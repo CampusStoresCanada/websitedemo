@@ -28,9 +28,9 @@ export interface MapRef {
   getCoordinatesForOrg: (org: Organization) => [number, number] | null;
 }
 
-// Canada center coordinates
-const CANADA_CENTER: [number, number] = [-106.3468, 56.1304];
-const CANADA_ZOOM = 3.5;
+// Canada center coordinates - wider view for attract mode
+const CANADA_CENTER: [number, number] = [-96, 56];
+const CANADA_ZOOM = 3.2;
 const FOCUSED_ZOOM = 8;
 
 const Map = forwardRef<MapRef, MapProps>(function Map(
