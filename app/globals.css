@@ -117,3 +117,57 @@ html {
 .delay-400 {
   animation-delay: 400ms;
 }
+
+/* Map Marker Styles */
+.map-marker {
+  cursor: pointer;
+}
+
+.map-marker > div {
+  transition: transform 0.2s ease;
+}
+
+.map-marker:hover > div {
+  transform: scale(1.15);
+}
+
+/* Mapbox overrides */
+.mapboxgl-ctrl-logo {
+  display: none !important;
+}
+
+.mapboxgl-ctrl-attrib {
+  font-size: 10px;
+  opacity: 0.6;
+}
+
+/* Animate in utilities */
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes slide-in-from-top {
+  from {
+    transform: translateY(-8px);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+
+.animate-in {
+  animation: fade-in 0.2s ease, slide-in-from-top 0.2s ease;
+}
+
+/* Line clamp */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
