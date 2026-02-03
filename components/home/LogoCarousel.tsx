@@ -1,34 +1,15 @@
-"use client";
+import { getMembers, getPartners } from "@/lib/data";
+import Image from "next/image";
 
-// Placeholder logos - will replace with real ones
-const memberLogos = [
-  { name: "University of Calgary", abbr: "UC" },
-  { name: "University of British Columbia", abbr: "UBC" },
-  { name: "McGill University", abbr: "McG" },
-  { name: "York University", abbr: "YU" },
-  { name: "NAIT", abbr: "NAIT" },
-  { name: "Fanshawe College", abbr: "FC" },
-  { name: "Dalhousie University", abbr: "Dal" },
-  { name: "University of Saskatchewan", abbr: "USk" },
-  { name: "Memorial University", abbr: "MUN" },
-  { name: "Sheridan College", abbr: "SC" },
-];
+export default async function LogoCarousel() {
+  const [members, partners] = await Promise.all([getMembers(), getPartners()]);
 
-const partnerLogos = [
-  { name: "VitalSource", abbr: "VS" },
-  { name: "Cengage", abbr: "Cen" },
-  { name: "Follett", abbr: "Fol" },
-  { name: "RedShelf", abbr: "RS" },
-  { name: "McGraw Hill", abbr: "MH" },
-];
-
-export default function LogoCarousel() {
   return (
     <div className="py-16 md:py-24 bg-white border-y border-[#E5E5E5]">
       {/* Members */}
       <div className="mb-16">
         <p className="text-center text-sm font-medium text-[#9B9B9B] uppercase tracking-wider mb-8">
-          Trusted by Canada&apos;s leading institutions
+          Trusted by {members.length} Canadian institutions
         </p>
         <div className="relative overflow-hidden">
           {/* Gradient masks */}
@@ -37,16 +18,29 @@ export default function LogoCarousel() {
 
           {/* Scrolling container */}
           <div className="flex animate-scroll">
-            {[...memberLogos, ...memberLogos].map((logo, i) => (
+            {[...members, ...members].map((org, i) => (
               <div
-                key={i}
-                className="flex-shrink-0 mx-8 flex items-center justify-center"
+                key={`${org.id}-${i}`}
+                className="flex-shrink-0 mx-6 flex items-center justify-center"
               >
-                <div className="w-32 h-12 bg-slate-100 rounded-lg flex items-center justify-center px-4 hover:bg-slate-200 transition-colors">
-                  <span className="text-[#6B6B6B] font-medium text-sm truncate">
-                    {logo.name}
-                  </span>
-                </div>
+                {org.logo_url ? (
+                  <div className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors">
+                    <Image
+                      src={org.logo_url}
+                      alt={org.name || ""}
+                      width={120}
+                      height={40}
+                      className="object-contain max-h-10"
+                      unoptimized
+                    />
+                  </div>
+                ) : (
+                  <div className="w-36 h-14 bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
+                    <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
+                      {org.name}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -56,7 +50,7 @@ export default function LogoCarousel() {
       {/* Partners */}
       <div>
         <p className="text-center text-sm font-medium text-[#9B9B9B] uppercase tracking-wider mb-8">
-          Powered by industry-leading partners
+          Powered by {partners.length}+ industry partners
         </p>
         <div className="relative overflow-hidden">
           {/* Gradient masks */}
@@ -65,16 +59,29 @@ export default function LogoCarousel() {
 
           {/* Scrolling container - reverse direction */}
           <div className="flex animate-scroll-reverse">
-            {[...partnerLogos, ...partnerLogos, ...partnerLogos].map((logo, i) => (
+            {[...partners, ...partners].map((org, i) => (
               <div
-                key={i}
-                className="flex-shrink-0 mx-8 flex items-center justify-center"
+                key={`${org.id}-${i}`}
+                className="flex-shrink-0 mx-6 flex items-center justify-center"
               >
-                <div className="w-32 h-12 bg-slate-100 rounded-lg flex items-center justify-center px-4 hover:bg-slate-200 transition-colors">
-                  <span className="text-[#6B6B6B] font-medium text-sm truncate">
-                    {logo.name}
-                  </span>
-                </div>
+                {org.logo_url ? (
+                  <div className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors">
+                    <Image
+                      src={org.logo_url}
+                      alt={org.name || ""}
+                      width={120}
+                      height={40}
+                      className="object-contain max-h-10"
+                      unoptimized
+                    />
+                  </div>
+                ) : (
+                  <div className="w-36 h-14 bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
+                    <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
+                      {org.name}
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>

@@ -1,7 +1,13 @@
 import LogoCarousel from "@/components/home/LogoCarousel";
 import ValueProps from "@/components/home/ValueProps";
+import StatsSection from "@/components/home/StatsSection";
+import { getOrganizationBySlug } from "@/lib/data";
+import Image from "next/image";
 
-export default function Home() {
+export default async function Home() {
+  // Fetch U of C for the preview card
+  const uOfC = await getOrganizationBySlug("university-of-calgary");
+
   return (
     <div>
       {/* Hero Section - Full Viewport Map */}
@@ -57,33 +63,50 @@ export default function Home() {
         </div>
 
         {/* Floating Widget Preview - Shows during attract mode */}
-        <div className="absolute top-1/3 right-[10%] hidden lg:block">
-          <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 transform rotate-2 hover:rotate-0 transition-transform">
-            <div className="flex items-start gap-4 mb-4">
-              <div className="w-14 h-14 rounded-xl bg-[#D60001] flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-lg">UC</span>
+        {uOfC && (
+          <div className="absolute top-1/3 right-[10%] hidden lg:block">
+            <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 transform rotate-2 hover:rotate-0 transition-transform">
+              <div className="flex items-start gap-4 mb-4">
+                {uOfC.logo_url ? (
+                  <div className="w-14 h-14 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center flex-shrink-0 overflow-hidden">
+                    <Image
+                      src={uOfC.logo_url}
+                      alt={uOfC.name || ""}
+                      width={48}
+                      height={48}
+                      className="object-contain"
+                      unoptimized
+                    />
+                  </div>
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-[#D60001] flex items-center justify-center flex-shrink-0">
+                    <span className="text-white font-bold text-lg">UC</span>
+                  </div>
+                )}
+                <div>
+                  <h3 className="font-semibold text-[#1A1A1A]">{uOfC.name}</h3>
+                  <p className="text-sm text-[#6B6B6B]">{uOfC.city}, {uOfC.province}</p>
+                </div>
               </div>
-              <div>
-                <h3 className="font-semibold text-[#1A1A1A]">University of Calgary</h3>
-                <p className="text-sm text-[#6B6B6B]">Calgary, Alberta</p>
+              <div className="flex gap-2 mb-4">
+                <span className="px-3 py-1 bg-[#D60001]/10 text-[#D60001] text-xs font-medium rounded-full">
+                  {uOfC.type}
+                </span>
+                {uOfC.join_date && (
+                  <span className="px-3 py-1 bg-slate-100 text-[#6B6B6B] text-xs font-medium rounded-full">
+                    Since {new Date(uOfC.join_date).getFullYear()}
+                  </span>
+                )}
               </div>
+              <p className="text-sm text-[#6B6B6B] mb-4">
+                {uOfC.company_description || "Serving students with course materials, merchandise, and technology."}
+              </p>
+              <button className="text-sm font-medium text-[#D60001] hover:text-[#B00001] transition-colors">
+                View Profile →
+              </button>
             </div>
-            <div className="flex gap-2 mb-4">
-              <span className="px-3 py-1 bg-[#D60001]/10 text-[#D60001] text-xs font-medium rounded-full">
-                Member
-              </span>
-              <span className="px-3 py-1 bg-slate-100 text-[#6B6B6B] text-xs font-medium rounded-full">
-                Since 2018
-              </span>
-            </div>
-            <p className="text-sm text-[#6B6B6B] mb-4">
-              Serving 30,000+ students with course materials, merchandise, and technology.
-            </p>
-            <button className="text-sm font-medium text-[#D60001] hover:text-[#B00001] transition-colors">
-              View Profile →
-            </button>
           </div>
-        </div>
+        )}
       </section>
 
       {/* Logo Carousel - Members */}
@@ -93,36 +116,7 @@ export default function Home() {
       <ValueProps />
 
       {/* Stats Section */}
-      <section className="py-24 md:py-32 bg-[#1A1A1A]">
-        <div className="max-w-7xl mx-auto px-6">
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-8">
-            <div className="text-center">
-              <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-                70
-              </div>
-              <div className="text-[#9B9B9B]">Member Institutions</div>
-            </div>
-            <div className="text-center">
-              <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-                100+
-              </div>
-              <div className="text-[#9B9B9B]">Vendor Partners</div>
-            </div>
-            <div className="text-center">
-              <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-                11
-              </div>
-              <div className="text-[#9B9B9B]">Provinces & Territories</div>
-            </div>
-            <div className="text-center">
-              <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-                30+
-              </div>
-              <div className="text-[#9B9B9B]">Years of Service</div>
-            </div>
-          </div>
-        </div>
-      </section>
+      <StatsSection />
 
       {/* CTA Section */}
       <section className="py-24 md:py-32">
