@@ -39,16 +39,33 @@ export default function Map({
       zoom: CANADA_ZOOM,
       minZoom: 2,
       maxZoom: 15,
+      scrollZoom: false, // Disable scroll zoom by default - let page scroll work
     });
 
     map.current.on("load", () => {
       setMapLoaded(true);
     });
 
+    // Enable scroll zoom only with Ctrl/Cmd key held
+    const mapInstance = map.current;
+    const container = mapContainer.current;
+
+    const handleWheel = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault();
+        mapInstance.scrollZoom.enable();
+      } else {
+        mapInstance.scrollZoom.disable();
+      }
+    };
+
+    container.addEventListener("wheel", handleWheel, { passive: false });
+
     // Add navigation controls
     map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
 
     return () => {
+      container.removeEventListener("wheel", handleWheel);
       map.current?.remove();
       map.current = null;
     };
@@ -108,7 +125,7 @@ export default function Map({
   }, [organizations, mapLoaded, onOrganizationClick, onOrganizationHover]);
 
   return (
-    <div ref={mapContainer} className="w-full h-full">
+    <div ref={mapContainer} className="w-full h-full relative group">
       {!mapLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
           <div className="flex items-center gap-3">
@@ -117,6 +134,10 @@ export default function Map({
           </div>
         </div>
       )}
+      {/* Scroll zoom hint - shows briefly on hover */}
+      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-sm px-4 py-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+        Use ⌘/Ctrl + scroll to zoom
+      </div>
     </div>
   );
 }
