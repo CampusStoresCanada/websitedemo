@@ -1,6 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  useImperativeHandle,
+  forwardRef,
+} from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { Organization } from "@/lib/database.types";
@@ -12,21 +18,50 @@ interface MapProps {
   organizations: Organization[];
   onOrganizationClick?: (org: Organization) => void;
   onOrganizationHover?: (org: Organization | null) => void;
+  highlightedOrgId?: string | null;
+}
+
+// Expose these methods to parent components
+export interface MapRef {
+  flyTo: (coords: [number, number], zoom?: number) => void;
+  resetView: () => void;
+  getCoordinatesForOrg: (org: Organization) => [number, number] | null;
 }
 
 // Canada center coordinates
 const CANADA_CENTER: [number, number] = [-106.3468, 56.1304];
 const CANADA_ZOOM = 3.5;
+const FOCUSED_ZOOM = 8;
 
-export default function Map({
-  organizations,
-  onOrganizationClick,
-  onOrganizationHover,
-}: MapProps) {
+const Map = forwardRef<MapRef, MapProps>(function Map(
+  { organizations, onOrganizationClick, onOrganizationHover, highlightedOrgId },
+  ref
+) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const markersRef = useRef<mapboxgl.Marker[]>([]);
+  const markersRef = useRef<globalThis.Map<string, mapboxgl.Marker>>(new globalThis.Map());
   const [mapLoaded, setMapLoaded] = useState(false);
+
+  // Expose map controls to parent
+  useImperativeHandle(ref, () => ({
+    flyTo: (coords: [number, number], zoom = FOCUSED_ZOOM) => {
+      map.current?.flyTo({
+        center: coords,
+        zoom,
+        duration: 2000,
+        essential: true,
+      });
+    },
+    resetView: () => {
+      map.current?.flyTo({
+        center: CANADA_CENTER,
+        zoom: CANADA_ZOOM,
+        duration: 1500,
+        essential: true,
+      });
+    },
+    getCoordinatesForOrg: (org: Organization) => getCoordinates(org),
+  }));
 
   // Initialize map
   useEffect(() => {
@@ -77,7 +112,7 @@ export default function Map({
 
     // Clear existing markers
     markersRef.current.forEach((marker) => marker.remove());
-    markersRef.current = [];
+    markersRef.current.clear();
 
     // Add markers for each organization with coordinates
     organizations.forEach((org) => {
@@ -88,8 +123,9 @@ export default function Map({
       // Create custom marker element
       const el = document.createElement("div");
       el.className = "map-marker";
+      el.dataset.orgId = org.id;
       el.innerHTML = `
-        <div class="w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-transform hover:scale-110 ${
+        <div class="marker-inner w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
           org.type === "Member"
             ? "bg-[#D60001] border-2 border-white shadow-lg"
             : "bg-[#3B82F6] border-2 border-white shadow-lg"
@@ -116,13 +152,34 @@ export default function Map({
         onOrganizationHover?.(null);
       });
 
-      const marker = new mapboxgl.Marker(el)
-        .setLngLat(coords)
-        .addTo(map.current!);
+      const marker = new mapboxgl.Marker(el).setLngLat(coords).addTo(map.current!);
 
-      markersRef.current.push(marker);
+      markersRef.current.set(org.id, marker);
     });
   }, [organizations, mapLoaded, onOrganizationClick, onOrganizationHover]);
+
+  // Update marker highlighting when highlightedOrgId changes
+  useEffect(() => {
+    markersRef.current.forEach((marker, orgId) => {
+      const el = marker.getElement();
+      const inner = el.querySelector(".marker-inner") as HTMLElement;
+      if (!inner) return;
+
+      if (orgId === highlightedOrgId) {
+        // Highlight this marker
+        inner.style.transform = "scale(1.4)";
+        inner.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.8), 0 4px 20px rgba(0,0,0,0.3)";
+        inner.style.zIndex = "100";
+        el.style.zIndex = "100";
+      } else {
+        // Reset marker
+        inner.style.transform = "";
+        inner.style.boxShadow = "";
+        inner.style.zIndex = "";
+        el.style.zIndex = "";
+      }
+    });
+  }, [highlightedOrgId]);
 
   return (
     <div ref={mapContainer} className="w-full h-full relative group">
@@ -140,13 +197,16 @@ export default function Map({
       </div>
     </div>
   );
-}
+});
+
+export default Map;
 
 // Helper to get initials from org name
 function getInitials(name: string): string {
   return name
     .split(" ")
     .map((word) => word[0])
+    .filter(Boolean)
     .slice(0, 2)
     .join("")
     .toUpperCase();

@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import dynamic from "next/dynamic";
 import HoverCard from "./HoverCard";
 import type { Organization } from "@/lib/database.types";
+import type { MapRef } from "./Map";
 
 // Dynamically import Map to avoid SSR issues with Mapbox
 const Map = dynamic(() => import("./Map"), {
@@ -22,27 +23,145 @@ interface MapHeroProps {
   organizations: Organization[];
 }
 
-export default function MapHero({ organizations }: MapHeroProps) {
-  const [hoveredOrg, setHoveredOrg] = useState<Organization | null>(null);
+// Attract mode settings
+const CYCLE_INTERVAL = 5000; // Time to show each org before moving to next
+const PAUSE_ON_INTERACTION = 8000; // How long to pause after user interaction
+const INITIAL_DELAY = 3000; // Wait before starting attract mode
 
-  const handleOrganizationClick = (org: Organization) => {
-    // Navigate to org profile page
-    window.location.href = `/org/${org.slug}`;
-  };
+export default function MapHero({ organizations }: MapHeroProps) {
+  const mapRef = useRef<MapRef>(null);
+  const [featuredOrg, setFeaturedOrg] = useState<Organization | null>(null);
+  const [hoveredOrg, setHoveredOrg] = useState<Organization | null>(null);
+  const [isAttractMode, setIsAttractMode] = useState(true);
+  const [isPaused, setIsPaused] = useState(false);
+  const currentIndexRef = useRef(0);
+  const pauseTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Filter to only organizations that have coordinates
+  const orgsWithCoords = organizations.filter((org) => {
+    if (mapRef.current) {
+      return mapRef.current.getCoordinatesForOrg(org) !== null;
+    }
+    // Fallback check without map ref
+    return (
+      (org.latitude && org.longitude) ||
+      (org.city && org.province)
+    );
+  });
+
+  // Shuffle array for variety (seeded by day so it's consistent for a session)
+  const shuffledOrgs = useRef<Organization[]>([]);
+  useEffect(() => {
+    const shuffled = [...orgsWithCoords].sort(() => Math.random() - 0.5);
+    shuffledOrgs.current = shuffled;
+  }, [orgsWithCoords]);
+
+  // Move to next organization in the cycle
+  const cycleToNext = useCallback(() => {
+    if (shuffledOrgs.current.length === 0) return;
+
+    const nextIndex = (currentIndexRef.current + 1) % shuffledOrgs.current.length;
+    currentIndexRef.current = nextIndex;
+
+    const nextOrg = shuffledOrgs.current[nextIndex];
+    setFeaturedOrg(nextOrg);
+
+    // Fly to the organization
+    if (mapRef.current) {
+      const coords = mapRef.current.getCoordinatesForOrg(nextOrg);
+      if (coords) {
+        mapRef.current.flyTo(coords, 7);
+      }
+    }
+  }, []);
+
+  // Start attract mode after initial delay
+  useEffect(() => {
+    const startTimeout = setTimeout(() => {
+      if (shuffledOrgs.current.length > 0) {
+        cycleToNext();
+      }
+    }, INITIAL_DELAY);
+
+    return () => clearTimeout(startTimeout);
+  }, [cycleToNext]);
+
+  // Main attract mode cycle
+  useEffect(() => {
+    if (!isAttractMode || isPaused || shuffledOrgs.current.length === 0) return;
+
+    const interval = setInterval(() => {
+      cycleToNext();
+    }, CYCLE_INTERVAL);
+
+    return () => clearInterval(interval);
+  }, [isAttractMode, isPaused, cycleToNext]);
+
+  // Handle user interaction - pause attract mode temporarily
+  const handleUserInteraction = useCallback(() => {
+    setIsPaused(true);
+
+    // Clear existing timeout
+    if (pauseTimeoutRef.current) {
+      clearTimeout(pauseTimeoutRef.current);
+    }
+
+    // Resume after pause duration
+    pauseTimeoutRef.current = setTimeout(() => {
+      setIsPaused(false);
+      // Reset view before resuming
+      mapRef.current?.resetView();
+      setFeaturedOrg(null);
+    }, PAUSE_ON_INTERACTION);
+  }, []);
+
+  // Handle org hover from map
+  const handleOrganizationHover = useCallback(
+    (org: Organization | null) => {
+      setHoveredOrg(org);
+      if (org) {
+        handleUserInteraction();
+      }
+    },
+    [handleUserInteraction]
+  );
+
+  // Handle org click
+  const handleOrganizationClick = useCallback(
+    (org: Organization) => {
+      handleUserInteraction();
+      // Navigate to org profile page
+      window.location.href = `/org/${org.slug}`;
+    },
+    [handleUserInteraction]
+  );
+
+  // The org to display in the card - hovered takes priority over featured
+  const displayedOrg = hoveredOrg || featuredOrg;
 
   return (
     <section className="relative h-[calc(100vh-64px)] min-h-[600px]">
       {/* Map Background */}
       <div className="absolute inset-0">
         <Map
+          ref={mapRef}
           organizations={organizations}
           onOrganizationClick={handleOrganizationClick}
-          onOrganizationHover={setHoveredOrg}
+          onOrganizationHover={handleOrganizationHover}
+          highlightedOrgId={displayedOrg?.id || null}
         />
       </div>
 
-      {/* Hover Card */}
-      <HoverCard organization={hoveredOrg} />
+      {/* Featured/Hover Card */}
+      <HoverCard organization={displayedOrg} />
+
+      {/* Attract Mode Indicator */}
+      {isAttractMode && !isPaused && featuredOrg && (
+        <div className="absolute top-4 left-4 flex items-center gap-2 bg-white/90 backdrop-blur-sm rounded-full px-4 py-2 shadow-sm">
+          <div className="w-2 h-2 rounded-full bg-[#D60001] animate-pulse" />
+          <span className="text-sm text-[#6B6B6B]">Exploring the network</span>
+        </div>
+      )}
 
       {/* Gradient overlay for text readability */}
       <div className="absolute inset-x-0 bottom-0 h-80 bg-gradient-to-t from-white via-white/80 to-transparent pointer-events-none" />
