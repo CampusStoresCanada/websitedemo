@@ -26,6 +26,8 @@ export type Database = {
           highlight_product_name: string | null
           id: string
           join_date: string | null
+          latitude: number | null
+          longitude: number | null
           logo_url: string | null
           membership_status: string | null
           name: string
@@ -57,6 +59,8 @@ export type Database = {
           highlight_product_name?: string | null
           id: string
           join_date?: string | null
+          latitude?: number | null
+          longitude?: number | null
           logo_url?: string | null
           membership_status?: string | null
           name: string
@@ -88,6 +92,8 @@ export type Database = {
           highlight_product_name?: string | null
           id?: string
           join_date?: string | null
+          latitude?: number | null
+          longitude?: number | null
           logo_url?: string | null
           membership_status?: string | null
           name?: string
