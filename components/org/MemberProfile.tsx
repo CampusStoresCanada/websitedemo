@@ -22,13 +22,13 @@ export default function MemberProfile({
   const heroImage = organization.hero_image_url || organization.banner_url;
 
   return (
-    <div className="min-h-screen bg-[#EEEEF0]">
+    <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]">
       <div className="flex min-h-screen">
-        {/* Left margin space - 14.64% */}
-        <div className="hidden lg:block" style={{ width: '14.64%' }} />
+        {/* Left margin space - 14.71% */}
+        <div className="hidden lg:block" style={{ width: '14.71%' }} />
 
-        {/* Colorized Hero - 23.87% width */}
-        <div className="hidden lg:block relative" style={{ width: '23.87%' }}>
+        {/* Colorized Hero - 23.79% width */}
+        <div className="hidden lg:block relative" style={{ width: '23.79%' }}>
           <div className="absolute inset-0 overflow-hidden">
             {heroImage ? (
               <ColorizedImage
@@ -43,11 +43,11 @@ export default function MemberProfile({
           </div>
         </div>
 
-        {/* Product Overlay - crosses the boundary */}
+        {/* Product Overlay - left edge at 13.32%, crosses over hero boundary */}
         {organization.product_overlay_url && (
           <div
             className="hidden lg:block absolute z-20 pointer-events-none"
-            style={{ left: '10%', bottom: '5%' }}
+            style={{ left: '13.32%', bottom: '0' }}
           >
             <Image
               src={organization.product_overlay_url}
@@ -64,8 +64,8 @@ export default function MemberProfile({
           </div>
         )}
 
-        {/* Content Area */}
-        <div className="flex-1 p-8 lg:py-16 lg:px-20 flex flex-col justify-center">
+        {/* Content Area - starts at ~51.61% from left, right margin ~8.78% */}
+        <div className="flex-1 p-8 lg:py-16 flex flex-col justify-center" style={{ paddingLeft: '13.1%', paddingRight: '8.78%' }}>
           {/* Mobile hero */}
           <div className="lg:hidden mb-8 -mx-8 -mt-8 h-64 relative overflow-hidden">
             {heroImage ? (
