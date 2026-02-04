@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import Link from "next/link";
 import type { Organization } from "@/lib/database.types";
 
 interface HoverCardProps {
@@ -81,9 +82,12 @@ export default function HoverCard({ organization }: HoverCardProps) {
         )}
 
         <div className="flex items-center justify-between">
-          <button className="text-sm font-medium text-[#D60001] hover:text-[#B00001] transition-colors">
+          <Link
+            href={`/org/${organization.slug}`}
+            className="text-sm font-medium text-[#D60001] hover:text-[#B00001] transition-colors"
+          >
             View Profile →
-          </button>
+          </Link>
           {organization.website && (
             <a
               href={organization.website}
