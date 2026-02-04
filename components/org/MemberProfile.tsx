@@ -18,21 +18,15 @@ export default function MemberProfile({
   brandColors,
   benchmarking,
 }: MemberProfileProps) {
-  // Get primary color (first brand color, or fallback to CSC red)
   const primaryColor = brandColors[0]?.hex || "#D60001";
-  const secondaryColor = brandColors[1]?.hex || null;
-
-  // Use hero_image_url if available, otherwise fall back to banner_url
   const heroImage = organization.hero_image_url || organization.banner_url;
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Main Content Area */}
-      <div className="flex flex-col lg:flex-row min-h-screen">
-        {/* Left Side - Colorized Hero Image with Product Overlay */}
-        <div className="lg:w-1/2 relative">
-          {/* Colorized Background */}
-          <div className="absolute inset-0">
+    <div className="min-h-screen bg-[#EEEEF0]">
+      <div className="flex min-h-screen">
+        {/* Colorized Hero - exactly 23.87% width */}
+        <div className="hidden lg:block relative" style={{ width: '23.87%' }}>
+          <div className="absolute inset-0 overflow-hidden">
             {heroImage ? (
               <ColorizedImage
                 src={heroImage}
@@ -41,171 +35,137 @@ export default function MemberProfile({
                 className="w-full h-full"
               />
             ) : (
-              <div
+              <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
+            )}
+          </div>
+        </div>
+
+        {/* Product Overlay - crosses the boundary */}
+        {organization.product_overlay_url && (
+          <div
+            className="hidden lg:block absolute z-20 pointer-events-none"
+            style={{ left: '10%', bottom: '5%' }}
+          >
+            <Image
+              src={organization.product_overlay_url}
+              alt="Featured product"
+              width={400}
+              height={500}
+              className="object-contain"
+              style={{
+                maxHeight: '80vh',
+                filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.4))",
+              }}
+              unoptimized
+            />
+          </div>
+        )}
+
+        {/* Content Area */}
+        <div className="flex-1 p-8 lg:py-16 lg:px-20 flex flex-col justify-center">
+          {/* Mobile hero */}
+          <div className="lg:hidden mb-8 -mx-8 -mt-8 h-64 relative overflow-hidden">
+            {heroImage ? (
+              <ColorizedImage
+                src={heroImage}
+                color={primaryColor}
+                alt={`${organization.name} campus`}
                 className="w-full h-full"
-                style={{ backgroundColor: primaryColor }}
               />
+            ) : (
+              <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
+            )}
+            {organization.product_overlay_url && (
+              <div className="absolute bottom-0 left-4 translate-y-1/3">
+                <Image
+                  src={organization.product_overlay_url}
+                  alt="Featured product"
+                  width={160}
+                  height={200}
+                  className="object-contain"
+                  style={{ filter: "drop-shadow(0 15px 30px rgba(0,0,0,0.4))" }}
+                  unoptimized
+                />
+              </div>
             )}
           </div>
 
-          {/* Product Overlay */}
-          {organization.product_overlay_url && (
-            <div className="absolute bottom-8 left-8 right-8 lg:bottom-16 lg:left-16 lg:right-16 pointer-events-none">
-              <Image
-                src={organization.product_overlay_url}
-                alt="Featured product"
-                width={400}
-                height={500}
-                className="object-contain max-h-[60vh]"
-                style={{
-                  filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.5))",
-                }}
-                unoptimized
-              />
-            </div>
-          )}
-
-          {/* Mobile padding for content below */}
-          <div className="lg:hidden h-[50vh]" />
-        </div>
-
-        {/* Right Side - Info */}
-        <div className="lg:w-1/2 p-8 lg:p-16 flex flex-col justify-center relative z-10 bg-black lg:bg-transparent">
           {/* Logo and Name */}
           <div className="flex items-center gap-6 mb-8">
             {organization.logo_url && (
-              <div className="w-24 h-24 lg:w-32 lg:h-32 bg-white rounded-xl p-3 flex-shrink-0">
+              <div className="w-24 h-24 lg:w-28 lg:h-28 flex-shrink-0">
                 <Image
                   src={organization.logo_url}
                   alt={organization.name}
-                  width={128}
-                  height={128}
+                  width={112}
+                  height={112}
                   className="w-full h-full object-contain"
                   unoptimized
                 />
               </div>
             )}
-            <h1 className="text-4xl lg:text-6xl font-bold tracking-tight leading-none">
+            <h1 className="text-4xl lg:text-6xl font-bold tracking-tight leading-[0.9] text-[#1A1A1A]">
               {formatSchoolName(organization.name)}
             </h1>
           </div>
 
           {/* Brand Colors */}
           {brandColors.length > 0 && (
-            <div className="flex gap-4 mb-8">
-              {brandColors.slice(0, 4).map((color) => (
-                <button
+            <div className="flex gap-4 mb-10">
+              {brandColors.map((color) => (
+                <div
                   key={color.id}
-                  className="group relative"
-                  title={color.name || color.hex || "Brand color"}
+                  className="w-36 h-11 rounded-full flex items-center justify-center font-mono text-sm uppercase tracking-wider"
+                  style={{
+                    backgroundColor: color.hex || "#888",
+                    color: isLightColor(color.hex) ? "#000" : "#fff",
+                  }}
                 >
-                  <div
-                    className="w-32 h-12 rounded-full border-2 border-white/20 flex items-center justify-center font-mono text-sm uppercase tracking-wider transition-transform group-hover:scale-105"
-                    style={{ backgroundColor: color.hex || "#888" }}
-                  >
-                    {color.hex}
-                  </div>
-                </button>
+                  {color.hex}
+                </div>
               ))}
             </div>
           )}
 
-          {/* Contact Row */}
-          <div className="flex flex-wrap gap-8 mb-12 text-gray-400">
-            {organization.email && (
-              <div>
-                <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
-                  Primary email
-                </span>
-                <a
-                  href={`mailto:${organization.email}`}
-                  className="hover:text-white transition-colors"
-                >
-                  {organization.email}
-                </a>
-              </div>
-            )}
-            {organization.phone && (
-              <div>
-                <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
-                  Primary phone
-                </span>
-                <a
-                  href={`tel:${organization.phone}`}
-                  className="hover:text-white transition-colors"
-                >
-                  {organization.phone}
-                </a>
-              </div>
-            )}
-            {organization.website && (
-              <div>
-                <span className="block text-xs uppercase tracking-wider text-gray-500 mb-1">
-                  Primary website
-                </span>
-                <a
-                  href={organization.website}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="hover:text-white transition-colors"
-                >
-                  {new URL(organization.website).hostname}
-                </a>
-              </div>
-            )}
+          {/* Primary Contact */}
+          <div className="mb-10">
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
+              Primary Contact
+            </h3>
+            <div className="flex flex-wrap gap-8 text-gray-500">
+              <span>{organization.email || "Primary email"}</span>
+              <span>{organization.phone || "Primary phone"}</span>
+              <span>{organization.website ? "Primary website" : "Primary website"}</span>
+            </div>
           </div>
 
-          {/* Stats Grid - from benchmarking */}
-          <div className="grid grid-cols-2 gap-x-16 gap-y-6 mb-12">
-            <StatItem
-              label="Square Footage"
-              value={
-                benchmarking?.total_square_footage || organization.square_footage
-                  ? formatNumber(benchmarking?.total_square_footage || organization.square_footage || 0) + " sq ft"
-                  : null
-              }
-            />
-            <StatItem
-              label="Full Time Equivalent"
-              value={
-                benchmarking?.enrollment_fte || organization.fte
-                  ? formatNumber(benchmarking?.enrollment_fte || organization.fte || 0) + " students"
-                  : null
-              }
-            />
-            <StatItem
-              label="Store Locations"
-              value={
-                benchmarking?.num_store_locations
-                  ? benchmarking.num_store_locations.toString()
-                  : null
-              }
-            />
-            <StatItem
-              label="Institution Type"
-              value={benchmarking?.institution_type || organization.organization_type}
-            />
+          {/* Store Information */}
+          <div className="mb-10">
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
+              Store Information
+            </h3>
+            <div className="grid grid-cols-2 gap-x-12 gap-y-1 text-sm">
+              <span className="text-gray-600">Square Footage</span>
+              <span className="text-gray-400">Full Time Equivalent</span>
+              <span className="text-gray-600">Other information</span>
+              <span className="text-gray-400">Things that are important</span>
+            </div>
           </div>
 
-          {/* Contacts Table */}
+          {/* Staffing */}
           {contacts.length > 0 && (
-            <div className="border-t border-white/10 pt-8">
-              <table className="w-full">
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
+                Staffing
+              </h3>
+              <table className="w-full text-sm">
                 <tbody>
                   {contacts.map((contact) => (
-                    <tr key={contact.id} className="border-b border-white/5">
-                      <td className="py-3 pr-4 text-white">
-                        {getFirstName(contact.name)}
-                      </td>
-                      <td className="py-3 pr-4 text-gray-400">
-                        {contact.work_email || contact.email || "Email"}
-                      </td>
-                      <td className="py-3 pr-4 text-gray-400">
-                        {contact.role_title || "Role"}
-                      </td>
-                      <td className="py-3 text-gray-400">
-                        {contact.work_phone_number || contact.phone || "Phone"}
-                      </td>
+                    <tr key={contact.id} className="border-b border-gray-200">
+                      <td className="py-2 pr-4 text-[#1A1A1A]">{getFirstName(contact.name)}</td>
+                      <td className="py-2 pr-4 text-gray-400">{contact.work_email || contact.email || "Email"}</td>
+                      <td className="py-2 pr-4 text-gray-400">{contact.role_title || "Something"}</td>
+                      <td className="py-2 text-gray-400">{contact.work_phone_number || contact.phone || "Phone"}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -219,7 +179,7 @@ export default function MemberProfile({
       <div className="fixed bottom-8 left-8 z-50">
         <Link
           href="/"
-          className="flex items-center gap-2 text-white/60 hover:text-white transition-colors"
+          className="flex items-center gap-2 px-4 py-2 bg-white/80 backdrop-blur-sm rounded-full shadow-lg text-gray-600 hover:text-[#1A1A1A] transition-colors"
         >
           <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
@@ -231,57 +191,28 @@ export default function MemberProfile({
   );
 }
 
-// Helper component for stat items
-function StatItem({ label, value }: { label: string; value: string | null }) {
-  return (
-    <div>
-      <span className="block text-gray-400">{label}</span>
-      <span className="text-gray-500">{value || "—"}</span>
-    </div>
-  );
-}
-
-// Format school name to split into lines if needed
 function formatSchoolName(name: string): React.ReactNode {
-  // Check for common patterns like "University of X"
   if (name.toLowerCase().startsWith("university of ")) {
-    return (
-      <>
-        UNIVERSITY OF
-        <br />
-        {name.slice(14).toUpperCase()}
-      </>
-    );
+    return (<>UNIVERSITY OF<br />{name.slice(14).toUpperCase()}</>);
   }
-  // Check for "X University"
   if (name.toLowerCase().endsWith(" university")) {
-    return (
-      <>
-        {name.slice(0, -11).toUpperCase()}
-        <br />
-        UNIVERSITY
-      </>
-    );
+    return (<>{name.slice(0, -11).toUpperCase()}<br />UNIVERSITY</>);
   }
-  // Check for "X College"
   if (name.toLowerCase().endsWith(" college")) {
-    return (
-      <>
-        {name.slice(0, -8).toUpperCase()}
-        <br />
-        COLLEGE
-      </>
-    );
+    return (<>{name.slice(0, -8).toUpperCase()}<br />COLLEGE</>);
   }
   return name.toUpperCase();
 }
 
-// Get first name only (for privacy/logged-out view)
 function getFirstName(fullName: string): string {
   return fullName.split(" ")[0];
 }
 
-// Format number with commas
-function formatNumber(num: number): string {
-  return num.toLocaleString();
+function isLightColor(hex: string | null): boolean {
+  if (!hex) return false;
+  const c = hex.replace("#", "");
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.5;
 }
