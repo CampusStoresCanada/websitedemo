@@ -50,13 +50,16 @@ export default function MemberProfile({
 
           {/* Product Overlay */}
           {organization.product_overlay_url && (
-            <div className="absolute bottom-8 left-8 right-8 lg:bottom-16 lg:left-16 lg:right-16">
+            <div className="absolute bottom-8 left-8 right-8 lg:bottom-16 lg:left-16 lg:right-16 pointer-events-none">
               <Image
                 src={organization.product_overlay_url}
                 alt="Featured product"
                 width={400}
                 height={500}
-                className="object-contain max-h-[60vh] drop-shadow-2xl"
+                className="object-contain max-h-[60vh]"
+                style={{
+                  filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.5))",
+                }}
                 unoptimized
               />
             </div>
@@ -189,7 +192,7 @@ export default function MemberProfile({
             <div className="border-t border-white/10 pt-8">
               <table className="w-full">
                 <tbody>
-                  {contacts.slice(0, 4).map((contact) => (
+                  {contacts.map((contact) => (
                     <tr key={contact.id} className="border-b border-white/5">
                       <td className="py-3 pr-4 text-white">
                         {getFirstName(contact.name)}

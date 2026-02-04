@@ -35,40 +35,41 @@ export default function PartnerProfile({
       {/* Main Content Area */}
       <div className="flex flex-col lg:flex-row min-h-screen">
         {/* Left Side - Product Screenshots/Collage */}
-        <div className="lg:w-1/2 relative bg-slate-100">
-          {/* Top colorized hero */}
+        <div className="lg:w-1/2 relative bg-slate-100 min-h-[50vh] lg:min-h-screen">
+          {/* Colorized hero background */}
           {heroImage && (
-            <div className="h-1/2 relative overflow-hidden">
+            <div className="absolute inset-0 overflow-hidden">
               <ColorizedImage
                 src={heroImage}
                 color={primaryColor}
                 alt={`${organization.name} product`}
                 className="w-full h-full"
-                intensity={0.7}
+                intensity={0.6}
               />
             </div>
           )}
 
           {/* Product overlay / highlight */}
           {organization.product_overlay_url && (
-            <div className="absolute bottom-8 left-8 right-8 lg:bottom-16 lg:left-16">
-              <div className="bg-white rounded-2xl shadow-2xl p-4 max-w-md">
-                <Image
-                  src={organization.product_overlay_url}
-                  alt="Product screenshot"
-                  width={600}
-                  height={400}
-                  className="rounded-lg"
-                  unoptimized
-                />
-              </div>
+            <div className="absolute bottom-8 left-8 right-8 lg:bottom-16 lg:left-8 lg:right-8 pointer-events-none">
+              <Image
+                src={organization.product_overlay_url}
+                alt="Product screenshot"
+                width={600}
+                height={400}
+                className="max-w-full h-auto"
+                style={{
+                  filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.3))",
+                }}
+                unoptimized
+              />
             </div>
           )}
 
           {/* Fallback if no images */}
           {!heroImage && !organization.product_overlay_url && (
             <div
-              className="w-full h-full min-h-[50vh] flex items-center justify-center"
+              className="absolute inset-0 flex items-center justify-center"
               style={{ backgroundColor: primaryColor + "20" }}
             >
               <div
@@ -83,9 +84,6 @@ export default function PartnerProfile({
               </div>
             </div>
           )}
-
-          {/* Mobile padding */}
-          <div className="lg:hidden h-[40vh]" />
         </div>
 
         {/* Right Side - Info */}
@@ -190,7 +188,7 @@ export default function PartnerProfile({
               </h3>
               <table className="w-full">
                 <tbody>
-                  {contacts.slice(0, 4).map((contact) => (
+                  {contacts.map((contact) => (
                     <tr key={contact.id} className="border-b border-gray-100">
                       <td className="py-3 pr-4 text-[#1A1A1A]">
                         {getFirstName(contact.name)}
