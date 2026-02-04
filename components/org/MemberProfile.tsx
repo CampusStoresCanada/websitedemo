@@ -23,8 +23,8 @@ export default function MemberProfile({
 
   return (
     <div className="min-h-screen bg-[#EEEEF0]">
-      <div className="flex min-h-screen">
-        {/* Colorized Hero - exactly 23.87% width */}
+      <div className="flex min-h-screen pl-[10%]">
+        {/* Colorized Hero - exactly 23.87% width, with space on left */}
         <div className="hidden lg:block relative" style={{ width: '23.87%' }}>
           <div className="absolute inset-0 overflow-hidden">
             {heroImage ? (
