@@ -4,6 +4,9 @@ import StatsSection from "@/components/home/StatsSection";
 import MapHero from "@/components/map/MapHero";
 import { getOrganizations } from "@/lib/data";
 
+// Revalidate every 60 seconds to pick up data changes
+export const revalidate = 60;
+
 export default async function Home() {
   // Fetch all organizations for the map
   const organizations = await getOrganizations();
