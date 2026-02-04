@@ -86,34 +86,33 @@ export default function PartnerProfile({
           )}
         </div>
 
-        {/* Right Side - Info */}
-        <div className="lg:w-1/2 p-8 lg:p-16 flex flex-col justify-center">
-          {/* Logo */}
+        {/* Right Side - Info - matching Member profile positioning */}
+        <div className="lg:w-1/2 p-8 lg:pt-[108px] lg:pb-16 lg:px-16 flex flex-col">
+          {/* Logo - 560x155px area to match Member profile */}
           {organization.logo_url && (
-            <div className="mb-8">
+            <div style={{ width: '560px', height: '155px', marginBottom: '62px' }}>
               <Image
                 src={organization.logo_url}
                 alt={organization.name}
-                width={250}
-                height={80}
-                className="h-16 lg:h-20 w-auto object-contain"
+                width={560}
+                height={155}
+                className="w-full h-full object-contain object-left"
                 unoptimized
               />
             </div>
           )}
 
-          {/* Category Badges */}
+          {/* Category Badges - double stroke: white inner, color outer */}
           {categories.length > 0 && (
             <div className="flex flex-wrap gap-3 mb-8">
               {categories.map((category, index) => (
                 <span
                   key={index}
-                  className={`px-6 py-2 rounded-full text-sm font-semibold uppercase tracking-wider ${
-                    index === 0
-                      ? "text-white"
-                      : "bg-[#1A1A1A] text-white"
-                  }`}
-                  style={index === 0 ? { backgroundColor: primaryColor } : {}}
+                  className="px-6 py-2 rounded-full text-sm font-semibold uppercase tracking-wider bg-transparent"
+                  style={{
+                    color: index === 0 ? primaryColor : "#1A1A1A",
+                    boxShadow: `0 0 0 2px white, 0 0 0 4px ${index === 0 ? primaryColor : "#1A1A1A"}`,
+                  }}
                 >
                   {category}
                 </span>

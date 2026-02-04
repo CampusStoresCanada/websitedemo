@@ -64,8 +64,8 @@ export default function MemberProfile({
           </div>
         )}
 
-        {/* Content Area - starts at ~51.61% from left, right margin ~8.78% */}
-        <div className="flex-1 p-8 lg:py-16 flex flex-col justify-center" style={{ paddingLeft: '13.1%', paddingRight: '8.78%' }}>
+        {/* Content Area - starts at ~51.61% from left (705px), top at 108px, right margin ~8.78% */}
+        <div className="flex-1 p-8 lg:pt-[108px] lg:pb-16 flex flex-col" style={{ paddingLeft: '13.1%', paddingRight: '8.78%' }}>
           {/* Mobile hero */}
           <div className="lg:hidden mb-8 -mx-8 -mt-8 h-64 relative overflow-hidden">
             {heroImage ? (
@@ -93,23 +93,22 @@ export default function MemberProfile({
             )}
           </div>
 
-          {/* Logo and Name */}
-          <div className="flex items-center gap-6 mb-8">
-            {organization.logo_url && (
-              <div className="w-24 h-24 lg:w-28 lg:h-28 flex-shrink-0">
-                <Image
-                  src={organization.logo_url}
-                  alt={organization.name}
-                  width={112}
-                  height={112}
-                  className="w-full h-full object-contain"
-                  unoptimized
-                />
-              </div>
+          {/* Logo - 560x155px area, 62px gap to color swatches */}
+          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }}>
+            {organization.logo_url ? (
+              <Image
+                src={organization.logo_url}
+                alt={organization.name}
+                width={560}
+                height={155}
+                className="w-full h-full object-contain object-left"
+                unoptimized
+              />
+            ) : (
+              <h1 className="text-4xl lg:text-6xl font-bold tracking-tight leading-[0.9] text-[#1A1A1A]">
+                {formatSchoolName(organization.name)}
+              </h1>
             )}
-            <h1 className="text-4xl lg:text-6xl font-bold tracking-tight leading-[0.9] text-[#1A1A1A]">
-              {formatSchoolName(organization.name)}
-            </h1>
           </div>
 
           {/* Brand Colors - swatches are 117px x 34px with 45px gap */}
@@ -149,11 +148,11 @@ export default function MemberProfile({
             <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
               Store Information
             </h3>
-            <div className="grid grid-cols-2 gap-x-12 gap-y-1 text-sm">
-              <span className="text-gray-600">Square Footage</span>
-              <span className="text-gray-400">Full Time Equivalent</span>
-              <span className="text-gray-600">Other information</span>
-              <span className="text-gray-400">Things that are important</span>
+            <div className="grid grid-cols-2 gap-x-12 gap-y-1 text-sm text-gray-500">
+              <span>Square Footage</span>
+              <span>Full Time Equivalent</span>
+              <span>Other information</span>
+              <span>Things that are important</span>
             </div>
           </div>
 
