@@ -112,14 +112,16 @@ export default function MemberProfile({
             </h1>
           </div>
 
-          {/* Brand Colors */}
+          {/* Brand Colors - swatches are 117px x 34px with 45px gap */}
           {brandColors.length > 0 && (
-            <div className="flex gap-4 mb-10">
+            <div className="flex mb-10" style={{ gap: '45px' }}>
               {brandColors.map((color) => (
                 <div
                   key={color.id}
-                  className="w-36 h-11 rounded-full flex items-center justify-center font-mono text-sm uppercase tracking-wider"
+                  className="rounded-full flex items-center justify-center text-sm font-medium"
                   style={{
+                    width: '117px',
+                    height: '34px',
                     backgroundColor: color.hex || "#888",
                     color: isLightColor(color.hex) ? "#000" : "#fff",
                   }}
