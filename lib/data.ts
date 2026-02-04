@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Organization, Contact } from "./database.types";
+import type { Organization, Contact, BrandColor, Benchmarking } from "./database.types";
 
 // Fetch all active organizations (members and partners)
 export async function getOrganizations(): Promise<Organization[]> {
@@ -123,6 +123,70 @@ export async function getOrganizationWithContacts(slug: string): Promise<{
   const contacts = await getContactsForOrganization(organization.id);
 
   return { organization, contacts };
+}
+
+// Fetch brand colors for an organization
+export async function getBrandColorsForOrganization(
+  organizationId: string
+): Promise<BrandColor[]> {
+  const { data, error } = await supabase
+    .from("brand_colors")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .order("sort_order");
+
+  if (error) {
+    console.error("Error fetching brand colors:", error);
+    return [];
+  }
+
+  return data || [];
+}
+
+// Fetch latest benchmarking data for an organization
+export async function getLatestBenchmarking(
+  organizationId: string
+): Promise<Benchmarking | null> {
+  const { data, error } = await supabase
+    .from("benchmarking")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .order("fiscal_year", { ascending: false })
+    .limit(1)
+    .single();
+
+  if (error) {
+    // PGRST116 = no rows found, which is fine
+    if (error.code !== "PGRST116") {
+      console.error("Error fetching benchmarking:", error);
+    }
+    return null;
+  }
+
+  return data;
+}
+
+// Fetch organization with all related data for profile page
+export async function getOrganizationProfile(slug: string): Promise<{
+  organization: Organization | null;
+  contacts: Contact[];
+  brandColors: BrandColor[];
+  benchmarking: Benchmarking | null;
+}> {
+  const organization = await getOrganizationBySlug(slug);
+
+  if (!organization || !organization.id) {
+    return { organization: null, contacts: [], brandColors: [], benchmarking: null };
+  }
+
+  // Fetch all related data in parallel
+  const [contacts, brandColors, benchmarking] = await Promise.all([
+    getContactsForOrganization(organization.id),
+    getBrandColorsForOrganization(organization.id),
+    getLatestBenchmarking(organization.id),
+  ]);
+
+  return { organization, contacts, brandColors, benchmarking };
 }
 
 // Get counts for stats
