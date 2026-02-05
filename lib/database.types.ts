@@ -30,6 +30,7 @@ export type Database = {
           latitude: number | null
           longitude: number | null
           logo_url: string | null
+          logo_horizontal_url: string | null
           membership_status: string | null
           name: string
           organization_type: string | null
@@ -69,6 +70,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           logo_url?: string | null
+          logo_horizontal_url?: string | null
           membership_status?: string | null
           name: string
           organization_type?: string | null
@@ -108,6 +110,7 @@ export type Database = {
           latitude?: number | null
           longitude?: number | null
           logo_url?: string | null
+          logo_horizontal_url?: string | null
           membership_status?: string | null
           name?: string
           organization_type?: string | null

@@ -74,7 +74,16 @@ export default function MemberProfile({
         >
           {/* Logo — 560x155px area, 62px gap to color swatches */}
           <div style={{ width: '560px', height: '155px', marginBottom: '62px' }}>
-            {organization.logo_url ? (
+            {organization.logo_horizontal_url ? (
+              <Image
+                src={organization.logo_horizontal_url}
+                alt={organization.name}
+                width={560}
+                height={155}
+                className="w-full h-full object-contain object-left"
+                unoptimized
+              />
+            ) : organization.logo_url ? (
               <Image
                 src={organization.logo_url}
                 alt={organization.name}
