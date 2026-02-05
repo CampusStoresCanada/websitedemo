@@ -45,15 +45,15 @@ export default function MemberProfile({
         {/* Product Overlay — left edge at 13.32%, anchored to bottom */}
         {organization.product_overlay_url && (
           <div
-            className="absolute z-20 pointer-events-none"
-            style={{ left: '13.32%', bottom: '0', width: '22.5vw' }}
+            className="absolute z-20 pointer-events-none flex items-center justify-center"
+            style={{ left: '5.64%', bottom: '0', width: '42.09vw', height: '42.09vw' }}
           >
             <Image
               src={organization.product_overlay_url}
               alt="Featured product"
               width={2301}
               height={2301}
-              className="w-full h-auto"
+              className="max-w-full max-h-full object-contain"
               style={{
                 filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.4))",
               }}
