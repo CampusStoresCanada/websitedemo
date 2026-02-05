@@ -46,14 +46,14 @@ export default function MemberProfile({
         {organization.product_overlay_url && (
           <div
             className="absolute z-20 pointer-events-none"
-            style={{ left: '13.32%', bottom: '0' }}
+            style={{ left: '13.32%', bottom: '0', width: '22.5vw' }}
           >
             <Image
               src={organization.product_overlay_url}
               alt="Featured product"
-              width={400}
-              height={500}
-              className="object-contain"
+              width={2301}
+              height={2301}
+              className="w-full h-auto"
               style={{
                 filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.4))",
               }}
