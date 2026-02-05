@@ -36,6 +36,7 @@ export default function MemberProfile({
               color={primaryColor}
               alt={`${organization.name} campus`}
               className="w-full h-full"
+              intensity={0.6}
             />
           ) : (
             <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
@@ -176,6 +177,7 @@ export default function MemberProfile({
               color={primaryColor}
               alt={`${organization.name} campus`}
               className="w-full h-full"
+              intensity={0.6}
             />
           ) : (
             <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
