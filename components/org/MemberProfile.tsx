@@ -23,30 +23,29 @@ export default function MemberProfile({
 
   return (
     <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]">
-      <div className="flex min-h-screen">
-        {/* Left margin space - 14.71% */}
-        <div className="hidden lg:block" style={{ width: '14.71%' }} />
-
-        {/* Colorized Hero - 23.79% width */}
-        <div className="hidden lg:block relative" style={{ width: '23.79%' }}>
-          <div className="absolute inset-0 overflow-hidden">
-            {heroImage ? (
-              <ColorizedImage
-                src={heroImage}
-                color={primaryColor}
-                alt={`${organization.name} campus`}
-                className="w-full h-full"
-              />
-            ) : (
-              <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
-            )}
-          </div>
+      {/* Desktop Layout - absolute positioning for precise mockup matching */}
+      <div className="hidden lg:block relative min-h-screen">
+        {/* Colorized Hero Strip — left: 14.71%, width: 23.79%, full height */}
+        <div
+          className="absolute top-0 bottom-0 overflow-hidden"
+          style={{ left: '14.71%', width: '23.79%' }}
+        >
+          {heroImage ? (
+            <ColorizedImage
+              src={heroImage}
+              color={primaryColor}
+              alt={`${organization.name} campus`}
+              className="w-full h-full"
+            />
+          ) : (
+            <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
+          )}
         </div>
 
-        {/* Product Overlay - left edge at 13.32%, crosses over hero boundary */}
+        {/* Product Overlay — left edge at 13.32%, anchored to bottom */}
         {organization.product_overlay_url && (
           <div
-            className="hidden lg:block absolute z-20 pointer-events-none"
+            className="absolute z-20 pointer-events-none"
             style={{ left: '13.32%', bottom: '0' }}
           >
             <Image
@@ -56,7 +55,6 @@ export default function MemberProfile({
               height={500}
               className="object-contain"
               style={{
-                maxHeight: '80vh',
                 filter: "drop-shadow(0 25px 50px rgba(0,0,0,0.4))",
               }}
               unoptimized
@@ -64,36 +62,17 @@ export default function MemberProfile({
           </div>
         )}
 
-        {/* Content Area - starts at ~51.61% from left (705px), top at 108px, right margin ~8.78% */}
-        <div className="flex-1 p-8 lg:pt-[108px] lg:pb-16 flex flex-col" style={{ paddingLeft: '13.1%', paddingRight: '8.78%' }}>
-          {/* Mobile hero */}
-          <div className="lg:hidden mb-8 -mx-8 -mt-8 h-64 relative overflow-hidden">
-            {heroImage ? (
-              <ColorizedImage
-                src={heroImage}
-                color={primaryColor}
-                alt={`${organization.name} campus`}
-                className="w-full h-full"
-              />
-            ) : (
-              <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
-            )}
-            {organization.product_overlay_url && (
-              <div className="absolute bottom-0 left-4 translate-y-1/3">
-                <Image
-                  src={organization.product_overlay_url}
-                  alt="Featured product"
-                  width={160}
-                  height={200}
-                  className="object-contain"
-                  style={{ filter: "drop-shadow(0 15px 30px rgba(0,0,0,0.4))" }}
-                  unoptimized
-                />
-              </div>
-            )}
-          </div>
-
-          {/* Logo - 560x155px area, 62px gap to color swatches */}
+        {/* Content Area — left edge at 51.61%, right padding 8.78% */}
+        <div
+          className="relative z-10"
+          style={{
+            marginLeft: '51.61%',
+            paddingRight: '8.78%',
+            paddingTop: '108px',
+            paddingBottom: '64px',
+          }}
+        >
+          {/* Logo — 560x155px area, 62px gap to color swatches */}
           <div style={{ width: '560px', height: '155px', marginBottom: '62px' }}>
             {organization.logo_url ? (
               <Image
@@ -111,7 +90,7 @@ export default function MemberProfile({
             )}
           </div>
 
-          {/* Brand Colors - swatches are 117px x 34px with 45px gap */}
+          {/* Brand Color Swatches — 117x34px pills, 45px gap */}
           {brandColors.length > 0 && (
             <div className="flex mb-10" style={{ gap: '45px' }}>
               {brandColors.map((color) => (
@@ -139,7 +118,7 @@ export default function MemberProfile({
             <div className="flex flex-wrap gap-8 text-gray-500">
               <span>{organization.email || "Primary email"}</span>
               <span>{organization.phone || "Primary phone"}</span>
-              <span>{organization.website ? "Primary website" : "Primary website"}</span>
+              <span>{organization.website || "Primary website"}</span>
             </div>
           </div>
 
@@ -174,6 +153,113 @@ export default function MemberProfile({
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Mobile Layout */}
+      <div className="lg:hidden">
+        <div className="h-64 relative overflow-hidden">
+          {heroImage ? (
+            <ColorizedImage
+              src={heroImage}
+              color={primaryColor}
+              alt={`${organization.name} campus`}
+              className="w-full h-full"
+            />
+          ) : (
+            <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
+          )}
+          {organization.product_overlay_url && (
+            <div className="absolute bottom-0 left-4 translate-y-1/3">
+              <Image
+                src={organization.product_overlay_url}
+                alt="Featured product"
+                width={160}
+                height={200}
+                className="object-contain"
+                style={{ filter: "drop-shadow(0 15px 30px rgba(0,0,0,0.4))" }}
+                unoptimized
+              />
+            </div>
+          )}
+        </div>
+
+        <div className="p-8">
+          <div className="mb-6">
+            {organization.logo_url ? (
+              <Image
+                src={organization.logo_url}
+                alt={organization.name}
+                width={300}
+                height={80}
+                className="h-16 w-auto object-contain"
+                unoptimized
+              />
+            ) : (
+              <h1 className="text-3xl font-bold text-[#1A1A1A]">
+                {formatSchoolName(organization.name)}
+              </h1>
+            )}
+          </div>
+
+          {brandColors.length > 0 && (
+            <div className="flex gap-4 mb-8 flex-wrap">
+              {brandColors.map((color) => (
+                <div
+                  key={color.id}
+                  className="rounded-full flex items-center justify-center text-xs font-medium"
+                  style={{
+                    width: '100px',
+                    height: '30px',
+                    backgroundColor: color.hex || "#888",
+                    color: isLightColor(color.hex) ? "#000" : "#fff",
+                  }}
+                >
+                  {color.hex}
+                </div>
+              ))}
+            </div>
+          )}
+
+          <div className="mb-8">
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
+              Primary Contact
+            </h3>
+            <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
+              <span>{organization.email || "Primary email"}</span>
+              <span>{organization.phone || "Primary phone"}</span>
+              <span>{organization.website || "Primary website"}</span>
+            </div>
+          </div>
+
+          <div className="mb-8">
+            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
+              Store Information
+            </h3>
+            <div className="grid grid-cols-2 gap-x-8 gap-y-1 text-sm text-gray-500">
+              <span>Square Footage</span>
+              <span>Full Time Equivalent</span>
+              <span>Other information</span>
+              <span>Things that are important</span>
+            </div>
+          </div>
+
+          {contacts.length > 0 && (
+            <div>
+              <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
+                Staffing
+              </h3>
+              <div className="space-y-3">
+                {contacts.map((contact) => (
+                  <div key={contact.id} className="border-b border-gray-200 pb-3">
+                    <div className="font-medium text-[#1A1A1A]">{getFirstName(contact.name)}</div>
+                    <div className="text-sm text-gray-400">{contact.role_title || "Role"}</div>
+                    <div className="text-sm text-gray-400">{contact.work_email || contact.email || "Email"}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
