@@ -66,6 +66,7 @@ interface MapHeroProps {
     explore: boolean;
     viewMode: "map" | "table";
     lens: ExploreLens;
+    focus?: "members" | "partners";
   };
 }
 
@@ -84,6 +85,7 @@ export default function MapHero({
 
   // Persistent mode = initialState provided (e.g. /members, /partners pages)
   const persistent = !!initialState;
+  const discoveryFocus = initialState?.focus ?? "all";
 
   // --- Core state ---
   const [explore, setExplore] = useState(persistent);
@@ -93,6 +95,7 @@ export default function MapHero({
   // --- Explore state ---
   const [lens, setLens] = useState<ExploreLens>(initialState?.lens ?? null);
   const [scaleFilter, setScaleFilter] = useState<ScaleRange | null>(null);
+  const [partnerCategoryFilter, setPartnerCategoryFilter] = useState<string | null>(null);
   const [posFilter, setPosFilter] = useState<string | null>(null);
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [mandateFilter, setMandateFilter] = useState<string | null>(null);
@@ -238,6 +241,20 @@ export default function MapHero({
     [members]
   );
 
+  const partnerCategoryCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const org of partners) {
+      if (!org.primaryCategory) continue;
+      counts[org.primaryCategory] = (counts[org.primaryCategory] || 0) + 1;
+    }
+    return counts;
+  }, [partners]);
+
+  const partnersWithCategory = useMemo(
+    () => partners.filter((o) => !!o.primaryCategory).length,
+    [partners]
+  );
+
   // --- Unique values for compound filter dropdowns ---
   const uniqueProvinces = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -275,6 +292,13 @@ export default function MapHero({
         pool = [...members]; break;
       case "partners":
         pool = [...partners]; break;
+      case "partner_category":
+        if (partnerCategoryFilter) {
+          pool = partners.filter((o) => o.primaryCategory === partnerCategoryFilter);
+        } else {
+          pool = partners.filter((o) => !!o.primaryCategory);
+        }
+        break;
       case "scale":
         if (scaleFilter) {
           const range = SCALE_RANGES.find((r) => r.key === scaleFilter)!;
@@ -324,7 +348,7 @@ export default function MapHero({
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
-  }, [organizations, members, partners, lens, scaleFilter, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode]);
+  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode]);
 
   // Map highlighted IDs: attract mode uses stories, explore uses filters
   const mapHighlightedIds = useMemo(() => {
@@ -387,6 +411,9 @@ export default function MapHero({
           if (val) setMandateFilter(val);
           break;
         case "partner_coverage":
+          setLens("partner_category");
+          if (val) setPartnerCategoryFilter(val);
+          break;
         case "partner_spotlight":
           setLens("partners");
           break;
@@ -468,6 +495,7 @@ export default function MapHero({
     setSelectedOrg(null);
     setSearchQuery("");
     setScaleFilter(null);
+    setPartnerCategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -537,6 +565,7 @@ export default function MapHero({
     // Drop lens and all sub-filters — go to compound-only mode
     setLens(null);
     setScaleFilter(null);
+    setPartnerCategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -550,6 +579,9 @@ export default function MapHero({
       setSelectedOrg(null);
     } else if (scaleFilter) {
       setScaleFilter(null);
+      setCompoundFilters({});
+    } else if (partnerCategoryFilter) {
+      setPartnerCategoryFilter(null);
       setCompoundFilters({});
     } else if (posFilter) {
       setPosFilter(null);
@@ -570,7 +602,7 @@ export default function MapHero({
       setCompoundFilters({});
       setShowFilterMenu(false);
     }
-  }, [selectedOrg, scaleFilter, posFilter, serviceFilter, mandateFilter, lens, searchQuery, compoundFilters]);
+  }, [selectedOrg, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, lens, searchQuery, compoundFilters]);
 
   /** Jump straight back to the discovery menu (lens picker). */
   const goHome = useCallback(() => {
@@ -578,6 +610,7 @@ export default function MapHero({
     setLens(null);
     setSearchQuery("");
     setScaleFilter(null);
+    setPartnerCategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -592,6 +625,7 @@ export default function MapHero({
   const LENS_LABELS: Record<string, string> = {
     members: "Members",
     partners: "Partners",
+    partner_category: "Partner Categories",
     scale: "By Scale",
     pos_platform: "Same Platform",
     services: "Services Offered",
@@ -608,6 +642,7 @@ export default function MapHero({
         action: () => {
           setSelectedOrg(null);
           setScaleFilter(null);
+          setPartnerCategoryFilter(null);
           setPosFilter(null);
           setServiceFilter(null);
           setMandateFilter(null);
@@ -630,6 +665,8 @@ export default function MapHero({
     if (lens === "scale" && scaleFilter) {
       const range = SCALE_RANGES.find((r) => r.key === scaleFilter);
       crumbs.push({ label: range?.label ?? scaleFilter, action: () => { setSelectedOrg(null); } });
+    } else if (lens === "partner_category" && partnerCategoryFilter) {
+      crumbs.push({ label: partnerCategoryFilter, action: () => { setSelectedOrg(null); } });
     } else if (lens === "pos_platform" && posFilter) {
       crumbs.push({ label: posFilter, action: () => { setSelectedOrg(null); } });
     } else if (lens === "services" && serviceFilter) {
@@ -644,7 +681,7 @@ export default function MapHero({
     }
 
     return crumbs;
-  }, [lens, scaleFilter, posFilter, serviceFilter, mandateFilter, selectedOrg, searchQuery, compoundFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, selectedOrg, searchQuery, compoundFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasNavContext = breadcrumbs.length > 0;
 
@@ -1018,13 +1055,13 @@ export default function MapHero({
               partners={partners}
               provinceCount={provinceCount}
               scaleCounts={scaleCounts}
-              membersWithFte={membersWithFte}
+              partnerCategoryCounts={partnerCategoryCounts}
               membersWithPos={membersWithPos}
               membersWithServices={membersWithServices}
               membersWithMandate={membersWithMandate}
               onSelectLens={setLens}
               user={user}
-              isMember={isMember}
+              focus={discoveryFocus}
             />
           ) : lens === "members" ? (
             <div>
@@ -1032,6 +1069,47 @@ export default function MapHero({
               <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
             </div>
           ) : lens === "partners" ? (
+            <div>
+              <GroupSummary orgs={filteredOrgs} lens={lens} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+            </div>
+          ) : lens === "partner_category" && !partnerCategoryFilter ? (
+            <div>
+              <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
+                <p className="text-sm text-gray-600">
+                  Partner categories across{" "}
+                  <span className="font-semibold text-gray-900">{partnersWithCategory}</span> categorized
+                  organizations
+                </p>
+              </div>
+              <div className="p-4 space-y-2">
+                {Object.entries(partnerCategoryCounts)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([category, count]) => (
+                    <button
+                      key={category}
+                      type="button"
+                      onClick={() => {
+                        setPartnerCategoryFilter(category);
+                      }}
+                      className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
+                    >
+                      <div className="flex items-center justify-between">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                          {category}
+                        </p>
+                        <div className="flex items-center gap-2">
+                          <span className="text-lg font-bold text-gray-900">{count}</span>
+                          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                          </svg>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+              </div>
+            </div>
+          ) : lens === "partner_category" && partnerCategoryFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
               <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
@@ -1283,27 +1361,30 @@ function DiscoveryMenu({
   partners,
   provinceCount,
   scaleCounts,
-  membersWithFte,
+  partnerCategoryCounts,
   membersWithPos,
   membersWithServices,
   membersWithMandate,
   onSelectLens,
   user,
-  isMember,
+  focus,
 }: {
   members: HomeMapOrg[];
   partners: HomeMapOrg[];
   provinceCount: number;
   scaleCounts: Record<ScaleRange, number>;
-  membersWithFte: number;
+  partnerCategoryCounts: Record<string, number>;
   membersWithPos: number;
   membersWithServices: number;
   membersWithMandate: number;
   onSelectLens: (lens: ExploreLens) => void;
   user: unknown;
-  isMember: boolean;
+  focus: "all" | "members" | "partners";
 }) {
   const totalScale = Object.values(scaleCounts).reduce((a, b) => a + b, 0);
+  const totalPartnerCategories = Object.keys(partnerCategoryCounts).length;
+  const partnerFocused = focus === "partners";
+  const memberFocused = focus === "members";
 
   return (
     <div className="p-5 space-y-5">
@@ -1331,55 +1412,59 @@ function DiscoveryMenu({
           Browse
         </p>
         <div className="space-y-2">
-          <button
-            type="button"
-            onClick={() => onSelectLens("members")}
-            className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-red-200 hover:bg-red-50/30 transition-colors group"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-[#D60001]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21" />
+          {!partnerFocused && (
+            <button
+              type="button"
+              onClick={() => onSelectLens("members")}
+              className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-red-200 hover:bg-red-50/30 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-[#D60001]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                    Campus Stores
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {members.length} member institutions
+                  </p>
+                </div>
+                <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
-                  Campus Stores
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {members.length} member institutions
-                </p>
-              </div>
-              <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </button>
+            </button>
+          )}
 
-          <button
-            type="button"
-            onClick={() => onSelectLens("partners")}
-            className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
-          >
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0M12 12.75h.008v.008H12v-.008z" />
+          {!memberFocused && (
+            <button
+              type="button"
+              onClick={() => onSelectLens("partners")}
+              className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0M12 12.75h.008v.008H12v-.008z" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                    Industry Partners
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {partners.length} vendors and suppliers
+                  </p>
+                </div>
+                <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
                 </svg>
               </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
-                  Industry Partners
-                </p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {partners.length} vendors and suppliers
-                </p>
-              </div>
-              <svg className="w-4 h-4 text-gray-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-              </svg>
-            </div>
-          </button>
+            </button>
+          )}
         </div>
       </div>
 
@@ -1391,6 +1476,8 @@ function DiscoveryMenu({
           Discover
         </p>
         <div className="space-y-2">
+          {!partnerFocused && (
+            <>
           <button
             type="button"
             onClick={() => onSelectLens("scale")}
@@ -1503,6 +1590,39 @@ function DiscoveryMenu({
               </div>
             </div>
           </button>
+            </>
+          )}
+
+          {!memberFocused && (
+            <button
+              type="button"
+              onClick={() => onSelectLens("partner_category")}
+              className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
+                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6A2.25 2.25 0 016 3.75h12A2.25 2.25 0 0120.25 6v12A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18V6z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 8.25h7.5M8.25 12h7.5M8.25 15.75h4.5" />
+                  </svg>
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                    By Partner Category
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    Explore partners by primary category
+                  </p>
+                </div>
+                <div className="flex items-center gap-2 flex-shrink-0">
+                  <span className="text-xs font-medium text-gray-400">{totalPartnerCategories}</span>
+                  <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </div>
+              </div>
+            </button>
+          )}
         </div>
       </div>
 

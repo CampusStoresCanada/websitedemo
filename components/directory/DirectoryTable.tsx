@@ -93,7 +93,7 @@ export default function DirectoryTable({
   // --- Table state ---
   const [sortKey, setSortKey] = useState<SortKey>("name");
   const [sortDir, setSortDir] = useState<SortDir>("asc");
-  const [page, setPage] = useState(0);
+  const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   // --- Detect composition ---
   const hasMembers = useMemo(
@@ -117,17 +117,36 @@ export default function DirectoryTable({
     return [...organizations].sort((a, b) => compareOrgs(a, b, sortKey, sortDir));
   }, [organizations, sortKey, sortDir]);
 
-  // --- Pagination ---
-  const totalPages = Math.max(1, Math.ceil(sortedOrgs.length / PAGE_SIZE));
+  // --- Infinite scroll window ---
+  const effectiveVisibleCount = Math.min(visibleCount, sortedOrgs.length);
   const pageOrgs = useMemo(
-    () => sortedOrgs.slice(page * PAGE_SIZE, (page + 1) * PAGE_SIZE),
-    [sortedOrgs, page]
+    () => sortedOrgs.slice(0, effectiveVisibleCount),
+    [sortedOrgs, effectiveVisibleCount]
   );
+  const hasMore = pageOrgs.length < sortedOrgs.length;
 
-  // Reset page when orgs change (i.e. parent filters changed)
+  const loadMore = useCallback(() => {
+    setVisibleCount((current) => Math.min(current + PAGE_SIZE, sortedOrgs.length));
+  }, [sortedOrgs.length]);
+
+  const [sentinelEl, setSentinelEl] = useState<HTMLDivElement | null>(null);
   useEffect(() => {
-    setPage(0);
-  }, [organizations]);
+    if (!sentinelEl || !hasMore) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0]?.isIntersecting) {
+          loadMore();
+        }
+      },
+      {
+        root: null,
+        rootMargin: "200px 0px",
+        threshold: 0,
+      }
+    );
+    observer.observe(sentinelEl);
+    return () => observer.disconnect();
+  }, [sentinelEl, hasMore, loadMore]);
 
   // --- Sort toggle ---
   const toggleSort = useCallback(
@@ -138,12 +157,13 @@ export default function DirectoryTable({
         setSortKey(key);
         setSortDir("asc");
       }
+      setVisibleCount(PAGE_SIZE);
     },
     [sortKey]
   );
 
-  // --- Column header component ---
-  const SortHeader = ({
+  // --- Column header renderer ---
+  const renderSortHeader = ({
     label,
     sortKeyVal,
     locked,
@@ -179,8 +199,8 @@ export default function DirectoryTable({
     </th>
   );
 
-  // --- Blurred cell for non-members ---
-  const BlurredCell = () => (
+  // --- Blurred cell renderer for non-members ---
+  const renderBlurredCell = () => (
     <td className="px-3 py-3">
       <span className="inline-block rounded bg-gray-200 w-16 h-4 blur-[3px]" />
     </td>
@@ -196,21 +216,21 @@ export default function DirectoryTable({
           <table className="min-w-full divide-y divide-gray-200">
             <thead className="bg-gray-50">
               <tr>
-                <SortHeader label="Organization" sortKeyVal="name" className="min-w-[200px]" />
-                <SortHeader label="City" sortKeyVal="city" />
-                <SortHeader label="Province" sortKeyVal="province" />
-                {showTypeBadge && <SortHeader label="Type" sortKeyVal="type" />}
-                {showPartnerCols && <SortHeader label="Category" sortKeyVal="primaryCategory" />}
-                {showTypeBadge && <SortHeader label="Org Type" sortKeyVal="organizationType" />}
+                {renderSortHeader({ label: "Organization", sortKeyVal: "name", className: "min-w-[200px]" })}
+                {renderSortHeader({ label: "City", sortKeyVal: "city" })}
+                {renderSortHeader({ label: "Province", sortKeyVal: "province" })}
+                {showTypeBadge && renderSortHeader({ label: "Type", sortKeyVal: "type" })}
+                {showPartnerCols && renderSortHeader({ label: "Category", sortKeyVal: "primaryCategory" })}
+                {showTypeBadge && renderSortHeader({ label: "Org Type", sortKeyVal: "organizationType" })}
                 {showMemberCols && (
                   <>
-                    <SortHeader label="Enrollment" sortKeyVal="enrollmentFte" />
-                    <SortHeader label="Institution Type" sortKeyVal="institutionType" />
-                    <SortHeader label="POS" sortKeyVal="posSystem" locked={!isMember} />
-                    <SortHeader label="Model" sortKeyVal="operationsMandate" locked={!isMember} />
-                    <SortHeader label="Services" sortKeyVal="servicesCount" locked={!isMember} />
-                    <SortHeader label="Locations" sortKeyVal="numLocations" locked={!isMember} />
-                    <SortHeader label="Staff" sortKeyVal="fulltimeEmployees" locked={!isMember} />
+                    {renderSortHeader({ label: "Enrollment", sortKeyVal: "enrollmentFte" })}
+                    {renderSortHeader({ label: "Institution Type", sortKeyVal: "institutionType" })}
+                    {renderSortHeader({ label: "POS", sortKeyVal: "posSystem", locked: !isMember })}
+                    {renderSortHeader({ label: "Model", sortKeyVal: "operationsMandate", locked: !isMember })}
+                    {renderSortHeader({ label: "Services", sortKeyVal: "servicesCount", locked: !isMember })}
+                    {renderSortHeader({ label: "Locations", sortKeyVal: "numLocations", locked: !isMember })}
+                    {renderSortHeader({ label: "Staff", sortKeyVal: "fulltimeEmployees", locked: !isMember })}
                   </>
                 )}
               </tr>
@@ -304,14 +324,14 @@ export default function DirectoryTable({
                             {org.posSystem ?? "—"}
                           </td>
                         ) : (
-                          <BlurredCell />
+                          renderBlurredCell()
                         )}
                         {isMember ? (
                           <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
                             {org.operationsMandate ?? "—"}
                           </td>
                         ) : (
-                          <BlurredCell />
+                          renderBlurredCell()
                         )}
                         {isMember ? (
                           <td className="px-3 py-3 text-sm text-gray-600 whitespace-nowrap">
@@ -320,21 +340,21 @@ export default function DirectoryTable({
                               : "—"}
                           </td>
                         ) : (
-                          <BlurredCell />
+                          renderBlurredCell()
                         )}
                         {isMember ? (
                           <td className="px-3 py-3 text-sm text-gray-900 tabular-nums whitespace-nowrap">
                             {org.numLocations ?? "—"}
                           </td>
                         ) : (
-                          <BlurredCell />
+                          renderBlurredCell()
                         )}
                         {isMember ? (
                           <td className="px-3 py-3 text-sm text-gray-900 tabular-nums whitespace-nowrap">
                             {org.fulltimeEmployees ?? "—"}
                           </td>
                         ) : (
-                          <BlurredCell />
+                          renderBlurredCell()
                         )}
                       </>
                     )}
@@ -345,59 +365,17 @@ export default function DirectoryTable({
           </table>
         </div>
 
-        {/* Pagination */}
-        {totalPages > 1 && (
-          <div className="flex items-center justify-between px-4 py-3 border-t border-gray-200 bg-gray-50">
-            <p className="text-xs text-gray-500">
-              Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, sortedOrgs.length)} of{" "}
-              {sortedOrgs.length}
+        {/* Infinite-scroll footer */}
+        {sortedOrgs.length > 0 && (
+          <div className="px-4 py-3 border-t border-gray-200 bg-gray-50">
+            <p className="text-xs text-gray-500 text-center">
+              Showing {pageOrgs.length} of {sortedOrgs.length}
             </p>
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                ← Prev
-              </button>
-              {Array.from({ length: totalPages }, (_, i) => i)
-                .filter(
-                  (i) =>
-                    i === 0 ||
-                    i === totalPages - 1 ||
-                    Math.abs(i - page) <= 1
-                )
-                .map((i, idx, arr) => {
-                  const prev = arr[idx - 1];
-                  const gap = prev != null && i - prev > 1;
-                  return (
-                    <span key={i} className="inline-flex items-center gap-0.5">
-                      {gap && <span className="px-1 text-gray-400 text-xs">…</span>}
-                      <button
-                        type="button"
-                        onClick={() => setPage(i)}
-                        className={[
-                          "rounded-md px-2.5 py-1.5 text-xs font-medium transition-colors",
-                          i === page
-                            ? "bg-[#D60001] text-white"
-                            : "border border-gray-300 text-gray-700 hover:bg-white",
-                        ].join(" ")}
-                      >
-                        {i + 1}
-                      </button>
-                    </span>
-                  );
-                })}
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={page === totalPages - 1}
-                className="rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:bg-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-              >
-                Next →
-              </button>
-            </div>
+            {hasMore ? (
+              <div className="mt-2 flex items-center justify-center">
+                <div ref={setSentinelEl} className="h-6 w-full max-w-[240px]" />
+              </div>
+            ) : null}
           </div>
         )}
       </div>

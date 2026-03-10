@@ -1,5 +1,4 @@
 import { supabase } from "@/lib/supabase";
-import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/state-machine";
 import { applyFieldMask, loadVisibilityConfig } from "@/lib/visibility/engine";
 
 // ---------------------------------------------------------------------------
@@ -398,7 +397,7 @@ async function fetchMapOrgsWithBenchmarking(
     .select(
       "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, website, primary_category, organization_type, fte, company_description"
     )
-    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .eq("membership_status", "active")
     .is("archived_at", null)
     .order("name", { ascending: true });
 

@@ -40,6 +40,7 @@ export function getPoolForLens(
     posFilter?: string | null;
     serviceFilter?: string | null;
     mandateFilter?: string | null;
+    partnerCategoryFilter?: string | null;
   } = {}
 ): HomeMapOrg[] {
   const members = organizations.filter((o) => o.type === "Member");
@@ -50,6 +51,11 @@ export function getPoolForLens(
       return members;
     case "partners":
       return partners;
+    case "partner_category":
+      if (subFilters.partnerCategoryFilter) {
+        return partners.filter((o) => o.primaryCategory === subFilters.partnerCategoryFilter);
+      }
+      return partners.filter((o) => !!o.primaryCategory);
     case "scale":
       if (subFilters.scaleFilter) {
         const range = SCALE_RANGES.find((r) => r.key === subFilters.scaleFilter)!;

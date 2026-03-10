@@ -7,6 +7,7 @@ export type ExploreLens =
   | null
   | "members"
   | "partners"
+  | "partner_category"
   | "scale"
   | "pos_platform"
   | "services"
@@ -44,6 +45,7 @@ export interface CompoundFilters {
 export const LENS_LABELS: Record<string, string> = {
   members: "Members",
   partners: "Partners",
+  partner_category: "Partner Categories",
   scale: "By Scale",
   pos_platform: "Same Platform",
   services: "Services Offered",

@@ -20,7 +20,7 @@ export default async function MembersPage() {
       <MapHero
         organizations={mapOrgs}
         stories={[]}
-        initialState={{ explore: true, viewMode: "table", lens: "members" }}
+        initialState={{ explore: true, viewMode: "table", lens: null, focus: "members" }}
       />
       <ValueProps />
       <DirectoryJoinCTA />

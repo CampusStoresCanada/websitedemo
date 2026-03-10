@@ -137,6 +137,11 @@ export default function Header() {
         .slice(0, 2)
     : user?.email?.charAt(0).toUpperCase() || "?";
 
+  const handleLogoClick = (event: React.MouseEvent<HTMLAnchorElement>) => {
+    event.preventDefault();
+    window.location.assign("/");
+  };
+
   useEffect(() => {
     const onScroll = () => setIsScrolled(window.scrollY > 0);
     window.addEventListener("scroll", onScroll);
@@ -379,7 +384,7 @@ export default function Header() {
         }`}
       >
         <div className="h-full max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-4">
-          <Link href="/" className="flex items-center">
+          <Link href="/" onClick={handleLogoClick} className="flex items-center">
             <Image
               src="/logos/csc-logo.svg"
               alt="Campus Stores Canada"
@@ -399,29 +404,10 @@ export default function Header() {
           </Link>
 
           <nav className="hidden lg:flex items-center gap-6 text-sm font-medium text-[#4b4b4b]">
-            <Link href="/" className="hover:text-[#1A1A1A]">Home</Link>
             <Link href="/about" className="hover:text-[#1A1A1A]">About</Link>
             <Link href="/members" className="hover:text-[#1A1A1A]">Members</Link>
             <Link href="/partners" className="hover:text-[#1A1A1A]">Partners</Link>
             <Link href="/resources" className="hover:text-[#1A1A1A]">Resources</Link>
-
-            <div className="relative group">
-              <button type="button" className="inline-flex items-center gap-1 hover:text-[#1A1A1A]">
-                Conference
-                <span className="text-[10px]">▾</span>
-              </button>
-              <div className="invisible group-hover:visible opacity-0 group-hover:opacity-100 transition-opacity absolute top-full left-0 mt-2 w-48 rounded-lg border border-gray-200 bg-white shadow-lg p-1 z-50">
-                <Link href={authAwareHref(`${conferenceBaseHref}/register${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="block px-3 py-2 rounded-md hover:bg-gray-50">
-                  Registration
-                </Link>
-                <Link href={authAwareHref(`${conferenceBaseHref}/products${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="block px-3 py-2 rounded-md hover:bg-gray-50">
-                  Products
-                </Link>
-                <Link href={authAwareHref(`${conferenceBaseHref}/schedule${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="block px-3 py-2 rounded-md hover:bg-gray-50">
-                  Schedule
-                </Link>
-              </div>
-            </div>
 
             <a href={memberSpaceHref} className="hover:text-[#1A1A1A]">Member Space</a>
           </nav>
@@ -638,20 +624,10 @@ export default function Header() {
         {showMobileMenu ? (
           <div className="lg:hidden border-t border-gray-200 bg-white">
             <nav className="max-w-7xl mx-auto px-4 py-3 grid gap-1 text-sm">
-              <Link href="/" className="px-2 py-2 rounded-md hover:bg-gray-50">Home</Link>
               <Link href="/about" className="px-2 py-2 rounded-md hover:bg-gray-50">About</Link>
               <Link href="/members" className="px-2 py-2 rounded-md hover:bg-gray-50">Members</Link>
               <Link href="/partners" className="px-2 py-2 rounded-md hover:bg-gray-50">Partners</Link>
               <Link href="/resources" className="px-2 py-2 rounded-md hover:bg-gray-50">Resources</Link>
-              <Link href={authAwareHref(`${conferenceBaseHref}/register${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="px-2 py-2 rounded-md hover:bg-gray-50">
-                Conference Registration
-              </Link>
-              <Link href={authAwareHref(`${conferenceBaseHref}/products${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="px-2 py-2 rounded-md hover:bg-gray-50">
-                Conference Products
-              </Link>
-              <Link href={authAwareHref(`${conferenceBaseHref}/schedule${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`)} className="px-2 py-2 rounded-md hover:bg-gray-50">
-                Conference Schedule
-              </Link>
               <a href={memberSpaceHref} className="px-2 py-2 rounded-md hover:bg-gray-50">Member Space</a>
 
               {user ? (

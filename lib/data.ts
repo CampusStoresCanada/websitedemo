@@ -21,6 +21,7 @@ export async function getOrganizations(): Promise<Organization[]> {
   const query = supabase
     .from("organizations")
     .select("*")
+    .eq("membership_status", "active")
     .is("archived_at", null)
     .order("name");
 
@@ -46,6 +47,7 @@ export async function getOrganizationsByType(
     .from("organizations")
     .select("*")
     .eq("type", type)
+    .eq("membership_status", "active")
     .is("archived_at", null)
     .order("name");
 
@@ -92,6 +94,7 @@ export async function getPartners(): Promise<Organization[]> {
       .from("organizations")
       .select("*")
       .eq("type", "Vendor Partner")
+      .eq("membership_status", "active")
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
@@ -115,6 +118,7 @@ export async function getOrganizationBySlug(
       .from("organizations")
       .select("*")
       .eq("slug", slug)
+      .eq("membership_status", "active")
       .is("archived_at", null)
       .single(),
     DB_TIMEOUT,
@@ -297,6 +301,7 @@ export async function getStats(): Promise<{
         .from("organizations")
         .select("*", { count: "exact", head: true })
         .eq("type", "Vendor Partner")
+        .eq("membership_status", "active")
         .is("archived_at", null),
       DB_TIMEOUT,
       { count: 0, error: null }
@@ -333,14 +338,14 @@ export async function getStats(): Promise<{
 const DIRECTORY_SELECT =
   "id, slug, name, type, membership_status, logo_url, logo_horizontal_url, city, province, country, primary_category, company_description, website" as const;
 
-/** Active members for public directory. Status matches isOrgPubliclyListable(). */
+/** Active members for public directory. */
 export async function getDirectoryMembers(): Promise<Partial<Organization>[]> {
   const result = await withTimeout(
     supabase
       .from("organizations")
       .select(DIRECTORY_SELECT)
       .eq("type", "Member")
-      .in("membership_status", ["active", "reactivated"])
+      .eq("membership_status", "active")
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
@@ -355,13 +360,14 @@ export async function getDirectoryMembers(): Promise<Partial<Organization>[]> {
   return (result.data || []) as Partial<Organization>[];
 }
 
-/** Partners for public directory. All non-archived partners shown. */
+/** Active partners for public directory. */
 export async function getDirectoryPartners(): Promise<Partial<Organization>[]> {
   const result = await withTimeout(
     supabase
       .from("organizations")
       .select(DIRECTORY_SELECT)
       .eq("type", "Vendor Partner")
+      .eq("membership_status", "active")
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
