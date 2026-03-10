@@ -78,6 +78,7 @@ export default function MapHero({
   const isMember = !!user && hasPermission(permissionState, "member");
   const mapRef = useRef<MapRef>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const previousBodyOverflowRef = useRef<string | null>(null);
   const exitedAtRef = useRef(0); // timestamp of last exit — cooldown guard
   const enterExploreRef = useRef<() => void>(() => {});
 
@@ -121,11 +122,12 @@ export default function MapHero({
   } | null>(null);
 
   useEffect(() => {
-    if (!selectedOrg) {
-      setContactForOrg(null);
-      return;
-    }
     let cancelled = false;
+    if (!selectedOrg) {
+      return () => {
+        cancelled = true;
+      };
+    }
     const supabase = createClient();
     supabase
       .from("contacts")
@@ -410,6 +412,9 @@ export default function MapHero({
     setExplore(true);
     setPaused(true);
     if (!persistent) {
+      if (previousBodyOverflowRef.current === null) {
+        previousBodyOverflowRef.current = document.body.style.overflow;
+      }
       document.body.style.overflow = "hidden";
       window.dispatchEvent(
         new CustomEvent("mapExploreMode", { detail: { active: true } })
@@ -418,7 +423,9 @@ export default function MapHero({
   }, [storyIndex, stories, organizations, persistent]);
 
   // Keep ref in sync so the timer always calls the latest enterExplore
-  enterExploreRef.current = enterExplore;
+  useEffect(() => {
+    enterExploreRef.current = enterExplore;
+  }, [enterExplore]);
 
   const handleMapMouseMove = useCallback(() => {
     if (explore || persistent) return;
@@ -442,8 +449,15 @@ export default function MapHero({
   useEffect(() => {
     return () => {
       if (hoverTimerRef.current) clearTimeout(hoverTimerRef.current);
+      if (!persistent) {
+        document.body.style.overflow = previousBodyOverflowRef.current ?? "";
+        previousBodyOverflowRef.current = null;
+        window.dispatchEvent(
+          new CustomEvent("mapExploreMode", { detail: { active: false } })
+        );
+      }
     };
-  }, []);
+  }, [persistent]);
 
   // ---------------------------------------------------------------------------
   // Exit explore
@@ -472,7 +486,8 @@ export default function MapHero({
       setPaused(false);
       setLens(null);
       setViewMode("map");
-      document.body.style.overflow = "";
+      document.body.style.overflow = previousBodyOverflowRef.current ?? "";
+      previousBodyOverflowRef.current = null;
       mapRef.current?.resetView();
       window.dispatchEvent(
         new CustomEvent("mapExploreMode", { detail: { active: false } })
@@ -981,7 +996,12 @@ export default function MapHero({
         {/* ------ Sidebar content ------ */}
         <div className="flex-1 overflow-y-auto">
           {selectedOrg ? (
-            <OrgDetailPanel org={selectedOrg} isMember={isMember} contact={contactForOrg} onFilterByValue={handleFilterByValue} />
+            <OrgDetailPanel
+              org={selectedOrg}
+              isMember={isMember}
+              contact={selectedOrg ? contactForOrg : null}
+              onFilterByValue={handleFilterByValue}
+            />
           ) : searchQuery.trim() ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
@@ -1616,4 +1636,3 @@ function OrgList({
 
 // OrgDetailPanel, GroupSummary, and CompoundFilterBar are imported from components/explore/
 // Only DiscoveryMenu and OrgList remain inline below as map-sidebar-specific components.
-
