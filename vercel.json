@@ -1,0 +1,32 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/renewal-reminders",
+      "schedule": "0 11 * * *"
+    },
+    {
+      "path": "/api/cron/renewal-charge",
+      "schedule": "0 12 * * *"
+    },
+    {
+      "path": "/api/cron/grace-check",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/admin-transfer-timeout",
+      "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/circle-sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/ops-alert-eval",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/retention-purge",
+      "schedule": "0 14 * * *"
+    }
+  ]
+}

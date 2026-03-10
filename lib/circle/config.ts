@@ -1,0 +1,82 @@
+// ---------------------------------------------------------------------------
+// Circle configuration — env validation + mapping constants
+// ---------------------------------------------------------------------------
+
+export interface CircleConfig {
+  apiKey: string;
+  communityId: string;
+  botUserId: string;
+  announcementsSpaceId: string;
+  headlessAuthToken: string;
+}
+
+let _warned = false;
+
+/**
+ * Returns Circle config if all required env vars are set, otherwise null.
+ * Logs a single warning on first miss to avoid log spam.
+ */
+export function getCircleConfig(): CircleConfig | null {
+  const apiKey = process.env.CIRCLE_API_KEY;
+  const communityId = process.env.CIRCLE_COMMUNITY_ID;
+  const botUserId = process.env.CIRCLE_BOT_USER_ID;
+  const announcementsSpaceId = process.env.CIRCLE_ANNOUNCEMENTS_SPACE_ID;
+  const headlessAuthToken = process.env.CIRCLE_HEADLESS_AUTH_TOKEN;
+
+  if (!apiKey || !communityId) {
+    if (!_warned) {
+      console.warn(
+        "[circle/config] CIRCLE_API_KEY or CIRCLE_COMMUNITY_ID not set — Circle integration disabled"
+      );
+      _warned = true;
+    }
+    return null;
+  }
+
+  return {
+    apiKey,
+    communityId,
+    botUserId: botUserId ?? "",
+    announcementsSpaceId: announcementsSpaceId ?? "",
+    headlessAuthToken: headlessAuthToken ?? "",
+  };
+}
+
+/**
+ * Quick boolean check — avoids allocating a config object.
+ */
+export function isCircleConfigured(): boolean {
+  return !!(process.env.CIRCLE_API_KEY && process.env.CIRCLE_COMMUNITY_ID);
+}
+
+// ---------------------------------------------------------------------------
+// Role → Circle tag mapping
+// ---------------------------------------------------------------------------
+
+/** Maps CSC user/org roles to the expected Circle tag name. */
+export const ROLE_TO_CIRCLE_TAG: Record<string, string> = {
+  member: "CSC Member",
+  org_admin: "CSC Org Admin",
+  admin: "CSC Admin",
+  super_admin: "CSC Super Admin",
+  partner: "CSC Partner",
+};
+
+// ---------------------------------------------------------------------------
+// Membership status → Circle space mapping
+// ---------------------------------------------------------------------------
+
+/** Maps org membership status to a Circle space name (for auto-assignment). */
+export const STATUS_TO_CIRCLE_SPACE: Record<string, string> = {
+  active: "Members Only",
+  reactivated: "Members Only",
+  partner_active: "Partners",
+};
+
+// ---------------------------------------------------------------------------
+// Admin API base URLs
+// ---------------------------------------------------------------------------
+
+export const CIRCLE_ADMIN_API_BASE = "https://app.circle.so/api/admin/v2";
+export const CIRCLE_HEADLESS_AUTH_BASE = "https://app.circle.so/api/v1/headless";
+export const CIRCLE_MEMBER_API_BASE = "https://app.circle.so/api/headless/v1";

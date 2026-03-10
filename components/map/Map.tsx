@@ -9,23 +9,25 @@ import {
 } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { Organization } from "@/lib/database.types";
+import type { HomeMapOrg } from "@/lib/homepage";
 
 // Set access token
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 
 interface MapProps {
-  organizations: Organization[];
-  onOrganizationClick?: (org: Organization) => void;
-  onOrganizationHover?: (org: Organization | null) => void;
-  highlightedOrgId?: string | null;
+  organizations: HomeMapOrg[];
+  onOrganizationClick?: (org: HomeMapOrg) => void;
+  onOrganizationHover?: (org: HomeMapOrg | null) => void;
+  highlightedOrgIds?: string[];
+  /** When true, scroll zoom works without Ctrl/Cmd (for full-screen explore mode) */
+  freeScrollZoom?: boolean;
 }
 
 // Expose these methods to parent components
 export interface MapRef {
   flyTo: (coords: [number, number], zoom?: number) => void;
   resetView: () => void;
-  getCoordinatesForOrg: (org: Organization) => [number, number] | null;
+  getCoordinatesForOrg: (org: HomeMapOrg) => [number, number] | null;
 }
 
 // Canada center coordinates - wider view for attract mode
@@ -34,7 +36,7 @@ const CANADA_ZOOM = 3.2;
 const FOCUSED_ZOOM = 8;
 
 const Map = forwardRef<MapRef, MapProps>(function Map(
-  { organizations, onOrganizationClick, onOrganizationHover, highlightedOrgId },
+  { organizations, onOrganizationClick, onOrganizationHover, highlightedOrgIds = [], freeScrollZoom = false },
   ref
 ) {
   const mapContainer = useRef<HTMLDivElement>(null);
@@ -60,7 +62,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         essential: true,
       });
     },
-    getCoordinatesForOrg: (org: Organization) => getCoordinates(org),
+    getCoordinatesForOrg: (org: HomeMapOrg) => getCoordinates(org),
   }));
 
   // Initialize map
@@ -81,11 +83,20 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       setMapLoaded(true);
     });
 
-    // Enable scroll zoom only with Ctrl/Cmd key held
+    // Enable scroll zoom only with Ctrl/Cmd key held (attract mode).
+    // In explore mode the useEffect below enables scrollZoom on the map
+    // and we prevent the page from scrolling by stopping wheel propagation.
     const mapInstance = map.current;
     const container = mapContainer.current;
 
     const handleWheel = (e: WheelEvent) => {
+      // If scroll zoom is currently enabled on the map instance, prevent
+      // the page from scrolling and let the map handle the event.
+      if (mapInstance.scrollZoom.isEnabled()) {
+        e.preventDefault();
+        return;
+      }
+      // Attract mode: allow Ctrl/Cmd + scroll to zoom the map
       if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         mapInstance.scrollZoom.enable();
@@ -97,7 +108,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     container.addEventListener("wheel", handleWheel, { passive: false });
 
     // Add navigation controls
-    map.current.addControl(new mapboxgl.NavigationControl(), "top-right");
+    map.current.addControl(new mapboxgl.NavigationControl(), "bottom-right");
 
     return () => {
       container.removeEventListener("wheel", handleWheel);
@@ -105,6 +116,16 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       map.current = null;
     };
   }, []);
+
+  // Toggle scroll zoom mode based on freeScrollZoom prop
+  useEffect(() => {
+    if (!map.current) return;
+    if (freeScrollZoom) {
+      map.current.scrollZoom.enable();
+    } else {
+      map.current.scrollZoom.disable();
+    }
+  }, [freeScrollZoom]);
 
   // Add markers when map is loaded and organizations change
   useEffect(() => {
@@ -120,23 +141,38 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       const coords = getCoordinates(org);
       if (!coords) return;
 
-      // Create custom marker element
+      // Create custom marker element (DOM API — no innerHTML to avoid XSS)
       const el = document.createElement("div");
       el.className = "map-marker";
       el.dataset.orgId = org.id;
-      el.innerHTML = `
-        <div class="marker-inner w-10 h-10 rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
-          org.type === "Member"
-            ? "bg-[#D60001] border-2 border-white shadow-lg"
-            : "bg-[#3B82F6] border-2 border-white shadow-lg"
-        }">
-          ${
-            org.logo_url
-              ? `<img src="${org.logo_url}" alt="${org.name}" class="w-6 h-6 rounded-full object-cover" />`
-              : `<span class="text-white text-xs font-bold">${getInitials(org.name)}</span>`
-          }
-        </div>
-      `;
+
+      const inner = document.createElement("div");
+      inner.className = `marker-inner rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
+        org.type === "Member"
+          ? "bg-[#D60001] border-2 border-white shadow-lg"
+          : "bg-[#3B82F6] border-2 border-white shadow-lg"
+      }`;
+      // Size set dynamically via updateMarkerSizes (zoom-responsive)
+      inner.style.width = "40px";
+      inner.style.height = "40px";
+
+      if (org.logoUrl) {
+        const img = document.createElement("img");
+        img.src = org.logoUrl;
+        img.alt = org.name;
+        img.className = "rounded-full object-cover";
+        img.style.width = "24px";
+        img.style.height = "24px";
+        inner.appendChild(img);
+      } else {
+        const span = document.createElement("span");
+        span.className = "text-white font-bold";
+        span.style.fontSize = "12px";
+        span.textContent = getInitials(org.name);
+        inner.appendChild(span);
+      }
+
+      el.appendChild(inner);
 
       // Add click handler
       el.addEventListener("click", () => {
@@ -156,30 +192,76 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
       markersRef.current.set(org.id, marker);
     });
+
+    // --- Zoom-responsive marker sizing ---
+    const updateMarkerSizes = () => {
+      const zoom = map.current?.getZoom() ?? CANADA_ZOOM;
+      const size = markerSizeForZoom(zoom);
+      const imgSize = Math.round(size * 0.6);
+      const fontSize = `${Math.max(8, Math.round(size * 0.3))}px`;
+
+      markersRef.current.forEach((marker) => {
+        const inner = marker.getElement().querySelector(".marker-inner") as HTMLElement;
+        if (!inner) return;
+        inner.style.width = `${size}px`;
+        inner.style.height = `${size}px`;
+        const img = inner.querySelector("img") as HTMLElement;
+        if (img) {
+          img.style.width = `${imgSize}px`;
+          img.style.height = `${imgSize}px`;
+        }
+        const span = inner.querySelector("span") as HTMLElement;
+        if (span) span.style.fontSize = fontSize;
+      });
+    };
+
+    updateMarkerSizes();
+    map.current!.on("zoom", updateMarkerSizes);
+
+    return () => {
+      map.current?.off("zoom", updateMarkerSizes);
+    };
   }, [organizations, mapLoaded, onOrganizationClick, onOrganizationHover]);
 
-  // Update marker highlighting when highlightedOrgId changes
+  // Update marker highlighting/dimming when highlightedOrgIds changes
   useEffect(() => {
+    const hasHighlights = highlightedOrgIds.length > 0;
+
     markersRef.current.forEach((marker, orgId) => {
       const el = marker.getElement();
       const inner = el.querySelector(".marker-inner") as HTMLElement;
       if (!inner) return;
 
-      if (orgId === highlightedOrgId) {
-        // Highlight this marker
-        inner.style.transform = "scale(1.4)";
-        inner.style.boxShadow = "0 0 0 4px rgba(255,255,255,0.8), 0 4px 20px rgba(0,0,0,0.3)";
-        inner.style.zIndex = "100";
-        el.style.zIndex = "100";
-      } else {
-        // Reset marker
-        inner.style.transform = "";
+      if (hasHighlights && highlightedOrgIds.includes(orgId)) {
+        // Highlight matching marker — pop with glow
+        inner.style.transform = "scale(1.3)";
+        inner.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.9), 0 4px 16px rgba(0,0,0,0.3)";
+        inner.style.filter = "drop-shadow(0 0 6px rgba(214,0,1,0.4))";
+        inner.style.zIndex = "10";
+        el.style.zIndex = "10";
+        el.style.opacity = "1";
+        el.style.transition = "opacity 0.3s, filter 0.3s";
+      } else if (hasHighlights) {
+        // Dim non-matching markers — desaturate + wash out
+        inner.style.transform = "scale(0.8)";
         inner.style.boxShadow = "";
+        inner.style.filter = "grayscale(1) brightness(1.3)";
         inner.style.zIndex = "";
         el.style.zIndex = "";
+        el.style.opacity = "0.35";
+        el.style.transition = "opacity 0.3s, filter 0.3s";
+      } else {
+        // Reset all markers to normal
+        inner.style.transform = "";
+        inner.style.boxShadow = "";
+        inner.style.filter = "";
+        inner.style.zIndex = "";
+        el.style.zIndex = "";
+        el.style.opacity = "1";
+        el.style.transition = "opacity 0.3s, filter 0.3s";
       }
     });
-  }, [highlightedOrgId]);
+  }, [highlightedOrgIds]);
 
   return (
     <div ref={mapContainer} className="w-full h-full relative group">
@@ -191,15 +273,25 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
           </div>
         </div>
       )}
-      {/* Scroll zoom hint - shows briefly on hover */}
-      <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-sm px-4 py-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
-        Use ⌘/Ctrl + scroll to zoom
-      </div>
+      {/* Scroll zoom hint - shows briefly on hover (hidden in free scroll mode) */}
+      {!freeScrollZoom && (
+        <div className="absolute bottom-4 left-1/2 -translate-x-1/2 bg-black/70 text-white text-sm px-4 py-2 rounded-full opacity-0 group-hover:opacity-100 transition-opacity duration-300 pointer-events-none z-10">
+          Use ⌘/Ctrl + scroll to zoom
+        </div>
+      )}
     </div>
   );
 });
 
 export default Map;
+
+/** Returns marker diameter in px for the current zoom level */
+function markerSizeForZoom(zoom: number): number {
+  if (zoom <= 3) return 20;
+  if (zoom >= 8) return 40;
+  // Linear interpolation: 20px at zoom 3 → 40px at zoom 8
+  return Math.round(20 + ((zoom - 3) / 5) * 20);
+}
 
 // Helper to get initials from org name
 function getInitials(name: string): string {
@@ -213,7 +305,7 @@ function getInitials(name: string): string {
 }
 
 // Get coordinates - prefer stored lat/lng, fallback to city lookup
-function getCoordinates(org: Organization): [number, number] | null {
+function getCoordinates(org: HomeMapOrg): [number, number] | null {
   // First try stored coordinates from database
   if (org.latitude && org.longitude) {
     return [Number(org.longitude), Number(org.latitude)];

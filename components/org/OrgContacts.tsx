@@ -1,7 +1,16 @@
-import type { Contact } from "@/lib/database.types";
+import type { VisibleContact } from "@/lib/visibility/data";
+import BlurredField from "@/components/ui/BlurredField";
 
 interface OrgContactsProps {
-  contacts: Contact[];
+  contacts: VisibleContact[];
+}
+
+/** Check if a string looks like a masked teaser */
+function isMaskedValue(value: string): boolean {
+  if (/^([A-Z]\.\s?)+$/.test(value.trim())) return true;
+  if (value.startsWith("@")) return true;
+  if (value.includes("•")) return true;
+  return false;
 }
 
 export default function OrgContacts({ contacts }: OrgContactsProps) {
@@ -14,52 +23,73 @@ export default function OrgContacts({ contacts }: OrgContactsProps) {
       <h3 className="font-semibold text-[#1A1A1A] mb-4">Contacts</h3>
 
       <div className="space-y-4">
-        {contacts.map((contact) => (
-          <div key={contact.id} className="flex items-start gap-3">
-            {/* Avatar */}
-            {contact.profile_picture_url ? (
-              <img
-                src={contact.profile_picture_url}
-                alt={contact.name}
-                className="w-10 h-10 rounded-full object-cover flex-shrink-0"
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
-                <span className="text-slate-500 font-medium text-sm">
-                  {getInitials(contact.name)}
-                </span>
-              </div>
-            )}
+        {contacts.map((contact) => {
+          const name = contact.name as string | null;
+          const roleTitle = contact.role_title as string | null;
+          const email = (contact.work_email || contact.email) as string | null;
+          const phone = (contact.work_phone_number || contact.phone) as string | null;
 
-            {/* Info */}
-            <div className="min-w-0 flex-1">
-              <p className="font-medium text-[#1A1A1A] truncate">
-                {contact.name}
-              </p>
-              {contact.role_title && (
-                <p className="text-sm text-[#6B6B6B] truncate">
-                  {contact.role_title}
+          return (
+            <div key={contact.id} className="flex items-start gap-3">
+              {/* Avatar */}
+              {contact.profile_picture_url ? (
+                <img
+                  src={contact.profile_picture_url as string}
+                  alt={name || "Contact"}
+                  className="w-10 h-10 rounded-full object-cover flex-shrink-0"
+                />
+              ) : (
+                <div className="w-10 h-10 rounded-full bg-slate-200 flex items-center justify-center flex-shrink-0">
+                  <span className="text-slate-500 font-medium text-sm">
+                    {getInitials(name)}
+                  </span>
+                </div>
+              )}
+
+              {/* Info */}
+              <div className="min-w-0 flex-1">
+                <p className="font-medium text-[#1A1A1A] truncate">
+                  {name ? (
+                    isMaskedValue(name) ? <BlurredField maskedValue={name} /> : name
+                  ) : "—"}
                 </p>
-              )}
-              {(contact.work_email || contact.email) && (
-                <a
-                  href={`mailto:${contact.work_email || contact.email}`}
-                  className="text-sm text-[#D60001] hover:underline truncate block"
-                >
-                  {contact.work_email || contact.email}
-                </a>
-              )}
-              {(contact.work_phone_number || contact.phone) && (
-                <a
-                  href={`tel:${contact.work_phone_number || contact.phone}`}
-                  className="text-sm text-[#6B6B6B] hover:text-[#D60001] transition-colors"
-                >
-                  {contact.work_phone_number || contact.phone}
-                </a>
-              )}
+                {roleTitle && (
+                  <p className="text-sm text-[#6B6B6B] truncate">
+                    {roleTitle}
+                  </p>
+                )}
+                {email && (
+                  isMaskedValue(email) ? (
+                    <span className="text-sm text-[#6B6B6B] truncate block">
+                      <BlurredField maskedValue={email} />
+                    </span>
+                  ) : (
+                    <a
+                      href={`mailto:${email}`}
+                      className="text-sm text-[#D60001] hover:underline truncate block"
+                    >
+                      {email}
+                    </a>
+                  )
+                )}
+                {phone && (
+                  isMaskedValue(phone) ? (
+                    <span className="text-sm text-[#6B6B6B]">
+                      <BlurredField maskedValue={phone} />
+                    </span>
+                  ) : (
+                    <a
+                      href={`tel:${phone}`}
+                      className="text-sm text-[#6B6B6B] hover:text-[#D60001] transition-colors"
+                    >
+                      {phone}
+                    </a>
+                  )
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );

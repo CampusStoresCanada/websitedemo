@@ -1,0 +1,265 @@
+// ---------------------------------------------------------------------------
+// Circle sync operation executor — maps queue items to API calls
+// ---------------------------------------------------------------------------
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { CircleAdminClient } from "./client";
+import { mintMemberToken } from "./headless-auth";
+import { CircleMemberClient } from "./member-proxy";
+import { ROLE_TO_CIRCLE_TAG } from "./config";
+import type { CircleSyncQueueItem } from "./types";
+
+/**
+ * Execute a single sync queue item against the Circle API.
+ * Throws on failure (caller handles retry logic).
+ */
+export async function executeCircleSyncOperation(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const payload = item.payload;
+
+  switch (item.operation) {
+    case "link_member":
+      await handleLinkMember(client, item);
+      break;
+
+    case "add_tag":
+      await handleAddTag(client, payload);
+      break;
+
+    case "remove_tag":
+      await handleRemoveTag(client, payload);
+      break;
+
+    case "add_to_space":
+      await handleAddToSpace(client, item);
+      break;
+
+    case "remove_from_space":
+      await handleRemoveFromSpace(client, item);
+      break;
+
+    case "add_to_access_group":
+      await handleAddToAccessGroup(client, payload);
+      break;
+
+    case "remove_from_access_group":
+      await handleRemoveFromAccessGroup(client, payload);
+      break;
+
+    case "send_dm":
+      await handleSendDm(payload);
+      break;
+
+    default:
+      throw new Error(`Unknown Circle sync operation: ${item.operation}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Operation handlers
+// ---------------------------------------------------------------------------
+
+async function handleLinkMember(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const email = String(item.payload.email ?? "");
+  const name = String(item.payload.name ?? "");
+
+  if (!email) throw new Error("link_member requires email in payload");
+
+  // Search for existing Circle member
+  const members = await client.searchMembers(email);
+
+  let circleId: number;
+  if (members.length > 0) {
+    circleId = members[0].id;
+  } else if (name) {
+    // Create new member
+    const created = await client.createMember({
+      email,
+      name,
+      skip_invitation: true,
+    });
+    circleId = created.id;
+  } else {
+    throw new Error(`No Circle member found for ${email} and no name for creation`);
+  }
+
+  // Intentional exception to identity lifecycle helper usage:
+  // this is external-system metadata (`circle_id`, sync timestamp), not
+  // identity/profile data, so we update the contact projection directly.
+  const adminClient = createAdminClient();
+  await adminClient
+    .from("contacts")
+    .update({
+      circle_id: String(circleId),
+      synced_to_circle_at: new Date().toISOString(),
+    })
+    .eq("id", item.entity_id);
+}
+
+async function handleAddTag(
+  client: CircleAdminClient,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const email = String(payload.email ?? "");
+  const role = String(payload.role ?? payload.newRole ?? "member");
+
+  if (!email) throw new Error("add_tag requires email in payload");
+
+  // Resolve the role to a Circle tag name
+  const tagName = ROLE_TO_CIRCLE_TAG[role] ?? ROLE_TO_CIRCLE_TAG.member;
+
+  // Look up tag ID by name
+  const tags = await client.listTags();
+  const tag = tags.find(
+    (t) => t.name.toLowerCase() === tagName.toLowerCase()
+  );
+
+  if (!tag) {
+    throw new Error(`Circle tag "${tagName}" not found — create it in Circle admin first`);
+  }
+
+  await client.addTagToMember(tag.id, email);
+}
+
+async function handleRemoveTag(
+  client: CircleAdminClient,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const email = String(payload.email ?? "");
+  const role = String(payload.role ?? "member");
+
+  if (!email) throw new Error("remove_tag requires email in payload");
+
+  const tagName = ROLE_TO_CIRCLE_TAG[role] ?? ROLE_TO_CIRCLE_TAG.member;
+
+  const tags = await client.listTags();
+  const tag = tags.find(
+    (t) => t.name.toLowerCase() === tagName.toLowerCase()
+  );
+
+  if (!tag) {
+    // Tag doesn't exist — nothing to remove
+    return;
+  }
+
+  await client.removeTagFromMember(tag.id, email);
+}
+
+async function handleAddToSpace(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const spaceId = Number(item.payload.spaceId);
+  const circleId = await resolveCircleId(item.entity_id);
+
+  if (!spaceId || !circleId) {
+    throw new Error(
+      `add_to_space requires spaceId in payload and linked Circle account (entity: ${item.entity_id})`
+    );
+  }
+
+  await client.addMemberToSpace(spaceId, circleId);
+}
+
+async function handleRemoveFromSpace(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const spaceId = Number(item.payload.spaceId);
+  const circleId = await resolveCircleId(item.entity_id);
+
+  if (!spaceId || !circleId) {
+    // Can't remove if not linked — silently succeed
+    return;
+  }
+
+  await client.removeMemberFromSpace(spaceId, circleId);
+}
+
+async function handleAddToAccessGroup(
+  client: CircleAdminClient,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const groupId = Number(payload.groupId);
+  const email = String(payload.email ?? "");
+
+  if (!groupId || !email) {
+    throw new Error("add_to_access_group requires groupId and email");
+  }
+
+  await client.addMemberToAccessGroup(groupId, email);
+}
+
+async function handleRemoveFromAccessGroup(
+  client: CircleAdminClient,
+  payload: Record<string, unknown>
+): Promise<void> {
+  const groupId = Number(payload.groupId);
+  const email = String(payload.email ?? "");
+
+  if (!groupId || !email) return;
+
+  await client.removeMemberFromAccessGroup(groupId, email);
+}
+
+async function handleSendDm(
+  payload: Record<string, unknown>
+): Promise<void> {
+  const recipientCircleId = Number(payload.recipientCircleId);
+  const botUserId = Number(payload.botUserId);
+  const message = String(payload.message ?? "");
+
+  if (!recipientCircleId || !botUserId || !message) {
+    throw new Error("send_dm requires recipientCircleId, botUserId, and message");
+  }
+
+  // Mint a token for the bot user
+  const token = await mintMemberToken({
+    community_member_id: botUserId,
+  });
+
+  const memberClient = new CircleMemberClient(token.access_token);
+
+  // Find or get the direct chat room with the recipient.
+  // For now, list all chat rooms and find the one with the recipient.
+  const chatRooms = await memberClient.listChatRooms();
+  const directRoom = chatRooms.find(
+    (room) =>
+      room.chat_room_kind === "direct" &&
+      room.members.some((m) => m.id === recipientCircleId)
+  );
+
+  if (!directRoom) {
+    // If no existing DM room, we may need to create one.
+    // Circle's API may auto-create on first message — try sending.
+    throw new Error(
+      `No existing DM room with Circle member ${recipientCircleId}. Manual DM creation not yet supported.`
+    );
+  }
+
+  await memberClient.sendMessage(directRoom.uuid, message);
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+/**
+ * Look up a contact's circle_id from the contacts projection.
+ */
+async function resolveCircleId(contactId: string): Promise<number | null> {
+  const adminClient = createAdminClient();
+  const { data } = await adminClient
+    .from("contacts")
+    .select("circle_id")
+    .eq("id", contactId)
+    .single();
+
+  if (!data?.circle_id) return null;
+  return Number(data.circle_id);
+}

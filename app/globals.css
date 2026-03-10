@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
 :root {
+  /* Brand Palette */
+  --brand-red: #EE2A2E;
+  --brand-red-hover: #D92327;
+  --brand-navy: #163D6D;
+  --brand-navy-deep: #102D51;
+
   /* Base Colors */
   --background: #FAFAFA;
   --surface: #FFFFFF;
@@ -13,8 +19,8 @@
   --border-default: #D4D4D4;
 
   /* Accent (CSC Red) */
-  --accent-primary: #D60001;
-  --accent-hover: #B00001;
+  --accent-primary: var(--brand-red);
+  --accent-hover: var(--brand-red-hover);
 
   /* Status Colors */
   --success: #10B981;
@@ -32,6 +38,14 @@
   --radius-md: 8px;
   --radius-lg: 12px;
   --radius-xl: 16px;
+
+  /* Typography (Adobe kit + fallbacks) */
+  --font-primary: "gotham", "Gotham", "Arial Black", "Helvetica Neue", Arial, sans-serif;
+  --font-secondary: Calibri, "Segoe UI", -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
+  --font-serif: "museo-slab", "Museo Slab", Georgia, "Times New Roman", serif;
+  /* Back-compat aliases used by existing classes/components */
+  --font-inter: var(--font-secondary);
+  --font-raleway: var(--font-serif);
 }
 
 @theme inline {
@@ -45,13 +59,13 @@
   --color-border-default: var(--border-default);
   --color-accent: var(--accent-primary);
   --color-accent-hover: var(--accent-hover);
-  --font-sans: var(--font-inter);
+  --font-sans: var(--font-secondary);
 }
 
 body {
   background: var(--background);
   color: var(--text-primary);
-  font-family: var(--font-inter), -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-family: var(--font-secondary);
 }
 
 /* Smooth scrolling */
@@ -170,4 +184,33 @@ html {
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* Kiosk mode for conference check-in utility screen */
+body.check-in-kiosk header,
+body.check-in-kiosk footer {
+  display: none !important;
+}
+
+body.check-in-kiosk main {
+  margin: 0 !important;
+  padding: 0 !important;
+  min-height: 100vh !important;
+}
+
+/* Directory slide-over panel animation */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in-right {
+  animation: slide-in-right 0.25s ease-out;
+}
+
+@keyframes slide-in-left {
+  from { transform: translateX(-100%); }
+  to { transform: translateX(0); }
+}
+.animate-slide-in-left {
+  animation: slide-in-left 0.25s ease-out;
 }

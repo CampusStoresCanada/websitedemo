@@ -1,10 +1,11 @@
 import { notFound } from "next/navigation";
-import { getOrganizationProfile } from "@/lib/data";
+import { getViewerContext } from "@/lib/visibility/viewer";
+import { getOrganizationForViewer } from "@/lib/visibility/data";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 
-// Revalidate every 60 seconds
-export const revalidate = 60;
+// Viewer-dependent masking means different responses per viewer
+export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
@@ -12,8 +13,9 @@ interface PageProps {
 
 export default async function OrgProfilePage({ params }: PageProps) {
   const { slug } = await params;
-  const { organization, contacts, brandColors, benchmarking } =
-    await getOrganizationProfile(slug);
+  const viewer = await getViewerContext();
+  const { organization, contacts, brandColors, benchmarking, allBenchmarking } =
+    await getOrganizationForViewer(slug, viewer);
 
   if (!organization) {
     notFound();
@@ -27,6 +29,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
         contacts={contacts}
         brandColors={brandColors}
         benchmarking={benchmarking}
+        allBenchmarking={allBenchmarking}
+        viewerLevel={viewer.viewerLevel}
       />
     );
   }
@@ -37,6 +41,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       organization={organization}
       contacts={contacts}
       brandColors={brandColors}
+      viewerLevel={viewer.viewerLevel}
     />
   );
 }

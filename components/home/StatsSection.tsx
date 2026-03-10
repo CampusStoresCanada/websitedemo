@@ -1,7 +1,6 @@
-import { getStats } from "@/lib/data";
+import type { HomePageStats } from "@/lib/homepage";
 
-export default async function StatsSection() {
-  const stats = await getStats();
+export default function StatsSection({ stats }: { stats: HomePageStats }) {
 
   return (
     <section className="py-24 md:py-32 bg-[#1A1A1A]">
@@ -9,27 +8,27 @@ export default async function StatsSection() {
         <div className="grid grid-cols-2 md:grid-cols-4 gap-12 md:gap-8">
           <div className="text-center">
             <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-              {stats.memberCount}
+              {stats.activeMembers}
             </div>
             <div className="text-[#9B9B9B]">Member Institutions</div>
           </div>
           <div className="text-center">
             <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-              {stats.partnerCount}+
+              {stats.activePartners}
             </div>
             <div className="text-[#9B9B9B]">Vendor Partners</div>
           </div>
           <div className="text-center">
             <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-              {stats.provinceCount}
+              {stats.provincesRepresented}
             </div>
             <div className="text-[#9B9B9B]">Provinces & Territories</div>
           </div>
           <div className="text-center">
             <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-              30+
+              {stats.totalFteServed.toLocaleString()}
             </div>
-            <div className="text-[#9B9B9B]">Years of Service</div>
+            <div className="text-[#9B9B9B]">Total FTE Served</div>
           </div>
         </div>
       </div>

@@ -43,6 +43,12 @@ export default function ColorizedImage({
       const containerWidth = container.offsetWidth;
       const containerHeight = container.offsetHeight;
 
+      // Guard: container not yet laid out (0 dimensions) — retry on next frame
+      if (containerWidth === 0 || containerHeight === 0) {
+        requestAnimationFrame(() => img.onload?.(new Event("load")));
+        return;
+      }
+
       canvas.width = containerWidth;
       canvas.height = containerHeight;
 

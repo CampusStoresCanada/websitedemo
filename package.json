@@ -6,15 +6,26 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "test": "vitest run",
+    "test:scheduler": "vitest run lib/scheduler/__tests__",
+    "test:commerce": "vitest run lib/conference-commerce/__tests__",
+    "check:swaps-live": "node scripts/swaps-live-check.mjs",
+    "check:swaps-live:dev": "SWAPS_LIVE_ALLOW_TEMP_ACTIVE_FIXTURE=true node scripts/swaps-live-check.mjs",
+    "sync:about-people": "node scripts/sync-about-people.mjs"
   },
   "dependencies": {
+    "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.94.0",
+    "@zxing/browser": "^0.1.5",
+    "ajv": "^8.18.0",
     "clsx": "^2.1.1",
     "mapbox-gl": "^3.18.1",
     "next": "16.1.6",
     "react": "19.2.3",
     "react-dom": "19.2.3",
+    "resend": "^6.9.2",
+    "stripe": "^20.4.0",
     "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
@@ -26,6 +37,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.0.18"
   }
 }

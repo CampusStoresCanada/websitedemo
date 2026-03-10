@@ -1,8 +1,14 @@
-import { getMembers, getPartners } from "@/lib/data";
 import Image from "next/image";
+import Link from "next/link";
+import type { HomeMapOrg } from "@/lib/homepage";
 
-export default async function LogoCarousel() {
-  const [members, partners] = await Promise.all([getMembers(), getPartners()]);
+export default function LogoCarousel({
+  members,
+  partners,
+}: {
+  members: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl">>;
+  partners: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl">>;
+}) {
 
   return (
     <div className="py-16 md:py-24 bg-white border-y border-[#E5E5E5]">
@@ -23,24 +29,28 @@ export default async function LogoCarousel() {
                 key={`${org.id}-${i}`}
                 className="flex-shrink-0 mx-6 flex items-center justify-center"
               >
-                {org.logo_url ? (
-                  <div className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors">
+                <Link
+                  href={`/org/${org.slug}`}
+                  className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors"
+                >
+                {org.logoUrl ? (
                     <Image
-                      src={org.logo_url}
+                      src={org.logoUrl}
                       alt={org.name || ""}
                       width={120}
                       height={40}
                       className="object-contain max-h-10"
                       unoptimized
                     />
-                  </div>
+                  
                 ) : (
-                  <div className="w-36 h-14 bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
+                  <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
                     <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
                       {org.name}
                     </span>
                   </div>
                 )}
+                </Link>
               </div>
             ))}
           </div>
@@ -64,24 +74,28 @@ export default async function LogoCarousel() {
                 key={`${org.id}-${i}`}
                 className="flex-shrink-0 mx-6 flex items-center justify-center"
               >
-                {org.logo_url ? (
-                  <div className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors">
+                <Link
+                  href={`/org/${org.slug}`}
+                  className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors"
+                >
+                {org.logoUrl ? (
                     <Image
-                      src={org.logo_url}
+                      src={org.logoUrl}
                       alt={org.name || ""}
                       width={120}
                       height={40}
                       className="object-contain max-h-10"
                       unoptimized
                     />
-                  </div>
+                  
                 ) : (
-                  <div className="w-36 h-14 bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
+                  <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
                     <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
                       {org.name}
                     </span>
                   </div>
                 )}
+                </Link>
               </div>
             ))}
           </div>
