@@ -2,7 +2,6 @@
 
 import { useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { Database } from "@/lib/database.types";
 import {
   clearCart,
   createConferenceCheckout,
@@ -12,8 +11,10 @@ import {
 } from "@/lib/actions/conference-commerce";
 import { formatCents } from "@/lib/utils";
 
-type CartRow = Database["public"]["Tables"]["cart_items"]["Row"];
-type ProductRow = Database["public"]["Tables"]["conference_products"]["Row"];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CartRow = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ProductRow = Record<string, any>;
 type CartWithTotals = {
   items: Array<CartRow & { product: ProductRow }>;
   subtotalCents: number;

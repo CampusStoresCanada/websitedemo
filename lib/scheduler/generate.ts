@@ -20,21 +20,41 @@ interface GenerateInput {
   meetingSlots: MeetingSlotInput[];
   matchScores: MatchScoreRecord[];
   policy: SchedulingPolicy;
+  suitePinnedExhibitorBySuiteId?: Record<string, string>;
   seed: number;
 }
 
 function selectActiveExhibitorsBySuite(
   exhibitors: ExhibitorProfile[],
   suiteIds: string[],
-  seed: number
+  seed: number,
+  suitePinnedExhibitorBySuiteId?: Record<string, string>
 ): Map<string, ExhibitorProfile> {
   const orderedSuites = [...suiteIds].sort((a, b) => a.localeCompare(b));
-  const orderedExhibitors = deterministicOrder(exhibitors, seed, (item) => item.registrationId);
+  const exhibitorById = new Map(exhibitors.map((row) => [row.registrationId, row] as const));
 
   const map = new Map<string, ExhibitorProfile>();
-  for (let index = 0; index < orderedSuites.length; index += 1) {
-    if (index >= orderedExhibitors.length) break;
-    map.set(orderedSuites[index], orderedExhibitors[index]);
+  const pinnedRegistrationIds = new Set<string>();
+  for (const suiteId of orderedSuites) {
+    const pinnedRegistrationId = suitePinnedExhibitorBySuiteId?.[suiteId];
+    if (!pinnedRegistrationId || pinnedRegistrationIds.has(pinnedRegistrationId)) continue;
+    const exhibitor = exhibitorById.get(pinnedRegistrationId);
+    if (!exhibitor) continue;
+    map.set(suiteId, exhibitor);
+    pinnedRegistrationIds.add(pinnedRegistrationId);
+  }
+
+  const orderedExhibitors = deterministicOrder(
+    exhibitors.filter((item) => !pinnedRegistrationIds.has(item.registrationId)),
+    seed,
+    (item) => item.registrationId
+  );
+  let exhibitorIndex = 0;
+  for (const suiteId of orderedSuites) {
+    if (map.has(suiteId)) continue;
+    if (exhibitorIndex >= orderedExhibitors.length) break;
+    map.set(suiteId, orderedExhibitors[exhibitorIndex]);
+    exhibitorIndex += 1;
   }
   return map;
 }
@@ -71,7 +91,12 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     return a.suiteId.localeCompare(b.suiteId);
   });
   const suiteIds = [...new Set(orderedSlots.map((slot) => slot.suiteId))];
-  const suiteToExhibitor = selectActiveExhibitorsBySuite(input.exhibitors, suiteIds, input.seed);
+  const suiteToExhibitor = selectActiveExhibitorsBySuite(
+    input.exhibitors,
+    suiteIds,
+    input.seed,
+    input.suitePinnedExhibitorBySuiteId
+  );
   const scoreByKey = scoreMap(input.matchScores);
   const exhibitorOrgByRegistration = exhibitorOrganizationByRegistration(input.exhibitors);
 

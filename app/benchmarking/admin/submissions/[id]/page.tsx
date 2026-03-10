@@ -11,7 +11,8 @@ export default async function SubmissionDetailPage({ params }: Props) {
   const supabase = await createClient();
 
   // Fetch the benchmarking row with org info
-  const { data: submission } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: submission } = (await (supabase as any)
     .from("benchmarking")
     .select(
       `
@@ -20,18 +21,19 @@ export default async function SubmissionDetailPage({ params }: Props) {
     `
     )
     .eq("id", id)
-    .single();
+    .single()) as { data: any };
 
   if (!submission) {
     redirect("/benchmarking/admin/submissions");
   }
 
   // Fetch delta flags for this submission
-  const { data: deltaFlags } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: deltaFlags } = (await (supabase as any)
     .from("delta_flags")
     .select("*")
     .eq("benchmarking_id", id)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })) as { data: any[] | null };
 
   // Fetch prior year data for comparison
   const org = submission.organization as unknown as {
@@ -41,12 +43,13 @@ export default async function SubmissionDetailPage({ params }: Props) {
     province: string;
   };
 
-  const { data: priorYear } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: priorYear } = (await (supabase as any)
     .from("benchmarking")
     .select("*")
     .eq("organization_id", org.id)
     .eq("fiscal_year", submission.fiscal_year - 1)
-    .single();
+    .single()) as { data: any };
 
   return (
     <div>

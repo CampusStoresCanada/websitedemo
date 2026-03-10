@@ -18,6 +18,20 @@ export interface OrgUserRow {
   membershipId: string;
 }
 
+interface MembershipProfile {
+  id: string;
+  display_name: string | null;
+  avatar_url: string | null;
+}
+
+interface MembershipRow {
+  id: string;
+  user_id: string;
+  role: string;
+  status: string;
+  profiles: MembershipProfile | MembershipProfile[] | null;
+}
+
 export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
   const { slug } = await params;
   const org = await resolveOrgSlug(slug);
@@ -26,7 +40,7 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
   const adminClient = createAdminClient();
 
   // Fetch all user_organizations for this org, joined with profiles
-  const { data: memberships, error } = await adminClient
+  const { data: membershipsRaw, error } = await adminClient
     .from("user_organizations")
     .select(
       `
@@ -49,8 +63,10 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
     console.error("[OrgUsersPage] Failed to fetch memberships:", error);
   }
 
+  const memberships: MembershipRow[] = (membershipsRaw ?? []) as unknown as MembershipRow[];
+
   // Also fetch auth emails for each user (profiles don't always have emails)
-  const userIds = (memberships ?? []).map((m) => m.user_id);
+  const userIds = memberships.map((m) => m.user_id);
   let emailMap: Record<string, string> = {};
 
   if (userIds.length > 0) {
@@ -65,12 +81,8 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
   }
 
   // Map to flat array for the client component
-  const users: OrgUserRow[] = (memberships ?? []).map((m) => {
-    const profile = m.profiles as unknown as {
-      id: string;
-      display_name: string | null;
-      avatar_url: string | null;
-    };
+  const users: OrgUserRow[] = memberships.map((m) => {
+    const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
 
     return {
       userId: m.user_id,

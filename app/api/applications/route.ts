@@ -115,7 +115,8 @@ export async function PATCH(request: Request) {
 
   // Update application status
   const newStatus = action === "approve" ? "approved" : "rejected";
-  const { error: updateError } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error: updateError } = await (supabase as any)
     .from("signup_applications")
     .update({
       status: newStatus,
@@ -132,7 +133,8 @@ export async function PATCH(request: Request) {
 
   // On approval, create the user_organizations link
   if (action === "approve" && application.organization_id && application.user_id) {
-    const { error: linkError } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { error: linkError } = await (supabase as any)
       .from("user_organizations")
       .insert({
         user_id: application.user_id,

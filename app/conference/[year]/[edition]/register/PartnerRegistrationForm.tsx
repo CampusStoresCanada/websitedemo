@@ -19,12 +19,14 @@ import {
 } from "@/lib/actions/conference-registration";
 import { acceptLegalDocument } from "@/lib/actions/conference-legal";
 import { addStaffMember } from "@/lib/actions/conference-staff";
-import type { Database } from "@/lib/database.types";
-
-type ConferenceRow = Database["public"]["Tables"]["conference_instances"]["Row"];
-type RegistrationRow = Database["public"]["Tables"]["conference_registrations"]["Row"];
-type LegalVersionRow = Database["public"]["Tables"]["conference_legal_versions"]["Row"];
-type LegalAcceptanceRow = Database["public"]["Tables"]["legal_acceptances"]["Row"];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ConferenceRow = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type RegistrationRow = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LegalVersionRow = Record<string, any>;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type LegalAcceptanceRow = Record<string, any>;
 
 interface PartnerRegistrationFormProps {
   conference: ConferenceRow;
@@ -156,7 +158,8 @@ export default function PartnerRegistrationForm({
         });
       } else if (step === 2) {
         await saveRegistrationStep(regId, {
-          sales_readiness: salesReadiness as unknown as Database["public"]["Tables"]["conference_registrations"]["Update"]["sales_readiness"],
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          sales_readiness: salesReadiness as any,
         });
       } else if (step === 3) {
         await saveRegistrationStep(regId, {

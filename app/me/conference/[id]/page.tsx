@@ -62,46 +62,50 @@ async function loadNextMeeting(params: {
   registrationId: string;
 }): Promise<NextMeeting> {
   const adminClient = createAdminClient();
-  const { data: activeRun } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac = adminClient as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: activeRun } = (await ac
     .from("scheduler_runs")
     .select("id")
     .eq("conference_id", params.conferenceId)
     .eq("run_mode", "active")
     .eq("status", "completed")
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
 
   if (!activeRun?.id) return null;
 
-  const { data: schedules } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: schedules } = (await ac
     .from("schedules")
     .select("meeting_slot_id, exhibitor_registration_id")
     .eq("conference_id", params.conferenceId)
     .eq("scheduler_run_id", activeRun.id)
     .contains("delegate_registration_ids", [params.registrationId])
-    .neq("status", "canceled");
+    .neq("status", "canceled")) as { data: any[] | null };
 
   if (!schedules || schedules.length === 0) return null;
 
   const meetingSlotIds = [...new Set(schedules.map((row) => row.meeting_slot_id))];
   const exhibitorRegIds = [...new Set(schedules.map((row) => row.exhibitor_registration_id))];
 
-  const [{ data: meetingSlots }, { data: exhibitorRegs }] = await Promise.all([
-    adminClient
+  const [{ data: meetingSlots }, { data: exhibitorRegs }] = (await Promise.all([
+    ac
       .from("meeting_slots")
       .select("id, day_number, slot_number, start_time, end_time, suite_id")
       .in("id", meetingSlotIds),
-    adminClient
+    ac
       .from("conference_registrations")
       .select("id, organization_id")
       .in("id", exhibitorRegIds),
-  ]);
+  ])) as [{ data: any[] | null }, { data: any[] | null }];
 
-  const suiteIds = [...new Set((meetingSlots ?? []).map((slot) => slot.suite_id))];
-  const orgIds = [...new Set((exhibitorRegs ?? []).map((reg) => reg.organization_id))];
-  const [{ data: suites }, { data: organizations }] = await Promise.all([
-    adminClient.from("conference_suites").select("id, suite_number").in("id", suiteIds),
-    adminClient.from("organizations").select("id, name").in("id", orgIds),
-  ]);
+  const suiteIds = [...new Set((meetingSlots ?? []).map((slot: any) => slot.suite_id))];
+  const orgIds = [...new Set((exhibitorRegs ?? []).map((reg: any) => reg.organization_id))];
+  const [{ data: suites }, { data: organizations }] = (await Promise.all([
+    ac.from("conference_suites").select("id, suite_number").in("id", suiteIds),
+    ac.from("organizations").select("id, name").in("id", orgIds),
+  ])) as [{ data: any[] | null }, { data: any[] | null }];
 
   const slotById = new Map((meetingSlots ?? []).map((slot) => [slot.id, slot] as const));
   const exhibitorByRegId = new Map((exhibitorRegs ?? []).map((row) => [row.id, row] as const));
@@ -146,14 +150,16 @@ export default async function MyConferencePage({
 
   const { id: conferenceId } = await params;
   const adminClient = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac2 = adminClient as any;
 
-  const [{ data: conference }, { data: peopleRows }] = await Promise.all([
-    adminClient
+  const [{ data: conference }, { data: peopleRows }] = (await Promise.all([
+    ac2
       .from("conference_instances")
       .select("id, name, year, edition_code")
       .eq("id", conferenceId)
       .maybeSingle(),
-    adminClient
+    ac2
       .from("conference_people")
       .select(
         "id, registration_id, display_name, contact_email, person_kind, assignment_status, travel_mode, road_origin_address, preferred_departure_airport, seat_preference, dietary_restrictions, accessibility_needs, mobile_phone, emergency_contact_name, emergency_contact_phone, arrival_flight_details, departure_flight_details, hotel_name, hotel_confirmation_code, badge_print_status, checked_in_at, data_quality_flags"
@@ -162,7 +168,7 @@ export default async function MyConferencePage({
       .eq("user_id", auth.ctx.userId)
       .neq("assignment_status", "canceled")
       .order("updated_at", { ascending: false }),
-  ]);
+  ])) as [{ data: any }, { data: any[] | null }];
 
   if (!conference) {
     return <main className="max-w-5xl mx-auto px-4 py-8">Conference not found.</main>;
@@ -214,6 +220,7 @@ export default async function MyConferencePage({
       emergency_contact_name: toNullable(formData.get("emergency_contact_name")),
       emergency_contact_phone: toNullable(formData.get("emergency_contact_phone")),
     };
+    if (!person) return;
     const result = await updateConferencePersonSelf(person.id, patch);
     if (result.success) {
       revalidatePath(`/me/conference/${conferenceId}`);

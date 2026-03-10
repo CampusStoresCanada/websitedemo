@@ -71,7 +71,12 @@ function formatTimeFromDate(date: Date): string {
 
 async function ensureMeetingScaffolding(
   conferenceId: string
-): Promise<{ suitesCount: number; meetingSlots: MeetingSlotRow[] }> {
+): Promise<{
+  suitesCount: number;
+  meetingSlots: MeetingSlotRow[];
+  suites: Array<{ id: string; suite_number: number }>;
+  suiteOrgAssignmentsBySuiteId: Record<string, string>;
+}> {
   const adminClient = createAdminClient();
 
   const { data: paramsRows, error: paramsError } = await adminClient
@@ -109,6 +114,12 @@ async function ensureMeetingScaffolding(
     meetingsModule?.enabled && meetingsModule.config_json && typeof meetingsModule.config_json === "object"
       ? (meetingsModule.config_json as Record<string, unknown>)
       : null;
+  const suiteOrgAssignmentsRaw =
+    moduleCfg?.suite_org_assignments &&
+    typeof moduleCfg.suite_org_assignments === "object" &&
+    !Array.isArray(moduleCfg.suite_org_assignments)
+      ? (moduleCfg.suite_org_assignments as Record<string, unknown>)
+      : {};
 
   const daySettingsRaw = ((moduleCfg?.meeting_day_settings ?? {}) as Record<string, unknown>) ?? {};
   const moduleMeetingDays = Array.isArray(moduleCfg?.meeting_days)
@@ -196,7 +207,19 @@ async function ensureMeetingScaffolding(
 
   if (slotsError) throw new Error(slotsError.message);
   if (existingSlots && existingSlots.length > 0) {
-    return { suitesCount: suites.length, meetingSlots: existingSlots };
+    const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
+    for (const suite of suites) {
+      const raw = suiteOrgAssignmentsRaw[String(suite.suite_number)];
+      if (typeof raw === "string" && raw.trim().length > 0) {
+        suiteOrgAssignmentsBySuiteId[suite.id] = raw.trim();
+      }
+    }
+    return {
+      suitesCount: suites.length,
+      meetingSlots: existingSlots,
+      suites,
+      suiteOrgAssignmentsBySuiteId,
+    };
   }
 
   const startBase = "1970-01-01T00:00:00.000Z";
@@ -259,7 +282,20 @@ async function ensureMeetingScaffolding(
 
   if (insertSlotsError) throw new Error(insertSlotsError.message);
 
-  return { suitesCount: suites.length, meetingSlots: insertedSlots ?? [] };
+  const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
+  for (const suite of suites) {
+    const raw = suiteOrgAssignmentsRaw[String(suite.suite_number)];
+    if (typeof raw === "string" && raw.trim().length > 0) {
+      suiteOrgAssignmentsBySuiteId[suite.id] = raw.trim();
+    }
+  }
+
+  return {
+    suitesCount: suites.length,
+    meetingSlots: insertedSlots ?? [],
+    suites,
+    suiteOrgAssignmentsBySuiteId,
+  };
 }
 
 function extractRegistrationIdsFromMetadata(metadata: Json | null): string[] {
@@ -469,6 +505,28 @@ export async function createSchedulerDraftRun(
     const schedulingPolicy = await getSchedulingConfig();
     const scaffolding = await ensureMeetingScaffolding(conferenceId);
     const candidates = await loadEligibleCandidates(conferenceId);
+    const orderedExhibitors = [...candidates.exhibitors].sort((a, b) =>
+      a.registrationId.localeCompare(b.registrationId)
+    );
+    const exhibitorByOrg = new Map<string, ExhibitorProfile[]>();
+    for (const exhibitor of orderedExhibitors) {
+      const list = exhibitorByOrg.get(exhibitor.organizationId) ?? [];
+      list.push(exhibitor);
+      exhibitorByOrg.set(exhibitor.organizationId, list);
+    }
+    const usedPinnedExhibitorRegistrationIds = new Set<string>();
+    const suitePinnedExhibitorBySuiteId: Record<string, string> = {};
+    for (const suite of scaffolding.suites) {
+      const orgId = scaffolding.suiteOrgAssignmentsBySuiteId[suite.id];
+      if (!orgId) continue;
+      const candidatesForOrg = exhibitorByOrg.get(orgId) ?? [];
+      const chosen = candidatesForOrg.find(
+        (row) => !usedPinnedExhibitorRegistrationIds.has(row.registrationId)
+      );
+      if (!chosen) continue;
+      suitePinnedExhibitorBySuiteId[suite.id] = chosen.registrationId;
+      usedPinnedExhibitorRegistrationIds.add(chosen.registrationId);
+    }
 
     const matchScores = computeAllMatchScores(candidates.delegates, candidates.exhibitors);
 
@@ -518,6 +576,7 @@ export async function createSchedulerDraftRun(
         tiebreakMode: schedulingPolicy.tiebreak_mode,
         feasibilityRelaxation: schedulingPolicy.feasibility_relaxation,
       },
+      suitePinnedExhibitorBySuiteId,
       seed: runSeed,
     });
 

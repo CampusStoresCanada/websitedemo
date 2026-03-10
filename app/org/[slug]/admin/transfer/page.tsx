@@ -25,19 +25,23 @@ export default async function OrgTransferPage({
   if (!auth.ok) notFound();
 
   const adminClient = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac = adminClient as any;
 
   // Fetch any pending transfer
-  const { data: pendingTransfer } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: pendingTransfer } = (await ac
     .from("admin_transfer_requests")
     .select(
       "id, from_user_id, to_user_id, status, requested_at, timeout_at, reason"
     )
     .eq("organization_id", org.id)
     .eq("status", "pending")
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
 
   // Fetch eligible successors: active org members (excluding current user)
-  const { data: members } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: members } = (await ac
     .from("user_organizations")
     .select(
       `
@@ -51,7 +55,7 @@ export default async function OrgTransferPage({
     )
     .eq("organization_id", org.id)
     .eq("status", "active")
-    .neq("user_id", auth.ctx.userId);
+    .neq("user_id", auth.ctx.userId)) as { data: any[] | null };
 
   // Get emails for candidates
   const candidateUserIds = (members ?? []).map((m) => m.user_id);
@@ -86,19 +90,21 @@ export default async function OrgTransferPage({
   let toUserName: string | null = null;
 
   if (pendingTransfer) {
-    const { data: fromProfile } = await adminClient
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: fromProfile } = (await ac
       .from("profiles")
       .select("display_name")
       .eq("id", pendingTransfer.from_user_id)
-      .single();
+      .single()) as { data: any };
     fromUserName = fromProfile?.display_name ?? null;
 
     if (pendingTransfer.to_user_id) {
-      const { data: toProfile } = await adminClient
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const { data: toProfile } = (await ac
         .from("profiles")
         .select("display_name")
         .eq("id", pendingTransfer.to_user_id)
-        .single();
+        .single()) as { data: any };
       toUserName = toProfile?.display_name ?? null;
     }
   }

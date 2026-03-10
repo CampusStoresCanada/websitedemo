@@ -27,11 +27,11 @@ export default async function ConferenceScheduleOpsPage({
 
   const { id: conferenceId } = await params;
   const adminClient = createAdminClient();
-  const { data: conference } = await adminClient
+  const { data: conference } = (await adminClient
     .from("conference_instances")
     .select("id, name, year, edition_code")
     .eq("id", conferenceId)
-    .maybeSingle();
+    .maybeSingle()) as { data: { id: string; name: string; year: number; edition_code: string } | null };
 
   if (!conference) {
     return <main className="p-6 text-sm text-red-700">Conference not found.</main>;

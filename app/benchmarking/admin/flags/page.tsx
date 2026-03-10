@@ -5,12 +5,13 @@ export default async function FlagsPage() {
   const supabase = await createClient();
 
   // Get latest survey fiscal year
-  const { data: latestSurvey } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: latestSurvey } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("fiscal_year, title")
     .order("fiscal_year", { ascending: false })
     .limit(1)
-    .single();
+    .single()) as { data: any };
 
   if (!latestSurvey) {
     return (
@@ -22,7 +23,8 @@ export default async function FlagsPage() {
   }
 
   // Get all delta flags for this fiscal year with org info
-  const { data: flags } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: flags } = (await (supabase as any)
     .from("delta_flags")
     .select(
       `
@@ -36,7 +38,7 @@ export default async function FlagsPage() {
     `
     )
     .eq("benchmarking.fiscal_year", latestSurvey.fiscal_year)
-    .order("created_at", { ascending: false });
+    .order("created_at", { ascending: false })) as { data: any[] | null };
 
   const tableData = (flags ?? []).map((f) => {
     const benchmarking = f.benchmarking as unknown as {

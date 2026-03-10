@@ -42,6 +42,24 @@ type OrgMember = {
   role: string;
 };
 
+type ConferenceInstanceRow = {
+  id: string;
+  name: string;
+  year: number;
+  edition_code: string;
+};
+
+type MembershipRow = {
+  user_id: string | null;
+  role: string;
+  status: string;
+  profiles: { display_name: string | null } | { display_name: string | null }[] | null;
+};
+
+type SchedulerRunRow = {
+  id: string;
+};
+
 export const dynamic = "force-dynamic";
 
 export default async function OrgConferencePage({
@@ -52,8 +70,10 @@ export default async function OrgConferencePage({
   const { slug, id: conferenceId } = await params;
   const org = await resolveOrgSlug(slug);
   if (!org) notFound();
+  const orgId = org.id;
+  const orgName = org.name;
 
-  const auth = await requireOrgAdminOrSuperAdmin(org.id);
+  const auth = await requireOrgAdminOrSuperAdmin(orgId);
   if (!auth.ok) {
     redirect(auth.status === 401 ? "/login" : `/org/${slug}`);
   }
@@ -74,7 +94,7 @@ export default async function OrgConferencePage({
           "id, user_id, source_type, source_id, person_kind, display_name, contact_email, assignment_status, entitlement_type, conference_entitlement_id, assigned_email_snapshot, schedule_scope, travel_mode, road_origin_address, emergency_contact_name, emergency_contact_phone, data_quality_flags, badge_print_status, checked_in_at, hotel_name, hotel_confirmation_code, admin_notes"
         )
         .eq("conference_id", conferenceId)
-        .eq("organization_id", org.id)
+        .eq("organization_id", orgId)
         .order("person_kind", { ascending: true })
         .order("display_name", { ascending: true }),
       adminClient
@@ -82,7 +102,7 @@ export default async function OrgConferencePage({
         .select(
           "user_id, role, status, profiles!inner(display_name)"
         )
-        .eq("organization_id", org.id)
+        .eq("organization_id", orgId)
         .eq("status", "active")
         .order("role", { ascending: true }),
       adminClient
@@ -94,13 +114,18 @@ export default async function OrgConferencePage({
         .maybeSingle(),
     ]);
 
-  if (!conferenceResult.data) {
+  const conference = conferenceResult.data as ConferenceInstanceRow | null;
+  if (!conference) {
     return <main className="max-w-6xl mx-auto px-4 py-8">Conference not found.</main>;
   }
 
   const people = (peopleResult.data ?? []) as OrgConferencePersonRow[];
+  const memberships = (membershipsResult.data ?? []) as unknown as MembershipRow[];
+  const activeRun = activeRunResult.data as SchedulerRunRow | null;
 
-  const memberUserIds = (membershipsResult.data ?? []).map((row) => row.user_id);
+  const memberUserIds = memberships
+    .map((row) => row.user_id)
+    .filter((userId): userId is string => Boolean(userId));
   let emailByUserId: Record<string, string> = {};
   if (memberUserIds.length > 0) {
     const { data: authUsers } = await adminClient.auth.admin.listUsers();
@@ -111,12 +136,17 @@ export default async function OrgConferencePage({
     );
   }
 
-  const orgMembers: OrgMember[] = (membershipsResult.data ?? []).map((row) => ({
-    userId: row.user_id,
-    displayName: (row.profiles as { display_name: string | null })?.display_name ?? null,
-    email: emailByUserId[row.user_id] ?? null,
-    role: row.role,
-  }));
+  const orgMembers: OrgMember[] = memberships
+    .filter((row): row is MembershipRow & { user_id: string } => Boolean(row.user_id))
+    .map((row) => {
+      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+      return {
+        userId: row.user_id,
+        displayName: profile?.display_name ?? null,
+        email: emailByUserId[row.user_id] ?? null,
+        role: row.role,
+      };
+    });
 
   const readinessRows = people
     .filter((row) => row.assignment_status !== "canceled")
@@ -149,7 +179,7 @@ export default async function OrgConferencePage({
     const entitlementType = String(formData.get("entitlement_type") ?? "delegate");
     const targetUserId = String(formData.get("target_user_id") ?? "");
     if (!entitlementId || !targetUserId) return;
-    const result = await assignConferenceEntitlement(conferenceId, org.id, entitlementId, {
+    const result = await assignConferenceEntitlement(conferenceId, orgId, entitlementId, {
       entitlementType: entitlementType || "delegate",
       targetUserId,
     });
@@ -164,7 +194,7 @@ export default async function OrgConferencePage({
     const entitlementType = String(formData.get("entitlement_type") ?? "delegate");
     const targetEmail = String(formData.get("target_email") ?? "").trim().toLowerCase();
     if (!entitlementId || !targetEmail) return;
-    const result = await assignConferenceEntitlement(conferenceId, org.id, entitlementId, {
+    const result = await assignConferenceEntitlement(conferenceId, orgId, entitlementId, {
       entitlementType: entitlementType || "delegate",
       targetEmail,
     });
@@ -178,13 +208,13 @@ export default async function OrgConferencePage({
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">
-            {conferenceResult.data.name} - {org.name}
+            {conference.name} - {orgName}
           </h1>
           <p className="text-sm text-gray-600">Org Conference Roster</p>
         </div>
         <div className="flex gap-2">
           <Link
-            href={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}`}
+            href={`/conference/${conference.year}/${conference.edition_code}`}
             className="rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:border-gray-400"
           >
             Open Conference Hub
@@ -196,7 +226,7 @@ export default async function OrgConferencePage({
             Back to Org Admin
           </Link>
           <Link
-            href={`/conference/${conferenceResult.data.year}/${conferenceResult.data.edition_code}/schedule`}
+            href={`/conference/${conference.year}/${conference.edition_code}/schedule`}
             className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
           >
             Open Schedule + Swaps
@@ -216,7 +246,7 @@ export default async function OrgConferencePage({
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Exhibitor Shared Schedule Context</h2>
         <p className="mt-2 text-sm text-gray-700">
-          Active run: {activeRunResult.data?.id ?? "Not published"} | Exhibitor records:{" "}
+          Active run: {activeRun?.id ?? "Not published"} | Exhibitor records:{" "}
           {exhibitorRows.length}
         </p>
       </section>

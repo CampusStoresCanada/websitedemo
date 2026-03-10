@@ -493,3 +493,19 @@ export type BrandColor = Database['public']['Tables']['brand_colors']['Row']
 export type Benchmarking = Database['public']['Tables']['benchmarking']['Row']
 export type ActiveOrganization = Database['public']['Views']['active_organizations']['Row']
 export type ActiveContact = Database['public']['Views']['active_contacts']['Row']
+
+// Temporary explicit type until `site_content` is added back to generated DB types.
+export type SiteContent = {
+  id: string
+  section: string
+  content_type: string | null
+  title: string | null
+  subtitle: string | null
+  body: string | null
+  image_url: string | null
+  display_order: number | null
+  is_active: boolean | null
+  updated_by: string | null
+  created_at: string | null
+  updated_at: string | null
+}

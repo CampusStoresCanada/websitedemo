@@ -16,11 +16,12 @@ export default async function BenchmarkingPage() {
   }
 
   // Fetch open/recent survey config
-  const { data: surveys } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: surveys } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
     .order("fiscal_year", { ascending: false })
-    .limit(2);
+    .limit(2)) as { data: any[] | null };
 
   // If logged in, check their org role and survey status
   let userOrgInfo: {
@@ -39,7 +40,8 @@ export default async function BenchmarkingPage() {
 
   if (userId) {
     // Find user's primary member org
-    const { data: userOrgs } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: userOrgs } = (await (supabase as any)
       .from("user_organizations")
       .select(
         `
@@ -49,7 +51,7 @@ export default async function BenchmarkingPage() {
       `
       )
       .eq("user_id", userId)
-      .eq("status", "active");
+      .eq("status", "active")) as { data: any[] | null };
 
     const memberOrg = userOrgs?.find(
       (uo) => {
@@ -77,12 +79,13 @@ export default async function BenchmarkingPage() {
       );
 
       if (activeSurvey) {
-        const { data: draft } = await supabase
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const { data: draft } = (await (supabase as any)
           .from("benchmarking")
           .select("id, status, fiscal_year, updated_at")
           .eq("organization_id", org.id)
           .eq("fiscal_year", activeSurvey.fiscal_year)
-          .single();
+          .single()) as { data: any };
 
         if (draft) {
           existingDraft = {

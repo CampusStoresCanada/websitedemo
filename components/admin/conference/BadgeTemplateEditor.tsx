@@ -200,15 +200,17 @@ export default function BadgeTemplateEditor({
 }: Props) {
   const normalizedInitialConfig = normalizeBadgeTemplateConfig(initialConfig);
   const [config, setConfigState] = useState<BadgeTemplateConfigV1>(() => {
-    const roleLayouts = normalizedInitialConfig.roleLayouts ?? {
-      delegate: {
-        front: cloneDeep(normalizedInitialConfig.front),
-        back: cloneDeep(normalizedInitialConfig.back),
-      },
-      exhibitor: {
-        front: cloneDeep(normalizedInitialConfig.front),
-        back: cloneDeep(normalizedInitialConfig.back),
-      },
+    const roleLayouts = {
+      delegate:
+        normalizedInitialConfig.roleLayouts?.delegate ?? {
+          front: cloneDeep(normalizedInitialConfig.front),
+          back: cloneDeep(normalizedInitialConfig.back),
+        },
+      exhibitor:
+        normalizedInitialConfig.roleLayouts?.exhibitor ?? {
+          front: cloneDeep(normalizedInitialConfig.front),
+          back: cloneDeep(normalizedInitialConfig.back),
+        },
     };
     return {
       ...normalizedInitialConfig,
@@ -283,15 +285,17 @@ export default function BadgeTemplateEditor({
             ? (updater as (value: BadgeTemplateConfigV1) => BadgeTemplateConfigV1)(prev)
             : updater;
         const normalized = normalizeBadgeTemplateConfig(computed);
-        const existingLayouts = normalized.roleLayouts ?? {
-          delegate: {
-            front: cloneDeep(normalized.front),
-            back: cloneDeep(normalized.back),
-          },
-          exhibitor: {
-            front: cloneDeep(normalized.front),
-            back: cloneDeep(normalized.back),
-          },
+        const existingLayouts = {
+          delegate:
+            normalized.roleLayouts?.delegate ?? {
+              front: cloneDeep(normalized.front),
+              back: cloneDeep(normalized.back),
+            },
+          exhibitor:
+            normalized.roleLayouts?.exhibitor ?? {
+              front: cloneDeep(normalized.front),
+              back: cloneDeep(normalized.back),
+            },
         };
         return {
           ...normalized,
@@ -1153,12 +1157,13 @@ export default function BadgeTemplateEditor({
         return;
       }
       if (isFrontTextLayer(dragState.layerId)) {
+        const frontTextLayerId = dragState.layerId;
         setConfig((prev) => ({
           ...prev,
           front: {
             ...prev.front,
-            [dragState.layerId]: {
-              ...prev.front[dragState.layerId],
+            [frontTextLayerId]: {
+              ...prev.front[frontTextLayerId],
               width: Math.max(20, nextWidth),
               height: Math.max(8, nextHeight),
             },
@@ -1219,6 +1224,7 @@ export default function BadgeTemplateEditor({
     }
 
     if (dragState.groupStart && dragState.layerId !== "back_qr") {
+      const groupStart = dragState.groupStart;
       const deltaX = nextX - dragState.startX;
       const deltaY = nextY - dragState.startY;
       setConfig((prev) => {
@@ -1235,7 +1241,7 @@ export default function BadgeTemplateEditor({
           images: prev.front.images.map((image) => ({ ...image })),
           textLayers: (prev.front.textLayers ?? []).map((text) => ({ ...text })),
         };
-        for (const [id, origin] of Object.entries(dragState.groupStart)) {
+        for (const [id, origin] of Object.entries(groupStart)) {
           const layerId = id as SelectedLayer;
           const movedX = snapValue(origin.x + deltaX);
           const movedY = snapValue(origin.y + deltaY);
@@ -1370,12 +1376,13 @@ export default function BadgeTemplateEditor({
     }
 
     if (isFrontTextLayer(dragState.layerId)) {
+      const frontTextLayerId = dragState.layerId;
       setConfig((prev) => ({
         ...prev,
         front: {
           ...prev.front,
-          [dragState.layerId]: {
-            ...prev.front[dragState.layerId],
+          [frontTextLayerId]: {
+            ...prev.front[frontTextLayerId],
             x: nextX,
             baselineY: nextY,
           },
@@ -1888,21 +1895,8 @@ export default function BadgeTemplateEditor({
       selectFallbackFrontLayer("role_tint");
       return;
     }
-    const mappedId: BadgeFrontLayerId =
-      selectedLayer === "role_background" ||
-      selectedLayer === "role_tint" ||
-      selectedLayer === "role_overlay"
-        ? "role_visuals"
-        : (selectedLayer as BadgeFrontLayerId);
-    const isRoleLayer =
-      selectedLayer === "role_background" ||
-      selectedLayer === "role_tint" ||
-      selectedLayer === "role_overlay";
-    const nextSelectionPool = editorLayerOrder.filter((layerId) =>
-      isRoleLayer
-        ? layerId !== "role_background" && layerId !== "role_tint" && layerId !== "role_overlay"
-        : layerId !== selectedLayer
-    );
+    const mappedId = selectedLayer as BadgeFrontLayerId;
+    const nextSelectionPool = editorLayerOrder.filter((layerId) => layerId !== selectedLayer);
     const nextSelectedLayer = nextSelectionPool[0] ?? "back_qr";
 
     setConfig((prev) => {

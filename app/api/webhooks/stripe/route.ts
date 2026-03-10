@@ -43,7 +43,8 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ received: true, skipped: true });
   }
 
-  const db = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
 
   const { data: existing } = await db
     .from("stripe_webhook_events")

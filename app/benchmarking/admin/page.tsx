@@ -15,10 +15,11 @@ export default async function BenchmarkingAdminPage() {
   const supabase = await createClient();
 
   // Fetch all surveys
-  const { data: surveys } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: surveys } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
-    .order("fiscal_year", { ascending: false });
+    .order("fiscal_year", { ascending: false })) as { data: any[] | null };
 
   const latestSurvey = surveys?.[0] ?? null;
 
@@ -33,10 +34,11 @@ export default async function BenchmarkingAdminPage() {
       .eq("type", "Member");
 
     // Count submissions by status for this fiscal year
-    const { data: submissions } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: submissions } = (await (supabase as any)
       .from("benchmarking")
       .select("status, verified_by")
-      .eq("fiscal_year", latestSurvey.fiscal_year);
+      .eq("fiscal_year", latestSurvey.fiscal_year)) as { data: any[] | null };
 
     const drafts = submissions?.filter((s) => s.status === "draft").length ?? 0;
     const submitted = submissions?.filter((s) => s.status === "submitted").length ?? 0;
@@ -53,20 +55,22 @@ export default async function BenchmarkingAdminPage() {
   // Pending flags count
   let pendingFlagCount = 0;
   if (latestSurvey) {
-    const { count } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { count } = (await (supabase as any)
       .from("delta_flags")
       .select("id, benchmarking!inner(fiscal_year)", { count: "exact", head: true })
       .eq("committee_status", "pending")
-      .eq("benchmarking.fiscal_year", latestSurvey.fiscal_year);
+      .eq("benchmarking.fiscal_year", latestSurvey.fiscal_year)) as { count: number | null };
     pendingFlagCount = count ?? 0;
   }
 
   // Fetch current reviewers
-  const { data: reviewers } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: reviewers } = (await (supabase as any)
     .from("profiles")
     .select("id, display_name, global_role")
     .eq("is_benchmarking_reviewer", true)
-    .order("display_name");
+    .order("display_name")) as { data: any[] | null };
 
   return (
     <div>

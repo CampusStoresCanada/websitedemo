@@ -49,11 +49,12 @@ export default async function RegisterPage({
   // Get user's org membership to determine registration type
   // Use user's own supabase client for queries scoped to the authenticated user
   const userClient = auth.ctx.supabase;
-  const { data: userOrgs } = await userClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: userOrgs } = (await (userClient as any)
     .from("user_organizations")
     .select("organization_id, role, organizations(id, name, type)")
     .eq("user_id", auth.ctx.userId)
-    .eq("status", "active");
+    .eq("status", "active")) as { data: any[] | null };
 
   if (!userOrgs || userOrgs.length === 0) {
     return (
@@ -66,7 +67,7 @@ export default async function RegisterPage({
     );
   }
 
-  const memberships = userOrgs.map((uo) =>
+  const memberships = userOrgs.map((uo: any) =>
     (uo as { organizations: { id: string; name: string; type: string } }).organizations
   );
   const delegateOrgs = memberships.filter((org) => org.type !== "vendor_partner");
@@ -141,12 +142,13 @@ export default async function RegisterPage({
   const adminClient = createAdminClient();
   let exhibitorOrgs: { id: string; name: string }[] = [];
   if (registrationType === "delegate") {
-    const { data: regs } = await adminClient
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: regs } = (await (adminClient as any)
       .from("conference_registrations")
       .select("organization_id, organizations(id, name)")
       .eq("conference_id", conference.id)
       .eq("registration_type", "exhibitor")
-      .in("status", ["submitted", "confirmed"]);
+      .in("status", ["submitted", "confirmed"])) as { data: any[] | null };
 
     if (regs) {
       exhibitorOrgs = regs.map((r) => {
@@ -157,12 +159,13 @@ export default async function RegisterPage({
   }
 
   // Pull known people contacts for the selected org.
-  const { data: peopleRows } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: peopleRows } = (await (adminClient as any)
     .from("people")
     .select("id, first_name, last_name, primary_email, title, work_phone, mobile_phone")
     .eq("organization_id", org.id)
     .order("first_name", { ascending: true })
-    .order("last_name", { ascending: true });
+    .order("last_name", { ascending: true })) as { data: any[] | null };
 
   const knownPeople = (peopleRows ?? []).map((person) => ({
     id: person.id,
@@ -181,17 +184,19 @@ export default async function RegisterPage({
     work_phone: string | null;
     mobile_phone: string | null;
   } | null = null;
-  const { data: userRow } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: userRow } = (await (adminClient as any)
     .from("users")
     .select("person_id")
     .eq("id", auth.ctx.userId)
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
   if (userRow?.person_id) {
-    const { data: person } = await adminClient
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: person } = (await (adminClient as any)
       .from("people")
       .select("first_name, last_name, primary_email, title, work_phone, mobile_phone")
       .eq("id", userRow.person_id)
-      .maybeSingle();
+      .maybeSingle()) as { data: any };
     if (person) {
       mePerson = {
         name: `${person.first_name} ${person.last_name}`.trim(),
@@ -217,12 +222,13 @@ export default async function RegisterPage({
     travel_delete_rule: "march_1_conference_year_utc",
   }));
 
-  const { data: registrationOpsModule } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: registrationOpsModule } = (await (adminClient as any)
     .from("conference_schedule_modules")
     .select("config_json")
     .eq("conference_id", conference.id)
     .eq("module_key", "registration_ops")
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
   const registrationOptionsRaw =
     (registrationOpsModule?.config_json as Record<string, unknown> | null)?.registration_options ??
     null;

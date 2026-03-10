@@ -343,8 +343,12 @@ export default function ConferenceScheduleDesigner({
     const output: Record<string, string> = {};
     for (let suite = 1; suite <= meetingSuiteCount; suite += 1) {
       const raw = suiteOrgAssignmentsRaw[String(suite)];
-      output[String(suite)] =
-        typeof raw === "string" && raw.trim().length > 0 ? raw.trim() : "";
+      if (typeof raw === "string" && raw.trim().length > 0) {
+        output[String(suite)] = raw.trim();
+        continue;
+      }
+      const fallbackOrg = initialExhibitorOrganizations[suite - 1];
+      output[String(suite)] = fallbackOrg?.id ?? "";
     }
     return output;
   });
@@ -467,6 +471,9 @@ export default function ConferenceScheduleDesigner({
   const assignedSuiteCount = Object.values(meetingSuiteAssignments).filter(
     (value) => value.trim().length > 0
   ).length;
+  const assignedSuiteOrgCount = Object.values(meetingSuiteOrgAssignments).filter(
+    (value) => value.trim().length > 0
+  ).length;
 
   const handleSaveMeetingPlan = async () => {
     setIsSavingMeetingPlan(true);
@@ -491,6 +498,21 @@ export default function ConferenceScheduleDesigner({
       return;
     }
     setMeetingPlanSaveMessage("Meeting suite room plan saved.");
+  };
+
+  const autoAssignSuiteOrganizations = () => {
+    setMeetingSuiteOrgAssignments((prev) => {
+      const next = { ...prev };
+      for (let suite = 1; suite <= meetingSuiteCount; suite += 1) {
+        const key = String(suite);
+        if ((next[key] ?? "").trim().length > 0) continue;
+        const fallbackOrg = initialExhibitorOrganizations[suite - 1];
+        if (fallbackOrg) next[key] = fallbackOrg.id;
+      }
+      return next;
+    });
+    setMeetingPlanSaveMessage("Auto-assigned suites from registered partner organizations. Save to persist.");
+    setMeetingPlanSaveError(null);
   };
 
   const updateProgramRowDraft = (
@@ -1107,6 +1129,10 @@ export default function ConferenceScheduleDesigner({
             Suites assigned: <span className="font-semibold">{assignedSuiteCount}</span> /{" "}
             <span className="font-semibold">{meetingSuiteCount}</span>
           </div>
+          <div className="mt-1 text-xs text-gray-600">
+            Organizations assigned: <span className="font-semibold">{assignedSuiteOrgCount}</span> /{" "}
+            <span className="font-semibold">{meetingSuiteCount}</span>
+          </div>
           <div className="mt-4 overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200 text-sm">
               <thead className="bg-gray-50">
@@ -1176,14 +1202,23 @@ export default function ConferenceScheduleDesigner({
                 <span className="text-emerald-700">{meetingPlanSaveMessage}</span>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={() => void handleSaveMeetingPlan()}
-              disabled={isSavingMeetingPlan}
-              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-            >
-              {isSavingMeetingPlan ? "Saving..." : "Save Meeting Suite Plan"}
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={autoAssignSuiteOrganizations}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Auto-Assign Organizations
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleSaveMeetingPlan()}
+                disabled={isSavingMeetingPlan}
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+              >
+                {isSavingMeetingPlan ? "Saving..." : "Save Meeting Suite Plan"}
+              </button>
+            </div>
           </div>
         </div>
       ) : null}

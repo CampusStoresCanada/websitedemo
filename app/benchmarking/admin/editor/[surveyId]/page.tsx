@@ -21,11 +21,12 @@ export default async function SurveyEditorPage({
 
   const supabase = await createClient();
 
-  const { data: survey } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: survey } = (await supabase
     .from("benchmarking_surveys")
     .select("*")
     .eq("id", surveyId)
-    .single();
+    .single()) as { data: any };
 
   if (!survey) {
     notFound();

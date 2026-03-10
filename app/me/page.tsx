@@ -13,13 +13,15 @@ export default async function MyAccountPage() {
 
   const adminClient = createAdminClient();
 
-  const [profileResult, orgResult, circleResult] = await Promise.all([
-    auth.ctx.supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userSb = auth.ctx.supabase as any;
+  const [profileResult, orgResult, circleResult] = (await Promise.all([
+    userSb
       .from("profiles")
       .select("display_name, global_role")
       .eq("id", auth.ctx.userId)
       .maybeSingle(),
-    auth.ctx.supabase
+    userSb
       .from("user_organizations")
       .select("id, role, organization:organizations(id, name, slug)")
       .eq("user_id", auth.ctx.userId)
@@ -31,12 +33,13 @@ export default async function MyAccountPage() {
       .not("circle_id", "is", null)
       .limit(1)
       .maybeSingle(),
-  ]);
+  ])) as [{ data: any }, { data: any[] | null }, { data: any }];
 
-  const { data: conferencePeopleRows } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: conferencePeopleRows } = (await (adminClient as any)
     .from("conference_people")
     .select("conference_id, conference_instances!inner(id, name, year, edition_code)")
-    .eq("user_id", auth.ctx.userId);
+    .eq("user_id", auth.ctx.userId)) as { data: any[] | null };
 
   const myConferenceLinks = (conferencePeopleRows ?? [])
     .map((row) => {

@@ -16,24 +16,29 @@ export default async function OrgAdminPage({ params }: OrgAdminPageProps) {
 
   // Check for pending admin transfer
   const adminClient = createAdminClient();
-  const { data: pendingTransfer } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac = adminClient as any;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: pendingTransfer } = (await ac
     .from("admin_transfer_requests")
     .select("id, from_user_id, to_user_id, status, requested_at, timeout_at")
     .eq("organization_id", org.id)
     .eq("status", "pending")
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
 
   // Get user counts for the summary card
-  const { count: userCount } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { count: userCount } = (await ac
     .from("user_organizations")
     .select("id", { count: "exact", head: true })
     .eq("organization_id", org.id)
-    .eq("status", "active");
+    .eq("status", "active")) as { count: number | null };
 
-  const { data: conferencePeopleRows } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: conferencePeopleRows } = (await ac
     .from("conference_people")
     .select("conference_id, conference_instances!inner(id, name, year, edition_code)")
-    .eq("organization_id", org.id);
+    .eq("organization_id", org.id)) as { data: any[] | null };
 
   const conferenceLinks = (conferencePeopleRows ?? [])
     .map((row) => {

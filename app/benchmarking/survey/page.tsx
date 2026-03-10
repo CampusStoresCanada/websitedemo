@@ -19,7 +19,8 @@ export default async function BenchmarkingSurveyPage() {
   const isAdmin = isGlobalAdmin(globalRole);
 
   // 3. Find user's member org where they're org_admin
-  const { data: userOrgs } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: userOrgs } = (await (supabase as any)
     .from("user_organizations")
     .select(
       `
@@ -29,7 +30,7 @@ export default async function BenchmarkingSurveyPage() {
     `
     )
     .eq("user_id", userId)
-    .eq("status", "active");
+    .eq("status", "active")) as { data: any[] | null };
 
   const memberOrgLink = userOrgs?.find((uo) => {
     const org = uo.organization as unknown as { type: string } | null;
@@ -53,27 +54,30 @@ export default async function BenchmarkingSurveyPage() {
   }
 
   // 4. Check active survey
-  const { data: activeSurvey } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: activeSurvey } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
     .eq("status", "open")
-    .single();
+    .single()) as { data: any };
 
   if (!activeSurvey) {
     redirect("/benchmarking");
   }
 
   // 5. Fetch or create the draft row for this org + fiscal year
-  let { data: currentRow } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let { data: currentRow } = (await (supabase as any)
     .from("benchmarking")
     .select("*")
     .eq("organization_id", organization.id)
     .eq("fiscal_year", activeSurvey.fiscal_year)
-    .single();
+    .single()) as { data: any };
 
   if (!currentRow) {
     // Create a new draft row
-    const { data: newRow, error: insertError } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: newRow, error: insertError } = (await (supabase as any)
       .from("benchmarking")
       .insert({
         organization_id: organization.id,
@@ -82,7 +86,7 @@ export default async function BenchmarkingSurveyPage() {
         respondent_user_id: userId,
       })
       .select("*")
-      .single();
+      .single()) as { data: any; error: any };
 
     if (insertError) {
       console.error("Error creating benchmarking draft:", insertError);
@@ -93,18 +97,20 @@ export default async function BenchmarkingSurveyPage() {
   }
 
   // 6. Fetch prior year data (for reference values and delta flags)
-  const { data: priorYearRow } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: priorYearRow } = (await (supabase as any)
     .from("benchmarking")
     .select("*")
     .eq("organization_id", organization.id)
     .eq("fiscal_year", activeSurvey.fiscal_year - 1)
-    .single();
+    .single()) as { data: any };
 
   // 7. Fetch existing delta flags for this row
-  const { data: deltaFlags } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: deltaFlags } = (await (supabase as any)
     .from("delta_flags")
     .select("*")
-    .eq("benchmarking_id", currentRow!.id);
+    .eq("benchmarking_id", currentRow!.id)) as { data: any[] | null };
 
   // 8. Get the field config for this survey (or DEFAULT if null)
   const fieldConfig = getFieldConfig(activeSurvey);

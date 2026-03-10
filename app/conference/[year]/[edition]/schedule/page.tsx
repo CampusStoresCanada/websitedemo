@@ -49,14 +49,15 @@ export default async function ConferenceSchedulePage({
   const conference = conferenceResult.data;
   const adminClient = createAdminClient();
 
-  const { data: delegateRegistration } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: delegateRegistration } = (await (adminClient as any)
     .from("conference_registrations")
     .select("id")
     .eq("conference_id", conference.id)
     .eq("user_id", auth.ctx.userId)
     .in("registration_type", ["delegate", "observer"])
     .in("status", ["submitted", "confirmed"])
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
 
   if (!delegateRegistration?.id) {
     return (
@@ -80,13 +81,14 @@ export default async function ConferenceSchedulePage({
     );
   }
 
-  const { data: activeRun } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: activeRun } = (await (adminClient as any)
     .from("scheduler_runs")
     .select("id")
     .eq("conference_id", conference.id)
     .eq("run_mode", "active")
     .eq("status", "completed")
-    .maybeSingle();
+    .maybeSingle()) as { data: any };
 
   if (!activeRun?.id) {
     return (
@@ -102,13 +104,14 @@ export default async function ConferenceSchedulePage({
     );
   }
 
-  const { data: schedules, error: schedulesError } = await adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: schedules, error: schedulesError } = (await (adminClient as any)
     .from("schedules")
     .select("*")
     .eq("conference_id", conference.id)
     .eq("scheduler_run_id", activeRun.id)
     .contains("delegate_registration_ids", [delegateRegistration.id])
-    .neq("status", "canceled");
+    .neq("status", "canceled")) as { data: any[] | null; error: any };
 
   if (schedulesError) {
     return (
@@ -123,23 +126,25 @@ export default async function ConferenceSchedulePage({
   const meetingSlotIds = [...new Set(rows.map((row) => row.meeting_slot_id))];
   const exhibitorRegIds = [...new Set(rows.map((row) => row.exhibitor_registration_id))];
 
-  const [{ data: meetingSlots }, { data: exhibitorRegs }] = await Promise.all([
-    adminClient
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac = adminClient as any;
+  const [{ data: meetingSlots }, { data: exhibitorRegs }] = (await Promise.all([
+    ac
       .from("meeting_slots")
       .select("id, day_number, slot_number, start_time, end_time, suite_id")
       .in("id", meetingSlotIds),
-    adminClient
+    ac
       .from("conference_registrations")
       .select("id, organization_id")
       .in("id", exhibitorRegIds),
-  ]);
+  ])) as [{ data: any[] | null }, { data: any[] | null }];
 
   const suiteIds = [...new Set((meetingSlots ?? []).map((slot) => slot.suite_id))];
   const orgIds = [...new Set((exhibitorRegs ?? []).map((reg) => reg.organization_id))];
-  const [{ data: suites }, { data: organizations }] = await Promise.all([
-    adminClient.from("conference_suites").select("id, suite_number").in("id", suiteIds),
-    adminClient.from("organizations").select("id, name").in("id", orgIds),
-  ]);
+  const [{ data: suites }, { data: organizations }] = (await Promise.all([
+    ac.from("conference_suites").select("id, suite_number").in("id", suiteIds),
+    ac.from("organizations").select("id, name").in("id", orgIds),
+  ])) as [{ data: any[] | null }, { data: any[] | null }];
 
   const slotById = new Map((meetingSlots ?? []).map((slot) => [slot.id, slot] as const));
   const exhibitorByRegId = new Map((exhibitorRegs ?? []).map((row) => [row.id, row] as const));

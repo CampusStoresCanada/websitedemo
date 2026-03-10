@@ -454,8 +454,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
                 ? err.message
                 : String(err ?? "unknown error");
 
-          const logFn = isLastAttempt ? console.error : console.warn;
-          logFn("[AuthProvider] fetchUserData attempt failed:", {
+          console.warn("[AuthProvider] fetchUserData attempt failed:", {
             attempt,
             isLastAttempt,
             err: errorDetails,
@@ -488,7 +487,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         ) {
           // No valid permission snapshot to trust yet. Keep the session alive and
           // avoid forced sign-out loops; server guards enforce authorization.
-          console.warn(
+          console.error(
             "[AuthProvider] no trusted permission snapshot available; deferring reauth while session remains valid"
           );
         }
@@ -732,8 +731,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             : err instanceof Error
               ? err.message
               : String(err ?? "unknown error");
-        const logFn = isLastAttempt ? console.error : console.warn;
-        logFn("[AuthProvider] refreshPermissions attempt failed:", {
+        console.warn("[AuthProvider] refreshPermissions attempt failed:", {
           attempt,
           isLastAttempt,
           err: errorDetails,

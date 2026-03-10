@@ -36,15 +36,17 @@ export default async function OnboardingPage() {
   // Fetch org data for the wizard
   const supabase = await createClient();
 
-  let org = null;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let org: any = null;
   if (orgId) {
-    const { data } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data } = (await (supabase as any)
       .from("organizations")
       .select(
         "id, name, type, slug, website, email, phone, street_address, city, province, postal_code, logo_url, company_description, metadata, procurement_info, onboarding_step, onboarding_completed_at, onboarding_reset_required, onboarding_reset_reason"
       )
       .eq("id", orgId)
-      .single();
+      .single()) as { data: any };
     org = data;
   }
 

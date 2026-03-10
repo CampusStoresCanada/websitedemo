@@ -5,12 +5,13 @@ export default async function SubmissionsPage() {
   const supabase = await createClient();
 
   // Get latest survey
-  const { data: latestSurvey } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: latestSurvey } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
     .order("fiscal_year", { ascending: false })
     .limit(1)
-    .single();
+    .single()) as { data: any };
 
   if (!latestSurvey) {
     return (
@@ -22,7 +23,8 @@ export default async function SubmissionsPage() {
   }
 
   // Get all benchmarking rows for this fiscal year with org info
-  const { data: submissions } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: submissions } = (await (supabase as any)
     .from("benchmarking")
     .select(
       `
@@ -37,17 +39,18 @@ export default async function SubmissionsPage() {
     `
     )
     .eq("fiscal_year", latestSurvey.fiscal_year)
-    .order("updated_at", { ascending: false });
+    .order("updated_at", { ascending: false })) as { data: any[] | null };
 
   // Get flag counts per benchmarking_id
   const benchmarkingIds = submissions?.map((s) => s.id) ?? [];
   let flagCounts: Record<string, number> = {};
 
   if (benchmarkingIds.length > 0) {
-    const { data: flags } = await supabase
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: flags } = (await (supabase as any)
       .from("delta_flags")
       .select("benchmarking_id, committee_status")
-      .in("benchmarking_id", benchmarkingIds);
+      .in("benchmarking_id", benchmarkingIds)) as { data: any[] | null };
 
     if (flags) {
       for (const f of flags) {

@@ -13,12 +13,13 @@ export default async function SurveyEditorIndexPage() {
 
   const supabase = await createClient();
 
-  const { data: latestSurvey } = await supabase
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: latestSurvey } = (await supabase
     .from("benchmarking_surveys")
     .select("id")
     .order("fiscal_year", { ascending: false })
     .limit(1)
-    .single();
+    .single()) as { data: { id: string } | null };
 
   if (latestSurvey) {
     redirect(`/benchmarking/admin/editor/${latestSurvey.id}`);

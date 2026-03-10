@@ -20,15 +20,17 @@ export async function GET(request: NextRequest) {
   const userId = auth.ctx.userId;
   const adminClient = createAdminClient();
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const ac = adminClient as any;
   const [{ data: membership }, { data: conference }] = await Promise.all([
-    adminClient
+    ac
       .from("user_organizations")
       .select("organization_id")
       .eq("user_id", userId)
       .eq("organization_id", orgId)
       .eq("status", "active")
       .maybeSingle(),
-    adminClient
+    ac
       .from("conference_instances")
       .select("id")
       .eq("year", Number(year))
@@ -40,13 +42,13 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ count: 0 }, { status: 200 });
   }
 
-  const { data: rows } = await adminClient
+  const { data: rows } = await ac
     .from("cart_items")
     .select("quantity")
     .eq("conference_id", conference.id)
     .eq("organization_id", orgId)
     .eq("user_id", userId);
 
-  const count = (rows ?? []).reduce((sum, row) => sum + row.quantity, 0);
+  const count = (rows ?? []).reduce((sum: number, row: any) => sum + row.quantity, 0);
   return NextResponse.json({ count }, { status: 200 });
 }

@@ -1,11 +1,11 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
-import type { Database } from "@/lib/database.types";
 import { addCartItem } from "@/lib/actions/conference-commerce";
 import { formatCents } from "@/lib/utils";
 
-type ProductWithEligibility = Database["public"]["Tables"]["conference_products"]["Row"] & {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type ProductWithEligibility = Record<string, any> & {
   eligibilityErrors: string[];
 };
 
