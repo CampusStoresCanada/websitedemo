@@ -103,10 +103,19 @@ export class CircleMemberClient {
    * List the member's chat rooms (DM conversations).
    */
   async listChatRooms(): Promise<CircleChatRoom[]> {
-    const result = await this.request<{
-      records: CircleChatRoom[];
-    }>("GET", "/chat_rooms");
-    return result.records ?? (Array.isArray(result) ? result : []);
+    try {
+      const result = await this.request<{
+        records: CircleChatRoom[];
+      }>("GET", "/chat_rooms");
+      return result.records ?? (Array.isArray(result) ? result : []);
+    } catch (err) {
+      if (err instanceof CircleApiError && err.isNotFound) {
+        // 404 — endpoint URL may differ per plan/config; degrade silently
+        console.warn("[circle/member-proxy] listChatRooms 404 — chat rooms endpoint not available");
+        return [];
+      }
+      throw err;
+    }
   }
 
   // ---- Chat room creation -------------------------------------------------
