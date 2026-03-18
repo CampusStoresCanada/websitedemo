@@ -102,28 +102,39 @@ export class CircleAdminClient {
   }
 
   /**
-   * Search for members by email using advanced_search endpoint.
-   * Returns an array (may be empty if not found).
+   * Search for a member by email.
+   * Circle's API ignores all filter params and returns all members,
+   * so we fetch all pages and match client-side.
    */
   async searchMembers(email: string): Promise<CircleMember[]> {
-    const result = await this.request<{ records: CircleMember[] }>(
-      "GET",
-      "/community_members",
-      { params: { email } }
-    );
-    const records = result.records ?? (Array.isArray(result) ? result : []);
-    // Log the first result's keys so we can identify the correct email field name
-    if (records.length > 0) {
-      console.log("[circle/searchMembers] sample record keys:", Object.keys(records[0]));
-      console.log("[circle/searchMembers] sample record:", JSON.stringify(records[0]).slice(0, 300));
-    } else {
-      console.log("[circle/searchMembers] no records returned for email:", email);
+    const map = await this.buildEmailMap();
+    const member = map.get(email.toLowerCase());
+    return member ? [member] : [];
+  }
+
+  /**
+   * Fetch all Circle members (all pages) and return a Map of email → member.
+   * Circle has no server-side email filter, so bulk operations must do this.
+   */
+  async buildEmailMap(): Promise<Map<string, CircleMember>> {
+    const map = new Map<string, CircleMember>();
+    let page = 1;
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const result = await this.request<{
+        records: CircleMember[];
+        has_next_page: boolean;
+      }>("GET", "/community_members", {
+        params: { per_page: 100, page },
+      });
+      const records = result.records ?? [];
+      for (const m of records) {
+        if (m.email) map.set(m.email.toLowerCase(), m);
+      }
+      if (!result.has_next_page || records.length === 0) break;
+      page++;
     }
-    // Guard: Circle may ignore the email filter and return all members.
-    // Only return records whose email actually matches to prevent bulk mis-assignment.
-    return records.filter(
-      (m) => m.email?.toLowerCase() === email.toLowerCase()
-    );
+    return map;
   }
 
   async createMember(data: CircleMemberInput): Promise<CircleMember> {

@@ -70,40 +70,47 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     dryRun,
   };
 
+  // Fetch all Circle members once and build an email map — Circle's API
+  // ignores server-side email filters so we must match client-side.
+  let emailMap: Map<string, { id: number }>;
+  try {
+    emailMap = await circleClient.buildEmailMap();
+  } catch (err) {
+    return NextResponse.json(
+      { error: `Failed to fetch Circle members: ${err instanceof Error ? err.message : err}` },
+      { status: 502 }
+    );
+  }
+
   for (const contact of contacts) {
     if (!contact.email) continue;
     results.checked++;
 
-    try {
-      const members = await circleClient.searchMembers(contact.email);
+    const circleMember = emailMap.get(contact.email.toLowerCase());
 
-      if (members.length === 0) {
-        results.notFound++;
+    if (!circleMember) {
+      results.notFound++;
+      continue;
+    }
+
+    const circleId = circleMember.id;
+
+    if (!dryRun) {
+      const { error: updateErr } = await db
+        .from("contacts")
+        .update({
+          circle_id: String(circleId),
+          synced_to_circle_at: new Date().toISOString(),
+        })
+        .eq("id", contact.id);
+
+      if (updateErr) {
+        results.errors.push(`${contact.email}: ${updateErr.message}`);
         continue;
       }
-
-      const circleId = members[0].id;
-
-      if (!dryRun) {
-        const { error: updateErr } = await db
-          .from("contacts")
-          .update({
-            circle_id: String(circleId),
-            synced_to_circle_at: new Date().toISOString(),
-          })
-          .eq("id", contact.id);
-
-        if (updateErr) {
-          results.errors.push(`${contact.email}: ${updateErr.message}`);
-          continue;
-        }
-      }
-
-      results.linked++;
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      results.errors.push(`${contact.email}: ${msg}`);
     }
+
+    results.linked++;
   }
 
   return NextResponse.json(results);
