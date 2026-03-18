@@ -111,7 +111,12 @@ export class CircleAdminClient {
       "/community_members",
       { params: { email } }
     );
-    return result.records ?? (Array.isArray(result) ? result : []);
+    const records = result.records ?? (Array.isArray(result) ? result : []);
+    // Guard: Circle may ignore the email filter and return all members.
+    // Only return records whose email actually matches to prevent bulk mis-assignment.
+    return records.filter(
+      (m) => m.email?.toLowerCase() === email.toLowerCase()
+    );
   }
 
   async createMember(data: CircleMemberInput): Promise<CircleMember> {

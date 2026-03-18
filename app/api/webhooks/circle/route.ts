@@ -64,6 +64,7 @@ function verifyToken(request: NextRequest): boolean {
 const CANONICAL_FIELD_MAP: Record<string, "role_title"> = {
   headline: "role_title",
   job_title: "role_title",
+  jobtitle: "role_title", // confirmed Circle field key from webhook test
 };
 
 // ---------------------------------------------------------------------------
