@@ -66,7 +66,7 @@ export default function OrgContacts({ contacts }: OrgContactsProps) {
                   ) : (
                     <a
                       href={`mailto:${email}`}
-                      className="text-sm text-[#D60001] hover:underline truncate block"
+                      className="text-sm text-[#EE2A2E] hover:underline truncate block"
                     >
                       {email}
                     </a>
@@ -80,7 +80,7 @@ export default function OrgContacts({ contacts }: OrgContactsProps) {
                   ) : (
                     <a
                       href={`tel:${phone}`}
-                      className="text-sm text-[#6B6B6B] hover:text-[#D60001] transition-colors"
+                      className="text-sm text-[#6B6B6B] hover:text-[#EE2A2E] transition-colors"
                     >
                       {phone}
                     </a>

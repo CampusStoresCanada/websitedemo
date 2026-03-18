@@ -117,7 +117,7 @@ export function PartnerApplicationForm() {
           Didn&apos;t receive it? Check your spam folder or{" "}
           <button
             onClick={() => setSubmitted(false)}
-            className="text-[#D60001] hover:text-[#B00001] font-medium"
+            className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
           >
             try again
           </button>
@@ -151,7 +151,7 @@ export function PartnerApplicationForm() {
             required
             value={companyName}
             onChange={(e) => setCompanyName(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="Acme Textbooks Inc."
           />
         </div>
@@ -166,7 +166,7 @@ export function PartnerApplicationForm() {
             required
             value={streetAddress}
             onChange={(e) => setStreetAddress(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="123 Commerce St"
           />
         </div>
@@ -182,7 +182,7 @@ export function PartnerApplicationForm() {
               required
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Toronto"
             />
           </div>
@@ -195,7 +195,7 @@ export function PartnerApplicationForm() {
               required
               value={province}
               onChange={(e) => setProvince(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors bg-white"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors bg-white"
             >
               <option value="">Select…</option>
               {PROVINCES.map((p) => (
@@ -213,7 +213,7 @@ export function PartnerApplicationForm() {
               required
               value={postalCode}
               onChange={(e) => setPostalCode(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="M5V 2T6"
             />
           </div>
@@ -229,7 +229,7 @@ export function PartnerApplicationForm() {
             required
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="https://www.example.com"
           />
         </div>
@@ -244,7 +244,7 @@ export function PartnerApplicationForm() {
             required
             value={phone}
             onChange={(e) => setPhone(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="(416) 555-0123"
           />
         </div>
@@ -268,7 +268,7 @@ export function PartnerApplicationForm() {
             required
             value={primaryCategory}
             onChange={(e) => handlePrimaryChange(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors bg-white"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors bg-white"
           >
             <option value="">Select category…</option>
             {PARTNER_PRIMARY_CATEGORIES.map((c) => (
@@ -288,7 +288,7 @@ export function PartnerApplicationForm() {
                   key={cat}
                   className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-colors ${
                     secondaryCategories.includes(cat)
-                      ? "border-[#D60001] bg-red-50 text-gray-900"
+                      ? "border-[#EE2A2E] bg-red-50 text-gray-900"
                       : "border-gray-200 hover:border-gray-300 text-gray-700"
                   }`}
                 >
@@ -301,7 +301,7 @@ export function PartnerApplicationForm() {
                   <div
                     className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
                       secondaryCategories.includes(cat)
-                        ? "bg-[#D60001] border-[#D60001]"
+                        ? "bg-[#EE2A2E] border-[#EE2A2E]"
                         : "border-gray-300"
                     }`}
                   >
@@ -339,7 +339,7 @@ export function PartnerApplicationForm() {
               required
               value={contactName}
               onChange={(e) => setContactName(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Jane Smith"
             />
           </div>
@@ -353,7 +353,7 @@ export function PartnerApplicationForm() {
               required
               value={contactEmail}
               onChange={(e) => setContactEmail(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="sales@example.com"
             />
           </div>
@@ -378,7 +378,7 @@ export function PartnerApplicationForm() {
             type="text"
             value={brandInfo}
             onChange={(e) => setBrandInfo(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="URL or short description"
           />
         </div>
@@ -392,7 +392,7 @@ export function PartnerApplicationForm() {
             rows={3}
             value={companyDescription}
             onChange={(e) => setCompanyDescription(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors resize-none"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors resize-none"
             placeholder="Brief description of your company and products/services…"
           />
         </div>
@@ -401,14 +401,14 @@ export function PartnerApplicationForm() {
       <button
         type="submit"
         disabled={isLoading}
-        className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isLoading ? "Submitting…" : "Submit Application"}
       </button>
 
       <p className="text-xs text-gray-500 text-center">
         Looking to become a member institution instead?{" "}
-        <Link href="/apply/member" className="text-[#D60001] hover:text-[#B00001] font-medium">
+        <Link href="/apply/member" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
           Apply as a member
         </Link>
       </p>

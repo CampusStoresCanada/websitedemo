@@ -344,7 +344,7 @@ export default function DelegateRegistrationForm({
             <input type="text" value={preferredAirport} onChange={(e) => setPreferredAirport(e.target.value)} placeholder="e.g., YYZ" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
           </div>
           <label className="flex items-center gap-2">
-            <input type="checkbox" checked={nexusTraveler} onChange={(e) => setNexusTraveler(e.target.checked)} className="rounded border-gray-300 text-[#D60001]" />
+            <input type="checkbox" checked={nexusTraveler} onChange={(e) => setNexusTraveler(e.target.checked)} className="rounded border-gray-300 text-[#EE2A2E]" />
             <span className="text-sm text-gray-700">NEXUS / Trusted Traveler</span>
           </label>
         </div>
@@ -365,7 +365,7 @@ export default function DelegateRegistrationForm({
                     ? setFunctionalRoles([...functionalRoles, opt])
                     : setFunctionalRoles(functionalRoles.filter((x) => x !== opt))
                 }
-                className="rounded border-gray-300 text-[#D60001]"
+                className="rounded border-gray-300 text-[#EE2A2E]"
               />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
@@ -378,7 +378,7 @@ export default function DelegateRegistrationForm({
         <div className="space-y-2">
           {PURCHASING_AUTHORITY_OPTIONS.map((opt) => (
             <label key={opt} className="flex items-center gap-2">
-              <input type="radio" name="purchasingAuth" value={opt} checked={purchasingAuthority === opt} onChange={() => setPurchasingAuthority(opt)} className="border-gray-300 text-[#D60001]" />
+              <input type="radio" name="purchasingAuth" value={opt} checked={purchasingAuthority === opt} onChange={() => setPurchasingAuthority(opt)} className="border-gray-300 text-[#EE2A2E]" />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
           ))}
@@ -401,7 +401,7 @@ export default function DelegateRegistrationForm({
                       ? setCategoryResponsibilities([...categoryResponsibilities, opt])
                       : setCategoryResponsibilities(categoryResponsibilities.filter((x) => x !== opt))
                   }
-                  className="rounded border-gray-300 text-[#D60001]"
+                  className="rounded border-gray-300 text-[#EE2A2E]"
                 />
                 <span className="text-sm text-gray-700">{opt}</span>
               </label>
@@ -423,7 +423,7 @@ export default function DelegateRegistrationForm({
                     ? setBuyingTimeline([...buyingTimeline, opt])
                     : setBuyingTimeline(buyingTimeline.filter((x) => x !== opt))
                 }
-                className="rounded border-gray-300 text-[#D60001]"
+                className="rounded border-gray-300 text-[#EE2A2E]"
               />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
@@ -446,7 +446,7 @@ export default function DelegateRegistrationForm({
                     ? setTopPriorities([...topPriorities, opt])
                     : setTopPriorities(topPriorities.filter((x) => x !== opt))
                 }
-                className="rounded border-gray-300 text-[#D60001]"
+                className="rounded border-gray-300 text-[#EE2A2E]"
               />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
@@ -467,7 +467,7 @@ export default function DelegateRegistrationForm({
                     ? setMeetingIntent([...meetingIntent, opt])
                     : setMeetingIntent(meetingIntent.filter((x) => x !== opt))
                 }
-                className="rounded border-gray-300 text-[#D60001]"
+                className="rounded border-gray-300 text-[#EE2A2E]"
               />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
@@ -517,7 +517,7 @@ export default function DelegateRegistrationForm({
                 <div className="flex gap-3">
                   {SEAT_PREFERENCE_OPTIONS.map((opt) => (
                     <label key={opt} className="flex items-center gap-1.5">
-                      <input type="radio" name="seatPref" value={opt} checked={seatPreference === opt} onChange={() => setSeatPreference(opt)} className="border-gray-300 text-[#D60001]" />
+                      <input type="radio" name="seatPref" value={opt} checked={seatPreference === opt} onChange={() => setSeatPreference(opt)} className="border-gray-300 text-[#EE2A2E]" />
                       <span className="text-sm text-gray-700">{opt}</span>
                     </label>
                   ))}
@@ -608,7 +608,7 @@ export default function DelegateRegistrationForm({
                         setAcceptedLegalIds(new Set([...acceptedLegalIds, doc.id]));
                       }
                     }}
-                    className="text-sm text-[#D60001] hover:underline font-medium"
+                    className="text-sm text-[#EE2A2E] hover:underline font-medium"
                   >
                     I accept these terms
                   </button>

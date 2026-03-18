@@ -6,6 +6,7 @@ import type { VisibilityConfig } from "../policy/types";
  */
 export type ViewerLevel =
   | "public"
+  | "authenticated"
   | "partner"
   | "member"
   | "org_admin"

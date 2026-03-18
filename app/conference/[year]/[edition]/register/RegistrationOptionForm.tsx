@@ -47,6 +47,19 @@ interface RegistrationOptionFormProps {
   } | null;
 }
 
+type TravelOpsClassification = {
+  effectiveTravelSupportMode: string;
+  travelBookingOwner: string;
+  travelPaymentOwner: string;
+  accommodationBookingOwner: string;
+  accommodationPaymentOwner: string;
+  airTravelAllowed: boolean | null;
+  requiresTravelIntake: boolean | null;
+  requiresAccommodationIntake: boolean | null;
+  organizationDistanceKm: number | null;
+  attendeeGuidance: string[];
+};
+
 function isValidEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
 }
@@ -123,6 +136,65 @@ function getDefaultStringValues(): CanonicalFormValueRecord {
   };
 }
 
+function extractTravelOpsClassification(
+  registration: RegistrationRow | null | undefined
+): TravelOpsClassification | null {
+  if (!registration || typeof registration !== "object") return null;
+  const customAnswers = (
+    registration as { registration_custom_answers?: Record<string, unknown> | null }
+  ).registration_custom_answers;
+  if (!customAnswers || typeof customAnswers !== "object" || Array.isArray(customAnswers)) {
+    return null;
+  }
+  const raw = customAnswers.travel_ops_classification;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const classification = raw as Record<string, unknown>;
+  return {
+    effectiveTravelSupportMode:
+      typeof classification.effective_travel_support_mode === "string"
+        ? classification.effective_travel_support_mode
+        : "unknown",
+    travelBookingOwner:
+      typeof classification.travel_booking_owner === "string"
+        ? classification.travel_booking_owner
+        : "unknown",
+    travelPaymentOwner:
+      typeof classification.travel_payment_owner === "string"
+        ? classification.travel_payment_owner
+        : "unknown",
+    accommodationBookingOwner:
+      typeof classification.accommodation_booking_owner === "string"
+        ? classification.accommodation_booking_owner
+        : "unknown",
+    accommodationPaymentOwner:
+      typeof classification.accommodation_payment_owner === "string"
+        ? classification.accommodation_payment_owner
+        : "unknown",
+    airTravelAllowed:
+      typeof classification.air_travel_allowed === "boolean"
+        ? classification.air_travel_allowed
+        : null,
+    requiresTravelIntake:
+      typeof classification.requires_travel_intake === "boolean"
+        ? classification.requires_travel_intake
+        : null,
+    requiresAccommodationIntake:
+      typeof classification.requires_accommodation_intake === "boolean"
+        ? classification.requires_accommodation_intake
+        : null,
+    organizationDistanceKm:
+      typeof classification.organization_distance_to_destination_airport_km === "number" &&
+      Number.isFinite(classification.organization_distance_to_destination_airport_km)
+        ? classification.organization_distance_to_destination_airport_km
+        : null,
+    attendeeGuidance: Array.isArray(classification.attendee_guidance)
+      ? classification.attendee_guidance.filter(
+          (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+        )
+      : [],
+  };
+}
+
 export default function RegistrationOptionForm({
   conference,
   orgId,
@@ -148,11 +220,16 @@ export default function RegistrationOptionForm({
   const [isLoading, setIsLoading] = useState(false);
   const [isRequestingException, setIsRequestingException] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [infoMessage, setInfoMessage] = useState<string | null>(null);
   const [exceptionReason, setExceptionReason] = useState("");
   const [submitted, setSubmitted] = useState(existingRegistration?.status === "submitted");
   const [acceptedLegalIds, setAcceptedLegalIds] = useState<Set<string>>(
     new Set(acceptances.map((acceptance) => acceptance.legal_version_id))
   );
+  const [travelOpsClassification, setTravelOpsClassification] =
+    useState<TravelOpsClassification | null>(() =>
+      extractTravelOpsClassification(existingRegistration)
+    );
 
   const [fieldValues, setFieldValues] = useState<CanonicalFormValueRecord>(() => {
     const base: CanonicalFormValueRecord = {
@@ -303,11 +380,12 @@ export default function RegistrationOptionForm({
     setFieldValues((prev) => ({ ...prev, [key]: value }));
   };
 
-  const handleSaveAndSubmit = async () => {
+  const handleSaveAndSubmit = async (submitAfterSave = true) => {
     if (!selectedOption) return;
 
     setIsLoading(true);
     setError(null);
+    setInfoMessage(null);
 
     try {
       const regId = await ensureRegistration();
@@ -377,11 +455,24 @@ export default function RegistrationOptionForm({
         }
       }
 
+      customAnswers.registration_option_id = selectedOption.id;
+      customAnswers.registration_option_name = selectedOption.name;
+      customAnswers.registration_product_ids = selectedOption.linked_product_ids;
+      customAnswers.registration_primary_product_id =
+        selectedOption.linked_product_ids[0] ?? "";
+
       update.registration_custom_answers = customAnswers;
 
       const saveResult = await saveRegistrationStep(regId, update);
       if (!saveResult.success) {
         setError(saveResult.error ?? "Failed to save registration.");
+        setIsLoading(false);
+        return;
+      }
+      setTravelOpsClassification(extractTravelOpsClassification(saveResult.data));
+
+      if (!submitAfterSave) {
+        setInfoMessage("Draft saved. Travel guidance refreshed below.");
         setIsLoading(false);
         return;
       }
@@ -462,6 +553,68 @@ export default function RegistrationOptionForm({
           {error}
         </div>
       ) : null}
+      {infoMessage ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+          {infoMessage}
+        </div>
+      ) : null}
+
+      {travelOpsClassification ? (
+        <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+          <p className="font-medium">Travel Ops Guidance</p>
+          <p className="mt-1 text-xs">
+            Support mode: <span className="font-medium">{travelOpsClassification.effectiveTravelSupportMode}</span>
+            {" · "}
+            Air travel:{" "}
+            <span className="font-medium">
+              {travelOpsClassification.airTravelAllowed === null
+                ? "unknown"
+                : travelOpsClassification.airTravelAllowed
+                  ? "allowed"
+                  : "not allowed"}
+            </span>
+            {" · "}
+            Travel intake:{" "}
+            <span className="font-medium">
+              {travelOpsClassification.requiresTravelIntake === null
+                ? "default"
+                : travelOpsClassification.requiresTravelIntake
+                  ? "required"
+                  : "optional"}
+            </span>
+            {" · "}
+            Accommodation intake:{" "}
+            <span className="font-medium">
+              {travelOpsClassification.requiresAccommodationIntake === null
+                ? "default"
+                : travelOpsClassification.requiresAccommodationIntake
+                  ? "required"
+                  : "optional"}
+            </span>
+            {travelOpsClassification.organizationDistanceKm != null
+              ? ` · Distance: ~${Math.round(travelOpsClassification.organizationDistanceKm)} km`
+              : ""}
+          </p>
+          <p className="mt-1 text-xs">
+            Travel booking/payment:{" "}
+            <span className="font-medium">
+              {travelOpsClassification.travelBookingOwner}/{travelOpsClassification.travelPaymentOwner}
+            </span>
+            {" · "}
+            Accommodation booking/payment:{" "}
+            <span className="font-medium">
+              {travelOpsClassification.accommodationBookingOwner}/{travelOpsClassification.accommodationPaymentOwner}
+            </span>
+          </p>
+          {travelOpsClassification.attendeeGuidance.length > 0 ? (
+            <ul className="mt-2 space-y-1 text-xs">
+              {travelOpsClassification.attendeeGuidance.map((line) => (
+                <li key={line}>• {line}</li>
+              ))}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
 
       {canRequestTravelException ? (
         <div className="rounded-md border border-amber-200 bg-amber-50 p-3">
@@ -483,7 +636,7 @@ export default function RegistrationOptionForm({
               type="button"
               onClick={() => void handleRequestTravelException()}
               disabled={isRequestingException}
-              className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
+              className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
             >
               {isRequestingException ? "Requesting..." : "Request Exception"}
             </button>
@@ -701,7 +854,7 @@ export default function RegistrationOptionForm({
                       setAcceptedLegalIds((prev) => new Set([...prev, doc.id]));
                     }
                   }}
-                  className="mt-2 text-sm font-medium text-[#D60001] hover:underline"
+                  className="mt-2 text-sm font-medium text-[#EE2A2E] hover:underline"
                 >
                   I accept these terms
                 </button>
@@ -714,9 +867,17 @@ export default function RegistrationOptionForm({
       <div className="flex justify-end">
         <button
           type="button"
+          onClick={() => void handleSaveAndSubmit(false)}
+          disabled={isLoading}
+          className="mr-2 rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+        >
+          {isLoading ? "Saving..." : "Save Draft & Refresh Guidance"}
+        </button>
+        <button
+          type="button"
           onClick={() => void handleSaveAndSubmit()}
           disabled={isLoading}
-          className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
+          className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
         >
           {isLoading ? "Submitting..." : "Save & Submit Registration"}
         </button>

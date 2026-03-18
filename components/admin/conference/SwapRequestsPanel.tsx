@@ -15,7 +15,7 @@ type CapIncreaseRow = Database["public"]["Tables"]["swap_cap_increase_requests"]
 function badgeClass(status: string): string {
   if (status === "approved_committed") return "bg-green-100 text-green-700";
   if (status === "denied_invalid" || status === "denied_cap_reached") return "bg-red-100 text-red-700";
-  if (status === "requested" || status === "options_generated") return "bg-blue-100 text-blue-700";
+  if (status === "requested" || status === "options_generated") return "bg-blue-100 text-[#D92327]";
   return "bg-gray-100 text-gray-700";
 }
 

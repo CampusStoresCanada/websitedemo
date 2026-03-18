@@ -189,7 +189,7 @@ export default function SignupForm() {
         </p>
         <Link
           href="/login"
-          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
         >
           Go to Login
         </Link>
@@ -206,7 +206,7 @@ export default function SignupForm() {
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium ${
                 step === s
-                  ? "bg-[#D60001] text-white"
+                  ? "bg-[#EE2A2E] text-white"
                   : ["email", "org-select", "profile"].indexOf(step) > i
                     ? "bg-green-100 text-green-700"
                     : "bg-gray-100 text-gray-400"
@@ -256,7 +256,7 @@ export default function SignupForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="you@yourschool.ca"
             />
             <p className="mt-1.5 text-xs text-gray-500">
@@ -267,7 +267,7 @@ export default function SignupForm() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? "Looking up your organization..." : "Continue"}
           </button>
@@ -294,7 +294,7 @@ export default function SignupForm() {
                     }}
                     className={`w-full flex items-center gap-3 p-3 rounded-lg border text-left transition-colors ${
                       selectedOrg?.id === org.id
-                        ? "border-[#D60001] bg-red-50"
+                        ? "border-[#EE2A2E] bg-red-50"
                         : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
                     }`}
                   >
@@ -347,7 +347,7 @@ export default function SignupForm() {
                 setSelectedOrg(null);
                 setStep("profile");
               }}
-              className="text-sm text-[#D60001] hover:text-[#B00001] font-medium"
+              className="text-sm text-[#EE2A2E] hover:text-[#D92327] font-medium"
             >
               Apply to join CSC →
             </button>
@@ -406,7 +406,7 @@ export default function SignupForm() {
               onChange={(e) => setDisplayName(e.target.value)}
               required
               autoComplete="name"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Jane Smith"
             />
           </div>
@@ -424,7 +424,7 @@ export default function SignupForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="new-password"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="At least 8 characters"
             />
           </div>
@@ -442,7 +442,7 @@ export default function SignupForm() {
               onChange={(e) => setConfirmPassword(e.target.value)}
               required
               autoComplete="new-password"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Confirm your password"
             />
           </div>
@@ -460,7 +460,7 @@ export default function SignupForm() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? "Creating account..." : "Create Account"}
           </button>
@@ -484,7 +484,7 @@ export default function SignupForm() {
             Already have an account?{" "}
             <Link
               href="/login"
-              className="text-[#D60001] hover:text-[#B00001] font-medium"
+              className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
             >
               Sign in
             </Link>
@@ -501,7 +501,7 @@ export default function SignupForm() {
           value={orgSearch}
           onChange={(e) => setOrgSearch(e.target.value)}
           placeholder="Search organizations..."
-          className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+          className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
         />
         <div className="max-h-48 overflow-y-auto space-y-1 rounded-lg border border-gray-200">
           {filteredOrgs.length === 0 ? (

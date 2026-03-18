@@ -8,7 +8,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 
 const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   super_admin: { label: "Super Admin", color: "bg-purple-100 text-purple-700" },
-  admin: { label: "Admin", color: "bg-blue-100 text-blue-700" },
+  admin: { label: "Admin", color: "bg-blue-100 text-[#D92327]" },
   org_admin: { label: "Org Admin", color: "bg-amber-100 text-amber-700" },
   member: { label: "Member", color: "bg-green-100 text-green-700" },
   partner: { label: "Partner", color: "bg-cyan-100 text-cyan-700" },
@@ -407,6 +407,7 @@ export default function Header() {
             <Link href="/about" className="hover:text-[#1A1A1A]">About</Link>
             <Link href="/members" className="hover:text-[#1A1A1A]">Members</Link>
             <Link href="/partners" className="hover:text-[#1A1A1A]">Partners</Link>
+            <Link href="/events" className="hover:text-[#1A1A1A]">Events</Link>
             <Link href="/resources" className="hover:text-[#1A1A1A]">Resources</Link>
 
             <a href={memberSpaceHref} className="hover:text-[#1A1A1A]">Member Space</a>
@@ -549,6 +550,10 @@ export default function Header() {
                       My Account
                     </Link>
 
+                    <Link href="/me/events" onClick={() => setShowUserMenu(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      My Events
+                    </Link>
+
                     {primaryOrg?.organization?.slug ? (
                       <Link
                         href={`/org/${primaryOrg.organization.slug}`}
@@ -627,12 +632,14 @@ export default function Header() {
               <Link href="/about" className="px-2 py-2 rounded-md hover:bg-gray-50">About</Link>
               <Link href="/members" className="px-2 py-2 rounded-md hover:bg-gray-50">Members</Link>
               <Link href="/partners" className="px-2 py-2 rounded-md hover:bg-gray-50">Partners</Link>
+              <Link href="/events" className="px-2 py-2 rounded-md hover:bg-gray-50">Events</Link>
               <Link href="/resources" className="px-2 py-2 rounded-md hover:bg-gray-50">Resources</Link>
               <a href={memberSpaceHref} className="px-2 py-2 rounded-md hover:bg-gray-50">Member Space</a>
 
               {user ? (
                 <>
                   <Link href="/me" className="px-2 py-2 rounded-md hover:bg-gray-50">My Account</Link>
+                  <Link href="/me/events" className="px-2 py-2 rounded-md hover:bg-gray-50">My Events</Link>
                   {primaryOrg?.organization?.slug ? (
                     <Link href={`/org/${primaryOrg.organization.slug}`} className="px-2 py-2 rounded-md hover:bg-gray-50">
                       My Organization

@@ -62,17 +62,16 @@ export async function sendCircleNotification(params: {
         room.members.some((m) => m.id === recipientCircleId)
     );
 
-    if (!directRoom) {
-      console.warn(
-        `[circle/notifications] No existing DM room with Circle member ${recipientCircleId}`
-      );
-      return {
-        success: false,
-        error: `No DM room exists with recipient. Start a conversation in Circle first.`,
-      };
+    let roomUuid: string;
+    if (directRoom) {
+      roomUuid = directRoom.uuid;
+    } else {
+      // No existing DM room — create one (Circle deduplicates if one already exists)
+      const newRoom = await memberClient.createDirectChatRoom(recipientCircleId);
+      roomUuid = newRoom.uuid;
     }
 
-    await memberClient.sendMessage(directRoom.uuid, params.message);
+    await memberClient.sendMessage(roomUuid, params.message);
     return { success: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

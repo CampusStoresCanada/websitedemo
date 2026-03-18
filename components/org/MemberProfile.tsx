@@ -35,7 +35,7 @@ export default function MemberProfile({
 }: MemberProfileProps) {
   const { permissionState, organizations } = useAuth();
   const { editMode, canEditOrg } = useToolkit();
-  const rawPrimaryColor = brandColors[0]?.hex || "#D60001";
+  const rawPrimaryColor = brandColors[0]?.hex || "#EE2A2E";
   const primaryColor = rawPrimaryColor.startsWith("#") ? rawPrimaryColor : `#${rawPrimaryColor}`;
   const heroImage = organization.hero_image_url || organization.banner_url;
 

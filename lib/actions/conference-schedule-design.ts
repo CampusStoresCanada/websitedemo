@@ -317,162 +317,6 @@ export async function saveMeetingSuiteRoomAssignments(
   };
 }
 
-export async function syncOffsiteSetupFromScheduleRow(
-  conferenceId: string,
-  input: {
-    item_id: string;
-    title: string;
-    starts_at: string;
-    location_label: string | null;
-    description: string | null;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  const { data: moduleRow, error: moduleError } = await adminClient
-    .from("conference_schedule_modules")
-    .select("config_json, enabled")
-    .eq("conference_id", conferenceId)
-    .eq("module_key", "offsite")
-    .maybeSingle();
-
-  if (moduleError) return { success: false, error: moduleError.message };
-
-  const config =
-    moduleRow?.config_json && typeof moduleRow.config_json === "object"
-      ? (moduleRow.config_json as Record<string, unknown>)
-      : {};
-  const events = Array.isArray(config.offsite_events)
-    ? (config.offsite_events as Array<Record<string, unknown>>)
-    : [];
-  if (events.length === 0) return { success: true };
-
-  const titleKey = input.title.trim().toLowerCase();
-  const candidateIndex = events.findIndex((event) => {
-    const eventTitle =
-      (typeof event.title === "string" && event.title.trim()) ||
-      (typeof event.name === "string" && event.name.trim()) ||
-      "";
-    return eventTitle.toLowerCase() === titleKey;
-  });
-
-  if (candidateIndex < 0) {
-    return {
-      success: false,
-      error: "Could not map this schedule row to an offsite setup event. Match titles first.",
-    };
-  }
-
-  const nextEvents = [...events];
-  const current = { ...nextEvents[candidateIndex] };
-  nextEvents[candidateIndex] = {
-    ...current,
-    venue_name:
-      typeof input.location_label === "string" && input.location_label.trim().length > 0
-        ? input.location_label.trim()
-        : (typeof current.venue_name === "string" ? current.venue_name : ""),
-    notes:
-      typeof input.description === "string" && input.description.trim().length > 0
-        ? input.description.trim()
-        : (typeof current.notes === "string" ? current.notes : ""),
-  };
-
-  const { error: upsertError } = await adminClient.from("conference_schedule_modules").upsert(
-    {
-      conference_id: conferenceId,
-      module_key: "offsite",
-      enabled: moduleRow?.enabled !== false,
-      config_json: {
-        ...config,
-        offsite_events: nextEvents,
-      },
-      created_by: auth.ctx.userId,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "conference_id,module_key" }
-  );
-
-  if (upsertError) return { success: false, error: upsertError.message };
-  return { success: true };
-}
-
-export async function syncEducationSetupFromScheduleRow(
-  conferenceId: string,
-  input: {
-    item_id: string;
-    starts_at: string;
-    location_label: string | null;
-    description: string | null;
-  }
-): Promise<{ success: boolean; error?: string }> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  const { data: moduleRow, error: moduleError } = await adminClient
-    .from("conference_schedule_modules")
-    .select("config_json, enabled")
-    .eq("conference_id", conferenceId)
-    .eq("module_key", "education")
-    .maybeSingle();
-
-  if (moduleError) return { success: false, error: moduleError.message };
-
-  const config =
-    moduleRow?.config_json && typeof moduleRow.config_json === "object"
-      ? (moduleRow.config_json as Record<string, unknown>)
-      : {};
-  const daySettings =
-    config.education_day_settings &&
-    typeof config.education_day_settings === "object" &&
-    !Array.isArray(config.education_day_settings)
-      ? ({ ...(config.education_day_settings as Record<string, unknown>) } as Record<string, unknown>)
-      : {};
-
-  const startsAt = new Date(input.starts_at);
-  if (Number.isNaN(startsAt.valueOf())) {
-    return { success: false, error: "Invalid education schedule date." };
-  }
-  const dayKey = startsAt.toISOString().slice(0, 10);
-  const currentRaw = daySettings[dayKey];
-  const current =
-    currentRaw && typeof currentRaw === "object" && !Array.isArray(currentRaw)
-      ? ({ ...(currentRaw as Record<string, unknown>) } as Record<string, unknown>)
-      : {};
-
-  daySettings[dayKey] = {
-    ...current,
-    location_label:
-      typeof input.location_label === "string" && input.location_label.trim().length > 0
-        ? input.location_label.trim()
-        : "",
-    notes:
-      typeof input.description === "string" && input.description.trim().length > 0
-        ? input.description.trim()
-        : "",
-  };
-
-  const { error: upsertError } = await adminClient.from("conference_schedule_modules").upsert(
-    {
-      conference_id: conferenceId,
-      module_key: "education",
-      enabled: moduleRow?.enabled !== false,
-      config_json: {
-        ...config,
-        education_day_settings: daySettings,
-      },
-      created_by: auth.ctx.userId,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "conference_id,module_key" }
-  );
-
-  if (upsertError) return { success: false, error: upsertError.message };
-  return { success: true };
-}
-
 export async function saveConferenceScheduleModules(
   conferenceId: string,
   modules: Array<{
@@ -510,28 +354,23 @@ export async function saveConferenceScheduleModules(
     .upsert(upserts, { onConflict: "conference_id,module_key" });
 
   if (error) return { success: false, error: error.message };
-  const meetingsModule = upserts.find((item) => item.module_key === "meetings");
-  if (meetingsModule?.enabled) {
-    const syncResult = await syncMeetingsModuleToConferenceParameters(
-      conferenceId,
-      (meetingsModule.config_json ?? {}) as Record<string, unknown>
-    );
-    if (!syncResult.success) return { success: false, error: syncResult.error };
-  }
-
-  // Setup is authoritative for schedule scaffolding.
-  // Rebuild program timeline from setup on every save so schedule stays in sync.
-  const scaffold = await generateProgramFromSetup(conferenceId, { replaceExisting: true });
-  if (!scaffold.success) {
-    return {
-      success: false,
-      error:
-        scaffold.error ??
-        "Setup was saved, but schedule timeline scaffolding could not be generated.",
-    };
-  }
-
   return listConferenceScheduleModules(conferenceId);
+}
+
+export async function regenerateProgramFromSetup(
+  conferenceId: string,
+  options?: { replaceExisting?: boolean }
+): Promise<{ success: boolean; error?: string; data?: { created: number } }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const result = await generateProgramFromSetup(conferenceId, {
+    replaceExisting: options?.replaceExisting !== false,
+  });
+  if (!result.success) {
+    return { success: false, error: result.error ?? "Failed to regenerate schedule program." };
+  }
+  return { success: true, data: result.data };
 }
 
 export async function reconcileConferenceScheduleSetup(
@@ -1302,111 +1141,4 @@ export async function createSuggestedOffsiteProducts(
     success: true,
     data: { created, updated, skipped, blocked, totalOffsiteCapacity },
   };
-}
-
-function normalizeTime(value: unknown, fallback: string): string {
-  if (typeof value !== "string") return fallback;
-  const trimmed = value.trim();
-  if (!/^\d{2}:\d{2}$/.test(trimmed)) return fallback;
-  return trimmed;
-}
-
-async function syncMeetingsModuleToConferenceParameters(
-  conferenceId: string,
-  cfg: Record<string, unknown>
-): Promise<{ success: boolean; error?: string }> {
-  const explicitMeetingDays = Array.isArray(cfg.meeting_days)
-    ? (cfg.meeting_days.filter((v): v is string => typeof v === "string") ?? [])
-    : [];
-
-  const daySettings = ((cfg.meeting_day_settings ?? {}) as Record<
-    string,
-    {
-      meeting_count?: number;
-      start_time?: string;
-      end_time?: string;
-      slot_duration_minutes?: number;
-      buffer_minutes?: number;
-    }
-  >) ?? {};
-  const meetingsPerDayByDate = ((cfg.meetings_per_day_by_date ?? {}) as Record<string, unknown>) ?? {};
-  const meetingDays = [...new Set([...explicitMeetingDays, ...Object.keys(daySettings)])].sort();
-
-  const selectedSettings = meetingDays
-    .map((date) => {
-      const settings = daySettings[date] ?? {};
-      const fallbackCount = Number(meetingsPerDayByDate[date] ?? 0);
-      return {
-        date,
-        settings: {
-          ...settings,
-          meeting_count:
-            Number.isFinite(Number(settings.meeting_count)) && Number(settings.meeting_count) > 0
-              ? Number(settings.meeting_count)
-              : Number.isFinite(fallbackCount) && fallbackCount > 0
-                ? fallbackCount
-                : undefined,
-        },
-      };
-    })
-    .filter((row) => row.settings);
-
-  const slotsPerDay = selectedSettings.map((row) =>
-    Math.max(1, Number(row.settings.meeting_count ?? 8))
-  );
-  const durations = selectedSettings.map((row) =>
-    Math.max(1, Number(row.settings.slot_duration_minutes ?? 15))
-  );
-  const buffers = selectedSettings.map((row) =>
-    Math.max(0, Number(row.settings.buffer_minutes ?? 0))
-  );
-  const starts = selectedSettings.map((row) => normalizeTime(row.settings.start_time, "09:00"));
-  const ends = selectedSettings.map((row) => normalizeTime(row.settings.end_time, "17:00"));
-
-  const conferenceDays = Math.max(1, meetingDays.length);
-  const meetingSlotsPerDay = Math.max(1, ...slotsPerDay, 1);
-  const slotDuration = Math.max(1, ...durations, 15);
-  const slotBuffer = Math.max(0, ...buffers, 0);
-  const meetingStart = starts.sort()[0] ?? "09:00";
-  const meetingEnd = ends.sort().reverse()[0] ?? "17:00";
-  const totalSuites = Math.max(1, Number(cfg.meeting_suites ?? 1));
-
-  const adminClient = createAdminClient();
-  const { data: existing, error: existingError } = await adminClient
-    .from("conference_parameters")
-    .select("*")
-    .eq("conference_id", conferenceId)
-    .maybeSingle();
-
-  if (existingError) return { success: false, error: existingError.message };
-
-  const payload = {
-    conference_id: conferenceId,
-    conference_days: conferenceDays,
-    meeting_slots_per_day: meetingSlotsPerDay,
-    slot_duration_minutes: slotDuration,
-    slot_buffer_minutes: slotBuffer,
-    meeting_start_time: meetingStart,
-    meeting_end_time: meetingEnd,
-    total_meeting_suites: totalSuites,
-    delegate_target_meetings: null,
-    updated_at: new Date().toISOString(),
-  };
-
-  if (existing) {
-    const { error: updateError } = await adminClient
-      .from("conference_parameters")
-      .update(payload)
-      .eq("conference_id", conferenceId);
-    if (updateError) return { success: false, error: updateError.message };
-    return { success: true };
-  }
-
-  const { error: insertError } = await adminClient.from("conference_parameters").insert({
-    ...payload,
-    flex_time_start: null,
-    flex_time_end: null,
-  });
-  if (insertError) return { success: false, error: insertError.message };
-  return { success: true };
 }

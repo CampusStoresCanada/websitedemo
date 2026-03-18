@@ -35,7 +35,7 @@ export async function POST() {
   }
 
   try {
-    const circleId = await resolveUserCircleId(auth.ctx.userId);
+    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
     if (!circleId) {
       return NextResponse.json({ ok: true, linked: false }, { status: 200 });
     }

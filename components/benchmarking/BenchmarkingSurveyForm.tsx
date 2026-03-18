@@ -266,7 +266,7 @@ export default function BenchmarkingSurveyForm({
               onClick={() => setActiveSection(idx)}
               className={`whitespace-nowrap px-4 py-3 border-b-2 text-sm font-medium transition-colors ${
                 activeSection === idx
-                  ? "border-[#D60001] text-[#D60001]"
+                  ? "border-[#EE2A2E] text-[#EE2A2E]"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
@@ -317,7 +317,7 @@ export default function BenchmarkingSurveyForm({
           {activeSection < sections.length - 1 ? (
             <button
               onClick={() => setActiveSection(Math.min(sections.length - 1, activeSection + 1))}
-              className="px-6 py-2 text-sm font-medium text-white bg-[#D60001] rounded-lg hover:bg-[#B00001]"
+              className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327]"
             >
               Next Section
             </button>
@@ -325,7 +325,7 @@ export default function BenchmarkingSurveyForm({
             <button
               onClick={handleSubmit}
               disabled={isSubmitting}
-              className="px-8 py-2.5 text-sm font-medium text-white bg-[#D60001] rounded-lg hover:bg-[#B00001] disabled:opacity-50"
+              className="px-8 py-2.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327] disabled:opacity-50"
             >
               {isSubmitting ? "Submitting..." : "Submit Survey"}
             </button>

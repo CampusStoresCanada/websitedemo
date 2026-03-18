@@ -109,6 +109,22 @@ export class CircleMemberClient {
     return result.records ?? (Array.isArray(result) ? result : []);
   }
 
+  // ---- Chat room creation -------------------------------------------------
+
+  /**
+   * Create a direct chat room with another member.
+   * Circle auto-deduplicates: if a direct room already exists with this member,
+   * it returns the existing one (idempotent).
+   */
+  async createDirectChatRoom(targetMemberId: number): Promise<CircleChatRoom> {
+    return this.request<CircleChatRoom>("POST", "/chat_rooms", {
+      body: {
+        chat_room_kind: "direct",
+        community_member_ids: [targetMemberId],
+      },
+    });
+  }
+
   // ---- Messages -----------------------------------------------------------
 
   /**

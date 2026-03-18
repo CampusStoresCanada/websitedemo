@@ -13,6 +13,14 @@ import {
   mapSchedulerEligibleRoleForProductSlug,
   validatePartnerMeetingMetadata,
 } from "@/lib/conference-commerce/eligibility";
+import {
+  evaluateRulesEngine,
+  mergeRulesEngineLayers,
+  type RulesEngineAction,
+  type RulesEngineEvalContext,
+  type RulesEngineTrigger,
+  type RulesEngineV1,
+} from "@/lib/conference/rules-engine";
 
 type CartRow = Database["public"]["Tables"]["cart_items"]["Row"];
 type ProductRow = Database["public"]["Tables"]["conference_products"]["Row"];
@@ -214,17 +222,20 @@ async function loadEligibilityArtifacts(params: {
   includeCartItems?: Array<{ slug: string; quantity: number }>;
 }): Promise<{
   orgTypeRaw: string | null;
+  membershipStatus: string | null;
   registrationTypes: string[];
   paidOrderItems: Array<{ slug: string; quantity: number }>;
+  pendingOrderItems: Array<{ slug: string; quantity: number }>;
   cartItems: Array<{ slug: string; quantity: number }>;
 }> {
   const adminClient = createAdminClient();
+  const pendingWindowStartIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
 
-  const [{ data: org }, { data: registrations }, { data: paidOrderItemsRows }, cartItems] =
+  const [{ data: org }, { data: registrations }, { data: paidOrderItemsRows }, { data: pendingOrderItemsRows }, cartItems] =
     await Promise.all([
       adminClient
         .from("organizations")
-        .select("type")
+        .select("type, membership_status")
         .eq("id", params.organizationId)
         .single(),
       adminClient
@@ -239,6 +250,13 @@ async function loadEligibilityArtifacts(params: {
         .eq("conference_orders.conference_id", params.conferenceId)
         .eq("conference_orders.organization_id", params.organizationId)
         .eq("conference_orders.status", "paid"),
+      adminClient
+        .from("conference_order_items")
+        .select("quantity, conference_orders!inner(status, conference_id, organization_id, created_at), conference_products!inner(slug)")
+        .eq("conference_orders.conference_id", params.conferenceId)
+        .eq("conference_orders.organization_id", params.organizationId)
+        .eq("conference_orders.status", "pending")
+        .gte("conference_orders.created_at", pendingWindowStartIso),
       params.includeCartItems
         ? Promise.resolve(params.includeCartItems)
         : getCartItemsWithProducts({
@@ -252,13 +270,51 @@ async function loadEligibilityArtifacts(params: {
     slug: (row as unknown as { conference_products: { slug: string } }).conference_products.slug,
     quantity: row.quantity,
   }));
+  const pendingOrderItems = (pendingOrderItemsRows ?? []).map((row) => ({
+    slug: (row as unknown as { conference_products: { slug: string } }).conference_products.slug,
+    quantity: row.quantity,
+  }));
 
   return {
     orgTypeRaw: org?.type ?? null,
+    membershipStatus: org?.membership_status ?? null,
     registrationTypes: (registrations ?? []).map((row) => row.registration_type),
     paidOrderItems,
+    pendingOrderItems,
     cartItems,
   };
+}
+
+function countReservedRegistrationItems(items: Array<{ slug: string; quantity: number }>): number {
+  return items.reduce((sum, item) => {
+    return mapSchedulerEligibleRoleForProductSlug(item.slug) ? sum + Math.max(0, item.quantity) : sum;
+  }, 0);
+}
+
+function getOrgRegistrationCountForRules(artifacts: {
+  registrationTypes: string[];
+  pendingOrderItems: Array<{ slug: string; quantity: number }>;
+}): number {
+  return artifacts.registrationTypes.length + countReservedRegistrationItems(artifacts.pendingOrderItems);
+}
+
+function getConcurrentCheckoutWarning(params: {
+  engine: RulesEngineV1;
+  pendingOrderItems: Array<{ slug: string; quantity: number }>;
+}): string | null {
+  const pendingRegistrationItems = countReservedRegistrationItems(params.pendingOrderItems);
+  if (pendingRegistrationItems <= 0) return null;
+  const customTemplate = params.engine.workflows.find(
+    (workflow) =>
+      workflow.enabled &&
+      workflow.scope === "commerce" &&
+      typeof workflow.conflict_message_template === "string" &&
+      workflow.conflict_message_template.trim().length > 0
+  )?.conflict_message_template;
+  return (
+    customTemplate ??
+    "[Rule] has changed. This has affected [scope of changes]. [Old value] is now [new value]. Contact CSC if you think this is incorrect: support@campusstorescanada.com"
+  );
 }
 
 async function loadProductRules(productId: string) {
@@ -292,9 +348,113 @@ async function loadAllProductRulesForConference(conferenceId: string) {
   return rulesByProductId;
 }
 
+async function loadConferenceRulesEngine(conferenceId: string): Promise<RulesEngineV1> {
+  const adminClient = createAdminClient();
+  const { data } = await adminClient
+    .from("conference_schedule_modules")
+    .select("config_json")
+    .eq("conference_id", conferenceId)
+    .eq("module_key", "registration_ops")
+    .maybeSingle();
+
+  const config =
+    data?.config_json && typeof data.config_json === "object" && !Array.isArray(data.config_json)
+      ? (data.config_json as Record<string, unknown>)
+      : {};
+  return mergeRulesEngineLayers({
+    tenantEngine: config.tenant_rules_engine_v1 ?? null,
+    conferenceEngine: config.rules_engine_v1 ?? null,
+  });
+}
+
+function collectRulesEngineBlockErrors(params: {
+  engine: RulesEngineV1;
+  trigger: RulesEngineTrigger;
+  context: RulesEngineEvalContext;
+}): string[] {
+  const evaluation = evaluateRulesEngine(params.engine, params.trigger, params.context);
+  const errors: string[] = [];
+  for (const action of evaluation.actions) {
+    if (action.type !== "block_purchase") continue;
+    if (isActionTargetMatch(action, params.context)) {
+      errors.push(action.message || "Purchase blocked by policy rule.");
+    }
+  }
+  return errors;
+}
+
+function isActionTargetMatch(
+  action: RulesEngineAction,
+  context: RulesEngineEvalContext
+): boolean {
+  if ("target_product_id" in action) {
+    const matchesProductId = !action.target_product_id || action.target_product_id === context.product_id;
+    const matchesSlug = !action.target_product_slug || action.target_product_slug === context.product_slug;
+    return matchesProductId && matchesSlug;
+  }
+  return true;
+}
+
+function evaluateRulesEngineActionsForContext(params: {
+  engine: RulesEngineV1;
+  trigger: RulesEngineTrigger;
+  context: RulesEngineEvalContext;
+}): RulesEngineAction[] {
+  const evaluation = evaluateRulesEngine(params.engine, params.trigger, params.context);
+  return evaluation.actions.filter((action) => isActionTargetMatch(action, params.context));
+}
+
+function applyRulesEnginePricingActions(basePriceCents: number, actions: RulesEngineAction[]): number {
+  let current = basePriceCents;
+  for (const action of actions) {
+    if (action.type === "apply_price_override_cents") {
+      const next = Number(action.amount_cents);
+      current = Number.isFinite(next) ? Math.max(0, Math.round(next)) : current;
+      continue;
+    }
+    if (action.type === "apply_discount_percent") {
+      const pct = Number(action.percent);
+      if (!Number.isFinite(pct)) continue;
+      const bounded = Math.max(0, Math.min(100, pct));
+      current = Math.max(0, Math.round(current * (1 - bounded / 100)));
+    }
+  }
+  return current;
+}
+
+function resolveProductVisibilityFromActions(actions: RulesEngineAction[]): boolean {
+  let visible = true;
+  for (const action of actions) {
+    if (action.type === "set_product_visibility") {
+      visible = action.visible;
+    }
+  }
+  return visible;
+}
+
+function isRegistrationProductSlug(slug: string): boolean {
+  return mapSchedulerEligibleRoleForProductSlug(slug) !== null;
+}
+
+function groupUnitPrices(unitPrices: number[]): Array<{ unitPriceCents: number; quantity: number }> {
+  const grouped: Array<{ unitPriceCents: number; quantity: number }> = [];
+  for (const price of unitPrices) {
+    const last = grouped[grouped.length - 1];
+    if (last && last.unitPriceCents === price) {
+      last.quantity += 1;
+      continue;
+    }
+    grouped.push({ unitPriceCents: price, quantity: 1 });
+  }
+  return grouped;
+}
+
 export async function listConferenceProducts(
   conferenceId: string,
-  organizationId: string
+  organizationId: string,
+  options?: {
+    includeIneligible?: boolean;
+  }
 ): Promise<CommerceSuccess<Array<ProductRow & { eligibilityErrors: string[] }>> | CommerceFailure> {
   const authz = await assertUserCanManageOrg({ organizationId });
   if (!authz.ok) return { success: false, error: authz.error };
@@ -321,13 +481,18 @@ export async function listConferenceProducts(
       organizationId,
       userId: authz.userId,
       organizationType: artifacts.orgTypeRaw,
+      membershipStatus: artifacts.membershipStatus,
       registrationTypes: artifacts.registrationTypes,
       cartItems: artifacts.cartItems,
       paidOrderItems: artifacts.paidOrderItems,
     });
+    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
 
     const allRules = await loadAllProductRulesForConference(conferenceId);
-    const enriched: Array<ProductRow & { eligibilityErrors: string[] }> = [];
+    const rulesEngine = await loadConferenceRulesEngine(conferenceId);
+    const enriched: Array<
+      ProductRow & { eligibilityErrors: string[]; __hiddenByRules?: boolean }
+    > = [];
     for (const product of products ?? []) {
       const rules = allRules.get(product.id) ?? [];
       const eligibility = checkProductEligibility({
@@ -336,10 +501,73 @@ export async function listConferenceProducts(
         rules,
         context,
       });
-      enriched.push({ ...product, eligibilityErrors: eligibility.errors });
+      const engineErrors = collectRulesEngineBlockErrors({
+        engine: rulesEngine,
+        trigger: "checkout_attempt",
+        context: {
+          org_membership_status: artifacts.membershipStatus,
+          org_type: artifacts.orgTypeRaw,
+          user_is_authenticated: true,
+          org_registration_count: orgRegistrationCountForRules,
+          product_id: product.id,
+          product_slug: product.slug,
+        },
+      });
+      const pricingActions = evaluateRulesEngineActionsForContext({
+        engine: rulesEngine,
+        trigger: "checkout_attempt",
+        context: {
+          org_membership_status: artifacts.membershipStatus,
+          org_type: artifacts.orgTypeRaw,
+          user_is_authenticated: true,
+          org_registration_count: orgRegistrationCountForRules,
+          product_id: product.id,
+          product_slug: product.slug,
+        },
+      });
+      const effectiveUnitPrice = applyRulesEnginePricingActions(
+        product.price_cents,
+        pricingActions
+      );
+      const visibilityActions = evaluateRulesEngineActionsForContext({
+        engine: rulesEngine,
+        trigger: "product_catalog_load",
+        context: {
+          org_membership_status: artifacts.membershipStatus,
+          org_type: artifacts.orgTypeRaw,
+          user_is_authenticated: true,
+          org_registration_count: orgRegistrationCountForRules,
+          product_id: product.id,
+          product_slug: product.slug,
+        },
+      });
+      const isVisibleForCatalog = resolveProductVisibilityFromActions(
+        visibilityActions
+      );
+      enriched.push({
+        ...product,
+        price_cents: effectiveUnitPrice,
+        eligibilityErrors: [...eligibility.errors, ...engineErrors],
+        __hiddenByRules: !isVisibleForCatalog,
+      });
     }
 
-    return { success: true, data: enriched };
+    const includeIneligible = options?.includeIneligible === true;
+    const visibleProducts = includeIneligible
+      ? enriched.filter((product) => product.__hiddenByRules !== true)
+      : enriched.filter(
+          (product) =>
+            product.__hiddenByRules !== true && product.eligibilityErrors.length === 0
+        );
+
+    return {
+      success: true,
+      data: visibleProducts.map((product) => {
+        const next = { ...product };
+        delete (next as { __hiddenByRules?: boolean }).__hiddenByRules;
+        return next;
+      }),
+    };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -354,7 +582,7 @@ export async function getConferenceCart(
 
   try {
     const adminClient = createAdminClient();
-    const [items, conference] = await Promise.all([
+    const [items, conference, artifacts, rulesEngine] = await Promise.all([
       getCartItemsWithProducts({ conferenceId, organizationId, userId: authz.userId }),
       adminClient
         .from("conference_instances")
@@ -365,14 +593,37 @@ export async function getConferenceCart(
           if (result.error) throw new Error(result.error.message);
           return result.data;
         }),
+      loadEligibilityArtifacts({
+        conferenceId,
+        organizationId,
+        userId: authz.userId,
+      }),
+      loadConferenceRulesEngine(conferenceId),
     ]);
 
     const taxRate = Number(conference.tax_rate_pct ?? 0);
 
     let subtotalCents = 0;
     let taxCents = 0;
+    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
     for (const item of items) {
-      const lineSubtotal = item.quantity * item.product.price_cents;
+      const pricingActions = evaluateRulesEngineActionsForContext({
+        engine: rulesEngine,
+        trigger: "checkout_attempt",
+        context: {
+          org_membership_status: artifacts.membershipStatus,
+          org_type: artifacts.orgTypeRaw,
+          user_is_authenticated: true,
+          org_registration_count: orgRegistrationCountForRules,
+          product_id: item.product.id,
+          product_slug: item.product.slug,
+        },
+      });
+      const effectiveUnitPrice = applyRulesEnginePricingActions(
+        item.product.price_cents,
+        pricingActions
+      );
+      const lineSubtotal = item.quantity * effectiveUnitPrice;
       const lineTax =
         item.product.is_tax_exempt || !item.product.is_taxable
           ? 0
@@ -466,24 +717,46 @@ export async function addCartItem(params: {
       organizationId: params.organizationId,
       userId: authz.userId,
       organizationType: artifacts.orgTypeRaw,
+      membershipStatus: artifacts.membershipStatus,
       registrationTypes: artifacts.registrationTypes,
       cartItems: cartForContext,
       paidOrderItems: artifacts.paidOrderItems,
     });
-
-    const rules = await loadProductRules(product.id);
+    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
+    const [rules, rulesEngine] = await Promise.all([
+      loadProductRules(product.id),
+      loadConferenceRulesEngine(params.conferenceId),
+    ]);
+    const concurrencyWarning = getConcurrentCheckoutWarning({
+      engine: rulesEngine,
+      pendingOrderItems: artifacts.pendingOrderItems,
+    });
     const eligibility = checkProductEligibility({
       product,
       quantity,
       rules,
       context,
     });
+    const engineErrors = collectRulesEngineBlockErrors({
+      engine: rulesEngine,
+      trigger: "cart_item_add",
+      context: {
+        org_membership_status: artifacts.membershipStatus,
+        org_type: artifacts.orgTypeRaw,
+        user_is_authenticated: true,
+        org_registration_count: orgRegistrationCountForRules,
+        product_id: product.id,
+        product_slug: product.slug,
+      },
+    });
 
-    if (!eligibility.eligible) {
+    if (!eligibility.eligible || engineErrors.length > 0) {
       return {
         success: false,
         code: "INELIGIBLE",
-        error: eligibility.errors.join(" "),
+        error: [...eligibility.errors, ...engineErrors, ...(concurrencyWarning ? [concurrencyWarning] : [])].join(
+          " "
+        ),
       };
     }
 
@@ -595,21 +868,47 @@ export async function updateCartItemQuantity(params: {
       organizationId: item.organization_id,
       userId: item.user_id,
       organizationType: artifacts.orgTypeRaw,
+      membershipStatus: artifacts.membershipStatus,
       registrationTypes: artifacts.registrationTypes,
       cartItems: cartForContext,
       paidOrderItems: artifacts.paidOrderItems,
     });
-
-    const rules = await loadProductRules(product.id);
+    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
+    const [rules, rulesEngine] = await Promise.all([
+      loadProductRules(product.id),
+      loadConferenceRulesEngine(item.conference_id),
+    ]);
+    const concurrencyWarning = getConcurrentCheckoutWarning({
+      engine: rulesEngine,
+      pendingOrderItems: artifacts.pendingOrderItems,
+    });
     const eligibility = checkProductEligibility({
       product,
       quantity: params.quantity,
       rules,
       context,
     });
+    const engineErrors = collectRulesEngineBlockErrors({
+      engine: rulesEngine,
+      trigger: "cart_item_add",
+      context: {
+        org_membership_status: artifacts.membershipStatus,
+        org_type: artifacts.orgTypeRaw,
+        user_is_authenticated: true,
+        org_registration_count: orgRegistrationCountForRules,
+        product_id: product.id,
+        product_slug: product.slug,
+      },
+    });
 
-    if (!eligibility.eligible) {
-      return { success: false, code: "INELIGIBLE", error: eligibility.errors.join(" ") };
+    if (!eligibility.eligible || engineErrors.length > 0) {
+      return {
+        success: false,
+        code: "INELIGIBLE",
+        error: [...eligibility.errors, ...engineErrors, ...(concurrencyWarning ? [concurrencyWarning] : [])].join(
+          " "
+        ),
+      };
     }
 
     const { data: updated, error: updateError } = await adminClient
@@ -710,12 +1009,14 @@ export async function createConferenceCheckout(
       organizationId: input.organizationId,
       userId: authz.userId,
       organizationType: artifacts.orgTypeRaw,
+      membershipStatus: artifacts.membershipStatus,
       registrationTypes: artifacts.registrationTypes,
       cartItems: cart.map((item) => ({ slug: item.product.slug, quantity: item.quantity })),
       paidOrderItems: artifacts.paidOrderItems,
     });
 
     const productIds = cart.map((item) => item.product.id);
+    const rulesEngine = await loadConferenceRulesEngine(input.conferenceId);
     const { data: allCartRules, error: rulesError } = await adminClient
       .from("conference_product_rules")
       .select("*")
@@ -729,6 +1030,14 @@ export async function createConferenceCheckout(
       cartRulesByProduct.set(rule.product_id, existing);
     }
 
+    const priceOverridesByProductId: Record<string, number> = {};
+    const mixedUnitPricesByProductId: Record<string, number[]> = {};
+    const baseRegistrationCount = getOrgRegistrationCountForRules(artifacts);
+    let claimedRegistrationUnitsInCheckout = 0;
+    const concurrencyWarning = getConcurrentCheckoutWarning({
+      engine: rulesEngine,
+      pendingOrderItems: artifacts.pendingOrderItems,
+    });
     for (const item of cart) {
       const rules = cartRulesByProduct.get(item.product.id) ?? [];
       const eligibility = checkProductEligibility({
@@ -741,8 +1050,58 @@ export async function createConferenceCheckout(
         return {
           success: false,
           code: "INELIGIBLE",
-          error: `${item.product.name}: ${eligibility.errors.join(" ")}`,
+          error: `${item.product.name}: ${[
+            ...eligibility.errors,
+            ...(concurrencyWarning ? [concurrencyWarning] : []),
+          ].join(" ")}`,
         };
+      }
+
+      const unitPrices: number[] = [];
+      for (let unitIndex = 0; unitIndex < item.quantity; unitIndex += 1) {
+        const perUnitRegistrationCount = baseRegistrationCount + claimedRegistrationUnitsInCheckout;
+        const perUnitActions = evaluateRulesEngineActionsForContext({
+          engine: rulesEngine,
+          trigger: "checkout_attempt",
+          context: {
+            org_membership_status: artifacts.membershipStatus,
+            org_type: artifacts.orgTypeRaw,
+            user_is_authenticated: true,
+            org_registration_count: perUnitRegistrationCount,
+            product_id: item.product.id,
+            product_slug: item.product.slug,
+          },
+        });
+        const perUnitBlocks = perUnitActions.filter((action) => action.type === "block_purchase");
+        if (perUnitBlocks.length > 0) {
+          const blockMessage = perUnitBlocks[0]?.message || "Purchase blocked by policy rule.";
+          return {
+            success: false,
+            code: "INELIGIBLE",
+            error: `${item.product.name}: ${[
+              blockMessage,
+              ...(concurrencyWarning ? [concurrencyWarning] : []),
+            ].join(" ")}`,
+          };
+        }
+        const effectiveUnitPrice = applyRulesEnginePricingActions(
+          item.product.price_cents,
+          perUnitActions
+        );
+        unitPrices.push(effectiveUnitPrice);
+        if (isRegistrationProductSlug(item.product.slug)) {
+          claimedRegistrationUnitsInCheckout += 1;
+        }
+      }
+
+      const uniqueUnitPrices = Array.from(new Set(unitPrices));
+      if (uniqueUnitPrices.length === 1) {
+        const onlyPrice = uniqueUnitPrices[0];
+        if (onlyPrice !== item.product.price_cents) {
+          priceOverridesByProductId[item.product.id] = onlyPrice;
+        }
+      } else {
+        mixedUnitPricesByProductId[item.product.id] = unitPrices;
       }
 
       const metadataCheck = validatePartnerMeetingMetadata({
@@ -782,6 +1141,10 @@ export async function createConferenceCheckout(
         p_checkout_idempotency_key: idempotencyKey,
         p_tax_rate_pct: Number(conference.tax_rate_pct ?? 0),
         p_currency: "CAD",
+        p_price_overrides:
+          Object.keys(priceOverridesByProductId).length > 0
+            ? priceOverridesByProductId
+            : null,
       }
     );
 
@@ -791,6 +1154,100 @@ export async function createConferenceCheckout(
         code: orderError?.code,
         error: orderError?.message ?? "Failed to create pending conference order.",
       };
+    }
+
+    if (Object.keys(mixedUnitPricesByProductId).length > 0) {
+      const { data: createdOrderItems, error: createdOrderItemsError } = await adminClient
+        .from("conference_order_items")
+        .select("id, order_id, product_id, quantity, metadata, conference_products!inner(is_taxable, is_tax_exempt)")
+        .eq("order_id", order.id);
+      if (createdOrderItemsError || !createdOrderItems) {
+        return {
+          success: false,
+          error:
+            createdOrderItemsError?.message ??
+            "Failed to load order items for mixed-price checkout processing.",
+        };
+      }
+
+      for (const row of createdOrderItems) {
+        const unitPrices = mixedUnitPricesByProductId[row.product_id];
+        if (!unitPrices) continue;
+        if (unitPrices.length !== row.quantity) {
+          return {
+            success: false,
+            error: "Unable to reconcile mixed-price checkout quantities. Please try again.",
+          };
+        }
+        const grouped = groupUnitPrices(unitPrices);
+        const productTax =
+          (row as unknown as { conference_products?: { is_taxable?: boolean; is_tax_exempt?: boolean } })
+            .conference_products ?? {};
+        const isTaxable = Boolean(productTax.is_taxable) && !Boolean(productTax.is_tax_exempt);
+        const replacementRows: Array<Database["public"]["Tables"]["conference_order_items"]["Insert"]> = grouped.map(
+          (group) => {
+            const lineSubtotal = group.quantity * group.unitPriceCents;
+            const lineTax = isTaxable ? Math.round(lineSubtotal * (Number(conference.tax_rate_pct ?? 0) / 100)) : 0;
+            return {
+              order_id: order.id,
+              product_id: row.product_id,
+              quantity: group.quantity,
+              unit_price_cents: group.unitPriceCents,
+              tax_cents: lineTax,
+              total_cents: lineSubtotal + lineTax,
+              metadata: row.metadata ?? null,
+            };
+          }
+        );
+
+        const { error: deleteItemError } = await adminClient
+          .from("conference_order_items")
+          .delete()
+          .eq("id", row.id);
+        if (deleteItemError) {
+          return {
+            success: false,
+            error: deleteItemError.message,
+          };
+        }
+        const { error: insertReplacementError } = await adminClient
+          .from("conference_order_items")
+          .insert(replacementRows);
+        if (insertReplacementError) {
+          return {
+            success: false,
+            error: insertReplacementError.message,
+          };
+        }
+      }
+
+      const { data: refreshedRows, error: refreshedRowsError } = await adminClient
+        .from("conference_order_items")
+        .select("tax_cents, total_cents")
+        .eq("order_id", order.id);
+      if (refreshedRowsError || !refreshedRows) {
+        return {
+          success: false,
+          error: refreshedRowsError?.message ?? "Failed to recalculate mixed-price order totals.",
+        };
+      }
+      const recalculatedTaxCents = refreshedRows.reduce((sum, entry) => sum + (entry.tax_cents ?? 0), 0);
+      const recalculatedTotalCents = refreshedRows.reduce((sum, entry) => sum + (entry.total_cents ?? 0), 0);
+      const recalculatedSubtotalCents = recalculatedTotalCents - recalculatedTaxCents;
+      const { error: orderTotalsError } = await adminClient
+        .from("conference_orders")
+        .update({
+          subtotal_cents: recalculatedSubtotalCents,
+          tax_cents: recalculatedTaxCents,
+          total_cents: recalculatedTotalCents,
+        })
+        .eq("id", order.id);
+      if (orderTotalsError) {
+        return {
+          success: false,
+          error: orderTotalsError.message,
+        };
+      }
     }
 
     const { data: orderItems, error: orderItemsError } = await adminClient

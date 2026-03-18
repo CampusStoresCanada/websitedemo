@@ -93,7 +93,7 @@ export default async function ConferenceCartPage({
               href={`/conference/${year}/${edition}/cart?org=${org.id}`}
               className={`rounded-full border px-3 py-1 text-xs font-medium ${
                 org.id === selectedOrg.id
-                  ? "border-[#D60001] bg-[#fff1f1] text-[#D60001]"
+                  ? "border-[#EE2A2E] bg-[#fff1f1] text-[#EE2A2E]"
                   : "border-gray-300 text-gray-700 hover:border-gray-400"
               }`}
             >

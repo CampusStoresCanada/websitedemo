@@ -5,6 +5,7 @@ import type {
 } from "./types";
 import { ALLOWED_TRANSITIONS } from "./types";
 import { getEffectivePolicy } from "@/lib/policy/engine";
+import { enqueueOrgCircleAccessSync } from "@/lib/circle/sync";
 
 export const PUBLIC_LISTABLE_ORG_STATUSES: OrgMembershipStatus[] = [
   "active",
@@ -83,6 +84,22 @@ export async function transitionMembershipState(
   if (!result.success) {
     return { success: false, error: result.error };
   }
+
+  // Fire-and-forget: sync org access groups in Circle to reflect the new status.
+  // Fetches org.type internally to pick the right access group.
+  void (async () => {
+    try {
+      const adminSb = await createClient();
+      const { data: org } = await adminSb
+        .from("organizations")
+        .select("type")
+        .eq("id", orgId)
+        .single();
+      await enqueueOrgCircleAccessSync(orgId, newStatus, org?.type ?? null);
+    } catch {
+      // Non-critical — transition already committed
+    }
+  })();
 
   return {
     success: true,

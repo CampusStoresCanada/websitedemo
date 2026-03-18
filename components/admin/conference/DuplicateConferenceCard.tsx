@@ -77,7 +77,7 @@ export default function DuplicateConferenceCard({ conferences }: DuplicateConfer
               setError(result.error ?? "Failed to duplicate conference");
             }
           }}
-          className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
+          className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
         >
           {isLoading ? "Duplicating..." : "Duplicate"}
         </button>

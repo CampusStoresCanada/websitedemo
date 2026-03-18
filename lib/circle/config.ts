@@ -74,9 +74,30 @@ export const STATUS_TO_CIRCLE_SPACE: Record<string, string> = {
 };
 
 // ---------------------------------------------------------------------------
+// Access group IDs — set via env, numeric Circle access group IDs
+// ---------------------------------------------------------------------------
+
+/**
+ * Returns configured Circle access group IDs from env.
+ * All values optional — if null, the corresponding sync is skipped.
+ */
+export function getAccessGroupIds(): {
+  member: number | null;
+  partner: number | null;
+  alumni: number | null;
+} {
+  return {
+    member: Number(process.env.CIRCLE_MEMBER_ACCESS_GROUP_ID) || null,
+    partner: Number(process.env.CIRCLE_PARTNER_ACCESS_GROUP_ID) || null,
+    alumni: Number(process.env.CIRCLE_ALUMNI_ACCESS_GROUP_ID) || null,
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Admin API base URLs
 // ---------------------------------------------------------------------------
 
 export const CIRCLE_ADMIN_API_BASE = "https://app.circle.so/api/admin/v2";
+export const CIRCLE_V1_API_BASE = "https://app.circle.so/api/v1";
 export const CIRCLE_HEADLESS_AUTH_BASE = "https://app.circle.so/api/v1/headless";
 export const CIRCLE_MEMBER_API_BASE = "https://app.circle.so/api/headless/v1";

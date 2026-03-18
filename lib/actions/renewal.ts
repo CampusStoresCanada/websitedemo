@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { processRefund } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
+import { sendTransactional } from "@/lib/comms/send";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -44,7 +45,7 @@ export async function optOutOfRenewal(
   // ── Load org ──────────────────────────────────────────────────
   const { data: org, error: orgErr } = await db
     .from("organizations")
-    .select("id, name, membership_status, membership_expires_at")
+    .select("id, name, email, membership_status, membership_expires_at")
     .eq("id", orgId)
     .single();
 
@@ -186,7 +187,18 @@ export async function optOutOfRenewal(
     };
   }
 
-  // TODO(chunk-22): send opt-out confirmation email via communications system
+  if (org.email) {
+    await sendTransactional({
+      templateKey: "opt_out_confirmation",
+      to: org.email,
+      variables: {
+        contact_name: org.name,
+        org_name: org.name,
+        refund_processed: false,
+        effective_date: org.membership_expires_at?.split("T")[0] ?? "",
+      },
+    });
+  }
 
   return { success: true };
 }

@@ -95,7 +95,7 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
         <h2 className="text-lg font-semibold text-gray-900">Survey Management</h2>
         <button
           onClick={() => setShowCreate(!showCreate)}
-          className="text-sm px-3 py-1.5 bg-[#D60001] text-white rounded-lg hover:bg-[#B00001] transition-colors"
+          className="text-sm px-3 py-1.5 bg-[#EE2A2E] text-white rounded-lg hover:bg-[#D92327] transition-colors"
         >
           + New Survey
         </button>
@@ -154,7 +154,7 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
             <button
               onClick={handleCreate}
               disabled={creating}
-              className="px-4 py-1.5 bg-[#D60001] text-white text-sm rounded-lg hover:bg-[#B00001] disabled:opacity-50 transition-colors"
+              className="px-4 py-1.5 bg-[#EE2A2E] text-white text-sm rounded-lg hover:bg-[#D92327] disabled:opacity-50 transition-colors"
             >
               {creating ? "Creating..." : "Create"}
             </button>

@@ -207,7 +207,7 @@ export function CurrencyField({
               }}
               onBlur={handleBlur}
               disabled={isReadOnly}
-              className={`w-full pl-7 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
+              className={`w-full pl-7 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
                 formatWarning ? "border-amber-400" : "border-gray-300"
               }`}
               placeholder="0.00"
@@ -397,7 +397,7 @@ export function NumberField({
             onBlur={handleBlur}
             step={step || "1"}
             disabled={isReadOnly}
-            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
+            className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
               formatWarning ? "border-amber-400" : "border-gray-300"
             }`}
             placeholder="0"
@@ -430,28 +430,28 @@ export function NumberField({
       {showPercentPrompt && ambiguousRawValue !== null && (
         <div className="mt-2 bg-blue-50 border border-blue-300 rounded-lg p-3">
           <div className="flex items-start gap-2">
-            <svg className="w-5 h-5 text-blue-600 mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
+            <svg className="w-5 h-5 text-[#EE2A2E] mt-0.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
               <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z" clipRule="evenodd" />
             </svg>
             <div className="flex-1">
               <p className="text-sm font-medium text-blue-800">
                 Quick clarification
               </p>
-              <p className="text-xs text-blue-700 mt-1">
+              <p className="text-xs text-[#D92327] mt-1">
                 You entered <strong>{ambiguousRawValue}</strong>. Did you mean:
               </p>
               <div className="flex gap-2 mt-2">
                 <button
                   type="button"
                   onClick={() => resolvePercentAmbiguity(true)}
-                  className="px-3 py-1.5 text-xs font-medium text-white bg-blue-600 rounded hover:bg-blue-700"
+                  className="px-3 py-1.5 text-xs font-medium text-white bg-[#EE2A2E] rounded hover:bg-[#D92327]"
                 >
                   {Math.round(ambiguousRawValue * 10000) / 100}%
                 </button>
                 <button
                   type="button"
                   onClick={() => resolvePercentAmbiguity(false)}
-                  className="px-3 py-1.5 text-xs font-medium text-blue-700 bg-white border border-blue-300 rounded hover:bg-blue-50"
+                  className="px-3 py-1.5 text-xs font-medium text-[#D92327] bg-white border border-blue-300 rounded hover:bg-blue-50"
                 >
                   {ambiguousRawValue}%
                 </button>
@@ -517,7 +517,7 @@ export function TextField({
         disabled={isReadOnly}
         placeholder={placeholder}
         maxLength={limit}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
       />
       {isNearLimit && (
         <p className="text-xs text-gray-400 mt-1 text-right">
@@ -581,7 +581,7 @@ export function TextLongField({
         placeholder={placeholder}
         maxLength={limit}
         rows={3}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
       />
       {isNearLimit && (
         <p className="text-xs text-gray-400 mt-1 text-right">
@@ -630,7 +630,7 @@ export function SelectField({
         value={currentValue}
         onChange={(e) => onFieldChange(field, e.target.value || null)}
         disabled={isReadOnly}
-        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
+        className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm"
       >
         <option value="">Select...</option>
         {options.map((opt) => (
@@ -679,7 +679,7 @@ export function BooleanField({
           disabled={isReadOnly}
           className={`px-4 py-1.5 rounded-lg text-sm border ${
             currentValue === true
-              ? "bg-[#D60001] text-white border-[#D60001]"
+              ? "bg-[#EE2A2E] text-white border-[#EE2A2E]"
               : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
           } disabled:opacity-50`}
         >
@@ -691,7 +691,7 @@ export function BooleanField({
           disabled={isReadOnly}
           className={`px-4 py-1.5 rounded-lg text-sm border ${
             currentValue === false
-              ? "bg-[#D60001] text-white border-[#D60001]"
+              ? "bg-[#EE2A2E] text-white border-[#EE2A2E]"
               : "bg-white text-gray-700 border-gray-300 hover:bg-gray-50"
           } disabled:opacity-50`}
         >

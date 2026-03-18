@@ -150,7 +150,7 @@ export default function SurveyPreview({ fieldConfig }: SurveyPreviewProps) {
               onClick={() => setActiveSection(idx)}
               className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
                 activeSection === idx
-                  ? "bg-[#D60001] text-white"
+                  ? "bg-[#EE2A2E] text-white"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
@@ -163,7 +163,7 @@ export default function SurveyPreview({ fieldConfig }: SurveyPreviewProps) {
           onClick={() => setUseSampleData(!useSampleData)}
           className={`flex-shrink-0 ml-4 px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors ${
             useSampleData
-              ? "bg-blue-50 border-blue-200 text-blue-700"
+              ? "bg-blue-50 border-blue-200 text-[#D92327]"
               : "bg-white border-gray-300 text-gray-600 hover:bg-gray-50"
           }`}
         >

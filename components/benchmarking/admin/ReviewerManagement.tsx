@@ -163,7 +163,7 @@ export default function ReviewerManagement({
                   <button
                     onClick={() => handleToggle(user.id, true)}
                     disabled={saving === user.id}
-                    className="text-xs text-blue-600 hover:text-blue-700 font-medium px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50 transition-colors"
+                    className="text-xs text-[#EE2A2E] hover:text-[#D92327] font-medium px-2 py-1 border border-blue-200 rounded hover:bg-blue-50 disabled:opacity-50 transition-colors"
                   >
                     {saving === user.id ? "..." : "Add as Reviewer"}
                   </button>

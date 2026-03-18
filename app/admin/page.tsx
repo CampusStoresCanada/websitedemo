@@ -6,6 +6,11 @@ export const metadata = {
 
 const LINKS = [
   {
+    href: "/admin/calendar",
+    title: "Operational Calendar",
+    description: "Unified timeline of conference, renewal, comms, and system milestones.",
+  },
+  {
     href: "/admin/ops",
     title: "Ops Health",
     description: "Monitor system health and integration status.",
@@ -21,10 +26,20 @@ const LINKS = [
     description: "Manage conference instances, statuses, and operations.",
   },
   {
+    href: "/admin/events",
+    title: "Events",
+    description: "Create, review, and manage non-conference events. Approve member-submitted events.",
+  },
+  {
     href: "/admin/conference",
     title: "Legal & Compliance",
     description:
       "Manage conference legal versions, acceptance coverage, and retention readiness.",
+  },
+  {
+    href: "/admin/circle",
+    title: "Circle Cutover",
+    description: "Launch Day Auth Cutover — feature flags, member mapping backfill, pre-flight validation.",
   },
   {
     href: "/admin/policy",
@@ -40,6 +55,11 @@ const LINKS = [
     href: "/admin/applications",
     title: "Applications",
     description: "Review pending applications and processing status.",
+  },
+  {
+    href: "/admin/comms",
+    title: "Communications",
+    description: "Manage email campaigns, templates, and delivery analytics.",
   },
   {
     href: "/benchmarking/admin",

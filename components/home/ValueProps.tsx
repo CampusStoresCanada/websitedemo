@@ -17,10 +17,10 @@ export default function ValueProps() {
         {/* Value Props Grid */}
         <div className="grid md:grid-cols-2 gap-8 md:gap-12">
           {/* Community of Practice */}
-          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#D60001]/20 hover:shadow-xl transition-all duration-300">
-            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#D60001]/10 flex items-center justify-center group-hover:bg-[#D60001] transition-colors">
+          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#EE2A2E]/20 hover:shadow-xl transition-all duration-300">
+            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#EE2A2E]/10 flex items-center justify-center group-hover:bg-[#EE2A2E] transition-colors">
               <svg
-                className="w-6 h-6 text-[#D60001] group-hover:text-white transition-colors"
+                className="w-6 h-6 text-[#EE2A2E] group-hover:text-white transition-colors"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -42,15 +42,15 @@ export default function ValueProps() {
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Direct peer connections
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Professional development
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Collaborative problem-solving
                 </li>
               </ul>
@@ -58,10 +58,10 @@ export default function ValueProps() {
           </div>
 
           {/* Collective Voice */}
-          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#D60001]/20 hover:shadow-xl transition-all duration-300">
-            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#D60001]/10 flex items-center justify-center group-hover:bg-[#D60001] transition-colors">
+          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#EE2A2E]/20 hover:shadow-xl transition-all duration-300">
+            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#EE2A2E]/10 flex items-center justify-center group-hover:bg-[#EE2A2E] transition-colors">
               <svg
-                className="w-6 h-6 text-[#D60001] group-hover:text-white transition-colors"
+                className="w-6 h-6 text-[#EE2A2E] group-hover:text-white transition-colors"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -83,15 +83,15 @@ export default function ValueProps() {
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Unified industry responses
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Amplify member concerns
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Canadian representation
                 </li>
               </ul>
@@ -99,10 +99,10 @@ export default function ValueProps() {
           </div>
 
           {/* Resource Hub */}
-          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#D60001]/20 hover:shadow-xl transition-all duration-300">
-            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#D60001]/10 flex items-center justify-center group-hover:bg-[#D60001] transition-colors">
+          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#EE2A2E]/20 hover:shadow-xl transition-all duration-300">
+            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#EE2A2E]/10 flex items-center justify-center group-hover:bg-[#EE2A2E] transition-colors">
               <svg
-                className="w-6 h-6 text-[#D60001] group-hover:text-white transition-colors"
+                className="w-6 h-6 text-[#EE2A2E] group-hover:text-white transition-colors"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -124,15 +124,15 @@ export default function ValueProps() {
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Benchmarking data & analysis
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Tools and templates
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Educational content & training
                 </li>
               </ul>
@@ -140,10 +140,10 @@ export default function ValueProps() {
           </div>
 
           {/* Innovation Catalyst */}
-          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#D60001]/20 hover:shadow-xl transition-all duration-300">
-            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#D60001]/10 flex items-center justify-center group-hover:bg-[#D60001] transition-colors">
+          <div className="group relative bg-white rounded-3xl p-8 md:p-10 border border-[#E5E5E5] hover:border-[#EE2A2E]/20 hover:shadow-xl transition-all duration-300">
+            <div className="absolute top-8 right-8 w-12 h-12 rounded-2xl bg-[#EE2A2E]/10 flex items-center justify-center group-hover:bg-[#EE2A2E] transition-colors">
               <svg
-                className="w-6 h-6 text-[#D60001] group-hover:text-white transition-colors"
+                className="w-6 h-6 text-[#EE2A2E] group-hover:text-white transition-colors"
                 fill="none"
                 stroke="currentColor"
                 viewBox="0 0 24 24"
@@ -165,15 +165,15 @@ export default function ValueProps() {
               </p>
               <ul className="space-y-2">
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Trend identification
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Reduced innovation risk
                 </li>
                 <li className="flex items-center gap-3 text-sm text-[#6B6B6B]">
-                  <span className="w-1.5 h-1.5 rounded-full bg-[#D60001]" />
+                  <span className="w-1.5 h-1.5 rounded-full bg-[#EE2A2E]" />
                   Strategic evolution support
                 </li>
               </ul>

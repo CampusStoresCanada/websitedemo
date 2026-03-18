@@ -9,6 +9,7 @@ import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
 import { mapSchedulerEligibleRoleForProductSlug } from "@/lib/conference-commerce/eligibility";
 import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
+import { resolveMeetingGeometryFromModulesConfig } from "@/lib/conference/meeting-geometry";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -78,27 +79,6 @@ async function ensureMeetingScaffolding(
   suiteOrgAssignmentsBySuiteId: Record<string, string>;
 }> {
   const adminClient = createAdminClient();
-
-  const { data: paramsRows, error: paramsError } = await adminClient
-    .from("conference_parameters")
-    .select(
-      "conference_days, meeting_slots_per_day, meeting_start_time, slot_duration_minutes, slot_buffer_minutes, total_meeting_suites"
-    )
-    .eq("conference_id", conferenceId)
-    .limit(2);
-
-  if (paramsError) {
-    throw new Error(`Failed to load conference parameters: ${paramsError.message}`);
-  }
-
-  if (paramsRows && paramsRows.length > 1) {
-    throw new Error(
-      "CONFERENCE_PARAMETERS_INTEGRITY_ERROR: multiple conference_parameters rows found for this conference. Keep exactly one."
-    );
-  }
-
-  const params = paramsRows?.[0] ?? null;
-
   const { data: meetingsModule, error: meetingsModuleError } = await adminClient
     .from("conference_schedule_modules")
     .select("enabled, config_json")
@@ -113,64 +93,13 @@ async function ensureMeetingScaffolding(
   const moduleCfg =
     meetingsModule?.enabled && meetingsModule.config_json && typeof meetingsModule.config_json === "object"
       ? (meetingsModule.config_json as Record<string, unknown>)
-      : null;
-  const suiteOrgAssignmentsRaw =
-    moduleCfg?.suite_org_assignments &&
-    typeof moduleCfg.suite_org_assignments === "object" &&
-    !Array.isArray(moduleCfg.suite_org_assignments)
-      ? (moduleCfg.suite_org_assignments as Record<string, unknown>)
       : {};
-
-  const daySettingsRaw = ((moduleCfg?.meeting_day_settings ?? {}) as Record<string, unknown>) ?? {};
-  const moduleMeetingDays = Array.isArray(moduleCfg?.meeting_days)
-    ? (moduleCfg?.meeting_days as unknown[]).filter((value): value is string => typeof value === "string")
-    : [];
-  const orderedMeetingDays = [...new Set([...moduleMeetingDays, ...Object.keys(daySettingsRaw)])].sort();
-
-  const pickTimeValue = (value: unknown, fallback: string): string => {
-    if (typeof value !== "string") return fallback;
-    const trimmed = value.trim();
-    return /^\d{2}:\d{2}(:\d{2})?$/.test(trimmed) ? trimmed : fallback;
-  };
-
-  const dayConfigs = orderedMeetingDays
-    .map((date, index) => {
-      const raw = daySettingsRaw[date];
-      const settings =
-        raw && typeof raw === "object" && !Array.isArray(raw)
-          ? (raw as Record<string, unknown>)
-          : {};
-      const meetingCount = Math.max(1, Number(settings.meeting_count ?? 0) || 1);
-      const slotDuration = Math.max(
-        1,
-        Number(settings.slot_duration_minutes ?? moduleCfg?.slot_duration_minutes ?? params?.slot_duration_minutes ?? 15) || 15
-      );
-      const bufferMinutes = Math.max(
-        0,
-        Number(settings.buffer_minutes ?? moduleCfg?.meeting_buffer_minutes ?? params?.slot_buffer_minutes ?? 0) || 0
-      );
-      const startTime = pickTimeValue(
-        settings.start_time ?? moduleCfg?.meeting_start_time,
-        params?.meeting_start_time ?? "09:00:00"
-      );
-      return {
-        dayNumber: index + 1,
-        meetingCount,
-        slotDuration,
-        bufferMinutes,
-        startTime,
-      };
-    })
-    .filter((cfg) => cfg.meetingCount > 0);
-
-  const hasModuleGeometry = dayConfigs.length > 0;
-  if (!hasModuleGeometry && !params) {
-    throw new Error("Conference parameters are required for scheduler runs.");
+  const geometry = resolveMeetingGeometryFromModulesConfig(moduleCfg);
+  if (geometry.dayConfigs.length === 0 || geometry.suitesTarget <= 0) {
+    throw new Error(
+      "MEETINGS_SETUP_INCOMPLETE: configure meeting days, per-day counts, and meeting suites before running scheduler."
+    );
   }
-
-  const suitesTarget = hasModuleGeometry
-    ? Math.max(1, Number(moduleCfg?.meeting_suites ?? params?.total_meeting_suites ?? 1))
-    : Math.max(1, Number(params?.total_meeting_suites ?? 1));
 
   const { data: existingSuites, error: suitesError } = await adminClient
     .from("conference_suites")
@@ -182,7 +111,7 @@ async function ensureMeetingScaffolding(
 
   let suites = existingSuites ?? [];
   if (suites.length === 0) {
-    const suiteRows = Array.from({ length: suitesTarget }, (_, index) => ({
+    const suiteRows = Array.from({ length: geometry.suitesTarget }, (_, index) => ({
       conference_id: conferenceId,
       suite_number: index + 1,
       is_active: true,
@@ -209,9 +138,9 @@ async function ensureMeetingScaffolding(
   if (existingSlots && existingSlots.length > 0) {
     const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
     for (const suite of suites) {
-      const raw = suiteOrgAssignmentsRaw[String(suite.suite_number)];
-      if (typeof raw === "string" && raw.trim().length > 0) {
-        suiteOrgAssignmentsBySuiteId[suite.id] = raw.trim();
+      const assignedOrgId = geometry.suiteOrgAssignmentsBySuiteNumber[String(suite.suite_number)];
+      if (assignedOrgId) {
+        suiteOrgAssignmentsBySuiteId[suite.id] = assignedOrgId;
       }
     }
     return {
@@ -224,51 +153,24 @@ async function ensureMeetingScaffolding(
 
   const startBase = "1970-01-01T00:00:00.000Z";
   const slotRows: Database["public"]["Tables"]["meeting_slots"]["Insert"][] = [];
+  for (const dayConfig of geometry.dayConfigs) {
+    for (let slot = 1; slot <= dayConfig.meetingCount; slot += 1) {
+      const start = parseTimeToDate(startBase, dayConfig.startTime);
+      const slotOffsetMinutes = (slot - 1) * (dayConfig.slotDurationMinutes + dayConfig.bufferMinutes);
+      start.setUTCMinutes(start.getUTCMinutes() + slotOffsetMinutes);
 
-  if (hasModuleGeometry) {
-    for (const dayConfig of dayConfigs) {
-      for (let slot = 1; slot <= dayConfig.meetingCount; slot += 1) {
-        const start = parseTimeToDate(startBase, dayConfig.startTime);
-        const slotOffsetMinutes = (slot - 1) * (dayConfig.slotDuration + dayConfig.bufferMinutes);
-        start.setUTCMinutes(start.getUTCMinutes() + slotOffsetMinutes);
+      const end = new Date(start);
+      end.setUTCMinutes(end.getUTCMinutes() + dayConfig.slotDurationMinutes);
 
-        const end = new Date(start);
-        end.setUTCMinutes(end.getUTCMinutes() + dayConfig.slotDuration);
-
-        for (const suite of suites) {
-          slotRows.push({
-            conference_id: conferenceId,
-            day_number: dayConfig.dayNumber,
-            slot_number: slot,
-            start_time: formatTimeFromDate(start),
-            end_time: formatTimeFromDate(end),
-            suite_id: suite.id,
-          });
-        }
-      }
-    }
-  } else {
-    for (let day = 1; day <= Number(params?.conference_days ?? 0); day += 1) {
-      for (let slot = 1; slot <= Number(params?.meeting_slots_per_day ?? 0); slot += 1) {
-        const start = parseTimeToDate(startBase, String(params?.meeting_start_time ?? "09:00:00"));
-        const slotOffsetMinutes =
-          (slot - 1) *
-          (Number(params?.slot_duration_minutes ?? 15) + Number(params?.slot_buffer_minutes ?? 0));
-        start.setUTCMinutes(start.getUTCMinutes() + slotOffsetMinutes);
-
-        const end = new Date(start);
-        end.setUTCMinutes(end.getUTCMinutes() + Number(params?.slot_duration_minutes ?? 15));
-
-        for (const suite of suites) {
-          slotRows.push({
-            conference_id: conferenceId,
-            day_number: day,
-            slot_number: slot,
-            start_time: formatTimeFromDate(start),
-            end_time: formatTimeFromDate(end),
-            suite_id: suite.id,
-          });
-        }
+      for (const suite of suites) {
+        slotRows.push({
+          conference_id: conferenceId,
+          day_number: dayConfig.dayNumber,
+          slot_number: slot,
+          start_time: formatTimeFromDate(start),
+          end_time: formatTimeFromDate(end),
+          suite_id: suite.id,
+        });
       }
     }
   }
@@ -284,9 +186,9 @@ async function ensureMeetingScaffolding(
 
   const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
   for (const suite of suites) {
-    const raw = suiteOrgAssignmentsRaw[String(suite.suite_number)];
-    if (typeof raw === "string" && raw.trim().length > 0) {
-      suiteOrgAssignmentsBySuiteId[suite.id] = raw.trim();
+    const assignedOrgId = geometry.suiteOrgAssignmentsBySuiteNumber[String(suite.suite_number)];
+    if (assignedOrgId) {
+      suiteOrgAssignmentsBySuiteId[suite.id] = assignedOrgId;
     }
   }
 

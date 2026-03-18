@@ -35,7 +35,7 @@ export default function DirectoryCard({
           </div>
         )}
         <div className="min-w-0 flex-1">
-          <h3 className="font-semibold text-[#1A1A1A] truncate group-hover:text-[#D60001] transition-colors">
+          <h3 className="font-semibold text-[#1A1A1A] truncate group-hover:text-[#EE2A2E] transition-colors">
             {name}
           </h3>
           {location && (

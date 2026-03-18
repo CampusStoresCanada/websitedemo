@@ -12,6 +12,8 @@ import {
 } from "@/lib/renewal/jobs";
 import { processCircleSyncQueue } from "@/lib/circle/sync";
 import { retentionPurgeRun } from "@/lib/retention/jobs";
+import { quickbooksExportRun } from "@/lib/quickbooks/export";
+import { quickbooksInboundReconcileRun } from "@/lib/quickbooks/reconcile";
 import { stripe } from "@/lib/stripe/client";
 import {
   extractConferenceOrderIdFromStripeEvent,
@@ -21,20 +23,6 @@ import {
   toWebhookPayloadJson,
 } from "@/lib/stripe/webhook-processing";
 
-function opsTableClient() {
-  return createAdminClient() as unknown as {
-    from: (table: string) => {
-      update: (values: Record<string, unknown>) => {
-        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
-      };
-      select: (columns: string) => {
-        eq: (column: string, value: string) => {
-          maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: { message: string } | null }>;
-        };
-      };
-    };
-  };
-}
 
 export async function acknowledgeOpsAlertAction(alertId: string): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAdmin();
@@ -42,7 +30,7 @@ export async function acknowledgeOpsAlertAction(alertId: string): Promise<{ succ
     return { success: false, error: auth.error };
   }
 
-  const adminClient = opsTableClient();
+  const adminClient = createAdminClient();
   const now = new Date().toISOString();
   const { error } = await adminClient
     .from("ops_alerts")
@@ -78,7 +66,7 @@ export async function resolveOpsAlertAction(alertId: string): Promise<{ success:
     return { success: false, error: auth.error };
   }
 
-  const adminClient = opsTableClient();
+  const adminClient = createAdminClient();
   const now = new Date().toISOString();
   const { error } = await adminClient
     .from("ops_alerts")
@@ -122,7 +110,7 @@ export async function setOpsAlertTriageAction(
   const normalizedDueAt =
     dueAt && dueAt.trim().length > 0 ? new Date(dueAt).toISOString() : null;
 
-  const adminClient = opsTableClient();
+  const adminClient = createAdminClient();
   const { error } = await adminClient
     .from("ops_alerts")
     .update({
@@ -192,7 +180,9 @@ export type OpsManualJobKey =
   | "grace_check"
   | "circle_sync"
   | "ops_alert_eval"
-  | "retention_purge";
+  | "retention_purge"
+  | "qbo_export"
+  | "qbo_reconcile";
 
 export async function runOpsJobNowAction(
   job: OpsManualJobKey,
@@ -220,6 +210,10 @@ export async function runOpsJobNowAction(
       result = (await processCircleSyncQueue()) as unknown as Record<string, unknown>;
     } else if (job === "retention_purge") {
       result = (await retentionPurgeRun()) as unknown as Record<string, unknown>;
+    } else if (job === "qbo_export") {
+      result = (await quickbooksExportRun()) as unknown as Record<string, unknown>;
+    } else if (job === "qbo_reconcile") {
+      result = (await quickbooksInboundReconcileRun()) as unknown as Record<string, unknown>;
     } else {
       result = (await evaluateOpsAlerts()) as unknown as Record<string, unknown>;
     }
@@ -874,6 +868,106 @@ export async function deleteSchedulerRunAction(
       startedAt: run.started_at,
       completedAt: run.completed_at,
     },
+  });
+
+  revalidatePath("/admin/ops");
+  return { success: true };
+}
+
+export async function retryQBExportAction(
+  rowId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const trimmedReason = reason.trim();
+  if (trimmedReason.length < 8) {
+    return { success: false, error: "Reason is required (minimum 8 characters)." };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("qbo_export_queue")
+    .update({
+      status: "pending",
+      retry_count: 0,
+      next_retry_at: null,
+      error_message: null,
+      lease_expires_at: null,
+    })
+    .eq("id", rowId);
+
+  if (error) {
+    await logAuditEventSafe({
+      action: "qbo_export_retry_request",
+      entityType: "qbo_export_queue",
+      entityId: rowId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { rowId, reason: trimmedReason, success: false, error: error.message },
+    });
+    return { success: false, error: `Failed to queue retry: ${error.message}` };
+  }
+
+  await logAuditEventSafe({
+    action: "qbo_export_retry_request",
+    entityType: "qbo_export_queue",
+    entityId: rowId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { rowId, reason: trimmedReason, success: true },
+  });
+
+  revalidatePath("/admin/ops");
+  return { success: true };
+}
+
+export async function ignoreQBReconciliationItemAction(
+  rowId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const trimmedReason = reason.trim();
+  if (trimmedReason.length < 8) {
+    return { success: false, error: "Reason is required (minimum 8 characters)." };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("qbo_reconciliation_queue")
+    .update({
+      status: "ignored",
+      notes: trimmedReason,
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("id", rowId);
+
+  if (error) {
+    await logAuditEventSafe({
+      action: "qbo_reconciliation_ignore_request",
+      entityType: "qbo_reconciliation_queue",
+      entityId: rowId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { rowId, reason: trimmedReason, success: false, error: error.message },
+    });
+    return { success: false, error: `Failed to ignore item: ${error.message}` };
+  }
+
+  await logAuditEventSafe({
+    action: "qbo_reconciliation_ignore_request",
+    entityType: "qbo_reconciliation_queue",
+    entityId: rowId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { rowId, reason: trimmedReason, success: true },
   });
 
   revalidatePath("/admin/ops");

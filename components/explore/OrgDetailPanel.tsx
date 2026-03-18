@@ -88,7 +88,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
               <button
                 type="button"
                 onClick={() => onFilterByValue(null, { province: org.province! })}
-                className="text-gray-500 hover:text-[#D60001] hover:underline transition-colors"
+                className="text-gray-500 hover:text-[#EE2A2E] hover:underline transition-colors"
                 title={`Show all in ${org.province}`}
               >
                 {org.province}
@@ -102,7 +102,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
               className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
                 org.type === "Member"
                   ? "bg-red-50 text-red-700 border border-red-100"
-                  : "bg-blue-50 text-blue-700 border border-blue-100"
+                  : "bg-blue-50 text-[#D92327] border border-blue-100"
               }`}
             >
               {org.type === "Vendor Partner" ? "Partner" : org.type}
@@ -155,12 +155,12 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
                     <p className="text-xs text-gray-500 truncate">{contact.roleTitle}</p>
                   )}
                   {contact.email && (
-                    <a href={`mailto:${contact.email}`} className="text-xs text-[#D60001] hover:underline truncate block mt-0.5">
+                    <a href={`mailto:${contact.email}`} className="text-xs text-[#EE2A2E] hover:underline truncate block mt-0.5">
                       {contact.email}
                     </a>
                   )}
                   {contact.phone && (
-                    <a href={`tel:${contact.phone}`} className="text-xs text-gray-500 hover:text-[#D60001] transition-colors truncate block">
+                    <a href={`tel:${contact.phone}`} className="text-xs text-gray-500 hover:text-[#EE2A2E] transition-colors truncate block">
                       {contact.phone}
                     </a>
                   )}
@@ -227,7 +227,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
                       <button
                         type="button"
                         onClick={() => onFilterByValue(null, { pos: org.posSystem! })}
-                        className="text-sm font-medium text-gray-900 hover:text-[#D60001] hover:underline transition-colors"
+                        className="text-sm font-medium text-gray-900 hover:text-[#EE2A2E] hover:underline transition-colors"
                         title={`Show all using ${org.posSystem}`}
                       >
                         {org.posSystem}
@@ -244,7 +244,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
                       <button
                         type="button"
                         onClick={() => onFilterByValue(null, { mandate: org.operationsMandate! })}
-                        className="text-sm font-medium text-gray-900 hover:text-[#D60001] hover:underline transition-colors"
+                        className="text-sm font-medium text-gray-900 hover:text-[#EE2A2E] hover:underline transition-colors"
                         title={`Show all ${org.operationsMandate}`}
                       >
                         {org.operationsMandate}
@@ -356,7 +356,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
                     <span className="text-[10px] text-gray-500 uppercase tracking-wider">Social Media</span>
                     <div className="flex flex-wrap gap-1 mt-1">
                       {org.socialMediaPlatforms.map((p) => (
-                        <span key={p} className="rounded-md bg-blue-50 border border-blue-100 px-1.5 py-0.5 text-[10px] text-blue-700">{p}</span>
+                        <span key={p} className="rounded-md bg-blue-50 border border-blue-100 px-1.5 py-0.5 text-[10px] text-[#D92327]">{p}</span>
                       ))}
                     </div>
                   </div>
@@ -375,7 +375,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
           </p>
           <Link
             href="/apply/member"
-            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#D60001] text-white text-xs font-medium rounded-full hover:bg-[#B00001] transition-colors"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#EE2A2E] text-white text-xs font-medium rounded-full hover:bg-[#D92327] transition-colors"
           >
             Join CSC
             <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -389,7 +389,7 @@ export function OrgDetailPanel({ org, isMember, contact, onClose, onFilterByValu
       <div className="space-y-2">
         <Link
           href={`/org/${org.slug}`}
-          className="w-full inline-flex items-center justify-center rounded-xl bg-[#D60001] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B00001] transition-colors"
+          className="w-full inline-flex items-center justify-center rounded-xl bg-[#EE2A2E] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"
         >
           View Full Profile →
         </Link>

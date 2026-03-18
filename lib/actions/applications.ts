@@ -29,6 +29,7 @@ import {
   linkUserToPerson,
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
+import { enqueueCircleSync } from "@/lib/circle/sync";
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -201,7 +202,7 @@ export async function verifyApplicationEmail(
   );
 
   // Send to admin notification email (configured or fallback)
-  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || "admin@campusstorescanada.ca";
+  const adminEmail = process.env.ADMIN_NOTIFICATION_EMAIL || "admin@campusstores.ca";
   await sendEmail({
     to: adminEmail,
     subject: adminContent.subject,
@@ -647,6 +648,53 @@ export async function completeOnboarding(
       updated_at: new Date().toISOString(),
     })
     .eq("id", orgId);
+
+  // Enqueue Circle account link + tag sync (non-blocking — must not fail onboarding)
+  // Reads circle_cutover_enabled flag internally; no-ops if Circle is not configured.
+  void (async () => {
+    try {
+      // Look up the primary contact for this org (match by org_id since contacts
+      // don't have user_id — find the primary contact of the org)
+      const { data: contact } = await db
+        .from("contacts")
+        .select("id, email, name, organization_id")
+        .eq("organization_id", orgId)
+        .contains("contact_type", ["primary"])
+        .limit(1)
+        .maybeSingle();
+
+      if (!contact?.email) return;
+
+      // Determine org type for tag assignment
+      const { data: orgRow } = await db
+        .from("organizations")
+        .select("type")
+        .eq("id", orgId)
+        .single();
+
+      const role = orgRow?.type === "Vendor Partner" ? "partner" : "member";
+
+      await enqueueCircleSync({
+        operation: "link_member",
+        entityType: "contact",
+        entityId: contact.id,
+        payload: { email: contact.email, name: contact.name ?? contact.email },
+        orgId,
+        idempotencyKey: `onboarding-link-${contact.id}`,
+      });
+
+      await enqueueCircleSync({
+        operation: "add_tag",
+        entityType: "contact",
+        entityId: contact.id,
+        payload: { email: contact.email, role },
+        orgId,
+        idempotencyKey: `onboarding-tag-${contact.id}-${role}`,
+      });
+    } catch (err) {
+      console.error("[completeOnboarding] Circle enqueue failed (non-fatal):", err instanceof Error ? err.message : err);
+    }
+  })();
 
   return { success: true };
 }

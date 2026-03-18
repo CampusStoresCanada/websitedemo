@@ -113,7 +113,7 @@ export default function SubmissionDetail({
               {submission.status === "submitted" ? "Submitted" : "In Progress"}
             </span>
             {isVerified && (
-              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+              <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-[#D92327]">
                 Verified
               </span>
             )}
@@ -132,7 +132,7 @@ export default function SubmissionDetail({
             className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors disabled:opacity-50 ${
               isVerified
                 ? "border border-gray-300 text-gray-700 hover:bg-gray-50"
-                : "bg-blue-600 text-white hover:bg-blue-700"
+                : "bg-[#EE2A2E] text-white hover:bg-[#D92327]"
             }`}
           >
             {verifying ? "..." : isVerified ? "Remove Verification" : "Mark as Verified"}
@@ -148,7 +148,7 @@ export default function SubmissionDetail({
             onClick={() => setActiveSection(s.id)}
             className={`flex-shrink-0 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors ${
               activeSection === s.id
-                ? "bg-[#D60001] text-white"
+                ? "bg-[#EE2A2E] text-white"
                 : "bg-gray-100 text-gray-600 hover:bg-gray-200"
             }`}
           >

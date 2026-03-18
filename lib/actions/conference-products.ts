@@ -104,6 +104,45 @@ export async function getRules(
   return { success: true, data: data ?? [] };
 }
 
+export async function getRulesForConference(
+  conferenceId: string
+): Promise<
+  | {
+      success: true;
+      data: Array<
+        RuleRow & {
+          product_name: string | null;
+          product_slug: string | null;
+        }
+      >;
+    }
+  | { success: false; error: string }
+> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const adminClient = createAdminClient();
+  const { data, error } = await adminClient
+    .from("conference_product_rules")
+    .select("*, conference_products!inner(name, slug, conference_id)")
+    .eq("conference_products.conference_id", conferenceId)
+    .order("display_order", { ascending: true });
+
+  if (error) return { success: false, error: error.message };
+
+  const normalized = (data ?? []).map((row) => ({
+    ...(row as RuleRow),
+    product_name:
+      (row as unknown as { conference_products?: { name?: string } }).conference_products?.name ??
+      null,
+    product_slug:
+      (row as unknown as { conference_products?: { slug?: string } }).conference_products?.slug ??
+      null,
+  }));
+
+  return { success: true, data: normalized };
+}
+
 export async function createRule(
   input: Omit<RuleInsert, "id">
 ): Promise<{ success: boolean; error?: string; data?: RuleRow }> {

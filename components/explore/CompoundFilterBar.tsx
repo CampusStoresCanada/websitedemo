@@ -123,7 +123,7 @@ export function CompoundFilterBar({
       <div className="flex flex-wrap gap-1.5">
         {/* Primary lens + sub-filter pills (red) */}
         {primaryPills.map((pill) => (
-          <span key={pill.label} className={`${pillCls} bg-[#D60001] text-white`}>
+          <span key={pill.label} className={`${pillCls} bg-[#EE2A2E] text-white`}>
             {pill.label}
             <button type="button" onClick={pill.onRemove} className={xBtn}>{xIcon}</button>
           </span>
@@ -170,7 +170,7 @@ export function CompoundFilterBar({
           <div className="p-2.5 border-b border-gray-100">
             <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Province</label>
             <select
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#D60001] focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#EE2A2E] focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
               value={compoundFilters.province ?? ""}
               onChange={(e) => setCompoundFilters((f) => ({ ...f, province: e.target.value || undefined }))}
             >
@@ -188,7 +188,7 @@ export function CompoundFilterBar({
             </label>
             {isMember ? (
               <select
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#D60001] focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#EE2A2E] focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
                 value={lens === "pos_platform" ? (posFilter ?? "") : (compoundFilters.pos ?? "")}
                 onChange={(e) => {
                   const v = e.target.value || null;
@@ -216,7 +216,7 @@ export function CompoundFilterBar({
             </label>
             {isMember ? (
               <select
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#D60001] focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#EE2A2E] focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
                 value={lens === "services" ? (serviceFilter ?? "") : (compoundFilters.service ?? "")}
                 onChange={(e) => {
                   const v = e.target.value || null;
@@ -244,7 +244,7 @@ export function CompoundFilterBar({
             </label>
             {isMember ? (
               <select
-                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#D60001] focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+                className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#EE2A2E] focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
                 value={lens === "operating_model" ? (mandateFilter ?? "") : (compoundFilters.mandate ?? "")}
                 onChange={(e) => {
                   const v = e.target.value || null;
@@ -269,7 +269,7 @@ export function CompoundFilterBar({
           <div className="p-2.5 border-b border-gray-100">
             <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Enrollment Scale</label>
             <select
-              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#D60001] focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+              className="w-full text-xs border border-gray-200 rounded-lg px-2 py-1.5 bg-gray-50 focus:bg-white focus:border-[#EE2A2E] focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
               value={lens === "scale" ? (scaleFilter ?? "") : (compoundFilters.scaleRange ?? "")}
               onChange={(e) => {
                 const v = e.target.value || null;

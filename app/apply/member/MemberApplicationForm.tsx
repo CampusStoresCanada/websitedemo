@@ -91,7 +91,7 @@ export function MemberApplicationForm() {
           Didn&apos;t receive it? Check your spam folder or{" "}
           <button
             onClick={() => setSubmitted(false)}
-            className="text-[#D60001] hover:text-[#B00001] font-medium"
+            className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
           >
             try again
           </button>
@@ -125,7 +125,7 @@ export function MemberApplicationForm() {
             required
             value={orgName}
             onChange={(e) => setOrgName(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="e.g. University of Toronto Bookstore"
           />
         </div>
@@ -139,7 +139,7 @@ export function MemberApplicationForm() {
             required
             value={institutionType}
             onChange={(e) => setInstitutionType(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors bg-white"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors bg-white"
           >
             <option value="">Select type…</option>
             {INSTITUTION_TYPES.map((t) => (
@@ -158,7 +158,7 @@ export function MemberApplicationForm() {
             required
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="https://bookstore.example.ca"
           />
         </div>
@@ -173,7 +173,7 @@ export function MemberApplicationForm() {
               required
               value={province}
               onChange={(e) => setProvince(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors bg-white"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors bg-white"
             >
               <option value="">Select…</option>
               {PROVINCES.map((p) => (
@@ -191,7 +191,7 @@ export function MemberApplicationForm() {
               required
               value={city}
               onChange={(e) => setCity(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Toronto"
             />
           </div>
@@ -217,7 +217,7 @@ export function MemberApplicationForm() {
             required
             value={contactName}
             onChange={(e) => setContactName(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="Jane Smith"
           />
         </div>
@@ -232,7 +232,7 @@ export function MemberApplicationForm() {
             required
             value={contactEmail}
             onChange={(e) => setContactEmail(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="jane@bookstore.example.ca"
           />
         </div>
@@ -248,7 +248,7 @@ export function MemberApplicationForm() {
               required
               value={contactPhone}
               onChange={(e) => setContactPhone(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="(416) 555-0123"
             />
           </div>
@@ -262,7 +262,7 @@ export function MemberApplicationForm() {
               required
               value={contactTitle}
               onChange={(e) => setContactTitle(e.target.value)}
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Store Manager"
             />
           </div>
@@ -287,7 +287,7 @@ export function MemberApplicationForm() {
             rows={3}
             value={reasonToJoin}
             onChange={(e) => setReasonToJoin(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors resize-none"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors resize-none"
             placeholder="Tell us about your goals and what you hope to gain from membership…"
           />
         </div>
@@ -301,7 +301,7 @@ export function MemberApplicationForm() {
             type="text"
             value={howHeard}
             onChange={(e) => setHowHeard(e.target.value)}
-            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+            className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
             placeholder="Referral, conference, web search…"
           />
         </div>
@@ -310,14 +310,14 @@ export function MemberApplicationForm() {
       <button
         type="submit"
         disabled={isLoading}
-        className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+        className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
       >
         {isLoading ? "Submitting…" : "Submit Application"}
       </button>
 
       <p className="text-xs text-gray-500 text-center">
         Looking to become a vendor partner instead?{" "}
-        <Link href="/apply/partner" className="text-[#D60001] hover:text-[#B00001] font-medium">
+        <Link href="/apply/partner" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
           Apply as a partner
         </Link>
       </p>

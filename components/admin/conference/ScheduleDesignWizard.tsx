@@ -7,12 +7,14 @@ import {
   createSuggestedMealProducts,
   createSuggestedOffsiteProducts,
   createSuggestedTradeShowProducts,
+  regenerateProgramFromSetup,
   reconcileConferenceSetupAndPeople,
   reconcileConferenceScheduleSetup,
   saveConferenceScheduleModules,
   type ConferenceScheduleModuleKey,
   type ConferenceScheduleModuleRow,
 } from "@/lib/actions/conference-schedule-design";
+import { loadGooglePlacesScript } from "@/lib/google/places";
 
 type ParamsRow = {
   id: string;
@@ -170,7 +172,8 @@ type TravelSectionKey =
   | "destination_airports"
   | "airline_policies"
   | "travel_policies"
-  | "reimbursement_policies";
+  | "reimbursement_policies"
+  | "travel_rules";
 type TravelSectionSignatures = Record<TravelSectionKey, string>;
 type PreflightSeverity = "blocking" | "warning" | "info";
 type PreflightIssue = {
@@ -230,6 +233,12 @@ function buildTravelSectionSignatures(config: Record<string, unknown>): TravelSe
     reimbursement_policies: stable(
       Array.isArray(config.reimbursement_policies) ? config.reimbursement_policies : []
     ),
+    travel_rules: stable({
+      travel_management_mode: config.travel_management_mode ?? null,
+      accommodation_management_mode: config.accommodation_management_mode ?? null,
+      travel_disable_air_within_km: config.travel_disable_air_within_km ?? null,
+      travel_nearby_support_mode: config.travel_nearby_support_mode ?? null,
+    }),
   };
 }
 
@@ -240,83 +249,6 @@ function findAirportReference(query: string): AirportReference | null {
   return METRO_CODE_FALLBACKS.find((entry) => entry.code === upper) ?? null;
 }
 
-declare global {
-  interface Window {
-    google?: {
-      maps?: {
-        places?: {
-          Autocomplete: new (
-            input: HTMLInputElement,
-            options?: {
-              types?: string[];
-              fields?: string[];
-              componentRestrictions?: { country: string | string[] };
-            }
-          ) => {
-            addListener: (eventName: string, handler: () => void) => { remove?: () => void };
-            getPlace: () => {
-              place_id?: string;
-              formatted_address?: string;
-              name?: string;
-            };
-          };
-        };
-      };
-    };
-  }
-}
-
-const GOOGLE_PLACES_SCRIPT_ID = "google-maps-places-script";
-const GOOGLE_PLACES_READY_TIMEOUT_MS = 15000;
-
-function loadGooglePlacesScript(apiKey: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.maps?.places?.Autocomplete) {
-      resolve();
-      return;
-    }
-
-    const encodedKey = encodeURIComponent(apiKey);
-    const existing = document.getElementById(GOOGLE_PLACES_SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      const existingSrc = existing.getAttribute("src") ?? "";
-      if (existingSrc && !existingSrc.includes(`key=${encodedKey}`)) {
-        reject(
-          new Error(
-            "Google Places script already exists with a different API key. Refresh and retry with one key."
-          )
-        );
-        return;
-      }
-      existing.addEventListener("load", () => {
-        if (window.google?.maps?.places?.Autocomplete) resolve();
-        else reject(new Error("Google Maps loaded, but Places Autocomplete is unavailable."));
-      });
-      existing.addEventListener("error", () =>
-        reject(new Error("Failed to load Google Places script."))
-      );
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = GOOGLE_PLACES_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodedKey}&libraries=places&v=weekly&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google?.maps?.places?.Autocomplete) resolve();
-      else reject(new Error("Google Maps loaded, but Places Autocomplete is unavailable."));
-    };
-    script.onerror = () => reject(new Error("Failed to load Google Places script."));
-    document.head.appendChild(script);
-
-    window.setTimeout(() => {
-      if (!window.google?.maps?.places?.Autocomplete) {
-        reject(new Error("Google Places initialization timed out."));
-      }
-    }, GOOGLE_PLACES_READY_TIMEOUT_MS);
-  });
-}
 
 function normalizePriorityList(input: string[]): string[] {
   const set = new Set<string>();
@@ -891,8 +823,14 @@ function createDefaultConditionalOverrideRule(): ProductConditionalOverrideRule 
 }
 
 function normalizeTravelSupportMode(value: unknown): TravelSupportMode {
-  if (value === "managed" || value === "none") return value;
-  if (value === "reimbursement" || value === "self_managed") return "none";
+  if (
+    value === "managed" ||
+    value === "reimbursement" ||
+    value === "self_managed" ||
+    value === "none"
+  ) {
+    return value;
+  }
   return "managed";
 }
 
@@ -1395,6 +1333,7 @@ export default function ScheduleDesignWizard({
   const [offsiteProductResult, setOffsiteProductResult] = useState<string | null>(null);
   const [isReconcilingSetup, setIsReconcilingSetup] = useState(false);
   const [isReconcilingPeople, setIsReconcilingPeople] = useState(false);
+  const [isRegeneratingProgram, setIsRegeneratingProgram] = useState(false);
   const [dayTypePrompt, setDayTypePrompt] = useState<DayTypePromptState | null>(null);
   const [travelSourceDraftByType, setTravelSourceDraftByType] = useState<Record<string, string>>(
     {}
@@ -1961,14 +1900,37 @@ export default function ScheduleDesignWizard({
   const requiredTravelFieldOverrides = (
     travelAccommodationConfig.required_travel_fields_by_key ?? {}
   ) as Record<string, boolean>;
+  const travelDisableAirWithinKmRaw = Number(
+    travelAccommodationConfig.travel_disable_air_within_km ?? NaN
+  );
+  const travelDisableAirWithinKm = Number.isFinite(travelDisableAirWithinKmRaw)
+    ? Math.max(0, travelDisableAirWithinKmRaw)
+    : "";
+  const travelNearbySupportMode = normalizeTravelSupportMode(
+    travelAccommodationConfig.travel_nearby_support_mode
+  );
   const requiredAccommodationFieldOverrides = (
     travelAccommodationConfig.required_accommodation_fields_by_key ?? {}
   ) as Record<string, boolean>;
-  const registrationOptionTravelRules = (
-    travelAccommodationConfig.registration_option_travel_rules ??
-    travelAccommodationConfig.registration_product_travel_rules ??
-    {}
-  ) as Record<string, Partial<ProductTravelRule>>;
+  const registrationOptionTravelRules = useMemo(
+    () =>
+      ((travelAccommodationConfig.registration_option_travel_rules ??
+        travelAccommodationConfig.registration_product_travel_rules ??
+        {}) as Record<string, Partial<ProductTravelRule>>),
+    [
+      travelAccommodationConfig.registration_option_travel_rules,
+      travelAccommodationConfig.registration_product_travel_rules,
+    ]
+  );
+  const hasLegacyTravelRuleKeys = useMemo(() => {
+    const keys = Object.keys(registrationOptionTravelRules ?? {});
+    if (keys.some((key) => key.includes("::"))) return true;
+    return registrationOptions.some(
+      (option) =>
+        Object.prototype.hasOwnProperty.call(registrationOptionTravelRules, option.id) &&
+        option.linked_product_ids.length > 0
+    );
+  }, [registrationOptionTravelRules, registrationOptions]);
   const travelHotels = Array.isArray(travelAccommodationConfig.hotels)
     ? (travelAccommodationConfig.hotels as Array<Partial<TravelHotelPolicy>>).map((entry, index) => ({
         id: typeof entry.id === "string" && entry.id.trim() ? entry.id : `hotel-${index + 1}`,
@@ -2081,6 +2043,7 @@ export default function ScheduleDesignWizard({
         currentTravelSectionSignatures.travel_policies !== saved.travel_policies,
       reimbursement_policies:
         currentTravelSectionSignatures.reimbursement_policies !== saved.reimbursement_policies,
+      travel_rules: currentTravelSectionSignatures.travel_rules !== saved.travel_rules,
     };
   }, [currentTravelSectionSignatures]);
   const preflightIssues = useMemo<PreflightIssue[]>(() => {
@@ -2517,7 +2480,8 @@ export default function ScheduleDesignWizard({
         travelSectionDirty.destination_airports ||
         travelSectionDirty.airline_policies ||
         travelSectionDirty.travel_policies ||
-        travelSectionDirty.reimbursement_policies
+        travelSectionDirty.reimbursement_policies ||
+        travelSectionDirty.travel_rules
       ) {
         add(
           "blocking",
@@ -2994,8 +2958,16 @@ export default function ScheduleDesignWizard({
           next.accommodation_management_mode === "attendee_managed"
             ? next.accommodation_management_mode
             : "partially_managed";
+        const travelDisableAirWithinKm = Number(next.travel_disable_air_within_km);
         next.travel_management_mode = travelMode;
         next.accommodation_management_mode = accommodationMode;
+        next.travel_disable_air_within_km =
+          Number.isFinite(travelDisableAirWithinKm) && travelDisableAirWithinKm > 0
+            ? travelDisableAirWithinKm
+            : null;
+        next.travel_nearby_support_mode = normalizeTravelSupportMode(
+          next.travel_nearby_support_mode
+        );
         next.required_travel_fields_by_key =
           next.required_travel_fields_by_key &&
           typeof next.required_travel_fields_by_key === "object" &&
@@ -3186,6 +3158,72 @@ export default function ScheduleDesignWizard({
       },
     }));
   }, []);
+
+  const migrateLegacyTravelRuleKeysToProductKeys = useCallback(() => {
+    const rawRuleMap =
+      registrationOptionTravelRules && typeof registrationOptionTravelRules === "object"
+        ? (registrationOptionTravelRules as Record<string, unknown>)
+        : {};
+    if (Object.keys(rawRuleMap).length === 0) {
+      setSaveSuccess("No travel rules found to migrate.");
+      return;
+    }
+
+    const nextRuleMap: Record<string, unknown> = { ...rawRuleMap };
+    let migratedCompositeCount = 0;
+    let migratedOptionCount = 0;
+    let removedLegacyCount = 0;
+    let skippedExistingCount = 0;
+
+    for (const [ruleKey, ruleValue] of Object.entries(rawRuleMap)) {
+      if (!ruleKey.includes("::")) continue;
+      const [, productId] = ruleKey.split("::");
+      const normalizedProductId = typeof productId === "string" ? productId.trim() : "";
+      if (!normalizedProductId) continue;
+      if (nextRuleMap[normalizedProductId] == null) {
+        nextRuleMap[normalizedProductId] = ruleValue;
+        migratedCompositeCount += 1;
+      } else {
+        skippedExistingCount += 1;
+      }
+    }
+
+    for (const option of registrationOptions) {
+      const optionRule = rawRuleMap[option.id];
+      if (!optionRule || typeof optionRule !== "object" || Array.isArray(optionRule)) continue;
+      const linkedProducts = uniqueStrings(option.linked_product_ids).filter(Boolean);
+      if (linkedProducts.length === 0) continue;
+      for (const productId of linkedProducts) {
+        if (nextRuleMap[productId] == null) {
+          nextRuleMap[productId] = optionRule;
+          migratedOptionCount += 1;
+        } else {
+          skippedExistingCount += 1;
+        }
+      }
+      delete nextRuleMap[option.id];
+      removedLegacyCount += 1;
+    }
+
+    for (const ruleKey of Object.keys(nextRuleMap)) {
+      if (!ruleKey.includes("::")) continue;
+      delete nextRuleMap[ruleKey];
+      removedLegacyCount += 1;
+    }
+
+    updateTravelAccommodationConfig({
+      registration_option_travel_rules: nextRuleMap,
+      registration_product_travel_rules: null,
+    });
+    setSaveError(null);
+    if (migratedCompositeCount === 0 && migratedOptionCount === 0 && removedLegacyCount === 0) {
+      setSaveSuccess("Travel rules are already normalized to product keys.");
+      return;
+    }
+    setSaveSuccess(
+      `Migrated travel rules to product keys (composite: ${migratedCompositeCount}, option: ${migratedOptionCount}, removed legacy keys: ${removedLegacyCount}, skipped existing product rules: ${skippedExistingCount}).`
+    );
+  }, [registrationOptionTravelRules, registrationOptions, updateTravelAccommodationConfig]);
 
   const setModuleAccessProduct = useCallback(
     (
@@ -3564,21 +3602,24 @@ export default function ScheduleDesignWizard({
     productId: string
   ): ProductTravelRule => {
     const optionKey = getRegistrationOptionKey(type, productId);
-    const raw = registrationOptionTravelRules[optionKey] ?? registrationOptionTravelRules[productId] ?? {};
+    const raw =
+      registrationOptionTravelRules[productId] ??
+      registrationOptionTravelRules[optionKey] ??
+      {};
     return normalizeTravelRule(raw);
   };
 
   const getRegistrationOptionTravelRule = (option: RegistrationOption): ProductTravelRule => {
-    const direct = registrationOptionTravelRules[option.id];
-    if (direct && typeof direct === "object") {
-      return normalizeTravelRule(direct as Partial<ProductTravelRule>);
-    }
     for (const productId of option.linked_product_ids) {
       const compositeKey = getRegistrationOptionKey(option.registration_type, productId);
-      const raw = registrationOptionTravelRules[compositeKey] ?? registrationOptionTravelRules[productId];
+      const raw = registrationOptionTravelRules[productId] ?? registrationOptionTravelRules[compositeKey];
       if (raw && typeof raw === "object") {
         return normalizeTravelRule(raw as Partial<ProductTravelRule>);
       }
+    }
+    const direct = registrationOptionTravelRules[option.id];
+    if (direct && typeof direct === "object") {
+      return normalizeTravelRule(direct as Partial<ProductTravelRule>);
     }
     return createDefaultProductTravelRule();
   };
@@ -3797,13 +3838,19 @@ export default function ScheduleDesignWizard({
       updateRegistrationOption(option.id, { form_items: nextFormItems });
     }
 
+    const targetRuleKeys =
+      option.linked_product_ids.length > 0 ? uniqueStrings(option.linked_product_ids) : [option.id];
+    const nextRuleMap: Record<string, unknown> = {
+      ...registrationOptionTravelRules,
+    };
+    for (const key of targetRuleKeys) {
+      nextRuleMap[key] = {
+        ...nextRule,
+      };
+    }
+
     updateTravelAccommodationConfig({
-      registration_option_travel_rules: {
-        ...registrationOptionTravelRules,
-        [option.id]: {
-          ...nextRule,
-        },
-      },
+      registration_option_travel_rules: nextRuleMap,
     });
   };
 
@@ -3891,7 +3938,6 @@ export default function ScheduleDesignWizard({
     productId: string,
     patch: Partial<ProductTravelRule>
   ) => {
-    const optionKey = getRegistrationOptionKey(type, productId);
     const current = getProductTravelRule(type, productId);
     const nextRule = enforceRuleByManagementScope({
       ...current,
@@ -3900,7 +3946,7 @@ export default function ScheduleDesignWizard({
     updateTravelAccommodationConfig({
       registration_option_travel_rules: {
         ...registrationOptionTravelRules,
-        [optionKey]: {
+        [productId]: {
           ...nextRule,
         },
       },
@@ -5283,7 +5329,7 @@ export default function ScheduleDesignWizard({
             onClick={() => setStep(s.id)}
             className={`rounded-full px-3 py-1 text-xs font-medium ${
               step === s.id
-                ? "bg-[#D60001] text-white"
+                ? "bg-[#EE2A2E] text-white"
                 : "bg-gray-100 text-gray-700 hover:bg-gray-200"
             }`}
             aria-current={step === s.id ? "step" : undefined}
@@ -5390,7 +5436,7 @@ export default function ScheduleDesignWizard({
                   onClick={() => setModuleStepIndex(index)}
                   className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
                     index === moduleStepIndex
-                      ? "border-[#D60001] bg-[#D60001] text-white"
+                      ? "border-[#EE2A2E] bg-[#EE2A2E] text-white"
                       : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                   aria-current={index === moduleStepIndex ? "step" : undefined}
@@ -5803,7 +5849,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyMeetingProductSuggestion}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Create/Update Suggested Meeting Products
                     </button>
@@ -6032,7 +6078,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyTradeShowProductSuggestion}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Create/Update Suggested Trade Show Products
                     </button>
@@ -6440,7 +6486,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyMealProductSuggestion}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Create/Update Suggested Meal Products
                     </button>
@@ -6484,7 +6530,7 @@ export default function ScheduleDesignWizard({
                   <button
                     type="button"
                     onClick={addOffsiteEvent}
-                    className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                    className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                   >
                     Add Offsite Event
                   </button>
@@ -6869,7 +6915,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyOffsiteProductSuggestion}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Create/Update Suggested Offsite Products
                     </button>
@@ -7132,7 +7178,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyEducationProductSuggestion}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Create/Update Suggested Education Products
                     </button>
@@ -7180,7 +7226,7 @@ export default function ScheduleDesignWizard({
                       <button
                         type="button"
                         onClick={addAudienceList}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                       >
                         Add Audience List
                       </button>
@@ -8211,7 +8257,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={addSponsorRecord}
-                      className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                     >
                       Add Sponsor
                     </button>
@@ -9186,6 +9232,75 @@ export default function ScheduleDesignWizard({
                 </div>
 
                 <div className="rounded-md border border-gray-100 p-3">
+                  <div className="flex items-center justify-between gap-2">
+                    <p className="text-sm font-medium text-gray-900">Travel Rules (Enforced)</p>
+                    {hasLegacyTravelRuleKeys ? (
+                      <button
+                        type="button"
+                        onClick={migrateLegacyTravelRuleKeysToProductKeys}
+                        className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+                      >
+                        Normalize Legacy Rule Keys
+                      </button>
+                    ) : null}
+                  </div>
+                  <p className="mt-1 text-xs text-gray-600">
+                    These settings are evaluated at registration time and drive allowed travel options.
+                  </p>
+                  <div className="mt-2 grid gap-3 md:grid-cols-2 text-sm">
+                    <label className="block text-xs text-gray-700">
+                      Disable air travel when organization is within X km of destination
+                      <input
+                        type="number"
+                        min={0}
+                        value={travelDisableAirWithinKm}
+                        onChange={(e) =>
+                          updateTravelAccommodationConfig({
+                            travel_disable_air_within_km: e.target.value
+                              ? Number(e.target.value)
+                              : null,
+                          })
+                        }
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm"
+                        placeholder="250"
+                      />
+                      <span className="mt-1 block text-xs text-gray-500">
+                        Leave blank to disable this distance rule.
+                      </span>
+                    </label>
+                    <label className="block text-xs text-gray-700">
+                      Nearby attendee support mode
+                      <select
+                        value={travelNearbySupportMode}
+                        onChange={(e) =>
+                          updateTravelAccommodationConfig({
+                            travel_nearby_support_mode: e.target.value,
+                          })
+                        }
+                        className="mt-1 block w-full rounded-md border border-gray-300 px-2 py-2 text-sm"
+                      >
+                        <option value="managed">Managed (we book)</option>
+                        <option value="reimbursement">Reimbursement (they book)</option>
+                        <option value="self_managed">Self-managed (no reimbursement)</option>
+                        <option value="none">No travel support</option>
+                      </select>
+                    </label>
+                  </div>
+                  {travelSectionDirty.travel_rules && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void saveSection("Travel Rules")}
+                        disabled={isSaving}
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                      >
+                        {isSaving ? "Saving..." : "Save Travel Rules"}
+                      </button>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-md border border-gray-100 p-3">
                   <div className="flex items-center justify-between">
                     <p className="text-sm font-medium text-gray-900">Accommodations</p>
                     <button
@@ -9369,7 +9484,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Accommodations")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Accommodations"}
                       </button>
@@ -9532,7 +9647,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Travel Destinations")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Destinations"}
                       </button>
@@ -9666,7 +9781,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Airline Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Airlines"}
                       </button>
@@ -9778,7 +9893,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Travel Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Travel Policies"}
                       </button>
@@ -9901,7 +10016,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Reimbursement Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Reimbursement Policies"}
                       </button>
@@ -10485,17 +10600,23 @@ export default function ScheduleDesignWizard({
                                                           { action_text_value: e.target.value }
                                                         )
                                                       }
-                                                      className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
-                                                    >
-                                                      <option value="managed">
-                                                        Organization Managed - Travel &amp; Accommodation
-                                                      </option>
-                                                      <option value="none">
-                                                        No Travel In Scope
-                                                      </option>
-                                                    </select>
-                                                  </label>
-                                                )}
+                                                    className="mt-1 block w-full rounded border border-gray-300 px-2 py-1"
+                                                  >
+                                                    <option value="managed">
+                                                      Managed (we book)
+                                                    </option>
+                                                    <option value="reimbursement">
+                                                      Reimbursement (they book)
+                                                    </option>
+                                                    <option value="self_managed">
+                                                      Self-managed (no reimbursement)
+                                                    </option>
+                                                    <option value="none">
+                                                      No travel support
+                                                    </option>
+                                                  </select>
+                                                </label>
+                                              )}
                                                 {override.action === "set_offsite_auto_discount_percent" && (
                                                   <label className="block text-[11px] text-gray-700">
                                                     Offsite auto-discount (%)
@@ -10699,6 +10820,27 @@ export default function ScheduleDesignWizard({
             <button
               type="button"
               onClick={async () => {
+                setIsRegeneratingProgram(true);
+                const result = await regenerateProgramFromSetup(conferenceId, {
+                  replaceExisting: true,
+                });
+                setIsRegeneratingProgram(false);
+                if (!result.success) {
+                  setSaveError(result.error ?? "Failed to regenerate program from setup.");
+                  return;
+                }
+                setSaveSuccess(
+                  `Program regenerated from setup (${result.data?.created ?? 0} item(s)).`
+                );
+              }}
+              disabled={isRegeneratingProgram}
+              className="inline-flex rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+            >
+              {isRegeneratingProgram ? "Regenerating..." : "Regenerate Program from Setup"}
+            </button>
+            <button
+              type="button"
+              onClick={async () => {
                 setIsReconcilingSetup(true);
                 const result = await reconcileConferenceScheduleSetup(conferenceId);
                 setIsReconcilingSetup(false);
@@ -10852,7 +10994,7 @@ export default function ScheduleDesignWizard({
             type="button"
             onClick={nextStep}
             disabled={isSaving || (step === maxStep)}
-            className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+            className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
           >
             {isSaving
               ? "Saving..."

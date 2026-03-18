@@ -33,7 +33,7 @@ export default function OrgHighlight({ organization }: OrgHighlightProps) {
           <div className={`p-8 flex flex-col justify-center ${
             organization.highlight_photo ? "md:w-1/2" : "w-full"
           }`}>
-            <span className="text-sm font-medium text-[#D60001] uppercase tracking-wider mb-2">
+            <span className="text-sm font-medium text-[#EE2A2E] uppercase tracking-wider mb-2">
               Featured
             </span>
             <h3 className="text-2xl font-bold text-[#1A1A1A] mb-3">

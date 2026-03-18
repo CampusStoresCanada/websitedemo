@@ -145,7 +145,7 @@ export default function ContentManager({
             setShowAddForm(true);
             setEditingId(null);
           }}
-          className="mb-6 px-4 py-2 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+          className="mb-6 px-4 py-2 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
         >
           + Add {label}
         </button>

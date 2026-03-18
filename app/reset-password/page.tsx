@@ -84,7 +84,7 @@ function ResetPasswordContent() {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
         <div className="text-center">
-          <div className="w-8 h-8 border-2 border-gray-300 border-t-[#D60001] rounded-full animate-spin mx-auto mb-4" />
+          <div className="w-8 h-8 border-2 border-gray-300 border-t-[#EE2A2E] rounded-full animate-spin mx-auto mb-4" />
           <p className="text-gray-600">Verifying reset link...</p>
         </div>
       </div>
@@ -121,7 +121,7 @@ function ResetPasswordContent() {
               </p>
               <Link
                 href="/forgot-password"
-                className="inline-block py-2.5 px-6 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+                className="inline-block py-2.5 px-6 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
               >
                 Request New Link
               </Link>
@@ -202,7 +202,7 @@ function ResetPasswordContent() {
                 required
                 minLength={8}
                 autoComplete="new-password"
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
                 placeholder="At least 8 characters"
               />
             </div>
@@ -221,14 +221,14 @@ function ResetPasswordContent() {
                 required
                 minLength={8}
                 autoComplete="new-password"
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
                 placeholder="Confirm your password"
               />
             </div>
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? "Updating..." : "Update Password"}
             </button>
@@ -244,7 +244,7 @@ function LoadingFallback() {
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
       <div className="text-center">
-        <div className="w-8 h-8 border-2 border-gray-300 border-t-[#D60001] rounded-full animate-spin mx-auto mb-4" />
+        <div className="w-8 h-8 border-2 border-gray-300 border-t-[#EE2A2E] rounded-full animate-spin mx-auto mb-4" />
         <p className="text-gray-600">Loading...</p>
       </div>
     </div>

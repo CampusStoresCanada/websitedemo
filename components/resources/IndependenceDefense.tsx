@@ -23,26 +23,26 @@ export default function IndependenceDefense() {
               </p>
               <ul className="space-y-3 text-[#9B9B9B] mb-8">
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#D60001] flex-shrink-0" />
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#EE2A2E] flex-shrink-0" />
                   Peer consultation with stores that have navigated similar
                   challenges
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#D60001] flex-shrink-0" />
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#EE2A2E] flex-shrink-0" />
                   Template business cases and advocacy materials
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#D60001] flex-shrink-0" />
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#EE2A2E] flex-shrink-0" />
                   Data-backed arguments for campus-operated stores
                 </li>
                 <li className="flex items-start gap-2">
-                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#D60001] flex-shrink-0" />
+                  <span className="mt-1.5 w-1.5 h-1.5 rounded-full bg-[#EE2A2E] flex-shrink-0" />
                   Confidential support network of experienced leaders
                 </li>
               </ul>
               <Link
                 href="/login"
-                className="inline-flex h-12 px-6 items-center bg-[#D60001] hover:bg-[#B00001] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
+                className="inline-flex h-12 px-6 items-center bg-[#EE2A2E] hover:bg-[#D92327] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
               >
                 Access IDN Resources
               </Link>
@@ -51,7 +51,7 @@ export default function IndependenceDefense() {
             <div className="hidden lg:flex items-center justify-center">
               <div className="w-48 h-48 rounded-full bg-white/5 flex items-center justify-center">
                 <svg
-                  className="w-24 h-24 text-[#D60001]/60"
+                  className="w-24 h-24 text-[#EE2A2E]/60"
                   fill="none"
                   stroke="currentColor"
                   viewBox="0 0 24 24"

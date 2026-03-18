@@ -116,7 +116,7 @@ export default function BadgeSetupWizardStub({
           onClick={() => setStep(1)}
           className={`rounded-md border px-3 py-2 text-sm font-medium ${
             step === 1
-              ? "border-[#D60001] bg-red-50 text-[#D60001]"
+              ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
               : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
           }`}
         >
@@ -127,7 +127,7 @@ export default function BadgeSetupWizardStub({
           onClick={() => setStep(2)}
           className={`rounded-md border px-3 py-2 text-sm font-medium ${
             step === 2
-              ? "border-[#D60001] bg-red-50 text-[#D60001]"
+              ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
               : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
           }`}
         >
@@ -138,7 +138,7 @@ export default function BadgeSetupWizardStub({
           onClick={() => setStep(3)}
           className={`rounded-md border px-3 py-2 text-sm font-medium ${
             step === 3
-              ? "border-[#D60001] bg-red-50 text-[#D60001]"
+              ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
               : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
           }`}
         >
@@ -308,7 +308,7 @@ export default function BadgeSetupWizardStub({
 
         <button
           type="submit"
-          className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+          className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
         >
           Save Setup Draft
         </button>

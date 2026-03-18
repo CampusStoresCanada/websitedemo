@@ -10,7 +10,7 @@ function StatusBadge({ status }: { status: string }) {
     draft: "bg-gray-100 text-gray-700",
     registration_open: "bg-green-100 text-green-700",
     registration_closed: "bg-yellow-100 text-yellow-700",
-    scheduling: "bg-blue-100 text-blue-700",
+    scheduling: "bg-blue-100 text-[#D92327]",
     active: "bg-purple-100 text-purple-700",
     completed: "bg-gray-100 text-gray-600",
     archived: "bg-gray-50 text-gray-400",
@@ -44,7 +44,7 @@ export default async function ConferenceListPage() {
         <h1 className="text-2xl font-bold text-gray-900">Conferences</h1>
         <Link
           href="/admin/conference/create"
-          className="px-4 py-2 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001]"
+          className="px-4 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
         >
           Create Conference
         </Link>
@@ -55,7 +55,7 @@ export default async function ConferenceListPage() {
           <p className="text-gray-500">No conferences yet.</p>
           <Link
             href="/admin/conference/create"
-            className="text-[#D60001] hover:underline text-sm mt-2 inline-block"
+            className="text-[#EE2A2E] hover:underline text-sm mt-2 inline-block"
           >
             Create your first conference
           </Link>
@@ -103,7 +103,7 @@ export default async function ConferenceListPage() {
                   <td className="px-4 py-3 text-right">
                     <Link
                       href={`/admin/conference/${conf.id}`}
-                      className="text-sm text-[#D60001] hover:underline"
+                      className="text-sm text-[#EE2A2E] hover:underline"
                     >
                       Manage
                     </Link>

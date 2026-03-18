@@ -8,10 +8,12 @@ export type ProductRuleRow =
 
 export interface EligibilityContext {
   orgTypeNormalized: "member" | "vendor_partner" | "unknown";
+  membershipStatus: string | null;
   conferenceId: string;
   organizationId: string;
   userId: string;
   registrationTypes: Set<string>;
+  registrationCount: number;
   cartItemsBySlug: Map<string, number>;
   paidOrderItemsBySlug: Map<string, number>;
 }
@@ -37,6 +39,7 @@ export function buildEligibilityContext(params: {
   organizationId: string;
   userId: string;
   organizationType: string | null;
+  membershipStatus: string | null;
   registrationTypes: string[];
   cartItems: Array<{ slug: string; quantity: number }>;
   paidOrderItems: Array<{ slug: string; quantity: number }>;
@@ -56,10 +59,12 @@ export function buildEligibilityContext(params: {
 
   return {
     orgTypeNormalized: normalizeOrgType(params.organizationType),
+    membershipStatus: params.membershipStatus,
     conferenceId: params.conferenceId,
     organizationId: params.organizationId,
     userId: params.userId,
     registrationTypes: new Set(params.registrationTypes),
+    registrationCount: params.registrationTypes.length,
     cartItemsBySlug,
     paidOrderItemsBySlug,
   };
@@ -118,6 +123,54 @@ export function checkProductEligibility(params: {
 
     if (rule.rule_type === "custom") {
       const expression = (config as { expression?: string }).expression;
+      if (expression === "dsl_v1") {
+        const dsl =
+          config.dsl_v1 && typeof config.dsl_v1 === "object" && !Array.isArray(config.dsl_v1)
+            ? (config.dsl_v1 as Record<string, unknown>)
+            : null;
+        if (!dsl) continue;
+
+        const dataField = String(dsl.data_field ?? "");
+        const logic = String(dsl.logic ?? "equals");
+        const rawExpected = dsl.value;
+        const outcome = String(dsl.outcome ?? "block_purchase");
+
+        let actualValue: string | number | boolean | null = null;
+        if (dataField === "org.membership_status") {
+          actualValue = params.context.membershipStatus;
+        } else if (dataField === "org.type") {
+          actualValue = params.context.orgTypeNormalized;
+        } else if (dataField === "org.registration_count") {
+          actualValue = params.context.registrationCount;
+        } else if (dataField === "org.has_any_registration") {
+          actualValue = params.context.registrationCount > 0;
+        }
+
+        const expectedString = String(rawExpected ?? "");
+        const expectedNumber = Number(rawExpected);
+        const expectedBoolean =
+          expectedString.toLowerCase() === "true"
+            ? true
+            : expectedString.toLowerCase() === "false"
+              ? false
+              : null;
+
+        let matched = false;
+        if (logic === "is_true") matched = actualValue === true;
+        else if (logic === "is_false") matched = actualValue === false;
+        else if (logic === "equals") matched = String(actualValue ?? "") === expectedString;
+        else if (logic === "not_equals") matched = String(actualValue ?? "") !== expectedString;
+        else if (logic === "gte")
+          matched = Number.isFinite(expectedNumber) && Number(actualValue ?? NaN) >= expectedNumber;
+        else if (logic === "lte")
+          matched = Number.isFinite(expectedNumber) && Number(actualValue ?? NaN) <= expectedNumber;
+        else if (expectedBoolean != null) matched = actualValue === expectedBoolean;
+
+        if (matched && outcome === "block_purchase") {
+          errors.push(rule.error_message || "Eligibility rule blocked this purchase.");
+        }
+        continue;
+      }
       if (expression === "attendance_commit_required=true") {
         const hasDelegateRegistration =
           params.context.registrationTypes.has("delegate") ||
@@ -126,6 +179,26 @@ export function checkProductEligibility(params: {
           errors.push(
             rule.error_message ||
               "This product requires an attendance commitment registration."
+          );
+        }
+      } else if (expression === "any_registration_required=true") {
+        if (params.context.registrationCount <= 0) {
+          errors.push(
+            rule.error_message ||
+              "At least one conference registration is required for this product."
+          );
+        }
+      } else if (expression === "membership_active_required=true") {
+        if (params.context.membershipStatus !== "active") {
+          errors.push(rule.error_message || "Active membership is required for this product.");
+        }
+      } else if (expression === "membership_or_partner_required=true") {
+        const hasMembership = params.context.membershipStatus === "active";
+        const isPartnerOrg = params.context.orgTypeNormalized === "vendor_partner";
+        if (!hasMembership && !isPartnerOrg) {
+          errors.push(
+            rule.error_message ||
+              "Active membership or partner organization status is required for this product."
           );
         }
       }

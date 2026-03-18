@@ -113,7 +113,7 @@ export default function ProductsClient({
   return (
     <section className="space-y-4">
       <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-xs text-gray-600">
-        Buying as <strong>{selectedOrganizationType ?? "organization"}</strong>. Eligibility is enforced at add-to-cart and checkout.
+        Buying as <strong>{selectedOrganizationType ?? "organization"}</strong>. Ineligible products are hidden automatically for this organization.
       </div>
 
       {partnerMeetingProduct && isVendorPartner ? (
@@ -165,7 +165,7 @@ export default function ProductsClient({
       <div className="grid gap-4 md:grid-cols-2">
         {products.map((product) => {
           const quantity = Math.max(1, quantities[product.id] ?? 1);
-          const disabled = product.eligibilityErrors.length > 0 || isPending;
+          const disabled = isPending;
           const remaining =
             product.capacity === null ? null : Math.max(0, product.capacity - product.current_sold);
 
@@ -201,21 +201,12 @@ export default function ProductsClient({
                 <button
                   onClick={() => handleAddToCart(product)}
                   disabled={disabled}
-                  className="ml-auto rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
+                  className="ml-auto rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   {isPending ? "Adding..." : "Add to Cart"}
                 </button>
               </div>
 
-              {product.eligibilityErrors.length > 0 ? (
-                <ul className="mt-3 space-y-1 rounded-md border border-amber-200 bg-amber-50 p-2">
-                  {product.eligibilityErrors.map((eligibilityError) => (
-                    <li key={eligibilityError} className="text-xs text-amber-800">
-                      {eligibilityError}
-                    </li>
-                  ))}
-                </ul>
-              ) : null}
             </article>
           );
         })}

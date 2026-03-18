@@ -8,6 +8,7 @@ import {
   finalizeAndSendInvoice,
 } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
+import { sendTransactional } from "@/lib/comms/send";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -320,8 +321,20 @@ export async function renewalReminderRun(): Promise<JobResult> {
             });
           }
 
-          // TODO(chunk-22): send renewal reminder email via communications system
-          // Parameters needed: org.name, org.email, reminderDay, invoiceUrl
+          if (org.email) {
+            await sendTransactional({
+              templateKey: "renewal_reminder",
+              to: org.email,
+              variables: {
+                contact_name: org.name,
+                org_name: org.name,
+                renewal_date: org.membership_expires_at?.split("T")[0] ?? "",
+                days_until_expiry: reminderDay,
+                invoice_amount: "",
+                invoice_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+              },
+            });
+          }
 
           // Record reminder event
           await recordEvent(db, org.id, renewalYear, eventType, invoiceId, {
@@ -538,8 +551,17 @@ export async function renewalChargeRun(): Promise<JobResult> {
               { error: stripeMsg }
             );
 
-            // TODO(chunk-22): send charge failed notification via communications system
-            // Parameters needed: org.name, org.email, invoiceUrl
+            if (org.email) {
+              await sendTransactional({
+                templateKey: "renewal_charge_failed",
+                to: org.email,
+                variables: {
+                  contact_name: org.name,
+                  org_name: org.name,
+                  payment_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                },
+              });
+            }
           }
         } else {
           // No saved payment method
@@ -733,8 +755,17 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               grace_days_policy: graceDays,
             });
 
-            // TODO(chunk-22): send access locked notification via communications system
-            // Parameters needed: org.name, org.email, reactivationUrl
+            if (org.email) {
+              await sendTransactional({
+                templateKey: "membership_locked",
+                to: org.email,
+                variables: {
+                  contact_name: org.name,
+                  org_name: org.name,
+                  admin_contact_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/contact`,
+                },
+              });
+            }
 
             succeeded++;
           } else {
@@ -755,8 +786,18 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               days_remaining: Math.ceil(graceDays - daysInGrace),
             });
 
-            // TODO(chunk-22): send grace period warning via communications system
-            // Parameters needed: org.name, org.email, daysRemaining, invoiceUrl
+            if (org.email) {
+              await sendTransactional({
+                templateKey: "grace_weekly_reminder",
+                to: org.email,
+                variables: {
+                  contact_name: org.name,
+                  org_name: org.name,
+                  grace_days_remaining: Math.ceil(graceDays - daysInGrace),
+                  payment_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                },
+              });
+            }
           }
 
           succeeded++;

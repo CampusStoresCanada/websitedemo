@@ -215,7 +215,7 @@ export function RenewalStatusCard({
                     href={renewalInvoice.stripeInvoiceUrl}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="text-xs font-medium text-[#D60001] hover:text-[#B00001] underline"
+                    className="text-xs font-medium text-[#EE2A2E] hover:text-[#D92327] underline"
                   >
                     Pay Now
                   </a>

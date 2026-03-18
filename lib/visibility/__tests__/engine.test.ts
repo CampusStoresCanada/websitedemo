@@ -33,6 +33,27 @@ describe("visibility engine", () => {
     ).toBe(true);
   });
 
+  it("allows private fields for authenticated viewers", () => {
+    expect(
+      isFieldVisible("contacts.work_email", "authenticated", config, "Member")
+    ).toBe(true);
+    expect(
+      isFieldVisible("contacts.work_email", "org_admin", config, "Member")
+    ).toBe(true);
+    expect(
+      isFieldVisible("contacts.work_email", "member", config, "Member")
+    ).toBe(true);
+    expect(
+      isFieldVisible("contacts.work_email", "partner", config, "Vendor Partner")
+    ).toBe(true);
+  });
+
+  it("keeps private fields hidden for public viewers", () => {
+    expect(
+      isFieldVisible("contacts.work_email", "public", config, "Member")
+    ).toBe(false);
+  });
+
   it("masks private contact name for public viewers", () => {
     const masked = applyFieldMask(
       {

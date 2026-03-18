@@ -20,7 +20,7 @@ const MapComponent = dynamic(() => import("./Map"), {
   loading: () => (
     <div className="w-full h-full bg-gradient-to-br from-slate-100 via-slate-50 to-slate-200 flex items-center justify-center">
       <div className="flex items-center gap-3">
-        <div className="w-6 h-6 border-2 border-[#D60001] border-t-transparent rounded-full animate-spin" />
+        <div className="w-6 h-6 border-2 border-[#EE2A2E] border-t-transparent rounded-full animate-spin" />
         <span className="text-[#6B6B6B]">Loading map...</span>
       </div>
     </div>
@@ -728,7 +728,7 @@ export default function MapHero({
         ].join(" ")}
       >
         {/* Gradient overlay for readability */}
-        <div className="absolute inset-0 bg-gradient-to-t from-white via-white/75 to-white/15 pointer-events-none" />
+        <div className="absolute inset-0 bg-gradient-to-t from-white/80 via-white/35 to-transparent pointer-events-none" />
 
         {/* Story card — top right */}
         {story && (
@@ -834,7 +834,7 @@ export default function MapHero({
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link
                   href="/members"
-                  className="h-14 px-8 bg-[#D60001] hover:bg-[#B00001] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 inline-flex items-center justify-center"
+                  className="h-14 px-8 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 inline-flex items-center justify-center"
                 >
                   Explore Members
                 </Link>
@@ -873,7 +873,7 @@ export default function MapHero({
                 <button
                   type="button"
                   onClick={goHome}
-                  className="flex-shrink-0 text-gray-400 hover:text-[#D60001] transition-colors"
+                  className="flex-shrink-0 text-gray-400 hover:text-[#EE2A2E] transition-colors"
                   title="Back to Explore menu"
                 >
                   <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -900,7 +900,7 @@ export default function MapHero({
                       <button
                         type="button"
                         onClick={crumb.action}
-                        className="text-sm text-gray-500 hover:text-[#D60001] transition-colors truncate max-w-[120px]"
+                        className="text-sm text-gray-500 hover:text-[#EE2A2E] transition-colors truncate max-w-[120px]"
                       >
                         {crumb.label}
                       </button>
@@ -964,7 +964,7 @@ export default function MapHero({
                     setScaleFilter(null);
                   }
                 }}
-                className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#D60001] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#D60001] transition-colors"
+                className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#EE2A2E] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] transition-colors"
               />
               {searchQuery && (
                 <button
@@ -1012,7 +1012,7 @@ export default function MapHero({
             <button
               type="button"
               onClick={goBack}
-              className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#D60001] transition-colors"
+              className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-[#EE2A2E] transition-colors"
             >
               <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
@@ -1023,7 +1023,7 @@ export default function MapHero({
             <button
               type="button"
               onClick={goHome}
-              className="text-sm text-gray-500 hover:text-[#D60001] transition-colors"
+              className="text-sm text-gray-500 hover:text-[#EE2A2E] transition-colors"
             >
               All lenses
             </button>
@@ -1095,7 +1095,7 @@ export default function MapHero({
                       className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
                     >
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                           {category}
                         </p>
                         <div className="flex items-center gap-2">
@@ -1136,7 +1136,7 @@ export default function MapHero({
                   >
                     <div className="flex items-center justify-between">
                       <div>
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                           {range.label} FTE
                         </p>
                         <p className="text-xs text-gray-500 mt-0.5">{range.description}</p>
@@ -1186,7 +1186,7 @@ export default function MapHero({
                       className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-gray-300 hover:bg-gray-50 transition-colors group"
                     >
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                           {system}
                         </p>
                         <div className="flex items-center gap-2">
@@ -1232,7 +1232,7 @@ export default function MapHero({
                       className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-gray-300 hover:bg-gray-50 transition-colors group"
                     >
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                           {service}
                         </p>
                         <div className="flex items-center gap-2">
@@ -1278,7 +1278,7 @@ export default function MapHero({
                       className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-gray-300 hover:bg-gray-50 transition-colors group"
                     >
                       <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                           {mandate}
                         </p>
                         <div className="flex items-center gap-2">
@@ -1420,12 +1420,12 @@ function DiscoveryMenu({
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-red-50 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-[#D60001]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-[#EE2A2E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M12 21v-8.25M15.75 21v-8.25M8.25 21v-8.25M3 9l9-6 9 6m-1.5 12V10.332A48.36 48.36 0 0012 9.75c-2.551 0-5.056.2-7.5.582V21" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 group-hover:text-[#D60001] transition-colors">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                     Campus Stores
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -1447,12 +1447,12 @@ function DiscoveryMenu({
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-[#EE2A2E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M20.25 14.15v4.25c0 1.094-.787 2.036-1.872 2.18-2.087.277-4.216.42-6.378.42s-4.291-.143-6.378-.42c-1.085-.144-1.872-1.086-1.872-2.18v-4.25m16.5 0a2.18 2.18 0 00.75-1.661V8.706c0-1.081-.768-2.015-1.837-2.175a48.114 48.114 0 00-3.413-.387m4.5 8.006c-.194.165-.42.295-.673.38A23.978 23.978 0 0112 15.75c-2.648 0-5.195-.429-7.577-1.22a2.016 2.016 0 01-.673-.38m0 0A2.18 2.18 0 013 12.489V8.706c0-1.081.768-2.015 1.837-2.175a48.111 48.111 0 013.413-.387m7.5 0V5.25A2.25 2.25 0 0013.5 3h-3a2.25 2.25 0 00-2.25 2.25v.894m7.5 0a48.667 48.667 0 00-7.5 0M12 12.75h.008v.008H12v-.008z" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                     Industry Partners
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -1601,13 +1601,13 @@ function DiscoveryMenu({
             >
               <div className="flex items-center gap-3">
                 <div className="w-10 h-10 rounded-lg bg-blue-50 flex items-center justify-center flex-shrink-0">
-                  <svg className="w-5 h-5 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <svg className="w-5 h-5 text-[#EE2A2E]" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M3.75 6A2.25 2.25 0 016 3.75h12A2.25 2.25 0 0120.25 6v12A2.25 2.25 0 0118 20.25H6A2.25 2.25 0 013.75 18V6z" />
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M8.25 8.25h7.5M8.25 12h7.5M8.25 15.75h4.5" />
                   </svg>
                 </div>
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-gray-900 group-hover:text-blue-600 transition-colors">
+                  <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
                     By Partner Category
                   </p>
                   <p className="text-xs text-gray-500 mt-0.5">
@@ -1700,7 +1700,7 @@ function OrgList({
               </div>
             )}
             <div className="min-w-0 flex-1">
-              <p className="text-sm font-medium text-gray-900 truncate group-hover:text-[#D60001] transition-colors">
+              <p className="text-sm font-medium text-gray-900 truncate group-hover:text-[#EE2A2E] transition-colors">
                 {org.name}
               </p>
               <p className="text-xs text-gray-500 truncate">

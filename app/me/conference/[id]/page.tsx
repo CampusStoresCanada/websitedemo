@@ -8,6 +8,10 @@ import {
   computeConferenceReadiness,
   type ConferenceReadinessSnapshot,
 } from "@/lib/conference/readiness";
+import {
+  buildAttendeeMeetingRows,
+  getConferenceScheduleTimeline,
+} from "@/lib/conference/schedule-service";
 
 type ConferencePersonRow = {
   id: string;
@@ -43,13 +47,7 @@ type NextMeeting = {
   suiteNumber: number | null;
 } | null;
 
-function toNullable(value: FormDataEntryValue | null): string | null {
-  if (typeof value !== "string") return null;
-  const trimmed = value.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function formatTime(time: string): string {
+function formatMeetingTime(time: string): string {
   const [hours, minutes] = time.split(":");
   const h = Number(hours);
   const suffix = h >= 12 ? "PM" : "AM";
@@ -57,85 +55,22 @@ function formatTime(time: string): string {
   return `${hour12}:${minutes} ${suffix}`;
 }
 
+function toNullable(value: FormDataEntryValue | null): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
 async function loadNextMeeting(params: {
   conferenceId: string;
   registrationId: string;
 }): Promise<NextMeeting> {
-  const adminClient = createAdminClient();
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const ac = adminClient as any;
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: activeRun } = (await ac
-    .from("scheduler_runs")
-    .select("id")
-    .eq("conference_id", params.conferenceId)
-    .eq("run_mode", "active")
-    .eq("status", "completed")
-    .maybeSingle()) as { data: any };
-
-  if (!activeRun?.id) return null;
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: schedules } = (await ac
-    .from("schedules")
-    .select("meeting_slot_id, exhibitor_registration_id")
-    .eq("conference_id", params.conferenceId)
-    .eq("scheduler_run_id", activeRun.id)
-    .contains("delegate_registration_ids", [params.registrationId])
-    .neq("status", "canceled")) as { data: any[] | null };
-
-  if (!schedules || schedules.length === 0) return null;
-
-  const meetingSlotIds = [...new Set(schedules.map((row) => row.meeting_slot_id))];
-  const exhibitorRegIds = [...new Set(schedules.map((row) => row.exhibitor_registration_id))];
-
-  const [{ data: meetingSlots }, { data: exhibitorRegs }] = (await Promise.all([
-    ac
-      .from("meeting_slots")
-      .select("id, day_number, slot_number, start_time, end_time, suite_id")
-      .in("id", meetingSlotIds),
-    ac
-      .from("conference_registrations")
-      .select("id, organization_id")
-      .in("id", exhibitorRegIds),
-  ])) as [{ data: any[] | null }, { data: any[] | null }];
-
-  const suiteIds = [...new Set((meetingSlots ?? []).map((slot: any) => slot.suite_id))];
-  const orgIds = [...new Set((exhibitorRegs ?? []).map((reg: any) => reg.organization_id))];
-  const [{ data: suites }, { data: organizations }] = (await Promise.all([
-    ac.from("conference_suites").select("id, suite_number").in("id", suiteIds),
-    ac.from("organizations").select("id, name").in("id", orgIds),
-  ])) as [{ data: any[] | null }, { data: any[] | null }];
-
-  const slotById = new Map((meetingSlots ?? []).map((slot) => [slot.id, slot] as const));
-  const exhibitorByRegId = new Map((exhibitorRegs ?? []).map((row) => [row.id, row] as const));
-  const suiteById = new Map((suites ?? []).map((suite) => [suite.id, suite] as const));
-  const orgById = new Map((organizations ?? []).map((org) => [org.id, org] as const));
-
-  const meetings = schedules
-    .map((row) => {
-      const slot = slotById.get(row.meeting_slot_id);
-      const exhibitorReg = exhibitorByRegId.get(row.exhibitor_registration_id);
-      if (!slot || !exhibitorReg) return null;
-      const exhibitorOrg = orgById.get(exhibitorReg.organization_id);
-      const suite = suiteById.get(slot.suite_id);
-      return {
-        exhibitorName: exhibitorOrg?.name ?? "Unknown exhibitor",
-        dayNumber: slot.day_number,
-        slotNumber: slot.slot_number,
-        startTime: formatTime(slot.start_time),
-        endTime: formatTime(slot.end_time),
-        suiteNumber: suite?.suite_number ?? null,
-      };
-    })
-    .filter((meeting): meeting is NonNullable<typeof meeting> => Boolean(meeting))
-    .sort((a, b) => {
-      if (a.dayNumber !== b.dayNumber) return a.dayNumber - b.dayNumber;
-      if (a.slotNumber !== b.slotNumber) return a.slotNumber - b.slotNumber;
-      return a.exhibitorName.localeCompare(b.exhibitorName);
-    });
-
-  return meetings[0] ?? null;
+  const timeline = await getConferenceScheduleTimeline(params.conferenceId, {
+    viewerRole: "delegate",
+    viewerRegistrationId: params.registrationId,
+    viewerMeetingRole: "delegate",
+  });
+  return buildAttendeeMeetingRows(timeline)[0] ?? null;
 }
 
 export const dynamic = "force-dynamic";
@@ -168,7 +103,10 @@ export default async function MyConferencePage({
       .eq("user_id", auth.ctx.userId)
       .neq("assignment_status", "canceled")
       .order("updated_at", { ascending: false }),
-  ])) as [{ data: any }, { data: any[] | null }];
+  ])) as [
+    { data: { id: string; name: string; year: number; edition_code: string } | null },
+    { data: ConferencePersonRow[] | null },
+  ];
 
   if (!conference) {
     return <main className="max-w-5xl mx-auto px-4 py-8">Conference not found.</main>;
@@ -243,7 +181,7 @@ export default async function MyConferencePage({
           </Link>
           <Link
             href={scheduleHref}
-            className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+            className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
           >
             View Full Schedule
           </Link>
@@ -277,7 +215,7 @@ export default async function MyConferencePage({
         {nextMeeting ? (
           <p className="mt-2 text-sm text-gray-700">
             Day {nextMeeting.dayNumber}, Slot {nextMeeting.slotNumber}: {nextMeeting.exhibitorName} (
-            {nextMeeting.startTime} - {nextMeeting.endTime})
+            {formatMeetingTime(nextMeeting.startTime)} - {formatMeetingTime(nextMeeting.endTime)})
             {nextMeeting.suiteNumber ? ` • Suite ${nextMeeting.suiteNumber}` : ""}
           </p>
         ) : (
@@ -398,7 +336,7 @@ export default async function MyConferencePage({
           <div className="sm:col-span-2">
             <button
               type="submit"
-              className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+              className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
             >
               Save Preferences
             </button>

@@ -51,7 +51,7 @@ export const STATUS_META: Record<OrgMembershipStatus, {
   textClass: string   // full text class
 }> = {
   applied:     { label: 'Applied',     color: 'gray',   bgClass: 'bg-gray-100',   textClass: 'text-gray-700'   },
-  approved:    { label: 'Approved',    color: 'blue',   bgClass: 'bg-blue-100',   textClass: 'text-blue-700'   },
+  approved:    { label: 'Approved',    color: 'blue',   bgClass: 'bg-blue-100',   textClass: 'text-[#D92327]'   },
   active:      { label: 'Active',      color: 'green',  bgClass: 'bg-green-100',  textClass: 'text-green-700'  },
   grace:       { label: 'Grace Period', color: 'yellow', bgClass: 'bg-yellow-100', textClass: 'text-yellow-700' },
   locked:      { label: 'Locked',      color: 'red',    bgClass: 'bg-red-100',    textClass: 'text-red-700'    },

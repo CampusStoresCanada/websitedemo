@@ -47,7 +47,7 @@ export default async function RootLayout({
             <main className="min-h-screen">{children}</main>
             <Footer />
             {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
-            <Toolkit />
+            <Toolkit googleMapsApiKey={process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null} />
           </ToolkitProvider>
         </AuthProvider>
       </body>

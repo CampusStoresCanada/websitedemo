@@ -97,7 +97,7 @@ export default function SubmissionsTable({ submissions, fiscalYear }: Submission
                 >
                   {col.label}
                   {sortBy === col.key && (
-                    <span className="ml-1 text-[#D60001]">&#9662;</span>
+                    <span className="ml-1 text-[#EE2A2E]">&#9662;</span>
                   )}
                 </th>
               ))}
@@ -122,7 +122,7 @@ export default function SubmissionsTable({ submissions, fiscalYear }: Submission
                           {s.organizationName}
                         </span>
                         {s.verifiedBy && (
-                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-blue-700">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-blue-100 text-[#D92327]">
                             Verified
                           </span>
                         )}
@@ -156,7 +156,7 @@ export default function SubmissionsTable({ submissions, fiscalYear }: Submission
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/benchmarking/admin/submissions/${s.id}`}
-                        className="text-xs text-[#D60001] hover:underline font-medium"
+                        className="text-xs text-[#EE2A2E] hover:underline font-medium"
                       >
                         View
                       </Link>

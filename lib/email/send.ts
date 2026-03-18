@@ -1,8 +1,9 @@
 import { Resend } from "resend";
+import { wrapEmailBody } from "./layout";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_ADDRESS = "Campus Stores Canada <noreply@campusstorescanada.ca>";
+const FROM_ADDRESS = "Campus Stores Canada <noreply@campusstores.ca>";
 
 interface SendEmailOptions {
   to: string;
@@ -11,13 +12,21 @@ interface SendEmailOptions {
   replyTo?: string;
 }
 
-export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; error?: string }> {
+export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; error?: string; messageId?: string }> {
+  // In development, intercept all outgoing email and redirect to the dev address.
+  // Set DEV_EMAIL_INTERCEPT=you@example.com in .env.local to enable.
+  const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const to = intercept ?? options.to;
+  const subject = intercept
+    ? `[DEV → ${options.to}] ${options.subject}`
+    : options.subject;
+
   try {
-    const { error } = await resend.emails.send({
+    const { data, error } = await resend.emails.send({
       from: FROM_ADDRESS,
-      to: options.to,
-      subject: options.subject,
-      html: options.html,
+      to,
+      subject,
+      html: wrapEmailBody(options.html),
       replyTo: options.replyTo,
     });
 
@@ -26,7 +35,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       return { success: false, error: error.message };
     }
 
-    return { success: true };
+    return { success: true, messageId: data?.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown email error";
     console.error("Email send exception:", msg);
@@ -77,7 +86,7 @@ export function applicationReceivedEmail(
         <p>Your ${typeLabel.toLowerCase()} application has been received and is under review.
            We'll be in touch once our team has reviewed your application.</p>
         <p>If you have questions, reply to this email or contact us at
-           <a href="mailto:info@campusstorescanada.ca">info@campusstorescanada.ca</a>.</p>
+           <a href="mailto:info@campusstores.ca">info@campusstores.ca</a>.</p>
       </div>
     `,
   };
@@ -151,7 +160,7 @@ export function applicationRejectedEmail(
            we're unable to approve it at this time.</p>
         ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
         <p>If you have questions or would like to discuss this further, please contact us at
-           <a href="mailto:info@campusstorescanada.ca">info@campusstorescanada.ca</a>.</p>
+           <a href="mailto:info@campusstores.ca">info@campusstores.ca</a>.</p>
       </div>
     `,
   };

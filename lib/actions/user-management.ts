@@ -13,6 +13,7 @@ import {
   linkUserToPerson,
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
+import { sendTransactional } from "@/lib/comms/send";
 
 // ─────────────────────────────────────────────────────────────────
 // Invite a new user to an organization
@@ -46,7 +47,7 @@ export async function inviteOrgUser(
   try {
     const { data: orgRow } = await adminClient
       .from("organizations")
-      .select("id, tenant_id")
+      .select("id, name, tenant_id")
       .eq("id", orgId)
       .maybeSingle();
 
@@ -116,7 +117,11 @@ export async function inviteOrgUser(
           return { success: false, error: "Failed to reactivate user membership" };
         }
 
-        // TODO(chunk-22): send "added back to org" notification email
+        sendTransactional({
+          templateKey: "org_user_added_to_org",
+          to: normalizedEmail,
+          variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
+        }).catch(() => {});
         return { success: true };
       }
     } else {
@@ -190,7 +195,11 @@ export async function inviteOrgUser(
       idempotencyKey: `invite:${userId}:${orgId}`,
     });
 
-    // TODO(chunk-22): send invite/welcome email via communications system
+    sendTransactional({
+      templateKey: "org_user_added_to_org",
+      to: normalizedEmail,
+      variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {
@@ -298,7 +307,20 @@ export async function deactivateOrgUser(
       },
     });
 
-    // TODO(chunk-22): send deactivation notification email
+    // Fire-and-forget: look up user email + org name for notification
+    Promise.all([
+      adminClient.auth.admin.getUserById(userId),
+      adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+    ]).then(([{ data: userRes }, { data: orgRes }]) => {
+      const email = userRes?.user?.email;
+      if (email) {
+        sendTransactional({
+          templateKey: "org_user_deactivated",
+          to: email,
+          variables: { user_name: email, org_name: orgRes?.name ?? orgId },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {
@@ -366,7 +388,19 @@ export async function reactivateOrgUser(
       idempotencyKey: `reactivate:${userId}:${orgId}:${Date.now()}`,
     });
 
-    // TODO(chunk-22): send reactivation notification email
+    Promise.all([
+      adminClient.auth.admin.getUserById(userId),
+      adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+    ]).then(([{ data: userRes }, { data: orgRes }]) => {
+      const email = userRes?.user?.email;
+      if (email) {
+        sendTransactional({
+          templateKey: "org_user_reactivated",
+          to: email,
+          variables: { user_name: email, org_name: orgRes?.name ?? orgId },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {
@@ -469,7 +503,24 @@ export async function changeOrgUserRole(
       },
     });
 
-    // TODO(chunk-22): send role change notification email
+    Promise.all([
+      adminClient.auth.admin.getUserById(userId),
+      adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+    ]).then(([{ data: userRes }, { data: orgRes }]) => {
+      const email = userRes?.user?.email;
+      if (email) {
+        sendTransactional({
+          templateKey: "org_user_role_changed",
+          to: email,
+          variables: {
+            user_name: email,
+            org_name: orgRes?.name ?? orgId,
+            old_role: membership.role,
+            new_role: newRole,
+          },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {

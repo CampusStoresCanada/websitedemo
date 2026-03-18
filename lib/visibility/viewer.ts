@@ -22,7 +22,7 @@ function deriveViewerLevel(ctx: AuthContext): ViewerLevel {
   if (globalRole === "super_admin") return "super_admin";
   if (globalRole === "admin") return "admin";
 
-  return "public";
+  return "authenticated";
 }
 
 /** Anonymous viewer — no auth required */
@@ -48,7 +48,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
 
   let viewerLevel = deriveViewerLevel(ctx);
 
-  if (viewerLevel === "public" && ctx.activeOrgIds.length > 0) {
+  if (viewerLevel === "authenticated" && ctx.activeOrgIds.length > 0) {
     const { data: orgTypes } = await ctx.supabase
       .from("organizations")
       .select("id, type")

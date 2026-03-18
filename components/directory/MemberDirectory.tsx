@@ -76,7 +76,7 @@ export default function MemberDirectory({ members }: MemberDirectoryProps) {
             placeholder="Search by name or city…"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            className="w-full h-10 pl-10 pr-4 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001]"
+            className="w-full h-10 pl-10 pr-4 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
           />
         </div>
 
@@ -84,7 +84,7 @@ export default function MemberDirectory({ members }: MemberDirectoryProps) {
         <select
           value={province}
           onChange={(e) => setProvince(e.target.value)}
-          className="h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001]"
+          className="h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
         >
           <option value="">All Provinces</option>
           {availableProvinces.map((p) => (
@@ -98,7 +98,7 @@ export default function MemberDirectory({ members }: MemberDirectoryProps) {
         <select
           value={sort}
           onChange={(e) => setSort(e.target.value as SortKey)}
-          className="h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001]"
+          className="h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
         >
           <option value="name">Sort by Name</option>
           <option value="province">Sort by Province</option>
@@ -126,7 +126,7 @@ export default function MemberDirectory({ members }: MemberDirectoryProps) {
               setSearch("");
               setProvince("");
             }}
-            className="text-[#D60001] hover:underline text-sm"
+            className="text-[#EE2A2E] hover:underline text-sm"
           >
             Clear filters
           </button>

@@ -15,6 +15,8 @@ import {
   runOpsAlertEvaluationAction,
   deleteSchedulerRunAction,
   deleteBillingRunAction,
+  retryQBExportAction,
+  ignoreQBReconciliationItemAction,
 } from "@/lib/actions/ops";
 import { approveApplication, rejectApplication } from "@/lib/actions/applications";
 
@@ -139,17 +141,24 @@ type PaymentFailureRow = {
   } | null;
 };
 
-type QbReconciliationRow = {
+type QBExportFailureRow = {
   id: string;
+  invoice_id: string;
   status: string;
-  due_date: string | null;
-  organization_id: string;
-  external_payment_id: string | null;
-  payment_source: string | null;
-  organization: {
-    name: string | null;
-    slug: string | null;
-  } | null;
+  retry_count: number;
+  error_message: string | null;
+  created_at: string;
+};
+
+type QBReconPendingRow = {
+  id: string;
+  qbo_payment_id: string;
+  amount_cents: number;
+  currency: string;
+  paid_at: string | null;
+  status: string;
+  notes: string | null;
+  created_at: string;
 };
 
 type CircleSyncRow = {
@@ -274,7 +283,7 @@ function alertBadgeClasses(
 ): string {
   if (severity === "critical") return "bg-red-50 text-red-700";
   if (severity === "warning") return "bg-amber-50 text-amber-700";
-  return "bg-blue-50 text-blue-700";
+  return "bg-blue-50 text-[#D92327]";
 }
 
 function deriveRenewalLevel(run: RenewalRunRow | null): HealthLevel {
@@ -330,22 +339,6 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const oneDayAgoIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
 
   const adminClient = createAdminClient();
-  const untypedDb = adminClient as unknown as {
-    from: (table: string) => {
-      select: (columns: string, opts?: { count?: "exact"; head?: boolean }) => {
-        eq: (column: string, value: unknown) => {
-          order: (column: string, opt?: { ascending?: boolean }) => {
-            limit: (limit: number) => Promise<{ data: unknown[] | null; error: { message: string } | null; count?: number | null }>;
-          };
-        };
-        in: (column: string, values: string[]) => Promise<{ data: unknown[] | null; error: { message: string } | null; count?: number | null }>;
-        order: (column: string, opt?: { ascending?: boolean }) => {
-          limit: (limit: number) => Promise<{ data: unknown[] | null; error: { message: string } | null; count?: number | null }>;
-        };
-        limit: (limit: number) => Promise<{ data: unknown[] | null; error: { message: string } | null; count?: number | null }>;
-      };
-    };
-  };
 
   const [
     reminderRun,
@@ -365,7 +358,9 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     conferenceWebhookRes,
     pendingAppsRes,
     failedInvoicesRes,
-    qbReconciliationRes,
+    qboReconPendingRes,
+    qboExportFailedRes,
+    qboExportPendingCountRes,
     authGuardDeniedRes,
     authGuardErrorRes,
     authRedirectLoopRes,
@@ -459,14 +454,21 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       .order("created_at", { ascending: false })
       .limit(12),
     adminClient
-      .from("invoices")
-      .select(
-        "id, status, due_date, organization_id, external_payment_id, payment_source, organization:organizations(name, slug)"
-      )
-      .eq("payment_source", "quickbooks")
-      .in("status", ["invoiced", "pending_settlement", "overdue", "failed"])
-      .order("updated_at", { ascending: false })
+      .from("qbo_reconciliation_queue")
+      .select("id, qbo_payment_id, amount_cents, currency, paid_at, status, notes, created_at")
+      .eq("status", "pending_review")
+      .order("created_at", { ascending: false })
       .limit(20),
+    adminClient
+      .from("qbo_export_queue")
+      .select("id, invoice_id, status, retry_count, error_message, created_at")
+      .eq("status", "failed")
+      .order("created_at", { ascending: false })
+      .limit(10),
+    adminClient
+      .from("qbo_export_queue")
+      .select("id", { count: "exact", head: true })
+      .in("status", ["pending", "retrying", "processing"]),
     adminClient
       .from("audit_log")
       .select("id", { count: "exact", head: true })
@@ -495,26 +497,26 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       .gte("created_at", new Date(now.getTime() - 2 * 60 * 60 * 1000).toISOString())
       .order("created_at", { ascending: false })
       .limit(1000),
-    untypedDb
+    adminClient
       .from("retention_jobs")
       .select(
         "id, conference_id, policy_set_id, cutoff_at, records_purged, status, executed_at, error_details"
       )
       .order("executed_at", { ascending: false })
       .limit(1),
-    untypedDb
+    adminClient
       .from("retention_jobs")
       .select(
         "id, conference_id, policy_set_id, cutoff_at, records_purged, status, executed_at, error_details"
       )
       .order("executed_at", { ascending: false })
       .limit(10),
-    untypedDb
+    adminClient
       .from("ops_alerts")
       .select("id, rule_key, severity, status, message, created_at, acknowledged_at, resolved_at, owner_id, due_at")
       .order("created_at", { ascending: false })
       .limit(50),
-    untypedDb
+    adminClient
       .from("audit_log")
       .select("id, action, entity_type, entity_id, actor_id, actor_type, details, created_at")
       .order("created_at", { ascending: false })
@@ -726,7 +728,9 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const auditLogsAll = (auditLogRes.data ?? []) as AuditLogRow[];
   const pendingApplications = (pendingAppsRes.data ?? []) as PendingApplicationRow[];
   const paymentFailures = (failedInvoicesRes.data ?? []) as PaymentFailureRow[];
-  const qbReconciliationRows = (qbReconciliationRes.data ?? []) as QbReconciliationRow[];
+  const qbReconPendingRows = (qboReconPendingRes.data ?? []) as QBReconPendingRow[];
+  const qboExportFailedRows = (qboExportFailedRes.data ?? []) as QBExportFailureRow[];
+  const qboExportPendingCount = qboExportPendingCountRes.count ?? 0;
   const failedSyncItems = (circleFailedItemsRes.data ?? []) as CircleSyncRow[];
   const latestConference =
     (latestConferenceRes.data as ConferenceInstanceRow | null) ?? null;
@@ -962,12 +966,13 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     const daysUntilDue = (due - now.getTime()) / (1000 * 60 * 60 * 24);
     return daysUntilDue <= 3;
   });
-  const qbBacklogCount = qbReconciliationRows.length;
+  const qbBacklogCount = qbReconPendingRows.length;
   const qbCard = cards.find((card) => card.key === "qb-reconciliation");
   if (qbCard) {
-    qbCard.level = settlementAtRisk.length > 0 ? "critical" : qbBacklogCount > 0 ? "warning" : "healthy";
-    qbCard.summary = `Backlog: ${qbBacklogCount}. Pending-settlement at risk (<=3 days): ${settlementAtRisk.length}.`;
-    qbCard.lastRunAt = "Live queue";
+    qbCard.level = qboExportFailedRows.length > 0 ? "critical" : qbBacklogCount > 0 || settlementAtRisk.length > 0 ? "warning" : "healthy";
+    qbCard.lastRunAt = "Queue-based";
+    qbCard.nextRunAt = nextRunFromSimpleCron("*/15 * * * *");
+    qbCard.summary = `Export pending: ${qboExportPendingCount}. Export failed: ${qboExportFailedRows.length}. Recon pending review: ${qbBacklogCount}. Settlement at risk: ${settlementAtRisk.length}.`;
   }
 
   return (
@@ -1151,6 +1156,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             { key: "circle_sync", label: "Run Circle Sync Queue" },
             { key: "ops_alert_eval", label: "Run Ops Alert Evaluation" },
             { key: "retention_purge", label: "Run Retention Purge" },
+            { key: "qbo_export", label: "Run QB Export" },
+            { key: "qbo_reconcile", label: "Run QB Reconcile" },
           ].map((job) => (
             <form
               key={job.key}
@@ -1164,7 +1171,9 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     | "grace_check"
                     | "circle_sync"
                     | "ops_alert_eval"
-                    | "retention_purge",
+                    | "retention_purge"
+                    | "qbo_export"
+                    | "qbo_reconcile",
                   reason
                 );
               }}
@@ -1581,44 +1590,140 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       </section>
 
       <section className="mt-8 rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-gray-900">Reconciliation Queue Monitor</h2>
+        <h2 className="text-base font-semibold text-gray-900">QuickBooks Queue Monitor</h2>
         <p className="mt-1 text-sm text-gray-600">
-          QuickBooks-linked invoices requiring reconciliation attention and pending-settlement risk.
+          QB export failures and inbound payments awaiting reconciliation.
         </p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
           <article className="rounded-lg border border-gray-100 p-3 text-sm">
-            <p className="font-medium text-gray-900">Pending Settlement at Risk (≤3 days)</p>
-            <p className="mt-1 text-gray-700">{settlementAtRisk.length}</p>
+            <p className="font-medium text-gray-900">Export Pending / Retrying</p>
+            <p className="mt-1 text-gray-700">{qboExportPendingCount}</p>
           </article>
           <article className="rounded-lg border border-gray-100 p-3 text-sm">
-            <p className="font-medium text-gray-900">QuickBooks Reconciliation Backlog</p>
-            <p className="mt-1 text-gray-700">{qbReconciliationRows.length}</p>
+            <p className="font-medium text-gray-900">Export Failed</p>
+            <p className={`mt-1 font-medium ${qboExportFailedRows.length > 0 ? "text-red-600" : "text-gray-700"}`}>{qboExportFailedRows.length}</p>
+          </article>
+          <article className="rounded-lg border border-gray-100 p-3 text-sm">
+            <p className="font-medium text-gray-900">Recon Pending Review</p>
+            <p className={`mt-1 font-medium ${qbReconPendingRows.length > 0 ? "text-amber-600" : "text-gray-700"}`}>{qbReconPendingRows.length}</p>
           </article>
         </div>
-        <ul className="mt-3 space-y-2">
-          {qbReconciliationRows.length === 0 ? (
-            <li className="text-sm text-gray-500">No QuickBooks reconciliation items in the current queue.</li>
-          ) : (
-            qbReconciliationRows.slice(0, 10).map((row) => (
-              <li key={row.id} className="rounded-lg border border-gray-100 p-2 text-sm">
-                <p className="font-medium text-gray-900">
-                  {row.organization?.name ?? row.organization_id}
-                </p>
-                <p className="text-gray-600">
-                  {row.status} • Due {toDisplayDate(row.due_date)} • External payment id: {row.external_payment_id ?? "missing"}
-                </p>
-                {row.organization?.slug ? (
-                  <Link
-                    href={`/org/${row.organization.slug}`}
-                    className="mt-2 inline-block rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+
+        {qboExportFailedRows.length > 0 && (
+          <div className="mt-4">
+            <p className="text-sm font-medium text-gray-900 mb-2">Failed Exports</p>
+            <ul className="space-y-2">
+              {qboExportFailedRows.map((row) => (
+                <li key={row.id} className="rounded-lg border border-red-100 bg-red-50 p-2 text-sm">
+                  <p className="font-medium text-gray-900">Invoice: {row.invoice_id}</p>
+                  <p className="text-gray-600 text-xs mt-0.5">
+                    Retries: {row.retry_count} • Queued: {toDisplayDate(row.created_at)}
+                  </p>
+                  {row.error_message && (
+                    <p className="text-red-700 text-xs mt-0.5 font-mono">{row.error_message}</p>
+                  )}
+                  <form
+                    action={async (formData: FormData) => {
+                      "use server";
+                      const reason = String(formData.get("reason") ?? "");
+                      await retryQBExportAction(row.id, reason);
+                    }}
+                    className="mt-2 flex items-end gap-2"
                   >
-                    Open Org
-                  </Link>
-                ) : null}
-              </li>
-            ))
-          )}
-        </ul>
+                    <label className="flex-1 text-xs text-gray-600">
+                      Reason
+                      <input
+                        name="reason"
+                        type="text"
+                        required
+                        minLength={8}
+                        placeholder="Why retrying?"
+                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white"
+                    >
+                      Retry
+                    </button>
+                  </form>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        <div className="mt-4">
+          <p className="text-sm font-medium text-gray-900 mb-2">Inbound Payments — Pending Review</p>
+          <ul className="space-y-2">
+            {qbReconPendingRows.length === 0 ? (
+              <li className="text-sm text-gray-500">No inbound QB payments awaiting review.</li>
+            ) : (
+              qbReconPendingRows.map((row) => (
+                <li key={row.id} className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-sm">
+                  <p className="font-medium text-gray-900">QB Payment: {row.qbo_payment_id}</p>
+                  <p className="text-gray-600 text-xs mt-0.5">
+                    {(row.amount_cents / 100).toFixed(2)} {row.currency.toUpperCase()} • Paid: {toDisplayDate(row.paid_at)} • Received: {toDisplayDate(row.created_at)}
+                  </p>
+                  {row.notes && (
+                    <p className="text-amber-700 text-xs mt-0.5">{row.notes}</p>
+                  )}
+                  <form
+                    action={async (formData: FormData) => {
+                      "use server";
+                      const reason = String(formData.get("reason") ?? "");
+                      await ignoreQBReconciliationItemAction(row.id, reason);
+                    }}
+                    className="mt-2 flex items-end gap-2"
+                  >
+                    <label className="flex-1 text-xs text-gray-600">
+                      Reason
+                      <input
+                        name="reason"
+                        type="text"
+                        required
+                        minLength={8}
+                        placeholder="Why ignoring?"
+                        className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs"
+                      />
+                    </label>
+                    <button
+                      type="submit"
+                      className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-white"
+                    >
+                      Ignore
+                    </button>
+                  </form>
+                </li>
+              ))
+            )}
+          </ul>
+        </div>
+
+        {settlementAtRisk.length > 0 && (
+          <div className="mt-4">
+            <p className="text-sm font-medium text-gray-900 mb-2">Settlement At Risk (≤3 days)</p>
+            <ul className="space-y-2">
+              {settlementAtRisk.map((row) => (
+                <li key={row.id} className="rounded-lg border border-red-100 p-2 text-sm">
+                  <p className="font-medium text-gray-900">{row.organization?.name ?? row.organization_id}</p>
+                  <p className="text-gray-600 text-xs mt-0.5">
+                    {row.status} • Due {toDisplayDate(row.due_date)} • {((row.total_cents ?? 0) / 100).toFixed(2)}
+                  </p>
+                  {row.organization?.slug ? (
+                    <Link
+                      href={`/org/${row.organization.slug}`}
+                      className="mt-2 inline-block rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                    >
+                      Open Org
+                    </Link>
+                  ) : null}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
       </section>
 
       <section className="mt-8 rounded-xl border border-gray-200 bg-white p-4">
@@ -1671,7 +1776,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             <h2 className="text-base font-semibold text-gray-900">Application Review</h2>
             <a
               href="/admin/applications"
-              className="text-sm font-medium text-blue-700 hover:underline"
+              className="text-sm font-medium text-[#D92327] hover:underline"
             >
               Open Applications
             </a>
@@ -1838,7 +1943,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 ? `/admin/conference/${latestConference.id}/legal`
                 : "/admin/conference"
             }
-            className="text-sm font-medium text-blue-700 hover:underline"
+            className="text-sm font-medium text-[#D92327] hover:underline"
           >
             Open Conference Legal Manager
           </Link>

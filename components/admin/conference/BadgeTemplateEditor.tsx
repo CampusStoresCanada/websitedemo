@@ -5730,7 +5730,7 @@ export default function BadgeTemplateEditor({
             <input type="hidden" name="field_mapping_json" value={serializedConfig} />
             <button
               type="submit"
-              className="w-full rounded-md bg-[#D60001] px-3 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+              className="w-full rounded-md bg-[#EE2A2E] px-3 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
             >
               Save Template
             </button>

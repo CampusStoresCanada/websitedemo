@@ -17,7 +17,7 @@ export default function ForgotPasswordPage() {
     setError(null);
 
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/reset-password`,
+      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
     });
 
     if (error) {
@@ -65,14 +65,14 @@ export default function ForgotPasswordPage() {
                     setEmailSent(false);
                     setEmail("");
                   }}
-                  className="text-[#D60001] hover:text-[#B00001] font-medium"
+                  className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
                 >
                   try again
                 </button>
               </p>
               <Link
                 href="/login"
-                className="text-sm text-[#D60001] hover:text-[#B00001] font-medium"
+                className="text-sm text-[#EE2A2E] hover:text-[#D92327] font-medium"
               >
                 Back to login
               </Link>
@@ -117,14 +117,14 @@ export default function ForgotPasswordPage() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
                 placeholder="you@yourschool.ca"
               />
             </div>
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {isLoading ? "Sending..." : "Send Reset Link"}
             </button>

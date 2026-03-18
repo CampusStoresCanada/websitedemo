@@ -1,4 +1,5 @@
 @import "tailwindcss";
+@plugin "@tailwindcss/typography";
 
 :root {
   /* Brand Palette */
@@ -213,4 +214,10 @@ body.check-in-kiosk main {
 }
 .animate-slide-in-left {
   animation: slide-in-left 0.25s ease-out;
+}
+
+
+/* Google Places autocomplete dropdown — ensure it appears above modals */
+.pac-container {
+  z-index: 9999;
 }

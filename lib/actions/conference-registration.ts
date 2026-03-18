@@ -16,10 +16,20 @@ import { getEffectivePolicies } from "@/lib/policy/engine";
 import { checkLegalAcceptance } from "@/lib/actions/conference-legal";
 import { syncConferencePeopleIndex } from "@/lib/actions/conference-people";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import {
+  evaluateRulesEngine,
+  normalizeRulesEngine,
+  type RulesEngineAction,
+  type RulesEngineEvalContext,
+} from "@/lib/conference/rules-engine";
 import type { Database } from "@/lib/database.types";
 
 type RegistrationRow = Database["public"]["Tables"]["conference_registrations"]["Row"];
 type RegistrationUpdate = Database["public"]["Tables"]["conference_registrations"]["Update"];
+export type AdminRegistrationRow = RegistrationRow & {
+  user_display_name: string | null;
+  organization_name: string | null;
+};
 
 type OppositeRegistrationType = "delegate" | "exhibitor";
 type TravelWindowExceptionStatus = "pending" | "approved" | "rejected";
@@ -34,6 +44,46 @@ type TravelWindowExceptionRecord = {
   reviewed_at: string | null;
   reviewed_by: string | null;
   review_note: string | null;
+};
+
+type TravelSupportMode = "managed" | "reimbursement" | "self_managed" | "none";
+type ManagementMode = "fully_managed" | "partially_managed" | "attendee_managed";
+
+type TravelPolicyDecision = {
+  effectiveTravelSupportMode: TravelSupportMode;
+  travelManagementMode: ManagementMode;
+  accommodationManagementMode: ManagementMode;
+  airTravelAllowed: boolean;
+  organizationDistanceKm: number | null;
+  matchedOverrideRules: Array<{
+    condition: string;
+    action: string;
+    thresholdKm: number | null;
+    reason: string;
+  }>;
+  travelBookingOwner: "csc" | "attendee" | "none";
+  travelPaymentOwner: "csc" | "attendee" | "reimbursement";
+  accommodationBookingOwner: "csc" | "attendee";
+  accommodationPaymentOwner: "csc" | "attendee";
+  attendeeGuidance: string[];
+  rulesEngineTravelRequirements: {
+    requiresTravelIntake: boolean | null;
+    requiresAccommodationIntake: boolean | null;
+  };
+};
+
+const AIRPORT_COORDINATES_BY_IATA: Record<string, { lat: number; lon: number }> = {
+  YYZ: { lat: 43.6777, lon: -79.6248 },
+  YTZ: { lat: 43.6275, lon: -79.3962 },
+  YVR: { lat: 49.1967, lon: -123.1815 },
+  YYC: { lat: 51.1139, lon: -114.0203 },
+  YEG: { lat: 53.3097, lon: -113.5797 },
+  YUL: { lat: 45.4706, lon: -73.7408 },
+  YOW: { lat: 45.3225, lon: -75.6692 },
+  YWG: { lat: 49.910, lon: -97.2399 },
+  YHZ: { lat: 44.8808, lon: -63.5086 },
+  YXE: { lat: 52.1708, lon: -106.6999 },
+  YQR: { lat: 50.4319, lon: -104.6661 },
 };
 
 function getOppositeRegistrationType(type: RegistrationType): OppositeRegistrationType | null {
@@ -82,6 +132,420 @@ function shiftUtcDays(base: Date, days: number): Date {
   const next = new Date(base);
   next.setUTCDate(next.getUTCDate() + days);
   return next;
+}
+
+function toFiniteNumber(value: unknown): number | null {
+  const num = Number(value);
+  return Number.isFinite(num) ? num : null;
+}
+
+function normalizeManagementMode(value: unknown): ManagementMode {
+  if (value === "fully_managed" || value === "partially_managed" || value === "attendee_managed") {
+    return value;
+  }
+  return "partially_managed";
+}
+
+function normalizeTravelSupportMode(value: unknown): TravelSupportMode {
+  if (value === "managed" || value === "reimbursement" || value === "self_managed" || value === "none") {
+    return value;
+  }
+  return "managed";
+}
+
+function normalizeTravelModeForStorage(value: unknown): "flight" | "road" | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized) return null;
+  if (["flight", "air", "plane"].includes(normalized)) return "flight";
+  if (
+    [
+      "road",
+      "car",
+      "personal vehicle",
+      "personal_vehicle",
+      "rail",
+      "bus",
+      "bus/coach",
+      "other",
+    ].includes(normalized)
+  ) {
+    return "road";
+  }
+  return null;
+}
+
+function haversineKm(aLat: number, aLon: number, bLat: number, bLon: number): number {
+  const toRad = (deg: number) => (deg * Math.PI) / 180;
+  const earthRadiusKm = 6371;
+  const dLat = toRad(bLat - aLat);
+  const dLon = toRad(bLon - aLon);
+  const lat1 = toRad(aLat);
+  const lat2 = toRad(bLat);
+  const sinLat = Math.sin(dLat / 2);
+  const sinLon = Math.sin(dLon / 2);
+  const h = sinLat * sinLat + Math.cos(lat1) * Math.cos(lat2) * sinLon * sinLon;
+  return 2 * earthRadiusKm * Math.atan2(Math.sqrt(h), Math.sqrt(1 - h));
+}
+
+function normalizeOrgTypeForRules(value: unknown): string {
+  const raw = typeof value === "string" ? value.trim().toLowerCase() : "";
+  if (raw === "member") return "member";
+  if (raw === "vendor partner" || raw === "vendor_partner") return "vendor_partner";
+  return raw;
+}
+
+function isRulesActionTargetMatch(
+  action: RulesEngineAction,
+  context: RulesEngineEvalContext
+): boolean {
+  if ("target_product_id" in action) {
+    const matchesProductId = !action.target_product_id || action.target_product_id === context.product_id;
+    const matchesSlug = !action.target_product_slug || action.target_product_slug === context.product_slug;
+    return matchesProductId && matchesSlug;
+  }
+  return true;
+}
+
+async function evaluateTravelPolicyForRegistration(params: {
+  adminClient: ReturnType<typeof createAdminClient>;
+  conferenceId: string;
+  organizationId: string;
+  registrationType: string;
+  registrationCustomAnswers?: Record<string, unknown> | null;
+}): Promise<TravelPolicyDecision> {
+  const {
+    adminClient,
+    conferenceId,
+    organizationId,
+    registrationType,
+    registrationCustomAnswers = null,
+  } = params;
+
+  const [moduleRes, regOpsModuleRes, organizationRes, orgRegistrationCountRes] = await Promise.all([
+    adminClient
+      .from("conference_schedule_modules")
+      .select("config_json")
+      .eq("conference_id", conferenceId)
+      .eq("module_key", "travel_accommodation")
+      .maybeSingle(),
+    adminClient
+      .from("conference_schedule_modules")
+      .select("config_json")
+      .eq("conference_id", conferenceId)
+      .eq("module_key", "registration_ops")
+      .maybeSingle(),
+    adminClient
+      .from("organizations")
+      .select("id, type, organization_type, membership_status, latitude, longitude")
+      .eq("id", organizationId)
+      .maybeSingle(),
+    adminClient
+      .from("conference_registrations")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId),
+  ]);
+
+  const policyValues = await getEffectivePolicies([
+    "conference.travel_management_mode",
+    "conference.accommodation_management_mode",
+    "conference.travel_disable_air_within_km",
+    "conference.travel_nearby_support_mode",
+  ]).catch(() => ({} as Record<string, unknown>));
+
+  const config =
+    moduleRes.data?.config_json && typeof moduleRes.data.config_json === "object"
+      ? (moduleRes.data.config_json as Record<string, unknown>)
+      : {};
+  const org = organizationRes.data;
+  const orgLat = toFiniteNumber(org?.latitude);
+  const orgLon = toFiniteNumber(org?.longitude);
+
+  const travelManagementMode = normalizeManagementMode(
+    config.travel_management_mode ?? policyValues["conference.travel_management_mode"]
+  );
+  const accommodationManagementMode = normalizeManagementMode(
+    config.accommodation_management_mode ?? policyValues["conference.accommodation_management_mode"]
+  );
+  const travelManagementScope =
+    config.travel_management_scope === "all_managed" ||
+    config.travel_management_scope === "some_managed" ||
+    config.travel_management_scope === "none_managed"
+      ? (config.travel_management_scope as "all_managed" | "some_managed" | "none_managed")
+      : null;
+
+  let effectiveTravelSupportMode: TravelSupportMode =
+    travelManagementMode === "fully_managed"
+      ? "managed"
+      : travelManagementMode === "attendee_managed"
+        ? "self_managed"
+        : "managed";
+  if (travelManagementScope === "none_managed") {
+    effectiveTravelSupportMode = "self_managed";
+  }
+
+  let airTravelAllowed = true;
+  const matchedOverrideRules: TravelPolicyDecision["matchedOverrideRules"] = [];
+  let rulesEngineRequiresTravelIntake: boolean | null = null;
+  let rulesEngineRequiresAccommodationIntake: boolean | null = null;
+
+  let organizationDistanceKm: number | null = null;
+  const destinationAirportEntries = Array.isArray(config.destination_airports)
+    ? (config.destination_airports as Array<Record<string, unknown>>)
+    : [];
+  if (orgLat != null && orgLon != null && destinationAirportEntries.length > 0) {
+    const distances: number[] = [];
+    for (const entry of destinationAirportEntries) {
+      const code = typeof entry.code === "string" ? entry.code.trim().toUpperCase() : "";
+      if (!code) continue;
+      const airportCoords = AIRPORT_COORDINATES_BY_IATA[code];
+      if (!airportCoords) continue;
+      distances.push(haversineKm(orgLat, orgLon, airportCoords.lat, airportCoords.lon));
+    }
+    if (distances.length > 0) {
+      organizationDistanceKm = Math.min(...distances);
+    }
+  }
+
+  const orgRegistrationCount = orgRegistrationCountRes.count ?? 0;
+  const rawRuleMap = (
+    config.registration_option_travel_rules ??
+    config.registration_product_travel_rules ??
+    {}
+  ) as Record<string, unknown>;
+  const customAnswers =
+    registrationCustomAnswers &&
+    typeof registrationCustomAnswers === "object" &&
+    !Array.isArray(registrationCustomAnswers)
+      ? registrationCustomAnswers
+      : {};
+  const registrationOptionId =
+    typeof customAnswers.registration_option_id === "string"
+      ? customAnswers.registration_option_id
+      : null;
+  const registrationProductIds = Array.isArray(customAnswers.registration_product_ids)
+    ? customAnswers.registration_product_ids.filter(
+        (entry): entry is string => typeof entry === "string" && entry.trim().length > 0
+      )
+    : [];
+  if (
+    typeof customAnswers.registration_primary_product_id === "string" &&
+    customAnswers.registration_primary_product_id.trim().length > 0
+  ) {
+    registrationProductIds.unshift(customAnswers.registration_primary_product_id);
+  }
+  const uniqueRegistrationProductIds = Array.from(new Set(registrationProductIds));
+  const productSlugById = new Map<string, string>();
+  if (uniqueRegistrationProductIds.length > 0) {
+    const { data: selectedProducts } = await adminClient
+      .from("conference_products")
+      .select("id, slug")
+      .in("id", uniqueRegistrationProductIds);
+    for (const row of selectedProducts ?? []) {
+      if (typeof row.id === "string" && typeof row.slug === "string") {
+        productSlugById.set(row.id, row.slug);
+      }
+    }
+  }
+
+  const rawRuleEntries = Object.entries(rawRuleMap);
+  const ruleEntries =
+    uniqueRegistrationProductIds.length > 0
+      ? rawRuleEntries.filter(([key]) => uniqueRegistrationProductIds.includes(key))
+      : registrationOptionId
+        ? rawRuleEntries.filter(([key]) => key === registrationOptionId)
+        : rawRuleEntries.filter(([key]) =>
+            key.toLowerCase().startsWith(`${registrationType.toLowerCase()}::`)
+          );
+  for (const [key, rawRule] of ruleEntries) {
+    if (!rawRule || typeof rawRule !== "object" || Array.isArray(rawRule)) continue;
+    const overrides = Array.isArray((rawRule as Record<string, unknown>).conditional_overrides)
+      ? ((rawRule as Record<string, unknown>).conditional_overrides as Array<Record<string, unknown>>)
+      : [];
+    for (const override of overrides) {
+      const condition = typeof override.condition === "string" ? override.condition : "";
+      const action = typeof override.action === "string" ? override.action : "";
+      const conditionNumberValue = toFiniteNumber(override.condition_number_value);
+      const conditionTextValue =
+        typeof override.condition_text_value === "string"
+          ? override.condition_text_value.trim().toLowerCase()
+          : "";
+
+      let conditionMatched = false;
+      if (condition === "org_distance_to_airport_km_lte") {
+        conditionMatched =
+          organizationDistanceKm != null &&
+          conditionNumberValue != null &&
+          organizationDistanceKm <= conditionNumberValue;
+      } else if (condition === "org_type_is") {
+        const orgType = typeof org?.type === "string" ? org.type.toLowerCase() : "";
+        const orgSubtype =
+          typeof org?.organization_type === "string" ? org.organization_type.toLowerCase() : "";
+        conditionMatched = Boolean(
+          conditionTextValue &&
+            (orgType === conditionTextValue || orgSubtype === conditionTextValue)
+        );
+      } else if (condition === "org_type_registration_count_gt") {
+        conditionMatched =
+          conditionNumberValue != null && orgRegistrationCount > conditionNumberValue;
+      }
+
+      if (!conditionMatched) continue;
+      if (action === "disable_air_travel_option") {
+        airTravelAllowed = false;
+      } else if (action === "set_travel_support_mode") {
+        effectiveTravelSupportMode = normalizeTravelSupportMode(override.action_text_value);
+      }
+      matchedOverrideRules.push({
+        condition,
+        action,
+        thresholdKm: condition === "org_distance_to_airport_km_lte" ? conditionNumberValue : null,
+        reason: `Matched override for ${key}`,
+      });
+    }
+  }
+
+  const policyDistanceThresholdKm = toFiniteNumber(
+    policyValues["conference.travel_disable_air_within_km"]
+  );
+  if (
+    policyDistanceThresholdKm != null &&
+    organizationDistanceKm != null &&
+    organizationDistanceKm <= policyDistanceThresholdKm
+  ) {
+    airTravelAllowed = false;
+    const nearbySupportModeRaw = policyValues["conference.travel_nearby_support_mode"];
+    if (nearbySupportModeRaw != null) {
+      effectiveTravelSupportMode = normalizeTravelSupportMode(nearbySupportModeRaw);
+    }
+    matchedOverrideRules.push({
+      condition: "policy.travel_disable_air_within_km",
+      action: "disable_air_travel_option",
+      thresholdKm: policyDistanceThresholdKm,
+      reason: "Matched conference-level nearby-travel policy.",
+    });
+  }
+
+  const regOpsConfig =
+    regOpsModuleRes.data?.config_json && typeof regOpsModuleRes.data.config_json === "object"
+      ? (regOpsModuleRes.data.config_json as Record<string, unknown>)
+      : {};
+  const rulesEngine = normalizeRulesEngine(regOpsConfig.rules_engine_v1 ?? null);
+  const travelEvalContexts: RulesEngineEvalContext[] =
+    uniqueRegistrationProductIds.length > 0
+      ? uniqueRegistrationProductIds.map((productId) => ({
+          org_membership_status:
+            typeof org?.membership_status === "string" ? org.membership_status : null,
+          org_type: normalizeOrgTypeForRules(org?.type ?? org?.organization_type ?? null),
+          user_is_authenticated: true,
+          org_registration_count: orgRegistrationCount,
+          product_id: productId,
+          product_slug: productSlugById.get(productId),
+        }))
+      : [
+          {
+            org_membership_status:
+              typeof org?.membership_status === "string" ? org.membership_status : null,
+            org_type: normalizeOrgTypeForRules(org?.type ?? org?.organization_type ?? null),
+            user_is_authenticated: true,
+            org_registration_count: orgRegistrationCount,
+            product_id: undefined,
+            product_slug: undefined,
+          },
+        ];
+
+  for (const context of travelEvalContexts) {
+    const evaluation = evaluateRulesEngine(rulesEngine, "travel_intake_save", context);
+    for (const action of evaluation.actions) {
+      if (!isRulesActionTargetMatch(action, context)) continue;
+      if (action.type === "set_travel_support_mode") {
+        effectiveTravelSupportMode = normalizeTravelSupportMode(action.mode);
+        matchedOverrideRules.push({
+          condition: "rules_engine.travel_intake_save",
+          action: "set_travel_support_mode",
+          thresholdKm: null,
+          reason: action.reason || "Rules engine travel support mode override.",
+        });
+        continue;
+      }
+      if (action.type === "set_travel_requirement") {
+        if (action.requirement === "air_travel_allowed") {
+          airTravelAllowed = action.value;
+        } else if (action.requirement === "requires_travel_intake") {
+          rulesEngineRequiresTravelIntake = action.value;
+        } else if (action.requirement === "requires_accommodation_intake") {
+          rulesEngineRequiresAccommodationIntake = action.value;
+        }
+        matchedOverrideRules.push({
+          condition: "rules_engine.travel_intake_save",
+          action: `set_travel_requirement.${action.requirement}`,
+          thresholdKm: null,
+          reason: action.reason || "Rules engine travel requirement override.",
+        });
+      }
+    }
+  }
+
+  const travelBookingOwner: TravelPolicyDecision["travelBookingOwner"] =
+    effectiveTravelSupportMode === "managed"
+      ? "csc"
+      : effectiveTravelSupportMode === "none"
+        ? "none"
+        : "attendee";
+  const travelPaymentOwner: TravelPolicyDecision["travelPaymentOwner"] =
+    effectiveTravelSupportMode === "managed"
+      ? "csc"
+      : effectiveTravelSupportMode === "reimbursement"
+        ? "reimbursement"
+        : "attendee";
+  const accommodationBookingOwner: TravelPolicyDecision["accommodationBookingOwner"] =
+    accommodationManagementMode === "attendee_managed" ? "attendee" : "csc";
+  const accommodationPaymentOwner: TravelPolicyDecision["accommodationPaymentOwner"] =
+    accommodationManagementMode === "attendee_managed" ? "attendee" : "csc";
+
+  const attendeeGuidance: string[] = [];
+  if (!airTravelAllowed) {
+    attendeeGuidance.push(
+      "Air travel is not covered for this registration path. Use road travel and submit mileage where applicable."
+    );
+  }
+  if (effectiveTravelSupportMode === "reimbursement") {
+    attendeeGuidance.push("Book your own travel; eligible costs are reimbursed per policy.");
+  } else if (effectiveTravelSupportMode === "self_managed") {
+    attendeeGuidance.push("Travel is self-managed and not centrally booked.");
+  } else if (effectiveTravelSupportMode === "managed") {
+    attendeeGuidance.push("Travel is centrally managed by CSC operations.");
+  }
+  attendeeGuidance.push(
+    accommodationManagementMode === "attendee_managed"
+      ? "Accommodation is self-managed."
+      : "Accommodation is managed through CSC room blocks."
+  );
+  if (rulesEngineRequiresTravelIntake === false) {
+    attendeeGuidance.push("Travel intake is optional for this registration path.");
+  }
+  if (rulesEngineRequiresAccommodationIntake === false) {
+    attendeeGuidance.push("Accommodation intake is optional for this registration path.");
+  }
+
+  return {
+    effectiveTravelSupportMode,
+    travelManagementMode,
+    accommodationManagementMode,
+    airTravelAllowed,
+    organizationDistanceKm,
+    matchedOverrideRules,
+    travelBookingOwner,
+    travelPaymentOwner,
+    accommodationBookingOwner,
+    accommodationPaymentOwner,
+    attendeeGuidance,
+    rulesEngineTravelRequirements: {
+      requiresTravelIntake: rulesEngineRequiresTravelIntake,
+      requiresAccommodationIntake: rulesEngineRequiresAccommodationIntake,
+    },
+  };
 }
 
 function readCustomAnswers(reg: RegistrationRow): Record<string, unknown> {
@@ -239,7 +703,7 @@ export async function saveRegistrationStep(
   // Validate ownership
   const { data: reg, error: regErr } = await adminClient
     .from("conference_registrations")
-    .select("user_id, status, travel_consent_given, organization_id, registration_type")
+    .select("conference_id, user_id, status, travel_consent_given, organization_id, registration_type, registration_custom_answers")
     .eq("id", registrationId)
     .single();
 
@@ -273,6 +737,18 @@ export async function saveRegistrationStep(
       success: false,
       error: "Custom answers must be a JSON object.",
     };
+  }
+
+  const normalizedTravelMode = normalizeTravelModeForStorage(safeFields.travel_mode);
+  if ("travel_mode" in safeFields && safeFields.travel_mode != null && normalizedTravelMode == null) {
+    return {
+      success: false,
+      error:
+        "Travel mode must be one of: flight/air, rail, bus/coach, personal vehicle, or road.",
+    };
+  }
+  if (normalizedTravelMode) {
+    safeFields.travel_mode = normalizedTravelMode;
   }
 
   if (typeof safeFields.delegate_email === "string" && safeFields.delegate_email.trim().length > 0) {
@@ -362,6 +838,66 @@ export async function saveRegistrationStep(
       safeFields.accessibility_needs = null;
     }
   }
+
+  const existingCustomAnswers = readCustomAnswers(reg as RegistrationRow);
+  const incomingCustomAnswers =
+    safeFields.registration_custom_answers &&
+    typeof safeFields.registration_custom_answers === "object" &&
+    !Array.isArray(safeFields.registration_custom_answers)
+      ? (safeFields.registration_custom_answers as Record<string, unknown>)
+      : {};
+  const mergedCustomAnswers: Record<string, unknown> = {
+    ...existingCustomAnswers,
+    ...incomingCustomAnswers,
+  };
+
+  const travelPolicyDecision = await evaluateTravelPolicyForRegistration({
+    adminClient,
+    conferenceId: reg.conference_id,
+    organizationId: reg.organization_id,
+    registrationType: reg.registration_type,
+    registrationCustomAnswers: mergedCustomAnswers,
+  });
+  if (safeFields.travel_mode === "flight" && !travelPolicyDecision.airTravelAllowed) {
+    const roundedDistance =
+      travelPolicyDecision.organizationDistanceKm != null
+        ? Math.round(travelPolicyDecision.organizationDistanceKm)
+        : null;
+    const reimbursementHint =
+      travelPolicyDecision.effectiveTravelSupportMode === "reimbursement"
+        ? "Road mileage reimbursement applies under current policy."
+        : "Please select road travel.";
+    return {
+      success: false,
+      error:
+        roundedDistance != null
+          ? `Air travel is not allowed under current policy (organization is ~${roundedDistance} km from destination). ${reimbursementHint}`
+          : `Air travel is not allowed under current policy. ${reimbursementHint}`,
+    };
+  }
+
+  safeFields.registration_custom_answers = {
+    ...mergedCustomAnswers,
+    travel_ops_classification: {
+      decision_pipeline_version: "travel_ops_v2",
+      travel_management_mode: travelPolicyDecision.travelManagementMode,
+      accommodation_management_mode: travelPolicyDecision.accommodationManagementMode,
+      effective_travel_support_mode: travelPolicyDecision.effectiveTravelSupportMode,
+      travel_booking_owner: travelPolicyDecision.travelBookingOwner,
+      travel_payment_owner: travelPolicyDecision.travelPaymentOwner,
+      accommodation_booking_owner: travelPolicyDecision.accommodationBookingOwner,
+      accommodation_payment_owner: travelPolicyDecision.accommodationPaymentOwner,
+      air_travel_allowed: travelPolicyDecision.airTravelAllowed,
+      requires_travel_intake:
+        travelPolicyDecision.rulesEngineTravelRequirements.requiresTravelIntake,
+      requires_accommodation_intake:
+        travelPolicyDecision.rulesEngineTravelRequirements.requiresAccommodationIntake,
+      organization_distance_to_destination_airport_km: travelPolicyDecision.organizationDistanceKm,
+      matched_override_rules: travelPolicyDecision.matchedOverrideRules,
+      attendee_guidance: travelPolicyDecision.attendeeGuidance,
+      computed_at: new Date().toISOString(),
+    },
+  } satisfies Record<string, unknown>;
 
   const { data, error } = await adminClient
     .from("conference_registrations")
@@ -814,8 +1350,14 @@ export async function getOrgRegistrations(
 
 export async function getAllRegistrations(
   conferenceId: string,
-  filters?: { status?: string; registration_type?: string; organization_id?: string }
-): Promise<{ success: boolean; error?: string; data?: RegistrationRow[] }> {
+  filters?: {
+    status?: string;
+    registration_type?: string;
+    organization_id?: string;
+    created_at_from?: string;
+    created_at_to?: string;
+  }
+): Promise<{ success: boolean; error?: string; data?: AdminRegistrationRow[] }> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
 
@@ -828,11 +1370,98 @@ export async function getAllRegistrations(
   if (filters?.status) query = query.eq("status", filters.status);
   if (filters?.registration_type) query = query.eq("registration_type", filters.registration_type);
   if (filters?.organization_id) query = query.eq("organization_id", filters.organization_id);
+  if (filters?.created_at_from) query = query.gte("created_at", `${filters.created_at_from}T00:00:00.000Z`);
+  if (filters?.created_at_to) query = query.lte("created_at", `${filters.created_at_to}T23:59:59.999Z`);
 
   const { data, error } = await query.order("created_at", { ascending: false });
 
   if (error) return { success: false, error: error.message };
-  return { success: true, data: data ?? [] };
+
+  const registrations = data ?? [];
+  if (registrations.length === 0) {
+    return { success: true, data: [] };
+  }
+
+  const userIds = Array.from(
+    new Set(
+      registrations
+        .map((row) => row.user_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  );
+
+  let profileById = new Map<string, string | null>();
+  let organizationById = new Map<string, string | null>();
+
+  if (userIds.length > 0) {
+    const { data: profiles, error: profileError } = await adminClient
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", userIds);
+
+    if (profileError) return { success: false, error: profileError.message };
+    profileById = new Map((profiles ?? []).map((profile) => [profile.id, profile.display_name]));
+  }
+
+  const organizationIds = Array.from(
+    new Set(
+      registrations
+        .map((row) => row.organization_id)
+        .filter((value): value is string => typeof value === "string" && value.length > 0)
+    )
+  );
+  if (organizationIds.length > 0) {
+    const { data: organizations, error: organizationError } = await adminClient
+      .from("organizations")
+      .select("id, name")
+      .in("id", organizationIds);
+
+    if (organizationError) return { success: false, error: organizationError.message };
+    organizationById = new Map((organizations ?? []).map((org) => [org.id, org.name]));
+  }
+
+  const enrichedRows: AdminRegistrationRow[] = registrations.map((row) => ({
+    ...row,
+    user_display_name: profileById.get(row.user_id) ?? null,
+    organization_name: organizationById.get(row.organization_id) ?? null,
+  }));
+
+  return { success: true, data: enrichedRows };
+}
+
+export type RegistrationExportPreset =
+  | "summary"
+  | "all"
+  | "hotel_rooming"
+  | "airline_booking"
+  | "catering_dietary"
+  | "emergency_contacts";
+
+export async function recordRegistrationExportEvent(input: {
+  conferenceId: string;
+  preset: RegistrationExportPreset;
+  rowCount: number;
+  filters?: Record<string, unknown>;
+  sharedWith?: string | null;
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  await logAuditEventSafe({
+    action: "conference_registration_exported",
+    entityType: "conference_instance",
+    entityId: input.conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      preset: input.preset,
+      row_count: input.rowCount,
+      shared_with: input.sharedWith ?? null,
+      filters: input.filters ?? {},
+    },
+  });
+
+  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────

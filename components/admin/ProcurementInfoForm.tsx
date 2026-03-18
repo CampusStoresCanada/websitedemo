@@ -121,7 +121,7 @@ export default function ProcurementInfoForm({
               onClick={() => toggleCategory(category)}
               className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
                 productCategories.includes(category)
-                  ? "bg-[#D60001] text-white"
+                  ? "bg-[#EE2A2E] text-white"
                   : "bg-gray-100 text-gray-600 hover:bg-gray-200"
               }`}
             >
@@ -144,7 +144,7 @@ export default function ProcurementInfoForm({
               type="checkbox"
               checked={buyLocal}
               onChange={(e) => setBuyLocal(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             <div>
               <span className="font-medium text-[#1A1A1A]">Buy Local Policy</span>
@@ -160,7 +160,7 @@ export default function ProcurementInfoForm({
                 value={buyLocalNotes}
                 onChange={(e) => setBuyLocalNotes(e.target.value)}
                 placeholder="e.g., 30% local sourcing required for apparel"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
               />
             </div>
           )}
@@ -173,7 +173,7 @@ export default function ProcurementInfoForm({
               type="checkbox"
               checked={indigenousOwned}
               onChange={(e) => setIndigenousOwned(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             <div>
               <span className="font-medium text-[#1A1A1A]">Indigenous-Owned Vendor Preference</span>
@@ -189,7 +189,7 @@ export default function ProcurementInfoForm({
                 value={indigenousOwnedNotes}
                 onChange={(e) => setIndigenousOwnedNotes(e.target.value)}
                 placeholder="e.g., Indigenous suppliers given priority for promotional items"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
               />
             </div>
           )}
@@ -215,7 +215,7 @@ export default function ProcurementInfoForm({
                 }
               }}
               placeholder="Enter certification name"
-              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
             <button
               type="button"
@@ -258,7 +258,7 @@ export default function ProcurementInfoForm({
             onChange={(e) => setOtherRequirements(e.target.value)}
             placeholder="e.g., All vendors must carry $2M liability insurance"
             rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
           />
         </div>
       </div>
@@ -277,7 +277,7 @@ export default function ProcurementInfoForm({
             <select
               value={fiscalYearStart}
               onChange={(e) => setFiscalYearStart(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             >
               <option value="">Select month</option>
               {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((month) => (
@@ -295,7 +295,7 @@ export default function ProcurementInfoForm({
               value={rfpWindow}
               onChange={(e) => setRfpWindow(e.target.value)}
               placeholder="e.g., January - March"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
         </div>
@@ -309,7 +309,7 @@ export default function ProcurementInfoForm({
             onChange={(e) => setKeyDates(e.target.value)}
             placeholder="e.g., Textbook adoption deadline: June 15. Apparel RFP opens: February 1."
             rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
           />
         </div>
       </div>
@@ -327,7 +327,7 @@ export default function ProcurementInfoForm({
           <select
             value={buyerContactId}
             onChange={(e) => setBuyerContactId(e.target.value)}
-            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
           >
             <option value="">Select a contact</option>
             {contacts.map((contact) => (
@@ -355,7 +355,7 @@ export default function ProcurementInfoForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="px-6 py-2 bg-[#D60001] text-white font-medium rounded-md hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-6 py-2 bg-[#EE2A2E] text-white font-medium rounded-md hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isSubmitting ? "Saving..." : "Save Changes"}
         </button>

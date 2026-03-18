@@ -55,7 +55,7 @@ export default function JoinCTA({
         </svg>
         <Link
           href={resolvedCtaLink}
-          className="text-[#D60001] hover:underline font-medium"
+          className="text-[#EE2A2E] hover:underline font-medium"
         >
           {resolvedCtaText}
         </Link>

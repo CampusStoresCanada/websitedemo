@@ -117,8 +117,8 @@ export default function AdminPagesPermissionsPage() {
 
       <div className="mt-4 text-sm text-gray-600">
         <p>
-          Related tools: <Link className="text-blue-700 hover:underline" href="/admin/ops">Ops Health</Link>{" "}
-          and <Link className="text-blue-700 hover:underline" href="/admin/policy">Policy Settings</Link>.
+          Related tools: <Link className="text-[#D92327] hover:underline" href="/admin/ops">Ops Health</Link>{" "}
+          and <Link className="text-[#D92327] hover:underline" href="/admin/policy">Policy Settings</Link>.
         </p>
       </div>
     </main>

@@ -227,7 +227,7 @@ export default async function OrgConferencePage({
           </Link>
           <Link
             href={`/conference/${conference.year}/${conference.edition_code}/schedule`}
-            className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+            className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
           >
             Open Schedule + Swaps
           </Link>

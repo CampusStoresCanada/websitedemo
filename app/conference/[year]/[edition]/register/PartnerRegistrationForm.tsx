@@ -288,7 +288,7 @@ export default function PartnerRegistrationForm({
                         ? setMeetingOutcomeIntent([...meetingOutcomeIntent, opt])
                         : setMeetingOutcomeIntent(meetingOutcomeIntent.filter((x) => x !== opt))
                     }
-                    className="rounded border-gray-300 text-[#D60001]"
+                    className="rounded border-gray-300 text-[#EE2A2E]"
                   />
                   <span className="text-sm text-gray-700">{opt}</span>
                 </label>
@@ -300,7 +300,7 @@ export default function PartnerRegistrationForm({
             <div className="space-y-2">
               {MEETING_STRUCTURE_OPTIONS.map((opt) => (
                 <label key={opt} className="flex items-center gap-2">
-                  <input type="radio" name="meetingStructure" value={opt} checked={meetingStructure === opt} onChange={() => setMeetingStructure(opt)} className="border-gray-300 text-[#D60001]" />
+                  <input type="radio" name="meetingStructure" value={opt} checked={meetingStructure === opt} onChange={() => setMeetingStructure(opt)} className="border-gray-300 text-[#EE2A2E]" />
                   <span className="text-sm text-gray-700">{opt}</span>
                 </label>
               ))}
@@ -327,7 +327,7 @@ export default function PartnerRegistrationForm({
                 type="checkbox"
                 checked={salesReadiness[key]}
                 onChange={(e) => setSalesReadiness({ ...salesReadiness, [key]: e.target.checked })}
-                className="rounded border-gray-300 text-[#D60001] h-5 w-5"
+                className="rounded border-gray-300 text-[#EE2A2E] h-5 w-5"
               />
             </label>
           ))}
@@ -349,7 +349,7 @@ export default function PartnerRegistrationForm({
                     ? setBuyingCycles([...buyingCycles, opt])
                     : setBuyingCycles(buyingCycles.filter((x) => x !== opt))
                 }
-                className="rounded border-gray-300 text-[#D60001]"
+                className="rounded border-gray-300 text-[#EE2A2E]"
               />
               <span className="text-sm text-gray-700">{opt}</span>
             </label>
@@ -451,7 +451,7 @@ export default function PartnerRegistrationForm({
                 },
               ])
             }
-            className="text-sm text-[#D60001] hover:underline"
+            className="text-sm text-[#EE2A2E] hover:underline"
           >
             + Add another staff member
           </button>
@@ -490,7 +490,7 @@ export default function PartnerRegistrationForm({
                 type="checkbox"
                 checked={s.extracurricular_registered}
                 onChange={(e) => { const n = [...staff]; n[i] = { ...n[i], extracurricular_registered: e.target.checked }; setStaff(n); }}
-                className="rounded border-gray-300 text-[#D60001] h-5 w-5"
+                className="rounded border-gray-300 text-[#EE2A2E] h-5 w-5"
               />
             </label>
           ))}
@@ -526,7 +526,7 @@ export default function PartnerRegistrationForm({
                         ? setSecondaryCategories([...secondaryCategories, c])
                         : setSecondaryCategories(secondaryCategories.filter((x) => x !== c))
                     }
-                    className="rounded border-gray-300 text-[#D60001]"
+                    className="rounded border-gray-300 text-[#EE2A2E]"
                   />
                   <span className="text-sm text-gray-700">{c}</span>
                 </label>
@@ -563,7 +563,7 @@ export default function PartnerRegistrationForm({
                         setAcceptedLegalIds(new Set([...acceptedLegalIds, doc.id]));
                       }
                     }}
-                    className="text-sm text-[#D60001] hover:underline font-medium"
+                    className="text-sm text-[#EE2A2E] hover:underline font-medium"
                   >
                     I accept these terms
                   </button>

@@ -97,7 +97,7 @@ export default async function ConferenceProductsPage({
           </Link>
           <Link
             href={`/conference/${year}/${edition}/cart?org=${selectedOrg.id}`}
-            className="inline-flex items-center rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+            className="inline-flex items-center rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
           >
             View Cart
           </Link>
@@ -112,7 +112,7 @@ export default async function ConferenceProductsPage({
               href={`/conference/${year}/${edition}/products?org=${org.id}`}
               className={`rounded-full border px-3 py-1 text-xs font-medium ${
                 org.id === selectedOrg.id
-                  ? "border-[#D60001] bg-[#fff1f1] text-[#D60001]"
+                  ? "border-[#EE2A2E] bg-[#fff1f1] text-[#EE2A2E]"
                   : "border-gray-300 text-gray-700 hover:border-gray-400"
               }`}
             >

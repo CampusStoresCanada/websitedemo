@@ -46,7 +46,7 @@ function statusBadge(status: PreviewRow["draftStatus"]): string {
   if (status === "computed") return "bg-green-100 text-green-700";
   if (status === "fallback_used") return "bg-amber-100 text-amber-700";
   if (status === "manual_required") return "bg-red-100 text-red-700";
-  return "bg-blue-100 text-blue-700";
+  return "bg-blue-100 text-[#D92327]";
 }
 
 export default function PricingPreviewPanel({ draftSetId, isSuperAdmin }: Props) {

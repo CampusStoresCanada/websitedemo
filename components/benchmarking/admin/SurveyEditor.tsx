@@ -212,7 +212,7 @@ export default function SurveyEditor({
           <button
             onClick={handleSave}
             disabled={saving}
-            className="px-6 py-2 text-sm font-medium text-white bg-[#D60001] rounded-lg hover:bg-[#B00001] disabled:opacity-50"
+            className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327] disabled:opacity-50"
           >
             {saving ? "Saving..." : "Save Changes"}
           </button>
@@ -233,7 +233,7 @@ export default function SurveyEditor({
                     onClick={() => setActiveSectionIdx(idx)}
                     className={`w-full text-left px-3 py-2 rounded text-sm flex items-center justify-between ${
                       activeSectionIdx === idx
-                        ? "bg-red-50 text-[#D60001] font-medium"
+                        ? "bg-red-50 text-[#EE2A2E] font-medium"
                         : "text-gray-600 hover:bg-gray-50"
                     }`}
                   >
@@ -285,7 +285,7 @@ export default function SurveyEditor({
                   onChange={(e) =>
                     updateSectionTitle(activeSection.id, e.target.value)
                   }
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
                 />
                 <label className="block text-xs font-medium text-gray-500 mb-1 mt-3">
                   Section Description (optional)
@@ -297,7 +297,7 @@ export default function SurveyEditor({
                     updateSectionDescription(activeSection.id, e.target.value)
                   }
                   placeholder="Description shown below the section heading"
-                  className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+                  className="w-full px-3 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
                 />
               </div>
 
@@ -408,7 +408,7 @@ function FieldRow({
               {field.name}
             </span>
             {isCalculated && (
-              <span className="text-xs bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded">
+              <span className="text-xs bg-blue-100 text-[#D92327] px-1.5 py-0.5 rounded">
                 calc
               </span>
             )}
@@ -466,7 +466,7 @@ function FieldRow({
               type="text"
               value={field.label}
               onChange={(e) => onUpdateProp("label", e.target.value)}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -479,7 +479,7 @@ function FieldRow({
               value={field.type}
               onChange={(e) => onUpdateProp("type", e.target.value as FieldType)}
               disabled={isCalculated}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent disabled:bg-gray-50"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50"
             >
               {compatibleTypes.map((t) => (
                 <option key={t} value={t}>
@@ -499,7 +499,7 @@ function FieldRow({
               value={field.tooltip ?? ""}
               onChange={(e) => onUpdateProp("tooltip", e.target.value || undefined)}
               placeholder="Help text shown in tooltip popup"
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -513,7 +513,7 @@ function FieldRow({
               value={field.helpText ?? ""}
               onChange={(e) => onUpdateProp("helpText", e.target.value || undefined)}
               placeholder="Inline description below the label"
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -526,7 +526,7 @@ function FieldRow({
               type="text"
               value={field.placeholder ?? ""}
               onChange={(e) => onUpdateProp("placeholder", e.target.value || undefined)}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -540,7 +540,7 @@ function FieldRow({
               value={field.suffix ?? ""}
               onChange={(e) => onUpdateProp("suffix", e.target.value || undefined)}
               placeholder="e.g., sq ft, years, %"
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -550,7 +550,7 @@ function FieldRow({
               type="checkbox"
               checked={field.required ?? false}
               onChange={(e) => onUpdateProp("required", e.target.checked || undefined)}
-              className="rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+              className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             <label className="text-xs font-medium text-gray-500">
               Required
@@ -567,7 +567,7 @@ function FieldRow({
               value={field.group ?? ""}
               onChange={(e) => onUpdateProp("group", e.target.value || undefined)}
               placeholder="Visual group heading"
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
 
@@ -589,7 +589,7 @@ function FieldRow({
                   )
                 }
                 rows={4}
-                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm font-mono focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+                className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm font-mono focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
               />
             </div>
           )}
@@ -604,7 +604,7 @@ function FieldRow({
               onChange={(e) => {
                 if (e.target.value) onMoveToSection(e.target.value);
               }}
-              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#D60001] focus:border-transparent"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             >
               <option value="">Stay in current section</option>
               {allSections

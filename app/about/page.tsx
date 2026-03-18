@@ -12,7 +12,7 @@ export const revalidate = 60;
 export const metadata: Metadata = {
   title: "About | Campus Stores Canada",
   description:
-    "Learn about Campus Stores Canada — the national association for post-secondary campus retail, connecting member institutions and vendor partners since 1993.",
+    "Learn about Campus Stores Canada — the national association for post-secondary campus retail, connecting member institutions and vendor partners since 2004.",
 };
 
 export default async function AboutPage() {

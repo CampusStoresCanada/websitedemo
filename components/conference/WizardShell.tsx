@@ -34,7 +34,7 @@ export default function WizardShell({
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium shrink-0 ${
                 i === currentStep
-                  ? "bg-[#D60001] text-white"
+                  ? "bg-[#EE2A2E] text-white"
                   : i < currentStep
                     ? "bg-green-100 text-green-700"
                     : "bg-gray-100 text-gray-400"
@@ -105,7 +105,7 @@ export default function WizardShell({
             type="button"
             onClick={onNext}
             disabled={nextDisabled || isLoading}
-            className="px-6 py-2 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+            className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
           >
             {isLoading && (
               <svg

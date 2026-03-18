@@ -41,7 +41,7 @@ export default function AdminSidebar({ isAdmin }: AdminSidebarProps) {
                   href={item.href}
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
-                      ? "bg-red-50 text-[#D60001]"
+                      ? "bg-red-50 text-[#EE2A2E]"
                       : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
                   }`}
                 >

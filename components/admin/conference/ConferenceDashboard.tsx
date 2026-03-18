@@ -10,6 +10,7 @@ import ConferenceForm from "./ConferenceForm";
 import ScheduleDesignWizard from "./ScheduleDesignWizard";
 import ConferenceScheduleDesigner from "./ConferenceScheduleDesigner";
 import ProductManager from "./ProductManager";
+import ConferenceRulesBuilder from "./ConferenceRulesBuilder";
 import RegistrationsTable from "./RegistrationsTable";
 import LegalManager from "./LegalManager";
 import StatusControls from "./StatusControls";
@@ -109,6 +110,7 @@ const TABS = [
   { id: "schedule", label: "Schedule" },
   { id: "overview", label: "Overview" },
   { id: "products", label: "Products" },
+  { id: "rules", label: "Rules" },
   { id: "registrations", label: "Registrations" },
   { id: "legal", label: "Legal" },
   { id: "wishlist", label: "Wishlist" },
@@ -172,7 +174,7 @@ export default function ConferenceDashboard({
               href={`/admin/conference/${conference.id}/check-in`}
               target="_blank"
               rel="noopener noreferrer"
-              className="rounded-md border border-[#D60001] bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+              className="rounded-md border border-[#EE2A2E] bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
             >
               Open Check-in Desk
             </Link>
@@ -201,7 +203,7 @@ export default function ConferenceDashboard({
               onClick={() => setActiveTabWithUrl(tab.id)}
               className={`py-2 px-1 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === tab.id
-                  ? "border-[#D60001] text-[#D60001]"
+                  ? "border-[#EE2A2E] text-[#EE2A2E]"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
             >
@@ -252,6 +254,9 @@ export default function ConferenceDashboard({
           initialScheduleModules={initialScheduleModules}
           onProductsChange={setProducts}
         />
+      )}
+      {activeTab === "rules" && (
+        <ConferenceRulesBuilder conferenceId={conference.id} products={products} />
       )}
       {activeTab === "registrations" && (
         <RegistrationsTable conferenceId={conference.id} />

@@ -19,7 +19,7 @@ export default function MemberDirectoryTeaser({
         </p>
         <Link
           href="/members"
-          className="inline-flex h-14 px-8 items-center bg-[#D60001] hover:bg-[#B00001] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
+          className="inline-flex h-14 px-8 items-center bg-[#EE2A2E] hover:bg-[#D92327] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
         >
           View Member Directory
         </Link>

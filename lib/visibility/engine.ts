@@ -81,9 +81,9 @@ function isVisibleByCrossRules(
  * Determine if a specific field is visible to a viewer.
  *
  * - admin/super_admin: always see everything
- * - org_admin: returns false here (caller must check isOwnOrg separately)
- * - public/member/partner: allowlist + explicit cross-rules only
- * - private list is always hidden unless admin/super_admin/own-org-admin
+ * - org_admin/authenticated/member/partner: private fields are visible
+ * - public/member/partner: allowlist + explicit cross-rules for non-private fields
+ * - private list is hidden for public viewers
  * - Unlisted fields: hidden (fail-closed)
  */
 export function isFieldVisible(
@@ -93,7 +93,7 @@ export function isFieldVisible(
   targetOrgType: string | null
 ): boolean {
   if (viewerLevel === "admin" || viewerLevel === "super_admin") return true;
-  if (viewerLevel === "org_admin") return false;
+  if (viewerLevel !== "public" && config.private_fields.includes(fieldPath)) return true;
 
   if (config.public_allowlist.includes(fieldPath)) return true;
 

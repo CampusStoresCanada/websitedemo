@@ -23,11 +23,11 @@ export default function JoinCSCFlow() {
 
         <button
           onClick={() => setJoinType("member")}
-          className="w-full flex items-start gap-4 p-4 rounded-lg border border-gray-200 hover:border-[#D60001] hover:bg-red-50/50 text-left transition-colors"
+          className="w-full flex items-start gap-4 p-4 rounded-lg border border-gray-200 hover:border-[#EE2A2E] hover:bg-red-50/50 text-left transition-colors"
         >
           <div className="w-10 h-10 rounded-lg bg-red-100 flex items-center justify-center flex-shrink-0 mt-0.5">
             <svg
-              className="w-5 h-5 text-[#D60001]"
+              className="w-5 h-5 text-[#EE2A2E]"
               fill="none"
               viewBox="0 0 24 24"
               strokeWidth={1.5}
@@ -56,7 +56,7 @@ export default function JoinCSCFlow() {
         >
           <div className="w-10 h-10 rounded-lg bg-blue-100 flex items-center justify-center flex-shrink-0 mt-0.5">
             <svg
-              className="w-5 h-5 text-blue-600"
+              className="w-5 h-5 text-[#EE2A2E]"
               fill="none"
               viewBox="0 0 24 24"
               strokeWidth={1.5}

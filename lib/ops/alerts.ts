@@ -550,24 +550,6 @@ async function evaluateLegalAcceptanceGap(): Promise<CandidateAlert | null> {
 
 async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
   const db = createAdminClient();
-  const untypedDb = db as unknown as {
-    from: (table: string) => {
-      select: (columns: string) => {
-        in: (column: string, values: string[]) => {
-          order: (column: string, opt?: { ascending?: boolean }) => Promise<{
-            data: Array<{
-              conference_id: string;
-              status: "completed" | "failed";
-              executed_at: string;
-              cutoff_at: string;
-              error_details: string | null;
-            }> | null;
-            error: { message: string } | null;
-          }>;
-        };
-      };
-    };
-  };
   const now = new Date();
   const { data: conferences, error: conferenceError } = await db
     .from("conference_instances")
@@ -598,7 +580,7 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
 
   if (dueConferences.length === 0) return null;
 
-  const { data: runs, error: runsError } = await untypedDb
+  const { data: runs, error: runsError } = await db
     .from("retention_jobs")
     .select("conference_id, status, executed_at, cutoff_at, error_details")
     .in(
@@ -685,6 +667,75 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
   };
 }
 
+async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
+  const db = createAdminClient() as unknown as {
+    from: (table: string) => {
+      select: (columns: string, opts?: { count?: "exact"; head?: boolean }) => {
+        eq: (column: string, value: unknown) => Promise<{
+          data: unknown[] | null;
+          count: number | null;
+          error: { message: string } | null;
+        }>;
+      };
+    };
+  };
+
+  const { count, error } = await db
+    .from("qbo_export_queue")
+    .select("id", { count: "exact", head: true })
+    .eq("status", "failed");
+
+  if (error) {
+    throw new Error(`Failed to evaluate QB export backlog: ${error.message}`);
+  }
+
+  const failedCount = count ?? 0;
+  if (failedCount === 0) return null;
+
+  return {
+    ruleKey: "qbo_export_backlog",
+    severity: failedCount >= 3 ? "critical" : "warning",
+    message: `${failedCount} QB export(s) have exhausted all retries and need attention.`,
+    details: { failedCount },
+  };
+}
+
+/**
+ * Idempotent immediate alert: raises a critical ops alert for the given candidate
+ * only if no open/acknowledged alert with the same rule_key already exists.
+ * Wrapped to never throw — alert infrastructure failure must not mask the caller's error.
+ */
+export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<void> {
+  try {
+    const readDb = createAdminClient() as unknown as {
+      from: (table: string) => {
+        select: (columns: string) => {
+          eq: (col: string, val: string) => {
+            neq: (col: string, val: string) => Promise<{
+              data: unknown[] | null;
+              error: { message: string } | null;
+            }>;
+          };
+        };
+      };
+    };
+
+    const { data } = await readDb
+      .from("ops_alerts")
+      .select("id")
+      .eq("rule_key", candidate.ruleKey)
+      .neq("status", "resolved");
+
+    const existing = (data ?? []) as Array<{ id: string }>;
+    if (existing.length > 0) return;
+
+    await insertAlert(candidate);
+  } catch {
+    // Best-effort — do not let alert infrastructure failure mask the caller's error.
+    console.error(`[ops] raiseAlertIfNotOpen failed for rule_key=${candidate.ruleKey}`);
+  }
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -698,6 +749,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBootstrapRecoveryFailure(),
     evaluateLegalAcceptanceGap(),
     evaluateRetentionOverdue(),
+    evaluateQBExportBacklog(),
   ]);
 
   return checks.filter((item): item is CandidateAlert => Boolean(item));

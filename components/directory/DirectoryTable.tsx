@@ -292,7 +292,7 @@ export default function DirectoryTable({
                           className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-medium ${
                             org.type === "Member"
                               ? "bg-red-50 text-red-700 border border-red-100"
-                              : "bg-blue-50 text-blue-700 border border-blue-100"
+                              : "bg-blue-50 text-[#D92327] border border-blue-100"
                           }`}
                         >
                           {org.type === "Vendor Partner" ? "Partner" : org.type ?? "—"}

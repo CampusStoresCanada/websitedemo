@@ -115,7 +115,7 @@ export function OnboardingWizard({
             <div
               className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-medium transition-colors ${
                 i === stepIdx
-                  ? "bg-[#D60001] text-white"
+                  ? "bg-[#EE2A2E] text-white"
                   : i < stepIdx
                     ? "bg-green-100 text-green-700"
                     : "bg-gray-100 text-gray-400"
@@ -224,7 +224,7 @@ export function OnboardingWizard({
 // ─────────────────────────────────────────────────────────────────
 
 const inputClass =
-  "w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors";
+  "w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors";
 const selectClass = `${inputClass} bg-white`;
 const labelClass = "block text-sm font-medium text-gray-700 mb-1";
 
@@ -378,7 +378,7 @@ function Step1PublicProfile({
         <button
           type="submit"
           disabled={isLoading}
-          className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Saving…" : "Save & Continue"}
         </button>
@@ -489,7 +489,7 @@ function Step2PrivateProfile({
         <button
           type="submit"
           disabled={isLoading}
-          className="flex-1 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex-1 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Saving…" : "Save & Continue"}
         </button>
@@ -552,15 +552,15 @@ function Step3AdminAccount({
             type="checkbox"
             checked={agreedToTerms}
             onChange={(e) => setAgreedToTerms(e.target.checked)}
-            className="mt-0.5 rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+            className="mt-0.5 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
           />
           <span className="text-sm text-gray-700">
             I agree to the Campus Stores Canada{" "}
-            <a href="/terms" className="text-[#D60001] hover:text-[#B00001] font-medium" target="_blank">
+            <a href="/terms" className="text-[#EE2A2E] hover:text-[#D92327] font-medium" target="_blank">
               Terms of Service
             </a>{" "}
             and{" "}
-            <a href="/privacy" className="text-[#D60001] hover:text-[#B00001] font-medium" target="_blank">
+            <a href="/privacy" className="text-[#EE2A2E] hover:text-[#D92327] font-medium" target="_blank">
               Privacy Policy
             </a>
             .
@@ -579,7 +579,7 @@ function Step3AdminAccount({
         <button
           type="submit"
           disabled={isLoading || !agreedToTerms}
-          className="flex-1 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex-1 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Saving…" : "Save & Continue"}
         </button>
@@ -666,7 +666,7 @@ function Step4PurchasingProfile({
               key={cat}
               className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-colors ${
                 categories.includes(cat)
-                  ? "border-[#D60001] bg-red-50"
+                  ? "border-[#EE2A2E] bg-red-50"
                   : "border-gray-200 hover:border-gray-300"
               }`}
             >
@@ -679,7 +679,7 @@ function Step4PurchasingProfile({
               <div
                 className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
                   categories.includes(cat)
-                    ? "bg-[#D60001] border-[#D60001]"
+                    ? "bg-[#EE2A2E] border-[#EE2A2E]"
                     : "border-gray-300"
                 }`}
               >
@@ -713,7 +713,7 @@ function Step4PurchasingProfile({
               type="checkbox"
               checked={buyLocal}
               onChange={(e) => setBuyLocal(e.target.checked)}
-              className="rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+              className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             Buy-local policies apply
           </label>
@@ -722,7 +722,7 @@ function Step4PurchasingProfile({
               type="checkbox"
               checked={indigenousOwned}
               onChange={(e) => setIndigenousOwned(e.target.checked)}
-              className="rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+              className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             Indigenous-owned vendor preferences
           </label>
@@ -799,7 +799,7 @@ function Step4PurchasingProfile({
         <button
           type="submit"
           disabled={isLoading}
-          className="flex-1 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex-1 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Saving…" : "Save & Continue"}
         </button>
@@ -921,7 +921,7 @@ function Step5SalesProfile({
                 key={cat}
                 className={`flex items-center gap-2 p-2 rounded-lg border text-sm cursor-pointer transition-colors ${
                   secondaryCategories.includes(cat)
-                    ? "border-[#D60001] bg-red-50"
+                    ? "border-[#EE2A2E] bg-red-50"
                     : "border-gray-200 hover:border-gray-300"
                 }`}
               >
@@ -934,7 +934,7 @@ function Step5SalesProfile({
                 <div
                   className={`w-4 h-4 rounded border flex items-center justify-center flex-shrink-0 ${
                     secondaryCategories.includes(cat)
-                      ? "bg-[#D60001] border-[#D60001]"
+                      ? "bg-[#EE2A2E] border-[#EE2A2E]"
                       : "border-gray-300"
                   }`}
                 >
@@ -961,7 +961,7 @@ function Step5SalesProfile({
               onClick={() => toggleCert(cert)}
               className={`px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${
                 certifications.includes(cert)
-                  ? "bg-[#D60001] text-white border-[#D60001]"
+                  ? "bg-[#EE2A2E] text-white border-[#EE2A2E]"
                   : "bg-white text-gray-700 border-gray-300 hover:border-gray-400"
               }`}
             >
@@ -1021,7 +1021,7 @@ function Step5SalesProfile({
         <button
           type="submit"
           disabled={isLoading}
-          className="flex-1 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="flex-1 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isLoading ? "Saving…" : "Save & Continue"}
         </button>

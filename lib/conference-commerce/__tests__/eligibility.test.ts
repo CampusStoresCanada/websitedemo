@@ -47,6 +47,7 @@ describe("conference commerce eligibility", () => {
       organizationId: "org-1",
       userId: "user-1",
       organizationType: "Member",
+      membershipStatus: "active",
       registrationTypes: ["delegate"],
       cartItems: [],
       paidOrderItems: [],
@@ -75,6 +76,7 @@ describe("conference commerce eligibility", () => {
       organizationId: "org-1",
       userId: "user-1",
       organizationType: "Vendor Partner",
+      membershipStatus: "active",
       registrationTypes: ["exhibitor"],
       cartItems: [{ slug: "partner_meeting_time", quantity: 1 }],
       paidOrderItems: [{ slug: "partner_meeting_time", quantity: 1 }],
@@ -103,6 +105,7 @@ describe("conference commerce eligibility", () => {
       organizationId: "org-1",
       userId: "user-1",
       organizationType: "Member",
+      membershipStatus: "active",
       registrationTypes: [],
       cartItems: [],
       paidOrderItems: [],
@@ -123,6 +126,73 @@ describe("conference commerce eligibility", () => {
 
     expect(result.eligible).toBe(false);
     expect(result.errors).toContain("Attendance commitment required");
+  });
+
+  it("supports membership-or-partner custom rule", () => {
+    const context = buildEligibilityContext({
+      conferenceId: "conf-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      organizationType: "Member",
+      membershipStatus: "expired",
+      registrationTypes: ["delegate"],
+      cartItems: [],
+      paidOrderItems: [],
+    });
+
+    const result = checkProductEligibility({
+      product: buildProduct({ slug: "extracurricular_ticket" }),
+      quantity: 1,
+      rules: [
+        buildRule({
+          rule_type: "custom",
+          rule_config: { expression: "membership_or_partner_required=true" },
+          error_message: "Requires active membership or partner status",
+        }),
+      ],
+      context,
+    });
+
+    expect(result.eligible).toBe(false);
+    expect(result.errors).toContain("Requires active membership or partner status");
+  });
+
+  it("supports composed dsl_v1 rule for block_purchase", () => {
+    const context = buildEligibilityContext({
+      conferenceId: "conf-1",
+      organizationId: "org-1",
+      userId: "user-1",
+      organizationType: "Member",
+      membershipStatus: "active",
+      registrationTypes: [],
+      cartItems: [],
+      paidOrderItems: [],
+    });
+
+    const result = checkProductEligibility({
+      product: buildProduct({ slug: "extracurricular_ticket" }),
+      quantity: 1,
+      rules: [
+        buildRule({
+          rule_type: "custom",
+          rule_config: {
+            expression: "dsl_v1",
+            dsl_v1: {
+              data_field: "org.has_any_registration",
+              logic: "is_false",
+              value: "false",
+              modifier: "none",
+              outcome: "block_purchase",
+            },
+          },
+          error_message: "Requires prior conference registration",
+        }),
+      ],
+      context,
+    });
+
+    expect(result.eligible).toBe(false);
+    expect(result.errors).toContain("Requires prior conference registration");
   });
 
   it("validates partner meeting metadata for multi-brand quantities", () => {

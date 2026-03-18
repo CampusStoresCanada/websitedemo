@@ -61,19 +61,6 @@ export async function retentionPurgeRun(): Promise<RetentionPurgeJobResult> {
   const now = new Date();
   const ranAt = now.toISOString();
   const db = createAdminClient();
-  const untypedDb = db as unknown as {
-    rpc: (
-      fn: string,
-      args: Record<string, unknown>
-    ) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
-    from: (table: string) => {
-      insert: (values: Record<string, unknown>) => {
-        select: (columns: string) => {
-          maybeSingle: () => Promise<{ data: { id: string } | null; error: { message: string } | null }>;
-        };
-      };
-    };
-  };
 
   let rule: string;
   try {
@@ -151,11 +138,11 @@ export async function retentionPurgeRun(): Promise<RetentionPurgeJobResult> {
   for (const conference of dueConferences) {
     const cutoffAt = conferenceCutoffIso(conference.year);
     try {
-      const { data: rpcData, error: rpcError } = await untypedDb.rpc(
+      const { data: rpcData, error: rpcError } = await db.rpc(
         "run_travel_retention_purge",
         {
           p_conference_id: conference.id,
-          p_policy_set_id: policySetId,
+          p_policy_set_id: policySetId as string,
           p_cutoff_at: cutoffAt,
           p_fields: [...TRAVEL_FIELDS_TO_PURGE],
         }
@@ -204,7 +191,7 @@ export async function retentionPurgeRun(): Promise<RetentionPurgeJobResult> {
       const errorMessage =
         error instanceof Error ? error.message : "Unknown retention purge error";
 
-      const { data: failedRow } = await untypedDb
+      const { data: failedRow } = await db
         .from("retention_jobs")
         .insert({
           job_type: "travel_purge",

@@ -32,7 +32,7 @@ export default function ResponseRateCard({
         </div>
         <div className="h-3 bg-gray-100 rounded-full overflow-hidden">
           <div
-            className="h-full bg-[#D60001] rounded-full transition-all duration-500"
+            className="h-full bg-[#EE2A2E] rounded-full transition-all duration-500"
             style={{ width: `${Math.min(pct, 100)}%` }}
           />
         </div>
@@ -49,8 +49,8 @@ export default function ResponseRateCard({
           <div className="text-xs text-green-600">Submitted</div>
         </div>
         <div className="text-center p-2 bg-blue-50 rounded-lg">
-          <div className="text-lg font-bold text-blue-700">{verified}</div>
-          <div className="text-xs text-blue-600">Verified</div>
+          <div className="text-lg font-bold text-[#D92327]">{verified}</div>
+          <div className="text-xs text-[#EE2A2E]">Verified</div>
         </div>
       </div>
     </div>

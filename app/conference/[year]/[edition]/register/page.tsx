@@ -97,7 +97,7 @@ export default async function RegisterPage({
               <p className="text-sm text-gray-500 mb-3">Register as a member delegate.</p>
               <Link
                 href={`/conference/${year}/${edition}/register?role=delegate&org=${delegateOrgs[0].id}`}
-                className="inline-flex px-3 py-1.5 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001]"
+                className="inline-flex px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
               >
                 Start Delegate
               </Link>
@@ -109,7 +109,7 @@ export default async function RegisterPage({
               <p className="text-sm text-gray-500 mb-3">Register as a vendor partner exhibitor.</p>
               <Link
                 href={`/conference/${year}/${edition}/register?role=exhibitor&org=${exhibitorOrgsForRole[0].id}`}
-                className="inline-flex px-3 py-1.5 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001]"
+                className="inline-flex px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
               >
                 Start Exhibitor
               </Link>
@@ -245,13 +245,13 @@ export default async function RegisterPage({
           <span className="text-gray-600 mr-3">Switch role:</span>
           <Link
             href={`/conference/${year}/${edition}/register?role=delegate&org=${delegateOrgs[0].id}`}
-            className={`mr-3 ${registrationType === "delegate" ? "font-semibold text-[#D60001]" : "text-gray-600 hover:text-gray-800"}`}
+            className={`mr-3 ${registrationType === "delegate" ? "font-semibold text-[#EE2A2E]" : "text-gray-600 hover:text-gray-800"}`}
           >
             Delegate
           </Link>
           <Link
             href={`/conference/${year}/${edition}/register?role=exhibitor&org=${exhibitorOrgsForRole[0].id}`}
-            className={registrationType === "exhibitor" ? "font-semibold text-[#D60001]" : "text-gray-600 hover:text-gray-800"}
+            className={registrationType === "exhibitor" ? "font-semibold text-[#EE2A2E]" : "text-gray-600 hover:text-gray-800"}
           >
             Exhibitor
           </Link>

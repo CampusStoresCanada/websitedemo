@@ -39,7 +39,7 @@ export default function OrgLocation({ organization }: OrgLocationProps) {
     // Add marker
     const el = document.createElement("div");
     el.className = "w-8 h-8 rounded-full flex items-center justify-center";
-    el.style.backgroundColor = organization.type === "Member" ? "#D60001" : "#3B82F6";
+    el.style.backgroundColor = organization.type === "Member" ? "#EE2A2E" : "#3B82F6";
     el.style.border = "3px solid white";
     el.style.boxShadow = "0 2px 8px rgba(0,0,0,0.3)";
 
@@ -76,7 +76,7 @@ export default function OrgLocation({ organization }: OrgLocationProps) {
           <div ref={mapContainer} className="w-full h-full" />
           {!mapLoaded && (
             <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
-              <div className="w-5 h-5 border-2 border-[#D60001] border-t-transparent rounded-full animate-spin" />
+              <div className="w-5 h-5 border-2 border-[#EE2A2E] border-t-transparent rounded-full animate-spin" />
             </div>
           )}
         </div>
@@ -105,7 +105,7 @@ export default function OrgLocation({ organization }: OrgLocationProps) {
             href={directionsUrl}
             target="_blank"
             rel="noopener noreferrer"
-            className="mt-4 inline-flex items-center gap-2 text-[#D60001] font-medium hover:underline"
+            className="mt-4 inline-flex items-center gap-2 text-[#EE2A2E] font-medium hover:underline"
           >
             <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17.657 16.657L13.414 20.9a1.998 1.998 0 01-2.827 0l-4.244-4.243a8 8 0 1111.314 0z" />

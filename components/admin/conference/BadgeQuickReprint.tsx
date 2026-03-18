@@ -147,7 +147,7 @@ export default function BadgeQuickReprint({
                     onClick={() => selectPerson(person.id)}
                     className={`w-full px-3 py-2 text-left text-sm ${
                       selectedPersonId === person.id
-                        ? "bg-[#fff5f5] text-[#D60001]"
+                        ? "bg-[#fff5f5] text-[#EE2A2E]"
                         : "hover:bg-gray-50 text-gray-800"
                     }`}
                   >
@@ -250,7 +250,7 @@ export default function BadgeQuickReprint({
           <button
             type="submit"
             disabled={isSubmitting || !selectedPersonId}
-            className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
+            className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
           >
             {isSubmitting ? "Queuing..." : "Queue Reprint"}
           </button>

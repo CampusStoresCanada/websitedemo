@@ -107,7 +107,7 @@ export default async function ConferenceOrdersPage({
               href={`/conference/${year}/${edition}/orders?org=${org.id}`}
               className={`rounded-full border px-3 py-1 text-xs font-medium ${
                 org.id === selectedOrg.id
-                  ? "border-[#D60001] bg-[#fff1f1] text-[#D60001]"
+                  ? "border-[#EE2A2E] bg-[#fff1f1] text-[#EE2A2E]"
                   : "border-gray-300 text-gray-700 hover:border-gray-400"
               }`}
             >
@@ -140,7 +140,7 @@ export default async function ConferenceOrdersPage({
                   <td className="px-4 py-3 text-sm text-gray-700">
                     <Link
                       href={`/conference/${year}/${edition}/orders/${order.id}?org=${selectedOrg.id}`}
-                      className="text-[#D60001] hover:underline"
+                      className="text-[#EE2A2E] hover:underline"
                     >
                       {new Date(order.created_at).toLocaleString()}
                     </Link>

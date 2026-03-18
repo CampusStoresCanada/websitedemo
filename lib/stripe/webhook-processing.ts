@@ -1,5 +1,6 @@
 import Stripe from "stripe";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
+import { enqueueQBExport } from "@/lib/quickbooks/export";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -107,11 +108,173 @@ export async function processStripeWebhookEvent(
   }
 }
 
+async function processEventTicketPurchase(
+  session: Stripe.Checkout.Session,
+  db: AdminClient
+): Promise<void> {
+  const { event_id, ticket_type_id, user_id } = session.metadata ?? {};
+  if (!event_id || !ticket_type_id || !user_id) {
+    console.error("[event-ticket webhook] missing metadata fields", session.metadata);
+    return;
+  }
+
+  // Mark registration as paid
+  const { error } = await db
+    .from("event_registrations")
+    .update({
+      payment_status: "paid",
+      stripe_session_id: session.id,
+    })
+    .eq("event_id", event_id)
+    .eq("user_id", user_id);
+
+  if (error) {
+    throw new Error(`[event-ticket webhook] failed to mark registration paid: ${error.message}`);
+  }
+
+  // Send confirmation email + calendar invite — best effort
+  void (async () => {
+    try {
+      const { data: event } = await db
+        .from("events")
+        .select("title, slug, starts_at, google_meet_link, google_event_id, is_virtual")
+        .eq("id", event_id)
+        .single() as { data: any };
+
+      const { data: profile } = await db
+        .from("profiles")
+        .select("display_name")
+        .eq("id", user_id)
+        .maybeSingle();
+
+      // Get email from auth (use admin API)
+      const { data: userRecord } = await db.auth.admin.getUserById(user_id);
+      const email = userRecord?.user?.email;
+      if (!email || !event) return;
+
+      const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
+
+      // Google Calendar invite
+      if (event.is_virtual && event.google_event_id) {
+        const { addAttendeeToCalendarEvent } = await import("@/lib/google/calendar");
+        addAttendeeToCalendarEvent(event.google_event_id, email).catch(() => {});
+      }
+
+      const { sendTransactional } = await import("@/lib/comms/send");
+      await sendTransactional({
+        templateKey: "event_registration_confirmation",
+        to: email,
+        variables: {
+          registrant_name: profile?.display_name ?? "there",
+          event_title: event.title,
+          event_date: new Date(event.starts_at).toLocaleString("en-CA", {
+            weekday: "long", year: "numeric", month: "long", day: "numeric",
+            hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+          }),
+          event_url: `${APP_URL}/events/${event.slug}`,
+          meet_link_block: event.google_meet_link
+            ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;">🎥 <strong>Google Meet:</strong> <a href="${event.google_meet_link}" style="color:#EE2A2E;">${event.google_meet_link}</a></p>`
+            : "",
+        },
+      });
+    } catch (e) {
+      console.error("[event-ticket webhook] post-payment notifications failed:", e);
+    }
+  })();
+}
+
+async function processEventTicketBulkPurchase(
+  session: Stripe.Checkout.Session,
+  db: AdminClient
+): Promise<void> {
+  // Find all pending registrations pre-created for this session
+  const { data: regs, error } = await db
+    .from("event_registrations")
+    .select("user_id, event_id")
+    .eq("stripe_session_id", session.id)
+    .eq("payment_status", "pending");
+
+  if (error || !regs?.length) {
+    console.error("[event-ticket-bulk webhook] no pending registrations found for session", session.id);
+    return;
+  }
+
+  // Activate all pending registrations
+  await db
+    .from("event_registrations")
+    .update({ payment_status: "paid" })
+    .eq("stripe_session_id", session.id)
+    .eq("payment_status", "pending");
+
+  const eventId = regs[0].event_id;
+  const { data: event } = await db
+    .from("events")
+    .select("title, slug, starts_at, google_meet_link, google_event_id, is_virtual")
+    .eq("id", eventId)
+    .single() as { data: any };
+
+  if (!event) return;
+
+  const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
+
+  // Fire calendar invite + confirmation email for each member — best effort
+  void Promise.all(
+    regs.map(async (reg) => {
+      try {
+        const { data: userRecord } = await db.auth.admin.getUserById(reg.user_id);
+        const email = userRecord?.user?.email;
+        if (!email) return;
+
+        if (event.is_virtual && event.google_event_id) {
+          const { addAttendeeToCalendarEvent } = await import("@/lib/google/calendar");
+          addAttendeeToCalendarEvent(event.google_event_id, email).catch(() => {});
+        }
+
+        const { data: profile } = await db
+          .from("profiles")
+          .select("display_name")
+          .eq("id", reg.user_id)
+          .maybeSingle();
+
+        const { sendTransactional } = await import("@/lib/comms/send");
+        await sendTransactional({
+          templateKey: "event_registration_confirmation",
+          to: email,
+          variables: {
+            registrant_name: profile?.display_name ?? "there",
+            event_title: event.title,
+            event_date: new Date(event.starts_at).toLocaleString("en-CA", {
+              weekday: "long", year: "numeric", month: "long", day: "numeric",
+              hour: "2-digit", minute: "2-digit", timeZoneName: "short",
+            }),
+            event_url: `${APP_URL}/events/${event.slug}`,
+            meet_link_block: event.google_meet_link
+              ? `<p style="margin:8px 0 0;font-size:13px;color:#374151;">🎥 <strong>Google Meet:</strong> <a href="${event.google_meet_link}" style="color:#EE2A2E;">${event.google_meet_link}</a></p>`
+              : "",
+          },
+        });
+      } catch (e) {
+        console.error("[event-ticket-bulk webhook] notification failed for user", reg.user_id, e);
+      }
+    })
+  );
+}
+
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   raw: Record<string, unknown>,
   db: AdminClient
 ): Promise<EventProcessingContext> {
+  // Route event ticket purchases to their own handlers
+  if (session.metadata?.source === "event_ticket_bulk") {
+    await processEventTicketBulkPurchase(session, db);
+    return { conferenceOrderId: null };
+  }
+  if (session.metadata?.source === "event_ticket") {
+    await processEventTicketPurchase(session, db);
+    return { conferenceOrderId: null };
+  }
+
   const conferenceOrderId = session.metadata?.conference_order_id ?? null;
   const checkoutKind = session.metadata?.checkout_kind ?? null;
   const paymentIntentId = extractStringField(raw, "payment_intent");
@@ -205,7 +368,7 @@ async function handleInvoicePaid(
     const chargeId = extractStringField(raw, "charge");
     const paymentIntentId = extractStringField(raw, "payment_intent");
 
-    await db
+    const { data: updatedInvoice } = await db
       .from("invoices")
       .update({
         status: "paid",
@@ -215,7 +378,13 @@ async function handleInvoicePaid(
         stripe_charge_id: chargeId,
         updated_at: new Date().toISOString(),
       })
-      .eq("stripe_invoice_id", stripeInvoice.id);
+      .eq("stripe_invoice_id", stripeInvoice.id)
+      .select("id")
+      .single();
+
+    if (updatedInvoice?.id) {
+      await enqueueQBExport(updatedInvoice.id);
+    }
   }
 
   if (orgId) {

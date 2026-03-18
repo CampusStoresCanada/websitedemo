@@ -30,7 +30,7 @@ export default function HoverCard({ organization }: HoverCardProps) {
           ) : (
             <div
               className={`w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                organization.type === "Member" ? "bg-[#D60001]" : "bg-[#3B82F6]"
+                organization.type === "Member" ? "bg-[#EE2A2E]" : "bg-[#3B82F6]"
               }`}
             >
               <span className="text-white font-bold text-lg">
@@ -56,7 +56,7 @@ export default function HoverCard({ organization }: HoverCardProps) {
           <span
             className={`px-3 py-1 text-xs font-medium rounded-full ${
               organization.type === "Member"
-                ? "bg-[#D60001]/10 text-[#D60001]"
+                ? "bg-[#EE2A2E]/10 text-[#EE2A2E]"
                 : "bg-[#3B82F6]/10 text-[#3B82F6]"
             }`}
           >
@@ -84,7 +84,7 @@ export default function HoverCard({ organization }: HoverCardProps) {
         <div className="flex items-center justify-between">
           <Link
             href={`/org/${organization.slug}`}
-            className="text-sm font-medium text-[#D60001] hover:text-[#B00001] transition-colors"
+            className="text-sm font-medium text-[#EE2A2E] hover:text-[#D92327] transition-colors"
           >
             View Profile →
           </Link>

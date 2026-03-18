@@ -9,6 +9,9 @@ const LABELS: Record<string, string> = {
   pages: "Pages & Permissions",
   conference: "Conference",
   content: "Content",
+  events: "Events",
+  new: "New",
+  edit: "Edit",
 };
 
 export default function AdminBreadcrumbs() {

@@ -1,6 +1,12 @@
 "use client";
 
 import { useState, useEffect } from "react";
+
+function localInputNow(offsetMs = 0): string {
+  const d = new Date(Date.now() + offsetMs);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 import type { PolicySet } from "@/lib/policy/types";
 import type { PolicyDiff, ImpactPreview } from "@/lib/actions/policy";
 import {
@@ -124,7 +130,7 @@ export default function PolicyPublishFlow({
                 key={i}
                 className="p-3 bg-blue-50 border border-blue-200 rounded-[var(--radius-md)] text-sm text-blue-800"
               >
-                <span className="text-xs font-medium uppercase text-blue-600 mr-2">
+                <span className="text-xs font-medium uppercase text-[#EE2A2E] mr-2">
                   {impact.category}
                 </span>
                 {impact.description}
@@ -154,9 +160,7 @@ export default function PolicyPublishFlow({
               type="radio"
               checked={!!effectiveAt}
               onChange={() =>
-                setEffectiveAt(
-                  new Date(Date.now() + 86400000).toISOString().slice(0, 16)
-                )
+                setEffectiveAt(localInputNow(86400000))
               }
               className="accent-[var(--accent-primary)]"
             />
@@ -167,7 +171,7 @@ export default function PolicyPublishFlow({
               type="datetime-local"
               value={effectiveAt}
               onChange={(e) => setEffectiveAt(e.target.value)}
-              min={new Date().toISOString().slice(0, 16)}
+              min={localInputNow()}
               className="border border-[var(--border-default)] rounded px-2 py-1 text-sm"
             />
           )}

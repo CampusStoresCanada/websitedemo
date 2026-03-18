@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef, createContext, useContext, ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePathname, useRouter } from "next/navigation";
+import CreateEventModal from "@/components/toolkit/CreateEventModal";
 import { submitFlag } from "@/lib/actions/submit-flag";
 import { updateField } from "@/lib/actions/update-field";
 import { addContact } from "@/lib/actions/add-contact";
@@ -72,13 +73,19 @@ export function ToolkitProvider({ children }: { children: ReactNode }) {
  * - Export: Export allowed data (events, pages, not personal info) (future)
  * - Bookmark: Save to internal favorites (future)
  */
-export default function Toolkit() {
-  const { user } = useAuth();
-  const { editMode, setEditMode, isAdmin } = useToolkit();
+export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?: string | null }) {
+  const { user, profile } = useAuth();
+  const { editMode, setEditMode, isAdmin, canEditOrg } = useToolkit();
+
+  // Users eligible to create events (not partner, not unauthenticated)
+  const canCreateEvent =
+    !!user &&
+    !!profile &&
+    !["partner"].includes(profile.global_role ?? "");
   const pathname = usePathname();
   const router = useRouter();
   const [isExpanded, setIsExpanded] = useState(false);
-  const [activeTool, setActiveTool] = useState<"flag" | "edit" | "explain" | "share" | "export" | "bookmark" | null>(null);
+  const [activeTool, setActiveTool] = useState<"flag" | "edit" | "explain" | "share" | "export" | "bookmark" | "create_event" | null>(null);
 
   // Flag selection mode state
   const [flagMode, setFlagMode] = useState(false);
@@ -112,7 +119,7 @@ export default function Toolkit() {
     return (
       <a
         href="/apply/member"
-        className="fixed bottom-6 right-6 z-50 px-5 py-3 bg-[#D60001] hover:bg-[#B00001] text-white text-sm font-semibold rounded-full shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+        className="fixed bottom-6 right-6 z-50 px-5 py-3 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-full shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18 9v3m0 0v3m0-3h3m-3 0h-3m-2-5a4 4 0 11-8 0 4 4 0 018 0zM3 20a6 6 0 0112 0v1H3v-1z" />
@@ -184,6 +191,7 @@ export default function Toolkit() {
           onCancel={handleClose}
           hoveredElement={editHoveredElement}
           setHoveredElement={setEditHoveredElement}
+          canEditOrg={canEditOrg}
         />
       )}
 
@@ -243,6 +251,15 @@ export default function Toolkit() {
               />
             )}
 
+            {/* Create Event - authenticated non-partner users */}
+            {canCreateEvent && (
+              <ToolButton
+                icon={<CalendarPlusIcon />}
+                label="Create Event"
+                onClick={() => handleToolClick("create_event")}
+              />
+            )}
+
             {/* Flag */}
             <ToolButton
               icon={<FlagIcon />}
@@ -295,6 +312,10 @@ export default function Toolkit() {
 
       {activeTool === "bookmark" && (
         <ComingSoonModal tool="Bookmark" onClose={handleClose} />
+      )}
+
+      {activeTool === "create_event" && (
+        <CreateEventModal onClose={handleClose} googleMapsApiKey={googleMapsApiKey} />
       )}
     </>
   );
@@ -667,6 +688,7 @@ function EditSelectionOverlay({
   onCancel,
   hoveredElement,
   setHoveredElement,
+  canEditOrg,
 }: {
   onSelect: (element: {
     text: string;
@@ -684,8 +706,22 @@ function EditSelectionOverlay({
   onCancel: () => void;
   hoveredElement: HTMLElement | null;
   setHoveredElement: (el: HTMLElement | null) => void;
+  canEditOrg: (orgId: string) => boolean;
 }) {
   useEffect(() => {
+    const getOrganizationIdForElement = (element: HTMLElement): string | null => {
+      const explicitOrgId = element.getAttribute("data-organization-id");
+      if (explicitOrgId) return explicitOrgId;
+
+      const field = element.getAttribute("data-field");
+      const entityId = element.getAttribute("data-entity-id");
+      if (field?.startsWith("organizations.") && entityId) {
+        return entityId;
+      }
+
+      return null;
+    };
+
     /**
      * Find the editable element - prioritizes specific fields over row-level actions
      */
@@ -751,6 +787,11 @@ function EditSelectionOverlay({
 
       const result = findEditableElement(target);
       if (result) {
+        const orgId = getOrganizationIdForElement(result.element);
+        if (orgId && !canEditOrg(orgId)) {
+          setHoveredElement(null);
+          return;
+        }
         setHoveredElement(result.element);
       } else {
         setHoveredElement(null);
@@ -766,6 +807,11 @@ function EditSelectionOverlay({
       }
 
       if (hoveredElement) {
+        const orgId = getOrganizationIdForElement(hoveredElement);
+        if (orgId && !canEditOrg(orgId)) {
+          return;
+        }
+
         e.preventDefault();
         e.stopPropagation();
 
@@ -818,7 +864,7 @@ function EditSelectionOverlay({
       document.removeEventListener('keydown', handleKeyDown);
       document.body.style.cursor = '';
     };
-  }, [hoveredElement, onSelect, onCancel, setHoveredElement]);
+  }, [hoveredElement, onSelect, onCancel, setHoveredElement, canEditOrg]);
 
   return (
     <>
@@ -2015,6 +2061,14 @@ function ExportIcon() {
   return (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+    </svg>
+  );
+}
+
+function CalendarPlusIcon() {
+  return (
+    <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5m-9-6h.008v.008H12v-.008ZM12 15h.008v.008H12V15Zm0 2.25h.008v.008H12v-.008ZM9.75 15h.008v.008H9.75V15Zm0 2.25h.008v.008H9.75v-.008ZM7.5 15h.008v.008H7.5V15Zm0 2.25h.008v.008H7.5v-.008Zm6.75-4.5h.008v.008h-.008v-.008Zm0 2.25h.008v.008h-.008V15Zm0 2.25h.008v.008h-.008v-.008Zm2.25-4.5h.008v.008H16.5v-.008Zm0 2.25h.008v.008H16.5V15Z" />
     </svg>
   );
 }

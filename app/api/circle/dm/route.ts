@@ -37,7 +37,7 @@ export async function GET(request: NextRequest) {
 
   try {
     // Look up the user's Circle member ID from their contact record
-    const circleId = await resolveUserCircleId(auth.ctx.userId);
+    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
     if (!circleId) {
       return NextResponse.json(
         { chatRooms: [], messages: [], linked: false },
@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Look up the user's Circle ID
-    const circleId = await resolveUserCircleId(auth.ctx.userId);
+    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
     if (!circleId) {
       return NextResponse.json(
         { error: "Your account is not linked to Circle" },

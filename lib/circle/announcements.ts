@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { getCircleClient } from "./client";
+import { CircleApiError } from "./types";
 import type { CirclePost } from "./types";
 
 /**
@@ -31,6 +32,13 @@ export async function getAnnouncementPosts(
       status: "published",
     });
   } catch (err) {
+    // 404 = space not found or no posts — not an error worth alarming on
+    if (err instanceof CircleApiError && err.status === 404) {
+      console.warn(
+        "[circle/announcements] Posts endpoint returned 404 — space may not exist or have no posts"
+      );
+      return [];
+    }
     console.error(
       "[circle/announcements] Failed to fetch posts:",
       err instanceof Error ? err.message : err

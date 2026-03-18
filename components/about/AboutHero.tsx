@@ -8,7 +8,7 @@ export default function AboutHero() {
         <p className="text-xl md:text-2xl text-[#9B9B9B] max-w-3xl leading-relaxed">
           The national voice for campus retail in Canada — connecting
           post-secondary bookstores, campus shops, and their vendor partners
-          since 1993.
+          since 2004.
         </p>
       </div>
     </section>

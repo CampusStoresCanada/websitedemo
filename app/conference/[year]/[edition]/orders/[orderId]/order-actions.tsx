@@ -92,7 +92,7 @@ export default function OrderActions({
         <p className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>
       ) : null}
       {info ? (
-        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-700">{info}</p>
+        <p className="rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-[#D92327]">{info}</p>
       ) : null}
       <div className="flex flex-wrap gap-2">
         {canOverrideRefund ? (
@@ -125,7 +125,7 @@ export default function OrderActions({
           type="button"
           onClick={handleRefund}
           disabled={isPending || !canRefund}
-          className="rounded-md bg-[#D60001] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
+          className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-50"
         >
           Request Refund
         </button>

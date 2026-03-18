@@ -32,7 +32,7 @@ export function VerifyApplication() {
   if (status === "loading") {
     return (
       <div className="text-center py-8">
-        <div className="w-8 h-8 border-2 border-gray-300 border-t-[#D60001] rounded-full animate-spin mx-auto mb-4" />
+        <div className="w-8 h-8 border-2 border-gray-300 border-t-[#EE2A2E] rounded-full animate-spin mx-auto mb-4" />
         <p className="text-sm text-gray-600">Verifying your application…</p>
       </div>
     );
@@ -62,7 +62,7 @@ export function VerifyApplication() {
         <p className="text-gray-600 text-sm mb-6">{errorMsg}</p>
         <Link
           href="/"
-          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
         >
           Go Home
         </Link>
@@ -96,7 +96,7 @@ export function VerifyApplication() {
       </p>
       <Link
         href="/"
-        className="inline-flex items-center justify-center px-6 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+        className="inline-flex items-center justify-center px-6 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
       >
         Return Home
       </Link>

@@ -180,7 +180,7 @@ export default function BenchmarkingComparison({
                       <BlurredValue placeholderWidth={16}>
                         <Link
                           href={`/org/${row.organization?.slug}`}
-                          className={`hover:underline ${isCurrentOrg ? 'font-semibold text-blue-700' : 'text-[#1A1A1A]'}`}
+                          className={`hover:underline ${isCurrentOrg ? 'font-semibold text-[#D92327]' : 'text-[#1A1A1A]'}`}
                         >
                           {row.organization?.name || 'Unknown'}
                           {isCurrentOrg && <span className="ml-2 text-xs text-blue-500">(You)</span>}

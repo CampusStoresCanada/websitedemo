@@ -27,6 +27,14 @@
     {
       "path": "/api/cron/retention-purge",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/qbo-export",
+      "schedule": "*/15 * * * *"
+    },
+    {
+      "path": "/api/cron/qbo-reconcile",
+      "schedule": "0 */4 * * *"
     }
   ]
 }

@@ -183,7 +183,7 @@ export default function DeltaFlagsTable({ flags, fiscalYear }: DeltaFlagsTablePr
                   {/* Respondent explanation */}
                   {flag.respondentExplanation && (
                     <div className="mb-3 p-3 bg-blue-50 rounded-lg">
-                      <p className="text-xs font-medium text-blue-700 mb-1">
+                      <p className="text-xs font-medium text-[#D92327] mb-1">
                         Respondent Explanation
                       </p>
                       <p className="text-sm text-blue-900">

@@ -116,7 +116,8 @@ export type CircleSyncOperation =
   | "remove_from_space"
   | "add_to_access_group"
   | "remove_from_access_group"
-  | "send_dm";
+  | "send_dm"
+  | "update_profile";
 
 export interface CircleSyncQueueItem {
   id: string;

@@ -12,6 +12,7 @@ import {
 } from "@/lib/actions/conference-products";
 import { updateProductLinkages } from "@/lib/actions/conference-product-linkage";
 import type { Database } from "@/lib/database.types";
+import QBItemPicker from "@/components/admin/qbo/QBItemPicker";
 
 type ProductRow = Database["public"]["Tables"]["conference_products"]["Row"];
 type RuleRow = Database["public"]["Tables"]["conference_product_rules"]["Row"];
@@ -178,7 +179,7 @@ export default function ProductManager({
         <h3 className="text-sm font-medium text-gray-700">{products.length} products</h3>
         <button
           onClick={() => setShowAdd(true)}
-          className="px-3 py-1.5 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001]"
+          className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
         >
           Add Product
         </button>
@@ -276,7 +277,7 @@ export default function ProductManager({
                       setLinkingProductId(shouldOpen ? p.id : null);
                       if (shouldOpen) ensureLinkEditorState(p);
                     }}
-                    className="text-xs text-blue-600 hover:underline"
+                    className="text-xs text-[#EE2A2E] hover:underline"
                   >
                     Linkages
                   </button>
@@ -288,11 +289,11 @@ export default function ProductManager({
                         await loadRules(p.id);
                       }
                     }}
-                    className="text-xs text-blue-600 hover:underline"
+                    className="text-xs text-[#EE2A2E] hover:underline"
                   >
                     Rules
                   </button>
-                  <button onClick={() => setEditingId(p.id)} className="text-xs text-[#D60001] hover:underline">Edit</button>
+                  <button onClick={() => setEditingId(p.id)} className="text-xs text-[#EE2A2E] hover:underline">Edit</button>
                   <button
                     onClick={async () => {
                       if (!window.confirm(`Delete product "${p.name}"? This cannot be undone.`)) return;
@@ -447,7 +448,7 @@ export default function ProductManager({
                       setError(null);
                       setLinkingProductId(null);
                     }}
-                    className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                    className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
                   >
                     Save Linkages
                   </button>
@@ -571,7 +572,7 @@ function ProductRulesEditor({
             }
             setIsSaving(false);
           }}
-          className="px-3 py-1.5 text-xs font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001] disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50"
         >
           {isSaving ? "Saving..." : "Add Rule"}
         </button>
@@ -604,6 +605,7 @@ function ProductEditor({
   const [isTaxable, setIsTaxable] = useState(product?.is_taxable ?? true);
   const [isActive, setIsActive] = useState(product?.is_active ?? true);
   const [displayOrder, setDisplayOrder] = useState(product?.display_order ?? 0);
+  const [qboItemId, setQboItemId] = useState<string | null>(product?.qbo_item_id ?? null);
   const [saving, setSaving] = useState(false);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -619,6 +621,7 @@ function ProductEditor({
       is_taxable: isTaxable,
       is_active: isActive,
       display_order: displayOrder,
+      qbo_item_id: qboItemId ?? null,
     });
     setSaving(false);
   };
@@ -655,6 +658,13 @@ function ProductEditor({
           <input type="number" value={displayOrder} onChange={(e) => setDisplayOrder(parseInt(e.target.value))} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
         </div>
       </div>
+      <div className="col-span-2">
+        <QBItemPicker
+          value={qboItemId}
+          onChange={(id) => setQboItemId(id)}
+          label="QuickBooks Item"
+        />
+      </div>
       <div className="flex gap-4">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={isTaxable} onChange={(e) => setIsTaxable(e.target.checked)} className="rounded border-gray-300" />
@@ -666,7 +676,7 @@ function ProductEditor({
         </label>
       </div>
       <div className="flex gap-2">
-        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001] disabled:opacity-50">
+        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50">
           {saving ? "Saving..." : "Save"}
         </button>
         <button type="button" onClick={onCancel} className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">

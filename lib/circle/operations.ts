@@ -52,6 +52,10 @@ export async function executeCircleSyncOperation(
       await handleSendDm(payload);
       break;
 
+    case "update_profile":
+      await handleUpdateProfile(client, item);
+      break;
+
     default:
       throw new Error(`Unknown Circle sync operation: ${item.operation}`);
   }
@@ -234,15 +238,51 @@ async function handleSendDm(
       room.members.some((m) => m.id === recipientCircleId)
   );
 
-  if (!directRoom) {
-    // If no existing DM room, we may need to create one.
-    // Circle's API may auto-create on first message — try sending.
-    throw new Error(
-      `No existing DM room with Circle member ${recipientCircleId}. Manual DM creation not yet supported.`
-    );
+  let roomUuid: string;
+  if (directRoom) {
+    roomUuid = directRoom.uuid;
+  } else {
+    // No existing room — create one (Circle deduplicates if one already exists)
+    const newRoom = await memberClient.createDirectChatRoom(recipientCircleId);
+    roomUuid = newRoom.uuid;
   }
 
-  await memberClient.sendMessage(directRoom.uuid, message);
+  await memberClient.sendMessage(roomUuid, message);
+}
+
+async function handleUpdateProfile(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const circleId = await resolveCircleId(item.entity_id);
+  if (!circleId) {
+    // Not linked yet — skip silently (will be linked later via link_member)
+    return;
+  }
+
+  // Payload may carry pre-fetched values; fall back to fetching from DB
+  let name = item.payload.name ? String(item.payload.name) : null;
+  let headline = item.payload.headline ? String(item.payload.headline) : null;
+
+  if (!name || !headline) {
+    const adminClient = createAdminClient();
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("name, role_title")
+      .eq("id", item.entity_id)
+      .single();
+
+    if (!name && contact?.name) name = contact.name;
+    if (!headline && contact?.role_title) headline = contact.role_title;
+  }
+
+  const updates: Record<string, string> = {};
+  if (name) updates.name = name;
+  if (headline) updates.headline = headline;
+
+  if (Object.keys(updates).length === 0) return;
+
+  await client.updateMember(circleId, updates);
 }
 
 // ---------------------------------------------------------------------------

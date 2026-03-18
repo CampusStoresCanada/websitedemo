@@ -24,6 +24,7 @@ export { CircleApiError } from "./types";
 export {
   getCircleConfig,
   isCircleConfigured,
+  getAccessGroupIds,
   ROLE_TO_CIRCLE_TAG,
   STATUS_TO_CIRCLE_SPACE,
   CIRCLE_ADMIN_API_BASE,
@@ -48,7 +49,10 @@ export { CircleMemberClient } from "./member-proxy";
 export {
   enqueueCircleSync,
   processCircleSyncQueue,
+  pullInboundFromCircle,
   linkCircleAccount,
+  enqueueOrgCircleAccessSync,
+  enqueueContactProfileSync,
 } from "./sync";
 
 // Operations (internal, but exported for testing)
@@ -59,3 +63,12 @@ export { getAnnouncementPosts } from "./announcements";
 
 // Notifications
 export { sendCircleNotification } from "./notifications";
+
+// Cutover tooling
+export {
+  getCircleCutoverStatus,
+  backfillCircleMemberMapping,
+  setCircleCutoverFlag,
+  validateCutoverReadiness,
+} from "./cutover";
+export type { CircleCutoverStatus, BackfillResult, CutoverValidationResult } from "./cutover";

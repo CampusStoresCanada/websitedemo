@@ -48,7 +48,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const circleId = await resolveUserCircleId(auth.ctx.userId);
+    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
     if (!circleId) {
       if (legacyFallbackEnabled) {
         return NextResponse.redirect(toAbsoluteUrl(legacyUrl, request));

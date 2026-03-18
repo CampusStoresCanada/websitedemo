@@ -2,6 +2,7 @@
 
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveMeetingGeometryFromModulesConfig } from "@/lib/conference/meeting-geometry";
 
 export type ProgramItemType =
   | "meeting"
@@ -214,9 +215,66 @@ function zonedToUtcIso(date: string, time: string, timeZone: string): string | n
   return Number.isNaN(candidate.getTime()) ? null : candidate.toISOString();
 }
 
+type ProgramInsertRow = Database["public"]["Tables"]["conference_program_items"]["Insert"];
+
+type TimeBlock = {
+  start: string;
+  end: string;
+  label: string;
+};
+
+function parseTimeToMinutes(time: string): number | null {
+  const match = /^(\d{2}):(\d{2})(?::\d{2})?$/.exec(time.trim());
+  if (!match) return null;
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+  if (!Number.isFinite(hour) || !Number.isFinite(minute)) return null;
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) return null;
+  return hour * 60 + minute;
+}
+
+function isTimeRangeOverlap(aStart: string, aEnd: string, bStart: string, bEnd: string): boolean {
+  const aStartMin = parseTimeToMinutes(aStart);
+  const aEndMin = parseTimeToMinutes(aEnd);
+  const bStartMin = parseTimeToMinutes(bStart);
+  const bEndMin = parseTimeToMinutes(bEnd);
+  if (aStartMin === null || aEndMin === null || bStartMin === null || bEndMin === null) return false;
+  return aStartMin < bEndMin && bStartMin < aEndMin;
+}
+
+function isTransitionRow(row: ProgramInsertRow): boolean {
+  return row.item_type === "custom" && row.title === "Meeting Transition";
+}
+
+function hasTimeOverlapWithBlocks(start: string, end: string, blocks: TimeBlock[]): boolean {
+  return blocks.some((block) => isTimeRangeOverlap(start, end, block.start, block.end));
+}
+
+function findTimelineOverlap(rows: ProgramInsertRow[]): {
+  previous: ProgramInsertRow;
+  current: ProgramInsertRow;
+} | null {
+  const sorted = [...rows].sort((a, b) => {
+    const startDiff = new Date(a.starts_at as string).valueOf() - new Date(b.starts_at as string).valueOf();
+    if (startDiff !== 0) return startDiff;
+    return new Date(a.ends_at as string).valueOf() - new Date(b.ends_at as string).valueOf();
+  });
+  for (let idx = 1; idx < sorted.length; idx += 1) {
+    const previous = sorted[idx - 1];
+    const current = sorted[idx];
+    if (isTransitionRow(previous) || isTransitionRow(current)) continue;
+    const previousEnd = new Date(previous.ends_at as string).valueOf();
+    const currentStart = new Date(current.starts_at as string).valueOf();
+    if (previousEnd > currentStart) {
+      return { previous, current };
+    }
+  }
+  return null;
+}
+
 export async function generateProgramFromSetup(
   conferenceId: string,
-  options?: { replaceExisting?: boolean }
+  options?: { replaceExisting?: boolean; strictOverlapCheck?: boolean }
 ): Promise<{ success: boolean; error?: string; data?: { created: number } }> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -260,73 +318,216 @@ export async function generateProgramFromSetup(
     };
   }
 
-  if (hasExisting && replaceExisting) {
-    const { error: deleteError } = await adminClient
-      .from("conference_program_items")
-      .delete()
-      .eq("conference_id", conferenceId);
-    if (deleteError) return { success: false, error: deleteError.message };
-  }
-
   const byKey = new Map(
     (modules ?? []).map((row) => [row.module_key, (row.config_json ?? {}) as Record<string, unknown>] as const)
   );
+  const meetingBlocksByDate = new Map<string, TimeBlock[]>();
+  const offsiteMealCoverageByDate = new Map<string, TimeBlock[]>();
+  const addMeetingBlock = (date: string, start: string, end: string, label: string) => {
+    if (!date || !start || !end) return;
+    const startMin = parseTimeToMinutes(start);
+    const endMin = parseTimeToMinutes(end);
+    if (startMin === null || endMin === null || endMin <= startMin) return;
+    const existing = meetingBlocksByDate.get(date) ?? [];
+    existing.push({ start, end, label });
+    meetingBlocksByDate.set(date, existing);
+  };
+  const addOffsiteMealCoverage = (date: string, start: string, end: string, label: string) => {
+    if (!date || !start || !end) return;
+    const startMin = parseTimeToMinutes(start);
+    const endMin = parseTimeToMinutes(end);
+    if (startMin === null || endMin === null || endMin <= startMin) return;
+    const existing = offsiteMealCoverageByDate.get(date) ?? [];
+    existing.push({ start, end, label });
+    offsiteMealCoverageByDate.set(date, existing);
+  };
 
-  const inserts: Database["public"]["Tables"]["conference_program_items"]["Insert"][] = [];
+  const inserts: ProgramInsertRow[] = [];
   let displayOrder = 0;
 
-  const meetingConfig = byKey.get("meetings");
-  if (meetingConfig) {
-    const days = Array.isArray(meetingConfig.meeting_days)
-      ? (meetingConfig.meeting_days.filter((v): v is string => typeof v === "string") ?? [])
+  const tradeShowConfig = byKey.get("trade_show");
+  if (tradeShowConfig) {
+    const days = Array.isArray(tradeShowConfig.trade_show_days)
+      ? (tradeShowConfig.trade_show_days.filter((v): v is string => typeof v === "string") ?? [])
       : [];
-    const daySettings = ((meetingConfig.meeting_day_settings ?? {}) as Record<string, unknown>) ?? {};
+    const start = normalizeTime(tradeShowConfig.start_time, "10:00:00");
+    const end = normalizeTime(tradeShowConfig.end_time, "16:00:00");
+    days.forEach((date) => addMeetingBlock(date, start, end, "Trade Show"));
+  }
 
-    days.forEach((date, index) => {
+  const educationConfig = byKey.get("education");
+  if (educationConfig) {
+    const days = Array.isArray(educationConfig.education_days)
+      ? (educationConfig.education_days.filter((v): v is string => typeof v === "string") ?? [])
+      : [];
+    const daySettings = ((educationConfig.education_day_settings ?? {}) as Record<string, unknown>) ?? {};
+    days.forEach((date) => {
       const row = daySettings[date];
       const settings =
         row && typeof row === "object" && !Array.isArray(row)
           ? (row as Record<string, unknown>)
           : {};
-      const meetingCount = Math.max(
-        1,
-        Number(
-          settings.meeting_count ??
-            settings.meeting_slots_per_day ??
-            meetingConfig.meeting_slots_per_day ??
-            meetingConfig.meetings_per_day ??
-            0
-        ) || 1
-      );
-      const slotDuration = Math.max(
-        1,
-        Number(settings.slot_duration_minutes ?? meetingConfig.slot_duration_minutes ?? 15) || 15
-      );
-      const buffer = Math.max(0, Number(settings.buffer_minutes ?? 0) || 0);
       const start = normalizeTime(settings.start_time, "09:00:00");
-      const computedMinutes = meetingCount * slotDuration + Math.max(0, meetingCount - 1) * buffer;
-      const explicitEnd = normalizeTime(settings.end_time, "");
-      const end = explicitEnd ? explicitEnd : addMinutes(start, computedMinutes);
-      const startsAt = zonedToUtcIso(date, start, conferenceTimeZone);
-      const endsAt = zonedToUtcIso(date, end, conferenceTimeZone);
-      if (!startsAt || !endsAt) return;
-      inserts.push({
-        conference_id: conferenceId,
-        item_type: "meeting",
-        title: `Meetings Day ${index + 1}`,
-        description: `${meetingCount} slots (${slotDuration}m, buffer ${buffer}m)`,
-        starts_at: startsAt,
-        ends_at: endsAt,
-        audience_mode: "target_roles",
-        target_roles: ["delegate", "exhibitor"],
-        is_required: false,
-        display_order: displayOrder++,
-        created_by: auth.ctx.userId,
+      const duration = Math.max(30, Number(settings.session_duration_minutes ?? 240) || 240);
+      const end = addMinutes(start, duration);
+      addMeetingBlock(date, start, end, "Education");
+    });
+  }
+
+  const mealsConfig = byKey.get("meals");
+  if (mealsConfig) {
+    const daySettings = ((mealsConfig.meal_day_settings ?? {}) as Record<string, unknown>) ?? {};
+    const days = Object.keys(daySettings).sort();
+    days.forEach((date) => {
+      const row = daySettings[date];
+      const settings =
+        row && typeof row === "object" && !Array.isArray(row)
+          ? (row as Record<string, unknown>)
+          : {};
+      const mealDefs: Array<{ enabledKey: string; durKey: string; label: string }> = [
+        { enabledKey: "breakfast", durKey: "breakfast_duration_minutes", label: "Breakfast" },
+        { enabledKey: "lunch", durKey: "lunch_duration_minutes", label: "Lunch" },
+        { enabledKey: "dinner", durKey: "dinner_duration_minutes", label: "Dinner" },
+        { enabledKey: "custom_enabled", durKey: "custom_duration_minutes", label: "Custom Meal" },
+      ];
+      mealDefs.forEach((def) => {
+        const enabled = Boolean(settings[def.enabledKey]);
+        if (!enabled) return;
+        const start =
+          def.enabledKey === "breakfast"
+            ? normalizeTime(settings.breakfast_time, "08:00:00")
+            : def.enabledKey === "lunch"
+              ? normalizeTime(settings.lunch_time, "12:00:00")
+              : def.enabledKey === "dinner"
+                ? normalizeTime(settings.dinner_time, "18:00:00")
+                : normalizeTime(settings.custom_time, "17:00:00");
+        const duration = Math.max(15, Number(settings[def.durKey] ?? 60) || 60);
+        const end = addMinutes(start, duration);
+        addMeetingBlock(date, start, end, def.label);
+      });
+      const snackBreaks = Array.isArray(settings.snack_breaks)
+        ? (settings.snack_breaks as Array<Record<string, unknown>>)
+        : [];
+      snackBreaks.forEach((entry, index) => {
+        const start = normalizeTime(entry.start_time, "15:00:00");
+        const duration = Math.max(5, Number(entry.duration_minutes ?? 30) || 30);
+        const end = addMinutes(start, duration);
+        addMeetingBlock(date, start, end, `Snack Break ${index + 1}`);
       });
     });
   }
 
-  const tradeShowConfig = byKey.get("trade_show");
+  const offsiteConfig = byKey.get("offsite");
+  if (offsiteConfig) {
+    const events = Array.isArray(offsiteConfig.offsite_events)
+      ? (offsiteConfig.offsite_events as Array<Record<string, unknown>>)
+      : [];
+    events.forEach((event, index) => {
+      const date = typeof event.date === "string" ? event.date : "";
+      const start = normalizeTime(event.start_time, "18:00:00");
+      const end = normalizeTime(event.end_time, "20:00:00");
+      addMeetingBlock(date, start, end, `Offsite ${index + 1}`);
+      if (event.includes_meal === true) {
+        addOffsiteMealCoverage(date, start, end, `Offsite ${index + 1} (includes meal)`);
+      }
+    });
+  }
+
+  for (const [date, blocks] of meetingBlocksByDate.entries()) {
+    blocks.sort((a, b) => {
+      const aStart = parseTimeToMinutes(a.start) ?? 0;
+      const bStart = parseTimeToMinutes(b.start) ?? 0;
+      if (aStart !== bStart) return aStart - bStart;
+      const aEnd = parseTimeToMinutes(a.end) ?? 0;
+      const bEnd = parseTimeToMinutes(b.end) ?? 0;
+      return aEnd - bEnd;
+    });
+    meetingBlocksByDate.set(date, blocks);
+  }
+
+  const meetingConfig = byKey.get("meetings");
+  if (meetingConfig) {
+    const geometry = resolveMeetingGeometryFromModulesConfig(meetingConfig);
+
+    geometry.dayConfigs.forEach((dayConfig, index) => {
+      const dayEnd = normalizeTime(dayConfig.endTime, "17:00:00");
+      const dayEndMinutes = parseTimeToMinutes(dayEnd) ?? 0;
+      const blockers = meetingBlocksByDate.get(dayConfig.date) ?? [];
+      let slotStart = dayConfig.startTime;
+      let generatedForDay = 0;
+      for (let requestedSlotNumber = 1; requestedSlotNumber <= dayConfig.meetingCount; requestedSlotNumber += 1) {
+        let slotEnd = addMinutes(slotStart, dayConfig.slotDurationMinutes);
+        const shiftReasons = new Set<string>();
+        let iterations = 0;
+        while (iterations < 50) {
+          iterations += 1;
+          const overlap = blockers.find((block) =>
+            isTimeRangeOverlap(slotStart, slotEnd, block.start, block.end)
+          );
+          if (!overlap) break;
+          shiftReasons.add(overlap.label);
+          const overlapEndMinutes = parseTimeToMinutes(overlap.end);
+          const slotStartMinutes = parseTimeToMinutes(slotStart);
+          if (overlapEndMinutes === null || slotStartMinutes === null) break;
+          if (overlapEndMinutes <= slotStartMinutes) break;
+          slotStart = overlap.end;
+          slotEnd = addMinutes(slotStart, dayConfig.slotDurationMinutes);
+        }
+
+        const slotEndMinutes = parseTimeToMinutes(slotEnd) ?? 0;
+        if (dayEndMinutes > 0 && slotEndMinutes > dayEndMinutes) {
+          break;
+        }
+
+        const slotStartsAt = zonedToUtcIso(dayConfig.date, slotStart, conferenceTimeZone);
+        const slotEndsAt = zonedToUtcIso(dayConfig.date, slotEnd, conferenceTimeZone);
+        if (slotStartsAt && slotEndsAt) {
+          generatedForDay += 1;
+          inserts.push({
+            conference_id: conferenceId,
+            item_type: "meeting",
+            title: `Meeting ${generatedForDay}`,
+            description:
+              shiftReasons.size > 0
+                ? `Day ${index + 1} · ${dayConfig.slotDurationMinutes}m · shifted after ${[...shiftReasons].join(", ")}`
+                : `Day ${index + 1} · ${dayConfig.slotDurationMinutes}m`,
+            starts_at: slotStartsAt,
+            ends_at: slotEndsAt,
+            audience_mode: "target_roles",
+            target_roles: ["delegate", "exhibitor"],
+            is_required: false,
+            display_order: displayOrder++,
+            created_by: auth.ctx.userId,
+          });
+        }
+
+        if (requestedSlotNumber < dayConfig.meetingCount && dayConfig.bufferMinutes > 0) {
+          const bufferEnd = addMinutes(slotEnd, dayConfig.bufferMinutes);
+          const bufferStartsAt = zonedToUtcIso(dayConfig.date, slotEnd, conferenceTimeZone);
+          const bufferEndsAt = zonedToUtcIso(dayConfig.date, bufferEnd, conferenceTimeZone);
+          if (bufferStartsAt && bufferEndsAt) {
+            inserts.push({
+              conference_id: conferenceId,
+              item_type: "custom",
+              title: "Meeting Transition",
+              description: `${dayConfig.bufferMinutes}m between slots`,
+              starts_at: bufferStartsAt,
+              ends_at: bufferEndsAt,
+              audience_mode: "target_roles",
+              target_roles: ["delegate", "exhibitor"],
+              is_required: false,
+              display_order: displayOrder++,
+              created_by: auth.ctx.userId,
+            });
+          }
+          slotStart = bufferEnd;
+          continue;
+        }
+        slotStart = slotEnd;
+      }
+    });
+  }
+
   if (tradeShowConfig) {
     const days = Array.isArray(tradeShowConfig.trade_show_days)
       ? (tradeShowConfig.trade_show_days.filter((v): v is string => typeof v === "string") ?? [])
@@ -353,7 +554,6 @@ export async function generateProgramFromSetup(
     });
   }
 
-  const educationConfig = byKey.get("education");
   if (educationConfig) {
     const days = Array.isArray(educationConfig.education_days)
       ? (educationConfig.education_days.filter((v): v is string => typeof v === "string") ?? [])
@@ -394,11 +594,11 @@ export async function generateProgramFromSetup(
     });
   }
 
-  const mealsConfig = byKey.get("meals");
   if (mealsConfig) {
     const daySettings = ((mealsConfig.meal_day_settings ?? {}) as Record<string, unknown>) ?? {};
     const days = Object.keys(daySettings).sort();
     days.forEach((date) => {
+      const offsiteMealCoverage = offsiteMealCoverageByDate.get(date) ?? [];
       const row = daySettings[date];
       const settings =
         row && typeof row === "object" && !Array.isArray(row)
@@ -430,6 +630,7 @@ export async function generateProgramFromSetup(
                 : normalizeTime(settings.custom_time, "17:00:00");
         const duration = Math.max(15, Number(settings[def.durKey] ?? 60) || 60);
         const end = addMinutes(start, duration);
+        if (hasTimeOverlapWithBlocks(start, end, offsiteMealCoverage)) return;
         const startsAt = zonedToUtcIso(date, start, conferenceTimeZone);
         const endsAt = zonedToUtcIso(date, end, conferenceTimeZone);
         if (!startsAt || !endsAt) return;
@@ -455,6 +656,7 @@ export async function generateProgramFromSetup(
         const start = normalizeTime(entry.start_time, "15:00:00");
         const duration = Math.max(5, Number(entry.duration_minutes ?? 30) || 30);
         const end = addMinutes(start, duration);
+        if (hasTimeOverlapWithBlocks(start, end, offsiteMealCoverage)) return;
         const startsAt = zonedToUtcIso(date, start, conferenceTimeZone);
         const endsAt = zonedToUtcIso(date, end, conferenceTimeZone);
         if (!startsAt || !endsAt) return;
@@ -475,7 +677,6 @@ export async function generateProgramFromSetup(
     });
   }
 
-  const offsiteConfig = byKey.get("offsite");
   if (offsiteConfig) {
     const events = Array.isArray(offsiteConfig.offsite_events)
       ? (offsiteConfig.offsite_events as Array<Record<string, unknown>>)
@@ -513,6 +714,22 @@ export async function generateProgramFromSetup(
 
   if (inserts.length === 0) {
     return { success: false, error: "No schedule data available in setup to generate timeline." };
+  }
+
+  const overlap = findTimelineOverlap(inserts);
+  if (overlap && options?.strictOverlapCheck === true) {
+    return {
+      success: false,
+      error: `Schedule conflict detected: "${overlap.previous.title}" (${overlap.previous.starts_at} - ${overlap.previous.ends_at}) overlaps "${overlap.current.title}" (${overlap.current.starts_at} - ${overlap.current.ends_at}). Adjust setup times before regenerating.`,
+    };
+  }
+
+  if (hasExisting && replaceExisting) {
+    const { error: deleteError } = await adminClient
+      .from("conference_program_items")
+      .delete()
+      .eq("conference_id", conferenceId);
+    if (deleteError) return { success: false, error: deleteError.message };
   }
 
   const { error: insertError } = await adminClient

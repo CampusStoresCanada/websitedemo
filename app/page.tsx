@@ -39,7 +39,7 @@ export default async function Home() {
                   {data.stats.activeMembers} active member institutions.
                 </p>
               </div>
-              <Link href="/members" className="text-sm font-medium text-[#D60001] hover:text-[#B00001]">
+              <Link href="/members" className="text-sm font-medium text-[#EE2A2E] hover:text-[#D92327]">
                 View all members →
               </Link>
             </div>
@@ -69,7 +69,7 @@ export default async function Home() {
                   {data.stats.activePartners} active partner organizations.
                 </p>
               </div>
-              <Link href="/partners" className="text-sm font-medium text-[#D60001] hover:text-[#B00001]">
+              <Link href="/partners" className="text-sm font-medium text-[#EE2A2E] hover:text-[#D92327]">
                 View all partners →
               </Link>
             </div>
@@ -101,7 +101,7 @@ export default async function Home() {
               partnerships, and grow together.
             </p>
             <div className="flex flex-col sm:flex-row gap-4 justify-center">
-              <Link href="/apply/member" className="h-14 px-8 bg-[#D60001] hover:bg-[#B00001] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 inline-flex items-center justify-center">
+              <Link href="/apply/member" className="h-14 px-8 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-lg font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 inline-flex items-center justify-center">
                 Become a Member
               </Link>
               <Link href="/apply/partner" className="h-14 px-8 bg-white hover:bg-slate-50 text-[#1A1A1A] text-lg font-medium rounded-full border border-[#E5E5E5] transition-all hover:border-[#D4D4D4] inline-flex items-center justify-center">

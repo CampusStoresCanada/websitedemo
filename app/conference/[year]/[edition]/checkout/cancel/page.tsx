@@ -39,7 +39,7 @@ export default async function ConferenceCheckoutCancelPage({
       <div className="mt-6 flex flex-wrap justify-center gap-2">
         <Link
           href={`/conference/${year}/${edition}/cart${orgParam}`}
-          className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+          className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
         >
           Return to Cart
         </Link>

@@ -67,7 +67,7 @@ export default function OrgMultiSelect({
         placeholder="Search organizations..."
         value={search}
         onChange={(e) => setSearch(e.target.value)}
-        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-2 focus:outline-none focus:ring-1 focus:ring-[#D60001] focus:border-[#D60001]"
+        className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm mb-2 focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
       />
 
       {/* List */}
@@ -94,7 +94,7 @@ export default function OrgMultiSelect({
                   checked={isSelected}
                   disabled={isDisabled}
                   onChange={() => toggle(org.id)}
-                  className="h-4 w-4 rounded border-gray-300 text-[#D60001] focus:ring-[#D60001]"
+                  className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
                 />
                 <div className="flex-1 min-w-0">
                   <span className="text-sm text-gray-900 truncate block">

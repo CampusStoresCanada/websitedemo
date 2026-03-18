@@ -23,7 +23,7 @@ export default function OrgProfileHero({ organization }: OrgProfileHeroProps) {
             <div
               className={`absolute inset-0 ${
                 organization.type === "Member"
-                  ? "bg-gradient-to-br from-[#D60001]/20 to-transparent"
+                  ? "bg-gradient-to-br from-[#EE2A2E]/20 to-transparent"
                   : "bg-gradient-to-br from-[#3B82F6]/20 to-transparent"
               }`}
             />
@@ -48,7 +48,7 @@ export default function OrgProfileHero({ organization }: OrgProfileHeroProps) {
             ) : (
               <div
                 className={`w-full h-full flex items-center justify-center ${
-                  organization.type === "Member" ? "bg-[#D60001]" : "bg-[#3B82F6]"
+                  organization.type === "Member" ? "bg-[#EE2A2E]" : "bg-[#3B82F6]"
                 }`}
               >
                 <span className="text-white font-bold text-4xl">
@@ -69,7 +69,7 @@ export default function OrgProfileHero({ organization }: OrgProfileHeroProps) {
               <span
                 className={`px-3 py-1 text-sm font-medium rounded-full ${
                   organization.type === "Member"
-                    ? "bg-[#D60001]/10 text-[#D60001]"
+                    ? "bg-[#EE2A2E]/10 text-[#EE2A2E]"
                     : "bg-[#3B82F6]/10 text-[#3B82F6]"
                 }`}
               >
@@ -101,7 +101,7 @@ export default function OrgProfileHero({ organization }: OrgProfileHeroProps) {
                 href={organization.website}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="h-12 px-6 bg-[#D60001] hover:bg-[#B00001] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 flex items-center gap-2"
+                className="h-12 px-6 bg-[#EE2A2E] hover:bg-[#D92327] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25 flex items-center gap-2"
               >
                 Visit Website
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

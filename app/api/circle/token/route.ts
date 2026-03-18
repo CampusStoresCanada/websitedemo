@@ -29,7 +29,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const circleId = await resolveUserCircleId(auth.ctx.userId);
+    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
     if (!circleId) {
       return NextResponse.json(
         { error: "Account not linked to Circle" },

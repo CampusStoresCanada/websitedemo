@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import ProfileEditForm from "./ProfileEditForm";
 
 export const metadata = {
   title: "My Account | Campus Stores Canada",
@@ -26,13 +27,14 @@ export default async function MyAccountPage() {
       .select("id, role, organization:organizations(id, name, slug)")
       .eq("user_id", auth.ctx.userId)
       .eq("status", "active"),
-    adminClient
-      .from("contacts")
-      .select("circle_id, synced_to_circle_at")
-      .eq("user_id", auth.ctx.userId)
-      .not("circle_id", "is", null)
-      .limit(1)
-      .maybeSingle(),
+    auth.ctx.userEmail
+      ? adminClient
+          .from("contacts")
+          .select("circle_id, synced_to_circle_at, role_title")
+          .eq("email", auth.ctx.userEmail)
+          .limit(1)
+          .maybeSingle()
+      : Promise.resolve({ data: null }),
   ])) as [{ data: any }, { data: any[] | null }, { data: any }];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -40,6 +42,21 @@ export default async function MyAccountPage() {
     .from("conference_people")
     .select("conference_id, conference_instances!inner(id, name, year, edition_code)")
     .eq("user_id", auth.ctx.userId)) as { data: any[] | null };
+
+  // My registered events
+  const { data: myRegistrationRows } = await adminClient
+    .from("event_registrations")
+    .select("id, status, registered_at, event:events!inner(id, title, slug, starts_at, status, audience_mode)")
+    .eq("user_id", auth.ctx.userId)
+    .in("status", ["registered", "waitlisted", "promoted"])
+    .order("registered_at", { ascending: false }) as { data: any[] | null };
+
+  // My created events
+  const { data: myCreatedEventRows } = await adminClient
+    .from("events")
+    .select("id, title, slug, starts_at, status")
+    .eq("created_by", auth.ctx.userId)
+    .order("created_at", { ascending: false }) as { data: any[] | null };
 
   const myConferenceLinks = (conferencePeopleRows ?? [])
     .map((row) => {
@@ -88,7 +105,17 @@ export default async function MyAccountPage() {
             <dt className="text-gray-500">Global Role</dt>
             <dd className="text-gray-900">{profileResult.data?.global_role || "user"}</dd>
           </div>
+          {circleResult.data?.role_title && (
+            <div className="flex items-center justify-between">
+              <dt className="text-gray-500">Role / Title</dt>
+              <dd className="text-gray-900">{circleResult.data.role_title}</dd>
+            </div>
+          )}
         </dl>
+        <ProfileEditForm
+          displayName={profileResult.data?.display_name ?? ""}
+          roleTitle={circleResult.data?.role_title ?? ""}
+        />
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-5">
@@ -124,7 +151,7 @@ export default async function MyAccountPage() {
                   <p className="text-xs text-gray-500">Role: {org.role}</p>
                 </div>
                 {org.organization?.slug ? (
-                  <Link href={`/org/${org.organization.slug}`} className="text-sm text-[#D60001] hover:text-[#B00001]">
+                  <Link href={`/org/${org.organization.slug}`} className="text-sm text-[#EE2A2E] hover:text-[#D92327]">
                     Open
                   </Link>
                 ) : null}
@@ -155,7 +182,7 @@ export default async function MyAccountPage() {
                 </div>
                 <Link
                   href={`/me/conference/${conference.id}`}
-                  className="text-sm text-[#D60001] hover:text-[#B00001]"
+                  className="text-sm text-[#EE2A2E] hover:text-[#D92327]"
                 >
                   Open
                 </Link>
@@ -164,6 +191,26 @@ export default async function MyAccountPage() {
           </ul>
         )}
       </section>
+
+      {/* My Events — link card */}
+      <Link
+        href="/me/events"
+        className="group flex items-center justify-between rounded-xl border border-gray-200 bg-white p-5 hover:border-gray-300 hover:shadow-sm transition-all"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">My Events</h2>
+          <p className="text-sm text-gray-500 mt-0.5">
+            {(myRegistrationRows ?? []).length > 0
+              ? `${(myRegistrationRows ?? []).length} active registration${(myRegistrationRows ?? []).length !== 1 ? "s" : ""}${(myCreatedEventRows ?? []).length > 0 ? ` · ${(myCreatedEventRows ?? []).length} hosted` : ""}`
+              : (myCreatedEventRows ?? []).length > 0
+              ? `${(myCreatedEventRows ?? []).length} hosted event${(myCreatedEventRows ?? []).length !== 1 ? "s" : ""}`
+              : "No events yet — browse upcoming events"}
+          </p>
+        </div>
+        <svg className="w-5 h-5 text-gray-400 group-hover:text-[#EE2A2E] transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
     </main>
   );
 }

@@ -8,6 +8,7 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEffectivePolicy } from "@/lib/policy/engine";
 import { enqueueCircleSync } from "@/lib/circle/sync";
+import { sendTransactional } from "@/lib/comms/send";
 
 // ─────────────────────────────────────────────────────────────────
 // Initiate Admin Transfer
@@ -121,9 +122,24 @@ export async function initiateAdminTransfer(
       };
     }
 
-    // TODO(chunk-22): send notification emails
-    // - To successor (if exists): "You've been nominated as admin"
-    // - To all global admins: "Admin transfer initiated for org X"
+    // Fire-and-forget: send notification emails
+    Promise.all([
+      adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+      adminClient.auth.admin.getUserById(auth.ctx.userId),
+      toUserId ? adminClient.auth.admin.getUserById(toUserId) : Promise.resolve({ data: { user: null } }),
+    ]).then(([{ data: orgRes }, { data: fromRes }, { data: toRes }]) => {
+      const orgName = orgRes?.name ?? orgId;
+      const fromName = fromRes?.user?.email ?? auth.ctx.userId;
+      const toName = toRes?.user?.email ?? toUserId ?? "Unknown";
+      const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${orgId}/admin/transfer`;
+      if (toRes?.user?.email) {
+        sendTransactional({
+          templateKey: "admin_transfer_initiated",
+          to: toRes.user.email,
+          variables: { recipient_name: toName, from_name: fromName, to_name: toName, org_name: orgName, timeout_hours: timeoutHours, accept_url: acceptUrl },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true, requestId: request.id };
   } catch (err) {
@@ -224,7 +240,31 @@ export async function acceptAdminTransfer(
       idempotencyKey: `transfer-accept-from:${requestId}`,
     });
 
-    // TODO(chunk-22): send confirmation emails
+    // Fire-and-forget: send confirmation emails to both parties
+    Promise.all([
+      adminClient.from("organizations").select("name").eq("id", request.organization_id).maybeSingle(),
+      adminClient.auth.admin.getUserById(request.from_user_id),
+      request.to_user_id ? adminClient.auth.admin.getUserById(request.to_user_id) : Promise.resolve({ data: { user: null } }),
+    ]).then(([{ data: orgRes }, { data: fromRes }, { data: toRes }]) => {
+      const orgName = orgRes?.name ?? request.organization_id;
+      const fromEmail = fromRes?.user?.email;
+      const toEmail = toRes?.user?.email;
+      const dashUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${request.organization_id}/admin`;
+      if (fromEmail) {
+        sendTransactional({
+          templateKey: "admin_transfer_completed",
+          to: fromEmail,
+          variables: { recipient_name: fromEmail, org_name: orgName, new_admin: toEmail ?? "successor", dashboard_url: dashUrl },
+        }).catch(() => {});
+      }
+      if (toEmail) {
+        sendTransactional({
+          templateKey: "admin_transfer_completed",
+          to: toEmail,
+          variables: { recipient_name: toEmail, org_name: orgName, new_admin: toEmail, dashboard_url: dashUrl },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {
@@ -298,7 +338,21 @@ export async function cancelAdminTransfer(
       return { success: false, error: "Failed to cancel transfer" };
     }
 
-    // TODO(chunk-22): send cancellation notification
+    // Fire-and-forget: send cancellation notification to initiator
+    Promise.all([
+      adminClient.from("organizations").select("name").eq("id", request.organization_id).maybeSingle(),
+      adminClient.auth.admin.getUserById(request.from_user_id),
+    ]).then(([{ data: orgRes }, { data: fromRes }]) => {
+      const orgName = orgRes?.name ?? request.organization_id;
+      const fromEmail = fromRes?.user?.email;
+      if (fromEmail) {
+        sendTransactional({
+          templateKey: "admin_transfer_canceled",
+          to: fromEmail,
+          variables: { recipient_name: fromEmail, org_name: orgName, reason: reason ?? "No reason provided" },
+        }).catch(() => {});
+      }
+    }).catch(() => {});
 
     return { success: true };
   } catch (err) {
@@ -400,7 +454,31 @@ export async function adminTransferTimeoutCheck(): Promise<{
             idempotencyKey: `transfer-auto-from:${transfer.id}`,
           });
 
-          // TODO(chunk-22): send auto-approval notification emails
+          // Fire-and-forget: send auto-approval notifications to both parties
+          Promise.all([
+            adminClient.from("organizations").select("name").eq("id", transfer.organization_id).maybeSingle(),
+            adminClient.auth.admin.getUserById(transfer.from_user_id),
+            adminClient.auth.admin.getUserById(transfer.to_user_id),
+          ]).then(([{ data: orgRes }, { data: fromRes }, { data: toRes }]) => {
+            const orgName = orgRes?.name ?? transfer.organization_id;
+            const fromEmail = fromRes?.user?.email;
+            const toEmail = toRes?.user?.email;
+            const dashUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${transfer.organization_id}/admin`;
+            if (fromEmail) {
+              sendTransactional({
+                templateKey: "admin_transfer_completed",
+                to: fromEmail,
+                variables: { recipient_name: fromEmail, org_name: orgName, new_admin: toEmail ?? "successor", dashboard_url: dashUrl },
+              }).catch(() => {});
+            }
+            if (toEmail) {
+              sendTransactional({
+                templateKey: "admin_transfer_completed",
+                to: toEmail,
+                variables: { recipient_name: toEmail, org_name: orgName, new_admin: toEmail, dashboard_url: dashUrl },
+              }).catch(() => {});
+            }
+          }).catch(() => {});
         } else {
           // No successor — fallback: assign a super_admin as temp org_admin
           const { data: superAdmins } = await adminClient
@@ -469,7 +547,28 @@ export async function adminTransferTimeoutCheck(): Promise<{
 
           result.fallback_triggered++;
 
-          // TODO(chunk-22): send fallback notification to super_admins
+          // Fire-and-forget: notify the designated super_admin of fallback assignment
+          Promise.all([
+            adminClient.from("organizations").select("name").eq("id", transfer.organization_id).maybeSingle(),
+            adminClient.auth.admin.getUserById(designatedSuperAdmin.id),
+            adminClient.auth.admin.getUserById(transfer.from_user_id),
+          ]).then(([{ data: orgRes }, { data: superRes }, { data: fromRes }]) => {
+            const orgName = orgRes?.name ?? transfer.organization_id;
+            const superEmail = superRes?.user?.email;
+            const dashUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${transfer.organization_id}/admin`;
+            if (superEmail) {
+              sendTransactional({
+                templateKey: "admin_transfer_fallback",
+                to: superEmail,
+                variables: {
+                  recipient_name: superEmail,
+                  org_name: orgName,
+                  old_admin: fromRes?.user?.email ?? transfer.from_user_id,
+                  dashboard_url: dashUrl,
+                },
+              }).catch(() => {});
+            }
+          }).catch(() => {});
         }
       } catch (transferErr) {
         const msg =

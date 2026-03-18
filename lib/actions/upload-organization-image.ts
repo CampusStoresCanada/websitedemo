@@ -34,7 +34,7 @@ export async function uploadOrganizationImage({
   }
 
   // Convert base64 to buffer
-  const base64Data = fileData.replace(/^data:image\/\w+;base64,/, "");
+  const base64Data = fileData.replace(/^data:image\/[^;]+;base64,/, "");
   const buffer = Buffer.from(base64Data, "base64");
 
   // Check file size (10MB max)

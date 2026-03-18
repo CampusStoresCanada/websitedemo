@@ -149,7 +149,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       const inner = document.createElement("div");
       inner.className = `marker-inner rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
         org.type === "Member"
-          ? "bg-[#D60001] border-2 border-white shadow-lg"
+          ? "bg-[#EE2A2E] border-2 border-white shadow-lg"
           : "bg-[#3B82F6] border-2 border-white shadow-lg"
       }`;
       // Size set dynamically via updateMarkerSizes (zoom-responsive)
@@ -268,7 +268,7 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       {!mapLoaded && (
         <div className="absolute inset-0 flex items-center justify-center bg-slate-100">
           <div className="flex items-center gap-3">
-            <div className="w-6 h-6 border-2 border-[#D60001] border-t-transparent rounded-full animate-spin" />
+            <div className="w-6 h-6 border-2 border-[#EE2A2E] border-t-transparent rounded-full animate-spin" />
             <span className="text-[#6B6B6B]">Loading map...</span>
           </div>
         </div>

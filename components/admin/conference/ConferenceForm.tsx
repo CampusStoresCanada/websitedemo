@@ -3,7 +3,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createConference, updateConference } from "@/lib/actions/conference";
+import { loadGooglePlacesScript } from "@/lib/google/places";
 import type { Database } from "@/lib/database.types";
+
+function utcToLocalInput(utcIso: string): string {
+  const d = new Date(utcIso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
 
 type ConferenceRow = Database["public"]["Tables"]["conference_instances"]["Row"];
 
@@ -11,86 +18,6 @@ interface ConferenceFormProps {
   conference?: ConferenceRow;
   canSuperAdminOverride?: boolean;
   googleMapsApiKey?: string | null;
-}
-
-declare global {
-  interface Window {
-    google?: {
-      maps?: {
-        places?: {
-          Autocomplete: new (
-            input: HTMLInputElement,
-            options?: {
-              types?: string[];
-              fields?: string[];
-              componentRestrictions?: { country: string | string[] };
-            }
-          ) => {
-            addListener: (eventName: string, handler: () => void) => { remove?: () => void };
-            getPlace: () => {
-              address_components?: Array<{
-                long_name: string;
-                short_name: string;
-                types: string[];
-              }>;
-              formatted_address?: string;
-              name?: string;
-            };
-          };
-        };
-      };
-    };
-  }
-}
-
-const GOOGLE_PLACES_SCRIPT_ID = "google-maps-places-script";
-const GOOGLE_PLACES_READY_TIMEOUT_MS = 15000;
-
-function loadGooglePlacesScript(apiKey: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (window.google?.maps?.places?.Autocomplete) {
-      resolve();
-      return;
-    }
-
-    const encodedKey = encodeURIComponent(apiKey);
-    const existing = document.getElementById(GOOGLE_PLACES_SCRIPT_ID) as HTMLScriptElement | null;
-    if (existing) {
-      const existingSrc = existing.getAttribute("src") ?? "";
-      if (existingSrc && !existingSrc.includes(`key=${encodedKey}`)) {
-        reject(
-          new Error(
-            "Google Places script already exists with a different API key. Refresh and retry with one key."
-          )
-        );
-        return;
-      }
-      existing.addEventListener("load", () => {
-        if (window.google?.maps?.places?.Autocomplete) resolve();
-        else reject(new Error("Google Maps loaded, but Places Autocomplete is unavailable."));
-      });
-      existing.addEventListener("error", () => reject(new Error("Failed to load Google Places script.")));
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.id = GOOGLE_PLACES_SCRIPT_ID;
-    script.src = `https://maps.googleapis.com/maps/api/js?key=${encodedKey}&libraries=places&v=weekly&loading=async`;
-    script.async = true;
-    script.defer = true;
-    script.onload = () => {
-      if (window.google?.maps?.places?.Autocomplete) resolve();
-      else reject(new Error("Google Maps loaded, but Places Autocomplete is unavailable."));
-    };
-    script.onerror = () => reject(new Error("Failed to load Google Places script."));
-    document.head.appendChild(script);
-
-    window.setTimeout(() => {
-      if (!window.google?.maps?.places?.Autocomplete) {
-        reject(new Error("Google Places initialization timed out."));
-      }
-    }, GOOGLE_PLACES_READY_TIMEOUT_MS);
-  });
 }
 
 export default function ConferenceForm({
@@ -248,7 +175,7 @@ export default function ConferenceForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="CSC 2027 Annual Conference"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
           />
         </div>
 
@@ -259,7 +186,7 @@ export default function ConferenceForm({
             required
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
           />
         </div>
 
@@ -270,7 +197,7 @@ export default function ConferenceForm({
             value={editionCode}
             onChange={(e) => setEditionCode(e.target.value)}
             placeholder="00"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
           />
         </div>
       </div>
@@ -280,11 +207,11 @@ export default function ConferenceForm({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">City</label>
-            <input type="text" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="text" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Province</label>
-            <input type="text" value={locationProvince} onChange={(e) => setLocationProvince(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="text" value={locationProvince} onChange={(e) => setLocationProvince(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">Venue (Google Places)</label>
@@ -294,7 +221,7 @@ export default function ConferenceForm({
               value={locationVenue}
               onChange={(e) => setLocationVenue(e.target.value)}
               placeholder="Start typing venue or address..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
             />
             {placesReady && (
               <p className="mt-1 text-xs text-gray-500">
@@ -315,19 +242,19 @@ export default function ConferenceForm({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Start Date</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">End Date</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Opens</label>
-            <input type="datetime-local" value={registrationOpenAt ? registrationOpenAt.slice(0, 16) : ""} onChange={(e) => setRegistrationOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="datetime-local" value={registrationOpenAt ? utcToLocalInput(registrationOpenAt) : ""} onChange={(e) => setRegistrationOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Closes</label>
-            <input type="datetime-local" value={registrationCloseAt ? registrationCloseAt.slice(0, 16) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="datetime-local" value={registrationCloseAt ? utcToLocalInput(registrationCloseAt) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
         </div>
       </fieldset>
@@ -337,19 +264,19 @@ export default function ConferenceForm({
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Timezone</label>
-            <input type="text" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="text" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tax Jurisdiction</label>
-            <input type="text" value={taxJurisdiction} onChange={(e) => setTaxJurisdiction(e.target.value)} placeholder="ON" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="text" value={taxJurisdiction} onChange={(e) => setTaxJurisdiction(e.target.value)} placeholder="ON" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tax Rate %</label>
-            <input type="number" step="0.01" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} placeholder="13.0" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="number" step="0.01" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} placeholder="13.0" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
           </div>
           <div className="col-span-3">
             <label className="block text-xs text-gray-500 mb-1">Stripe Tax Rate ID</label>
-            <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#D60001]" />
+            <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
             <p className="mt-1 text-xs text-gray-400">
               From Stripe Dashboard &rarr; Tax Rates. Must match the jurisdiction rate above.
             </p>
@@ -387,7 +314,7 @@ export default function ConferenceForm({
         <button
           type="submit"
           disabled={isLoading}
-          className="px-6 py-2 text-sm font-medium text-white bg-[#D60001] rounded-md hover:bg-[#b50001] disabled:opacity-50"
+          className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50"
         >
           {isLoading ? "Saving..." : isEdit ? "Save Changes" : "Create Conference"}
         </button>

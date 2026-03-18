@@ -3,12 +3,15 @@
 import Link from "next/link";
 import { useState } from "react";
 import {
+  regenerateProgramFromSetup,
   saveConferenceRoomInventory,
   saveMeetingSuiteRoomAssignments,
-  syncEducationSetupFromScheduleRow,
-  syncOffsiteSetupFromScheduleRow,
 } from "@/lib/actions/conference-schedule-design";
-import { upsertConferenceProgramItem } from "@/lib/actions/conference-program";
+import {
+  listConferenceProgramItems,
+  upsertConferenceProgramItem,
+} from "@/lib/actions/conference-program";
+import { resolveMeetingGeometryFromModulesConfig } from "@/lib/conference/meeting-geometry";
 import type { ConferenceScheduleModuleRow } from "@/lib/actions/conference-schedule-design";
 
 type ProgramItem = {
@@ -104,7 +107,6 @@ const ROOM_REQUIRED_TYPES: ProgramItem["item_type"][] = [
   "meal",
   "education",
   "trade_show",
-  "offsite",
   "move_in",
   "move_out",
 ];
@@ -112,8 +114,157 @@ const ROOM_REQUIRED_TYPES: ProgramItem["item_type"][] = [
 const DETAIL_REQUIRED_TYPES: ProgramItem["item_type"][] = [
   "meal",
   "education",
-  "offsite",
 ];
+
+type DetailFieldType = "select" | "text" | "textarea";
+
+type StructuredDetailField = {
+  key: string;
+  label: string;
+  type: DetailFieldType;
+  required?: boolean;
+  options?: string[];
+};
+
+type DetailSchema = {
+  title: string;
+  guidance: string;
+  fields: StructuredDetailField[];
+};
+
+const DETAIL_SCHEMAS: Partial<Record<ProgramItem["item_type"], DetailSchema>> = {
+  meal: {
+    title: "Meal Details",
+    guidance: "Capture practical meal notes without over-constraining menu planning.",
+    fields: [
+      {
+        key: "service_type",
+        label: "Service Type",
+        type: "select",
+        required: true,
+        options: ["Buffet", "Plated", "Grab-and-Go", "Reception", "Coffee Break", "Other"],
+      },
+      {
+        key: "menu",
+        label: "Menu",
+        type: "textarea",
+        required: true,
+      },
+      {
+        key: "dietary_notes",
+        label: "Dietary Coverage Notes",
+        type: "textarea",
+      },
+      { key: "service_notes", label: "Service Notes", type: "textarea" },
+    ],
+  },
+  education: {
+    title: "Education Details",
+    guidance: "Capture speakers, abstract, and attendee instructions in a consistent format.",
+    fields: [
+      {
+        key: "session_format",
+        label: "Session Format",
+        type: "select",
+        required: true,
+        options: ["Keynote", "Panel", "Workshop", "Roundtable", "Fireside Chat", "Other"],
+      },
+      { key: "speakers", label: "Speakers", type: "text", required: true },
+      { key: "session_abstract", label: "Session Abstract", type: "textarea", required: true },
+      { key: "attendee_instructions", label: "Attendee Instructions", type: "textarea" },
+    ],
+  },
+  trade_show: {
+    title: "Trade Show Details",
+    guidance: "Capture floor focus and exhibitor execution details.",
+    fields: [
+      {
+        key: "activation_type",
+        label: "Activation Type",
+        type: "select",
+        options: ["Open Floor", "Featured Showcase", "Demo Block", "Networking Activation", "Other"],
+      },
+      { key: "featured_focus", label: "Featured Focus", type: "text" },
+      { key: "exhibitor_instructions", label: "Exhibitor Instructions", type: "textarea" },
+      { key: "attendee_notes", label: "Attendee Notes", type: "textarea" },
+    ],
+  },
+  move_in: {
+    title: "Move-In Details",
+    guidance: "Capture logistics controls as structured operations fields.",
+    fields: [
+      {
+        key: "dock_mode",
+        label: "Dock Access Mode",
+        type: "select",
+        required: true,
+        options: ["Timed Window", "Open Window", "Staggered", "By Appointment"],
+      },
+      { key: "freight_rules", label: "Freight Rules", type: "textarea" },
+      { key: "vendor_checklist", label: "Vendor Checklist", type: "textarea" },
+    ],
+  },
+  move_out: {
+    title: "Move-Out Details",
+    guidance: "Capture teardown and pickup guidance in a predictable format.",
+    fields: [
+      {
+        key: "teardown_mode",
+        label: "Teardown Mode",
+        type: "select",
+        required: true,
+        options: ["Timed Window", "Staggered", "By Zone", "By Appointment"],
+      },
+      { key: "pickup_rules", label: "Pickup Rules", type: "textarea" },
+      { key: "compliance_notes", label: "Compliance Notes", type: "textarea" },
+    ],
+  },
+  custom: {
+    title: "Custom Session Details",
+    guidance: "Use consistent owner/objective/instruction fields for custom blocks.",
+    fields: [
+      { key: "owner", label: "Owner", type: "text", required: true },
+      { key: "objective", label: "Objective", type: "text", required: true },
+      { key: "execution_instructions", label: "Execution Instructions", type: "textarea" },
+      { key: "notes", label: "Notes", type: "textarea" },
+    ],
+  },
+};
+
+function parseStructuredDetails(
+  description: string | null | undefined,
+  schema: DetailSchema
+): Record<string, string> {
+  const lines = String(description ?? "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const values: Record<string, string> = {};
+  for (const field of schema.fields) values[field.key] = "";
+  for (const line of lines) {
+    const idx = line.indexOf(":");
+    if (idx <= 0) continue;
+    const label = line.slice(0, idx).trim().toLowerCase();
+    const value = line.slice(idx + 1).trim();
+    const field = schema.fields.find((entry) => entry.label.toLowerCase() === label);
+    if (!field) continue;
+    values[field.key] = value;
+  }
+  return values;
+}
+
+function serializeStructuredDetails(schema: DetailSchema, values: Record<string, string>): string {
+  return schema.fields
+    .map((field) => `${field.label}: ${(values[field.key] ?? "").trim()}`)
+    .join("\n");
+}
+
+function summarizeStructuredDetails(schema: DetailSchema, values: Record<string, string>): string {
+  const firstValue = schema.fields
+    .map((field) => (values[field.key] ?? "").trim())
+    .find((value) => value.length > 0);
+  return firstValue ?? "Not configured";
+}
 
 const ALL_ROOM_CAPABILITY_OPTIONS: Array<{
   value:
@@ -304,14 +455,18 @@ export default function ConferenceScheduleDesigner({
   const [roomSaveError, setRoomSaveError] = useState<string | null>(null);
   const [programItems, setProgramItems] = useState<ProgramItem[]>(initialProgramItems);
   const [programRowDrafts, setProgramRowDrafts] = useState<
-    Record<string, { location_label?: string; description?: string }>
+    Record<string, { title?: string; location_label?: string; description?: string }>
   >({});
   const [savingProgramItemId, setSavingProgramItemId] = useState<string | null>(null);
   const [programSaveError, setProgramSaveError] = useState<string | null>(null);
   const [programSaveMessage, setProgramSaveMessage] = useState<string | null>(null);
+  const [detailModalItemId, setDetailModalItemId] = useState<string | null>(null);
+  const [detailModalValues, setDetailModalValues] = useState<Record<string, string>>({});
+  const [detailModalError, setDetailModalError] = useState<string | null>(null);
   const [isSavingMeetingPlan, setIsSavingMeetingPlan] = useState(false);
   const [meetingPlanSaveError, setMeetingPlanSaveError] = useState<string | null>(null);
   const [meetingPlanSaveMessage, setMeetingPlanSaveMessage] = useState<string | null>(null);
+  const [isRegeneratingProgram, setIsRegeneratingProgram] = useState(false);
   const meetingsModule = modules.find((row) => row.module_key === "meetings");
   const meetingsConfig = (meetingsModule?.config_json ?? {}) as Record<string, unknown>;
   const suiteRoomAssignmentsRaw =
@@ -352,16 +507,9 @@ export default function ConferenceScheduleDesigner({
     }
     return output;
   });
-  const meetingDays = Array.isArray(meetingsConfig.meeting_days)
-    ? (meetingsConfig.meeting_days.filter((v): v is string => typeof v === "string") ?? [])
-    : [];
-  const meetingDaySettings = ((meetingsConfig.meeting_day_settings ?? {}) as Record<string, unknown>) ?? {};
-  const totalMeetingCount = meetingDays.reduce((sum, date) => {
-    const raw = meetingDaySettings[date];
-    const row = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
-    const value = Number(row.meeting_count ?? 0);
-    return sum + (Number.isFinite(value) && value > 0 ? value : 0);
-  }, 0);
+  const meetingGeometry = resolveMeetingGeometryFromModulesConfig(meetingsConfig);
+  const resolvedMeetingDays = meetingGeometry.meetingDays;
+  const totalMeetingCount = meetingGeometry.dayConfigs.reduce((sum, dayConfig) => sum + dayConfig.meetingCount, 0);
 
   const tradeShowModule = modules.find((row) => row.module_key === "trade_show");
   const tradeShowConfig = (tradeShowModule?.config_json ?? {}) as Record<string, unknown>;
@@ -382,15 +530,34 @@ export default function ConferenceScheduleDesigner({
 
   const offsiteModule = modules.find((row) => row.module_key === "offsite");
   const offsiteConfig = (offsiteModule?.config_json ?? {}) as Record<string, unknown>;
+  const offsiteAllowTbdVenue = Boolean(offsiteConfig.allow_tbd_venue);
   const offsiteEvents = Array.isArray(offsiteConfig.offsite_events)
     ? (offsiteConfig.offsite_events as Array<Record<string, unknown>>)
     : [];
+  const moduleStatusSummary = [
+    enabledSet.has("meetings")
+      ? `Meetings ${resolvedMeetingDays.length}d / ${totalMeetingCount} slots-per-suite`
+      : null,
+    enabledSet.has("trade_show") ? `Trade Show ${tradeShowDays.length}d` : null,
+    enabledSet.has("education")
+      ? `Education ${educationDays.length}d / target ${Number(educationConfig.session_count_target ?? 0)}`
+      : null,
+    enabledSet.has("meals") ? `Meals ${mealDays.length}d` : null,
+    enabledSet.has("offsite") ? `Offsite ${offsiteEvents.length} event(s)` : null,
+  ].filter((value): value is string => Boolean(value));
   const hasProgramItems = programItems.length > 0;
   const sortedProgramItems = [...programItems].sort((a, b) => {
     const startDiff = new Date(a.starts_at).valueOf() - new Date(b.starts_at).valueOf();
     if (startDiff !== 0) return startDiff;
     return a.display_order - b.display_order;
   });
+  const detailModalItem = detailModalItemId
+    ? sortedProgramItems.find((item) => item.id === detailModalItemId) ?? null
+    : null;
+  const detailModalSchema =
+    detailModalItem && detailModalItem.item_type !== "offsite"
+      ? DETAIL_SCHEMAS[detailModalItem.item_type] ?? null
+      : null;
 
   const roomRequiredItems = sortedProgramItems.filter((item) =>
     ROOM_REQUIRED_TYPES.includes(item.item_type)
@@ -406,6 +573,9 @@ export default function ConferenceScheduleDesigner({
     (item) =>
       DETAIL_REQUIRED_TYPES.includes(item.item_type) &&
       (item.description ?? "").trim().length === 0
+  );
+  const offsiteItemsMissingVenue = sortedProgramItems.filter(
+    (item) => item.item_type === "offsite" && (item.location_label ?? "").trim().length === 0
   );
 
   const knownRoomNames = new Set(
@@ -517,7 +687,7 @@ export default function ConferenceScheduleDesigner({
 
   const updateProgramRowDraft = (
     id: string,
-    patch: { location_label?: string; description?: string }
+    patch: { title?: string; location_label?: string; description?: string }
   ) => {
     setProgramRowDrafts((prev) => ({
       ...prev,
@@ -526,6 +696,38 @@ export default function ConferenceScheduleDesigner({
         ...patch,
       },
     }));
+  };
+
+  const openDetailsModal = (item: ProgramItem) => {
+    if (item.item_type === "offsite") return;
+    const schema = DETAIL_SCHEMAS[item.item_type];
+    if (!schema) return;
+    const draft = programRowDrafts[item.id];
+    const baseDescription =
+      typeof draft?.description === "string" ? draft.description : (item.description ?? "");
+    setDetailModalValues(parseStructuredDetails(baseDescription, schema));
+    setDetailModalError(null);
+    setDetailModalItemId(item.id);
+  };
+
+  const closeDetailsModal = () => {
+    setDetailModalItemId(null);
+    setDetailModalValues({});
+    setDetailModalError(null);
+  };
+
+  const applyDetailsModal = () => {
+    if (!detailModalItem || !detailModalSchema) return;
+    const missingRequired = detailModalSchema.fields.find(
+      (field) => field.required && (detailModalValues[field.key] ?? "").trim().length === 0
+    );
+    if (missingRequired) {
+      setDetailModalError(`"${missingRequired.label}" is required.`);
+      return;
+    }
+    const serialized = serializeStructuredDetails(detailModalSchema, detailModalValues);
+    updateProgramRowDraft(detailModalItem.id, { description: serialized });
+    closeDetailsModal();
   };
 
   const handleSaveProgramRow = async (item: ProgramItem) => {
@@ -537,7 +739,7 @@ export default function ConferenceScheduleDesigner({
     const result = await upsertConferenceProgramItem(conferenceId, {
       id: item.id,
       item_type: item.item_type,
-      title: item.title,
+      title: typeof draft.title === "string" ? draft.title : item.title,
       description:
         typeof draft.description === "string"
           ? draft.description
@@ -558,36 +760,6 @@ export default function ConferenceScheduleDesigner({
     if (!result.success || !result.data) {
       setProgramSaveError(result.error ?? "Failed to save schedule row.");
       return;
-    }
-
-    if (item.item_type === "offsite") {
-      const syncResult = await syncOffsiteSetupFromScheduleRow(conferenceId, {
-        item_id: item.id,
-        title: result.data.title,
-        starts_at: result.data.starts_at,
-        location_label: result.data.location_label ?? null,
-        description: result.data.description ?? null,
-      });
-      if (!syncResult.success) {
-        setProgramSaveError(
-          syncResult.error ??
-            "Saved schedule row, but could not write back to offsite setup."
-        );
-      }
-    }
-    if (item.item_type === "education") {
-      const syncResult = await syncEducationSetupFromScheduleRow(conferenceId, {
-        item_id: item.id,
-        starts_at: result.data.starts_at,
-        location_label: result.data.location_label ?? null,
-        description: result.data.description ?? null,
-      });
-      if (!syncResult.success) {
-        setProgramSaveError(
-          syncResult.error ??
-            "Saved schedule row, but could not write back to education setup."
-        );
-      }
     }
 
     setProgramItems((prev) => prev.map((row) => (row.id === item.id ? (result.data as ProgramItem) : row)));
@@ -614,105 +786,85 @@ export default function ConferenceScheduleDesigner({
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
-        <p className="font-semibold">Looking for room assignments?</p>
-        <p className="mt-1">
-          This page edits the program timeline and meeting geometry inputs. Generated room/suite
-          occupancy and assignment diffs are in <span className="font-medium">Schedule Ops</span>.
-        </p>
-        <div className="mt-3">
+      <div className="rounded-lg border border-gray-200 bg-white p-4">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Schedule Context</h2>
+            <p className="mt-1 text-sm text-gray-600">
+              Edit timeline rows here. Use Setup for scope changes. Use Schedule Ops for generated
+              room/suite assignments and run diffs.
+            </p>
+            <p className="mt-2 text-xs text-gray-500">
+              Enabled modules:{" "}
+              {enabledModules.length > 0
+                ? enabledModules.map((key) => MODULE_LABELS[key] ?? key).join(", ")
+                : "none"}
+            </p>
+          </div>
           <Link
             href={`/admin/conference/${conferenceId}/schedule-ops`}
-            className="inline-flex rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+            className="inline-flex rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
           >
-            Open Schedule Ops (Rooms + Assignments)
+            Open Schedule Ops
           </Link>
         </div>
-      </div>
-
-      <div className="rounded-lg border border-blue-200 bg-blue-50 p-4 text-sm text-blue-900">
-        <p className="font-semibold">Schedule Workspace</p>
-        <p className="mt-1">
-          This workspace uses module scope selected in <span className="font-medium">Setup</span>.
-          Change scope in Setup when conference features change.
-        </p>
-        <p className="mt-2 text-xs">
-          Enabled modules:{" "}
-          {enabledModules.length > 0
-            ? enabledModules.map((key) => MODULE_LABELS[key] ?? key).join(", ")
-            : "none"}
-        </p>
-      </div>
-
-      <div className="rounded-lg border border-gray-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-gray-900">Setup-Derived Schedule Snapshot</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          This summary is generated from Setup and is the source input for room/suite assignment.
-        </p>
-        <div className="mt-4 space-y-3 text-sm">
-          {enabledSet.has("meetings") ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">Meetings</p>
-              <p className="mt-1 text-gray-700">
-                {meetingDays.length} day(s), {totalMeetingCount} meetings per suite total,{" "}
-                {Number(meetingsConfig.meeting_suites ?? params?.total_meeting_suites ?? 0)} suite(s).
-              </p>
-            </div>
-          ) : null}
-          {enabledSet.has("trade_show") ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">Trade Show</p>
-              <p className="mt-1 text-gray-700">
-                {tradeShowDays.length > 0
-                  ? `${tradeShowDays.length} day(s) configured.`
-                  : "No trade show days configured yet."}
-              </p>
-            </div>
-          ) : null}
-          {enabledSet.has("education") ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">Education</p>
-              <p className="mt-1 text-gray-700">
-                {educationDays.length > 0
-                  ? `${educationDays.length} day(s), target sessions: ${Number(educationConfig.session_count_target ?? 0)}.`
-                  : "No education days configured yet."}
-              </p>
-            </div>
-          ) : null}
-          {enabledSet.has("meals") ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">Meals</p>
-              <p className="mt-1 text-gray-700">
-                {mealDays.length > 0
-                  ? `${mealDays.length} day(s) with meal service definitions.`
-                  : "No meal service days configured yet."}
-              </p>
-            </div>
-          ) : null}
-          {enabledSet.has("offsite") ? (
-            <div className="rounded-md border border-gray-200 bg-gray-50 p-3">
-              <p className="font-medium text-gray-900">Offsite Events</p>
-              <p className="mt-1 text-gray-700">
-                {offsiteEvents.length > 0
-                  ? `${offsiteEvents.length} event(s) configured.`
-                  : "No offsite events configured yet."}
-              </p>
-            </div>
-          ) : null}
+        <div className="mt-3 flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={async () => {
+              setProgramSaveError(null);
+              setProgramSaveMessage(null);
+              setIsRegeneratingProgram(true);
+              const result = await regenerateProgramFromSetup(conferenceId, { replaceExisting: true });
+              setIsRegeneratingProgram(false);
+              if (!result.success) {
+                setProgramSaveError(result.error ?? "Failed to regenerate timeline from setup.");
+                return;
+              }
+              const latest = await listConferenceProgramItems(conferenceId);
+              if (!latest.success || !latest.data) {
+                setProgramSaveError(latest.error ?? "Timeline regenerated but failed to reload rows.");
+                return;
+              }
+              setProgramItems(latest.data as ProgramItem[]);
+              setProgramSaveMessage(
+                `Program regenerated from setup (${result.data?.created ?? 0} item(s)).`
+              );
+            }}
+            disabled={isRegeneratingProgram}
+            className="inline-flex rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-60"
+          >
+            {isRegeneratingProgram ? "Regenerating..." : "Regenerate Program from Setup"}
+          </button>
+          <span className="text-xs text-gray-500">
+            Use after changing setup timing/counts.
+          </span>
+        </div>
+        <div className="mt-4 flex flex-wrap gap-2 text-xs">
+          {moduleStatusSummary.length === 0 ? (
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-600">
+              No setup modules enabled yet
+            </span>
+          ) : (
+            moduleStatusSummary.map((entry) => (
+              <span
+                key={entry}
+                className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-1 text-gray-700"
+              >
+                {entry}
+              </span>
+            ))
+          )}
         </div>
         {!hasProgramItems ? (
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-            No manual timeline rows exist yet. Use this setup snapshot + Schedule Ops for generated
-            room assignments.
+            No timeline rows exist yet. Run setup regeneration, then edit rows here.
           </div>
         ) : null}
       </div>
 
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Operations At-a-Glance</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          One-screen summary of schedule completeness and room assignment coverage.
-        </p>
         <p className="mt-1 text-xs text-gray-500">
           Times shown in conference local time: <span className="font-medium">{scheduleTimeZone}</span>
         </p>
@@ -740,6 +892,19 @@ export default function ConferenceScheduleDesigner({
         {programSaveMessage ? (
           <p className="mt-3 text-sm text-emerald-700">{programSaveMessage}</p>
         ) : null}
+        {offsiteAllowTbdVenue && offsiteItemsMissingVenue.length > 0 ? (
+          <div className="mt-3 rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+            {offsiteItemsMissingVenue.length} offsite row(s) are still TBD for venue. Manage offsite
+            location/details in Setup.
+            <Link
+              href={`/admin/conference/${conferenceId}?tab=setup`}
+              className="ml-1 font-semibold underline"
+            >
+              Open Setup
+            </Link>
+            .
+          </div>
+        ) : null}
 
         {hasProgramItems ? (
           <div className="mt-4 overflow-x-auto">
@@ -747,7 +912,6 @@ export default function ConferenceScheduleDesigner({
               <thead className="bg-gray-50">
                 <tr>
                   <th className="px-3 py-2 text-left font-semibold text-gray-700">When</th>
-                  <th className="px-3 py-2 text-left font-semibold text-gray-700">Type</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-700">Session</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-700">Room / Location</th>
                   <th className="px-3 py-2 text-left font-semibold text-gray-700">Details</th>
@@ -756,9 +920,23 @@ export default function ConferenceScheduleDesigner({
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {dayRows.map((row) =>
-                  row.items.map((item, index) => {
+                {dayRows.map((row) => (
+                  <>
+                    <tr key={`${row.dayKey}-heading`} className="bg-black">
+                      <td
+                        colSpan={6}
+                        className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-white"
+                      >
+                        {row.dayLabel} • {row.items.length} row{row.items.length === 1 ? "" : "s"}
+                      </td>
+                    </tr>
+                    {row.items.map((item) => {
                     const draft = programRowDrafts[item.id] ?? {};
+                    const isOffsite = item.item_type === "offsite";
+                    const titleValue =
+                      typeof draft.title === "string"
+                        ? draft.title
+                        : item.title;
                     const roomValue =
                       typeof draft.location_label === "string"
                         ? draft.location_label
@@ -767,6 +945,10 @@ export default function ConferenceScheduleDesigner({
                       typeof draft.description === "string"
                         ? draft.description
                         : (item.description ?? "");
+                    const detailSchema = item.item_type !== "offsite" ? (DETAIL_SCHEMAS[item.item_type] ?? null) : null;
+                    const detailValues = detailSchema
+                      ? parseStructuredDetails(descriptionValue, detailSchema)
+                      : {};
                     const roomMissing =
                       ROOM_REQUIRED_TYPES.includes(item.item_type) &&
                       (item.location_label ?? "").trim().length === 0;
@@ -798,52 +980,91 @@ export default function ConferenceScheduleDesigner({
                       !matchedRoomCapabilities.includes(itemCapability!);
                     const detailMissing =
                       DETAIL_REQUIRED_TYPES.includes(item.item_type) &&
-                      (item.description ?? "").trim().length === 0;
+                      (descriptionValue ?? "").trim().length === 0;
+                    const offsiteMissingVenue =
+                      isOffsite && (item.location_label ?? "").trim().length === 0;
+                    const isDirty =
+                      titleValue !== item.title ||
+                      roomValue !== (item.location_label ?? "") ||
+                      descriptionValue !== (item.description ?? "");
                     return (
                       <tr key={item.id}>
                         <td className="px-3 py-2 text-gray-700">
-                          <div className="font-medium text-gray-900">
-                            {index === 0 ? row.dayLabel : ""}
-                          </div>
                           <div className="text-xs text-gray-500">
                             {formatTimeLabel(item.starts_at, scheduleTimeZone)} -{" "}
                             {formatTimeLabel(item.ends_at, scheduleTimeZone)}
                           </div>
                         </td>
-                        <td className="px-3 py-2 text-gray-700">{item.item_type}</td>
-                        <td className="px-3 py-2 text-gray-900">{item.title}</td>
+                        <td className="px-3 py-2 text-gray-900 min-w-[220px]">
+                          <div className="space-y-1">
+                            <input
+                              type="text"
+                              value={titleValue}
+                              onChange={(event) =>
+                                updateProgramRowDraft(item.id, {
+                                  title: event.target.value,
+                                })
+                              }
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                            />
+                            <p className="text-[11px] text-gray-500 capitalize">
+                              {item.item_type.replaceAll("_", " ")}
+                            </p>
+                          </div>
+                        </td>
                         <td className="px-3 py-2 text-gray-700 min-w-[220px]">
-                          <select
-                            value={roomValue}
-                            onChange={(event) =>
-                              updateProgramRowDraft(item.id, {
-                                location_label: event.target.value,
-                              })
-                            }
-                            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                          >
-                            <option value="">Unassigned</option>
-                            {roomInventory
-                              .filter((room) => room.is_bookable)
-                              .map((roomDef) => (
-                                <option key={`${item.id}-${roomDef.id}`} value={roomDef.name}>
-                                  {roomDef.name}
-                                </option>
-                              ))}
-                          </select>
+                          {isOffsite ? (
+                            <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+                              {(item.location_label ?? "").trim().length > 0
+                                ? `Venue: ${item.location_label}`
+                                : offsiteAllowTbdVenue
+                                  ? "Venue TBD in Setup"
+                                  : "Venue missing. Configure in Setup."}
+                            </div>
+                          ) : (
+                            <select
+                              value={roomValue}
+                              onChange={(event) =>
+                                updateProgramRowDraft(item.id, {
+                                  location_label: event.target.value,
+                                })
+                              }
+                              className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                            >
+                              <option value="">Unassigned</option>
+                              {roomInventory
+                                .filter((room) => room.is_bookable)
+                                .map((roomDef) => (
+                                  <option key={`${item.id}-${roomDef.id}`} value={roomDef.name}>
+                                    {roomDef.name}
+                                  </option>
+                                ))}
+                            </select>
+                          )}
                         </td>
                         <td className="px-3 py-2 min-w-[260px]">
-                          <textarea
-                            value={descriptionValue}
-                            onChange={(event) =>
-                              updateProgramRowDraft(item.id, {
-                                description: event.target.value,
-                              })
-                            }
-                            rows={2}
-                            className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                            placeholder="Add session details for this row"
-                          />
+                          {isOffsite ? (
+                            <div className="rounded-md border border-gray-200 bg-gray-50 px-2 py-1.5 text-xs text-gray-700">
+                              Manage offsite details in Setup to keep source-of-truth in one place.
+                            </div>
+                          ) : (
+                            <div className="space-y-1.5">
+                              <div className="rounded-md border border-gray-200 bg-white px-2 py-1.5 text-xs text-gray-700">
+                                {detailSchema
+                                  ? summarizeStructuredDetails(detailSchema, detailValues)
+                                  : ((descriptionValue ?? "").trim() || "Not configured")}
+                              </div>
+                              {detailSchema ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openDetailsModal(item)}
+                                  className="rounded border border-gray-300 bg-white px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-50"
+                                >
+                                  Edit Details
+                                </button>
+                              ) : null}
+                            </div>
+                          )}
                         </td>
                         <td className="px-3 py-2">
                           <div className="flex flex-wrap gap-1">
@@ -872,28 +1093,39 @@ export default function ConferenceScheduleDesigner({
                                 Details Missing
                               </span>
                             ) : null}
+                            {offsiteMissingVenue ? (
+                              <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-800">
+                                Complete in Setup
+                              </span>
+                            ) : null}
                           </div>
                         </td>
                         <td className="px-3 py-2">
                           <button
                             type="button"
                             onClick={() => void handleSaveProgramRow(item)}
-                            disabled={savingProgramItemId === item.id}
+                            disabled={savingProgramItemId === item.id || isOffsite || !isDirty}
                             className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
                           >
-                            {savingProgramItemId === item.id ? "Saving..." : "Save Row"}
+                            {isOffsite
+                              ? "Use Setup"
+                              : savingProgramItemId === item.id
+                                ? "Saving..."
+                                : "Save"}
                           </button>
                         </td>
                       </tr>
                     );
                   })
-                )}
+                    }
+                  </>
+                ))}
               </tbody>
             </table>
           </div>
         ) : (
           <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-600">
-            No program items yet. Use Setup and optional Program Overrides below.
+            No program items yet.
           </div>
         )}
       </div>
@@ -909,7 +1141,7 @@ export default function ConferenceScheduleDesigner({
           <button
             type="button"
             onClick={addRoomInventoryRow}
-            className="rounded-md bg-[#D60001] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+            className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
           >
             Add Room
           </button>
@@ -1086,6 +1318,88 @@ export default function ConferenceScheduleDesigner({
         </div>
       </div>
 
+      {detailModalItem && detailModalSchema ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-2xl rounded-lg border border-gray-200 bg-white p-4 shadow-xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-base font-semibold text-gray-900">{detailModalSchema.title}</h3>
+                <p className="mt-1 text-sm text-gray-600">{detailModalItem.title}</p>
+                <p className="mt-1 text-xs text-gray-500">{detailModalSchema.guidance}</p>
+              </div>
+              <button
+                type="button"
+                onClick={closeDetailsModal}
+                className="rounded border border-gray-300 px-2 py-1 text-xs text-gray-700 hover:bg-gray-50"
+              >
+                Close
+              </button>
+            </div>
+            <div className="mt-4 grid gap-3">
+              {detailModalSchema.fields.map((field) => (
+                <label key={field.key} className="block text-sm text-gray-700">
+                  {field.label}
+                  {field.required ? <span className="ml-1 text-red-600">*</span> : null}
+                  {field.type === "select" ? (
+                    <select
+                      value={detailModalValues[field.key] ?? ""}
+                      onChange={(event) =>
+                        setDetailModalValues((prev) => ({ ...prev, [field.key]: event.target.value }))
+                      }
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    >
+                      <option value="">Select…</option>
+                      {(field.options ?? []).map((option) => (
+                        <option key={`${field.key}-${option}`} value={option}>
+                          {option}
+                        </option>
+                      ))}
+                    </select>
+                  ) : field.type === "textarea" ? (
+                    <textarea
+                      value={detailModalValues[field.key] ?? ""}
+                      onChange={(event) =>
+                        setDetailModalValues((prev) => ({ ...prev, [field.key]: event.target.value }))
+                      }
+                      rows={3}
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  ) : (
+                    <input
+                      type="text"
+                      value={detailModalValues[field.key] ?? ""}
+                      onChange={(event) =>
+                        setDetailModalValues((prev) => ({ ...prev, [field.key]: event.target.value }))
+                      }
+                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+                    />
+                  )}
+                </label>
+              ))}
+            </div>
+            {detailModalError ? (
+              <p className="mt-3 text-sm text-red-700">{detailModalError}</p>
+            ) : null}
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={closeDetailsModal}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={applyDetailsModal}
+                className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+              >
+                Apply Details
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Meeting Engine</h2>
         <p className="mt-1 text-sm text-gray-600">
@@ -1095,7 +1409,7 @@ export default function ConferenceScheduleDesigner({
           {enabledSet.has("meetings") ? (
             <div className="rounded-md border border-gray-200 bg-gray-50 p-3 text-sm text-gray-800">
               <p>
-                Meeting days configured: <span className="font-semibold">{meetingDays.length}</span>
+                Meeting days configured: <span className="font-semibold">{resolvedMeetingDays.length}</span>
               </p>
               <p className="mt-1">
                 Meetings per suite (total): <span className="font-semibold">{totalMeetingCount}</span>

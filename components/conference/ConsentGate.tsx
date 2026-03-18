@@ -29,7 +29,7 @@ export default function ConsentGate({
             type="checkbox"
             checked={consentGiven}
             onChange={(e) => onConsentChange(e.target.checked)}
-            className="mt-0.5 rounded border-gray-300 text-[#D60001]"
+            className="mt-0.5 rounded border-gray-300 text-[#EE2A2E]"
           />
           <span className="text-sm text-gray-700">
             {consentText}{" "}

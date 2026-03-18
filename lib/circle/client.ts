@@ -2,7 +2,7 @@
 // CircleAdminClient — thin fetch wrapper for Circle Admin API v2
 // ---------------------------------------------------------------------------
 
-import { CIRCLE_ADMIN_API_BASE, getCircleConfig } from "./config";
+import { CIRCLE_ADMIN_API_BASE, CIRCLE_V1_API_BASE, getCircleConfig } from "./config";
 import type {
   CircleMember,
   CircleMemberInput,
@@ -223,24 +223,67 @@ export class CircleAdminClient {
 
   // ---- Posts (announcements feed) -----------------------------------------
 
+  /**
+   * List posts in a Circle space.
+   *
+   * Circle's posts API exists at the v1 base (`/api/v1/posts`), not admin v2.
+   * We build the request manually here with the v1 base URL.
+   * Falls back gracefully on 404 (space has no posts or env var misconfigured).
+   */
   async listPosts(
     spaceId: number,
     options?: ListPostsOptions
   ): Promise<CirclePost[]> {
-    const result = await this.request<{ records: CirclePost[] }>(
-      "GET",
-      "/posts",
-      {
-        params: {
-          space_id: spaceId,
-          per_page: options?.per_page ?? 10,
-          page: options?.page ?? 1,
-          sort: options?.sort ?? "latest",
-          status: options?.status ?? "published",
+    const config = getCircleConfig();
+    if (!config) return [];
+
+    const params = new URLSearchParams({
+      community_id: config.communityId,
+      space_id: String(spaceId),
+      per_page: String(options?.per_page ?? 10),
+      page: String(options?.page ?? 1),
+      sort: options?.sort ?? "newest",
+    });
+    // Note: `status` filter omitted — v1 API may not support it; filter client-side if needed
+
+    // Try v1 API first (where posts actually live)
+    const candidates = [
+      `${CIRCLE_V1_API_BASE}/posts?${params}`,
+      `${this.baseUrl}/posts?${params}`,
+    ];
+
+    for (const url of candidates) {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${this.apiKey}`,
+          "Content-Type": "application/json",
         },
+      });
+
+      if (response.status === 404) continue; // try next candidate
+
+      if (!response.ok) {
+        // Non-404 error — throw so caller can handle
+        const body = await response.json().catch(() => null);
+        throw new (await import("./types")).CircleApiError(
+          `Circle API GET /posts failed: ${response.status}`,
+          response.status,
+          body
+        );
       }
-    );
-    return result.records ?? (Array.isArray(result) ? result : []);
+
+      const data = await response.json();
+      const records: CirclePost[] = data.records ?? (Array.isArray(data) ? data : []);
+
+      // Filter to published posts client-side if status was requested
+      if (options?.status === "published") {
+        return records.filter((p) => p.status === "published" || !p.status);
+      }
+      return records;
+    }
+
+    // All candidates returned 404 — space not found or no posts
+    return [];
   }
 
   // ---- Community ----------------------------------------------------------

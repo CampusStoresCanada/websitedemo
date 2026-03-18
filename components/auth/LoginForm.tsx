@@ -110,7 +110,7 @@ export default function LoginForm() {
             setMagicLinkSent(false);
             setEmail("");
           }}
-          className="text-sm text-[#D60001] hover:text-[#B00001] font-medium"
+          className="text-sm text-[#EE2A2E] hover:text-[#D92327] font-medium"
         >
           Use a different email
         </button>
@@ -129,7 +129,7 @@ export default function LoginForm() {
           }}
           className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
             mode === "password"
-              ? "border-[#D60001] text-[#D60001]"
+              ? "border-[#EE2A2E] text-[#EE2A2E]"
               : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -142,7 +142,7 @@ export default function LoginForm() {
           }}
           className={`flex-1 py-3 text-sm font-medium border-b-2 transition-colors ${
             mode === "magic-link"
-              ? "border-[#D60001] text-[#D60001]"
+              ? "border-[#EE2A2E] text-[#EE2A2E]"
               : "border-transparent text-gray-500 hover:text-gray-700"
           }`}
         >
@@ -172,7 +172,7 @@ export default function LoginForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="you@yourschool.ca"
             />
           </div>
@@ -190,21 +190,21 @@ export default function LoginForm() {
               onChange={(e) => setPassword(e.target.value)}
               required
               autoComplete="current-password"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="Enter your password"
             />
           </div>
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? "Signing in..." : "Sign In"}
           </button>
           <div className="text-center">
             <Link
               href="/forgot-password"
-              className="text-sm text-gray-500 hover:text-[#D60001] transition-colors"
+              className="text-sm text-gray-500 hover:text-[#EE2A2E] transition-colors"
             >
               Forgot your password?
             </Link>
@@ -226,7 +226,7 @@ export default function LoginForm() {
               onChange={(e) => setEmail(e.target.value)}
               required
               autoComplete="email"
-              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#D60001]/20 focus:border-[#D60001] transition-colors"
+              className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
               placeholder="you@yourschool.ca"
             />
           </div>
@@ -236,7 +236,7 @@ export default function LoginForm() {
           <button
             type="submit"
             disabled={isLoading}
-            className="w-full py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
           >
             {isLoading ? "Sending link..." : "Send Magic Link"}
           </button>
@@ -248,7 +248,7 @@ export default function LoginForm() {
           Not a member yet?{" "}
           <Link
             href="/signup"
-            className="text-[#D60001] hover:text-[#B00001] font-medium"
+            className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
           >
             Join CSC
           </Link>

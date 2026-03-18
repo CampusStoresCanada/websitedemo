@@ -656,7 +656,7 @@ export default async function ConferenceBadgeOpsPage({
             href={`/admin/conference/${conferenceId}/badges?mode=setup`}
             className={`rounded-md border px-3 py-2 text-sm font-medium ${
               mode === "setup"
-                ? "border-[#D60001] bg-red-50 text-[#D60001]"
+                ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
                 : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -666,7 +666,7 @@ export default async function ConferenceBadgeOpsPage({
             href={`/admin/conference/${conferenceId}/badges?mode=reset`}
             className={`rounded-md border px-3 py-2 text-sm font-medium ${
               mode === "reset"
-                ? "border-[#D60001] bg-red-50 text-[#D60001]"
+                ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
                 : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -676,7 +676,7 @@ export default async function ConferenceBadgeOpsPage({
             href={`/admin/conference/${conferenceId}/badges?mode=studio`}
             className={`rounded-md border px-3 py-2 text-sm font-medium ${
               mode === "studio"
-                ? "border-[#D60001] bg-red-50 text-[#D60001]"
+                ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
                 : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -686,7 +686,7 @@ export default async function ConferenceBadgeOpsPage({
             href={`/admin/conference/${conferenceId}/badges?mode=make`}
             className={`rounded-md border px-3 py-2 text-sm font-medium ${
               mode === "make"
-                ? "border-[#D60001] bg-red-50 text-[#D60001]"
+                ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]"
                 : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
             }`}
           >
@@ -714,7 +714,7 @@ export default async function ConferenceBadgeOpsPage({
           <form action={resetStartOverAction} className="mt-3 flex flex-wrap gap-2">
             <button
               type="submit"
-              className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+              className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
             >
               Create Fresh Draft
             </button>
@@ -966,7 +966,7 @@ export default async function ConferenceBadgeOpsPage({
               <button
                 type="submit"
                 disabled={missingCanonicalCount > 0}
-                className="rounded-md bg-[#D60001] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50"
+                className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 Generate Print Package (PDF)
               </button>

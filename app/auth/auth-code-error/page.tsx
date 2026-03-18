@@ -28,7 +28,7 @@ export default function AuthCodeErrorPage() {
         </p>
         <Link
           href="/login"
-          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#D60001] text-white text-sm font-medium rounded-lg hover:bg-[#B00001] transition-colors"
+          className="inline-flex items-center justify-center px-6 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
         >
           Back to Login
         </Link>
