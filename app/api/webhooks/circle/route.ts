@@ -145,6 +145,8 @@ async function handleProfileFieldUpdated(data: Record<string, unknown>): Promise
 
   if (!circleId || !fieldKey) return;
 
+  console.log(`[circle/webhook] profile_field_updated: circle_id=${circleId} key=${fieldKey} value=${fieldValue}`);
+
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const db = createAdminClient();
 
