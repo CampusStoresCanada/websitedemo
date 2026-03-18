@@ -112,6 +112,13 @@ export class CircleAdminClient {
       { params: { email } }
     );
     const records = result.records ?? (Array.isArray(result) ? result : []);
+    // Log the first result's keys so we can identify the correct email field name
+    if (records.length > 0) {
+      console.log("[circle/searchMembers] sample record keys:", Object.keys(records[0]));
+      console.log("[circle/searchMembers] sample record:", JSON.stringify(records[0]).slice(0, 300));
+    } else {
+      console.log("[circle/searchMembers] no records returned for email:", email);
+    }
     // Guard: Circle may ignore the email filter and return all members.
     // Only return records whose email actually matches to prevent bulk mis-assignment.
     return records.filter(
