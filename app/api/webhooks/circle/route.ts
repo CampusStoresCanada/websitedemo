@@ -17,22 +17,39 @@ export const dynamic = "force-dynamic";
 
 const WEBHOOK_SECRET = process.env.CIRCLE_WEBHOOK_SECRET;
 
-function verifyBearer(authHeader: string | null): boolean {
+function verifyToken(request: NextRequest): boolean {
   if (!WEBHOOK_SECRET) return false;
-  if (!authHeader) return false;
 
-  const prefix = "Bearer ";
-  if (!authHeader.startsWith(prefix)) return false;
+  // Check multiple header locations — Circle workflows may not support
+  // the Authorization header, so also check X-Webhook-Secret and a query param.
+  const candidates = [
+    request.headers.get("x-webhook-secret"),
+    request.headers.get("x-circle-secret"),
+    (() => {
+      const auth = request.headers.get("authorization");
+      if (!auth) return null;
+      return auth.startsWith("Bearer ") ? auth.slice(7) : auth;
+    })(),
+    new URL(request.url).searchParams.get("secret"),
+  ];
 
-  const token = authHeader.slice(prefix.length);
-  try {
-    return crypto.timingSafeEqual(
-      Buffer.from(token, "utf8"),
-      Buffer.from(WEBHOOK_SECRET, "utf8")
-    );
-  } catch {
-    return false;
+  for (const token of candidates) {
+    if (!token) continue;
+    try {
+      if (
+        token.length === WEBHOOK_SECRET.length &&
+        crypto.timingSafeEqual(
+          Buffer.from(token, "utf8"),
+          Buffer.from(WEBHOOK_SECRET, "utf8")
+        )
+      ) {
+        return true;
+      }
+    } catch {
+      // length mismatch throws — continue
+    }
   }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -191,9 +208,8 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     return NextResponse.json({ error: "Webhook secret not configured" }, { status: 500 });
   }
 
-  const authHeader = request.headers.get("authorization");
-  if (!verifyBearer(authHeader)) {
-    console.warn("[circle/webhook] Bearer token verification failed");
+  if (!verifyToken(request)) {
+    console.warn("[circle/webhook] Token verification failed");
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
