@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getEffectivePolicy } from "@/lib/policy/engine";
 import { enqueueCircleSync } from "@/lib/circle/sync";
 import { sendTransactional } from "@/lib/comms/send";
+import { resetOnboardingForNewOrgAdmin } from "@/lib/actions/applications";
 
 // ─────────────────────────────────────────────────────────────────
 // Initiate Admin Transfer
@@ -202,7 +203,7 @@ export async function acceptAdminTransfer(
     }
 
     // Execute the atomic transfer via RPC
-    const { data: result, error: rpcErr } = await adminClient.rpc(
+    const { error: rpcErr } = await adminClient.rpc(
       "execute_admin_transfer",
       {
         p_request_id: requestId,
@@ -218,7 +219,12 @@ export async function acceptAdminTransfer(
       };
     }
 
-    // TODO(chunk-05): trigger onboarding reset for new org admin
+    // Keep onboarding workflow aligned with new org_admin ownership.
+    await resetOnboardingForNewOrgAdmin(
+      request.organization_id,
+      request.to_user_id ?? auth.ctx.userId,
+      "org_admin_changed"
+    );
 
     // Circle sync: update tags for both old and new admin
     if (request.to_user_id) {
@@ -434,7 +440,12 @@ export async function adminTransferTimeoutCheck(): Promise<{
 
           result.auto_approved++;
 
-          // TODO(chunk-05): trigger onboarding reset for new org admin
+          // Keep onboarding workflow aligned with new org_admin ownership.
+          await resetOnboardingForNewOrgAdmin(
+            transfer.organization_id,
+            transfer.to_user_id,
+            "org_admin_changed"
+          );
 
           // Circle sync: update tags for auto-approved transfer
           await enqueueCircleSync({

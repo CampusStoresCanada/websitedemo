@@ -40,9 +40,19 @@ export async function updateTicketType(
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: "Access denied" };
 
+  // If price changed, clear cached stripe_price_id so the next purchase
+  // creates a new Stripe Price with the updated amount.
+  const updatePayload: Record<string, unknown> = {
+    ...payload,
+    updated_at: new Date().toISOString(),
+  };
+  if ("price_cents" in payload) {
+    updatePayload.stripe_price_id = null;
+  }
+
   const { data, error } = await createAdminClient()
     .from("event_ticket_types")
-    .update({ ...payload, updated_at: new Date().toISOString() })
+    .update(updatePayload)
     .eq("id", id)
     .select()
     .single();

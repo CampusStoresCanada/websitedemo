@@ -20,6 +20,13 @@ type DiffRow = {
   draftLabel: string;
 };
 
+function formatTimestamp(value: string | null): string {
+  if (!value) return "Unavailable";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) return "Unavailable";
+  return parsed.toLocaleString();
+}
+
 function formatTimeRange(start: string, end: string): string {
   return `${start.slice(0, 5)}-${end.slice(0, 5)}`;
 }
@@ -48,7 +55,9 @@ export default function ScheduleOpsClient({
   const [isLoading, setIsLoading] = useState(false);
   const [isActing, setIsActing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [lastFetchedAt, setLastFetchedAt] = useState<number>(Date.now());
+  const [lastFetchedAt, setLastFetchedAt] = useState<number>(
+    Date.parse(initialSummary.generatedAt) || Date.now()
+  );
 
   async function loadSummary(nextSelectedRunId?: string | null) {
     const selected = nextSelectedRunId ?? selectedRunId ?? "";
@@ -64,7 +73,7 @@ export default function ScheduleOpsClient({
     const payload = (await response.json()) as ScheduleOpsSummary;
     setSummary(payload);
     setSelectedRunId(payload.selectedRunId);
-    setLastFetchedAt(Date.now());
+    setLastFetchedAt(Date.parse(payload.generatedAt) || Date.now());
   }
 
   useEffect(() => {
@@ -118,6 +127,8 @@ export default function ScheduleOpsClient({
   const selectedRun = selectedRunId ? runsById.get(selectedRunId) ?? null : null;
   const activeRun = summary.activeRunId ? runsById.get(summary.activeRunId) ?? null : null;
   const isStale = Date.now() - lastFetchedAt > 30_000;
+  const snapshotTimestamp = formatTimestamp(summary.generatedAt);
+  const latestRunTimestamp = formatTimestamp(summary.latestRunUpdatedAt);
 
   const selectedAssignmentBySlot = useMemo(() => {
     return new Map(summary.selectedAssignments.map((row) => [row.meetingSlotId, row] as const));
@@ -273,6 +284,25 @@ export default function ScheduleOpsClient({
               {isStale ? "Stale (>30s)" : "Fresh"}
             </p>
           </div>
+        </div>
+        <div
+          className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+            isStale
+              ? "border-amber-300 bg-amber-50 text-amber-900"
+              : "border-gray-200 bg-gray-50 text-gray-700"
+          }`}
+        >
+          <p className="font-semibold">
+            {isStale ? "Stale view warning" : "Schedule version"}
+          </p>
+          <p className="mt-1">
+            Snapshot captured: {snapshotTimestamp}. Latest run update: {latestRunTimestamp}.
+          </p>
+          {isStale ? (
+            <p className="mt-1">
+              This view is older than 30 seconds. Refresh now to confirm run and assignment state.
+            </p>
+          ) : null}
         </div>
 
         <label className="mt-3 block text-sm text-gray-700">

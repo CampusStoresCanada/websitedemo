@@ -665,14 +665,12 @@ export async function completeOnboarding(
 
       if (!contact?.email) return;
 
-      // Determine org type for tag assignment
+      // Fetch org's Circle tag ID
       const { data: orgRow } = await db
         .from("organizations")
-        .select("type")
+        .select("circle_tag_id")
         .eq("id", orgId)
         .single();
-
-      const role = orgRow?.type === "Vendor Partner" ? "partner" : "member";
 
       await enqueueCircleSync({
         operation: "link_member",
@@ -683,18 +681,110 @@ export async function completeOnboarding(
         idempotencyKey: `onboarding-link-${contact.id}`,
       });
 
-      await enqueueCircleSync({
-        operation: "add_tag",
-        entityType: "contact",
-        entityId: contact.id,
-        payload: { email: contact.email, role },
-        orgId,
-        idempotencyKey: `onboarding-tag-${contact.id}-${role}`,
-      });
+      if (orgRow?.circle_tag_id) {
+        await enqueueCircleSync({
+          operation: "add_tag",
+          entityType: "contact",
+          entityId: contact.id,
+          payload: { tagId: Number(orgRow.circle_tag_id), email: contact.email },
+          orgId,
+          idempotencyKey: `onboarding-tag-${contact.id}-${orgRow.circle_tag_id}`,
+        });
+      }
     } catch (err) {
       console.error("[completeOnboarding] Circle enqueue failed (non-fatal):", err instanceof Error ? err.message : err);
     }
   })();
+
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Resend Invite / Payment Link (admin only)
+// ─────────────────────────────────────────────────────────────────
+
+export async function resendApplicationInvite(
+  applicationId: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+
+  const { data: app } = await db
+    .from("signup_applications")
+    .select("id, applicant_name, applicant_email, application_type, organization_id, status")
+    .eq("id", applicationId)
+    .single();
+
+  if (!app) return { success: false, error: "Application not found" };
+  if (app.status !== "approved") {
+    return { success: false, error: "Can only resend for approved applications" };
+  }
+  if (!app.applicant_email) {
+    return { success: false, error: "No email on file for this applicant" };
+  }
+
+  let sentInvite = false;
+  let sentPayment = false;
+
+  // Resend account invite (password reset link)
+  try {
+    const { data: resetData } = await db.auth.admin.generateLink({
+      type: "recovery",
+      email: app.applicant_email,
+    });
+    if (resetData?.properties?.action_link) {
+      const inviteContent = accountInviteEmail(
+        app.applicant_name ?? "there",
+        resetData.properties.action_link
+      );
+      await sendEmail({
+        to: app.applicant_email,
+        subject: inviteContent.subject,
+        html: inviteContent.html,
+      });
+      sentInvite = true;
+    }
+  } catch (err) {
+    console.error("Resend invite failed:", err);
+  }
+
+  // Resend payment link
+  if (app.organization_id) {
+    try {
+      const { data: invoice } = await db
+        .from("invoices")
+        .select("id, stripe_invoice_id, status")
+        .eq("organization_id", app.organization_id)
+        .in("status", ["pending", "sent", "overdue", "pending_settlement"])
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const paymentUrl = invoice?.stripe_invoice_id
+        ? `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`
+        : `${process.env.NEXT_PUBLIC_SITE_URL || ""}/account/billing`;
+
+      const approvedContent = applicationApprovedEmail(
+        app.applicant_name ?? "there",
+        app.application_type as "member" | "partner",
+        paymentUrl
+      );
+      await sendEmail({
+        to: app.applicant_email,
+        subject: `[Reminder] ${approvedContent.subject}`,
+        html: approvedContent.html,
+      });
+      sentPayment = true;
+    } catch (err) {
+      console.error("Resend payment link failed:", err);
+    }
+  }
+
+  if (!sentInvite && !sentPayment) {
+    return { success: false, error: "Failed to send both invite and payment link" };
+  }
 
   return { success: true };
 }

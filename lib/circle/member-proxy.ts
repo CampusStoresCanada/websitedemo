@@ -13,6 +13,8 @@ export interface CircleMemberNotification {
   message: string;
   href: string;
   created_at: string;
+  read_at: string | null;
+  is_unread: boolean;
   category: "notification" | "reply";
 }
 
@@ -97,21 +99,32 @@ export class CircleMemberClient {
     }
   }
 
+  // ---- Profile ------------------------------------------------------------
+
+  async getCommunityMember(communityMemberId: number): Promise<{ user_public_uid: string; community_member_id: number; name: string } | null> {
+    return this.requestOptional("GET", `/community_members/${communityMemberId}`) as Promise<{ user_public_uid: string; community_member_id: number; name: string } | null>;
+  }
+
   // ---- Chat rooms ---------------------------------------------------------
+
+  async getProfile(): Promise<{ public_uid: string; name: string; avatar_url: string | null } | null> {
+    try {
+      return await this.request<{ public_uid: string; name: string; avatar_url: string | null }>("GET", "/community_member");
+    } catch {
+      return null;
+    }
+  }
 
   /**
    * List the member's chat rooms (DM conversations).
    */
   async listChatRooms(): Promise<CircleChatRoom[]> {
     try {
-      const result = await this.request<{
-        records: CircleChatRoom[];
-      }>("GET", "/chat_rooms");
+      const result = await this.request<{ records: CircleChatRoom[] }>("GET", "/messages");
       return result.records ?? (Array.isArray(result) ? result : []);
     } catch (err) {
       if (err instanceof CircleApiError && err.isNotFound) {
-        // 404 — endpoint URL may differ per plan/config; degrade silently
-        console.warn("[circle/member-proxy] listChatRooms 404 — chat rooms endpoint not available");
+        console.warn("[circle/member-proxy] listChatRooms 404 — messages endpoint not available");
         return [];
       }
       throw err;
@@ -183,7 +196,7 @@ export class CircleMemberClient {
   async searchMembers(
     email: string
   ): Promise<
-    Array<{ id: number; name: string; email: string; avatar_url: string | null }>
+    Array<{ id: number; name: string; email: string; avatar_url: string | null; user_public_uid?: string }>
   > {
     const result = await this.request<{
       records: Array<{
@@ -191,6 +204,7 @@ export class CircleMemberClient {
         name: string;
         email: string;
         avatar_url: string | null;
+        user_public_uid?: string;
       }>;
     }>("POST", "/search/community_members", {
       body: {
@@ -210,25 +224,24 @@ export class CircleMemberClient {
     options?: { per_page?: number }
   ): Promise<CircleMemberNotification[]> {
     const perPage = options?.per_page ?? 20;
-    const candidates: Array<{ path: string; params?: Record<string, string | number> }> = [
-      { path: "/notifications", params: { per_page: perPage } },
-      { path: "/member_notifications", params: { per_page: perPage } },
-      { path: "/notification_center_items", params: { per_page: perPage } },
-    ];
+    const raw = await this.requestOptional("GET", "/notifications", {
+      params: { per_page: perPage },
+    });
+    if (!raw) return [];
+    return parseNotifications(raw);
+  }
 
-    for (const candidate of candidates) {
-      const raw = await this.requestOptional("GET", candidate.path, {
-        params: candidate.params,
-      });
-      if (!raw) continue;
+  async markNotificationRead(notificationId: number | string): Promise<void> {
+    await this.request("PUT", `/notifications/${notificationId}/mark_as_read`);
+  }
 
-      const parsed = parseNotifications(raw);
-      if (parsed.length > 0) {
-        return parsed;
-      }
-    }
+  async markAllNotificationsRead(): Promise<void> {
+    await this.request("POST", "/notifications/mark_all_as_read", { body: {} });
+  }
 
-    return [];
+  async getNotificationCount(): Promise<number> {
+    const result = await this.requestOptional("GET", "/notifications/count") as Record<string, number> | null;
+    return result?.new_notifications_count ?? 0;
   }
 }
 
@@ -258,58 +271,35 @@ function normalizeNotification(
   row: unknown,
   index: number
 ): CircleMemberNotification | null {
-  if (!row || typeof row !== "object") {
-    return null;
-  }
+  if (!row || typeof row !== "object") return null;
 
-  const candidate = row as Record<string, unknown>;
+  const r = row as Record<string, unknown>;
 
-  const id =
-    asString(candidate.id) ??
-    asString(candidate.uuid) ??
-    asString(candidate.notification_id) ??
-    `circle-item-${index}`;
+  const id = String(r.id ?? `circle-item-${index}`);
 
-  const title =
-    asString(candidate.title) ??
-    asString(candidate.name) ??
-    asString(candidate.subject) ??
-    "Circle notification";
+  // Build title from actor + action + content
+  const actorName = asString(r.actor_name) ?? "Someone";
+  const displayAction = asString(r.display_action) ?? "posted in";
+  const notifiableTitle = asString(r.notifiable_title) ?? "";
+  const spaceTitle = asString(r.space_title) ?? "";
+  const title = notifiableTitle
+    ? `${actorName} ${displayAction} "${notifiableTitle}"`
+    : `${actorName} ${displayAction} ${spaceTitle}`.trim();
 
-  const message =
-    asString(candidate.body) ??
-    asString(candidate.message) ??
-    asString(candidate.preview) ??
-    asString(candidate.summary) ??
-    "";
+  const message = spaceTitle && notifiableTitle ? spaceTitle : "";
 
-  const href =
-    asString(candidate.url) ??
-    asString(candidate.href) ??
-    asString(candidate.path) ??
-    "/api/circle/member-space";
+  const href = asString(r.action_web_url) ?? asString(r.url) ?? asString(r.href) ?? "/api/circle/member-space";
 
   const createdAt =
-    asString(candidate.created_at) ??
-    asString(candidate.inserted_at) ??
-    asString(candidate.updated_at) ??
-    new Date().toISOString();
+    asString(r.created_at) ?? asString(r.inserted_at) ?? new Date().toISOString();
 
-  const eventType =
-    (asString(candidate.type) ?? asString(candidate.event_type) ?? "").toLowerCase();
+  const action = (asString(r.action) ?? "").toLowerCase();
   const category: "notification" | "reply" =
-    eventType.includes("reply") || eventType.includes("comment")
-      ? "reply"
-      : "notification";
+    action === "reply" || action === "comment" ? "reply" : "notification";
 
-  return {
-    id,
-    title,
-    message,
-    href,
-    created_at: createdAt,
-    category,
-  };
+  const read_at = asString(r.read_at) ?? null;
+
+  return { id, title, message, href, created_at: createdAt, read_at, is_unread: read_at === null, category };
 }
 
 function asString(value: unknown): string | null {

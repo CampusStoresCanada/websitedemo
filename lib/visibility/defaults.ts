@@ -54,6 +54,8 @@ export const DEFAULT_VISIBILITY_CONFIG: VisibilityConfig = {
   ],
 
   private_fields: [
+    // Contacts — system fields (not PII, needed for UI logic)
+    "contacts.circle_id",
     // Contacts — PII
     "contacts.name",
     "contacts.work_email",

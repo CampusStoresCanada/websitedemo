@@ -1,5 +1,6 @@
 "use server";
 
+import { createHash, randomUUID } from "node:crypto";
 import {
   requireAuthenticated,
   requireAdmin,
@@ -48,6 +49,44 @@ type TravelWindowExceptionRecord = {
 
 type TravelSupportMode = "managed" | "reimbursement" | "self_managed" | "none";
 type ManagementMode = "fully_managed" | "partially_managed" | "attendee_managed";
+export type TravelImportConflictMode = "overwrite" | "fill_empty_only" | "skip_if_existing";
+export type TravelImportRowErrorCode =
+  | "unknown_user_or_registration"
+  | "invalid_travel_mode"
+  | "invalid_datetime_format"
+  | "missing_required_field"
+  | "duplicate_row_in_file"
+  | "policy_window_violation"
+  | "conflict_skipped_existing"
+  | "conference_mismatch"
+  | "permission_denied";
+
+export type TravelImportRowResult = {
+  rowNumber: number;
+  rowRef: string;
+  status: "success" | "failed" | "skipped";
+  code: TravelImportRowErrorCode | null;
+  message: string;
+  registrationId: string | null;
+  userId: string | null;
+  appliedFields: string[];
+};
+
+export type TravelImportReport = {
+  conferenceId: string;
+  dryRun: boolean;
+  duplicateSubmission: boolean;
+  conflictMode: TravelImportConflictMode;
+  fileHash: string;
+  idempotencyKey: string;
+  importRunId: string | null;
+  totals: {
+    success: number;
+    failed: number;
+    skipped: number;
+  };
+  rows: TravelImportRowResult[];
+};
 
 type TravelPolicyDecision = {
   effectiveTravelSupportMode: TravelSupportMode;
@@ -132,6 +171,65 @@ function shiftUtcDays(base: Date, days: number): Date {
   const next = new Date(base);
   next.setUTCDate(next.getUTCDate() + days);
   return next;
+}
+
+function normalizeCsvHeader(value: string): string {
+  return value.trim().toLowerCase();
+}
+
+function csvCell(value: string | null | undefined): string {
+  return (value ?? "").trim();
+}
+
+function parseCsv(content: string): string[][] {
+  const rows: string[][] = [];
+  let current = "";
+  let row: string[] = [];
+  let inQuotes = false;
+  const input = content.replace(/^\uFEFF/, "");
+
+  for (let i = 0; i < input.length; i += 1) {
+    const char = input[i];
+    const next = input[i + 1];
+
+    if (char === '"') {
+      if (inQuotes && next === '"') {
+        current += '"';
+        i += 1;
+      } else {
+        inQuotes = !inQuotes;
+      }
+      continue;
+    }
+
+    if (char === "," && !inQuotes) {
+      row.push(current);
+      current = "";
+      continue;
+    }
+
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && next === "\n") {
+        i += 1;
+      }
+      row.push(current);
+      if (row.some((cell) => cell.trim().length > 0)) {
+        rows.push(row);
+      }
+      row = [];
+      current = "";
+      continue;
+    }
+
+    current += char;
+  }
+
+  row.push(current);
+  if (row.some((cell) => cell.trim().length > 0)) {
+    rows.push(row);
+  }
+
+  return rows;
 }
 
 function toFiniteNumber(value: unknown): number | null {
@@ -1224,6 +1322,519 @@ export async function reviewTravelWindowException(
   });
 
   return { success: true, data: data as RegistrationRow };
+}
+
+type TravelImportCsvRow = {
+  rowNumber: number;
+  rowRef: string;
+  conferenceId: string;
+  registrationId: string | null;
+  userId: string | null;
+  travelMode: "flight" | "road" | null;
+  arrivalFlightNumber: string | null;
+  arrivalDateTime: string | null;
+  arrivalAirport: string | null;
+  departureFlightNumber: string | null;
+  departureDateTime: string | null;
+  departureAirport: string | null;
+  lodgingProperty: string | null;
+  roomNumber: string | null;
+  hotelConfirmationNumber: string | null;
+  travelConfirmationReference: string | null;
+  adminNote: string | null;
+};
+
+function parseTravelImportCsv(content: string): {
+  rows: TravelImportCsvRow[];
+  error?: string;
+} {
+  const parsed = parseCsv(content);
+  if (parsed.length < 2) {
+    return { rows: [], error: "CSV must include a header row and at least one data row." };
+  }
+
+  const header = parsed[0].map(normalizeCsvHeader);
+  const requiredHeaders = [
+    "conference_id",
+    "travel_mode",
+    "arrival_flight_number",
+    "arrival_datetime",
+    "arrival_airport",
+    "departure_flight_number",
+    "departure_datetime",
+    "departure_airport",
+    "lodging_property",
+    "room_number",
+    "hotel_confirmation_number",
+    "travel_confirmation_reference",
+  ];
+  const missingHeaders = requiredHeaders.filter((field) => !header.includes(field));
+  if (!header.includes("user_id") && !header.includes("registration_id")) {
+    missingHeaders.push("user_id|registration_id");
+  }
+  if (missingHeaders.length > 0) {
+    return {
+      rows: [],
+      error: `CSV is missing required header(s): ${missingHeaders.join(", ")}`,
+    };
+  }
+
+  const rows: TravelImportCsvRow[] = [];
+  for (let i = 1; i < parsed.length; i += 1) {
+    const line = parsed[i];
+    const get = (key: string) => {
+      const idx = header.indexOf(key);
+      if (idx < 0) return "";
+      return line[idx] ?? "";
+    };
+    const row: TravelImportCsvRow = {
+      rowNumber: i + 1,
+      rowRef: `row-${i + 1}`,
+      conferenceId: csvCell(get("conference_id")),
+      registrationId: csvCell(get("registration_id")) || null,
+      userId: csvCell(get("user_id")) || null,
+      travelMode: normalizeTravelModeForStorage(get("travel_mode")),
+      arrivalFlightNumber: csvCell(get("arrival_flight_number")) || null,
+      arrivalDateTime: csvCell(get("arrival_datetime")) || null,
+      arrivalAirport: csvCell(get("arrival_airport")) || null,
+      departureFlightNumber: csvCell(get("departure_flight_number")) || null,
+      departureDateTime: csvCell(get("departure_datetime")) || null,
+      departureAirport: csvCell(get("departure_airport")) || null,
+      lodgingProperty: csvCell(get("lodging_property")) || null,
+      roomNumber: csvCell(get("room_number")) || null,
+      hotelConfirmationNumber: csvCell(get("hotel_confirmation_number")) || null,
+      travelConfirmationReference: csvCell(get("travel_confirmation_reference")) || null,
+      adminNote: csvCell(get("admin_note")) || null,
+    };
+    rows.push(row);
+  }
+
+  return { rows };
+}
+
+function hasValue(value: string | null | undefined): boolean {
+  return Boolean(value && value.trim().length > 0);
+}
+
+function isOutsideTravelWindow(params: {
+  row: TravelImportCsvRow;
+  startDate: Date | null;
+  endDate: Date | null;
+  arrivalMinDaysBeforeStart: number;
+  departureMaxDaysAfterEnd: number;
+}): boolean {
+  const { row, startDate, endDate, arrivalMinDaysBeforeStart, departureMaxDaysAfterEnd } = params;
+  const arrival = parseDateOrDateTime(row.arrivalDateTime);
+  const departure = parseDateOrDateTime(row.departureDateTime);
+
+  if (startDate && arrival && Number.isFinite(arrivalMinDaysBeforeStart)) {
+    const earliestAllowed = shiftUtcDays(startDate, -arrivalMinDaysBeforeStart);
+    if (arrival < earliestAllowed) return true;
+  }
+  if (endDate && departure && Number.isFinite(departureMaxDaysAfterEnd)) {
+    const latestAllowed = shiftUtcDays(endDate, departureMaxDaysAfterEnd);
+    if (departure > latestAllowed) return true;
+  }
+  return false;
+}
+
+export async function runTravelImportCsv(input: {
+  conferenceId: string;
+  csvContent: string;
+  conflictMode: TravelImportConflictMode;
+  dryRun?: boolean;
+}): Promise<{ success: boolean; error?: string; data?: TravelImportReport }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    return { success: false, error: auth.error ?? "Admin access required." };
+  }
+
+  const csvContent = input.csvContent.trim();
+  if (!csvContent) {
+    return { success: false, error: "CSV content is required." };
+  }
+
+  const parsedCsv = parseTravelImportCsv(csvContent);
+  if (parsedCsv.error) {
+    return { success: false, error: parsedCsv.error };
+  }
+
+  const dryRun = input.dryRun !== false;
+  const fileHash = createHash("sha256").update(csvContent).digest("hex");
+  const idempotencyKey = `${input.conferenceId}:${fileHash}:${input.conflictMode}`;
+  const adminClient = createAdminClient();
+  const importRunId = dryRun ? null : randomUUID();
+
+  const { data: duplicateRows } = await adminClient
+    .from("audit_log")
+    .select("id")
+    .eq("action", "conference_travel_import_applied")
+    .eq("entity_type", "conference_instance")
+    .eq("entity_id", input.conferenceId)
+    .contains("details", { idempotency_key: idempotencyKey })
+    .limit(1);
+  const duplicateSubmission = (duplicateRows ?? []).length > 0;
+
+  if (duplicateSubmission && !dryRun) {
+    await logAuditEventSafe({
+      action: "conference_travel_import_duplicate_noop",
+      entityType: "conference_instance",
+      entityId: input.conferenceId,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: {
+        idempotency_key: idempotencyKey,
+        file_hash: fileHash,
+        conflict_mode: input.conflictMode,
+      },
+    });
+    return {
+      success: true,
+      data: {
+        conferenceId: input.conferenceId,
+        dryRun,
+        duplicateSubmission,
+        conflictMode: input.conflictMode,
+        fileHash,
+        idempotencyKey,
+        importRunId,
+        totals: { success: 0, failed: 0, skipped: 0 },
+        rows: [],
+      },
+    };
+  }
+
+  const { data: conference } = await adminClient
+    .from("conference_instances")
+    .select("id, start_date, end_date")
+    .eq("id", input.conferenceId)
+    .maybeSingle();
+  if (!conference) {
+    return { success: false, error: "Conference not found." };
+  }
+  const startDate = parseDateOnly(conference.start_date);
+  const endDate = parseDateOnly(conference.end_date);
+
+  const policyValues = await getEffectivePolicies([
+    "conference.travel_arrival_min_days_before_start",
+    "conference.travel_departure_max_days_after_end",
+  ]).catch(() => ({} as Record<string, unknown>));
+  const arrivalMinDaysBeforeStart = Number(
+    policyValues["conference.travel_arrival_min_days_before_start"] ?? 0
+  );
+  const departureMaxDaysAfterEnd = Number(
+    policyValues["conference.travel_departure_max_days_after_end"] ?? 0
+  );
+
+  const rows = parsedCsv.rows;
+  const registrationIds = Array.from(
+    new Set(rows.map((row) => row.registrationId).filter((value): value is string => Boolean(value)))
+  );
+  const userIds = Array.from(
+    new Set(rows.map((row) => row.userId).filter((value): value is string => Boolean(value)))
+  );
+
+  const [registrationRowsRes, userRegistrationRowsRes] = await Promise.all([
+    registrationIds.length > 0
+      ? adminClient
+          .from("conference_registrations")
+          .select(
+            "id, conference_id, user_id, travel_mode, arrival_flight_details, departure_flight_details, hotel_name, hotel_confirmation_code, road_origin_address, registration_custom_answers, updated_at"
+          )
+          .in("id", registrationIds)
+      : Promise.resolve({ data: [] as RegistrationRow[] }),
+    userIds.length > 0
+      ? adminClient
+          .from("conference_registrations")
+          .select(
+            "id, conference_id, user_id, travel_mode, arrival_flight_details, departure_flight_details, hotel_name, hotel_confirmation_code, road_origin_address, registration_custom_answers, updated_at, status"
+          )
+          .eq("conference_id", input.conferenceId)
+          .in("user_id", userIds)
+      : Promise.resolve({ data: [] as RegistrationRow[] }),
+  ]);
+
+  const registrationById = new Map(
+    ((registrationRowsRes.data ?? []) as RegistrationRow[]).map((row) => [row.id, row] as const)
+  );
+  const userRegs = (userRegistrationRowsRes.data ?? []) as (RegistrationRow & { status?: string })[];
+  const userRegistrationByUserId = new Map<string, RegistrationRow>();
+  for (const row of userRegs.sort((a, b) => {
+    const aCanceled = a.status === "canceled" ? 1 : 0;
+    const bCanceled = b.status === "canceled" ? 1 : 0;
+    if (aCanceled !== bCanceled) return aCanceled - bCanceled;
+    return new Date(b.updated_at).getTime() - new Date(a.updated_at).getTime();
+  })) {
+    if (!row.user_id) continue;
+    if (!userRegistrationByUserId.has(row.user_id)) {
+      userRegistrationByUserId.set(row.user_id, row);
+    }
+  }
+
+  const seenRowKeys = new Set<string>();
+  const rowResults: TravelImportRowResult[] = [];
+
+  for (const row of rows) {
+    const fail = (code: TravelImportRowErrorCode, message: string): void => {
+      rowResults.push({
+        rowNumber: row.rowNumber,
+        rowRef: row.rowRef,
+        status: "failed",
+        code,
+        message,
+        registrationId: row.registrationId,
+        userId: row.userId,
+        appliedFields: [],
+      });
+    };
+    const skip = (code: TravelImportRowErrorCode, message: string, registrationId: string): void => {
+      rowResults.push({
+        rowNumber: row.rowNumber,
+        rowRef: row.rowRef,
+        status: "skipped",
+        code,
+        message,
+        registrationId,
+        userId: row.userId,
+        appliedFields: [],
+      });
+    };
+
+    if (row.conferenceId !== input.conferenceId) {
+      fail("conference_mismatch", `conference_id ${row.conferenceId} does not match import scope.`);
+      continue;
+    }
+
+    if (!row.registrationId && !row.userId) {
+      fail("missing_required_field", "Either registration_id or user_id is required.");
+      continue;
+    }
+
+    if (!row.travelMode) {
+      fail("invalid_travel_mode", "travel_mode must be one of flight|road.");
+      continue;
+    }
+
+    const dedupeKey = `${row.conferenceId}:${row.registrationId ?? ""}:${row.userId ?? ""}`;
+    if (seenRowKeys.has(dedupeKey)) {
+      fail("duplicate_row_in_file", "Duplicate registration/user row in file.");
+      continue;
+    }
+    seenRowKeys.add(dedupeKey);
+
+    if (row.travelMode === "flight") {
+      const requiredForFlight = [
+        row.arrivalFlightNumber,
+        row.arrivalDateTime,
+        row.arrivalAirport,
+        row.departureFlightNumber,
+        row.departureDateTime,
+        row.departureAirport,
+      ];
+      if (requiredForFlight.some((value) => !hasValue(value))) {
+        fail(
+          "missing_required_field",
+          "Flight rows require arrival/departure flight numbers, datetimes, and airports."
+        );
+        continue;
+      }
+    }
+
+    if (
+      (hasValue(row.arrivalDateTime) && !parseDateOrDateTime(row.arrivalDateTime)) ||
+      (hasValue(row.departureDateTime) && !parseDateOrDateTime(row.departureDateTime))
+    ) {
+      fail("invalid_datetime_format", "arrival_datetime/departure_datetime must be ISO date or datetime.");
+      continue;
+    }
+
+    if (
+      isOutsideTravelWindow({
+        row,
+        startDate,
+        endDate,
+        arrivalMinDaysBeforeStart,
+        departureMaxDaysAfterEnd,
+      })
+    ) {
+      fail("policy_window_violation", "Travel dates are outside policy window.");
+      continue;
+    }
+
+    const resolvedRegistration =
+      (row.registrationId ? registrationById.get(row.registrationId) : null) ??
+      (row.userId ? userRegistrationByUserId.get(row.userId) : null) ??
+      null;
+
+    if (!resolvedRegistration || resolvedRegistration.conference_id !== input.conferenceId) {
+      fail("unknown_user_or_registration", "No matching registration found in this conference.");
+      continue;
+    }
+
+    const arrivalDetails =
+      row.travelMode === "flight"
+        ? [row.arrivalFlightNumber, row.arrivalDateTime, row.arrivalAirport]
+            .filter((value): value is string => hasValue(value))
+            .join(" | ")
+        : null;
+    const departureDetails =
+      row.travelMode === "flight"
+        ? [row.departureFlightNumber, row.departureDateTime, row.departureAirport]
+            .filter((value): value is string => hasValue(value))
+            .join(" | ")
+        : null;
+
+    const incomingValues: Record<string, string | null> = {
+      travel_mode: row.travelMode,
+      arrival_flight_details: arrivalDetails,
+      departure_flight_details: departureDetails,
+      hotel_name: row.lodgingProperty,
+      hotel_confirmation_code: row.hotelConfirmationNumber,
+    };
+
+    const currentCustomAnswers =
+      (resolvedRegistration.registration_custom_answers as Record<string, unknown> | null) ?? {};
+    const currentTravelRef =
+      typeof currentCustomAnswers.travel_confirmation_reference === "string"
+        ? currentCustomAnswers.travel_confirmation_reference
+        : null;
+    const incomingTravelRef = row.travelConfirmationReference;
+
+    const hasExistingValue = Object.entries(incomingValues).some(([key, incoming]) => {
+      if (!hasValue(incoming)) return false;
+      const current = resolvedRegistration[key as keyof RegistrationRow];
+      return hasValue(typeof current === "string" ? current : null);
+    }) || (hasValue(incomingTravelRef) && hasValue(currentTravelRef));
+
+    if (input.conflictMode === "skip_if_existing" && hasExistingValue) {
+      skip(
+        "conflict_skipped_existing",
+        "Skipped row because travel fields already exist and conflict mode is skip_if_existing.",
+        resolvedRegistration.id
+      );
+      continue;
+    }
+
+    const updatePayload: RegistrationUpdate = {
+      updated_at: new Date().toISOString(),
+      travel_import_run_id: importRunId,
+      travel_import_row_ref: row.rowRef,
+    };
+    const appliedFields: string[] = [];
+
+    const applyField = (key: keyof RegistrationUpdate, incoming: string | null) => {
+      if (!hasValue(incoming)) return;
+      const current = resolvedRegistration[key as keyof RegistrationRow];
+      const currentStr = typeof current === "string" ? current : null;
+      if (
+        input.conflictMode === "fill_empty_only" &&
+        hasValue(currentStr)
+      ) {
+        return;
+      }
+      updatePayload[key] = incoming;
+      appliedFields.push(String(key));
+    };
+
+    applyField("travel_mode", row.travelMode);
+    applyField("arrival_flight_details", arrivalDetails);
+    applyField("departure_flight_details", departureDetails);
+    applyField("hotel_name", row.lodgingProperty);
+    applyField("hotel_confirmation_code", row.hotelConfirmationNumber);
+
+    const nextCustomAnswers: Record<string, unknown> = { ...currentCustomAnswers };
+    if (hasValue(incomingTravelRef)) {
+      if (!(input.conflictMode === "fill_empty_only" && hasValue(currentTravelRef))) {
+        nextCustomAnswers.travel_confirmation_reference = incomingTravelRef;
+        appliedFields.push("registration_custom_answers.travel_confirmation_reference");
+      }
+    }
+    if (hasValue(row.roomNumber)) {
+      nextCustomAnswers.room_number = row.roomNumber;
+      appliedFields.push("registration_custom_answers.room_number");
+    }
+    if (hasValue(row.adminNote)) {
+      nextCustomAnswers.travel_import_admin_note = row.adminNote;
+      appliedFields.push("registration_custom_answers.travel_import_admin_note");
+    }
+    updatePayload.registration_custom_answers = nextCustomAnswers;
+
+    if (!dryRun) {
+      const { error: regUpdateError } = await adminClient
+        .from("conference_registrations")
+        .update(updatePayload)
+        .eq("id", resolvedRegistration.id);
+      if (regUpdateError) {
+        fail("unknown_user_or_registration", regUpdateError.message);
+        continue;
+      }
+
+      await adminClient
+        .from("conference_people")
+        .update({
+          travel_mode: updatePayload.travel_mode ?? null,
+          arrival_flight_details: updatePayload.arrival_flight_details ?? null,
+          departure_flight_details: updatePayload.departure_flight_details ?? null,
+          hotel_name: updatePayload.hotel_name ?? null,
+          hotel_confirmation_code: updatePayload.hotel_confirmation_code ?? null,
+          travel_import_run_id: importRunId,
+          travel_import_row_ref: row.rowRef,
+          updated_at: updatePayload.updated_at,
+        })
+        .eq("conference_id", input.conferenceId)
+        .eq("registration_id", resolvedRegistration.id);
+    }
+
+    rowResults.push({
+      rowNumber: row.rowNumber,
+      rowRef: row.rowRef,
+      status: "success",
+      code: null,
+      message: dryRun ? "Validated." : "Imported.",
+      registrationId: resolvedRegistration.id,
+      userId: resolvedRegistration.user_id,
+      appliedFields,
+    });
+  }
+
+  const report: TravelImportReport = {
+    conferenceId: input.conferenceId,
+    dryRun,
+    duplicateSubmission,
+    conflictMode: input.conflictMode,
+    fileHash,
+    idempotencyKey,
+    importRunId,
+    totals: {
+      success: rowResults.filter((row) => row.status === "success").length,
+      failed: rowResults.filter((row) => row.status === "failed").length,
+      skipped: rowResults.filter((row) => row.status === "skipped").length,
+    },
+    rows: rowResults,
+  };
+
+  await logAuditEventSafe({
+    action: dryRun ? "conference_travel_import_dry_run" : "conference_travel_import_applied",
+    entityType: "conference_instance",
+    entityId: input.conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      import_run_id: importRunId,
+      file_hash: fileHash,
+      idempotency_key: idempotencyKey,
+      conflict_mode: input.conflictMode,
+      totals: report.totals,
+      row_count: rowResults.length,
+      duplicate_submission: duplicateSubmission,
+      failed_rows: rowResults.filter((row) => row.status === "failed").map((row) => ({
+        row_ref: row.rowRef,
+        code: row.code,
+      })),
+    },
+  });
+
+  return { success: true, data: report };
 }
 
 // ─────────────────────────────────────────────────────────────────

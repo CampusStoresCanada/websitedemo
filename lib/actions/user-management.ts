@@ -47,7 +47,7 @@ export async function inviteOrgUser(
   try {
     const { data: orgRow } = await adminClient
       .from("organizations")
-      .select("id, name, tenant_id")
+      .select("id, name, tenant_id, circle_tag_id")
       .eq("id", orgId)
       .maybeSingle();
 
@@ -185,15 +185,17 @@ export async function inviteOrgUser(
       };
     }
 
-    // Circle sync: tag the new user with their role
-    await enqueueCircleSync({
-      operation: "add_tag",
-      entityType: "contact",
-      entityId: userId,
-      payload: { email: normalizedEmail, role, orgId },
-      orgId,
-      idempotencyKey: `invite:${userId}:${orgId}`,
-    });
+    // Circle sync: tag the new user with their org's tag
+    if (orgRow.circle_tag_id) {
+      await enqueueCircleSync({
+        operation: "add_tag",
+        entityType: "contact",
+        entityId: userId,
+        payload: { tagId: Number(orgRow.circle_tag_id), email: normalizedEmail },
+        orgId,
+        idempotencyKey: `invite-tag:${userId}:${orgRow.circle_tag_id}`,
+      });
+    }
 
     sendTransactional({
       templateKey: "org_user_added_to_org",
@@ -478,16 +480,6 @@ export async function changeOrgUserRole(
       console.error("[changeOrgUserRole] Update failed:", updateErr);
       return { success: false, error: "Failed to change user role" };
     }
-
-    // Circle sync: update Circle tag to match new role
-    await enqueueCircleSync({
-      operation: "add_tag",
-      entityType: "contact",
-      entityId: userId,
-      payload: { orgId, newRole },
-      orgId,
-      idempotencyKey: `role:${userId}:${orgId}:${newRole}`,
-    });
 
     await logAuditEventSafe({
       action: "organization_user_role_changed",

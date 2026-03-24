@@ -25,8 +25,6 @@ export {
   getCircleConfig,
   isCircleConfigured,
   getAccessGroupIds,
-  ROLE_TO_CIRCLE_TAG,
-  STATUS_TO_CIRCLE_SPACE,
   CIRCLE_ADMIN_API_BASE,
   CIRCLE_HEADLESS_AUTH_BASE,
   CIRCLE_MEMBER_API_BASE,

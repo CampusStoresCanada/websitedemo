@@ -35,7 +35,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
   const body = await request.json().catch(() => ({}));
   const targetEmail: string | undefined = body.email;
-  const limit: number = typeof body.limit === "number" ? Math.min(body.limit, 200) : 50;
+  const limit: number = typeof body.limit === "number" ? Math.min(body.limit, 2000) : 1000;
   const dryRun: boolean = Boolean(body.dryRun);
 
   const db = createAdminClient();

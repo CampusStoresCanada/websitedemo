@@ -6,7 +6,6 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { CircleAdminClient } from "./client";
 import { mintMemberToken } from "./headless-auth";
 import { CircleMemberClient } from "./member-proxy";
-import { ROLE_TO_CIRCLE_TAG } from "./config";
 import type { CircleSyncQueueItem } from "./types";
 
 /**
@@ -54,6 +53,10 @@ export async function executeCircleSyncOperation(
 
     case "update_profile":
       await handleUpdateProfile(client, item);
+      break;
+
+    case "delete_member":
+      await handleDeleteMember(client, item);
       break;
 
     default:
@@ -110,23 +113,21 @@ async function handleAddTag(
   payload: Record<string, unknown>
 ): Promise<void> {
   const email = String(payload.email ?? "");
-  const role = String(payload.role ?? payload.newRole ?? "member");
-
   if (!email) throw new Error("add_tag requires email in payload");
 
-  // Resolve the role to a Circle tag name
-  const tagName = ROLE_TO_CIRCLE_TAG[role] ?? ROLE_TO_CIRCLE_TAG.member;
-
-  // Look up tag ID by name
-  const tags = await client.listTags();
-  const tag = tags.find(
-    (t) => t.name.toLowerCase() === tagName.toLowerCase()
-  );
-
-  if (!tag) {
-    throw new Error(`Circle tag "${tagName}" not found — create it in Circle admin first`);
+  // Prefer direct tagId (org tag); fall back to legacy role-based name lookup
+  if (payload.tagId) {
+    await client.addTagToMember(Number(payload.tagId), email);
+    return;
   }
 
+  // Legacy: resolve by tag name
+  const tagName = String(payload.tagName ?? payload.role ?? "");
+  if (!tagName) throw new Error("add_tag requires tagId or tagName in payload");
+
+  const tags = await client.listTags();
+  const tag = tags.find((t) => t.name.toLowerCase() === tagName.toLowerCase());
+  if (!tag) throw new Error(`Circle tag "${tagName}" not found`);
   await client.addTagToMember(tag.id, email);
 }
 
@@ -135,22 +136,21 @@ async function handleRemoveTag(
   payload: Record<string, unknown>
 ): Promise<void> {
   const email = String(payload.email ?? "");
-  const role = String(payload.role ?? "member");
-
   if (!email) throw new Error("remove_tag requires email in payload");
 
-  const tagName = ROLE_TO_CIRCLE_TAG[role] ?? ROLE_TO_CIRCLE_TAG.member;
-
-  const tags = await client.listTags();
-  const tag = tags.find(
-    (t) => t.name.toLowerCase() === tagName.toLowerCase()
-  );
-
-  if (!tag) {
-    // Tag doesn't exist — nothing to remove
+  // Prefer direct tagId
+  if (payload.tagId) {
+    await client.removeTagFromMember(Number(payload.tagId), email);
     return;
   }
 
+  // Legacy: resolve by tag name
+  const tagName = String(payload.tagName ?? payload.role ?? "");
+  if (!tagName) return; // nothing to remove
+
+  const tags = await client.listTags();
+  const tag = tags.find((t) => t.name.toLowerCase() === tagName.toLowerCase());
+  if (!tag) return; // tag doesn't exist — nothing to remove
   await client.removeTagFromMember(tag.id, email);
 }
 
@@ -283,6 +283,29 @@ async function handleUpdateProfile(
   if (Object.keys(updates).length === 0) return;
 
   await client.updateMember(circleId, updates);
+}
+
+async function handleDeleteMember(
+  client: CircleAdminClient,
+  item: CircleSyncQueueItem
+): Promise<void> {
+  const circleId = await resolveCircleId(item.entity_id);
+  if (!circleId) {
+    // Not linked — nothing to delete
+    return;
+  }
+
+  await client.deleteMember(circleId);
+
+  // Clear circle_id so re-add works cleanly on reactivation
+  const adminClient = createAdminClient();
+  await adminClient
+    .from("contacts")
+    .update({
+      circle_id: null,
+      synced_to_circle_at: new Date().toISOString(),
+    })
+    .eq("id", item.entity_id);
 }
 
 // ---------------------------------------------------------------------------

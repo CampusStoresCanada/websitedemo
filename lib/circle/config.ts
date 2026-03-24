@@ -50,30 +50,6 @@ export function isCircleConfigured(): boolean {
 }
 
 // ---------------------------------------------------------------------------
-// Role → Circle tag mapping
-// ---------------------------------------------------------------------------
-
-/** Maps CSC user/org roles to the expected Circle tag name. */
-export const ROLE_TO_CIRCLE_TAG: Record<string, string> = {
-  member: "CSC Member",
-  org_admin: "CSC Org Admin",
-  admin: "CSC Admin",
-  super_admin: "CSC Super Admin",
-  partner: "CSC Partner",
-};
-
-// ---------------------------------------------------------------------------
-// Membership status → Circle space mapping
-// ---------------------------------------------------------------------------
-
-/** Maps org membership status to a Circle space name (for auto-assignment). */
-export const STATUS_TO_CIRCLE_SPACE: Record<string, string> = {
-  active: "Members Only",
-  reactivated: "Members Only",
-  partner_active: "Partners",
-};
-
-// ---------------------------------------------------------------------------
 // Access group IDs — set via env, numeric Circle access group IDs
 // ---------------------------------------------------------------------------
 

@@ -8,6 +8,16 @@ function stripHtml(html: string): string {
   return html.replace(/<[^>]*>/g, "").trim();
 }
 
+/** Admin v2 returns body as { body: "<html>", ... } or as a plain string */
+function extractBodyText(body: unknown): string {
+  if (!body) return "";
+  if (typeof body === "string") return stripHtml(body);
+  if (typeof body === "object" && body !== null && "body" in body && typeof (body as Record<string, unknown>).body === "string") {
+    return stripHtml((body as Record<string, unknown>).body as string);
+  }
+  return "";
+}
+
 function formatRelativeDate(dateStr: string): string {
   const date = new Date(dateStr);
   const now = new Date();
@@ -98,9 +108,9 @@ export default async function CircleAnnouncementFeed() {
               <h3 className="font-semibold text-[#1A1A1A] mb-2 line-clamp-2 group-hover:text-[#1B4332]">
                 {post.name}
               </h3>
-              {post.body && (
+              {post.body && extractBodyText(post.body) && (
                 <p className="text-sm text-[#6B6B6B] line-clamp-3">
-                  {stripHtml(post.body).slice(0, 150)}
+                  {extractBodyText(post.body).slice(0, 150)}
                 </p>
               )}
               <p className="text-xs text-[#9B9B9B] mt-3">

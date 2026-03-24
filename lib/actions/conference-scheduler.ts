@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin, requireSuperAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
@@ -326,7 +326,7 @@ export async function createSchedulerDraftRun(
   conferenceId: string,
   seed?: number
 ): Promise<SchedulerActionSuccess<SchedulerRunSummary> | SchedulerActionFailure> {
-  const auth = await requireAdmin();
+  const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
 
   const policySet = await getActivePolicySet();

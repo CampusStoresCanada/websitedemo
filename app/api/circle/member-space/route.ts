@@ -56,7 +56,7 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: "Account is not linked to Circle." }, { status: 400 });
     }
 
-    const token = await mintMemberToken({ community_member_id: circleId });
+    const token = await mintMemberToken({ email: auth.ctx.userEmail });
 
     const headlessTemplate = process.env.CIRCLE_MEMBER_SPACE_HEADLESS_URL_TEMPLATE;
     if (headlessTemplate && headlessTemplate.includes("{token}")) {

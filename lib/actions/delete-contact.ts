@@ -5,6 +5,7 @@ import {
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { archivePersonContact } from "@/lib/identity/lifecycle";
+import { enqueueContactCircleDeprovisioning } from "@/lib/circle/sync";
 
 interface DeleteContactParams {
   contactId: string;
@@ -75,6 +76,9 @@ export async function deleteContact({
     console.log("Name:", contact.name);
     console.log("Deleted by:", userEmail);
     console.log("=======================");
+
+    // Queue Circle de-provisioning (fire-and-forget)
+    void enqueueContactCircleDeprovisioning(contactId);
 
     return { success: true, deletedName: contact.name };
   } catch (err) {

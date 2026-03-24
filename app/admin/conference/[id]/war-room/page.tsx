@@ -65,6 +65,12 @@ export default async function ConferenceWarRoomPage({
             Schedule Ops
           </Link>
           <Link
+            href={`/admin/conference/${id}/travel-import`}
+            className="rounded-md border border-gray-300 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Travel Import
+          </Link>
+          <Link
             href={`/admin/conference/${id}/check-in`}
             target="_blank"
             rel="noopener noreferrer"

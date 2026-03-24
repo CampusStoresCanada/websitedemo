@@ -21,6 +21,7 @@ import {
   type RulesEngineTrigger,
   type RulesEngineV1,
 } from "@/lib/conference/rules-engine";
+import { getEffectivePolicies } from "@/lib/policy/engine";
 
 type CartRow = Database["public"]["Tables"]["cart_items"]["Row"];
 type ProductRow = Database["public"]["Tables"]["conference_products"]["Row"];
@@ -83,8 +84,10 @@ const WISHLIST_TRANSITIONS: Record<WishlistStatus, WishlistStatus[]> = {
   registered: [],
 };
 
-const WISHLIST_MAX_RETRY_ATTEMPTS = 3;
-const WISHLIST_RETRY_BACKOFF_MINUTES = 60;
+// Defaults — overridden at runtime by policy keys billing.wishlist_max_retry_attempts
+// and billing.wishlist_retry_backoff_minutes if present.
+const WISHLIST_MAX_RETRY_ATTEMPTS_DEFAULT = 3;
+const WISHLIST_RETRY_BACKOFF_MINUTES_DEFAULT = 60;
 
 function isFinalBillingFailure(error: unknown): boolean {
   if (!(error instanceof Error)) return false;
@@ -2083,6 +2086,24 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
 
   const wishlistTaxRate = Number(conferenceForTax.tax_rate_pct ?? 0);
 
+  // Load policy-configurable retry/backoff (fall back to code defaults)
+  let maxRetryAttempts = WISHLIST_MAX_RETRY_ATTEMPTS_DEFAULT;
+  let retryBackoffMinutes = WISHLIST_RETRY_BACKOFF_MINUTES_DEFAULT;
+  try {
+    const retryPolicies = await getEffectivePolicies([
+      "billing.wishlist_max_retry_attempts",
+      "billing.wishlist_retry_backoff_minutes",
+    ]);
+    if (typeof retryPolicies["billing.wishlist_max_retry_attempts"] === "number") {
+      maxRetryAttempts = retryPolicies["billing.wishlist_max_retry_attempts"] as number;
+    }
+    if (typeof retryPolicies["billing.wishlist_retry_backoff_minutes"] === "number") {
+      retryBackoffMinutes = retryPolicies["billing.wishlist_retry_backoff_minutes"] as number;
+    }
+  } catch {
+    // Policy keys may not exist yet; use defaults silently
+  }
+
   const { data: intents, error: intentsError } = await adminClient
     .from("wishlist_intents")
     .select("id, status, metadata, quantity, organization_id, stripe_payment_method_id, product_id, conference_products!inner(price_cents, currency, is_taxable, is_tax_exempt)")
@@ -2166,7 +2187,7 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
       ? (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60)
       : Number.POSITIVE_INFINITY;
 
-    if (attemptCount >= WISHLIST_MAX_RETRY_ATTEMPTS) {
+    if (attemptCount >= maxRetryAttempts) {
       skippedMaxAttempts += 1;
       await logAttempt({
         wishlistIntentId: intent.id,
@@ -2199,7 +2220,7 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
     if (
       intent.status === "billing_failed_retryable" &&
       Number.isFinite(minutesSinceLastAttempt) &&
-      minutesSinceLastAttempt < WISHLIST_RETRY_BACKOFF_MINUTES
+      minutesSinceLastAttempt < retryBackoffMinutes
     ) {
       skippedBackoff += 1;
       await logAttempt({
@@ -2252,7 +2273,7 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
         .from("wishlist_intents")
         .update({
           status:
-            nextAttemptCount >= WISHLIST_MAX_RETRY_ATTEMPTS
+            nextAttemptCount >= maxRetryAttempts
               ? "billing_failed_final"
               : "billing_failed_retryable",
           billing_attempted_at: attemptedAt,
@@ -2351,7 +2372,7 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
           .from("wishlist_intents")
           .update({
             status:
-              nextAttemptCount >= WISHLIST_MAX_RETRY_ATTEMPTS
+              nextAttemptCount >= maxRetryAttempts
                 ? "billing_failed_final"
                 : "billing_failed_retryable",
             billing_attempted_at: attemptedAt,
@@ -2368,7 +2389,7 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
       }
     } catch (error) {
       failed += 1;
-      const finalFailure = isFinalBillingFailure(error) || nextAttemptCount >= WISHLIST_MAX_RETRY_ATTEMPTS;
+      const finalFailure = isFinalBillingFailure(error) || nextAttemptCount >= maxRetryAttempts;
       const details = stripeErrorDetails(error);
       await logAttempt({
         wishlistIntentId: intent.id,
@@ -2412,8 +2433,8 @@ export async function runWishlistBilling(conferenceId: string): Promise<Commerce
       successful_items: successful,
       metadata: {
         mode: "wishlist_fifo",
-        max_retry_attempts: WISHLIST_MAX_RETRY_ATTEMPTS,
-        retry_backoff_minutes: WISHLIST_RETRY_BACKOFF_MINUTES,
+        max_retry_attempts: maxRetryAttempts,
+        retry_backoff_minutes: retryBackoffMinutes,
         skipped_backoff: skippedBackoff,
         skipped_max_attempts: skippedMaxAttempts,
       },

@@ -40,7 +40,7 @@ export async function POST() {
       return NextResponse.json({ ok: true, linked: false }, { status: 200 });
     }
 
-    await mintMemberToken({ community_member_id: circleId });
+    await mintMemberToken({ email: auth.ctx.userEmail });
 
     return NextResponse.json({ ok: true, linked: true }, { status: 200 });
   } catch (error) {

@@ -323,63 +323,183 @@ const ACCESS_ACTIVE_STATUSES = new Set([
  *
  * Called after a membership state transition. Non-throwing, fire-and-forget safe.
  *
- * @param orgId      - Supabase org UUID
- * @param newStatus  - The status the org just transitioned TO
- * @param orgType    - Optional: "Vendor Partner" triggers partner group; otherwise member group
+ * Partner orgs each have their own Circle access group (stored on the org row).
+ * Member orgs share the global Members access group from env config.
+ *
+ * Lifecycle:
+ *   active/grace/reactivated → add to access group (create partner group if needed)
+ *   locked                   → remove from access group + delete from Circle
+ *   canceled                 → same as locked + delete the partner access group
  */
 export async function enqueueOrgCircleAccessSync(
   orgId: string,
   newStatus: string,
-  orgType?: string | null
+  _orgType?: string | null  // kept for backwards compat; we fetch from DB
 ): Promise<void> {
   try {
     if (!isCircleConfigured()) return;
 
     const groupIds = getAccessGroupIds();
-    const isPartner = orgType?.toLowerCase().includes("partner") ?? false;
-    const activeGroupId = isPartner ? groupIds.partner : groupIds.member;
-
-    if (!activeGroupId && !groupIds.alumni) {
-      // No access group IDs configured — nothing to do
-      return;
-    }
-
-    const isActive = ACCESS_ACTIVE_STATUSES.has(newStatus);
-    const isDeactivated = newStatus === "locked" || newStatus === "canceled";
-
-    if (!isActive && !isDeactivated) {
-      // applied, approved, etc. — no access group change needed
-      return;
-    }
-
     const adminClient = createAdminClient();
 
-    // Fetch all contacts in this org that have an email (needed for access group ops)
+    // Fetch org details we need
+    const { data: org } = await adminClient
+      .from("organizations")
+      .select("name, type, circle_access_group_id, circle_tag_id, logo_url")
+      .eq("id", orgId)
+      .single();
+
+    if (!org) return;
+
+    const isPartner = org.type?.toLowerCase().includes("partner") ?? false;
+    const isActive = ACCESS_ACTIVE_STATUSES.has(newStatus);
+    const isLocked = newStatus === "locked";
+    const isCanceled = newStatus === "canceled";
+    const isDeactivated = isLocked || isCanceled;
+
+    if (!isActive && !isDeactivated) {
+      // applied, approved, etc. — no Circle action needed
+      return;
+    }
+
+    // ── Resolve the access group ID for this org ──────────────────────────────
+    let activeGroupId: number | null = null;
+
+    if (isPartner) {
+      if (isActive) {
+        // Ensure partner has a Circle access group — create one if missing
+        if (org.circle_access_group_id) {
+          activeGroupId = Number(org.circle_access_group_id);
+        } else {
+          const circleClient = getCircleClient();
+          if (circleClient) {
+            try {
+              const group = await circleClient.createAccessGroup(org.name);
+              activeGroupId = group.id;
+              // Persist the new group ID on the org row
+              await adminClient
+                .from("organizations")
+                .update({ circle_access_group_id: String(group.id) })
+                .eq("id", orgId);
+              console.log(
+                `[circle/sync] Created access group "${org.name}" (id=${group.id}) for org ${orgId}`
+              );
+            } catch (err) {
+              console.error(
+                `[circle/sync] Failed to create access group for org ${orgId}:`,
+                err instanceof Error ? err.message : err
+              );
+              return; // Can't proceed without a group ID
+            }
+          }
+        }
+      } else {
+        // Deactivated — use whatever group they had (for removal)
+        activeGroupId = org.circle_access_group_id
+          ? Number(org.circle_access_group_id)
+          : null;
+      }
+    } else {
+      // Member org — use the global Members group
+      activeGroupId = groupIds.member ?? null;
+    }
+
+    // ── Ensure partner has a Circle tag — create one if missing ──────────────
+    if (isPartner && isActive && !org.circle_tag_id) {
+      const circleClient = getCircleClient();
+      if (circleClient) {
+        try {
+          const tag = await circleClient.createTag({
+            name: org.name,
+            color: "#ffffff",
+            display_format: "label",
+            is_background_enabled: false,
+            ...(org.logo_url ? { custom_emoji_url: org.logo_url } : {}),
+          });
+          (org as Record<string, unknown>).circle_tag_id = String(tag.id);
+          await adminClient
+            .from("organizations")
+            .update({ circle_tag_id: String(tag.id) })
+            .eq("id", orgId);
+          console.log(
+            `[circle/sync] Created tag "${org.name}" (id=${tag.id}) for org ${orgId}`
+          );
+        } catch (err) {
+          console.error(
+            `[circle/sync] Failed to create tag for org ${orgId}:`,
+            err instanceof Error ? err.message : err
+          );
+        }
+      }
+    }
+
+    // ── Fetch all org contacts with emails ────────────────────────────────────
     const { data: contacts, error } = await adminClient
       .from("contacts")
       .select("id, email")
       .eq("organization_id", orgId)
       .not("email", "is", null);
 
-    if (error || !contacts || contacts.length === 0) return;
+    if (error || !contacts || contacts.length === 0) {
+      // Still need to handle partner group deletion on cancel even with no contacts
+      if (isCanceled && isPartner && activeGroupId) {
+        await deletePartnerAccessGroup(adminClient, orgId, activeGroupId);
+      }
+      return;
+    }
 
     const now = new Date().toISOString();
 
     for (const contact of contacts) {
       if (!contact.email) continue;
 
-      if (isActive && activeGroupId) {
-        // Add to active access group
-        await enqueueCircleSync({
-          operation: "add_to_access_group",
-          entityType: "contact",
-          entityId: contact.id,
-          payload: { groupId: activeGroupId, email: contact.email },
-          orgId,
-          idempotencyKey: `access-add-${contact.id}-${activeGroupId}-${newStatus}`,
-        });
+      if (isActive) {
+        // Re-add to Circle if they were deleted during a prior lock/cancel
+        if (newStatus === "reactivated") {
+          await enqueueCircleSync({
+            operation: "link_member",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { email: contact.email },
+            orgId,
+            idempotencyKey: `reactivate-link-${contact.id}-${now}`,
+          });
+        }
+        // Add to access group
+        if (activeGroupId) {
+          await enqueueCircleSync({
+            operation: "add_to_access_group",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { groupId: activeGroupId, email: contact.email },
+            orgId,
+            idempotencyKey: `access-add-${contact.id}-${activeGroupId}-${newStatus}`,
+          });
+        }
+        // Tag with org tag
+        if (org.circle_tag_id) {
+          await enqueueCircleSync({
+            operation: "add_tag",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { tagId: Number(org.circle_tag_id), email: contact.email },
+            orgId,
+            idempotencyKey: `org-tag-add-${contact.id}-${org.circle_tag_id}-${newStatus}`,
+          });
+        }
       } else if (isDeactivated) {
-        // Remove from active access group
+        // Remove org tag
+        if (org.circle_tag_id) {
+          await enqueueCircleSync({
+            operation: "remove_tag",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { tagId: Number(org.circle_tag_id), email: contact.email },
+            orgId,
+            idempotencyKey: `org-tag-remove-${contact.id}-${org.circle_tag_id}-${now}`,
+          });
+        }
+        // Remove from access group
         if (activeGroupId) {
           await enqueueCircleSync({
             operation: "remove_from_access_group",
@@ -390,22 +510,210 @@ export async function enqueueOrgCircleAccessSync(
             idempotencyKey: `access-remove-${contact.id}-${activeGroupId}-${now}`,
           });
         }
-        // Add to alumni group if configured
-        if (groupIds.alumni) {
-          await enqueueCircleSync({
-            operation: "add_to_access_group",
-            entityType: "contact",
-            entityId: contact.id,
-            payload: { groupId: groupIds.alumni, email: contact.email },
-            orgId,
-            idempotencyKey: `access-alumni-${contact.id}-${groupIds.alumni}`,
-          });
-        }
+        // Delete from Circle community (removes posting/DM access)
+        await enqueueCircleSync({
+          operation: "delete_member",
+          entityType: "contact",
+          entityId: contact.id,
+          payload: { email: contact.email },
+          orgId,
+          idempotencyKey: `delete-member-${contact.id}-${now}`,
+        });
       }
+    }
+
+    // ── On cancel: delete the partner's access group ──────────────────────────
+    if (isCanceled && isPartner && activeGroupId) {
+      await deletePartnerAccessGroup(adminClient, orgId, activeGroupId);
     }
   } catch (err) {
     console.error(
       "[circle/sync] enqueueOrgCircleAccessSync failed:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/**
+ * Provision a single newly-added contact into Circle.
+ * Called from add-contact.ts after a contact row is created.
+ * Queues: link_member + add_to_access_group + add_tag (if org is active).
+ * Safe to call — never throws.
+ */
+export async function enqueueNewContactCircleProvisioning(
+  contactId: string,
+  orgId: string
+): Promise<void> {
+  if (!isCircleConfigured()) return;
+
+  try {
+    const adminClient = createAdminClient();
+    const groupIds = getAccessGroupIds();
+
+    // Fetch contact email
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("email")
+      .eq("id", contactId)
+      .single();
+
+    if (!contact?.email) return;
+
+    // Fetch org details + active membership status
+    const { data: org } = await adminClient
+      .from("organizations")
+      .select("type, membership_status, circle_access_group_id, circle_tag_id")
+      .eq("id", orgId)
+      .single();
+
+    if (!org || !ACCESS_ACTIVE_STATUSES.has(org.membership_status ?? "")) return;
+
+    const isPartner = org.type?.toLowerCase().includes("partner") ?? false;
+    const groupId = isPartner
+      ? (org.circle_access_group_id ? Number(org.circle_access_group_id) : null)
+      : (groupIds.member ?? null);
+
+    const now = new Date().toISOString();
+
+    // 1. Link to Circle (create account if needed)
+    await enqueueCircleSync({
+      operation: "link_member",
+      entityType: "contact",
+      entityId: contactId,
+      payload: { email: contact.email },
+      orgId,
+      idempotencyKey: `new-contact-link-${contactId}-${now}`,
+    });
+
+    // 2. Add to access group
+    if (groupId) {
+      await enqueueCircleSync({
+        operation: "add_to_access_group",
+        entityType: "contact",
+        entityId: contactId,
+        payload: { groupId, email: contact.email },
+        orgId,
+        idempotencyKey: `new-contact-access-${contactId}-${groupId}`,
+      });
+    }
+
+    // 3. Apply org tag
+    if (org.circle_tag_id) {
+      await enqueueCircleSync({
+        operation: "add_tag",
+        entityType: "contact",
+        entityId: contactId,
+        payload: { tagId: Number(org.circle_tag_id), email: contact.email },
+        orgId,
+        idempotencyKey: `new-contact-tag-${contactId}-${org.circle_tag_id}`,
+      });
+    }
+
+    console.log(`[circle/sync] Queued Circle provisioning for new contact ${contactId} in org ${orgId}`);
+  } catch (err) {
+    console.error(
+      "[circle/sync] enqueueNewContactCircleProvisioning failed:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/**
+ * Queue Circle de-provisioning for an archived/deleted contact.
+ * Removes them from their access group, removes their org tag, and deletes
+ * their Circle member account. Safe to call — never throws.
+ */
+export async function enqueueContactCircleDeprovisioning(
+  contactId: string,
+): Promise<void> {
+  if (!isCircleConfigured()) return;
+
+  try {
+    const adminClient = createAdminClient();
+    const groupIds = getAccessGroupIds();
+
+    // Fetch contact email, circle_id, and org details in one go
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("email, circle_id, organization_id, organizations(type, circle_access_group_id, circle_tag_id)")
+      .eq("id", contactId)
+      .single();
+
+    if (!contact?.email) return;
+
+    const org = Array.isArray(contact.organizations)
+      ? contact.organizations[0]
+      : contact.organizations;
+
+    const orgId = contact.organization_id ?? undefined;
+    const isPartner = org?.type?.toLowerCase().includes("partner") ?? false;
+    const groupId = isPartner
+      ? (org?.circle_access_group_id ? Number(org.circle_access_group_id) : null)
+      : (groupIds.member ?? null);
+
+    // 1. Remove from access group
+    if (groupId) {
+      await enqueueCircleSync({
+        operation: "remove_from_access_group",
+        entityType: "contact",
+        entityId: contactId,
+        payload: { groupId, email: contact.email },
+        orgId,
+        idempotencyKey: `archive-contact-access-${contactId}-${groupId}`,
+      });
+    }
+
+    // 2. Remove org tag
+    if (org?.circle_tag_id) {
+      await enqueueCircleSync({
+        operation: "remove_tag",
+        entityType: "contact",
+        entityId: contactId,
+        payload: { tagId: Number(org.circle_tag_id), email: contact.email },
+        orgId,
+        idempotencyKey: `archive-contact-tag-${contactId}-${org.circle_tag_id}`,
+      });
+    }
+
+    // 3. Delete Circle member account
+    if (contact.circle_id) {
+      await enqueueCircleSync({
+        operation: "delete_member",
+        entityType: "contact",
+        entityId: contactId,
+        payload: { circleId: Number(contact.circle_id), email: contact.email },
+        orgId,
+        idempotencyKey: `archive-contact-delete-${contactId}`,
+      });
+    }
+
+    console.log(`[circle/sync] Queued Circle de-provisioning for archived contact ${contactId}`);
+  } catch (err) {
+    console.error(
+      "[circle/sync] enqueueContactCircleDeprovisioning failed:",
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
+/** Delete a partner's Circle access group and clear it from the org row. */
+async function deletePartnerAccessGroup(
+  adminClient: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  groupId: number
+): Promise<void> {
+  const circleClient = getCircleClient();
+  if (!circleClient) return;
+  try {
+    await circleClient.deleteAccessGroup(groupId);
+    await adminClient
+      .from("organizations")
+      .update({ circle_access_group_id: null })
+      .eq("id", orgId);
+    console.log(`[circle/sync] Deleted access group ${groupId} for org ${orgId}`);
+  } catch (err) {
+    console.error(
+      `[circle/sync] Failed to delete access group ${groupId}:`,
       err instanceof Error ? err.message : err
     );
   }

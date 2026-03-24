@@ -1,5 +1,4 @@
 import type { VisibleContact } from "@/lib/visibility/data";
-import BlurredField from "@/components/ui/BlurredField";
 
 interface OrgContactsProps {
   contacts: VisibleContact[];
@@ -48,40 +47,33 @@ export default function OrgContacts({ contacts }: OrgContactsProps) {
 
               {/* Info */}
               <div className="min-w-0 flex-1">
-                <p className="font-medium text-[#1A1A1A] truncate">
-                  {name ? (
-                    isMaskedValue(name) ? <BlurredField maskedValue={name} /> : name
-                  ) : "—"}
-                </p>
+                {name && !isMaskedValue(name) && contact.circle_id ? (
+                  <a
+                    href={`/api/circle/profile/${contact.id}`}
+                    className="font-medium text-[#1A1A1A] hover:text-[#EE2A2E] truncate block"
+                  >
+                    {name}
+                  </a>
+                ) : name ? (
+                  <p className="font-medium text-[#1A1A1A] truncate">{name}</p>
+                ) : null}
                 {roleTitle && (
-                  <p className="text-sm text-[#6B6B6B] truncate">
-                    {roleTitle}
-                  </p>
+                  <p className="text-sm text-[#6B6B6B] truncate">{roleTitle}</p>
                 )}
                 {email && (
                   isMaskedValue(email) ? (
-                    <span className="text-sm text-[#6B6B6B] truncate block">
-                      <BlurredField maskedValue={email} />
-                    </span>
+                    <p className="text-sm text-[#6B6B6B] truncate">{email}</p>
                   ) : (
-                    <a
-                      href={`mailto:${email}`}
-                      className="text-sm text-[#EE2A2E] hover:underline truncate block"
-                    >
+                    <a href={`mailto:${email}`} className="text-sm text-[#EE2A2E] hover:underline truncate block">
                       {email}
                     </a>
                   )
                 )}
                 {phone && (
                   isMaskedValue(phone) ? (
-                    <span className="text-sm text-[#6B6B6B]">
-                      <BlurredField maskedValue={phone} />
-                    </span>
+                    <p className="text-sm text-[#6B6B6B]">{phone}</p>
                   ) : (
-                    <a
-                      href={`tel:${phone}`}
-                      className="text-sm text-[#6B6B6B] hover:text-[#EE2A2E] transition-colors"
-                    >
+                    <a href={`tel:${phone}`} className="text-sm text-[#6B6B6B] hover:text-[#EE2A2E] transition-colors">
                       {phone}
                     </a>
                   )

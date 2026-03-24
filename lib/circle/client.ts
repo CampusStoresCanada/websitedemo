@@ -170,6 +170,37 @@ export class CircleAdminClient {
    * Add a tag to a member. Uses POST to the tagged_members sub-resource
    * of the member_tag. The Circle API expects the member's email.
    */
+  async createTag(data: {
+    name: string;
+    color?: string;
+    custom_emoji_url?: string;
+    display_format?: string;
+    is_public?: boolean;
+    is_background_enabled?: boolean;
+    display_locations?: { post_bio?: boolean; profile_page?: boolean; member_directory?: boolean };
+  }): Promise<CircleTag> {
+    return this.request<CircleTag>("POST", "/member_tags", { body: data });
+  }
+
+  async updateTag(
+    tagId: number,
+    data: {
+      name?: string;
+      color?: string;
+      custom_emoji_url?: string;
+      display_format?: string;
+      is_public?: boolean;
+      is_background_enabled?: boolean;
+      display_locations?: { post_bio?: boolean; profile_page?: boolean; member_directory?: boolean };
+    }
+  ): Promise<CircleTag> {
+    return this.request<CircleTag>("PUT", `/member_tags/${tagId}`, { body: data });
+  }
+
+  async deleteTag(tagId: number): Promise<void> {
+    await this.request<void>("DELETE", `/member_tags/${tagId}`);
+  }
+
   async addTagToMember(tagId: number, email: string): Promise<void> {
     await this.request<void>("POST", `/member_tags/${tagId}/tagged_members`, {
       body: { email },
@@ -214,6 +245,12 @@ export class CircleAdminClient {
 
   // ---- Access Groups ------------------------------------------------------
 
+  async createAccessGroup(name: string): Promise<CircleAccessGroup> {
+    return this.request<CircleAccessGroup>("POST", "/access_groups", {
+      body: { name },
+    });
+  }
+
   async listAccessGroups(): Promise<CircleAccessGroup[]> {
     const result = await this.request<{ records: CircleAccessGroup[] }>(
       "GET",
@@ -244,6 +281,42 @@ export class CircleAdminClient {
     );
   }
 
+  async updateAccessGroup(
+    groupId: number,
+    data: { name?: string }
+  ): Promise<CircleAccessGroup> {
+    return this.request<CircleAccessGroup>(
+      "PUT",
+      `/access_groups/${groupId}`,
+      { body: data }
+    );
+  }
+
+  async deleteAccessGroup(groupId: number): Promise<void> {
+    await this.request<void>("DELETE", `/access_groups/${groupId}`);
+  }
+
+  /** List members of an access group (paginated). */
+  async listAccessGroupMembers(
+    groupId: number
+  ): Promise<CircleMember[]> {
+    const members: CircleMember[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.request<{
+        records: CircleMember[];
+        has_next_page: boolean;
+      }>("GET", `/access_groups/${groupId}/community_members`, {
+        params: { per_page: 100, page },
+      });
+      const records = result.records ?? [];
+      members.push(...records);
+      if (!result.has_next_page || records.length === 0) break;
+      page++;
+    }
+    return members;
+  }
+
   // ---- Posts (announcements feed) -----------------------------------------
 
   /**
@@ -269,10 +342,10 @@ export class CircleAdminClient {
     });
     // Note: `status` filter omitted — v1 API may not support it; filter client-side if needed
 
-    // Try v1 API first (where posts actually live)
+    // Try admin v2 first (reliable), fall back to v1 if 404
     const candidates = [
-      `${CIRCLE_V1_API_BASE}/posts?${params}`,
       `${this.baseUrl}/posts?${params}`,
+      `${CIRCLE_V1_API_BASE}/posts?${params}`,
     ];
 
     for (const url of candidates) {
@@ -298,6 +371,9 @@ export class CircleAdminClient {
       const data = await response.json();
       const records: CirclePost[] = data.records ?? (Array.isArray(data) ? data : []);
 
+      // Continue to next candidate if this URL returned nothing
+      if (records.length === 0) continue;
+
       // Filter to published posts client-side if status was requested
       if (options?.status === "published") {
         return records.filter((p) => p.status === "published" || !p.status);
@@ -305,7 +381,7 @@ export class CircleAdminClient {
       return records;
     }
 
-    // All candidates returned 404 — space not found or no posts
+    // All candidates returned 404 or empty
     return [];
   }
 

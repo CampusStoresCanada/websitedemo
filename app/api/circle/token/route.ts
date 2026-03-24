@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
 
     // Mint token
     const token = await mintMemberToken({
-      community_member_id: circleId,
+      email: auth.ctx.userEmail,
     });
 
     return NextResponse.json({

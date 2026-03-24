@@ -29,6 +29,7 @@ type WebsiteAlert = {
   message: string;
   href: string;
   createdAt: string;
+  isRead?: boolean;
 };
 
 type CircleAlertItem = {
@@ -37,6 +38,17 @@ type CircleAlertItem = {
   message: string;
   href: string;
   createdAt: string;
+  isRead?: boolean;
+};
+
+type CircleDmItem = {
+  uuid: string;
+  name: string;
+  kind: "direct" | "group_chat";
+  unreadCount: number;
+  lastMessage: string | null;
+  lastSender: string | null;
+  href: string;
 };
 
 function isGlobalAdmin(role: string): boolean {
@@ -55,6 +67,7 @@ export default function Header() {
   const [websiteAlertCount, setWebsiteAlertCount] = useState(0);
   const [circleNotifications, setCircleNotifications] = useState<CircleAlertItem[]>([]);
   const [circleReplies, setCircleReplies] = useState<CircleAlertItem[]>([]);
+  const [circleDms, setCircleDms] = useState<CircleDmItem[]>([]);
   const [activeConference, setActiveConference] = useState<ActiveConference>(null);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
@@ -97,25 +110,29 @@ export default function Header() {
   const memberSpaceHref = authAwareHref("/api/circle/member-space");
 
   const badge = ROLE_BADGES[permissionState];
-  const notificationsCount = websiteAlertCount + circleNotifications.length;
-  const repliesCount = circleReplies.length;
+  const notificationsCount = websiteAlertCount + circleNotifications.filter(n => !n.isRead).length;
+  const repliesCount = circleReplies.filter(n => !n.isRead).length;
   const totalAlertCount = dmUnreadCount + notificationsCount + repliesCount;
   const mergedNotificationItems = useMemo(() => {
     const websiteItems = websiteAlerts.map((item) => ({
       id: `website:${item.id}`,
+      alertKey: item.id,
       source: "Website" as const,
       title: item.title,
       message: item.message,
       href: item.href,
       createdAt: item.createdAt,
+      isRead: item.isRead ?? false,
     }));
     const circleItems = circleNotifications.map((item) => ({
       id: `circle:${item.id}`,
+      alertKey: null as string | null,
       source: "Circle" as const,
       title: item.title,
       message: item.message,
       href: item.href,
       createdAt: item.createdAt,
+      isRead: item.isRead,
     }));
     return [...websiteItems, ...circleItems].sort((a, b) => {
       const aTs = new Date(a.createdAt).getTime();
@@ -268,12 +285,14 @@ export default function Header() {
         const data = (await response.json()) as {
           notifications?: CircleAlertItem[];
           replies?: CircleAlertItem[];
+          dms?: CircleDmItem[];
+          dmUnreadCount?: number;
         };
         if (cancelled) return;
-        setCircleNotifications(
-          Array.isArray(data.notifications) ? data.notifications : []
-        );
+        setCircleNotifications(Array.isArray(data.notifications) ? data.notifications : []);
         setCircleReplies(Array.isArray(data.replies) ? data.replies : []);
+        setCircleDms(Array.isArray(data.dms) ? data.dms : []);
+        if (typeof data.dmUnreadCount === "number") setDmUnreadCount(data.dmUnreadCount);
       } catch {
         if (!cancelled) {
           setCircleNotifications([]);
@@ -302,11 +321,11 @@ export default function Header() {
       try {
         const response = await fetch("/api/alerts", { cache: "no-store" });
         if (!response.ok) return;
-        const data = (await response.json()) as { items?: WebsiteAlert[]; total?: number };
+        const data = (await response.json()) as { items?: WebsiteAlert[]; total?: number; unreadCount?: number };
         if (cancelled) return;
         const items = Array.isArray(data.items) ? data.items : [];
         setWebsiteAlerts(items);
-        setWebsiteAlertCount(typeof data.total === "number" ? data.total : items.length);
+        setWebsiteAlertCount(typeof data.unreadCount === "number" ? data.unreadCount : items.filter(i => !i.isRead).length);
       } catch {
         if (!cancelled) {
           setWebsiteAlerts([]);
@@ -433,7 +452,16 @@ export default function Header() {
               <div className="relative" ref={alertMenuRef}>
                 <button
                   type="button"
-                  onClick={() => setShowAlertMenu((value) => !value)}
+                  onClick={() => {
+                    setShowAlertMenu((value) => {
+                      if (!value) {
+                        fetch("/api/circle/notifications", { method: "POST" }).catch(() => {});
+                        setCircleNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+                        setCircleReplies(prev => prev.map(n => ({ ...n, isRead: true })));
+                      }
+                      return !value;
+                    });
+                  }}
                   className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:border-gray-400"
                   aria-label="Alerts"
                 >
@@ -474,16 +502,30 @@ export default function Header() {
 
                     {alertTab === "notifications" ? (
                       mergedNotificationItems.length > 0 ? (
-                        mergedNotificationItems.slice(0, 5).map((alert) => (
-                          <Link
+                        mergedNotificationItems.slice(0, 10).map((alert) => (
+                          <a
                             key={alert.id}
                             href={alert.href}
-                            className="mt-1 block rounded-md px-2 py-2 hover:bg-gray-50"
+                            onClick={() => {
+                              if (alert.source === "Circle") {
+                                const id = alert.id.slice(7);
+                                fetch("/api/circle/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) }).catch(() => {});
+                              } else if (alert.alertKey && !alert.isRead) {
+                                fetch("/api/alerts", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ alertKeys: [alert.alertKey] }) }).catch(() => {});
+                                setWebsiteAlerts(prev => prev.map(a => a.id === alert.alertKey ? { ...a, isRead: true } : a));
+                                setWebsiteAlertCount(prev => Math.max(0, prev - 1));
+                              }
+                            }}
+                            className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${alert.isRead ? "opacity-60" : ""}`}
                           >
-                            <p className="text-[11px] uppercase tracking-wide text-gray-400">{alert.source}</p>
-                            <p className="text-sm text-gray-800">{alert.title}</p>
-                            <p className="text-xs text-gray-500 line-clamp-2">{alert.message}</p>
-                          </Link>
+                            {!alert.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
+                            {alert.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
+                            <div className="min-w-0">
+                              <p className="text-[11px] uppercase tracking-wide text-gray-400">{alert.source}</p>
+                              <p className={`text-sm ${alert.isRead ? "text-gray-500" : "text-gray-800 font-medium"}`}>{alert.title}</p>
+                              {alert.message && <p className="text-xs text-gray-500 line-clamp-2">{alert.message}</p>}
+                            </div>
+                          </a>
                         ))
                       ) : (
                         <p className="px-2 py-2 text-xs text-gray-500">No notifications.</p>
@@ -492,15 +534,23 @@ export default function Header() {
 
                     {alertTab === "replies" ? (
                       circleReplies.length > 0 ? (
-                        circleReplies.slice(0, 5).map((reply) => (
-                          <Link
+                        circleReplies.slice(0, 10).map((reply) => (
+                          <a
                             key={reply.id}
                             href={reply.href}
-                            className="mt-1 block rounded-md px-2 py-2 hover:bg-gray-50"
+                            onClick={() => {
+                              const id = reply.id.startsWith("circle:") ? reply.id.slice(7) : reply.id;
+                              fetch("/api/circle/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) }).catch(() => {});
+                            }}
+                            className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${reply.isRead ? "opacity-60" : ""}`}
                           >
-                            <p className="text-sm text-gray-800">{reply.title}</p>
-                            <p className="text-xs text-gray-500 line-clamp-2">{reply.message}</p>
-                          </Link>
+                            {!reply.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
+                            {reply.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
+                            <div className="min-w-0">
+                              <p className={`text-sm ${reply.isRead ? "text-gray-500" : "text-gray-800 font-medium"}`}>{reply.title}</p>
+                              {reply.message && <p className="text-xs text-gray-500 line-clamp-2">{reply.message}</p>}
+                            </div>
+                          </a>
                         ))
                       ) : (
                         <p className="px-2 py-2 text-xs text-gray-500">No replies right now.</p>
@@ -508,14 +558,68 @@ export default function Header() {
                     ) : null}
 
                     {alertTab === "dms" ? (
-                      <a
-                        href={memberSpaceHref}
-                        className="mt-1 flex items-start justify-between rounded-md px-2 py-2 hover:bg-gray-50"
-                      >
-                        <span className="text-sm text-gray-800">Open Circle DMs</span>
-                        <span className="text-xs text-gray-500">{dmUnreadCount}</span>
-                      </a>
+                      circleDms.length > 0 ? (
+                        circleDms.map((dm) => (
+                          <a
+                            key={dm.uuid}
+                            href={dm.href}
+                            className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${dm.unreadCount === 0 ? "opacity-60" : ""}`}
+                          >
+                            {dm.unreadCount > 0 && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
+                            {dm.unreadCount === 0 && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className={`text-sm truncate ${dm.unreadCount > 0 ? "text-gray-800 font-medium" : "text-gray-500"}`}>{dm.name}</p>
+                                {dm.unreadCount > 0 && <span className="text-[10px] font-medium text-white bg-[#EE2A2E] rounded-full px-1.5 py-0.5 flex-shrink-0">{dm.unreadCount}</span>}
+                              </div>
+                              {dm.lastMessage && (
+                                <p className="text-xs text-gray-500 truncate">
+                                  {dm.lastSender ? `${dm.lastSender}: ` : ""}{dm.lastMessage}
+                                </p>
+                              )}
+                            </div>
+                          </a>
+                        ))
+                      ) : (
+                        <p className="px-2 py-2 text-xs text-gray-500">No messages yet.</p>
+                      )
                     ) : null}
+
+                    <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2">
+                      {(notificationsCount > 0 || repliesCount > 0) ? (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            fetch("/api/circle/notifications", { method: "POST" }).catch(() => {});
+                            setCircleNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
+                            setCircleReplies(prev => prev.map(n => ({ ...n, isRead: true })));
+                            // Mark website alerts as read
+                            const unreadWebsiteKeys = websiteAlerts.filter(a => !a.isRead).map(a => a.id);
+                            if (unreadWebsiteKeys.length > 0) {
+                              fetch("/api/alerts", {
+                                method: "POST",
+                                headers: { "Content-Type": "application/json" },
+                                body: JSON.stringify({ alertKeys: unreadWebsiteKeys }),
+                              }).catch(() => {});
+                              setWebsiteAlerts(prev => prev.map(a => ({ ...a, isRead: true })));
+                              setWebsiteAlertCount(0);
+                            }
+                          }}
+                          className="text-xs text-gray-500 hover:text-gray-800 transition-colors"
+                        >
+                          Mark all as read
+                        </button>
+                      ) : (
+                        <span />
+                      )}
+                      <Link
+                        href="/me"
+                        className="text-xs text-gray-400 hover:text-gray-600 transition-colors"
+                        onClick={() => setShowAlertMenu(false)}
+                      >
+                        Notification settings
+                      </Link>
+                    </div>
                   </div>
                 ) : null}
               </div>

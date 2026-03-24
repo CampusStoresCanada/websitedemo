@@ -18,6 +18,7 @@ type AlertItem = {
   message: string;
   href: string;
   createdAt: string;
+  isRead?: boolean;
 };
 
 const ALERT_MENU_LIMIT = 10;
@@ -165,6 +166,8 @@ export async function GET() {
       .from("signup_applications")
       .select("id, application_type, applicant_name, status, created_at")
       .or(`user_id.eq.${userId},applicant_email.eq.${userEmail ?? "__none__"}`)
+      .in("status", pendingStatuses)
+      .gte("created_at", recentThresholdIso)
       .order("created_at", { ascending: false })
       .limit(5),
 
@@ -305,8 +308,29 @@ export async function GET() {
   });
 
   const deduped = Array.from(new Map(alertItems.map((item) => [item.id, item])).values());
-  const totalCount = deduped.length;
-  const limited = deduped.slice(0, ALERT_MENU_LIMIT);
+
+  // Load read state for this user
+  const alertKeys = deduped.map((item) => item.id);
+  const readSet = new Set<string>();
+  if (alertKeys.length > 0) {
+    const { data: readRows } = await adminClient
+      .from("user_alert_reads")
+      .select("alert_key")
+      .eq("user_id", userId)
+      .in("alert_key", alertKeys);
+    for (const row of readRows ?? []) {
+      readSet.add((row as { alert_key: string }).alert_key);
+    }
+  }
+
+  const itemsWithReadState = deduped.map((item) => ({
+    ...item,
+    isRead: readSet.has(item.id),
+  }));
+
+  const totalCount = itemsWithReadState.length;
+  const unreadCount = itemsWithReadState.filter((item) => !item.isRead).length;
+  const limited = itemsWithReadState.slice(0, ALERT_MENU_LIMIT);
 
   return NextResponse.json(
     {
@@ -321,7 +345,47 @@ export async function GET() {
         renewals: renewalEventsRes.data?.length ?? 0,
       },
       total: totalCount,
+      unreadCount,
     },
     { status: 200 }
   );
+}
+
+export async function POST(request: Request) {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) {
+    return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  const { userId } = auth.ctx;
+  const adminClient = createAdminClient();
+
+  let body: { alertKeys?: string[] } = {};
+  try {
+    body = (await request.json()) as { alertKeys?: string[] };
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
+  }
+
+  const alertKeys = body.alertKeys;
+  if (!Array.isArray(alertKeys) || alertKeys.length === 0) {
+    return NextResponse.json({ error: "alertKeys array required" }, { status: 400 });
+  }
+
+  // Upsert read records (ignore conflicts for idempotency)
+  const rows = alertKeys.slice(0, 100).map((key) => ({
+    user_id: userId,
+    alert_key: key,
+    read_at: new Date().toISOString(),
+  }));
+
+  const { error } = await adminClient
+    .from("user_alert_reads")
+    .upsert(rows, { onConflict: "user_id,alert_key", ignoreDuplicates: true });
+
+  if (error) {
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
 }

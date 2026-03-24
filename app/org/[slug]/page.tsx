@@ -21,6 +21,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
     notFound();
   }
 
+  console.log(`[org/${slug}] viewer=${viewer.viewerLevel} contacts sample: ${JSON.stringify(contacts.slice(0,3).map(c => ({ id: c.id, name: c.name, circle_id: (c as Record<string,unknown>).circle_id })))}`);
+
   // Render different layouts based on organization type
   if (organization.type === "Member") {
     return (

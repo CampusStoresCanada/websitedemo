@@ -453,7 +453,11 @@ export default function MemberProfile({
                       >
                         <td className="py-2 pr-4 text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
                           {contact.name ? (
-                            isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (contact.name as string)
+                            isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
+                              contact.circle_id ? (
+                                <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
+                              ) : (contact.name as string)
+                            )
                           ) : "—"}
                         </td>
                         <td className="py-2 pr-4 text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
@@ -792,7 +796,11 @@ export default function MemberProfile({
                       <div className="flex-1">
                         <div className="font-medium text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
                           {contact.name ? (
-                            isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (contact.name as string)
+                            isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
+                              contact.circle_id ? (
+                                <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
+                              ) : (contact.name as string)
+                            )
                           ) : "—"}
                         </div>
                         <div className="text-sm text-gray-400" data-flaggable data-field="contacts.role_title" data-entity-id={contact.id}>

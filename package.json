@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "test:actions": "vitest run lib/actions/__tests__",
     "test:scheduler": "vitest run lib/scheduler/__tests__",
     "test:commerce": "vitest run lib/conference-commerce/__tests__",
     "check:swaps-live": "node scripts/swaps-live-check.mjs",

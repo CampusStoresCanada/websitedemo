@@ -46,7 +46,7 @@ export async function GET(request: NextRequest) {
     }
 
     // Mint a member token
-    const token = await mintMemberToken({ community_member_id: circleId });
+    const token = await mintMemberToken({ email: auth.ctx.userEmail });
     const memberClient = new CircleMemberClient(token.access_token);
 
     // Check if a specific room was requested
@@ -132,7 +132,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Mint token and send
-    const token = await mintMemberToken({ community_member_id: circleId });
+    const token = await mintMemberToken({ email: auth.ctx.userEmail });
     const memberClient = new CircleMemberClient(token.access_token);
     const sent = await memberClient.sendMessage(chatRoomUuid, message);
 

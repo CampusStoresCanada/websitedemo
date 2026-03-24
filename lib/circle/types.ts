@@ -26,12 +26,13 @@ export interface CircleMemberInput {
   tag_ids?: number[];
   space_ids?: number[];
   skip_invitation?: boolean;
+  active?: boolean;
 }
 
 export interface CirclePost {
   id: number;
   name: string; // title
-  body: string | null; // HTML content
+  body: string | { body: string; [key: string]: unknown } | null; // HTML string or admin v2 nested object
   space_id: number;
   user_id: number;
   created_at: string;
@@ -73,11 +74,24 @@ export interface CircleMessage {
   user: { id: number; name: string; avatar_url: string | null } | null;
 }
 
+export interface CircleChatRoomParticipant {
+  community_member_id: number;
+  name: string;
+  avatar_url: string | null;
+}
+
 export interface CircleChatRoom {
   uuid: string;
   chat_room_kind: "direct" | "group_chat";
-  last_message_at: string | null;
-  members: Array<{ id: number; name: string; avatar_url: string | null }>;
+  chat_room_name: string;
+  unread_messages_count: number;
+  last_message: {
+    body: string;
+    sender: { name: string; avatar_url: string | null };
+    created_at: string;
+  } | null;
+  other_participants_preview: CircleChatRoomParticipant[];
+  current_participant: CircleChatRoomParticipant | null;
 }
 
 // ---- Headless Auth --------------------------------------------------------
@@ -117,7 +131,8 @@ export type CircleSyncOperation =
   | "add_to_access_group"
   | "remove_from_access_group"
   | "send_dm"
-  | "update_profile";
+  | "update_profile"
+  | "delete_member";
 
 export interface CircleSyncQueueItem {
   id: string;

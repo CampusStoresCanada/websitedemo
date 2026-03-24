@@ -18,7 +18,7 @@ import {
   retryQBExportAction,
   ignoreQBReconciliationItemAction,
 } from "@/lib/actions/ops";
-import { approveApplication, rejectApplication } from "@/lib/actions/applications";
+import { approveApplication, rejectApplication, resendApplicationInvite } from "@/lib/actions/applications";
 
 export const metadata = {
   title: "Ops Health | Admin | Campus Stores Canada",
@@ -117,6 +117,17 @@ type OperationOutcome = {
   action: string;
   success: boolean | null;
   message: string;
+};
+
+type AdminTransferRow = {
+  id: string;
+  organization_id: string;
+  from_user_id: string;
+  to_user_id: string | null;
+  status: string;
+  requested_at: string;
+  timeout_at: string;
+  reason: string | null;
 };
 
 type PendingApplicationRow = {
@@ -427,8 +438,10 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       .limit(10),
     adminClient
       .from("admin_transfer_requests")
-      .select("id", { count: "exact", head: true })
-      .eq("status", "pending"),
+      .select("id, organization_id, from_user_id, to_user_id, status, requested_at, timeout_at, reason")
+      .in("status", ["pending", "accepted", "auto_approved", "fallback_triggered"])
+      .order("requested_at", { ascending: false })
+      .limit(10),
     adminClient
       .from("stripe_webhook_events")
       .select("id, type, result, processed_at, error_message")
@@ -442,9 +455,9 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     adminClient
       .from("signup_applications")
       .select("id, application_type, applicant_name, status, created_at")
-      .in("status", ["pending", "pending_review", "pending_verification"])
+      .in("status", ["pending", "pending_review", "pending_verification", "approved"])
       .order("created_at", { ascending: false })
-      .limit(8),
+      .limit(12),
     adminClient
       .from("invoices")
       .select(
@@ -562,7 +575,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const circleFailedCount = circleFailedCountRes.count ?? 0;
   const circleLevel: HealthLevel = circleFailedCount > 0 ? "critical" : circlePendingCount > 50 ? "warning" : "healthy";
 
-  const transferPendingCount = transferPendingCountRes.count ?? 0;
+  const adminTransfers = (transferPendingCountRes.data ?? []) as AdminTransferRow[];
+  const transferPendingCount = adminTransfers.filter((t) => t.status === "pending").length;
   const transferLevel: HealthLevel = transferPendingCount > 5 ? "warning" : "healthy";
   const authGuardDeniedLastHour = authGuardDeniedRes.count ?? 0;
   const authGuardErrorsLastHour = authGuardErrorRes.count ?? 0;
@@ -1837,6 +1851,26 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                       </form>
                     </div>
                   ) : null}
+                  {row.status === "approved" ? (
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700">
+                        Awaiting payment/onboarding
+                      </span>
+                      <form
+                        action={async () => {
+                          "use server";
+                          await resendApplicationInvite(row.id);
+                        }}
+                      >
+                        <button
+                          type="submit"
+                          className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
+                        >
+                          Resend Invite &amp; Payment Link
+                        </button>
+                      </form>
+                    </div>
+                  ) : null}
                 </li>
               ))
             )}
@@ -1925,6 +1959,42 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                       Void Invoice
                     </button>
                   </form>
+                </li>
+              ))
+            )}
+          </ul>
+        </article>
+
+        <article className="rounded-xl border border-gray-200 bg-white p-4">
+          <h2 className="text-base font-semibold text-gray-900">Admin Transfers</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Pending: {transferPendingCount} &bull; Recent total: {adminTransfers.length}
+          </p>
+
+          <ul className="mt-3 space-y-2">
+            {adminTransfers.length === 0 ? (
+              <li className="text-sm text-gray-500">No recent admin transfer requests.</li>
+            ) : (
+              adminTransfers.map((row) => (
+                <li key={row.id} className="rounded-lg border border-gray-100 p-2 text-sm">
+                  <p className="text-gray-600">
+                    <span className={`inline-block rounded px-1.5 py-0.5 text-xs font-medium ${
+                      row.status === "pending"
+                        ? "bg-amber-50 text-amber-700"
+                        : row.status === "fallback_triggered"
+                        ? "bg-red-50 text-red-700"
+                        : "bg-green-50 text-green-700"
+                    }`}>
+                      {row.status}
+                    </span>
+                    {" "}&bull; Requested {toDisplayDate(row.requested_at)}
+                    {row.status === "pending" && ` \u2022 Timeout ${toDisplayDate(row.timeout_at)}`}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Org: {row.organization_id.slice(0, 8)}&hellip;
+                    {row.to_user_id ? ` \u2192 ${row.to_user_id.slice(0, 8)}\u2026` : " (no successor)"}
+                    {row.reason ? ` — ${row.reason}` : ""}
+                  </p>
                 </li>
               ))
             )}

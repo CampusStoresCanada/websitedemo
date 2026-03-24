@@ -5,6 +5,7 @@ import {
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { ensureKnownPerson, upsertPersonContact } from "@/lib/identity/lifecycle";
+import { enqueueNewContactCircleProvisioning } from "@/lib/circle/sync";
 
 interface AddContactParams {
   organizationId: string;
@@ -102,12 +103,8 @@ export async function addContact({
       return { success: false, error: contact.error ?? "Failed to add contact" };
     }
 
-    console.log("=== CONTACT ADDED ===");
-    console.log("Contact ID:", contact.contactId);
-    console.log("Name:", name);
-    console.log("Organization:", org.name);
-    console.log("Added by:", userEmail);
-    console.log("=====================");
+    // Queue Circle provisioning for the new contact (fire-and-forget)
+    void enqueueNewContactCircleProvisioning(contact.contactId, organizationId);
 
     return { success: true, contactId: contact.contactId };
   } catch (err) {
