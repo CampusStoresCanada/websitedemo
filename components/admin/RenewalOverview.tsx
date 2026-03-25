@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { parseUTC } from "@/lib/utils";
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -47,7 +48,7 @@ interface RenewalOverviewProps {
 
 function formatTimestamp(ts: string | null): string {
   if (!ts) return "\u2014";
-  return new Date(ts).toLocaleString("en-CA", {
+  return parseUTC(ts).toLocaleString("en-CA", {
     month: "short",
     day: "numeric",
     hour: "2-digit",

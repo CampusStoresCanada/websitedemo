@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parseUTC } from "@/lib/utils";
 import {
   listWishlistIntentsForConference,
   runWishlistBilling,
@@ -165,7 +166,7 @@ export default function WishlistQueue({
               return (
                 <tr key={row.id}>
                   <td className="px-4 py-3 text-sm text-gray-700">
-                    {new Date(row.wishlisted_at).toLocaleString()}
+                    <Timestamp iso={row.wishlisted_at} format="compact" />
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{row.organization_name ?? "Unknown org"}</td>
                   <td className="px-4 py-3 text-sm text-gray-700">{row.product_name ?? "Unknown product"}</td>
@@ -214,7 +215,7 @@ export default function WishlistQueue({
                       ) : null}
                     </div>
                     <div className="mt-1 text-[10px] text-gray-500">
-                      board:{row.board_decided_at ? new Date(row.board_decided_at).toLocaleDateString() : "-"} | billing:{row.billing_attempted_at ? new Date(row.billing_attempted_at).toLocaleDateString() : "-"}
+                      board:{row.board_decided_at ? parseUTC(row.board_decided_at).toLocaleDateString() : "-"} | billing:{row.billing_attempted_at ? parseUTC(row.billing_attempted_at).toLocaleDateString() : "-"}
                     </div>
                   </td>
                 </tr>

@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { approveApplication, rejectApplication } from "@/lib/actions/applications";
+import { parseUTC } from "@/lib/utils";
 import type { Json } from "@/lib/database.types";
 
 interface Application {
@@ -249,7 +250,7 @@ export function ApplicationsReview({
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
                           {app.created_at
-                            ? new Date(app.created_at).toLocaleDateString(
+                            ? parseUTC(app.created_at).toLocaleDateString(
                                 "en-CA"
                               )
                             : "\u2014"}
@@ -367,19 +368,19 @@ function ExpandedView({
         <span>
           Submitted:{" "}
           {app.created_at
-            ? new Date(app.created_at).toLocaleString("en-CA")
+            ? parseUTC(app.created_at).toLocaleString("en-CA")
             : "\u2014"}
         </span>
         {app.verified_at && (
           <span>
             Verified:{" "}
-            {new Date(app.verified_at).toLocaleString("en-CA")}
+            {parseUTC(app.verified_at).toLocaleString("en-CA")}
           </span>
         )}
         {app.reviewed_at && (
           <span>
             Reviewed:{" "}
-            {new Date(app.reviewed_at).toLocaleString("en-CA")}
+            {parseUTC(app.reviewed_at).toLocaleString("en-CA")}
           </span>
         )}
       </div>

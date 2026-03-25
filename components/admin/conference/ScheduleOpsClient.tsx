@@ -20,9 +20,14 @@ type DiffRow = {
   draftLabel: string;
 };
 
+function parseUTC(s: string): Date {
+  const utc = s.endsWith("Z") || s.includes("+") ? s : s.replace(" ", "T") + "Z";
+  return new Date(utc);
+}
+
 function formatTimestamp(value: string | null): string {
   if (!value) return "Unavailable";
-  const parsed = new Date(value);
+  const parsed = parseUTC(value);
   if (Number.isNaN(parsed.getTime())) return "Unavailable";
   return parsed.toLocaleString();
 }
@@ -320,7 +325,7 @@ export default function ScheduleOpsClient({
             {summary.runs.length === 0 ? <option value="">No runs yet</option> : null}
             {summary.runs.map((run) => (
               <option key={run.id} value={run.id}>
-                {run.runMode} / {run.status} / {new Date(run.startedAt).toLocaleString()}
+                {run.runMode} / {run.status} / {formatTimestamp(run.startedAt)}
               </option>
             ))}
           </select>

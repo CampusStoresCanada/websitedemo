@@ -1,5 +1,6 @@
 "use client";
 
+import { parseUTC } from "@/lib/utils";
 import type { WaitlistRow } from "@/lib/events/types";
 
 interface WaitlistTableProps {
@@ -31,7 +32,7 @@ export default function WaitlistTable({ waitlist }: WaitlistTableProps) {
               </td>
               <td className="px-4 py-3 text-gray-500">{entry.email ?? "—"}</td>
               <td className="px-4 py-3 text-gray-500">
-                {new Date(entry.joined_at).toLocaleDateString("en-CA")}
+                {parseUTC(entry.joined_at).toLocaleDateString("en-CA")}
               </td>
             </tr>
           ))}

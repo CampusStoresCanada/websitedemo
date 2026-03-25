@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { parseUTC } from "@/lib/utils";
 
 interface Submission {
   id: string;
@@ -137,7 +138,7 @@ export default function SubmissionsTable({ submissions, fiscalYear }: Submission
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-500">
                       {s.updatedAt
-                        ? new Date(s.updatedAt).toLocaleDateString("en-CA", {
+                        ? parseUTC(s.updatedAt).toLocaleDateString("en-CA", {
                             month: "short",
                             day: "numeric",
                             year: "numeric",

@@ -2078,8 +2078,9 @@ export default function ScheduleDesignWizard({
       );
     }
 
-    const regOpen = conferenceRegistrationOpenAt ? new Date(conferenceRegistrationOpenAt) : null;
-    const regClose = conferenceRegistrationCloseAt ? new Date(conferenceRegistrationCloseAt) : null;
+    const parseUTC = (s: string) => { const u = s.endsWith("Z") || s.includes("+") ? s : s.replace(" ", "T") + "Z"; return new Date(u); };
+    const regOpen = conferenceRegistrationOpenAt ? parseUTC(conferenceRegistrationOpenAt) : null;
+    const regClose = conferenceRegistrationCloseAt ? parseUTC(conferenceRegistrationCloseAt) : null;
     if (!conferenceRegistrationOpenAt || !conferenceRegistrationCloseAt) {
       add(
         "blocking",

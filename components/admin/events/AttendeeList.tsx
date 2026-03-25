@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { parseUTC } from "@/lib/utils";
 import { adminRegisterUser, getEligibleMembersForEvent } from "@/lib/actions/event-registration";
 import type { AttendeeRow } from "@/lib/events/types";
 
@@ -17,9 +18,9 @@ function exportCsv(attendees: AttendeeRow[], eventId: string) {
     a.display_name ?? "",
     a.email ?? "",
     a.registration_status,
-    new Date(a.registered_at).toLocaleString("en-CA"),
+    parseUTC(a.registered_at).toLocaleString("en-CA"),
     a.checked_in ? "Yes" : "No",
-    a.checked_in_at ? new Date(a.checked_in_at).toLocaleString("en-CA") : "",
+    a.checked_in_at ? parseUTC(a.checked_in_at).toLocaleString("en-CA") : "",
   ]);
   const csv = [headers, ...rows].map((r) => r.map((c) => `"${c}"`).join(",")).join("\n");
   const blob = new Blob([csv], { type: "text/csv" });
@@ -272,7 +273,7 @@ export default function AttendeeList({ attendees, eventId }: AttendeeListProps) 
                     </span>
                   </td>
                   <td className="px-4 py-3 text-gray-500">
-                    {new Date(attendee.registered_at).toLocaleDateString("en-CA")}
+                    {parseUTC(attendee.registered_at).toLocaleDateString("en-CA")}
                   </td>
                   <td className="px-4 py-3">
                     {attendee.checked_in ? (
@@ -281,7 +282,7 @@ export default function AttendeeList({ attendees, eventId }: AttendeeListProps) 
                           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" />
                         </svg>
                         {attendee.checked_in_at
-                          ? new Date(attendee.checked_in_at).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })
+                          ? parseUTC(attendee.checked_in_at).toLocaleTimeString("en-CA", { hour: "numeric", minute: "2-digit" })
                           : "Yes"}
                       </span>
                     ) : (

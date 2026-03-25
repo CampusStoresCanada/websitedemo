@@ -3,6 +3,7 @@
 import Link from "next/link";
 import type { BenchmarkingSurvey } from "@/lib/database.types";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { parseUTC } from "@/lib/utils";
 
 interface BenchmarkingLandingProps {
   surveys: BenchmarkingSurvey[];
@@ -78,7 +79,7 @@ export default function BenchmarkingLanding({
               {latestSurvey.closes_at && (
                 <p>
                   Closes:{" "}
-                  {new Date(latestSurvey.closes_at).toLocaleDateString("en-CA", {
+                  {parseUTC(latestSurvey.closes_at).toLocaleDateString("en-CA", {
                     year: "numeric",
                     month: "long",
                     day: "numeric",
@@ -161,13 +162,13 @@ export default function BenchmarkingLanding({
                       <span className="text-green-700">
                         Survey submitted
                         {existingDraft.updatedAt &&
-                          ` on ${new Date(existingDraft.updatedAt).toLocaleDateString("en-CA")}`}
+                          ` on ${parseUTC(existingDraft.updatedAt).toLocaleDateString("en-CA")}`}
                       </span>
                     ) : (
                       <span className="text-amber-700">
                         Draft in progress
                         {existingDraft.updatedAt &&
-                          ` — last saved ${new Date(existingDraft.updatedAt).toLocaleDateString("en-CA")}`}
+                          ` — last saved ${parseUTC(existingDraft.updatedAt).toLocaleDateString("en-CA")}`}
                       </span>
                     )}
                   </p>

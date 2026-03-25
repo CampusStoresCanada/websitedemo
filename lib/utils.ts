@@ -24,6 +24,30 @@ export function slugify(name: string): string {
     .replace(/(^-|-$)/g, "");
 }
 
+/**
+ * Parse a Supabase timestamp as UTC. Supabase returns "YYYY-MM-DD HH:mm:ss"
+ * with no tz marker — JS treats that as local time, not UTC. This appends "Z"
+ * to force UTC interpretation.
+ */
+export function parseUTC(s: string): Date {
+  const utc = s.endsWith("Z") || s.includes("+") ? s : s.replace(" ", "T") + "Z";
+  return new Date(utc);
+}
+
+/**
+ * Format a Supabase timestamp string for display, normalizing to UTC first.
+ * Safe in both server and client contexts. On the server this uses UTC;
+ * in the browser it uses the user's local timezone via toLocaleString.
+ */
+export function formatUTC(
+  s: string | null | undefined,
+  options?: Intl.DateTimeFormatOptions,
+  fallback = "Never"
+): string {
+  if (!s) return fallback;
+  return parseUTC(s).toLocaleString("en-CA", options);
+}
+
 // Format cents to CAD currency string
 export function formatCents(value: number): string {
   return new Intl.NumberFormat("en-CA", {

@@ -66,7 +66,7 @@ export default async function ConferenceOrderDetailPage({
           <dt className="text-gray-500">Status</dt>
           <dd className="text-gray-800">{order.status}</dd>
           <dt className="text-gray-500">Created</dt>
-          <dd className="text-gray-800">{new Date(order.created_at).toLocaleString()}</dd>
+          <dd className="text-gray-800"><Timestamp iso={order.created_at} format="compact" /></dd>
           <dt className="text-gray-500">Subtotal</dt>
           <dd className="text-gray-800">{formatCents(order.subtotal_cents)}</dd>
           <dt className="text-gray-500">Tax</dt>

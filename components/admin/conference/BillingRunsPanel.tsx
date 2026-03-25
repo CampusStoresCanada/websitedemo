@@ -89,10 +89,10 @@ export default function BillingRunsPanel({
             {runs.map((run) => (
               <tr key={run.id}>
                 <td className="px-4 py-3 text-sm text-gray-700">
-                  {run.started_at ? new Date(run.started_at).toLocaleString() : "n/a"}
+                  {run.started_at ? <Timestamp iso={run.started_at} format="compact" /> : "n/a"}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">
-                  {run.completed_at ? new Date(run.completed_at).toLocaleString() : "n/a"}
+                  {run.completed_at ? <Timestamp iso={run.completed_at} format="compact" /> : "n/a"}
                 </td>
                 <td className="px-4 py-3 text-sm text-gray-700">{run.status}</td>
                 <td className="px-4 py-3 text-sm text-gray-700">{run.total_items ?? 0}</td>
@@ -154,7 +154,7 @@ export default function BillingRunsPanel({
               {attempts.map((attempt) => (
                 <tr key={attempt.id}>
                   <td className="px-4 py-3 text-xs text-gray-700">
-                    {new Date(attempt.attempted_at).toLocaleString()}
+                    <Timestamp iso={attempt.attempted_at} format="compact" />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-600">{attempt.wishlist_intent_id.slice(0, 8)}</td>
                   <td className="px-4 py-3 text-xs text-gray-700">{attempt.organization_name ?? "unknown"}</td>

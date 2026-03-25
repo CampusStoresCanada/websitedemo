@@ -10,6 +10,7 @@ import type {
   MessageTemplate,
 } from "@/lib/comms/types";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
+import { parseUTC } from "@/lib/utils";
 
 export const metadata = {
   title: "Campaign Detail | Communications | Admin | Campus Stores Canada",
@@ -142,14 +143,14 @@ export default async function CampaignDetailPage({
         <div className="rounded-xl border border-gray-200 bg-white p-3">
           <p className="text-xs text-gray-500">Created</p>
           <p className="mt-1 font-semibold text-gray-900 text-sm">
-            {new Date(campaign.created_at).toLocaleString("en-CA")}
+            {parseUTC(campaign.created_at).toLocaleString("en-CA")}
           </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-3">
           <p className="text-xs text-gray-500">Completed</p>
           <p className="mt-1 font-semibold text-gray-900 text-sm">
             {campaign.completed_at
-              ? new Date(campaign.completed_at).toLocaleString("en-CA")
+              ? parseUTC(campaign.completed_at).toLocaleString("en-CA")
               : "—"}
           </p>
         </div>
@@ -233,7 +234,7 @@ export default async function CampaignDetailPage({
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {d.sent_at
-                        ? new Date(d.sent_at).toLocaleString("en-CA")
+                        ? parseUTC(d.sent_at).toLocaleString("en-CA")
                         : "—"}
                     </td>
                     <td className="px-4 py-3 text-red-600 text-xs">{d.error ?? "—"}</td>

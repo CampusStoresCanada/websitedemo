@@ -9,8 +9,9 @@ import {
   discardDraft,
   seedMissingBillingPolicies,
 } from "@/lib/actions/policy";
-import type { PlatformConfig, PlatformFeature } from "@/lib/actions/platform";
-import { FEATURE_POLICY_CATEGORIES } from "@/lib/actions/platform";
+import type { PlatformConfig, PlatformFeature } from "@/lib/actions/platform-types";
+import { FEATURE_POLICY_CATEGORIES } from "@/lib/actions/platform-types";
+import { parseUTC } from "@/lib/utils";
 import PolicyTab from "./PolicyTab";
 import PolicyPublishFlow from "./PolicyPublishFlow";
 import PolicyVersionHistory from "./PolicyVersionHistory";
@@ -187,7 +188,7 @@ export default function PolicyDashboard({
               ? `Active: ${activeSet.name}`
               : "No active policy set"}
             {activeSet?.published_at &&
-              ` — published ${new Date(activeSet.published_at).toLocaleDateString("en-CA")}`}
+              ` — published ${parseUTC(activeSet.published_at).toLocaleDateString("en-CA")}`}
           </p>
         </div>
         <div className="flex items-center gap-3">
@@ -218,7 +219,7 @@ export default function PolicyDashboard({
             </span>
             <span className="text-xs text-amber-600 ml-2">
               Created{" "}
-              {new Date(draft.created_at).toLocaleDateString("en-CA")}
+              {parseUTC(draft.created_at).toLocaleDateString("en-CA")}
             </span>
           </div>
           <div className="flex items-center gap-2">

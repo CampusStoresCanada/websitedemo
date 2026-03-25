@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { parseUTC } from "@/lib/utils";
 import type { CalendarItem, CalendarItemNote, CalendarStatus, CalendarSeverity } from "@/lib/calendar/types";
 
 type NoteWithActor = CalendarItemNote & {
@@ -156,7 +157,7 @@ export default function CalendarItemDetailClient({ item, notes }: Props) {
           {confirmed ? (
             <p className="text-xs text-green-700">
               Confirmed{" "}
-              {new Date(confirmed).toLocaleString("en-CA", {
+              {parseUTC(confirmed).toLocaleString("en-CA", {
                 month: "short", day: "numeric",
                 hour: "2-digit", minute: "2-digit",
                 timeZone: "America/Toronto",
@@ -201,7 +202,7 @@ export default function CalendarItemDetailClient({ item, notes }: Props) {
           <ul className="space-y-3 mb-4">
             {notes.map((n) => {
               const actorName = n.actor?.display_name ?? "Admin";
-              const ts = new Date(n.created_at).toLocaleString("en-CA", {
+              const ts = parseUTC(n.created_at).toLocaleString("en-CA", {
                 month:    "short",
                 day:      "numeric",
                 hour:     "2-digit",

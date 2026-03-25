@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { parseUTC } from "@/lib/utils";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { enqueueQBExport } from "@/lib/quickbooks/export";
 import type { Json } from "@/lib/database.types";
@@ -167,7 +168,7 @@ async function processEventTicketPurchase(
         variables: {
           registrant_name: profile?.display_name ?? "there",
           event_title: event.title,
-          event_date: new Date(event.starts_at).toLocaleString("en-CA", {
+          event_date: parseUTC(event.starts_at).toLocaleString("en-CA", {
             weekday: "long", year: "numeric", month: "long", day: "numeric",
             hour: "2-digit", minute: "2-digit", timeZoneName: "short",
           }),
@@ -243,7 +244,7 @@ async function processEventTicketBulkPurchase(
           variables: {
             registrant_name: profile?.display_name ?? "there",
             event_title: event.title,
-            event_date: new Date(event.starts_at).toLocaleString("en-CA", {
+            event_date: parseUTC(event.starts_at).toLocaleString("en-CA", {
               weekday: "long", year: "numeric", month: "long", day: "numeric",
               hour: "2-digit", minute: "2-digit", timeZoneName: "short",
             }),

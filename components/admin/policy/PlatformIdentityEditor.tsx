@@ -2,7 +2,8 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PlatformConfig } from "@/lib/actions/platform";
+import { parseUTC } from "@/lib/utils";
+import type { PlatformConfig } from "@/lib/actions/platform-types";
 import { savePlatformIdentity } from "@/lib/actions/platform";
 
 interface Props {
@@ -59,7 +60,7 @@ export default function PlatformIdentityEditor({ config, isSuperAdmin }: Props) 
         {config.bootstrapped_at && (
           <span className="text-[10px] text-[var(--text-tertiary)]">
             Bootstrapped{" "}
-            {new Date(config.bootstrapped_at).toLocaleDateString("en-CA")}
+            {parseUTC(config.bootstrapped_at).toLocaleDateString("en-CA")}
           </span>
         )}
       </div>

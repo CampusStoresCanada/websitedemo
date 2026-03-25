@@ -142,7 +142,7 @@ export default async function ConferenceOrdersPage({
                       href={`/conference/${year}/${edition}/orders/${order.id}?org=${selectedOrg.id}`}
                       className="text-[#EE2A2E] hover:underline"
                     >
-                      {new Date(order.created_at).toLocaleString()}
+                      <Timestamp iso={order.created_at} format="compact" />
                     </Link>
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-700">{order.status}</td>

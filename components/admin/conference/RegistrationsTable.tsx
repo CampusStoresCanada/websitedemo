@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { parseUTC } from "@/lib/utils";
 import {
   getAllRegistrations,
   recordRegistrationExportEvent,
@@ -704,7 +705,7 @@ export default function RegistrationsTable({ conferenceId }: RegistrationsTableP
                     })()}
                   </td>
                   <td className="px-4 py-3 text-sm text-gray-500">
-                    {new Date(reg.created_at).toLocaleDateString()}
+                    {parseUTC(reg.created_at).toLocaleDateString()}
                   </td>
                 </tr>
               ))}

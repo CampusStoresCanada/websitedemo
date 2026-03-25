@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseUTC } from "@/lib/utils";
 import type { CampaignStatus } from "@/lib/comms/types";
 
 export const metadata = {
@@ -158,7 +159,7 @@ export default async function CommsPage() {
                     </td>
                     <td className="px-4 py-3 text-gray-700">{sendCount}</td>
                     <td className="px-4 py-3 text-gray-500">
-                      {new Date(c.created_at).toLocaleDateString("en-CA")}
+                      {parseUTC(c.created_at).toLocaleDateString("en-CA")}
                     </td>
                   </tr>
                 );

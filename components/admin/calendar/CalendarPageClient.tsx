@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parseUTC } from "@/lib/utils";
 import type {
   CalendarItemEnriched,
   CalendarLayer,
@@ -81,7 +82,7 @@ export default function CalendarPageClient({ items, saturation, syncedAt }: Prop
       )
     : items;
 
-  const syncLabel = new Date(syncedAt).toLocaleTimeString("en-CA", {
+  const syncLabel = parseUTC(syncedAt).toLocaleTimeString("en-CA", {
     hour:   "2-digit",
     minute: "2-digit",
     timeZone: "America/Toronto",

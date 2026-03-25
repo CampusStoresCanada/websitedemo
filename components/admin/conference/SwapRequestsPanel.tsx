@@ -165,7 +165,7 @@ export default function SwapRequestsPanel({
               visibleSwapRequests.map((row) => (
                 <tr key={row.id}>
                   <td className="px-4 py-3 text-xs text-gray-700">
-                    {new Date(row.createdAt).toLocaleString()}
+                    <Timestamp iso={row.createdAt} format="compact" />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-700">
                     {row.delegateRegistrationId.slice(0, 8)}
@@ -222,7 +222,7 @@ export default function SwapRequestsPanel({
                 capRequests.map((row) => (
                   <tr key={row.id}>
                     <td className="px-4 py-3 text-xs text-gray-700">
-                      {new Date(row.created_at).toLocaleString()}
+                      <Timestamp iso={row.created_at} format="compact" />
                     </td>
                     <td className="px-4 py-3 text-xs font-mono text-gray-700">
                       {row.delegate_registration_id.slice(0, 8)}
@@ -254,7 +254,7 @@ export default function SwapRequestsPanel({
                         </div>
                       ) : (
                         <span className="text-xs text-gray-500">
-                          {row.decided_at ? new Date(row.decided_at).toLocaleString() : "resolved"}
+                          {row.decided_at ? <Timestamp iso={row.decided_at} format="compact" /> : "resolved"}
                         </span>
                       )}
                     </td>

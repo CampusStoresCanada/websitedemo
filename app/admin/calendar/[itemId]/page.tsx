@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { notFound } from "next/navigation";
 import Link from "next/link";
+import { parseUTC } from "@/lib/utils";
 import CalendarItemDetailClient from "@/components/admin/calendar/CalendarItemDetailClient";
 import type { CalendarItem, CalendarItemNote } from "@/lib/calendar/types";
 
@@ -139,7 +140,7 @@ export default async function CalendarItemDetailPage({ params }: PageProps) {
   const entityHrefStr  = entityHref(item.related_entity_type, item.related_entity_id, item.metadata);
   const entityLabelStr = entityLabel(item.related_entity_type);
 
-  const dateStr = new Date(item.starts_at).toLocaleString("en-CA", {
+  const dateStr = parseUTC(item.starts_at).toLocaleString("en-CA", {
     weekday:  "long",
     year:     "numeric",
     month:    "long",
@@ -201,7 +202,7 @@ export default async function CalendarItemDetailPage({ params }: PageProps) {
           <div className="px-4 py-3">
             <dt className="text-xs text-gray-500">Ends</dt>
             <dd className="mt-0.5 text-sm text-gray-700">
-              {new Date(item.ends_at).toLocaleString("en-CA", {
+              {parseUTC(item.ends_at).toLocaleString("en-CA", {
                 month: "short", day: "numeric",
                 hour: "2-digit", minute: "2-digit",
                 timeZone: "America/Toronto", timeZoneName: "short",

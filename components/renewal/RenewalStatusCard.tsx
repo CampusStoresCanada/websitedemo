@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { parseUTC } from "@/lib/utils";
 import { optOutOfRenewal } from "@/lib/actions/renewal";
 import { useRouter } from "next/navigation";
 
@@ -167,7 +168,7 @@ export function RenewalStatusCard({
           <div className="flex justify-between items-center">
             <span className="text-sm text-gray-600">Next Renewal</span>
             <span className="text-sm font-medium text-gray-900">
-              {new Date(membershipExpiresAt).toLocaleDateString("en-CA")}
+              {parseUTC(membershipExpiresAt).toLocaleDateString("en-CA")}
               {daysUntilExpiry !== null && (
                 <span className="ml-1.5 text-xs text-gray-500">
                   ({daysUntilExpiry > 0 ? `${daysUntilExpiry}d away` : "overdue"})
@@ -203,7 +204,7 @@ export function RenewalStatusCard({
                 Status: {renewalInvoice.status}
                 {renewalInvoice.dueDate && (
                   <> &middot; Due{" "}
-                    {new Date(renewalInvoice.dueDate).toLocaleDateString(
+                    {parseUTC(renewalInvoice.dueDate).toLocaleDateString(
                       "en-CA"
                     )}
                   </>

@@ -3,12 +3,14 @@
 import { useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import type { PolicyValue } from "@/lib/policy/types";
-import type { PlatformFeature, PlatformFeatureKey } from "@/lib/actions/platform";
+import type { PlatformFeature, PlatformFeatureKey } from "@/lib/actions/platform-types";
 import {
   PLATFORM_FEATURE_KEYS,
   PLATFORM_FEATURE_LABELS,
   PLATFORM_FEATURE_DESCRIPTIONS,
   FEATURE_POLICY_CATEGORIES,
+} from "@/lib/actions/platform-types";
+import {
   savePlatformIdentity,
   savePlatformFeatures,
   completeBootstrap,

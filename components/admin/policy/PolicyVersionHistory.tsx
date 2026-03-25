@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import { parseUTC } from "@/lib/utils";
 import type { PolicySet } from "@/lib/policy/types";
-import type { PolicyDiff } from "@/lib/actions/policy";
+import type { PolicyDiff } from "@/lib/actions/policy-types";
 import {
   getPolicyVersionHistory,
   getPolicyDiff,
@@ -202,7 +203,7 @@ export default function PolicyVersionHistory({ isSuperAdmin }: Props) {
                   <span className="text-xs text-[var(--text-tertiary)]">
                     Published{" "}
                     {version.published_at
-                      ? new Date(version.published_at).toLocaleString("en-CA")
+                      ? parseUTC(version.published_at).toLocaleString("en-CA")
                       : "—"}
                   </span>
                 </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
+import { parseUTC } from "@/lib/utils";
 import { useAuth } from "@/components/providers/AuthProvider";
 
 interface ChatRoom {
@@ -218,7 +219,7 @@ export function CircleDMPanel({
                       </p>
                       {room.last_message_at && (
                         <p className="text-xs text-gray-500">
-                          {new Date(room.last_message_at).toLocaleDateString()}
+                          {parseUTC(room.last_message_at).toLocaleDateString()}
                         </p>
                       )}
                     </div>
@@ -243,7 +244,7 @@ export function CircleDMPanel({
                       {msg.user?.name ?? "Unknown"}
                     </span>
                     <span className="text-xs text-gray-400">
-                      {new Date(msg.created_at).toLocaleTimeString([], {
+                      {parseUTC(msg.created_at).toLocaleTimeString([], {
                         hour: "2-digit",
                         minute: "2-digit",
                       })}

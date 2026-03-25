@@ -22,12 +22,13 @@ import {
   type TicketUserContext,
   type ResolvedTickets,
 } from "@/lib/events/tickets";
+import { parseUTC } from "@/lib/utils";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
 
 function fmtDate(iso: string | null | undefined): string {
   if (!iso) return "";
-  return new Date(iso).toLocaleString("en-CA", {
+  return parseUTC(iso).toLocaleString("en-CA", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
     hour: "2-digit", minute: "2-digit", timeZoneName: "short",
   });

@@ -15,6 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { createCalendarEventWithMeet } from "@/lib/google/calendar";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { sendTransactional } from "@/lib/comms/send";
+import { parseUTC } from "@/lib/utils";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
 
@@ -119,7 +120,7 @@ export async function GET(req: NextRequest) {
   if (creatorEmail && existing.created_by) {
     const eventUrl = `${APP_URL}/events/${eventId}`;
     const startsAt = existing.starts_at
-      ? new Date(existing.starts_at).toLocaleString("en-CA", {
+      ? parseUTC(existing.starts_at).toLocaleString("en-CA", {
           weekday: "long", year: "numeric", month: "long", day: "numeric",
           hour: "2-digit", minute: "2-digit", timeZoneName: "short",
         })

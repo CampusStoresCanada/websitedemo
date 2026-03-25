@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAuthenticated, requireAdmin, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseUTC } from "@/lib/utils";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { createCalendarEventWithMeet, deleteCalendarEvent } from "@/lib/google/calendar";
 import { triggerAutomation } from "@/lib/comms/automation";
@@ -524,7 +525,7 @@ export async function transitionEventStatus(
     void (async () => {
       try {
         const eventDate = existing.starts_at
-          ? new Date(existing.starts_at).toLocaleString("en-CA", {
+          ? parseUTC(existing.starts_at).toLocaleString("en-CA", {
               weekday: "long", year: "numeric", month: "long", day: "numeric",
               hour: "2-digit", minute: "2-digit", timeZoneName: "short",
             })
@@ -690,7 +691,7 @@ export async function deleteEvent(
 
 function formatEventDate(startsAt: string | null): string {
   if (!startsAt) return "";
-  return new Date(startsAt).toLocaleString("en-CA", {
+  return parseUTC(startsAt).toLocaleString("en-CA", {
     weekday: "long", year: "numeric", month: "long", day: "numeric",
     hour: "2-digit", minute: "2-digit", timeZoneName: "short",
   });

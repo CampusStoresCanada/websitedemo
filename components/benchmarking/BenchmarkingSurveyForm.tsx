@@ -11,6 +11,7 @@ import {
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 import DynamicSurveySection from "./DynamicSurveySection";
+import { parseUTC } from "@/lib/utils";
 
 interface BenchmarkingSurveyFormProps {
   benchmarkingId: string;
@@ -226,7 +227,7 @@ export default function BenchmarkingSurveyForm({
         {surveyClosesAt && (
           <p className="text-sm text-gray-500 mt-2">
             Survey closes{" "}
-            {new Date(surveyClosesAt).toLocaleDateString("en-CA", {
+            {parseUTC(surveyClosesAt).toLocaleDateString("en-CA", {
               year: "numeric",
               month: "long",
               day: "numeric",

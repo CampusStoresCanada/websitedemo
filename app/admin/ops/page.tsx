@@ -19,6 +19,7 @@ import {
   ignoreQBReconciliationItemAction,
 } from "@/lib/actions/ops";
 import { approveApplication, rejectApplication, resendApplicationInvite } from "@/lib/actions/applications";
+import { Timestamp } from "@/components/ui/LocalDate";
 
 export const metadata = {
   title: "Ops Health | Admin | Campus Stores Canada",
@@ -34,8 +35,8 @@ type JobCard = {
   key: string;
   title: string;
   level: HealthLevel;
-  lastRunAt: string;
-  nextRunAt: string;
+  lastRunAt: React.ReactNode;
+  nextRunAt: React.ReactNode;
   summary: string;
 };
 
@@ -226,14 +227,6 @@ type RetentionJobRow = {
   error_details: string | null;
 };
 
-function toDisplayDate(value: string | null | undefined): string {
-  if (!value) return "Never";
-  try {
-    return new Date(value).toLocaleString();
-  } catch {
-    return value;
-  }
-}
 
 function levelClasses(level: HealthLevel): string {
   if (level === "critical") return "bg-red-50 text-red-700 border-red-200";
@@ -266,12 +259,12 @@ function nextRunFromSimpleCron(
     const mod = minute % step;
     const delta = mod === 0 ? step : step - mod;
     next.setMinutes(minute + delta, 0, 0);
-    return next.toLocaleString();
+    return next.toISOString();
   }
 
   if (cronExpr === "0 * * * *") {
     next.setHours(now.getHours() + 1, 0, 0, 0);
-    return next.toLocaleString();
+    return next.toISOString();
   }
 
   const targetHour =
@@ -286,7 +279,7 @@ function nextRunFromSimpleCron(
   if (next.getTime() <= now.getTime()) {
     next.setDate(next.getDate() + 1);
   }
-  return next.toLocaleString();
+  return next.toISOString();
 }
 
 function alertBadgeClasses(
@@ -629,8 +622,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       key: "renewal-reminders",
       title: "Renewal Reminders",
       level: deriveRenewalLevel(reminderRun),
-      lastRunAt: toDisplayDate(reminderRun?.started_at),
-      nextRunAt: nextRunFromSimpleCron("0 11 * * *"),
+      lastRunAt: <Timestamp iso={reminderRun?.started_at} format="compact" />,
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("0 11 * * *")} format="compact" />,
       summary: reminderRun
         ? `Status: ${reminderRun.status}. Processed ${reminderRun.orgs_processed ?? 0}, failed ${reminderRun.orgs_failed ?? 0}.`
         : "No reminder runs yet.",
@@ -639,8 +632,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       key: "renewal-charges",
       title: "Renewal Charges",
       level: deriveRenewalLevel(chargeRun),
-      lastRunAt: toDisplayDate(chargeRun?.started_at),
-      nextRunAt: nextRunFromSimpleCron("0 12 * * *"),
+      lastRunAt: <Timestamp iso={chargeRun?.started_at} format="compact" />,
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("0 12 * * *")} format="compact" />,
       summary: chargeRun
         ? `Status: ${chargeRun.status}. Succeeded ${chargeRun.orgs_succeeded ?? 0}, failed ${chargeRun.orgs_failed ?? 0}.`
         : "No charge runs yet.",
@@ -649,8 +642,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       key: "grace-transitions",
       title: "Grace Transitions",
       level: deriveRenewalLevel(graceRun),
-      lastRunAt: toDisplayDate(graceRun?.started_at),
-      nextRunAt: nextRunFromSimpleCron("0 13 * * *"),
+      lastRunAt: <Timestamp iso={graceRun?.started_at} format="compact" />,
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("0 13 * * *")} format="compact" />,
       summary: graceRun
         ? `Status: ${graceRun.status}. Processed ${graceRun.orgs_processed ?? 0}, failed ${graceRun.orgs_failed ?? 0}.`
         : "No grace transition runs yet.",
@@ -660,7 +653,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       title: "Circle Sync",
       level: circleLevel,
       lastRunAt: "Queue-based",
-      nextRunAt: nextRunFromSimpleCron("*/5 * * * *"),
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("*/5 * * * *")} format="compact" />,
       summary: `Pending: ${circlePendingCount}. Failed: ${circleFailedCount}.`,
     },
     {
@@ -668,7 +661,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       title: "Circle Cutover",
       level: circleFailedCount > 0 ? "warning" : "healthy",
       lastRunAt: "Live telemetry",
-      nextRunAt: nextRunFromSimpleCron("*/15 * * * *"),
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("*/15 * * * *")} format="compact" />,
       summary:
         circleFailedCount > 0
           ? `Cutover drift signals detected in sync failures (${circleFailedCount}).`
@@ -678,7 +671,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       key: "scheduler",
       title: "Scheduler",
       level: schedulerLevel,
-      lastRunAt: toDisplayDate(schedulerLatest?.started_at),
+      lastRunAt: <Timestamp iso={schedulerLatest?.started_at} format="compact" />,
       nextRunAt: "On-demand (manual or automation-driven)",
       summary: schedulerLatest
         ? `Latest ${schedulerLatest.run_mode}/${schedulerLatest.status}. Meetings: ${schedulerLatest.total_meetings_created ?? 0}. Active runs: ${schedulerActiveCountRes.count ?? 0}, drafts: ${schedulerDraftCountRes.count ?? 0}.`
@@ -688,7 +681,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       key: "billing-runs",
       title: "Billing Runs",
       level: billingLevel,
-      lastRunAt: toDisplayDate(billingLatest?.started_at),
+      lastRunAt: <Timestamp iso={billingLatest?.started_at} format="compact" />,
       nextRunAt: "On-demand / board-triggered",
       summary: billingLatest
         ? `Status: ${billingLatest.status}. Successful items: ${billingLatest.successful_items ?? 0}/${billingLatest.total_items ?? 0}. Failed: ${billingLatest.failed_items ?? 0}.`
@@ -712,8 +705,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
           : latestRetentionRun.status === "failed"
             ? "critical"
             : "healthy",
-      lastRunAt: toDisplayDate(latestRetentionRun?.executed_at),
-      nextRunAt: nextRunFromSimpleCron("0 14 * * *"),
+      lastRunAt: <Timestamp iso={latestRetentionRun?.executed_at} format="compact" />,
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("0 14 * * *")} format="compact" />,
       summary: latestRetentionRun
         ? `Latest status: ${latestRetentionRun.status}. Records purged: ${latestRetentionRun.records_purged}.`
         : "No retention runs recorded yet.",
@@ -723,7 +716,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       title: "Admin Transfers",
       level: transferLevel,
       lastRunAt: "Live count",
-      nextRunAt: nextRunFromSimpleCron("0 * * * *"),
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("0 * * * *")} format="compact" />,
       summary: `Pending transfer requests: ${transferPendingCount}.`,
     },
     {
@@ -731,7 +724,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       title: "Auth / Session Health",
       level: authLevel,
       lastRunAt: "Telemetry window",
-      nextRunAt: nextRunFromSimpleCron("*/15 * * * *"),
+      nextRunAt: <Timestamp iso={nextRunFromSimpleCron("*/15 * * * *")} format="compact" />,
       summary: `Last 1h guard denies: ${authGuardDeniedLastHour}. Guard errors: ${authGuardErrorsLastHour}. Last 24h redirect loops: ${authRedirectLoopsLastDay}.`,
     },
   ];
@@ -1018,7 +1011,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
           <div>
             <h2 className="text-base font-semibold text-gray-900">Alert Lifecycle</h2>
             <p className="mt-1 text-sm text-gray-600">
-              Last evaluator run: {toDisplayDate(lastEvaluationRun?.created_at)}{" "}
+              Last evaluator run: <Timestamp iso={lastEvaluationRun?.created_at} />{" "}
               {lastEvaluationRun
                 ? `(${lastEvaluationRun.action === "ops_alert_evaluation_cron_run" ? "cron" : "manual"})`
                 : ""}
@@ -1082,14 +1075,14 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                   </span>
                   <span className="text-xs text-gray-500">{alert.rule_key}</span>
                 </div>
-                <span className="text-xs text-gray-500">{toDisplayDate(alert.created_at)}</span>
+                <span className="text-xs text-gray-500"><Timestamp iso={alert.created_at} /></span>
               </div>
 
               <p className="mt-2 text-sm text-gray-900">{alert.message}</p>
               <p className="mt-1 text-xs text-gray-500">
-                Owner: {alert.owner_id ?? "Unassigned"} · Due: {toDisplayDate(alert.due_at)} ·
-                Acknowledged: {toDisplayDate(alert.acknowledged_at)} · Resolved:{" "}
-                {toDisplayDate(alert.resolved_at)}
+                Owner: {alert.owner_id ?? "Unassigned"} · Due: <Timestamp iso={alert.due_at} /> ·
+                Acknowledged: <Timestamp iso={alert.acknowledged_at} /> · Resolved:{" "}
+                <Timestamp iso={alert.resolved_at} />
               </p>
 
               <div className="mt-3 flex gap-2">
@@ -1256,7 +1249,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                       {run.run_mode}/{run.status}
                     </p>
                     <p className="text-xs text-gray-600">
-                      {toDisplayDate(run.started_at)} • Meetings: {run.total_meetings_created ?? 0}
+                      <Timestamp iso={run.started_at} /> • Meetings: {run.total_meetings_created ?? 0}
                     </p>
                     <form
                       action={async (formData: FormData) => {
@@ -1297,7 +1290,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                   <li key={run.id} className="rounded-md border border-gray-100 p-2 text-sm">
                     <p className="font-medium text-gray-900">{run.status}</p>
                     <p className="text-xs text-gray-600">
-                      {toDisplayDate(run.started_at)} • Failed: {run.failed_items ?? 0}/{run.total_items ?? 0}
+                      <Timestamp iso={run.started_at} /> • Failed: {run.failed_items ?? 0}/{run.total_items ?? 0}
                     </p>
                     <form
                       action={async (formData: FormData) => {
@@ -1388,10 +1381,10 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             retentionRecentRuns.map((run) => (
               <li key={run.id} className="rounded-lg border border-gray-100 p-3 text-sm">
                 <p className="font-medium text-gray-900">
-                  {run.status} • Purged {run.records_purged} • {toDisplayDate(run.executed_at)}
+                  {run.status} • Purged {run.records_purged} • <Timestamp iso={run.executed_at} />
                 </p>
                 <p className="text-xs text-gray-600">
-                  Conference: {run.conference_id} • Cutoff: {toDisplayDate(run.cutoff_at)} • Policy Set:{" "}
+                  Conference: {run.conference_id} • Cutoff: <Timestamp iso={run.cutoff_at} /> • Policy Set:{" "}
                   {run.policy_set_id ?? "n/a"}
                 </p>
                 {run.error_details ? (
@@ -1418,7 +1411,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 stripeEvents.slice(0, 5).map((row) => (
                   <li key={row.id} className="rounded-lg border border-gray-100 p-2 text-sm">
                     <p className="font-medium text-gray-900">{row.type}</p>
-                    <p className="text-gray-600">{toDisplayDate(row.processed_at)} • {row.result}</p>
+                    <p className="text-gray-600"><Timestamp iso={row.processed_at} /> • {row.result}</p>
                     {row.error_message ? <p className="text-red-700">{row.error_message}</p> : null}
                     {row.result !== "success" ? (
                       <form
@@ -1464,7 +1457,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 conferenceEvents.slice(0, 5).map((row) => (
                   <li key={`${row.stripe_event_id}:${row.event_type}`} className="rounded-lg border border-gray-100 p-2 text-sm">
                     <p className="font-medium text-gray-900">{row.event_type}</p>
-                    <p className="text-gray-600">{toDisplayDate(row.processed_at)} • {row.success ? "success" : "failed"}</p>
+                    <p className="text-gray-600"><Timestamp iso={row.processed_at} /> • {row.success ? "success" : "failed"}</p>
                     {row.error_message ? <p className="text-red-700">{row.error_message}</p> : null}
                     {!row.success ? (
                       <form
@@ -1521,7 +1514,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                   {row.operation} • {row.entity_type}:{row.entity_id}
                 </p>
                 <p className="text-gray-600">
-                  Attempts: {row.attempts} • Next retry: {toDisplayDate(row.next_retry_at)}
+                  Attempts: {row.attempts} • Next retry: <Timestamp iso={row.next_retry_at} />
                 </p>
                 {row.last_error ? <p className="text-red-700">{row.last_error}</p> : null}
                 <form
@@ -1631,7 +1624,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 <li key={row.id} className="rounded-lg border border-red-100 bg-red-50 p-2 text-sm">
                   <p className="font-medium text-gray-900">Invoice: {row.invoice_id}</p>
                   <p className="text-gray-600 text-xs mt-0.5">
-                    Retries: {row.retry_count} • Queued: {toDisplayDate(row.created_at)}
+                    Retries: {row.retry_count} • Queued: <Timestamp iso={row.created_at} />
                   </p>
                   {row.error_message && (
                     <p className="text-red-700 text-xs mt-0.5 font-mono">{row.error_message}</p>
@@ -1678,7 +1671,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 <li key={row.id} className="rounded-lg border border-amber-100 bg-amber-50 p-2 text-sm">
                   <p className="font-medium text-gray-900">QB Payment: {row.qbo_payment_id}</p>
                   <p className="text-gray-600 text-xs mt-0.5">
-                    {(row.amount_cents / 100).toFixed(2)} {row.currency.toUpperCase()} • Paid: {toDisplayDate(row.paid_at)} • Received: {toDisplayDate(row.created_at)}
+                    {(row.amount_cents / 100).toFixed(2)} {row.currency.toUpperCase()} • Paid: <Timestamp iso={row.paid_at} /> • Received: <Timestamp iso={row.created_at} />
                   </p>
                   {row.notes && (
                     <p className="text-amber-700 text-xs mt-0.5">{row.notes}</p>
@@ -1723,7 +1716,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 <li key={row.id} className="rounded-lg border border-red-100 p-2 text-sm">
                   <p className="font-medium text-gray-900">{row.organization?.name ?? row.organization_id}</p>
                   <p className="text-gray-600 text-xs mt-0.5">
-                    {row.status} • Due {toDisplayDate(row.due_date)} • {((row.total_cents ?? 0) / 100).toFixed(2)}
+                    {row.status} • Due <Timestamp iso={row.due_date} /> • {((row.total_cents ?? 0) / 100).toFixed(2)}
                   </p>
                   {row.organization?.slug ? (
                     <Link
@@ -1774,7 +1767,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                         : "recorded"}
                   </span>
                   <span className="text-xs text-gray-500">
-                    {toDisplayDate(outcome.createdAt)}
+                    <Timestamp iso={outcome.createdAt} />
                   </span>
                 </div>
                 <p className="mt-1 text-gray-700">{outcome.message}</p>
@@ -1809,7 +1802,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     {row.applicant_name ?? "Unnamed applicant"}
                   </p>
                   <p className="text-gray-600">
-                    {row.application_type} • {row.status} • {toDisplayDate(row.created_at)}
+                    {row.application_type} • {row.status} • <Timestamp iso={row.created_at} />
                   </p>
                   {row.status === "pending_review" ? (
                     <div className="mt-2 flex flex-wrap gap-2">
@@ -1893,7 +1886,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     {row.organization?.name ?? row.organization_id}
                   </p>
                   <p className="text-gray-600">
-                    {row.status} • ${(row.total_cents / 100).toFixed(2)} • Due {toDisplayDate(row.due_date)}
+                    {row.status} • ${(row.total_cents / 100).toFixed(2)} • Due <Timestamp iso={row.due_date} />
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {row.organization?.slug ? (
@@ -1987,8 +1980,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     }`}>
                       {row.status}
                     </span>
-                    {" "}&bull; Requested {toDisplayDate(row.requested_at)}
-                    {row.status === "pending" && ` \u2022 Timeout ${toDisplayDate(row.timeout_at)}`}
+                    {" "}&bull; Requested <Timestamp iso={row.requested_at} />
+                    {row.status === "pending" && <>{" "}&bull; Timeout <Timestamp iso={row.timeout_at} /></>}
                   </p>
                   <p className="text-xs text-gray-500 mt-1">
                     Org: {row.organization_id.slice(0, 8)}&hellip;
@@ -2030,8 +2023,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
               </p>
               <p className="text-gray-600">
                 Status: {latestConference.status} • Dates:{" "}
-                {toDisplayDate(latestConference.start_date)} -{" "}
-                {toDisplayDate(latestConference.end_date)}
+                <Timestamp iso={latestConference.start_date} /> -{" "}
+                <Timestamp iso={latestConference.end_date} />
               </p>
               <p className="text-gray-600">
                 Required users: {requiredUserCount} • Overall legal coverage:{" "}
@@ -2072,7 +2065,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                         </td>
                         <td className="px-3 py-2 text-gray-700">{row.version}</td>
                         <td className="px-3 py-2 text-gray-700">
-                          {toDisplayDate(row.effectiveAt)}
+                          <Timestamp iso={row.effectiveAt} />
                         </td>
                         <td className="px-3 py-2 text-gray-700">
                           {row.acceptedUsers}/{requiredUserCount} (
@@ -2106,7 +2099,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
               <p className="mt-2 text-gray-700">
                 Latest retention run:{" "}
                 {latestRetentionRun
-                  ? `${toDisplayDate(latestRetentionRun.executed_at)} (${latestRetentionRun.status}, ${latestRetentionRun.records_purged} purged)`
+                  ? <><Timestamp iso={latestRetentionRun.executed_at} /> ({latestRetentionRun.status}, {latestRetentionRun.records_purged} purged)</>
                   : "none recorded"}
                 .
               </p>
@@ -2225,7 +2218,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             <tbody className="divide-y divide-gray-100">
               {pagedAuditLogs.map((row) => (
                 <tr key={row.id}>
-                  <td className="px-3 py-2 text-gray-700">{toDisplayDate(row.created_at)}</td>
+                  <td className="px-3 py-2 text-gray-700"><Timestamp iso={row.created_at} /></td>
                   <td className="px-3 py-2 font-medium text-gray-900">{row.action}</td>
                   <td className="px-3 py-2 text-gray-700">
                     {row.entity_type ?? "-"}

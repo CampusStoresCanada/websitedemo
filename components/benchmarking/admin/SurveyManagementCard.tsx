@@ -8,6 +8,7 @@ import {
   updateSurveyDates,
 } from "@/lib/actions/benchmarking-admin";
 import { useRouter } from "next/navigation";
+import { parseUTC } from "@/lib/utils";
 
 const STATUS_LABELS: Record<string, { label: string; color: string }> = {
   draft: { label: "Draft", color: "bg-gray-100 text-gray-700" },
@@ -199,12 +200,12 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
                     <span>FY{survey.fiscal_year}</span>
                     {survey.opens_at && (
                       <span>
-                        Opens: {new Date(survey.opens_at).toLocaleDateString("en-CA")}
+                        Opens: {parseUTC(survey.opens_at).toLocaleDateString("en-CA")}
                       </span>
                     )}
                     {survey.closes_at && (
                       <span>
-                        Closes: {new Date(survey.closes_at).toLocaleDateString("en-CA")}
+                        Closes: {parseUTC(survey.closes_at).toLocaleDateString("en-CA")}
                       </span>
                     )}
                   </div>

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { parseUTC } from "@/lib/utils";
 import type { CalendarItemEnriched } from "@/lib/calendar/types";
 
 // ── Helpers ───────────────────────────────────────────────────────
@@ -89,7 +90,7 @@ export default function CalendarItemCard({ item, compact = false }: Props) {
   const catLabel      = CATEGORY_LABELS[item.category] ?? item.category;
   const relTime       = relativeLabel(item.starts_at);
 
-  const dateStr = new Date(item.starts_at).toLocaleDateString("en-CA", {
+  const dateStr = parseUTC(item.starts_at).toLocaleDateString("en-CA", {
     month:    "short",
     day:      "numeric",
     timeZone: "America/Toronto",

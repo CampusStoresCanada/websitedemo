@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { parseUTC } from "@/lib/utils";
 import {
   getLegalVersions,
   createLegalVersion,
@@ -98,7 +99,7 @@ export default function LegalManager({ conferenceId }: LegalManagerProps) {
                     {LEGAL_DOCUMENT_LABELS[v.document_type as LegalDocumentType] ?? v.document_type}
                   </div>
                   <div className="text-xs text-gray-500 mt-0.5">
-                    Version {v.version} &middot; Effective {new Date(v.effective_at).toLocaleDateString()}
+                    Version {v.version} &middot; Effective {parseUTC(v.effective_at).toLocaleDateString()}
                   </div>
                 </div>
               </div>

@@ -2,13 +2,14 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { PlatformFeature, PlatformFeatureKey } from "@/lib/actions/platform";
+import { parseUTC } from "@/lib/utils";
+import type { PlatformFeature, PlatformFeatureKey } from "@/lib/actions/platform-types";
 import {
   PLATFORM_FEATURE_KEYS,
   PLATFORM_FEATURE_LABELS,
   PLATFORM_FEATURE_DESCRIPTIONS,
-  updatePlatformFeature,
-} from "@/lib/actions/platform";
+} from "@/lib/actions/platform-types";
+import { updatePlatformFeature } from "@/lib/actions/platform";
 
 interface Props {
   features: PlatformFeature[];
@@ -91,7 +92,7 @@ export default function PlatformFeaturesTab({ features, isSuperAdmin }: Props) {
                 {feature?.enabled_at && !alwaysOn && (
                   <p className="text-[10px] text-[var(--text-tertiary)] mt-1">
                     Enabled{" "}
-                    {new Date(feature.enabled_at).toLocaleDateString("en-CA")}
+                    {parseUTC(feature.enabled_at).toLocaleDateString("en-CA")}
                   </p>
                 )}
               </div>

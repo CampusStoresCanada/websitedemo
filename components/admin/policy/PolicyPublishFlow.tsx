@@ -8,7 +8,7 @@ function localInputNow(offsetMs = 0): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 import type { PolicySet } from "@/lib/policy/types";
-import type { PolicyDiff, ImpactPreview } from "@/lib/actions/policy";
+import type { PolicyDiff, ImpactPreview } from "@/lib/actions/policy-types";
 import {
   getImpactPreview,
   publishDraft,
