@@ -5,6 +5,7 @@ import { getPublicConference } from "@/lib/actions/conference";
 import { listConferenceOrdersForOrganization } from "@/lib/actions/conference-commerce";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatCents } from "@/lib/utils";
+import { Timestamp } from "@/components/ui/LocalDate";
 
 interface OrganizationMembership {
   id: string;

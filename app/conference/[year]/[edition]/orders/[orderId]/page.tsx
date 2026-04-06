@@ -4,6 +4,7 @@ import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import { getConferenceOrderDetails } from "@/lib/actions/conference-commerce";
 import { formatCents } from "@/lib/utils";
+import { Timestamp } from "@/components/ui/LocalDate";
 import OrderActions from "./order-actions";
 
 export const metadata = { title: "Conference Order Details" };

@@ -1252,6 +1252,80 @@ export type Database = {
           },
         ]
       }
+      circle_member_mapping: {
+        Row: {
+          circle_member_id: number
+          contact_id: string | null
+          created_at: string
+          id: string
+          match_confidence: string
+          match_method: string
+          notes: string | null
+          supabase_user_id: string | null
+          updated_at: string
+          verified: boolean
+          verified_at: string | null
+          verified_by: string | null
+        }
+        Insert: {
+          circle_member_id: number
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          match_confidence?: string
+          match_method?: string
+          notes?: string | null
+          supabase_user_id?: string | null
+          updated_at?: string
+          verified?: boolean
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Update: {
+          circle_member_id?: number
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          match_confidence?: string
+          match_method?: string
+          notes?: string | null
+          supabase_user_id?: string | null
+          updated_at?: string
+          verified?: boolean
+          verified_at?: string | null
+          verified_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "circle_member_mapping_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "circle_member_mapping_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "circle_member_mapping_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "circle_member_mapping_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       circle_sync_queue: {
         Row: {
           attempts: number
@@ -4354,8 +4428,10 @@ export type Database = {
           canceled_at: string | null
           catalogue: string | null
           catalogue_url: string | null
+          circle_access_group_id: string | null
           circle_id: string | null
           circle_properties: Json | null
+          circle_tag_id: string | null
           circle_updated_at: string | null
           city: string | null
           company_description: string | null
@@ -4440,8 +4516,10 @@ export type Database = {
           canceled_at?: string | null
           catalogue?: string | null
           catalogue_url?: string | null
+          circle_access_group_id?: string | null
           circle_id?: string | null
           circle_properties?: Json | null
+          circle_tag_id?: string | null
           circle_updated_at?: string | null
           city?: string | null
           company_description?: string | null
@@ -4526,8 +4604,10 @@ export type Database = {
           canceled_at?: string | null
           catalogue?: string | null
           catalogue_url?: string | null
+          circle_access_group_id?: string | null
           circle_id?: string | null
           circle_properties?: Json | null
+          circle_tag_id?: string | null
           circle_updated_at?: string | null
           city?: string | null
           company_description?: string | null
@@ -4875,6 +4955,100 @@ export type Database = {
             columns: ["tag_id"]
             isOneToOne: false
             referencedRelation: "tags"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_config: {
+        Row: {
+          bootstrapped_at: string | null
+          bootstrapped_by: string | null
+          client_domain: string
+          client_name: string
+          client_short_name: string
+          created_at: string
+          id: string
+          logo_url: string | null
+          primary_color: string
+          support_email: string
+          updated_at: string
+        }
+        Insert: {
+          bootstrapped_at?: string | null
+          bootstrapped_by?: string | null
+          client_domain?: string
+          client_name?: string
+          client_short_name?: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          primary_color?: string
+          support_email?: string
+          updated_at?: string
+        }
+        Update: {
+          bootstrapped_at?: string | null
+          bootstrapped_by?: string | null
+          client_domain?: string
+          client_name?: string
+          client_short_name?: string
+          created_at?: string
+          id?: string
+          logo_url?: string | null
+          primary_color?: string
+          support_email?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_config_bootstrapped_by_fkey"
+            columns: ["bootstrapped_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      platform_features: {
+        Row: {
+          always_on: boolean
+          config_json: Json
+          created_at: string
+          enabled: boolean
+          enabled_at: string | null
+          enabled_by: string | null
+          feature_key: string
+          id: string
+          updated_at: string
+        }
+        Insert: {
+          always_on?: boolean
+          config_json?: Json
+          created_at?: string
+          enabled?: boolean
+          enabled_at?: string | null
+          enabled_by?: string | null
+          feature_key: string
+          id?: string
+          updated_at?: string
+        }
+        Update: {
+          always_on?: boolean
+          config_json?: Json
+          created_at?: string
+          enabled?: boolean
+          enabled_at?: string | null
+          enabled_by?: string | null
+          feature_key?: string
+          id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "platform_features_enabled_by_fkey"
+            columns: ["enabled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -6604,6 +6778,35 @@ export type Database = {
           },
         ]
       }
+      user_alert_reads: {
+        Row: {
+          alert_key: string
+          id: string
+          read_at: string
+          user_id: string
+        }
+        Insert: {
+          alert_key: string
+          id?: string
+          read_at?: string
+          user_id: string
+        }
+        Update: {
+          alert_key?: string
+          id?: string
+          read_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_alert_reads_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_organizations: {
         Row: {
           created_at: string | null
@@ -7596,8 +7799,10 @@ export type Database = {
           canceled_at: string | null
           catalogue: string | null
           catalogue_url: string | null
+          circle_access_group_id: string | null
           circle_id: string | null
           circle_properties: Json | null
+          circle_tag_id: string | null
           circle_updated_at: string | null
           city: string | null
           company_description: string | null
@@ -8017,3 +8222,11 @@ export const Constants = {
     },
   },
 } as const
+
+// Convenience row-type aliases (keep in sync with table names above)
+export type Organization = Database["public"]["Tables"]["organizations"]["Row"];
+export type Contact = Database["public"]["Tables"]["contacts"]["Row"];
+export type BrandColor = Database["public"]["Tables"]["brand_colors"]["Row"];
+export type Benchmarking = Database["public"]["Tables"]["benchmarking"]["Row"];
+export type SiteContent = Database["public"]["Tables"]["site_content"]["Row"];
+export type DeltaFlag = Database["public"]["Tables"]["delta_flags"]["Row"];

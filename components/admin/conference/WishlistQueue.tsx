@@ -9,6 +9,7 @@ import {
   updateWishlistIntentStatus,
 } from "@/lib/actions/conference-commerce";
 import type { Database } from "@/lib/database.types";
+import { Timestamp } from "@/components/ui/LocalDate";
 
 type WishlistRow = Database["public"]["Tables"]["wishlist_intents"]["Row"] & {
   organization_name: string | null;
