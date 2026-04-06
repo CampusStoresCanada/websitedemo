@@ -4,7 +4,7 @@ import { createHash } from "crypto";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 
 type RegistrationUpdate = Database["public"]["Tables"]["conference_registrations"]["Update"];
 
@@ -315,18 +315,18 @@ export async function importConferenceTravelCsv(input: {
       failedCount += 1;
       continue;
     }
-    const existing = regRes.data as unknown as { id: string; conference_id: string; user_id: string | null; travel_mode: string | null; arrival_flight_details: string | null; departure_flight_details: string | null; hotel_name: string | null; hotel_confirmation_code: string | null; admin_notes: string | null; registration_custom_answers: Record<string, unknown> | null };
+    const existing = regRes.data;
     const registrationId = existing.id;
 
     const updatePayload: RegistrationUpdate = {
       updated_at: new Date().toISOString(),
     };
-    const existingRecord = existing as unknown as Record<string, unknown>;
     const setField = <K extends keyof RegistrationUpdate>(key: K, value: RegistrationUpdate[K]) => {
-      if (input.mode === "skip_if_existing" && existingRecord[key as string] != null && String(existingRecord[key as string]).trim() !== "") {
+      const currentValue = existing[key as keyof typeof existing];
+      if (input.mode === "skip_if_existing" && currentValue != null && String(currentValue).trim() !== "") {
         return false;
       }
-      if (input.mode === "fill_empty_only" && existingRecord[key as string] != null && String(existingRecord[key as string]).trim() !== "") {
+      if (input.mode === "fill_empty_only" && currentValue != null && String(currentValue).trim() !== "") {
         return false;
       }
       updatePayload[key] = value;
@@ -367,10 +367,10 @@ export async function importConferenceTravelCsv(input: {
       imported_at: new Date().toISOString(),
       imported_by: auth.ctx.userId,
     };
-    (updatePayload as Record<string, unknown>).registration_custom_answers = {
+    updatePayload.registration_custom_answers = {
       ...existingAnswers,
       travel_import_meta: importedMeta,
-    };
+    } as unknown as Json;
     changed = true;
 
     if (!changed) {

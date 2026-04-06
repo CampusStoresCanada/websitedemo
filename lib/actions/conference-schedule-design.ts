@@ -174,27 +174,31 @@ export async function listConferenceExhibitorOrganizations(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const adminClient = createAdminClient();
-  const { data: rawData, error } = await adminClient
+  const { data: peopleData, error } = await adminClient
     .from("conference_people")
-    .select("organization_id, organization_name, badge_org_name")
+    .select("organization_id")
     .eq("conference_id", conferenceId)
     .eq("person_kind", "exhibitor");
 
   if (error) return { success: false, error: error.message };
 
-  const data = rawData as unknown as Array<{ organization_id: string | null; organization_name: string | null; badge_org_name: string | null }>;
+  const orgIds = [...new Set(
+    (peopleData ?? [])
+      .map((row) => row.organization_id)
+      .filter((id): id is string => typeof id === "string" && id.trim().length > 0)
+  )];
+
+  const { data: orgsData, error: orgsError } = await adminClient
+    .from("organizations")
+    .select("id, name")
+    .in("id", orgIds);
+  if (orgsError) return { success: false, error: orgsError.message };
+
+  const orgNameById = new Map((orgsData ?? []).map((org) => [org.id, org.name]));
+
   const dedup = new Map<string, string>();
-  for (const row of data ?? []) {
-    const orgId =
-      typeof row.organization_id === "string" && row.organization_id.trim().length > 0
-        ? row.organization_id.trim()
-        : null;
-    if (!orgId) continue;
-    const name =
-      (typeof row.organization_name === "string" && row.organization_name.trim()) ||
-      (typeof row.badge_org_name === "string" && row.badge_org_name.trim()) ||
-      orgId;
-    if (!dedup.has(orgId)) dedup.set(orgId, name);
+  for (const orgId of orgIds) {
+    if (!dedup.has(orgId)) dedup.set(orgId, orgNameById.get(orgId) ?? orgId);
   }
 
   const output = [...dedup.entries()]

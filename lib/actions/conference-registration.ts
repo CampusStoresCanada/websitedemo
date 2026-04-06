@@ -23,7 +23,7 @@ import {
   type RulesEngineAction,
   type RulesEngineEvalContext,
 } from "@/lib/conference/rules-engine";
-import type { Database } from "@/lib/database.types";
+import type { Database, Json } from "@/lib/database.types";
 
 type RegistrationRow = Database["public"]["Tables"]["conference_registrations"]["Row"];
 type RegistrationUpdate = Database["public"]["Tables"]["conference_registrations"]["Update"];
@@ -646,11 +646,10 @@ async function evaluateTravelPolicyForRegistration(params: {
   };
 }
 
-function readCustomAnswers(reg: RegistrationRow): Record<string, unknown> {
-  const raw = (reg as unknown as { registration_custom_answers?: Record<string, unknown> | null })
-    .registration_custom_answers;
+function readCustomAnswers(reg: { registration_custom_answers: Json }): Record<string, unknown> {
+  const raw = reg.registration_custom_answers;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-  return raw;
+  return raw as Record<string, unknown>;
 }
 
 function readTravelWindowException(reg: RegistrationRow): TravelWindowExceptionRecord | null {
@@ -808,7 +807,7 @@ export async function saveRegistrationStep(
   if (regErr || !regRaw) {
     return { success: false, error: "Registration not found" };
   }
-  const reg = regRaw as unknown as { conference_id: string; user_id: string | null; status: string; travel_consent_given: boolean | null; organization_id: string | null; registration_type: string; registration_custom_answers: Record<string, unknown> | null };
+  const reg = regRaw;
   if (reg.user_id !== auth.ctx.userId && !isGlobalAdmin(auth.ctx.globalRole)) {
     return { success: false, error: "Not authorized" };
   }
@@ -938,7 +937,7 @@ export async function saveRegistrationStep(
     }
   }
 
-  const existingCustomAnswers = readCustomAnswers(reg as unknown as RegistrationRow);
+  const existingCustomAnswers = readCustomAnswers(reg);
   const incomingCustomAnswers =
     safeFields.registration_custom_answers &&
     typeof safeFields.registration_custom_answers === "object" &&
@@ -953,7 +952,7 @@ export async function saveRegistrationStep(
   const travelPolicyDecision = await evaluateTravelPolicyForRegistration({
     adminClient,
     conferenceId: reg.conference_id,
-    organizationId: reg.organization_id ?? "",
+    organizationId: reg.organization_id,
     registrationType: reg.registration_type,
     registrationCustomAnswers: mergedCustomAnswers,
   });
@@ -1009,12 +1008,12 @@ export async function saveRegistrationStep(
 
   const personResult = await ensurePersonForUser({
     userId: auth.ctx.userId,
-    organizationId: reg.organization_id ?? "",
+    organizationId: reg.organization_id,
     fallbackEmail: auth.ctx.userEmail,
   });
   if (personResult.personId) {
     await upsertConferenceContact({
-      organizationId: reg.organization_id ?? "",
+      organizationId: reg.organization_id,
       personId: personResult.personId,
       name: (safeFields.delegate_name as string | null | undefined) ?? undefined,
       email:
@@ -1089,9 +1088,7 @@ export async function submitRegistration(
   const startDate = parseDateOnly(conferenceRow.start_date);
   const endDate = parseDateOnly(conferenceRow.end_date);
 
-  const customAnswers =
-    ((reg as unknown as { registration_custom_answers?: Record<string, unknown> })
-      .registration_custom_answers as Record<string, unknown> | undefined) ?? {};
+  const customAnswers = readCustomAnswers(reg);
   const arrivalRaw =
     typeof customAnswers.arrival_date === "string" ? customAnswers.arrival_date : null;
   const departureRaw =
@@ -1227,7 +1224,7 @@ export async function requestTravelWindowException(
   const { data, error } = await adminClient
     .from("conference_registrations")
     .update({
-      registration_custom_answers: nextCustomAnswers as unknown as import("@/lib/database.types").Json,
+      registration_custom_answers: nextCustomAnswers as unknown as Json,
       updated_at: now,
     })
     .eq("id", registrationId)
@@ -1295,7 +1292,7 @@ export async function reviewTravelWindowException(
   const { data, error } = await adminClient
     .from("conference_registrations")
     .update({
-      registration_custom_answers: nextCustomAnswers as unknown as import("@/lib/database.types").Json,
+      registration_custom_answers: nextCustomAnswers as unknown as Json,
       updated_at: now,
     })
     .eq("id", registrationId)
@@ -1694,7 +1691,7 @@ export async function runTravelImportCsv(input: {
     };
 
     const currentCustomAnswers =
-      ((resolvedRegistration as unknown as Record<string, unknown>).registration_custom_answers as Record<string, unknown> | null) ?? {};
+      (resolvedRegistration.registration_custom_answers as Record<string, unknown> | null) ?? {};
     const currentTravelRef =
       typeof currentCustomAnswers.travel_confirmation_reference === "string"
         ? currentCustomAnswers.travel_confirmation_reference
@@ -1733,7 +1730,7 @@ export async function runTravelImportCsv(input: {
       ) {
         return;
       }
-      (updatePayload as Record<string, string | null | undefined>)[key as string] = incoming ?? undefined;
+      (updatePayload as Record<keyof RegistrationUpdate, string | null | undefined>)[key] = incoming ?? undefined;
       appliedFields.push(String(key));
     };
 
@@ -1758,7 +1755,7 @@ export async function runTravelImportCsv(input: {
       nextCustomAnswers.travel_import_admin_note = row.adminNote;
       appliedFields.push("registration_custom_answers.travel_import_admin_note");
     }
-    (updatePayload as Record<string, unknown>).registration_custom_answers = nextCustomAnswers;
+    updatePayload.registration_custom_answers = nextCustomAnswers as unknown as Json;
 
     if (!dryRun) {
       const { error: regUpdateError } = await adminClient
