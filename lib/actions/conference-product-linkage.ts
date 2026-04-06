@@ -74,10 +74,7 @@ export async function updateProductLinkages(params: {
       conference_id: params.conferenceId,
       module_key: key,
       enabled: row?.enabled ?? false,
-      config_json: normalizeModuleConfig(
-        key,
-        nextConfig
-      ),
+      config_json: normalizeModuleConfig(key, nextConfig) as unknown as import("@/lib/database.types").Json,
       updated_at: new Date().toISOString(),
       created_by: auth.ctx.userId,
     };
@@ -113,7 +110,7 @@ export async function updateProductLinkages(params: {
       config_json: normalizeModuleConfig("registration_ops", {
         ...regConfig,
         registration_options: nextOptions as RegistrationOptionRow[],
-      }),
+      }) as unknown as import("@/lib/database.types").Json,
       updated_at: new Date().toISOString(),
       created_by: auth.ctx.userId,
     });
@@ -140,7 +137,7 @@ export async function updateProductLinkages(params: {
     const { error: productUpdateError } = await adminClient
       .from("conference_products")
       .update({
-        metadata: currentMetadata,
+        metadata: currentMetadata as unknown as import("@/lib/database.types").Json,
       })
       .eq("id", params.productId);
     if (productUpdateError) return { success: false, error: productUpdateError.message };

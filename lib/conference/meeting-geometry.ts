@@ -121,7 +121,7 @@ export function resolveMeetingGeometryFromModulesConfig(
         endTime,
       } satisfies MeetingDayGeometry;
     })
-    .filter((value): value is MeetingDayGeometry => Boolean(value));
+    .filter(Boolean) as MeetingDayGeometry[];
 
   const suitesTarget = normalizePositiveInt(config.meeting_suites, 0);
 

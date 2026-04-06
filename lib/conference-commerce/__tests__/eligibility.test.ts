@@ -23,6 +23,7 @@ function buildProduct(overrides: Partial<ProductRow> = {}): ProductRow {
     display_order: 0,
     is_active: true,
     metadata: null,
+    qbo_item_id: null,
     created_at: "2026-03-02T00:00:00.000Z",
     ...overrides,
   };

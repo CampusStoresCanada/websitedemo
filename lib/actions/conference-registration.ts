@@ -751,9 +751,9 @@ export async function createRegistration(
     });
   }
 
-  await syncConferencePeopleIndex(reg.conference_id).catch((syncError) => {
+  await syncConferencePeopleIndex(conferenceId).catch((syncError) => {
     console.warn("[conference-registration] syncConferencePeopleIndex(save) failed", {
-      conferenceId: reg.conference_id,
+      conferenceId,
       error: syncError instanceof Error ? syncError.message : String(syncError),
     });
   });
@@ -799,15 +799,16 @@ export async function saveRegistrationStep(
   const adminClient = createAdminClient();
 
   // Validate ownership
-  const { data: reg, error: regErr } = await adminClient
+  const { data: regRaw, error: regErr } = await adminClient
     .from("conference_registrations")
     .select("conference_id, user_id, status, travel_consent_given, organization_id, registration_type, registration_custom_answers")
     .eq("id", registrationId)
     .single();
 
-  if (regErr || !reg) {
+  if (regErr || !regRaw) {
     return { success: false, error: "Registration not found" };
   }
+  const reg = regRaw as unknown as { conference_id: string; user_id: string | null; status: string; travel_consent_given: boolean | null; organization_id: string | null; registration_type: string; registration_custom_answers: Record<string, unknown> | null };
   if (reg.user_id !== auth.ctx.userId && !isGlobalAdmin(auth.ctx.globalRole)) {
     return { success: false, error: "Not authorized" };
   }
@@ -937,7 +938,7 @@ export async function saveRegistrationStep(
     }
   }
 
-  const existingCustomAnswers = readCustomAnswers(reg as RegistrationRow);
+  const existingCustomAnswers = readCustomAnswers(reg as unknown as RegistrationRow);
   const incomingCustomAnswers =
     safeFields.registration_custom_answers &&
     typeof safeFields.registration_custom_answers === "object" &&
@@ -952,7 +953,7 @@ export async function saveRegistrationStep(
   const travelPolicyDecision = await evaluateTravelPolicyForRegistration({
     adminClient,
     conferenceId: reg.conference_id,
-    organizationId: reg.organization_id,
+    organizationId: reg.organization_id ?? "",
     registrationType: reg.registration_type,
     registrationCustomAnswers: mergedCustomAnswers,
   });
@@ -1008,12 +1009,12 @@ export async function saveRegistrationStep(
 
   const personResult = await ensurePersonForUser({
     userId: auth.ctx.userId,
-    organizationId: reg.organization_id,
+    organizationId: reg.organization_id ?? "",
     fallbackEmail: auth.ctx.userEmail,
   });
   if (personResult.personId) {
     await upsertConferenceContact({
-      organizationId: reg.organization_id,
+      organizationId: reg.organization_id ?? "",
       personId: personResult.personId,
       name: (safeFields.delegate_name as string | null | undefined) ?? undefined,
       email:
@@ -1226,7 +1227,7 @@ export async function requestTravelWindowException(
   const { data, error } = await adminClient
     .from("conference_registrations")
     .update({
-      registration_custom_answers: nextCustomAnswers as RegistrationUpdate["registration_custom_answers"],
+      registration_custom_answers: nextCustomAnswers as unknown as import("@/lib/database.types").Json,
       updated_at: now,
     })
     .eq("id", registrationId)
@@ -1294,7 +1295,7 @@ export async function reviewTravelWindowException(
   const { data, error } = await adminClient
     .from("conference_registrations")
     .update({
-      registration_custom_answers: nextCustomAnswers as RegistrationUpdate["registration_custom_answers"],
+      registration_custom_answers: nextCustomAnswers as unknown as import("@/lib/database.types").Json,
       updated_at: now,
     })
     .eq("id", registrationId)
@@ -1693,7 +1694,7 @@ export async function runTravelImportCsv(input: {
     };
 
     const currentCustomAnswers =
-      (resolvedRegistration.registration_custom_answers as Record<string, unknown> | null) ?? {};
+      ((resolvedRegistration as unknown as Record<string, unknown>).registration_custom_answers as Record<string, unknown> | null) ?? {};
     const currentTravelRef =
       typeof currentCustomAnswers.travel_confirmation_reference === "string"
         ? currentCustomAnswers.travel_confirmation_reference
@@ -1732,7 +1733,7 @@ export async function runTravelImportCsv(input: {
       ) {
         return;
       }
-      updatePayload[key] = incoming;
+      (updatePayload as Record<string, string | null | undefined>)[key as string] = incoming ?? undefined;
       appliedFields.push(String(key));
     };
 
@@ -1757,7 +1758,7 @@ export async function runTravelImportCsv(input: {
       nextCustomAnswers.travel_import_admin_note = row.adminNote;
       appliedFields.push("registration_custom_answers.travel_import_admin_note");
     }
-    updatePayload.registration_custom_answers = nextCustomAnswers;
+    (updatePayload as Record<string, unknown>).registration_custom_answers = nextCustomAnswers;
 
     if (!dryRun) {
       const { error: regUpdateError } = await adminClient

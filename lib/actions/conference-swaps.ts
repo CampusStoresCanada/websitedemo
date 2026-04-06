@@ -109,7 +109,7 @@ function mapSwapRequestSummary(row: SwapRequestRow): SwapRequestSummary {
     dropScheduleId: row.drop_schedule_id,
     replacementExhibitorId: row.replacement_exhibitor_id,
     replacementScheduleId: row.replacement_schedule_id,
-    status: row.status,
+    status: row.status as SwapRequestSummary["status"],
     swapNumber: row.swap_number,
     adminOverride: row.admin_override,
     reason: row.reason,

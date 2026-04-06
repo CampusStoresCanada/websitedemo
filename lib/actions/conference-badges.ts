@@ -567,7 +567,7 @@ export async function saveBadgeTemplateConfig(params: {
       config_version: params.configVersion,
       name: params.name,
       status: params.status,
-      field_mapping: params.fieldMapping,
+      field_mapping: params.fieldMapping as unknown as import("@/lib/database.types").Json,
       created_by: auth.ctx.userId,
       updated_at: new Date().toISOString(),
     },
@@ -611,7 +611,7 @@ async function insertBadgeEvent(params: {
     event_status: params.eventStatus,
     message: params.message,
     actor_id: params.actorId,
-    payload: params.payload ?? {},
+    payload: (params.payload ?? {}) as unknown as import("@/lib/database.types").Json,
   });
 }
 

@@ -235,7 +235,7 @@ async function handleSendDm(
   const directRoom = chatRooms.find(
     (room) =>
       room.chat_room_kind === "direct" &&
-      room.members.some((m) => m.id === recipientCircleId)
+      room.other_participants_preview.some((m) => m.community_member_id === recipientCircleId)
   );
 
   let roomUuid: string;

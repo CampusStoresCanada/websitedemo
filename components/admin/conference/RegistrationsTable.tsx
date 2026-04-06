@@ -422,7 +422,7 @@ export default function RegistrationsTable({ conferenceId }: RegistrationsTableP
   };
 
   const handleDownloadTravelTemplate = async () => {
-    const csv = getTravelImportTemplateCsv();
+    const csv = await getTravelImportTemplateCsv();
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");

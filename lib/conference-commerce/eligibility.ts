@@ -124,9 +124,10 @@ export function checkProductEligibility(params: {
     if (rule.rule_type === "custom") {
       const expression = (config as { expression?: string }).expression;
       if (expression === "dsl_v1") {
+        const configRecord = config as Record<string, unknown>;
         const dsl =
-          config.dsl_v1 && typeof config.dsl_v1 === "object" && !Array.isArray(config.dsl_v1)
-            ? (config.dsl_v1 as Record<string, unknown>)
+          configRecord.dsl_v1 && typeof configRecord.dsl_v1 === "object" && !Array.isArray(configRecord.dsl_v1)
+            ? (configRecord.dsl_v1 as Record<string, unknown>)
             : null;
         if (!dsl) continue;
 

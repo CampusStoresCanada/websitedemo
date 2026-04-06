@@ -45,8 +45,8 @@ function mapRunSummary(run: SchedulerRunRow): SchedulerRunSummary {
   return {
     runId: run.id,
     conferenceId: run.conference_id,
-    runMode: run.run_mode,
-    status: run.status,
+    runMode: run.run_mode as SchedulerRunSummary["runMode"],
+    status: run.status as SchedulerRunSummary["status"],
     runSeed: run.run_seed,
     startedAt: run.started_at,
     completedAt: run.completed_at,

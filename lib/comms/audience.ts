@@ -52,13 +52,13 @@ async function resolveConferenceDelegates(
   let q = supabase
     .from("conference_people")
     .select(
-      `id, user_id, contact_email, full_name, conference_instance_id,
+      `id, user_id, contact_email, display_name, conference_id,
        conference_registrations!inner(registration_type)`
     )
     .eq("conference_registrations.registration_type", "member");
 
   if (filters?.conference_instance_id) {
-    q = q.eq("conference_instance_id", filters.conference_instance_id);
+    q = q.eq("conference_id", filters.conference_instance_id);
   }
 
   const { data, error } = await q;
@@ -69,9 +69,9 @@ async function resolveConferenceDelegates(
 
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
-    email: row.contact_email,
-    name: row.full_name ?? null,
-  }));
+    email: row.contact_email ?? "",
+    name: row.display_name ?? null,
+  })).filter((r) => r.email !== "");
 }
 
 // ── Conference Exhibitors ─────────────────────────────────────────
@@ -83,13 +83,13 @@ async function resolveConferenceExhibitors(
   let q = supabase
     .from("conference_people")
     .select(
-      `id, user_id, contact_email, full_name, conference_instance_id,
+      `id, user_id, contact_email, display_name, conference_id,
        conference_registrations!inner(registration_type)`
     )
     .eq("conference_registrations.registration_type", "partner");
 
   if (filters?.conference_instance_id) {
-    q = q.eq("conference_instance_id", filters.conference_instance_id);
+    q = q.eq("conference_id", filters.conference_instance_id);
   }
 
   const { data, error } = await q;
@@ -100,9 +100,9 @@ async function resolveConferenceExhibitors(
 
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
-    email: row.contact_email,
-    name: row.full_name ?? null,
-  }));
+    email: row.contact_email ?? "",
+    name: row.display_name ?? null,
+  })).filter((r) => r.email !== "");
 }
 
 // ── All Conference Attendees ──────────────────────────────────────
@@ -113,10 +113,10 @@ async function resolveConferenceAll(
 ): Promise<ResolvedRecipient[]> {
   let q = supabase
     .from("conference_people")
-    .select("id, user_id, contact_email, full_name, conference_instance_id");
+    .select("id, user_id, contact_email, display_name, conference_id");
 
   if (filters?.conference_instance_id) {
-    q = q.eq("conference_instance_id", filters.conference_instance_id);
+    q = q.eq("conference_id", filters.conference_instance_id);
   }
 
   const { data, error } = await q;
@@ -127,9 +127,9 @@ async function resolveConferenceAll(
 
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
-    email: row.contact_email,
-    name: row.full_name ?? null,
-  }));
+    email: row.contact_email ?? "",
+    name: row.display_name ?? null,
+  })).filter((r) => r.email !== "");
 }
 
 // ── Global Admins (admin + super_admin) ───────────────────────────
@@ -176,7 +176,7 @@ async function resolveOrgAdmins(
     .from("user_organizations")
     .select(
       `user_id, role,
-       profiles(id, email:auth.users(email), display_name),
+       profiles(id, display_name),
        organizations(id)`
     )
     .eq("role", "org_admin")
@@ -192,14 +192,22 @@ async function resolveOrgAdmins(
     return [];
   }
 
-  // Fall back to auth.users lookup for email if profile join fails
+  // Resolve emails via auth.users admin lookup (profiles table has no email column)
+  const userIds = (data ?? []).map((row) => row.user_id).filter(Boolean);
+  const { data: authUsers } = await supabase.auth.admin.listUsers();
+  const emailMap = Object.fromEntries(
+    (authUsers?.users ?? [])
+      .filter((u) => userIds.includes(u.id))
+      .map((u) => [u.id, u.email ?? ""])
+  );
+
   const results: ResolvedRecipient[] = [];
   for (const row of data ?? []) {
     const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
     if (!profile) continue;
     results.push({
       userId: row.user_id,
-      email: (profile as { email?: string }).email ?? "",
+      email: emailMap[row.user_id] ?? "",
       name: (profile as { display_name?: string }).display_name ?? null,
     });
   }

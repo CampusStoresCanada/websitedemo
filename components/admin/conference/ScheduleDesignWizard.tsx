@@ -1160,6 +1160,7 @@ function uniqueStrings<T extends string>(values: T[]): T[] {
 function sortRegistrationFields(
   fields: Array<{
     key: RegistrationFieldKey;
+    label: string;
     section: RegistrationFieldSection;
     order: number;
   }>
@@ -2122,7 +2123,7 @@ export default function ScheduleDesignWizard({
         !Array.isArray(meetingConfig.meetings_per_day_by_date)
           ? (meetingConfig.meetings_per_day_by_date as Record<string, unknown>)
           : {};
-      const totalSlotsFromLegacyPerDate = Object.values(meetingsPerDayByDate).reduce((sum, raw) => {
+      const totalSlotsFromLegacyPerDate = Object.values(meetingsPerDayByDate).reduce((sum: number, raw) => {
         const n = Number(raw ?? 0);
         return sum + (Number.isFinite(n) && n > 0 ? n : 0);
       }, 0);
@@ -3923,7 +3924,7 @@ export default function ScheduleDesignWizard({
       if (!scopedKeys.has(item.field_key)) return item;
       return {
         ...item,
-        state: required ? "required" : "optional",
+        state: (required ? "required" : "optional") as RegistrationFieldState,
       };
     });
     updateRegistrationOption(option.id, { form_items: nextItems });

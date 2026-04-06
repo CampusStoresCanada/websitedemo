@@ -174,7 +174,7 @@ export async function listConferenceExhibitorOrganizations(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const adminClient = createAdminClient();
-  const { data, error } = await adminClient
+  const { data: rawData, error } = await adminClient
     .from("conference_people")
     .select("organization_id, organization_name, badge_org_name")
     .eq("conference_id", conferenceId)
@@ -182,6 +182,7 @@ export async function listConferenceExhibitorOrganizations(
 
   if (error) return { success: false, error: error.message };
 
+  const data = rawData as unknown as Array<{ organization_id: string | null; organization_name: string | null; badge_org_name: string | null }>;
   const dedup = new Map<string, string>();
   for (const row of data ?? []) {
     const orgId =
@@ -234,7 +235,7 @@ export async function saveConferenceRoomInventory(
       config_json: {
         ...existingConfig,
         room_inventory: normalized,
-      },
+      } as unknown as import("@/lib/database.types").Json,
       created_by: auth.ctx.userId,
       updated_at: new Date().toISOString(),
     },
@@ -342,7 +343,7 @@ export async function saveConferenceScheduleModules(
       conference_id: conferenceId,
       module_key: key,
       enabled: moduleDef?.enabled === true,
-      config_json: moduleDef?.config_json ?? {},
+      config_json: (moduleDef?.config_json ?? {}) as unknown as import("@/lib/database.types").Json,
       created_by: auth.ctx.userId,
       updated_at: new Date().toISOString(),
     };

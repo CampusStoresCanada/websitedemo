@@ -7,7 +7,7 @@ import { getAccessGroupIds } from "@/lib/circle/config";
 
 export const maxDuration = 60;
 
-const ACTIVE_STATUSES = ["active", "grace", "reactivated"];
+const ACTIVE_STATUSES = ["active", "grace", "reactivated"] as const;
 const ORG_NAME_ALIASES: Record<string, string[]> = {
   cesium: ["cesium telecom"],
   "cesium telecom": ["cesium"],

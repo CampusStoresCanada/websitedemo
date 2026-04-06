@@ -7,10 +7,10 @@ import { resolveUserCircleId } from "@/lib/circle/member-link";
 
 export const dynamic = "force-dynamic";
 
-async function getClientForRequest(userId: string, userEmail: string): Promise<CircleMemberClient | null> {
+async function getClientForRequest(userId: string, userEmail: string | null): Promise<CircleMemberClient | null> {
   const circleId = await resolveUserCircleId(userId, userEmail);
   if (!circleId) return null;
-  const token = await mintMemberToken({ email: userEmail });
+  const token = await mintMemberToken({ email: userEmail ?? undefined });
   return new CircleMemberClient(token.access_token);
 }
 

@@ -109,6 +109,8 @@ export default function MapHero({
     pos?: string;
     service?: string;
     mandate?: string;
+    payment?: string;
+    shopping?: string;
   }>({});
   const [showFilterMenu, setShowFilterMenu] = useState(false);
 

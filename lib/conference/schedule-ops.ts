@@ -123,7 +123,7 @@ export async function loadScheduleOpsSummary(
     adminClient
       .from("scheduler_runs")
       .select(
-        "id, run_mode, status, started_at, completed_at, total_meetings_created, total_delegates, total_exhibitors, constraint_violations, updated_at"
+        "id, run_mode, status, started_at, completed_at, total_meetings_created, total_delegates, total_exhibitors, constraint_violations"
       )
       .eq("conference_id", conferenceId)
       .order("started_at", { ascending: false })

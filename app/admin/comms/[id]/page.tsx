@@ -73,7 +73,7 @@ export default async function CampaignDetailPage({
   const previewVariableValues = (campaign.variable_values ?? {}) as Record<string, string>;
   const canPreview = !!(previewBodyHtml || previewSubject);
   const audiencePreview = isDraft
-    ? await previewAudience(campaign.audience_definition as AudienceDefinition)
+    ? await previewAudience(campaign.audience_definition as unknown as AudienceDefinition)
     : null;
 
   const deliveryStats = {

@@ -995,7 +995,7 @@ export async function listPublishedEventsWithOrgContext(
       // Primary color per org (first by sort_order)
       const orgPrimaryColor = new Map<string, string>();
       for (const c of colorsResult.data ?? []) {
-        if (!orgPrimaryColor.has(c.organization_id)) {
+        if (!orgPrimaryColor.has(c.organization_id) && c.hex) {
           const hex = c.hex.startsWith("#") ? c.hex : `#${c.hex}`;
           orgPrimaryColor.set(c.organization_id, hex);
         }

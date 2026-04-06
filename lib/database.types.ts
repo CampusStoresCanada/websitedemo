@@ -8230,3 +8230,4 @@ export type BrandColor = Database["public"]["Tables"]["brand_colors"]["Row"];
 export type Benchmarking = Database["public"]["Tables"]["benchmarking"]["Row"];
 export type SiteContent = Database["public"]["Tables"]["site_content"]["Row"];
 export type DeltaFlag = Database["public"]["Tables"]["delta_flags"]["Row"];
+export type BenchmarkingSurvey = Database["public"]["Tables"]["benchmarking_surveys"]["Row"];

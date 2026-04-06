@@ -1,5 +1,6 @@
 "use server";
 
+import type { Database } from "@/lib/database.types";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveMeetingGeometryFromModulesConfig } from "@/lib/conference/meeting-geometry";

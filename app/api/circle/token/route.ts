@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
 
     // Mint token
     const token = await mintMemberToken({
-      email: auth.ctx.userEmail,
+      email: auth.ctx.userEmail ?? undefined,
     });
 
     return NextResponse.json({

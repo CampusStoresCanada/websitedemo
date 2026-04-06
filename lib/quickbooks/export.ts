@@ -172,7 +172,7 @@ async function processExportRow(
     .from("invoices")
     .select(`
       id, type, description, amount_cents, tax_amount_cents, total_cents,
-      currency, status, paid_at, due_date, created_at,
+      currency, status, paid_at, due_date, created_at, metadata,
       organization_id,
       organization:organizations(
         id, name, email, quickbooks_customer_id

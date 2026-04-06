@@ -84,7 +84,7 @@ export async function executeCampaignSend(
 
   // Resolve audience
   const recipients = await resolveAudience(
-    campaign.audience_definition as AudienceDefinition
+    campaign.audience_definition as unknown as AudienceDefinition
   );
 
   if (options.dryRun) {
@@ -248,8 +248,8 @@ export async function createCampaign(options: {
       template_id: templateId,
       subject_override: options.subjectOverride || null,
       body_override: options.bodyOverride || null,
-      audience_definition: options.audience,
-      variable_values: options.variableValues ?? {},
+      audience_definition: options.audience as unknown as import("@/lib/database.types").Json,
+      variable_values: (options.variableValues ?? {}) as unknown as import("@/lib/database.types").Json,
       trigger_source: options.triggerSource ?? "manual",
       automation_mode: options.automationMode ?? null,
       trigger_event_key: options.triggerEventKey ?? null,
