@@ -13,6 +13,10 @@ const TRAVEL_FIELDS_TO_PURGE = [
   "emergency_contact_phone",
   "gender",
   "mobile_phone",
+  "arrival_flight_details",
+  "departure_flight_details",
+  "hotel_name",
+  "hotel_confirmation_code",
 ] as const;
 
 type RetentionConference = {

@@ -30,6 +30,17 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
+const RENAME_RULES = [
+  {
+    notionName: "Cesium",
+    preferredExistingSlug: "cesium-telecom",
+  },
+  {
+    notionName: "Cesium Telecom",
+    preferredExistingSlug: "cesium-telecom",
+  },
+];
+
 function normalizeText(value) {
   return String(value ?? "")
     .toLowerCase()
@@ -205,7 +216,16 @@ async function main() {
   for (const item of tagged) {
     const slugKey = normalizeText(item.slug);
     const nameKey = normalizeText(item.name);
-    const existing = bySlug.get(slugKey) ?? byName.get(nameKey) ?? null;
+    const renameRule = RENAME_RULES.find(
+      (rule) => normalizeText(rule.notionName) === nameKey
+    );
+    const existing =
+      (renameRule
+        ? bySlug.get(normalizeText(renameRule.preferredExistingSlug)) ?? null
+        : null) ??
+      bySlug.get(slugKey) ??
+      byName.get(nameKey) ??
+      null;
 
     if (existing) {
       const patch = {};

@@ -9,6 +9,10 @@ import {
 } from "@/lib/auth/guards";
 import { inviteOrgUser } from "@/lib/actions/user-management";
 import {
+  calculateConferenceRefund,
+  requestConferenceRefund,
+} from "@/lib/actions/conference-commerce";
+import {
   requestBadgeReprint,
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
@@ -77,22 +81,24 @@ type SyncResult = {
   staffUpserts: number;
 };
 
+type CpqRows = Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;
+type CpqRow = Promise<{ data: Record<string, unknown> | null; error: { message: string } | null }>;
+type CpqChain = {
+  eq: (column: string, value: string) => CpqChain;
+  order: (column: string, opts?: { ascending?: boolean }) => CpqRows;
+  in: (column: string, values: string[]) => CpqRows;
+  maybeSingle: () => CpqRow;
+};
+type CpqSelect = CpqChain & {
+  // direct terminations without filters
+  order: (column: string, opts?: { ascending?: boolean }) => CpqRows;
+  maybeSingle: () => CpqRow;
+};
+
 function conferencePeopleClient() {
   return createAdminClient() as unknown as {
     from: (table: string) => {
-      select: (columns: string) => {
-        eq: (column: string, value: string) => {
-          order: (
-            column: string,
-            opts?: { ascending?: boolean }
-          ) => Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;
-          in?: (
-            column: string,
-            values: string[]
-          ) => Promise<{ data: Record<string, unknown>[] | null; error: { message: string } | null }>;
-        };
-        maybeSingle: () => Promise<{ data: Record<string, unknown> | null; error: { message: string } | null }>;
-      };
+      select: (columns: string) => CpqSelect;
       upsert: (
         values: Record<string, unknown> | Record<string, unknown>[],
         opts?: { onConflict?: string }
@@ -532,7 +538,7 @@ async function insertAssignmentEvent(event: {
     actor_id: event.actorId,
     actor_type: event.actorType,
     reason: event.reason,
-    metadata: event.metadata ?? null,
+    metadata: (event.metadata ?? null) as unknown as import("@/lib/database.types").Json | null,
   });
 }
 
@@ -1221,6 +1227,15 @@ export async function assignConferenceEntitlement(
     .eq("source_id", conferenceEntitlementId)
     .maybeSingle();
 
+  if (
+    assignmentStatus !== "pending_user_activation" &&
+    targetUserId &&
+    (existing?.user_id as string | null) &&
+    (existing?.user_id as string | null) !== targetUserId
+  ) {
+    assignmentStatus = "reassigned";
+  }
+
   const payload = {
     conference_id: conferenceId,
     organization_id: organizationId,
@@ -1290,7 +1305,12 @@ export async function assignConferenceEntitlement(
     nextStatus: assignmentStatus,
     actorId: auth.ctx.userId,
     actorType: "user",
-    reason: assignmentStatus === "pending_user_activation" ? "invite_pending" : "assigned",
+    reason:
+      assignmentStatus === "pending_user_activation"
+        ? "invite_pending"
+        : assignmentStatus === "reassigned"
+          ? "reassigned"
+          : "assigned",
     metadata: {
       targetEmail: normalizedEmail,
       entitlementType: params.entitlementType,
@@ -1316,6 +1336,331 @@ export async function assignConferenceEntitlement(
   return {
     success: true,
     data: { personId: personRow.id as string, assignmentStatus },
+  };
+}
+
+export async function listOrganizationAssignableUsers(
+  organizationId: string
+): Promise<{
+  success: boolean;
+  error?: string;
+  data?: Array<{ userId: string; displayName: string | null; email: string | null; role: string }>;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+
+  const adminDb = createAdminClient();
+  const { data: memberships, error: membershipError } = await adminDb
+    .from("user_organizations")
+    .select("user_id, role")
+    .eq("organization_id", organizationId)
+    .eq("status", "active");
+
+  if (membershipError) {
+    return { success: false, error: `Failed to load organization users: ${membershipError.message}` };
+  }
+
+  const memberRows = (memberships ?? []) as Array<{ user_id: string | null; role: string | null }>;
+  const userIds = memberRows
+    .map((row) => row.user_id)
+    .filter((value): value is string => Boolean(value));
+
+  if (userIds.length === 0) {
+    return { success: true, data: [] };
+  }
+
+  const [{ data: profileRows }, authUsersResult] = await Promise.all([
+    adminDb.from("profiles").select("id, display_name").in("id", userIds),
+    adminDb.auth.admin.listUsers(),
+  ]);
+
+  const profileNameById = new Map<string, string | null>(
+    ((profileRows ?? []) as Array<{ id: string; display_name: string | null }>).map((row) => [
+      row.id,
+      row.display_name ?? null,
+    ])
+  );
+  const emailById = new Map<string, string | null>(
+    (authUsersResult.data?.users ?? [])
+      .filter((user) => userIds.includes(user.id))
+      .map((user) => [user.id, user.email ?? null])
+  );
+
+  const data = memberRows
+    .filter((row): row is { user_id: string; role: string | null } => Boolean(row.user_id))
+    .map((row) => ({
+      userId: row.user_id,
+      displayName: profileNameById.get(row.user_id) ?? null,
+      email: emailById.get(row.user_id) ?? null,
+      role: row.role ?? "member",
+    }));
+
+  return { success: true, data };
+}
+
+export async function unassignConferenceEntitlement(
+  conferenceId: string,
+  organizationId: string,
+  conferenceEntitlementId: string
+): Promise<{ success: boolean; error?: string; data?: { personId: string } }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+
+  const db = conferencePeopleClient();
+  const { data: existing, error: existingError } = await db
+    .from("conference_people")
+    .select("id,user_id,assignment_status,entitlement_type")
+    .eq("conference_id", conferenceId)
+    .eq("organization_id", organizationId)
+    .eq("source_type", "entitlement")
+    .eq("source_id", conferenceEntitlementId)
+    .maybeSingle();
+
+  if (existingError || !existing) {
+    return { success: false, error: existingError?.message ?? "Entitlement row not found." };
+  }
+
+  const previousUserId = (existing.user_id as string | null) ?? null;
+  const previousStatus = (existing.assignment_status as string | null) ?? null;
+
+  const { error: updateError } = await db
+    .from("conference_people")
+    .update({
+      user_id: null,
+      canonical_person_id: null,
+      person_kind: "unassigned",
+      assignment_status: "unassigned",
+      assigned_email_snapshot: null,
+      assigned_at: new Date().toISOString(),
+      assigned_by: auth.ctx.userId,
+      reassigned_from_user_id: previousUserId,
+      schedule_scope: "organization",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", existing.id as string);
+
+  if (updateError) {
+    return { success: false, error: `Failed to unassign entitlement: ${updateError.message}` };
+  }
+
+  await logAuditEventSafe({
+    action: "conference_entitlement_assignment",
+    entityType: "conference_people",
+    entityId: existing.id as string,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      conferenceId,
+      organizationId,
+      conferenceEntitlementId,
+      targetUserId: null,
+      targetEmail: null,
+      assignmentStatus: "unassigned",
+    },
+  });
+
+  await insertAssignmentEvent({
+    conferenceId,
+    organizationId,
+    personId: existing.id as string,
+    conferenceEntitlementId,
+    previousUserId,
+    nextUserId: null,
+    previousStatus,
+    nextStatus: "unassigned",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    reason: "unassigned",
+    metadata: {
+      entitlementType: (existing.entitlement_type as string | null) ?? null,
+    },
+  });
+
+  await logAuditEventSafe({
+    action: "conference_assignment_notification_hook",
+    entityType: "conference_people",
+    entityId: existing.id as string,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      hook: "assignment_unassigned",
+      conferenceId,
+      organizationId,
+      conferenceEntitlementId,
+    },
+  });
+
+  return { success: true, data: { personId: existing.id as string } };
+}
+
+export async function unassignConferenceEntitlementWithDisposition(
+  conferenceId: string,
+  organizationId: string,
+  conferenceEntitlementId: string,
+  disposition: "hold_for_reassignment" | "release_and_refund"
+): Promise<{
+  success: boolean;
+  error?: string;
+  data?: { personId: string; refunded: boolean; refundAmountCents?: number };
+}> {
+  if (disposition === "hold_for_reassignment") {
+    const holdResult = await unassignConferenceEntitlement(
+      conferenceId,
+      organizationId,
+      conferenceEntitlementId
+    );
+    if (!holdResult.success || !holdResult.data) return { success: false, error: holdResult.error };
+    return {
+      success: true,
+      data: { personId: holdResult.data.personId, refunded: false },
+    };
+  }
+
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+
+  const db = conferencePeopleClient();
+  const adminDb = createAdminClient();
+  const { data: existing, error: existingError } = await db
+    .from("conference_people")
+    .select("id,user_id,assignment_status,entitlement_type")
+    .eq("conference_id", conferenceId)
+    .eq("organization_id", organizationId)
+    .eq("source_type", "entitlement")
+    .eq("source_id", conferenceEntitlementId)
+    .maybeSingle();
+
+  if (existingError || !existing) {
+    return { success: false, error: existingError?.message ?? "Entitlement row not found." };
+  }
+
+  const { data: entitlementItem, error: entitlementError } = await adminDb
+    .from("conference_order_items")
+    .select("id,order_id,quantity,total_cents")
+    .eq("id", conferenceEntitlementId)
+    .maybeSingle();
+  if (entitlementError || !entitlementItem) {
+    return {
+      success: false,
+      error: entitlementError?.message ?? "Failed to resolve entitlement order item.",
+    };
+  }
+
+  const quantity = Math.max(1, entitlementItem.quantity ?? 1);
+  const seatBaseCents = Math.round((entitlementItem.total_cents ?? 0) / quantity);
+  if (seatBaseCents <= 0) {
+    return { success: false, error: "Entitlement seat amount is not refundable." };
+  }
+
+  const refundQuote = await calculateConferenceRefund(entitlementItem.order_id);
+  if (!refundQuote.success) return { success: false, error: refundQuote.error };
+  if (!refundQuote.data.eligible && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return {
+      success: false,
+      error: "Order is not eligible for a refund under current policy.",
+    };
+  }
+
+  const seatRefundCents = Math.round(
+    seatBaseCents * ((refundQuote.data.refundPct ?? 0) / 100)
+  );
+  if (seatRefundCents <= 0) {
+    return {
+      success: false,
+      error: "No refundable amount is available for this entitlement seat.",
+    };
+  }
+
+  const refundResult = await requestConferenceRefund(
+    entitlementItem.order_id,
+    seatRefundCents,
+    {
+      allowManagedOverride: true,
+      overrideReason: "entitlement_release_refund",
+    }
+  );
+  if (!refundResult.success) {
+    return { success: false, error: refundResult.error };
+  }
+
+  const previousUserId = (existing.user_id as string | null) ?? null;
+  const previousStatus = (existing.assignment_status as string | null) ?? null;
+  const nowIso = new Date().toISOString();
+  const { error: updateError } = await db
+    .from("conference_people")
+    .update({
+      user_id: null,
+      canonical_person_id: null,
+      person_kind: "unassigned",
+      assignment_status: "canceled",
+      entitlement_status: "refunded",
+      assigned_email_snapshot: null,
+      assigned_at: nowIso,
+      assigned_by: auth.ctx.userId,
+      reassigned_from_user_id: previousUserId,
+      schedule_scope: "organization",
+      updated_at: nowIso,
+    })
+    .eq("id", existing.id as string);
+
+  if (updateError) {
+    return { success: false, error: `Failed to release refunded entitlement: ${updateError.message}` };
+  }
+
+  await insertAssignmentEvent({
+    conferenceId,
+    organizationId,
+    personId: existing.id as string,
+    conferenceEntitlementId,
+    previousUserId,
+    nextUserId: null,
+    previousStatus,
+    nextStatus: "canceled",
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    reason: "released_refunded",
+    metadata: {
+      entitlementType: (existing.entitlement_type as string | null) ?? null,
+      refundAmountCents: refundResult.data.refundAmountCents,
+      refundPct: refundResult.data.refundPct,
+      conferenceOrderId: entitlementItem.order_id,
+      stripeRefundId: refundResult.data.stripeRefundId,
+    },
+  });
+
+  await logAuditEventSafe({
+    action: "conference_entitlement_released_refunded",
+    entityType: "conference_people",
+    entityId: existing.id as string,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      conferenceId,
+      organizationId,
+      conferenceEntitlementId,
+      conferenceOrderId: entitlementItem.order_id,
+      refundAmountCents: refundResult.data.refundAmountCents,
+      refundPct: refundResult.data.refundPct,
+      stripeRefundId: refundResult.data.stripeRefundId,
+    },
+  });
+
+  return {
+    success: true,
+    data: {
+      personId: existing.id as string,
+      refunded: true,
+      refundAmountCents: refundResult.data.refundAmountCents,
+    },
   };
 }
 

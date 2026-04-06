@@ -1496,7 +1496,11 @@ export async function calculateConferenceRefund(
 
 export async function requestConferenceRefund(
   orderId: string,
-  overrideAmountCents?: number
+  overrideAmountCents?: number,
+  options?: {
+    allowManagedOverride?: boolean;
+    overrideReason?: string;
+  }
 ): Promise<
   CommerceSuccess<{
     orderId: string;
@@ -1549,7 +1553,8 @@ export async function requestConferenceRefund(
 
   let requestedRefundAmount = refundQuote.data.refundAmountCents;
   if (typeof overrideAmountCents === "number") {
-    if (!isAdmin) {
+    const managedOverrideAllowed = Boolean(options?.allowManagedOverride);
+    if (!isAdmin && !managedOverrideAllowed) {
       return {
         success: false,
         error: "Only admins can override refund amounts.",
@@ -1634,6 +1639,12 @@ export async function requestConferenceRefund(
         requestedRefundAmount,
         totalRefundedCents: alreadyRefunded + requestedRefundAmount,
         stripeRefundId: stripeRefund.id,
+        overrideReason: options?.overrideReason ?? null,
+        usedManagedOverride: Boolean(
+          typeof overrideAmountCents === "number" &&
+            !isAdmin &&
+            options?.allowManagedOverride
+        ),
       },
     });
 

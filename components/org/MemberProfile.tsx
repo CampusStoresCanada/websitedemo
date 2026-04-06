@@ -1,6 +1,8 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import Image from "next/image";
+import { useRouter } from "next/navigation";
 import type { BrandColor, Benchmarking } from "@/lib/database.types";
 import type { BenchmarkingWithOrg } from "@/lib/data";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
@@ -15,6 +17,10 @@ import EditableProcurementSection from "./EditableProcurementSection";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToolkit } from "@/components/ui/Toolkit";
+import {
+  assignConferenceEntitlement,
+  unassignConferenceEntitlementWithDisposition,
+} from "@/lib/actions/conference-people";
 
 interface MemberProfileProps {
   organization: VisibleOrganization;
@@ -23,6 +29,32 @@ interface MemberProfileProps {
   benchmarking: Benchmarking | null;
   allBenchmarking: BenchmarkingWithOrg[];
   viewerLevel: ViewerLevel;
+  conferenceAttendance: Array<{
+    id: string;
+    conferenceId: string;
+    conferenceName: string;
+    conferenceYear: number;
+    conferenceEditionCode: string;
+    conferenceStartDate: string | null;
+    organizationId: string;
+    sourceType: string;
+    sourceId: string;
+    personKind: string;
+    displayName: string | null;
+    contactEmail: string | null;
+    userId: string | null;
+    assignmentStatus: string;
+    entitlementId: string | null;
+    entitlementType: string | null;
+    badgeStatus: string;
+    checkedInAt: string | null;
+  }>;
+  orgAssignableUsers: Array<{
+    userId: string;
+    displayName: string | null;
+    email: string | null;
+    role: string;
+  }>;
 }
 
 export default function MemberProfile({
@@ -32,15 +64,24 @@ export default function MemberProfile({
   benchmarking,
   allBenchmarking,
   viewerLevel,
+  conferenceAttendance,
+  orgAssignableUsers,
 }: MemberProfileProps) {
+  const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
+  const router = useRouter();
   const { permissionState, organizations } = useAuth();
   const { editMode, canEditOrg } = useToolkit();
+  const [savingContactId, setSavingContactId] = useState<string | null>(null);
+  const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const rawPrimaryColor = brandColors[0]?.hex || "#EE2A2E";
   const primaryColor = rawPrimaryColor.startsWith("#") ? rawPrimaryColor : `#${rawPrimaryColor}`;
   const heroImage = organization.hero_image_url || organization.banner_url;
 
   // Check if current user can edit THIS organization
   const canEditThisOrg = canEditOrg(organization.id);
+  const canEditConferenceAttendance =
+    editMode &&
+    (canEditThisOrg || permissionState === "admin" || permissionState === "super_admin");
 
   // Partners see procurement info instead of benchmarking
   const isPartner = permissionState === "partner";
@@ -109,6 +150,263 @@ export default function MemberProfile({
     return (
       <a href={`tel:${v}`} className="hover:text-[#1A1A1A] transition-colors">{v}</a>
     );
+  };
+
+  const currentConference = useMemo(() => {
+    const allRows = conferenceAttendance.map((row) => ({
+      conferenceId: row.conferenceId,
+      conferenceName: row.conferenceName,
+      conferenceYear: row.conferenceYear,
+      conferenceEditionCode: row.conferenceEditionCode,
+      conferenceStartDate: row.conferenceStartDate,
+      sourceType: row.sourceType,
+      assignmentStatus: row.assignmentStatus,
+      userId: row.userId,
+      entitlementId: row.entitlementId ?? row.sourceId,
+      entitlementType: row.entitlementType ?? "delegate",
+      contactEmail: row.contactEmail,
+      displayName: row.displayName,
+    }));
+
+    const startByConferenceId = new Map<string, number>();
+    for (const row of allRows) {
+      if (!row.conferenceStartDate) continue;
+      const start = new Date(row.conferenceStartDate).getTime();
+      if (!Number.isFinite(start)) continue;
+      if (!startByConferenceId.has(row.conferenceId)) {
+        startByConferenceId.set(row.conferenceId, start);
+      }
+    }
+
+    const conferenceIds = Array.from(new Set(allRows.map((row) => row.conferenceId)));
+    const now = Date.now();
+    const upcoming = conferenceIds
+      .map((id) => ({ id, start: startByConferenceId.get(id) }))
+      .filter((entry): entry is { id: string; start: number } => Number.isFinite(entry.start))
+      .filter((entry) => entry.start >= now)
+      .sort((a, b) => a.start - b.start);
+    const latestPast = conferenceIds
+      .map((id) => ({ id, start: startByConferenceId.get(id) }))
+      .filter((entry): entry is { id: string; start: number } => Number.isFinite(entry.start))
+      .filter((entry) => entry.start < now)
+      .sort((a, b) => b.start - a.start);
+    const conferenceId = upcoming[0]?.id ?? latestPast[0]?.id ?? conferenceIds[0] ?? "";
+    const conferenceRows = allRows.filter((row) => row.conferenceId === conferenceId);
+
+    const entitlementRows = conferenceRows
+      .filter((row) => row.sourceType === "entitlement")
+      .map((row) => ({
+        conferenceId: row.conferenceId,
+        conferenceName: row.conferenceName,
+        conferenceYear: row.conferenceYear,
+        conferenceEditionCode: row.conferenceEditionCode,
+        conferenceStartDate: row.conferenceStartDate,
+        entitlementId: row.entitlementId,
+        entitlementType: row.entitlementType ?? "delegate",
+        contactEmail: row.contactEmail,
+        displayName: row.displayName,
+        assignmentStatus: row.assignmentStatus,
+        userId: row.userId,
+      }))
+      .filter((row) => Boolean(row.entitlementId));
+
+    const registrationAssignedUserIds = new Set(
+      conferenceRows
+        .filter((row) => row.sourceType === "registration" && row.userId && row.assignmentStatus !== "canceled")
+        .map((row) => row.userId)
+    );
+    const registrationAssignedByEmail = new Set(
+      conferenceRows
+        .filter((row) => row.sourceType === "registration" && row.assignmentStatus !== "canceled")
+        .map((row) => normalize(row.contactEmail))
+        .filter((value) => Boolean(value))
+    );
+    const registrationAssignedByName = new Set(
+      conferenceRows
+        .filter((row) => row.sourceType === "registration" && row.assignmentStatus !== "canceled")
+        .map((row) => normalize(row.displayName))
+        .filter((value) => Boolean(value))
+    );
+
+    if (conferenceRows.length === 0) {
+      return {
+        conferenceId: "",
+        label: "No conference entitlements",
+        assignedByUserId: new Map<string, { entitlementId: string; entitlementType: string }>(),
+        assignedByEmail: new Map<string, { entitlementId: string; entitlementType: string }>(),
+        assignedByName: new Map<string, { entitlementId: string; entitlementType: string }>(),
+        registrationAssignedUserIds: new Set<string>(),
+        registrationAssignedByEmail: new Set<string>(),
+        registrationAssignedByName: new Set<string>(),
+        freeEntitlements: [] as Array<{ entitlementId: string; entitlementType: string }>,
+        totalSeats: 0,
+      };
+    }
+    const info = conferenceRows[0];
+
+    const assignedByUserId = new Map<string, { entitlementId: string; entitlementType: string }>();
+    const assignedByEmail = new Map<string, { entitlementId: string; entitlementType: string }>();
+    const assignedByName = new Map<string, { entitlementId: string; entitlementType: string }>();
+    const freeEntitlements: Array<{ entitlementId: string; entitlementType: string }> = [];
+    for (const row of entitlementRows) {
+      const entitlement = {
+        entitlementId: row.entitlementId as string,
+        entitlementType: row.entitlementType,
+      };
+      const hasAssignee = Boolean(row.userId || row.contactEmail || row.displayName) && row.assignmentStatus !== "unassigned";
+      if (hasAssignee) {
+        if (row.userId) assignedByUserId.set(row.userId, entitlement);
+        const email = normalize(row.contactEmail);
+        if (email && !assignedByEmail.has(email)) assignedByEmail.set(email, entitlement);
+        const name = normalize(row.displayName);
+        if (name && !assignedByName.has(name)) assignedByName.set(name, entitlement);
+      } else {
+        freeEntitlements.push(entitlement);
+      }
+    }
+
+    const label = info
+      ? `${info.conferenceName} (${info.conferenceYear}-${info.conferenceEditionCode})`
+      : "Current conference";
+    return {
+      conferenceId,
+      label,
+      assignedByUserId,
+      assignedByEmail,
+      assignedByName,
+      registrationAssignedUserIds,
+      registrationAssignedByEmail,
+      registrationAssignedByName,
+      freeEntitlements,
+      totalSeats: entitlementRows.length,
+    };
+  }, [conferenceAttendance]);
+
+  const resolveOrgUserForContact = (contact: VisibleContact) => {
+    const directUserId = ((contact as unknown as { user_id?: string | null }).user_id ?? "").trim();
+    if (directUserId) return { userId: directUserId };
+
+    const contactEmail = normalize((contact.work_email ?? contact.email ?? "").toString());
+    if (contactEmail) {
+      const matched = orgAssignableUsers.find(
+        (orgUser) => normalize(orgUser.email) === contactEmail
+      );
+      if (matched) return { userId: matched.userId };
+    }
+
+    const contactName = normalize((contact.name ?? "").toString());
+    if (!contactName) return null;
+    const matchedByName = orgAssignableUsers.find(
+      (orgUser) => normalize(orgUser.displayName) === contactName
+    );
+    return matchedByName ? { userId: matchedByName.userId } : null;
+  };
+
+  const handleAttendanceToggle = async (contact: VisibleContact, checked: boolean) => {
+    if (!canEditConferenceAttendance || !currentConference.conferenceId) return;
+    const orgUser = resolveOrgUserForContact(contact);
+    const contactEmail = normalize((contact.work_email ?? contact.email ?? "").toString());
+    const contactName = normalize((contact.name ?? "").toString());
+    const assigned =
+      (orgUser ? currentConference.assignedByUserId.get(orgUser.userId) : undefined) ||
+      (contactEmail ? currentConference.assignedByEmail.get(contactEmail) : undefined) ||
+      (contactName ? currentConference.assignedByName.get(contactName) : undefined);
+    const registrationAssigned = Boolean(
+      (orgUser && currentConference.registrationAssignedUserIds.has(orgUser.userId)) ||
+      (contactEmail && currentConference.registrationAssignedByEmail.has(contactEmail)) ||
+      (contactName && currentConference.registrationAssignedByName.has(contactName))
+    );
+
+    setSavingContactId(contact.id);
+    setAttendanceError(null);
+    try {
+      if (checked) {
+        if (assigned || registrationAssigned) {
+          return;
+        }
+        if (!orgUser) {
+          setAttendanceError("Unable to match this row to an org user for assignment.");
+          return;
+        }
+        const nextEntitlement = currentConference.freeEntitlements[0];
+        if (!nextEntitlement) {
+          setAttendanceError("All available conference seats are already assigned.");
+          return;
+        }
+        const result = await assignConferenceEntitlement(
+          currentConference.conferenceId,
+          organization.id,
+          nextEntitlement.entitlementId,
+          {
+            entitlementType: nextEntitlement.entitlementType,
+            targetUserId: orgUser.userId,
+          }
+        );
+        if (!result.success) {
+          setAttendanceError(result.error ?? "Failed to assign conference attendance.");
+          return;
+        }
+      } else {
+        if (registrationAssigned) return;
+        if (!assigned) return;
+        const dispositionInput = window.prompt(
+          "Unassign conference attendance:\n- Type HOLD to keep the seat for reassignment.\n- Type REFUND to release the seat and issue refund.",
+          "HOLD"
+        );
+        if (!dispositionInput) return;
+        const normalizedDisposition = dispositionInput.trim().toUpperCase();
+        if (normalizedDisposition !== "HOLD" && normalizedDisposition !== "REFUND") {
+          setAttendanceError("Cancelled. Use HOLD or REFUND when unassigning attendance.");
+          return;
+        }
+        const result = await unassignConferenceEntitlementWithDisposition(
+          currentConference.conferenceId,
+          organization.id,
+          assigned.entitlementId,
+          normalizedDisposition === "REFUND" ? "release_and_refund" : "hold_for_reassignment"
+        );
+        if (!result.success) {
+          setAttendanceError(result.error ?? "Failed to unassign conference attendance.");
+          return;
+        }
+        if (normalizedDisposition === "REFUND" && result.data?.refundAmountCents) {
+          window.alert(
+            `Seat released and refund submitted for ${(result.data.refundAmountCents / 100).toFixed(2)}.`
+          );
+        }
+      }
+      router.refresh();
+    } finally {
+      setSavingContactId(null);
+    }
+  };
+
+  const getAttendanceCell = (contact: VisibleContact) => {
+    const matchedUser = resolveOrgUserForContact(contact);
+    const contactEmail = normalize((contact.work_email ?? contact.email ?? "").toString());
+    const contactName = normalize((contact.name ?? "").toString());
+    const assignedContext =
+      (matchedUser ? currentConference.assignedByUserId.get(matchedUser.userId) : undefined) ||
+      (contactEmail ? currentConference.assignedByEmail.get(contactEmail) : undefined) ||
+      (contactName ? currentConference.assignedByName.get(contactName) : undefined);
+    const registrationAssigned = Boolean(
+      (matchedUser && currentConference.registrationAssignedUserIds.has(matchedUser.userId)) ||
+      (contactEmail && currentConference.registrationAssignedByEmail.has(contactEmail)) ||
+      (contactName && currentConference.registrationAssignedByName.has(contactName))
+    );
+    const hasFreeSeats = currentConference.freeEntitlements.length > 0;
+    const checked = Boolean(assignedContext) || registrationAssigned;
+    const canToggle =
+      Boolean(currentConference.conferenceId) &&
+      (Boolean(assignedContext) || Boolean(matchedUser) || registrationAssigned);
+    const disabledForAssign = !checked && (!hasFreeSeats || !matchedUser);
+    const disabled =
+      !canEditConferenceAttendance ||
+      !canToggle ||
+      registrationAssigned ||
+      savingContactId === contact.id ||
+      disabledForAssign;
+    return { checked, disabled };
   };
 
   return (
@@ -444,8 +742,21 @@ export default function MemberProfile({
                   Staffing
                 </h3>
                 <table className="w-full text-sm">
+                  <thead>
+                    <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
+                      <th className="pb-2 pr-4 font-semibold">Name</th>
+                      <th className="pb-2 pr-4 font-semibold">Email</th>
+                      <th className="pb-2 pr-4 font-semibold">Role</th>
+                      <th className="pb-2 pr-4 font-semibold">Phone</th>
+                      <th className="pb-2 pl-3 font-semibold">Attending Conference</th>
+                      {editMode && canEditThisOrg ? <th className="pb-2 pl-4 font-semibold">Actions</th> : null}
+                    </tr>
+                  </thead>
                   <tbody>
                     {contacts.map((contact) => (
+                      (() => {
+                        const attendance = getAttendanceCell(contact);
+                        return (
                       <tr
                         key={contact.id}
                         className="border-b border-gray-200"
@@ -469,6 +780,16 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" data-flaggable data-field="contacts.work_phone_number" data-entity-id={contact.id}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
+                        <td className="py-2 pl-3 text-xs">
+                          <input
+                            type="checkbox"
+                            aria-label={`Attending conference for ${contact.name ?? "contact"}`}
+                            checked={attendance.checked}
+                            disabled={attendance.disabled}
+                            onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
+                            className="h-4 w-4"
+                          />
+                        </td>
                         {/* Delete button - only visible in edit mode */}
                         {editMode && canEditThisOrg && (
                           <td
@@ -482,6 +803,8 @@ export default function MemberProfile({
                           </td>
                         )}
                       </tr>
+                        );
+                      })()
                     ))}
                     {/* Add Contact row - only visible in edit mode for admins */}
                     {editMode && canEditThisOrg && (
@@ -490,7 +813,7 @@ export default function MemberProfile({
                         data-add-contact
                         data-organization-id={organization.id}
                       >
-                        <td colSpan={5} className="py-3 text-center text-emerald-600 font-medium">
+                        <td colSpan={6} className="py-3 text-center text-emerald-600 font-medium">
                           <span className="flex items-center justify-center gap-2">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -502,9 +825,13 @@ export default function MemberProfile({
                     )}
                   </tbody>
                 </table>
+                {attendanceError ? (
+                  <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
+                ) : null}
               </div>
             </ProtectedSection>
           )}
+
         </div>
       </div>
 
@@ -788,6 +1115,9 @@ export default function MemberProfile({
                 </h3>
                 <div className="space-y-3">
                   {contacts.map((contact) => (
+                    (() => {
+                      const attendance = getAttendanceCell(contact);
+                      return (
                     <div
                       key={contact.id}
                       className="border-b border-gray-200 pb-3 flex justify-between items-start"
@@ -809,6 +1139,19 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
+                        <div className="text-xs mt-1 font-medium">
+                          <label className="inline-flex items-center gap-2">
+                            <span>Attending Conference</span>
+                            <input
+                              type="checkbox"
+                              aria-label={`Attending conference for ${contact.name ?? "contact"}`}
+                              checked={attendance.checked}
+                              disabled={attendance.disabled}
+                              onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
+                              className="h-4 w-4"
+                            />
+                          </label>
+                        </div>
                       </div>
                       {/* Delete button - only visible in edit mode */}
                       {editMode && canEditThisOrg && (
@@ -823,6 +1166,8 @@ export default function MemberProfile({
                         </div>
                       )}
                     </div>
+                      );
+                    })()
                   ))}
                   {/* Add Contact row - only visible in edit mode for admins */}
                   {editMode && canEditThisOrg && (
@@ -840,9 +1185,13 @@ export default function MemberProfile({
                     </div>
                   )}
                 </div>
+                {attendanceError ? (
+                  <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
+                ) : null}
               </div>
             </ProtectedSection>
           )}
+
         </div>
       </div>
 

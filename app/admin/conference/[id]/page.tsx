@@ -1,29 +1,41 @@
+import { redirect } from "next/navigation";
 import { getConference } from "@/lib/actions/conference";
 import { isSuperAdmin, requireAdmin } from "@/lib/auth/guards";
-import {
-  listBillingRunsForConference,
-  listWishlistBillingAttemptsForConference,
-  listWishlistIntentsForConference,
-} from "@/lib/actions/conference-commerce";
-import {
-  listSwapCapIncreaseRequests,
-  listSwapRequests,
-} from "@/lib/actions/conference-swaps";
-import {
-  listConferenceExhibitorOrganizations,
-  listConferenceScheduleModules,
-} from "@/lib/actions/conference-schedule-design";
-import { getConferenceScheduleTimeline } from "@/lib/conference/schedule-service";
-import ConferenceDashboard from "@/components/admin/conference/ConferenceDashboard";
+import ConferenceForm from "@/components/admin/conference/ConferenceForm";
 
-export const metadata = { title: "Conference Dashboard | Admin" };
+export const metadata = { title: "Conference Details | Admin" };
 
-export default async function ConferenceDetailPage({
+/** Map old ?tab= values to new route segments */
+const TAB_REDIRECTS: Record<string, string> = {
+  overview: "overview",
+  setup: "setup",
+  schedule: "schedule",
+  products: "products",
+  rules: "rules",
+  registrations: "registrations",
+  legal: "legal",
+  wishlist: "wishlist",
+  billing_runs: "billing-runs",
+  swaps: "swaps",
+  status: "status",
+};
+
+export default async function ConferenceDetailsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { id } = await params;
+  const sp = await searchParams;
+  const tab = typeof sp.tab === "string" ? sp.tab : undefined;
+
+  // Legacy redirect: ?tab=X → /admin/conference/[id]/X
+  if (tab && TAB_REDIRECTS[tab]) {
+    redirect(`/admin/conference/${id}/${TAB_REDIRECTS[tab]}`);
+  }
+
   const auth = await requireAdmin();
   const canSuperAdminOverride = auth.ok ? isSuperAdmin(auth.ctx.globalRole) : false;
   const googleMapsApiKey =
@@ -36,60 +48,12 @@ export default async function ConferenceDetailPage({
       </div>
     );
   }
-  const [
-    wishlistResult,
-    billingRunsResult,
-    billingAttemptsResult,
-    swapRequestsResult,
-    swapCapRequestsResult,
-    scheduleTimeline,
-    scheduleModulesResult,
-    exhibitorOrganizationsResult,
-  ] = await Promise.all([
-    listWishlistIntentsForConference({ conferenceId: id }),
-    listBillingRunsForConference({ conferenceId: id, limit: 25 }),
-    listWishlistBillingAttemptsForConference({ conferenceId: id, limit: 50 }),
-    listSwapRequests(id),
-    listSwapCapIncreaseRequests(id),
-    getConferenceScheduleTimeline(id, { viewerRole: "admin" }),
-    listConferenceScheduleModules(id),
-    listConferenceExhibitorOrganizations(id),
-  ]);
 
   return (
-    <ConferenceDashboard
+    <ConferenceForm
       conference={result.data}
-      initialWishlistRows={wishlistResult.success ? wishlistResult.data : []}
-      initialBillingRuns={billingRunsResult.success ? billingRunsResult.data : []}
-      initialBillingAttempts={billingAttemptsResult.success ? billingAttemptsResult.data : []}
-      initialSwapRequests={swapRequestsResult.success ? swapRequestsResult.data : []}
-      initialSwapCapIncreaseRequests={
-        swapCapRequestsResult.success ? swapCapRequestsResult.data : []
-      }
       canSuperAdminOverride={canSuperAdminOverride}
       googleMapsApiKey={googleMapsApiKey}
-      initialProgramItems={scheduleTimeline.programItems.map((item) => ({
-        id: item.id,
-        conference_id: item.conferenceId,
-        item_type: item.itemType,
-        title: item.title,
-        description: item.description,
-        starts_at: item.startsAt,
-        ends_at: item.endsAt,
-        location_label: item.locationLabel,
-        audience_mode: item.audienceMode,
-        target_roles: item.targetRoles,
-        is_required: item.isRequired,
-        display_order: item.displayOrder,
-        created_at: item.createdAt ?? item.startsAt,
-        updated_at: item.updatedAt ?? item.endsAt,
-      }))}
-      initialScheduleModules={
-        scheduleModulesResult.success ? scheduleModulesResult.data ?? [] : []
-      }
-      initialExhibitorOrganizations={
-        exhibitorOrganizationsResult.success ? exhibitorOrganizationsResult.data ?? [] : []
-      }
     />
   );
 }

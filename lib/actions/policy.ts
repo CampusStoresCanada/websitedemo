@@ -192,6 +192,53 @@ const REQUIRED_RETENTION_CONSENT_POLICY_DEFAULTS = [
   },
 ] as const;
 
+const REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS = [
+  {
+    key: "conference.travel_arrival_min_days_before_start",
+    category: "scheduling",
+    type: "integer",
+    label: "Travel Arrival Window (days before start)",
+    description:
+      "How many days before conference start an arrival is allowed. Arrivals earlier than this require an exception.",
+    value: 2,
+    isHighRisk: false,
+    displayOrder: 200,
+  },
+  {
+    key: "conference.travel_departure_max_days_after_end",
+    category: "scheduling",
+    type: "integer",
+    label: "Travel Departure Window (days after end)",
+    description:
+      "How many days after conference end a departure is allowed. Departures later than this require an exception.",
+    value: 1,
+    isHighRisk: false,
+    displayOrder: 210,
+  },
+  {
+    key: "conference.travel_extra_nights_bill_to_attendee",
+    category: "scheduling",
+    type: "boolean",
+    label: "Extra Night Cost to Attendee",
+    description:
+      "Whether extra-window hotel nights are billed to the attendee rather than the organization.",
+    value: true,
+    isHighRisk: false,
+    displayOrder: 220,
+  },
+  {
+    key: "conference.travel_exception_requires_admin_approval",
+    category: "scheduling",
+    type: "boolean",
+    label: "Travel Exception Requires Admin Approval",
+    description:
+      "Whether out-of-window travel requests must be approved by an admin before submission.",
+    value: true,
+    isHighRisk: false,
+    displayOrder: 230,
+  },
+] as const;
+
 const REQUIRED_INTEGRATION_POLICY_DEFAULTS = [
   {
     key: "integration.conference_ops_masthead_org_ids",
@@ -209,6 +256,8 @@ const REQUIRED_INTEGRATION_POLICY_DEFAULTS = [
 type BillingPolicySeed = (typeof REQUIRED_BILLING_POLICY_DEFAULTS)[number];
 type RetentionConsentPolicySeed =
   (typeof REQUIRED_RETENTION_CONSENT_POLICY_DEFAULTS)[number];
+type TravelWindowPolicySeed =
+  (typeof REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS)[number];
 type IntegrationPolicySeed =
   (typeof REQUIRED_INTEGRATION_POLICY_DEFAULTS)[number];
 
@@ -372,6 +421,62 @@ async function ensureRequiredIntegrationPolicies(
     return {
       success: false,
       error: `Failed to seed integration keys: ${insertError.message}`,
+    };
+  }
+
+  return { success: true, insertedCount: missing.length };
+}
+
+async function ensureRequiredTravelWindowPolicies(
+  supabase: SupabaseClient<Database>,
+  policySetId: string
+): Promise<{ success: boolean; error?: string; insertedCount?: number }> {
+  const keys = REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS.map((item) => item.key);
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("policy_values")
+    .select("key")
+    .eq("policy_set_id", policySetId)
+    .in("key", keys);
+
+  if (existingRowsError) {
+    return {
+      success: false,
+      error: `Failed to inspect travel window keys for policy set ${policySetId}: ${existingRowsError.message}`,
+    };
+  }
+
+  const existingKeys = new Set((existingRows ?? []).map((row) => row.key));
+  const missing = REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS.filter(
+    (item) => !existingKeys.has(item.key)
+  );
+
+  if (missing.length === 0) {
+    return { success: true, insertedCount: 0 };
+  }
+
+  const rowsToInsert: Database["public"]["Tables"]["policy_values"]["Insert"][] =
+    missing.map((item: TravelWindowPolicySeed) => ({
+      policy_set_id: policySetId,
+      key: item.key,
+      category: item.category,
+      label: item.label,
+      description: item.description,
+      type: item.type,
+      value_json:
+        item.value as Database["public"]["Tables"]["policy_values"]["Insert"]["value_json"],
+      validation_schema: null,
+      is_high_risk: item.isHighRisk,
+      display_order: item.displayOrder,
+    }));
+
+  const { error: insertError } = await supabase
+    .from("policy_values")
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    return {
+      success: false,
+      error: `Failed to seed travel window keys: ${insertError.message}`,
     };
   }
 
@@ -618,6 +723,25 @@ export async function createPolicyDraft(
       },
     });
     return { success: false, error: integrationSeedResult.error };
+  }
+
+  const travelWindowSeedResult = await ensureRequiredTravelWindowPolicies(
+    supabase,
+    newDraft.id
+  );
+  if (!travelWindowSeedResult.success) {
+    await supabase.from("policy_sets").delete().eq("id", newDraft.id);
+    await logPolicyAudit({
+      action: "policy_draft_create",
+      actorId: auth.userId,
+      entityId: newDraft.id,
+      success: false,
+      details: {
+        reason: "travel_window_seed_failed",
+        error: travelWindowSeedResult.error ?? null,
+      },
+    });
+    return { success: false, error: travelWindowSeedResult.error };
   }
 
   await logPolicyAudit({
@@ -1501,6 +1625,13 @@ export async function getPolicyDashboardData(): Promise<{
       return {
         success: false,
         error: integrationSeed.error,
+      };
+    }
+    const travelWindowSeed = await ensureRequiredTravelWindowPolicies(supabase, draft.id);
+    if (!travelWindowSeed.success) {
+      return {
+        success: false,
+        error: travelWindowSeed.error,
       };
     }
 

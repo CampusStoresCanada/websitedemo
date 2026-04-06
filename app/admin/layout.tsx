@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/guards";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
+import AdminSidebar from "@/components/admin/AdminSidebar";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -17,9 +18,12 @@ export default async function AdminLayout({
   }
 
   return (
-    <div className="max-w-7xl mx-auto px-4 py-8">
-      <AdminBreadcrumbs />
-      {children}
+    <div className="flex min-h-[calc(100vh-4rem)]">
+      <AdminSidebar globalRole={auth.ctx.globalRole} />
+      <div className="flex-1 min-w-0 px-6 py-6">
+        <AdminBreadcrumbs />
+        {children}
+      </div>
     </div>
   );
 }

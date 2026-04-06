@@ -8,6 +8,10 @@ import { getAccessGroupIds } from "@/lib/circle/config";
 export const maxDuration = 60;
 
 const ACTIVE_STATUSES = ["active", "grace", "reactivated"];
+const ORG_NAME_ALIASES: Record<string, string[]> = {
+  cesium: ["cesium telecom"],
+  "cesium telecom": ["cesium"],
+};
 
 export async function POST(request: NextRequest) {
   const auth = await getServerAuthState();
@@ -40,8 +44,10 @@ export async function POST(request: NextRequest) {
   // Fetch all partner orgs missing a circle_access_group_id
   const { data: partnerOrgs, error: orgsErr } = await adminClient
     .from("organizations")
-    .select("id, name, type, circle_access_group_id, membership_status")
+    .select("id, name, type, circle_access_group_id, membership_status, archived_at")
     .ilike("type", "%partner%")
+    .in("membership_status", ACTIVE_STATUSES)
+    .is("archived_at", null)
     .is("circle_access_group_id", null);
 
   if (orgsErr) {
@@ -53,7 +59,11 @@ export async function POST(request: NextRequest) {
     );
 
     for (const org of partnerOrgs) {
-      const match = circleGroupMap.get(org.name.toLowerCase().trim());
+      const orgNameKey = org.name.toLowerCase().trim();
+      const aliasKeys = ORG_NAME_ALIASES[orgNameKey] ?? [];
+      const match =
+        circleGroupMap.get(orgNameKey) ??
+        aliasKeys.map((key) => circleGroupMap.get(key)).find(Boolean);
       if (match) {
         if (!dryRun) {
           const { error } = await adminClient

@@ -153,6 +153,17 @@ function describeError(err: unknown): Record<string, unknown> {
   return { type: typeof err, value: err };
 }
 
+function isExpectedMissingSessionError(err: unknown): boolean {
+  if (!err || typeof err !== "object") return false;
+  const maybeError = err as { name?: string; message?: string };
+  const name = (maybeError.name ?? "").toLowerCase();
+  const message = (maybeError.message ?? "").toLowerCase();
+  return (
+    name.includes("authsessionmissingerror") ||
+    message.includes("auth session missing")
+  );
+}
+
 async function emitAuthTelemetry(
   event: "auth_idle_timeout" | "auth_bootstrap_recovery_failed",
   details: Record<string, unknown>
@@ -210,6 +221,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   const finalizedConferenceAssignmentsForUserRef = useRef<string | null>(null);
   const bootstrapResolvedRef = useRef(Boolean(initialAuth));
   const lastKnownGoodRef = useRef<{
+    userId: string;
     profile: UserProfile | null;
     globalRole: GlobalRole;
     permissionState: PermissionState;
@@ -219,6 +231,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   } | null>(
     initialAuth
       ? {
+          userId: initialAuth.user?.id ?? "",
           profile: initialAuth.profile,
           globalRole: initialAuth.globalRole,
           permissionState: initialAuth.permissionState,
@@ -390,6 +403,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       setReauthCountdownSeconds(0);
       consecutivePermissionFailuresRef.current = 0;
       lastKnownGoodRef.current = {
+        userId,
         profile: userProfile,
         globalRole: role,
         permissionState: resolvedPermissionState,
@@ -426,6 +440,19 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
       console.log(`[AuthProvider] loadSession (${source}):`, session.user.email);
       setUser(session.user);
+      const previousSnapshotUserId = lastKnownGoodRef.current?.userId ?? null;
+      if (previousSnapshotUserId && previousSnapshotUserId !== session.user.id) {
+        // Session switched accounts. Reset authz state to safe defaults until fresh fetch succeeds.
+        setProfile(null);
+        setOrganizations([]);
+        setGlobalRole("user");
+        setPermissionState("public");
+        setIsSurveyParticipant(false);
+        setIsBenchmarkingReviewer(false);
+        setDevOverride(null);
+        setDevSurveyParticipantOverride(null);
+        lastKnownGoodRef.current = null;
+      }
       void ensureCircleSession(session.user.id);
       void finalizePendingConferenceAssignments(session.user.id);
       // Session identity is known at this point; do not block the entire app shell
@@ -469,7 +496,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
       if (!fetched) {
         // Keep last known good permissions if we have them. Do not downgrade on transient data errors.
-        if (lastKnownGoodRef.current) {
+        if (lastKnownGoodRef.current?.userId === session.user.id) {
           console.warn(
             "[AuthProvider] retaining last-known-good permissions after repeated fetch failures",
             { failures: consecutivePermissionFailuresRef.current }
@@ -507,6 +534,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       );
 
       if (fallbackUserError) {
+        if (isExpectedMissingSessionError(fallbackUserError)) {
+          return false;
+        }
         throw fallbackUserError;
       }
 
@@ -550,7 +580,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             const recovered = await recoverSessionFromUser(
               "BOOTSTRAP_RECOVERY_AFTER_SESSION_ERROR"
             ).catch((recoverErr) => {
-              console.error("[AuthProvider] getUser recovery failed:", recoverErr);
+              if (!isExpectedMissingSessionError(recoverErr)) {
+                console.error("[AuthProvider] getUser recovery failed:", recoverErr);
+              }
               return false;
             });
 
@@ -581,7 +613,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           const recovered = await recoverSessionFromUser(
             "BOOTSTRAP_RECOVERY_AFTER_THROW"
           ).catch((recoverErr) => {
-            console.error("[AuthProvider] getUser recovery after throw failed:", recoverErr);
+            if (!isExpectedMissingSessionError(recoverErr)) {
+              console.error("[AuthProvider] getUser recovery after throw failed:", recoverErr);
+            }
             return false;
           });
 

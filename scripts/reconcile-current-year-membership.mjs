@@ -32,6 +32,16 @@ const RENAME_RULES = [
     preferredExistingSlug: "ambrose-university-college-bookstores",
     desiredSlug: "ambrose-university-lions-store",
   },
+  {
+    notionName: "Cesium",
+    preferredExistingSlug: "cesium-telecom",
+    desiredSlug: "cesium-telecom",
+  },
+  {
+    notionName: "Cesium Telecom",
+    preferredExistingSlug: "cesium-telecom",
+    desiredSlug: "cesium-telecom",
+  },
 ];
 
 function normalize(value) {

@@ -453,14 +453,7 @@ export default function Header() {
                 <button
                   type="button"
                   onClick={() => {
-                    setShowAlertMenu((value) => {
-                      if (!value) {
-                        fetch("/api/circle/notifications", { method: "POST" }).catch(() => {});
-                        setCircleNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-                        setCircleReplies(prev => prev.map(n => ({ ...n, isRead: true })));
-                      }
-                      return !value;
-                    });
+                    setShowAlertMenu((value) => !value);
                   }}
                   className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:border-gray-400"
                   aria-label="Alerts"

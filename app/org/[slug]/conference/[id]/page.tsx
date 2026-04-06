@@ -1,13 +1,11 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   isGlobalAdmin,
   requireOrgAdminOrSuperAdmin,
 } from "@/lib/auth/guards";
 import { resolveOrgSlug } from "@/lib/org/resolve";
-import { assignConferenceEntitlement } from "@/lib/actions/conference-people";
 import { computeConferenceReadiness } from "@/lib/conference/readiness";
 
 type OrgConferencePersonRow = {
@@ -35,25 +33,11 @@ type OrgConferencePersonRow = {
   admin_notes: string | null;
 };
 
-type OrgMember = {
-  userId: string;
-  displayName: string | null;
-  email: string | null;
-  role: string;
-};
-
 type ConferenceInstanceRow = {
   id: string;
   name: string;
   year: number;
   edition_code: string;
-};
-
-type MembershipRow = {
-  user_id: string | null;
-  role: string;
-  status: string;
-  profiles: { display_name: string | null } | { display_name: string | null }[] | null;
 };
 
 type SchedulerRunRow = {
@@ -81,7 +65,7 @@ export default async function OrgConferencePage({
   const canSeeAdminNotes = isGlobalAdmin(auth.ctx.globalRole);
   const adminClient = createAdminClient();
 
-  const [conferenceResult, peopleResult, membershipsResult, activeRunResult] =
+  const [conferenceResult, peopleResult, activeRunResult] =
     await Promise.all([
       adminClient
         .from("conference_instances")
@@ -98,14 +82,6 @@ export default async function OrgConferencePage({
         .order("person_kind", { ascending: true })
         .order("display_name", { ascending: true }),
       adminClient
-        .from("user_organizations")
-        .select(
-          "user_id, role, status, profiles!inner(display_name)"
-        )
-        .eq("organization_id", orgId)
-        .eq("status", "active")
-        .order("role", { ascending: true }),
-      adminClient
         .from("scheduler_runs")
         .select("id")
         .eq("conference_id", conferenceId)
@@ -120,14 +96,22 @@ export default async function OrgConferencePage({
   }
 
   const people = (peopleResult.data ?? []) as OrgConferencePersonRow[];
-  const memberships = (membershipsResult.data ?? []) as unknown as MembershipRow[];
   const activeRun = activeRunResult.data as SchedulerRunRow | null;
 
-  const memberUserIds = memberships
+  const memberUserIds = people
     .map((row) => row.user_id)
     .filter((userId): userId is string => Boolean(userId));
+  let profileNameByUserId: Record<string, string | null> = {};
   let emailByUserId: Record<string, string> = {};
   if (memberUserIds.length > 0) {
+    const { data: profileRows } = await adminClient
+      .from("profiles")
+      .select("id, display_name")
+      .in("id", memberUserIds);
+    profileNameByUserId = Object.fromEntries(
+      (profileRows ?? []).map((row) => [row.id as string, (row.display_name as string | null) ?? null])
+    );
+
     const { data: authUsers } = await adminClient.auth.admin.listUsers();
     emailByUserId = Object.fromEntries(
       (authUsers?.users ?? [])
@@ -135,18 +119,6 @@ export default async function OrgConferencePage({
         .map((user) => [user.id, user.email ?? ""])
     );
   }
-
-  const orgMembers: OrgMember[] = memberships
-    .filter((row): row is MembershipRow & { user_id: string } => Boolean(row.user_id))
-    .map((row) => {
-      const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-      return {
-        userId: row.user_id,
-        displayName: profile?.display_name ?? null,
-        email: emailByUserId[row.user_id] ?? null,
-        role: row.role,
-      };
-    });
 
   const readinessRows = people
     .filter((row) => row.assignment_status !== "canceled")
@@ -167,41 +139,6 @@ export default async function OrgConferencePage({
 
   const notReadyCount = readinessRows.filter((row) => !row.readiness.isReady).length;
   const exhibitorRows = people.filter((row) => row.person_kind === "exhibitor");
-  const unassignedEntitlements = people.filter(
-    (row) =>
-      row.source_type === "entitlement" &&
-      (row.assignment_status === "unassigned" || row.assignment_status === "pending_user_activation")
-  );
-
-  async function assignToExistingUser(formData: FormData) {
-    "use server";
-    const entitlementId = String(formData.get("entitlement_id") ?? "");
-    const entitlementType = String(formData.get("entitlement_type") ?? "delegate");
-    const targetUserId = String(formData.get("target_user_id") ?? "");
-    if (!entitlementId || !targetUserId) return;
-    const result = await assignConferenceEntitlement(conferenceId, orgId, entitlementId, {
-      entitlementType: entitlementType || "delegate",
-      targetUserId,
-    });
-    if (result.success) {
-      revalidatePath(`/org/${slug}/conference/${conferenceId}`);
-    }
-  }
-
-  async function assignByInvite(formData: FormData) {
-    "use server";
-    const entitlementId = String(formData.get("entitlement_id") ?? "");
-    const entitlementType = String(formData.get("entitlement_type") ?? "delegate");
-    const targetEmail = String(formData.get("target_email") ?? "").trim().toLowerCase();
-    if (!entitlementId || !targetEmail) return;
-    const result = await assignConferenceEntitlement(conferenceId, orgId, entitlementId, {
-      entitlementType: entitlementType || "delegate",
-      targetEmail,
-    });
-    if (result.success) {
-      revalidatePath(`/org/${slug}/conference/${conferenceId}`);
-    }
-  }
 
   return (
     <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
@@ -252,75 +189,10 @@ export default async function OrgConferencePage({
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <h2 className="text-base font-semibold text-gray-900">Unassigned Purchased Entitlements</h2>
-        {unassignedEntitlements.length === 0 ? (
-          <p className="mt-2 text-sm text-gray-600">No unassigned or pending entitlements.</p>
-        ) : (
-          <div className="mt-3 space-y-3">
-            {unassignedEntitlements.map((row) => {
-              const entitlementId = row.conference_entitlement_id ?? row.source_id;
-              const entitlementType = row.entitlement_type ?? "delegate";
-              return (
-                <div key={row.id} className="rounded-lg border border-gray-200 p-3">
-                  <p className="text-sm text-gray-800">
-                    Entitlement <span className="font-mono text-xs">{entitlementId}</span> (
-                    {entitlementType}) - {row.assignment_status}
-                  </p>
-                  {row.assigned_email_snapshot ? (
-                    <p className="mt-1 text-xs text-gray-600">
-                      Pending email: {row.assigned_email_snapshot}
-                    </p>
-                  ) : null}
-                  <div className="mt-3 grid gap-2 sm:grid-cols-2">
-                    <form action={assignToExistingUser} className="flex flex-wrap items-center gap-2">
-                      <input type="hidden" name="entitlement_id" value={entitlementId} />
-                      <input type="hidden" name="entitlement_type" value={entitlementType} />
-                      <select
-                        name="target_user_id"
-                        required
-                        className="min-w-[220px] rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                      >
-                        <option value="">Assign to existing org user</option>
-                        {orgMembers.map((member) => (
-                          <option key={member.userId} value={member.userId}>
-                            {member.displayName ?? member.email ?? member.userId} ({member.role})
-                          </option>
-                        ))}
-                      </select>
-                      <button
-                        type="submit"
-                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Assign
-                      </button>
-                    </form>
-                    <form action={assignByInvite} className="flex flex-wrap items-center gap-2">
-                      <input type="hidden" name="entitlement_id" value={entitlementId} />
-                      <input type="hidden" name="entitlement_type" value={entitlementType} />
-                      <input
-                        type="email"
-                        name="target_email"
-                        required
-                        placeholder="Invite by email"
-                        className="min-w-[220px] rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                      />
-                      <button
-                        type="submit"
-                        className="rounded-md border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                      >
-                        Invite + Assign
-                      </button>
-                    </form>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        )}
-      </section>
-
-      <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Conference People (Org Scope)</h2>
+        <p className="mt-2 text-xs text-gray-500">
+          Use Toolkit Edit mode and click an entitlement row assignment to manage conference attendance.
+        </p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
@@ -340,10 +212,34 @@ export default async function OrgConferencePage({
               {readinessRows.map(({ person, readiness }) => (
                 <tr key={person.id}>
                   <td className="px-3 py-2 text-gray-900">
-                    {person.display_name ?? person.contact_email ?? person.id}
+                    {person.display_name ??
+                      profileNameByUserId[person.user_id ?? ""] ??
+                      person.contact_email ??
+                      emailByUserId[person.user_id ?? ""] ??
+                      person.id}
                   </td>
                   <td className="px-3 py-2 text-gray-700">{person.person_kind}</td>
-                  <td className="px-3 py-2 text-gray-700">{person.assignment_status}</td>
+                  <td
+                    className={`px-3 py-2 text-gray-700 ${
+                      person.source_type === "entitlement"
+                        ? "cursor-pointer rounded hover:bg-emerald-50 hover:text-emerald-700"
+                        : ""
+                    }`}
+                    data-field={
+                      person.source_type === "entitlement"
+                        ? "conference_people.assignment_status"
+                        : undefined
+                    }
+                    data-entity-id={person.id}
+                    data-organization-id={orgId}
+                    data-conference-id={conferenceId}
+                    data-entitlement-id={person.conference_entitlement_id ?? person.source_id}
+                    data-entitlement-type={person.entitlement_type ?? "delegate"}
+                    data-source-type={person.source_type}
+                  >
+                    {person.assignment_status}
+                    {person.source_type === "entitlement" ? " (edit)" : ""}
+                  </td>
                   <td className="px-3 py-2 text-gray-700">{person.badge_print_status}</td>
                   <td className="px-3 py-2 text-gray-700">
                     {person.checked_in_at ? "Checked in" : "Not checked in"}

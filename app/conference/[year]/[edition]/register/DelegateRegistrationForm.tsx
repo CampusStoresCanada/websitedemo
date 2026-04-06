@@ -128,6 +128,8 @@ export default function DelegateRegistrationForm({
   const [successDefinition, setSuccessDefinition] = useState(existingRegistration?.success_definition ?? "");
 
   // Step 8: Travel
+  const [travelMode, setTravelMode] = useState(existingRegistration?.travel_mode ?? "");
+  const [roadOriginAddress, setRoadOriginAddress] = useState(existingRegistration?.road_origin_address ?? "");
   const [travelConsent, setTravelConsent] = useState(existingRegistration?.travel_consent_given ?? false);
   const [legalName, setLegalName] = useState(existingRegistration?.legal_name ?? "");
   const [dateOfBirth, setDateOfBirth] = useState(existingRegistration?.date_of_birth ?? "");
@@ -244,6 +246,8 @@ export default function DelegateRegistrationForm({
         }
         await saveRegistrationStep(regId, {
           travel_consent_given: travelConsent,
+          travel_mode: travelMode || null,
+          road_origin_address: travelMode === "road" ? (roadOriginAddress || null) : null,
           ...(travelConsent
             ? {
                 legal_name: legalName || null,
@@ -494,6 +498,25 @@ export default function DelegateRegistrationForm({
       {/* Step 8: Travel & Logistics */}
       {step === 8 && (
         <div className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">How will you travel to the conference?</label>
+            <div className="flex gap-4">
+              <label className="flex items-center gap-2">
+                <input type="radio" name="travelMode" value="flight" checked={travelMode === "flight"} onChange={() => { setTravelMode("flight"); setRoadOriginAddress(""); }} className="border-gray-300 text-[#EE2A2E]" />
+                <span className="text-sm text-gray-700">Flight</span>
+              </label>
+              <label className="flex items-center gap-2">
+                <input type="radio" name="travelMode" value="road" checked={travelMode === "road"} onChange={() => setTravelMode("road")} className="border-gray-300 text-[#EE2A2E]" />
+                <span className="text-sm text-gray-700">Road (driving)</span>
+              </label>
+            </div>
+          </div>
+          {travelMode === "road" && (
+            <div>
+              <label className="block text-xs text-gray-500 mb-1">Departure City / Address</label>
+              <input type="text" value={roadOriginAddress} onChange={(e) => setRoadOriginAddress(e.target.value)} placeholder="e.g., Ottawa, ON" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm" />
+            </div>
+          )}
           <ConsentGate
             consentType="travel"
             consentText="I consent to CSC storing my travel data for the purpose of coordinating travel arrangements for this conference."
@@ -632,6 +655,7 @@ export default function DelegateRegistrationForm({
             <div><span className="text-gray-500">Categories:</span> {categoryResponsibilities.length}</div>
             <div><span className="text-gray-500">Top Priorities:</span> {topPriorities.join(", ") || "None"}</div>
             <div><span className="text-gray-500">Success:</span> {successDefinition.slice(0, 80)}{successDefinition.length > 80 ? "..." : ""}</div>
+            <div><span className="text-gray-500">Travel Mode:</span> {travelMode === "flight" ? "Flight" : travelMode === "road" ? "Road" : "Not set"}{travelMode === "road" && roadOriginAddress ? ` (from ${roadOriginAddress})` : ""}</div>
             <div><span className="text-gray-500">Travel Consent:</span> {travelConsent ? "Yes" : "No"}</div>
             <div><span className="text-gray-500">Preferred Exhibitors:</span> {top5Preferences.length}/5</div>
             <div><span className="text-gray-500">Blackout:</span> {blackoutList.length}</div>

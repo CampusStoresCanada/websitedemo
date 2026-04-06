@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef, createContext, useContext, ReactNode } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { usePathname, useRouter } from "next/navigation";
 import CreateEventModal from "@/components/toolkit/CreateEventModal";
@@ -11,6 +11,11 @@ import { deleteContact } from "@/lib/actions/delete-contact";
 import { addBrandColor } from "@/lib/actions/add-brand-color";
 import { deleteBrandColor } from "@/lib/actions/delete-brand-color";
 import { uploadOrganizationImage } from "@/lib/actions/upload-organization-image";
+import {
+  assignConferenceEntitlement,
+  listOrganizationAssignableUsers,
+  unassignConferenceEntitlement,
+} from "@/lib/actions/conference-people";
 
 // Context to expose edit mode to child components
 interface ToolkitContextValue {
@@ -39,21 +44,25 @@ export function ToolkitProvider({ children }: { children: ReactNode }) {
   const { profile, organizations } = useAuth();
   const [editMode, setEditMode] = useState(false);
 
-  // Check if user is a super_admin (can edit anything)
-  const isSuperAdmin = profile?.global_role === "super_admin";
+  // Global admins can edit any organization.
+  const isGlobalAdmin = profile?.global_role === "super_admin" || profile?.global_role === "admin";
 
   // Get org IDs where user is org_admin
-  const orgAdminOrgIds = organizations
-    ?.filter((uo) => uo.role === "org_admin")
-    ?.map((uo) => uo.organization.id) || [];
+  const orgAdminOrgIds = useMemo(
+    () =>
+      organizations
+        ?.filter((uo) => uo.role === "org_admin")
+        ?.map((uo) => uo.organization.id) ?? [],
+    [organizations]
+  );
 
   // Function to check if user can edit a specific org
   const canEditOrg = useCallback((orgId: string): boolean => {
-    return isSuperAdmin || orgAdminOrgIds.includes(orgId);
-  }, [isSuperAdmin, orgAdminOrgIds]);
+    return isGlobalAdmin || orgAdminOrgIds.includes(orgId);
+  }, [isGlobalAdmin, orgAdminOrgIds]);
 
   // User can see Edit tool if they're super_admin OR org_admin for any org
-  const isAdmin = isSuperAdmin || orgAdminOrgIds.length > 0;
+  const isAdmin = isGlobalAdmin || orgAdminOrgIds.length > 0;
 
   return (
     <ToolkitContext.Provider value={{ editMode, isAdmin, canEditOrg, setEditMode }}>
@@ -110,6 +119,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
     isImageField?: boolean; // True when clicking an image field (hero_image_url, logo_url, etc.)
     colorType?: 'primary' | 'secondary'; // For add color action
     organizationId?: string; // For add contact/color action
+    conferenceId?: string;
+    entitlementId?: string;
+    entitlementType?: string;
+    sourceType?: string;
   } | null>(null);
 
   // Non-logged-in users: show a "Join CSC" FAB on key pages
@@ -702,6 +715,10 @@ function EditSelectionOverlay({
     isImageField?: boolean;
     colorType?: 'primary' | 'secondary';
     organizationId?: string;
+    conferenceId?: string;
+    entitlementId?: string;
+    entitlementType?: string;
+    sourceType?: string;
   }) => void;
   onCancel: () => void;
   hoveredElement: HTMLElement | null;
@@ -819,6 +836,10 @@ function EditSelectionOverlay({
         const field = hoveredElement.getAttribute('data-field') || '';
         const entityId = hoveredElement.getAttribute('data-entity-id') || '';
         const organizationId = hoveredElement.getAttribute('data-organization-id') || '';
+        const conferenceId = hoveredElement.getAttribute('data-conference-id') || '';
+        const entitlementId = hoveredElement.getAttribute('data-entitlement-id') || '';
+        const entitlementType = hoveredElement.getAttribute('data-entitlement-type') || '';
+        const sourceType = hoveredElement.getAttribute('data-source-type') || '';
         const colorType = hoveredElement.getAttribute('data-color-type') as 'primary' | 'secondary' | null;
         const rect = hoveredElement.getBoundingClientRect();
 
@@ -841,6 +862,10 @@ function EditSelectionOverlay({
           isImageField: isImageField || undefined,
           colorType: colorType || undefined,
           organizationId: organizationId || undefined,
+          conferenceId: conferenceId || undefined,
+          entitlementId: entitlementId || undefined,
+          entitlementType: entitlementType || undefined,
+          sourceType: sourceType || undefined,
         });
       }
     };
@@ -944,6 +969,10 @@ function EditConfirmationPopover({
     isImageField?: boolean;
     colorType?: 'primary' | 'secondary';
     organizationId?: string;
+    conferenceId?: string;
+    entitlementId?: string;
+    entitlementType?: string;
+    sourceType?: string;
   };
   onClose: () => void;
   onSuccess: () => void;
@@ -993,6 +1022,16 @@ function EditConfirmationPopover({
   if (selectedElement.isImageField) {
     return (
       <ImageUploadPopover
+        selectedElement={selectedElement}
+        onClose={onClose}
+        onSuccess={onSuccess}
+      />
+    );
+  }
+
+  if (selectedElement.field === "conference_people.assignment_status") {
+    return (
+      <ConferenceAttendancePopover
         selectedElement={selectedElement}
         onClose={onClose}
         onSuccess={onSuccess}
@@ -1161,6 +1200,242 @@ function FieldEditPopover({
             {error && (
               <div className="text-red-500 text-xs mt-2">{error}</div>
             )}
+          </>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ConferenceAttendancePopover({
+  selectedElement,
+  onClose,
+  onSuccess,
+}: {
+  selectedElement: {
+    rect: DOMRect;
+    organizationId?: string;
+    conferenceId?: string;
+    entitlementId?: string;
+    entitlementType?: string;
+    sourceType?: string;
+  };
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const [members, setMembers] = useState<Array<{ userId: string; displayName: string | null; email: string | null; role: string }>>([]);
+  const [selectedUserId, setSelectedUserId] = useState("");
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const organizationId = selectedElement.organizationId ?? "";
+  const conferenceId = selectedElement.conferenceId ?? "";
+  const entitlementId = selectedElement.entitlementId ?? "";
+  const entitlementType = selectedElement.entitlementType ?? "delegate";
+  const isEntitlement = selectedElement.sourceType === "entitlement";
+
+  useEffect(() => {
+    let active = true;
+    if (!organizationId) return;
+    void (async () => {
+      const result = await listOrganizationAssignableUsers(organizationId);
+      if (!active) return;
+      if (!result.success) {
+        setError(result.error ?? "Failed to load organization users.");
+        return;
+      }
+      setMembers(result.data ?? []);
+    })();
+    return () => {
+      active = false;
+    };
+  }, [organizationId]);
+
+  const validateContext = () => {
+    if (!isEntitlement) return "Conference attendance editing is only supported for entitlement rows.";
+    if (!organizationId || !conferenceId || !entitlementId) {
+      return "Missing conference assignment context on selected row.";
+    }
+    return null;
+  };
+
+  const handleAssign = async () => {
+    const contextError = validateContext();
+    if (contextError) {
+      setError(contextError);
+      return;
+    }
+    if (!selectedUserId) {
+      setError("Choose an org user first.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    const result = await assignConferenceEntitlement(conferenceId, organizationId, entitlementId, {
+      entitlementType,
+      targetUserId: selectedUserId,
+    });
+    if (!result.success) {
+      setError(result.error ?? "Failed to assign entitlement.");
+      setIsSubmitting(false);
+      return;
+    }
+    setSubmitted(true);
+    setTimeout(onSuccess, 500);
+  };
+
+  const handleInviteAssign = async () => {
+    const contextError = validateContext();
+    if (contextError) {
+      setError(contextError);
+      return;
+    }
+    if (!inviteEmail.trim()) {
+      setError("Enter an email to invite.");
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    const result = await assignConferenceEntitlement(conferenceId, organizationId, entitlementId, {
+      entitlementType,
+      targetEmail: inviteEmail.trim().toLowerCase(),
+    });
+    if (!result.success) {
+      setError(result.error ?? "Failed to invite + assign.");
+      setIsSubmitting(false);
+      return;
+    }
+    setSubmitted(true);
+    setTimeout(onSuccess, 500);
+  };
+
+  const handleUnassign = async () => {
+    const contextError = validateContext();
+    if (contextError) {
+      setError(contextError);
+      return;
+    }
+    setIsSubmitting(true);
+    setError(null);
+    const result = await unassignConferenceEntitlement(conferenceId, organizationId, entitlementId);
+    if (!result.success) {
+      setError(result.error ?? "Failed to unassign entitlement.");
+      setIsSubmitting(false);
+      return;
+    }
+    setSubmitted(true);
+    setTimeout(onSuccess, 500);
+  };
+
+  const popoverStyle = {
+    top: selectedElement.rect.bottom + 8,
+    left: Math.max(16, selectedElement.rect.left),
+  };
+  if (popoverStyle.top + 270 > window.innerHeight) {
+    popoverStyle.top = Math.max(16, selectedElement.rect.top - 270);
+  }
+  const maxWidth = Math.min(440, window.innerWidth - popoverStyle.left - 16);
+
+  return (
+    <>
+      <div
+        data-edit-overlay
+        className="fixed inset-0 z-[55] bg-black/10"
+        onClick={() => !isSubmitting && onClose()}
+      />
+      <div
+        data-edit-overlay
+        className="fixed pointer-events-none z-[56] border-2 border-emerald-500 bg-emerald-500/20 rounded"
+        style={{
+          top: selectedElement.rect.top - 2,
+          left: selectedElement.rect.left - 2,
+          width: selectedElement.rect.width + 4,
+          height: selectedElement.rect.height + 4,
+        }}
+      />
+      <div
+        data-edit-overlay
+        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-3 space-y-3"
+        style={{ ...popoverStyle, width: maxWidth }}
+      >
+        {submitted ? (
+          <div className="flex items-center gap-2 text-emerald-600">
+            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
+            </svg>
+            <span className="font-medium">Conference attendance updated.</span>
+          </div>
+        ) : (
+          <>
+            <div className="text-xs text-gray-400 uppercase tracking-wider">conference attendance</div>
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-600">Assign / Reassign</label>
+              <div className="flex gap-2">
+                <select
+                  value={selectedUserId}
+                  onChange={(e) => setSelectedUserId(e.target.value)}
+                  disabled={isSubmitting}
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                >
+                  <option value="">Choose organization user</option>
+                  {members.map((member) => (
+                    <option key={member.userId} value={member.userId}>
+                      {member.displayName ?? member.email ?? member.userId} ({member.role})
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={handleAssign}
+                  disabled={isSubmitting}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Assign
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="block text-xs font-medium text-gray-600">Invite + Assign</label>
+              <div className="flex gap-2">
+                <input
+                  type="email"
+                  value={inviteEmail}
+                  onChange={(e) => setInviteEmail(e.target.value)}
+                  disabled={isSubmitting}
+                  placeholder="name@school.ca"
+                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                />
+                <button
+                  type="button"
+                  onClick={handleInviteAssign}
+                  disabled={isSubmitting}
+                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Invite
+                </button>
+              </div>
+            </div>
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={handleUnassign}
+                disabled={isSubmitting}
+                className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50"
+              >
+                Unassign
+              </button>
+              <button
+                type="button"
+                onClick={onClose}
+                disabled={isSubmitting}
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Cancel
+              </button>
+            </div>
+            {error ? <p className="text-xs text-red-600">{error}</p> : null}
           </>
         )}
       </div>
