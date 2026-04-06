@@ -6838,6 +6838,7 @@ export type Database = {
       user_organizations: {
         Row: {
           created_at: string | null
+          hidden: boolean
           id: string
           organization_id: string
           role: string
@@ -6847,6 +6848,7 @@ export type Database = {
         }
         Insert: {
           created_at?: string | null
+          hidden?: boolean
           id?: string
           organization_id: string
           role?: string
@@ -6856,6 +6858,7 @@ export type Database = {
         }
         Update: {
           created_at?: string | null
+          hidden?: boolean
           id?: string
           organization_id?: string
           role?: string

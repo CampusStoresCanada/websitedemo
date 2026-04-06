@@ -94,7 +94,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
       .from("user_organizations")
       .select("user_id, role")
       .eq("organization_id", organization.id)
-      .eq("status", "active");
+      .eq("status", "active")
+      .eq("hidden", false);
 
     const userIds = Array.from(
       new Set(

@@ -10,25 +10,33 @@ interface ConferenceSubNavProps {
   editionCode: string;
 }
 
-const NAV_ITEMS = [
-  { segment: "details", label: "Details" },
+/** Config/setup tabs — shown first, left side */
+const CONFIG_TABS = [
   { segment: "overview", label: "Overview" },
-  { segment: "setup", label: "Setup" },
+  { segment: "details", label: "Edit" },
+  { segment: "setup", label: "Schedule Design" },
   { segment: "schedule", label: "Schedule" },
   { segment: "products", label: "Products" },
   { segment: "rules", label: "Rules" },
-  { segment: "registrations", label: "Registrations" },
   { segment: "legal", label: "Legal" },
+] as const;
+
+/** Registration & commerce management tabs */
+const MANAGEMENT_TABS = [
+  { segment: "registrations", label: "Registrations" },
   { segment: "wishlist", label: "Wishlist" },
   { segment: "billing-runs", label: "Billing Runs" },
   { segment: "swaps", label: "Swaps" },
   { segment: "status", label: "Status" },
 ] as const;
 
-const OPS_LINKS = [
+/**
+ * Conference-day ops tabs.
+ * These were previously buried as small header buttons — promoted to first-class tabs.
+ */
+const OPS_TABS = [
   { segment: "war-room", label: "War Room" },
   { segment: "badges", label: "Badge Ops" },
-  { segment: "check-in", label: "Check-in Desk", external: true },
   { segment: "schedule-ops", label: "Schedule Ops" },
   { segment: "travel-import", label: "Travel Import" },
 ] as const;
@@ -42,16 +50,25 @@ export default function ConferenceSubNav({
   const pathname = usePathname();
   const basePath = `/admin/conference/${conferenceId}`;
 
-  // Match: exact base path maps to "details", otherwise match last segment
   function isActive(segment: string): boolean {
-    if (segment === "details") {
-      return pathname === basePath || pathname === `${basePath}/details`;
-    }
-    return pathname === `${basePath}/${segment}`;
+    return (
+      pathname === `${basePath}/${segment}` ||
+      // Overview is also active when at the bare base path (pre-redirect)
+      (segment === "overview" && pathname === basePath)
+    );
+  }
+
+  function tabClass(segment: string): string {
+    return `whitespace-nowrap py-2 px-1 text-sm font-medium border-b-2 transition-colors ${
+      isActive(segment)
+        ? "border-[#EE2A2E] text-[#EE2A2E]"
+        : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+    }`;
   }
 
   return (
     <div className="mb-6">
+      {/* Conference header row */}
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
           <h1 className="text-xl font-bold text-gray-900">{conferenceName}</h1>
@@ -59,36 +76,57 @@ export default function ConferenceSubNav({
             {year} &middot; Edition {editionCode}
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          {OPS_LINKS.map((link) => (
-            <Link
-              key={link.segment}
-              href={`${basePath}/${link.segment}`}
-              {...("external" in link && link.external
-                ? { target: "_blank", rel: "noopener noreferrer" }
-                : {})}
-              className={`rounded-md border px-3 py-1.5 text-xs font-medium transition-colors ${
-                link.segment === "check-in"
-                  ? "border-[#EE2A2E] bg-[#EE2A2E] text-white hover:bg-[#b50001]"
-                  : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-              }`}
-            >
-              {link.label}
-            </Link>
-          ))}
-        </div>
+        {/* Check-in Desk stays as a standalone button — it opens a new window */}
+        <Link
+          href={`${basePath}/check-in`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="rounded-md border border-[#EE2A2E] bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] shrink-0"
+        >
+          Check-in Desk ↗
+        </Link>
       </div>
+
+      {/* Unified tab bar */}
       <div className="border-b border-gray-200">
-        <nav className="-mb-px flex gap-4 overflow-x-auto" aria-label="Conference sections">
-          {NAV_ITEMS.map((item) => (
+        <nav
+          className="-mb-px flex items-center gap-4 overflow-x-auto"
+          aria-label="Conference sections"
+        >
+          {/* Group 1: Config & setup */}
+          {CONFIG_TABS.map((item) => (
             <Link
               key={item.segment}
-              href={item.segment === "details" ? basePath : `${basePath}/${item.segment}`}
-              className={`whitespace-nowrap py-2 px-1 text-sm font-medium border-b-2 transition-colors ${
-                isActive(item.segment)
-                  ? "border-[#EE2A2E] text-[#EE2A2E]"
-                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
-              }`}
+              href={`${basePath}/${item.segment}`}
+              className={tabClass(item.segment)}
+            >
+              {item.label}
+            </Link>
+          ))}
+
+          {/* Visual separator */}
+          <span className="h-4 w-px shrink-0 bg-gray-300" aria-hidden="true" />
+
+          {/* Group 2: Registration & commerce management */}
+          {MANAGEMENT_TABS.map((item) => (
+            <Link
+              key={item.segment}
+              href={`${basePath}/${item.segment}`}
+              className={tabClass(item.segment)}
+            >
+              {item.label}
+            </Link>
+          ))}
+
+          {/* Visual separator */}
+          <span className="h-4 w-px shrink-0 bg-gray-300" aria-hidden="true" />
+
+          {/* Group 3: Conference-day operations */}
+          {OPS_TABS.map((item) => (
+            <Link
+              key={item.segment}
+              href={`${basePath}/${item.segment}`}
+              className={tabClass(item.segment)}
             >
               {item.label}
             </Link>

@@ -1,5 +1,6 @@
 import { createClient } from "@/lib/supabase/server";
 import { ApplicationsReview } from "@/components/admin/ApplicationsReview";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
 
 export const metadata = { title: "Applications | Admin" };
 
@@ -12,13 +13,11 @@ export default async function ApplicationsAdminPage() {
 
   return (
     <main>
-      <h1 className="text-2xl font-bold text-gray-900">Applications</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        Review pending membership and partner applications.
-      </p>
-      <div className="mt-6">
-        <ApplicationsReview initialApplications={applications ?? []} />
-      </div>
+      <AdminPageHeader
+        title="Applications"
+        description="Review pending membership and partner applications."
+      />
+      <ApplicationsReview initialApplications={applications ?? []} />
     </main>
   );
 }

@@ -14,6 +14,7 @@ export interface OrgUserRow {
   email: string | null;
   role: string;
   status: string;
+  hidden: boolean;
   avatarUrl: string | null;
   membershipId: string;
 }
@@ -29,6 +30,7 @@ interface MembershipRow {
   user_id: string;
   role: string;
   status: string;
+  hidden: boolean;
   profiles: MembershipProfile | MembershipProfile[] | null;
 }
 
@@ -48,6 +50,7 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
       user_id,
       role,
       status,
+      hidden,
       profiles!inner(
         id,
         display_name,
@@ -90,6 +93,7 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
       email: emailMap[m.user_id] ?? null,
       role: m.role,
       status: m.status,
+      hidden: m.hidden ?? false,
       avatarUrl: profile?.avatar_url ?? null,
       membershipId: m.id,
     };

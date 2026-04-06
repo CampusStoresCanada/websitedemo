@@ -28,14 +28,6 @@ const ROLE_LEVEL: Record<AdminRole, number> = {
 
 const NAV_GROUPS: NavGroup[] = [
   {
-    heading: "Overview",
-    items: [
-      { href: "/admin", label: "Dashboard" },
-      { href: "/admin/ops", label: "Ops Health" },
-      { href: "/admin/calendar", label: "Calendar" },
-    ],
-  },
-  {
     heading: "Conference",
     items: [
       { href: "/admin/conference", label: "Conferences", matchPrefix: "/admin/conference" },
@@ -45,8 +37,8 @@ const NAV_GROUPS: NavGroup[] = [
     heading: "Membership",
     items: [
       { href: "/admin/membership", label: "Members & Partners" },
-      { href: "/admin/people", label: "People" },
       { href: "/admin/applications", label: "Applications" },
+      { href: "/admin/people", label: "People" },
     ],
   },
   {
@@ -57,11 +49,18 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    heading: "System",
+    items: [
+      { href: "/admin/ops", label: "Ops Health" },
+      { href: "/admin/calendar", label: "Calendar" },
+    ],
+  },
+  {
     heading: "Configuration",
     minRole: "super_admin",
     items: [
       { href: "/admin/policy", label: "Policy Settings" },
-      { href: "/admin/integrations", label: "Integrations" },
+      { href: "/admin/circle", label: "Circle" },
       { href: "/admin/content", label: "Site Content" },
       { href: "/admin/pages", label: "Pages & Permissions" },
     ],
@@ -110,7 +109,7 @@ export default function AdminSidebar({ globalRole = "admin" }: AdminSidebarProps
                         href={item.href}
                         className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${
                           active
-                            ? "bg-white text-gray-900 font-medium shadow-sm"
+                            ? "bg-white text-[#EE2A2E] font-medium shadow-sm"
                             : "text-gray-600 hover:bg-white hover:text-gray-900"
                         }`}
                       >

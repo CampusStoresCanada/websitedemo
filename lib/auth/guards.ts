@@ -122,7 +122,11 @@ export function isSuperAdmin(role: GlobalRole): boolean {
 }
 
 export function canManageOrganization(ctx: AuthContext, organizationId: string): boolean {
-  return isSuperAdmin(ctx.globalRole) || ctx.orgAdminOrgIds.includes(organizationId);
+  // admin + super_admin → global scope, can manage any org
+  // org_admin → org scope, can only manage orgs they administrate
+  // The super_admin vs admin distinction (who can create/alter global roles) is
+  // enforced separately — this guard is only about org-level management operations.
+  return isGlobalAdmin(ctx.globalRole) || ctx.orgAdminOrgIds.includes(organizationId);
 }
 
 export async function requireAuthenticated(): Promise<GuardResult> {

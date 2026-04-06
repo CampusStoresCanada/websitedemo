@@ -1,12 +1,10 @@
 import { redirect } from "next/navigation";
-import { getConference } from "@/lib/actions/conference";
-import { isSuperAdmin, requireAdmin } from "@/lib/auth/guards";
-import ConferenceForm from "@/components/admin/conference/ConferenceForm";
 
-export const metadata = { title: "Conference Details | Admin" };
+export const metadata = { title: "Conference | Admin" };
 
 /** Map old ?tab= values to new route segments */
 const TAB_REDIRECTS: Record<string, string> = {
+  details: "details",
   overview: "overview",
   setup: "setup",
   schedule: "schedule",
@@ -16,11 +14,17 @@ const TAB_REDIRECTS: Record<string, string> = {
   legal: "legal",
   wishlist: "wishlist",
   billing_runs: "billing-runs",
+  "billing-runs": "billing-runs",
   swaps: "swaps",
   status: "status",
+  "war-room": "war-room",
+  badges: "badges",
+  "schedule-ops": "schedule-ops",
+  "travel-import": "travel-import",
+  "check-in": "check-in",
 };
 
-export default async function ConferenceDetailsPage({
+export default async function ConferenceIndexPage({
   params,
   searchParams,
 }: {
@@ -36,24 +40,6 @@ export default async function ConferenceDetailsPage({
     redirect(`/admin/conference/${id}/${TAB_REDIRECTS[tab]}`);
   }
 
-  const auth = await requireAdmin();
-  const canSuperAdminOverride = auth.ok ? isSuperAdmin(auth.ctx.globalRole) : false;
-  const googleMapsApiKey =
-    process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null;
-  const result = await getConference(id);
-  if (!result.success || !result.data) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        Conference not found. {result.error}
-      </div>
-    );
-  }
-
-  return (
-    <ConferenceForm
-      conference={result.data}
-      canSuperAdminOverride={canSuperAdminOverride}
-      googleMapsApiKey={googleMapsApiKey}
-    />
-  );
+  // Default: land on Overview (read-only summary), not the Edit form
+  redirect(`/admin/conference/${id}/overview`);
 }

@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isSuperAdmin, requireAdmin } from "@/lib/auth/guards";
 import PeopleDirectory from "@/components/admin/PeopleDirectory";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
 
 export const metadata = { title: "People | Admin" };
 
@@ -70,10 +71,10 @@ export default async function PeopleAdminPage() {
 
   return (
     <main>
-      <h1 className="text-2xl font-bold text-gray-900">People</h1>
-      <p className="mt-1 mb-6 text-sm text-gray-600">
-        All user accounts across the platform.
-      </p>
+      <AdminPageHeader
+        title="People"
+        description="All user accounts across the platform."
+      />
       <PeopleDirectory initialPeople={people} />
     </main>
   );

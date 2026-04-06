@@ -523,3 +523,52 @@ export async function changeOrgUserRole(
     };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Toggle member visibility within an org
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Hide or unhide a member within an organization.
+ *
+ * A hidden member retains their account, role, and data access but is
+ * invisible in all public and peer-member-facing views. Only the org's
+ * own org_admin, global admins, and super_admins can see hidden members.
+ *
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function setOrgMemberHidden(
+  orgId: string,
+  userId: string,
+  hidden: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const adminClient = createAdminClient();
+
+  const { error } = await adminClient
+    .from("user_organizations")
+    .update({ hidden, updated_at: new Date().toISOString() })
+    .eq("organization_id", orgId)
+    .eq("user_id", userId);
+
+  if (error) {
+    console.error("[setOrgMemberHidden] Update failed:", error);
+    return { success: false, error: "Failed to update member visibility" };
+  }
+
+  await logAuditEventSafe({
+    action: hidden ? "organization_member_hidden" : "organization_member_shown",
+    entityType: "organization",
+    entityId: orgId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { orgId, targetUserId: userId, hidden },
+  });
+
+  return { success: true };
+}

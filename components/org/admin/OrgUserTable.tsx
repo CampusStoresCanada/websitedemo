@@ -6,6 +6,7 @@ import {
   deactivateOrgUser,
   reactivateOrgUser,
   changeOrgUserRole,
+  setOrgMemberHidden,
 } from "@/lib/actions/user-management";
 import type { OrgUserRow } from "@/app/org/[slug]/admin/users/page";
 
@@ -62,6 +63,19 @@ export function OrgUserTable({ users, orgId }: OrgUserTableProps) {
     startTransition(() => router.refresh());
   }
 
+  async function handleToggleHidden(userId: string, currentlyHidden: boolean) {
+    setActionError(null);
+    setActingOnUser(userId);
+    const result = await setOrgMemberHidden(orgId, userId, !currentlyHidden);
+    if (!result.success) {
+      setActionError(result.error ?? "Failed to update visibility");
+      setActingOnUser(null);
+      return;
+    }
+    setActingOnUser(null);
+    startTransition(() => router.refresh());
+  }
+
   if (users.length === 0) {
     return (
       <div className="bg-white rounded-lg p-8 text-center text-gray-500 border border-gray-200">
@@ -100,6 +114,9 @@ export function OrgUserTable({ users, orgId }: OrgUserTableProps) {
               <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Status
               </th>
+              <th className="text-left px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
+                Visibility
+              </th>
               <th className="text-right px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider">
                 Actions
               </th>
@@ -113,7 +130,9 @@ export function OrgUserTable({ users, orgId }: OrgUserTableProps) {
               return (
                 <tr
                   key={user.membershipId}
-                  className="hover:bg-gray-50 transition-colors"
+                  className={`transition-colors ${
+                    user.hidden ? "bg-gray-50 opacity-60" : "hover:bg-gray-50"
+                  }`}
                 >
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-3">
@@ -164,6 +183,20 @@ export function OrgUserTable({ users, orgId }: OrgUserTableProps) {
                       {user.status}
                     </span>
                   </td>
+                  {/* Visibility cell */}
+                  <td className="px-4 py-3">
+                    {user.hidden ? (
+                      <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-gray-100 text-gray-500">
+                        Hidden
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center rounded px-2 py-0.5 text-xs font-medium bg-green-50 text-green-700">
+                        Visible
+                      </span>
+                    )}
+                  </td>
+
+                  {/* Actions cell */}
                   <td className="px-4 py-3 text-right">
                     <div className="flex items-center justify-end gap-2">
                       {/* Role toggle */}
@@ -180,11 +213,25 @@ export function OrgUserTable({ users, orgId }: OrgUserTableProps) {
                           disabled={isActing}
                           className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
                         >
-                          {user.role === "org_admin"
-                            ? "Demote"
-                            : "Promote"}
+                          {user.role === "org_admin" ? "Demote" : "Promote"}
                         </button>
                       )}
+
+                      {/* Visibility toggle */}
+                      <button
+                        onClick={() =>
+                          handleToggleHidden(user.userId, user.hidden)
+                        }
+                        disabled={isActing}
+                        className="text-xs px-2 py-1 rounded border border-gray-300 text-gray-600 hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
+                        title={
+                          user.hidden
+                            ? "Make visible to all members"
+                            : "Hide from public and member views"
+                        }
+                      >
+                        {user.hidden ? "Show" : "Hide"}
+                      </button>
 
                       {/* Deactivate / Reactivate */}
                       {user.status === "active" ? (

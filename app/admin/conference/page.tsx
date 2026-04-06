@@ -1,6 +1,7 @@
 import { getConferences } from "@/lib/actions/conference";
 import { CONFERENCE_STATUS_LABELS, type ConferenceStatus } from "@/lib/constants/conference";
 import Link from "next/link";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import DuplicateConferenceCard from "@/components/admin/conference/DuplicateConferenceCard";
 
 export const metadata = { title: "Conference Management | Admin" };
@@ -39,16 +40,20 @@ export default async function ConferenceListPage() {
 
   return (
     <div>
+      <AdminPageHeader
+        title="Conferences"
+        description="Manage conference instances, registrations, scheduling, and commerce."
+        actions={
+          <Link
+            href="/admin/conference/create"
+            className="px-4 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
+          >
+            Create Conference
+          </Link>
+        }
+      />
+
       <DuplicateConferenceCard conferences={conferences} />
-      <div className="flex justify-between items-center mb-6">
-        <h1 className="text-2xl font-bold text-gray-900">Conferences</h1>
-        <Link
-          href="/admin/conference/create"
-          className="px-4 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
-        >
-          Create Conference
-        </Link>
-      </div>
 
       {conferences.length === 0 ? (
         <div className="text-center py-12 bg-white rounded-lg border border-gray-200">
