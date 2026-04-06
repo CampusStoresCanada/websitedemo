@@ -34,22 +34,25 @@ create index if not exists idx_events_created_by on public.events(created_by);
 alter table public.events enable row level security;
 
 -- anon: only published public events
-create policy "events_anon_read"
-  on public.events for select
-  to anon
-  using (status = 'published' and audience_mode = 'public');
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'events' and policyname = 'events_anon_read') then
+    create policy "events_anon_read" on public.events for select to anon using (status = 'published' and audience_mode = 'public');
+  end if;
+end $$;
 
 -- authenticated: all published events (both audience modes)
-create policy "events_member_read"
-  on public.events for select
-  to authenticated
-  using (status = 'published');
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'events' and policyname = 'events_member_read') then
+    create policy "events_member_read" on public.events for select to authenticated using (status = 'published');
+  end if;
+end $$;
 
 -- creators see their own events regardless of status
-create policy "events_creator_read"
-  on public.events for select
-  to authenticated
-  using (created_by = auth.uid());
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'events' and policyname = 'events_creator_read') then
+    create policy "events_creator_read" on public.events for select to authenticated using (created_by = auth.uid());
+  end if;
+end $$;
 
 -- all writes go through admin client (server actions bypass RLS)
 
@@ -71,10 +74,11 @@ create index if not exists idx_event_reg_user  on public.event_registrations(use
 
 alter table public.event_registrations enable row level security;
 
-create policy "event_reg_owner_read"
-  on public.event_registrations for select
-  to authenticated
-  using (user_id = auth.uid());
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'event_registrations' and policyname = 'event_reg_owner_read') then
+    create policy "event_reg_owner_read" on public.event_registrations for select to authenticated using (user_id = auth.uid());
+  end if;
+end $$;
 
 -- ── event_waitlist ───────────────────────────────────────────────
 
@@ -92,10 +96,11 @@ create index if not exists idx_event_waitlist_event on public.event_waitlist(eve
 
 alter table public.event_waitlist enable row level security;
 
-create policy "event_waitlist_owner_read"
-  on public.event_waitlist for select
-  to authenticated
-  using (user_id = auth.uid());
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'event_waitlist' and policyname = 'event_waitlist_owner_read') then
+    create policy "event_waitlist_owner_read" on public.event_waitlist for select to authenticated using (user_id = auth.uid());
+  end if;
+end $$;
 
 -- ── event_checkins ───────────────────────────────────────────────
 
@@ -113,7 +118,8 @@ create index if not exists idx_event_checkins_event on public.event_checkins(eve
 
 alter table public.event_checkins enable row level security;
 
-create policy "event_checkin_owner_read"
-  on public.event_checkins for select
-  to authenticated
-  using (user_id = auth.uid());
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'event_checkins' and policyname = 'event_checkin_owner_read') then
+    create policy "event_checkin_owner_read" on public.event_checkins for select to authenticated using (user_id = auth.uid());
+  end if;
+end $$;

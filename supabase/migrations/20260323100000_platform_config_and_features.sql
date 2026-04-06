@@ -26,35 +26,21 @@ create unique index if not exists idx_platform_config_singleton
 alter table public.platform_config enable row level security;
 
 -- Super admins can read and write
-create policy "platform_config_super_admin_all"
-  on public.platform_config
-  for all
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role = 'super_admin'
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role = 'super_admin'
-    )
-  );
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'platform_config' and policyname = 'platform_config_super_admin_all') then
+    create policy "platform_config_super_admin_all" on public.platform_config for all
+      using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role = 'super_admin'))
+      with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role = 'super_admin'));
+  end if;
+end $$;
 
 -- Admins can read
-create policy "platform_config_admin_read"
-  on public.platform_config
-  for select
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role in ('admin', 'super_admin')
-    )
-  );
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'platform_config' and policyname = 'platform_config_admin_read') then
+    create policy "platform_config_admin_read" on public.platform_config for select
+      using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role in ('admin', 'super_admin')));
+  end if;
+end $$;
 
 -- ────────────────────────────────────────────────────────────────
 -- 2. Platform features (one row per feature key)
@@ -79,35 +65,21 @@ create table if not exists public.platform_features (
 alter table public.platform_features enable row level security;
 
 -- Super admins can read and write
-create policy "platform_features_super_admin_all"
-  on public.platform_features
-  for all
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role = 'super_admin'
-    )
-  )
-  with check (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role = 'super_admin'
-    )
-  );
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'platform_features' and policyname = 'platform_features_super_admin_all') then
+    create policy "platform_features_super_admin_all" on public.platform_features for all
+      using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role = 'super_admin'))
+      with check (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role = 'super_admin'));
+  end if;
+end $$;
 
 -- Admins can read
-create policy "platform_features_admin_read"
-  on public.platform_features
-  for select
-  using (
-    exists (
-      select 1 from public.profiles p
-      where p.id = auth.uid()
-        and p.global_role in ('admin', 'super_admin')
-    )
-  );
+do $$ begin
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'platform_features' and policyname = 'platform_features_admin_read') then
+    create policy "platform_features_admin_read" on public.platform_features for select
+      using (exists (select 1 from public.profiles p where p.id = auth.uid() and p.global_role in ('admin', 'super_admin')));
+  end if;
+end $$;
 
 -- ────────────────────────────────────────────────────────────────
 -- 3. Seed all feature rows (disabled by default, always_on for core)
