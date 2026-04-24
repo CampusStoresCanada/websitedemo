@@ -254,6 +254,10 @@ async function handleUpdateProfile(
   client: CircleAdminClient,
   item: CircleSyncQueueItem
 ): Promise<void> {
+  // DISABLED — calls PUT /community_members/{id}. Shut down during API usage audit.
+  // To re-enable: verify this operation's monthly call volume is acceptable.
+  return;
+
   const circleId = await resolveCircleId(item.entity_id);
   if (!circleId) {
     // Not linked yet — skip silently (will be linked later via link_member)
@@ -289,6 +293,11 @@ async function handleDeleteMember(
   client: CircleAdminClient,
   item: CircleSyncQueueItem
 ): Promise<void> {
+  // DISABLED — calls DELETE /community_members/{id}. Shut down during API usage audit.
+  // WARNING: deprovisioned contacts will NOT be removed from Circle until re-enabled.
+  // To re-enable: confirm this is acceptable and monthly call volume is low.
+  return;
+
   const circleId = await resolveCircleId(item.entity_id);
   if (!circleId) {
     // Not linked — nothing to delete

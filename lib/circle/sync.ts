@@ -210,8 +210,8 @@ export async function processCircleSyncQueue(): Promise<QueueResult> {
 // Inbound sync — pull profile updates from Circle → Supabase
 // ---------------------------------------------------------------------------
 
-const INBOUND_SYNC_BATCH_SIZE = 25;
-const INBOUND_SYNC_INTERVAL_MINUTES = 60; // only re-sync contacts older than this
+const INBOUND_SYNC_BATCH_SIZE = 10;
+const INBOUND_SYNC_INTERVAL_MINUTES = 1440; // 24 hours — bio/avatar/headline change rarely
 
 /**
  * Pull non-canonical profile data (bio, headline, avatar) from Circle into
@@ -225,7 +225,10 @@ export async function pullInboundFromCircle(): Promise<{
   updated: number;
   errors: string[];
 }> {
-  const result = { checked: 0, updated: 0, errors: [] as string[] };
+  // DISABLED — was generating ~30k GET /community_members/{id} calls/month via
+  // per-contact polling every 60 min. Shut down pending a webhook-based approach.
+  // To re-enable: justify a minimum polling interval that keeps monthly calls < 500.
+  return { checked: 0, updated: 0, errors: ["pullInboundFromCircle disabled"] };
 
   const circleClient = getCircleClient();
   if (!circleClient) return result;
@@ -279,11 +282,22 @@ export async function pullInboundFromCircle(): Promise<{
       // Intentional exception to identity lifecycle helper usage:
       // circle_properties and synced_from_circle_at are external-system
       // engagement metadata, not identity fields.
+      //
+      // profile_picture_url: Circle is the source of truth for member photos.
+      // Promote avatar_url into the canonical column so it flows to the website
+      // without needing a separate upload. Only update when Circle provides a
+      // value — never blank it out if Circle returns null.
+      const photoUpdate: Record<string, unknown> = {};
+      if (member.avatar_url) {
+        photoUpdate.profile_picture_url = member.avatar_url;
+      }
+
       await adminClient
         .from("contacts")
         .update({
           circle_properties: merged as Json,
           synced_from_circle_at: new Date().toISOString(),
+          ...photoUpdate,
         })
         .eq("id", contact.id);
 
