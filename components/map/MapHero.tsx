@@ -39,6 +39,17 @@ const DirectoryTable = dynamic(
 const STORY_CYCLE_MS = 9000;
 const HOVER_DWELL_MS = 2000;
 
+const CANADIAN_PROVINCES = new Set([
+  "AB","BC","MB","NB","NL","NS","NT","NU","ON","PE","QC","SK","YT",
+  "Alberta","British Columbia","Manitoba","New Brunswick","Newfoundland and Labrador",
+  "Nova Scotia","Northwest Territories","Nunavut","Ontario","Prince Edward Island",
+  "Quebec","Saskatchewan","Yukon",
+]);
+function matchesProvinceFilter(orgProvince: string | null, filter: string): boolean {
+  if (filter === "__international__") return !orgProvince || !CANADIAN_PROVINCES.has(orgProvince);
+  return orgProvince === filter;
+}
+
 const STORY_LABELS: Record<string, string> = {
   city_cluster: "Local Community",
   pos_ecosystem: "Shared Platform",
@@ -75,8 +86,9 @@ export default function MapHero({
   stories,
   initialState,
 }: MapHeroProps) {
-  const { user, permissionState } = useAuth();
+  const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
+  const canViewCancoll = isMember || isCancollMember;
   const mapRef = useRef<MapRef>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousBodyOverflowRef = useRef<string | null>(null);
@@ -91,6 +103,7 @@ export default function MapHero({
   const [explore, setExplore] = useState(persistent);
   const [storyIndex, setStoryIndex] = useState(0);
   const [paused, setPaused] = useState(persistent);
+  const [pageReady, setPageReady] = useState(false);
 
   // --- Explore state ---
   const [lens, setLens] = useState<ExploreLens>(initialState?.lens ?? null);
@@ -103,35 +116,55 @@ export default function MapHero({
   const [selectedOrg, setSelectedOrg] = useState<HomeMapOrg | null>(null);
 
   // --- Compound cross-lens filters ---
-  const [compoundFilters, setCompoundFilters] = useState<{
-    province?: string;
-    scaleRange?: ScaleRange;
-    pos?: string;
-    service?: string;
-    mandate?: string;
-    payment?: string;
-    shopping?: string;
-  }>({});
+  const [compoundFilters, setCompoundFilters] = useState<CompoundFilters>({});
   const [showFilterMenu, setShowFilterMenu] = useState(false);
+
+  // --- Semantic search state (partner focus only) ---
+  // null = no semantic search active; array = ranked partner IDs from Voyage
+  const [semanticResults, setSemanticResults] = useState<{ id: string; score: number }[] | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+
+  // Debounced semantic search: fires 400ms after the user stops typing,
+  // but only on the partners page where embeddings are meaningful.
+  useEffect(() => {
+    if (discoveryFocus !== "partners" || !searchQuery.trim()) {
+      setSemanticResults(null);
+      return;
+    }
+    setSemanticLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await fetch(`/api/search/partners?q=${encodeURIComponent(searchQuery.trim())}`);
+        if (res.ok) {
+          const data = await res.json();
+          setSemanticResults(Array.isArray(data) ? data : null);
+        }
+      } catch {
+        // fall back to text search silently
+      } finally {
+        setSemanticLoading(false);
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [searchQuery, discoveryFocus]);
 
   // --- View mode: map or table ---
   const [viewMode, setViewMode] = useState<"map" | "table">(initialState?.viewMode ?? "map");
 
-  // --- Primary contact for selected org (fetched on-demand) ---
-  const [contactForOrg, setContactForOrg] = useState<{
+  // --- Primary contacts for selected org (fetched on-demand, all is_primary=true) ---
+  const [contactsForOrg, setContactsForOrg] = useState<{
     name: string;
     roleTitle: string | null;
     email: string | null;
     phone: string | null;
     avatarUrl: string | null;
-  } | null>(null);
+  }[]>([]);
 
   useEffect(() => {
     let cancelled = false;
     if (!selectedOrg) {
-      return () => {
-        cancelled = true;
-      };
+      setContactsForOrg([]);
+      return () => { cancelled = true; };
     }
     const supabase = createClient();
     supabase
@@ -139,23 +172,19 @@ export default function MapHero({
       .select("name, role_title, work_email, email, work_phone_number, phone, profile_picture_url")
       .eq("organization_id", selectedOrg.id)
       .is("archived_at", null)
+      .eq("is_primary", true)
       .order("name")
-      .limit(1)
       .then(({ data }) => {
         if (cancelled) return;
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const row = (data as any)?.[0];
-        if (row) {
-          setContactForOrg({
-            name: row.name ?? "Unknown",
-            roleTitle: row.role_title ?? null,
-            email: row.work_email || row.email || null,
-            phone: row.work_phone_number || row.phone || null,
-            avatarUrl: row.profile_picture_url ?? null,
-          });
-        } else {
-          setContactForOrg(null);
-        }
+        const rows = (data as any[]) ?? [];
+        setContactsForOrg(rows.map((row) => ({
+          name: row.name ?? "Unknown",
+          roleTitle: row.role_title ?? null,
+          email: row.work_email || row.email || null,
+          phone: row.work_phone_number || row.phone || null,
+          avatarUrl: row.profile_picture_url ?? null,
+        })));
       });
     return () => { cancelled = true; };
   }, [selectedOrg?.id]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -178,9 +207,85 @@ export default function MapHero({
     return set.size;
   }, [organizations]);
 
+  // Pool after lens + sub-lens filter but BEFORE compound filters.
+  // All dimension counts derive from this so they reflect the current cohort,
+  // not the full global set.
+  const lensPool = useMemo((): HomeMapOrg[] => {
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      // Respect the current focus so counts/filters stay scoped to the right cohort
+      const scope =
+        discoveryFocus === "partners" ? partners
+        : discoveryFocus === "members" ? members
+        : organizations;
+      return scope.filter(
+        (o) =>
+          o.name.toLowerCase().includes(q) ||
+          (o.city && o.city.toLowerCase().includes(q)) ||
+          (o.province && o.province.toLowerCase().includes(q))
+      );
+    }
+    switch (lens) {
+      case "members": return [...members];
+      case "partners": return [...partners];
+      case "partner_category":
+        return partnerCategoryFilter
+          ? partners.filter((o) => o.primaryCategory === partnerCategoryFilter)
+          : partners.filter((o) => !!o.primaryCategory);
+      case "scale":
+        if (scaleFilter) {
+          const range = SCALE_RANGES.find((r) => r.key === scaleFilter)!;
+          return members.filter((o) => o.enrollmentFte != null && o.enrollmentFte >= range.min && o.enrollmentFte <= range.max);
+        }
+        return members.filter((o) => o.enrollmentFte != null);
+      case "pos_platform":
+        return posFilter
+          ? members.filter((o) => o.posSystem === posFilter)
+          : members.filter((o) => o.posSystem != null);
+      case "services":
+        return serviceFilter
+          ? members.filter((o) => o.servicesOffered?.includes(serviceFilter))
+          : members.filter((o) => o.servicesOffered != null && o.servicesOffered.length > 0);
+      case "operating_model":
+        return mandateFilter
+          ? members.filter((o) => o.operationsMandate === mandateFilter)
+          : members.filter((o) => o.operationsMandate != null);
+      default:
+        return [...organizations];
+    }
+  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, discoveryFocus]);
+
+  // Apply active compound filters on top of lensPool so all dimension counts
+  // reflect the full current cohort (cross-filtered facets).
+  const cohortPool = useMemo(() => {
+    let pool = [...lensPool];
+    if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
+    if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem === compoundFilters.pos);
+    if (compoundFilters.service && lens !== "services") pool = pool.filter((o) => o.servicesOffered?.includes(compoundFilters.service!));
+    if (compoundFilters.mandate && lens !== "operating_model") pool = pool.filter((o) => o.operationsMandate === compoundFilters.mandate);
+    if (compoundFilters.scaleRange && lens !== "scale") {
+      const range = SCALE_RANGES.find((r) => r.key === compoundFilters.scaleRange)!;
+      if (range) pool = pool.filter((o) => o.enrollmentFte != null && o.enrollmentFte >= range.min && o.enrollmentFte <= range.max);
+    }
+    if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
+    if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
+    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => o.primaryCategory === compoundFilters.category);
+    if (compoundFilters.certification) {
+      const cert = compoundFilters.certification;
+      pool = pool.filter((o) =>
+        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+      );
+    }
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    return pool;
+  }, [lensPool, compoundFilters, lens]);
+
+  const lensMembers = useMemo(() => cohortPool.filter((o) => o.type === "Member"), [cohortPool]);
+  const lensPartners = useMemo(() => cohortPool.filter((o) => o.type === "Vendor Partner"), [cohortPool]);
+
   const scaleCounts = useMemo(() => {
     const counts: Record<ScaleRange, number> = { small: 0, medium: 0, large: 0, xlarge: 0 };
-    for (const org of members) {
+    for (const org of lensMembers) {
       if (org.enrollmentFte == null) continue;
       for (const range of SCALE_RANGES) {
         if (org.enrollmentFte >= range.min && org.enrollmentFte <= range.max) {
@@ -190,31 +295,29 @@ export default function MapHero({
       }
     }
     return counts;
-  }, [members]);
+  }, [lensMembers]);
 
   const membersWithFte = useMemo(
-    () => members.filter((o) => o.enrollmentFte != null).length,
-    [members]
+    () => lensMembers.filter((o) => o.enrollmentFte != null).length,
+    [lensMembers]
   );
 
-  // POS system counts (two-level: system → orgs)
   const posCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const org of members) {
+    for (const org of lensMembers) {
       if (org.posSystem) counts[org.posSystem] = (counts[org.posSystem] || 0) + 1;
     }
     return counts;
-  }, [members]);
+  }, [lensMembers]);
 
   const membersWithPos = useMemo(
-    () => members.filter((o) => o.posSystem != null).length,
-    [members]
+    () => lensMembers.filter((o) => o.posSystem != null).length,
+    [lensMembers]
   );
 
-  // Services offered counts (two-level: service → orgs)
   const serviceCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const org of members) {
+    for (const org of lensMembers) {
       if (org.servicesOffered) {
         for (const svc of org.servicesOffered) {
           counts[svc] = (counts[svc] || 0) + 1;
@@ -222,59 +325,117 @@ export default function MapHero({
       }
     }
     return counts;
-  }, [members]);
+  }, [lensMembers]);
 
   const membersWithServices = useMemo(
-    () => members.filter((o) => o.servicesOffered != null && o.servicesOffered.length > 0).length,
-    [members]
+    () => lensMembers.filter((o) => o.servicesOffered != null && o.servicesOffered.length > 0).length,
+    [lensMembers]
   );
 
-  // Operating model counts (two-level: mandate → orgs)
   const mandateCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const org of members) {
+    for (const org of lensMembers) {
       if (org.operationsMandate) counts[org.operationsMandate] = (counts[org.operationsMandate] || 0) + 1;
     }
     return counts;
-  }, [members]);
+  }, [lensMembers]);
 
   const membersWithMandate = useMemo(
-    () => members.filter((o) => o.operationsMandate != null).length,
-    [members]
+    () => lensMembers.filter((o) => o.operationsMandate != null).length,
+    [lensMembers]
   );
 
   const partnerCategoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const org of partners) {
+    for (const org of lensPartners) {
       if (!org.primaryCategory) continue;
       counts[org.primaryCategory] = (counts[org.primaryCategory] || 0) + 1;
     }
     return counts;
-  }, [partners]);
+  }, [lensPartners]);
+
+  const certificationCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const org of lensPartners) {
+      for (const cert of (org.certifications ?? [])) {
+        counts[cert] = (counts[cert] || 0) + 1;
+      }
+      if (org.isCancollMember) {
+        counts["CANCOLL"] = (counts["CANCOLL"] || 0) + 1;
+      }
+    }
+    return counts;
+  }, [lensPartners]);
 
   const partnersWithCategory = useMemo(
-    () => partners.filter((o) => !!o.primaryCategory).length,
-    [partners]
+    () => lensPartners.filter((o) => !!o.primaryCategory).length,
+    [lensPartners]
   );
 
-  // --- Unique values for compound filter dropdowns ---
+  // Unique provinces for compound filter dropdown — from lensPool so counts
+  // reflect the current cohort rather than the global set.
   const uniqueProvinces = useMemo(() => {
     const counts: Record<string, number> = {};
-    for (const org of organizations) {
+    for (const org of lensPool) {
       if (org.province && org.province !== "Out of Canada") {
         counts[org.province] = (counts[org.province] || 0) + 1;
       }
     }
     return Object.entries(counts).sort(([a], [b]) => a.localeCompare(b));
-  }, [organizations]);
+  }, [lensPool]);
 
   // --- Compute filtered orgs and map highlights based on explore state ---
-  const { filteredOrgs, highlightedIds } = useMemo(() => {
+  const { filteredOrgs, highlightedIds, searchRanking } = useMemo(() => {
     if (selectedOrg && viewMode !== "table") {
       return { filteredOrgs: [] as HomeMapOrg[], highlightedIds: [selectedOrg.id] };
     }
 
     if (searchQuery.trim()) {
+      // Partners page: hybrid search — text matches surface instantly, semantic
+      // results (from Voyage, 400ms debounce) fill in below them.
+      if (discoveryFocus === "partners") {
+        const q = searchQuery.toLowerCase();
+
+        // Text match: name / city / province (instant, client-side)
+        const textMatchIds = new Set(
+          partners
+            .filter(
+              (o) =>
+                o.name.toLowerCase().includes(q) ||
+                (o.city && o.city.toLowerCase().includes(q)) ||
+                (o.province && o.province.toLowerCase().includes(q))
+            )
+            .map((o) => o.id)
+        );
+
+        // Semantic match: null = still loading (debounce), [] = API returned nothing
+        const semanticIdToScore = new Map(
+          (semanticResults ?? []).map((r) => [r.id, r.score])
+        );
+
+        // Union of both sets — text matches score 1.0, semantic fills the rest
+        const allIds = new Set([...textMatchIds, ...semanticIdToScore.keys()]);
+        const rankingMap = new Map<string, number>();
+        for (const id of allIds) {
+          rankingMap.set(id, textMatchIds.has(id) ? 1.0 : (semanticIdToScore.get(id) ?? 0));
+        }
+        let pool = partners
+          .filter((o) => allIds.has(o.id))
+          .sort((a, b) => (rankingMap.get(b.id) ?? 0) - (rankingMap.get(a.id) ?? 0));
+
+        if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
+        if (compoundFilters.category) pool = pool.filter((o) => o.primaryCategory === compoundFilters.category);
+        if (compoundFilters.certification) {
+          const cert = compoundFilters.certification;
+          pool = pool.filter((o) =>
+            cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+          );
+        }
+        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+        return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id), searchRanking: rankingMap.size > 0 ? rankingMap : undefined };
+      }
+
+      // All other pages: existing text match on name / city / province
       const q = searchQuery.toLowerCase();
       let pool = organizations.filter(
         (o) =>
@@ -283,7 +444,8 @@ export default function MapHero({
           (o.province && o.province.toLowerCase().includes(q))
       );
       // Apply compound filters even on search results
-      if (compoundFilters.province) pool = pool.filter((o) => o.province === compoundFilters.province);
+      if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
+      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
       return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
     }
 
@@ -338,7 +500,7 @@ export default function MapHero({
     }
 
     // Apply compound cross-lens filters (skip if same dimension as primary lens)
-    if (compoundFilters.province) pool = pool.filter((o) => o.province === compoundFilters.province);
+    if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
     if (compoundFilters.pos && lens !== "pos_platform") pool = pool.filter((o) => o.posSystem === compoundFilters.pos);
     if (compoundFilters.service && lens !== "services") pool = pool.filter((o) => o.servicesOffered?.includes(compoundFilters.service!));
     if (compoundFilters.mandate && lens !== "operating_model") pool = pool.filter((o) => o.operationsMandate === compoundFilters.mandate);
@@ -348,9 +510,17 @@ export default function MapHero({
     }
     if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
+    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => o.primaryCategory === compoundFilters.category);
+    if (compoundFilters.certification) {
+      const cert = compoundFilters.certification;
+      pool = pool.filter((o) =>
+        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+      );
+    }
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
-  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode]);
+  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
 
   // Map highlighted IDs: attract mode uses stories, explore uses filters
   const mapHighlightedIds = useMemo(() => {
@@ -456,8 +626,19 @@ export default function MapHero({
     enterExploreRef.current = enterExplore;
   }, [enterExplore]);
 
+  // Don't start the hover-to-explore timer until the page is fully loaded
+  useEffect(() => {
+    if (document.readyState === "complete") {
+      setPageReady(true);
+    } else {
+      const onLoad = () => setPageReady(true);
+      window.addEventListener("load", onLoad, { once: true });
+      return () => window.removeEventListener("load", onLoad);
+    }
+  }, []);
+
   const handleMapMouseMove = useCallback(() => {
-    if (explore || persistent) return;
+    if (!pageReady || explore || persistent) return;
     setPaused(true);
     if (hoverTimerRef.current) return;
     if (Date.now() - exitedAtRef.current < 3000) return;
@@ -465,7 +646,7 @@ export default function MapHero({
       hoverTimerRef.current = null;
       enterExploreRef.current();
     }, HOVER_DWELL_MS);
-  }, [explore, persistent]);
+  }, [pageReady, explore, persistent]);
 
   const handleMapMouseLeave = useCallback(() => {
     if (hoverTimerRef.current) {
@@ -533,6 +714,13 @@ export default function MapHero({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, [explore, exitExplore]);
+
+  // Fit map to filtered orgs whenever switching to map view
+  useEffect(() => {
+    if (viewMode !== "map" || !explore) return;
+    const orgs = filteredOrgs.length > 0 ? filteredOrgs : organizations;
+    setTimeout(() => mapRef.current?.fitOrgs(orgs), 350);
+  }, [viewMode, explore]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ---------------------------------------------------------------------------
   // Interactions
@@ -609,7 +797,7 @@ export default function MapHero({
   /** Jump straight back to the discovery menu (lens picker). */
   const goHome = useCallback(() => {
     setSelectedOrg(null);
-    setLens(null);
+    setLens(initialState?.lens ?? null);
     setSearchQuery("");
     setScaleFilter(null);
     setPartnerCategoryFilter(null);
@@ -618,7 +806,7 @@ export default function MapHero({
     setMandateFilter(null);
     setCompoundFilters({});
     setShowFilterMenu(false);
-  }, []);
+  }, [initialState?.lens]);
 
   // ---------------------------------------------------------------------------
   // Breadcrumb segments — each is { label, action } where action jumps to that level
@@ -696,8 +884,10 @@ export default function MapHero({
       className={[
         "relative overflow-hidden",
         "transition-[height,margin-top] duration-700 ease-in-out",
-        explore
-          ? "h-[calc(100vh+64px)] -mt-16 z-20" /* slide up behind nav + extend past fold */
+        explore && !persistent
+          ? "h-[calc(100vh+64px)] -mt-16 z-20" /* homepage attract→explore: slide behind nav */
+          : explore && persistent
+          ? "h-[calc(100vh-64px)]" /* /members, /partners: normal flow below nav */
           : "h-[calc(100vh-64px)] min-h-[620px] mt-0",
       ].join(" ")}
     >
@@ -726,7 +916,7 @@ export default function MapHero({
         onClick={() => { if (!explore) enterExplore(); }}
         className={[
           "absolute inset-0 z-10 transition-opacity duration-500",
-          explore ? "opacity-0 pointer-events-none" : "opacity-100 cursor-pointer",
+          explore ? "opacity-0 pointer-events-none" : "opacity-100 cursor-crosshair",
         ].join(" ")}
       >
         {/* Gradient overlay for readability */}
@@ -830,8 +1020,7 @@ export default function MapHero({
                 Store Network
               </h1>
               <p className="text-xl md:text-2xl text-[#6B6B6B] leading-relaxed mb-8 max-w-xl">
-                Hover over the map to explore the network, or browse
-                our members and partners below.
+                The national association for campus stores and the partners who support them.
               </p>
               <div className="flex flex-col sm:flex-row gap-4">
                 <Link
@@ -866,7 +1055,7 @@ export default function MapHero({
         ].join(" ")}
       >
         {/* ------ Sidebar header ------ */}
-        <div className="flex-shrink-0 pt-20 px-5 pb-4 border-b border-gray-100">
+        <div className={`flex-shrink-0 ${persistent ? "pt-4" : "pt-20"} px-5 pb-4 border-b border-gray-100`}>
           {/* Top row: home + breadcrumbs + close */}
           <div className="flex items-center justify-between mb-4 gap-2">
             <div className="flex items-center gap-1 min-w-0 flex-1">
@@ -968,7 +1157,10 @@ export default function MapHero({
                 }}
                 className="w-full rounded-lg border border-gray-200 bg-gray-50 pl-10 pr-3 py-2.5 text-sm text-gray-900 placeholder-gray-400 focus:border-[#EE2A2E] focus:bg-white focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] transition-colors"
               />
-              {searchQuery && (
+              {semanticLoading && (
+                <div className="absolute right-3 top-1/2 -translate-y-1/2 w-4 h-4 border-2 border-[#EE2A2E] border-t-transparent rounded-full animate-spin" />
+              )}
+              {searchQuery && !semanticLoading && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery("")}
@@ -993,8 +1185,12 @@ export default function MapHero({
               posCounts={posCounts}
               serviceCounts={serviceCounts}
               mandateCounts={mandateCounts}
+              partnerCategoryCounts={partnerCategoryCounts}
+              certificationCounts={certificationCounts}
+              canViewCancoll={canViewCancoll}
               lens={lens}
               setLens={setLens}
+              defaultLens={initialState?.lens ?? null}
               scaleFilter={scaleFilter}
               setScaleFilter={setScaleFilter}
               posFilter={posFilter}
@@ -1004,6 +1200,7 @@ export default function MapHero({
               mandateFilter={mandateFilter}
               setMandateFilter={setMandateFilter}
               isMember={isMember}
+              focus={discoveryFocus}
             />
           )}
         </div>
@@ -1038,18 +1235,19 @@ export default function MapHero({
             <OrgDetailPanel
               org={selectedOrg}
               isMember={isMember}
-              contact={selectedOrg ? contactForOrg : null}
+              canViewCancoll={canViewCancoll}
+              contacts={selectedOrg ? contactsForOrg : []}
               onFilterByValue={handleFilterByValue}
             />
           ) : searchQuery.trim() ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === null && hasActiveCompounds(compoundFilters) ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === null ? (
             <DiscoveryMenu
@@ -1068,12 +1266,12 @@ export default function MapHero({
           ) : lens === "members" ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "partners" ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "partner_category" && !partnerCategoryFilter ? (
             <div>
@@ -1114,7 +1312,7 @@ export default function MapHero({
           ) : lens === "partner_category" && partnerCategoryFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "scale" && !scaleFilter ? (
             <div>
@@ -1164,7 +1362,7 @@ export default function MapHero({
           ) : lens === "scale" && scaleFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "pos_platform" && !posFilter ? (
             <div>
@@ -1210,7 +1408,7 @@ export default function MapHero({
           ) : lens === "pos_platform" && posFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "services" && !serviceFilter ? (
             <div>
@@ -1256,7 +1454,7 @@ export default function MapHero({
           ) : lens === "services" && serviceFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "operating_model" && !mandateFilter ? (
             <div>
@@ -1302,7 +1500,7 @@ export default function MapHero({
           ) : lens === "operating_model" && mandateFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : null}
         </div>
@@ -1322,10 +1520,11 @@ export default function MapHero({
       {/* EXPLORE: Table visualization (right of sidebar, replaces map)     */}
       {/* ================================================================= */}
       {explore && viewMode === "table" && (lens || searchQuery.trim() || hasActiveCompounds(compoundFilters)) && (
-        <div className="absolute top-0 bottom-0 right-0 z-20 bg-gray-50 overflow-y-auto pt-20 px-4 pb-4 left-[380px]">
+        <div className={`absolute top-0 bottom-0 right-0 z-20 bg-gray-50 overflow-y-auto ${persistent ? "pt-4" : "pt-20"} px-4 pb-4 left-[380px]`}>
           <DirectoryTable
             organizations={filteredOrgs}
             onOrgClick={handleOrgClick}
+            searchRanking={searchRanking}
           />
         </div>
       )}
@@ -1337,7 +1536,7 @@ export default function MapHero({
         type="button"
         onClick={exitExplore}
         className={[
-          "absolute top-20 right-4 z-40 w-10 h-10 rounded-full",
+          `absolute ${persistent ? "top-4" : "top-20"} right-4 z-40 w-10 h-10 rounded-full`,
           "bg-white/90 backdrop-blur-sm border border-gray-200 shadow-lg",
           "flex items-center justify-center text-gray-600 hover:text-gray-900 hover:bg-white",
           "transition-all duration-500",
@@ -1657,10 +1856,12 @@ function OrgList({
   orgs,
   onOrgClick,
   isMember,
+  focus,
 }: {
   orgs: HomeMapOrg[];
   onOrgClick: (org: HomeMapOrg) => void;
   isMember: boolean;
+  focus?: "all" | "members" | "partners";
 }) {
   if (orgs.length === 0) {
     return (
@@ -1670,6 +1871,8 @@ function OrgList({
     );
   }
 
+  const isPartnerFocus = focus === "partners";
+
   return (
     <div className="divide-y divide-gray-100">
       {orgs.map((org) => (
@@ -1677,6 +1880,7 @@ function OrgList({
           key={org.id}
           type="button"
           onClick={() => onOrgClick(org)}
+          data-org-id={org.id}
           className="w-full px-5 py-3 text-left hover:bg-gray-50 transition-colors group"
         >
           <div className="flex items-center gap-3">
@@ -1706,50 +1910,56 @@ function OrgList({
                 {org.name}
               </p>
               <p className="text-xs text-gray-500 truncate">
-                {orgSubtitle(org) || (org.type === "Member" ? "Member institution" : "Industry partner")}
+                {isPartnerFocus
+                  ? (org.primaryCategory ?? "Industry partner")
+                  : (orgSubtitle(org) || "Member institution")}
               </p>
             </div>
             <svg className="w-4 h-4 text-gray-300 group-hover:text-gray-500 transition-colors flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
             </svg>
           </div>
-          {/* Data chips */}
-          <div className="flex flex-wrap gap-1 mt-1.5 ml-12">
-            {org.enrollmentFte != null && (
-              <span className="rounded bg-amber-50 border border-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
-                {org.enrollmentFte >= 1000
-                  ? `${(org.enrollmentFte / 1000).toFixed(1)}k FTE`
-                  : `${org.enrollmentFte} FTE`}
-              </span>
-            )}
-            {org.posSystem && (
-              isMember ? (
-                <span className="rounded bg-purple-50 border border-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
-                  {org.posSystem}
+
+          {/* Partner card: category only — detail lives in the table */}
+          {isPartnerFocus ? null : (
+            /* Member card: data chips */
+            <div className="flex flex-wrap gap-1 mt-1.5 ml-12">
+              {org.enrollmentFte != null && (
+                <span className="rounded bg-amber-50 border border-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                  {org.enrollmentFte >= 1000
+                    ? `${(org.enrollmentFte / 1000).toFixed(1)}k FTE`
+                    : `${org.enrollmentFte} FTE`}
                 </span>
-              ) : (
-                <span className="rounded bg-gray-100 w-12 h-4 inline-block blur-[3px]" />
-              )
-            )}
-            {org.operationsMandate && (
-              isMember ? (
-                <span className="rounded bg-orange-50 border border-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
-                  {org.operationsMandate}
-                </span>
-              ) : (
-                <span className="rounded bg-gray-100 w-10 h-4 inline-block blur-[3px]" />
-              )
-            )}
-            {org.servicesOffered && org.servicesOffered.length > 0 && (
-              isMember ? (
-                <span className="rounded bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
-                  {org.servicesOffered.length} services
-                </span>
-              ) : (
-                <span className="rounded bg-gray-100 w-14 h-4 inline-block blur-[3px]" />
-              )
-            )}
-          </div>
+              )}
+              {org.posSystem && (
+                isMember ? (
+                  <span className="rounded bg-purple-50 border border-purple-100 px-1.5 py-0.5 text-[10px] font-medium text-purple-700">
+                    {org.posSystem}
+                  </span>
+                ) : (
+                  <span className="rounded bg-gray-100 w-12 h-4 inline-block blur-[3px]" />
+                )
+              )}
+              {org.operationsMandate && (
+                isMember ? (
+                  <span className="rounded bg-orange-50 border border-orange-100 px-1.5 py-0.5 text-[10px] font-medium text-orange-700">
+                    {org.operationsMandate}
+                  </span>
+                ) : (
+                  <span className="rounded bg-gray-100 w-10 h-4 inline-block blur-[3px]" />
+                )
+              )}
+              {org.servicesOffered && org.servicesOffered.length > 0 && (
+                isMember ? (
+                  <span className="rounded bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 text-[10px] font-medium text-emerald-700">
+                    {org.servicesOffered.length} services
+                  </span>
+                ) : (
+                  <span className="rounded bg-gray-100 w-14 h-4 inline-block blur-[3px]" />
+                )
+              )}
+            </div>
+          )}
         </button>
       ))}
     </div>

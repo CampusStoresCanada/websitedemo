@@ -1,10 +1,16 @@
 import type { Metadata } from "next";
+import { Suspense } from "react";
 import "./globals.css";
 import Header from "@/components/layout/Header";
 import Footer from "@/components/layout/Footer";
 import { AuthProvider } from "@/components/providers/AuthProvider";
 import DevPanel from "@/components/dev/DevPanel";
 import Toolkit, { ToolkitProvider } from "@/components/ui/Toolkit";
+import FlagReviewPanel from "@/components/ui/FlagReviewPanel";
+import ExplainContextPanel from "@/components/ui/ExplainContextPanel";
+import InternalSharePanel from "@/components/ui/InternalSharePanel";
+import PublicHighlightHandler from "@/components/ui/PublicHighlightHandler";
+import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
 
 export const metadata: Metadata = {
@@ -33,6 +39,9 @@ export default async function RootLayout({
         (uo) => uo.role === "org_admin" && uo.organization?.type === "Member"
       ),
     isBenchmarkingReviewer: serverAuth.profile?.is_benchmarking_reviewer ?? false,
+    isCancollMember: serverAuth.organizations.some(
+      (uo) => uo.organization?.is_cancoll_member === true
+    ),
   };
 
   return (
@@ -48,6 +57,11 @@ export default async function RootLayout({
             <Footer />
             {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
             <Toolkit googleMapsApiKey={process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null} />
+            <Suspense><FlagReviewPanel /></Suspense>
+            <Suspense><ExplainContextPanel /></Suspense>
+            <Suspense><InternalSharePanel /></Suspense>
+            <Suspense><PublicHighlightHandler /></Suspense>
+            <Suspense><BookmarkJumpHandler /></Suspense>
           </ToolkitProvider>
         </AuthProvider>
       </body>

@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveOnboardingStep, completeOnboarding } from "@/lib/actions/applications";
 import { PROVINCES } from "@/lib/constants/provinces";
-import { PRODUCT_CATEGORIES } from "@/lib/types/procurement";
+import { VENDOR_CATEGORIES as PRODUCT_CATEGORIES } from "@/lib/types/procurement";
 import {
   PARTNER_PRIMARY_CATEGORIES,
   PARTNER_SECONDARY_CATEGORIES,

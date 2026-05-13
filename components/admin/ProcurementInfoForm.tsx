@@ -2,8 +2,12 @@
 
 import { useState } from "react";
 import type { Contact } from "@/lib/database.types";
-import type { ProcurementInfo, ProductCategory } from "@/lib/types/procurement";
-import { PRODUCT_CATEGORIES } from "@/lib/types/procurement";
+import type { ProcurementInfo, CategoryBuyer, BuyingCycle } from "@/lib/types/procurement";
+import {
+  VENDOR_CATEGORIES,
+  CANADIAN_PROVINCES,
+  CERTIFICATION_NAMES,
+} from "@/lib/types/procurement";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
 
 interface ProcurementInfoFormProps {
@@ -20,41 +24,74 @@ export default function ProcurementInfoForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
-  // Form state
-  const [productCategories, setProductCategories] = useState<ProductCategory[]>(
-    initialData?.product_categories || []
+  const [checkedCategories, setCheckedCategories] = useState<Set<string>>(
+    () => new Set((initialData?.category_buyers ?? []).map((b) => b.category))
   );
-  const [buyLocal, setBuyLocal] = useState(initialData?.requirements?.buy_local ?? false);
-  const [buyLocalNotes, setBuyLocalNotes] = useState(initialData?.requirements?.buy_local_notes || "");
-  const [indigenousOwned, setIndigenousOwned] = useState(initialData?.requirements?.indigenous_owned ?? false);
-  const [indigenousOwnedNotes, setIndigenousOwnedNotes] = useState(initialData?.requirements?.indigenous_owned_notes || "");
-  const [sustainabilityCerts, setSustainabilityCerts] = useState<string[]>(
-    initialData?.requirements?.sustainability_certs || []
-  );
-  const [newCert, setNewCert] = useState("");
-  const [otherRequirements, setOtherRequirements] = useState(initialData?.requirements?.other_requirements || "");
-  const [fiscalYearStart, setFiscalYearStart] = useState(initialData?.buying_cycle?.fiscal_year_start || "");
-  const [rfpWindow, setRfpWindow] = useState(initialData?.buying_cycle?.rfp_window || "");
-  const [keyDates, setKeyDates] = useState(initialData?.buying_cycle?.key_dates || "");
-  const [buyerContactId, setBuyerContactId] = useState(initialData?.buyer_contact_id || "");
 
-  const toggleCategory = (category: ProductCategory) => {
-    setProductCategories((prev) =>
-      prev.includes(category)
-        ? prev.filter((c) => c !== category)
-        : [...prev, category]
-    );
-  };
-
-  const addCert = () => {
-    if (newCert.trim() && !sustainabilityCerts.includes(newCert.trim())) {
-      setSustainabilityCerts([...sustainabilityCerts, newCert.trim()]);
-      setNewCert("");
+  const [buyerMap, setBuyerMap] = useState<Record<string, Set<string>>>(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const entry of initialData?.category_buyers ?? []) {
+      map[entry.category] = new Set(entry.contact_ids);
     }
+    return map;
+  });
+
+  const [preferredCerts, setPreferredCerts] = useState<Set<string>>(
+    () => new Set(initialData?.preferred_certifications ?? [])
+  );
+
+  const [sourcingProvinces, setSourcingProvinces] = useState<Set<string>>(
+    () => new Set(initialData?.sourcing_provinces ?? [])
+  );
+
+  const [fiscalYearStart, setFiscalYearStart] = useState(
+    initialData?.buying_cycle?.fiscal_year_start ?? ""
+  );
+  const [rfpStart, setRfpStart] = useState(initialData?.buying_cycle?.rfp_start ?? "");
+  const [rfpEnd, setRfpEnd] = useState(initialData?.buying_cycle?.rfp_end ?? "");
+  // key_dates is stored as KeyDate[] in the type but the form edits it as freeform text.
+  // We keep it as a string here and round-trip it through a notes field.
+  const [keyDates, setKeyDates] = useState<string>(
+    typeof initialData?.buying_cycle?.key_dates === "string"
+      ? (initialData.buying_cycle.key_dates as unknown as string)
+      : ""
+  );
+
+  const toggleCategory = (cat: string) => {
+    setCheckedCategories((prev) => {
+      const next = new Set(prev);
+      if (next.has(cat)) {
+        next.delete(cat);
+        setBuyerMap((bm) => { const nb = { ...bm }; delete nb[cat]; return nb; });
+      } else {
+        next.add(cat);
+      }
+      return next;
+    });
   };
 
-  const removeCert = (cert: string) => {
-    setSustainabilityCerts(sustainabilityCerts.filter((c) => c !== cert));
+  const toggleBuyer = (cat: string, contactId: string) => {
+    setBuyerMap((prev) => {
+      const existing = new Set(prev[cat] ?? []);
+      existing.has(contactId) ? existing.delete(contactId) : existing.add(contactId);
+      return { ...prev, [cat]: existing };
+    });
+  };
+
+  const toggleCert = (cert: string) => {
+    setPreferredCerts((prev) => {
+      const next = new Set(prev);
+      next.has(cert) ? next.delete(cert) : next.add(cert);
+      return next;
+    });
+  };
+
+  const toggleProvince = (prov: string) => {
+    setSourcingProvinces((prev) => {
+      const next = new Set(prev);
+      next.has(prov) ? next.delete(prov) : next.add(prov);
+      return next;
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -62,39 +99,32 @@ export default function ProcurementInfoForm({
     setIsSubmitting(true);
     setMessage(null);
 
-    const procurementInfo: ProcurementInfo = {
-      product_categories: productCategories.length > 0 ? productCategories : undefined,
-      requirements: {
-        buy_local: buyLocal || undefined,
-        buy_local_notes: buyLocalNotes || undefined,
-        indigenous_owned: indigenousOwned || undefined,
-        indigenous_owned_notes: indigenousOwnedNotes || undefined,
-        sustainability_certs: sustainabilityCerts.length > 0 ? sustainabilityCerts : undefined,
-        other_requirements: otherRequirements || undefined,
-      },
-      buying_cycle: {
-        fiscal_year_start: fiscalYearStart || undefined,
-        rfp_window: rfpWindow || undefined,
-        key_dates: keyDates || undefined,
-      },
-      buyer_contact_id: buyerContactId || undefined,
+    const category_buyers: CategoryBuyer[] = [...checkedCategories].map((cat) => ({
+      category: cat,
+      contact_ids: [...(buyerMap[cat] ?? [])],
+    }));
+
+    const buying_cycle: BuyingCycle = {
+      fiscal_year_start: fiscalYearStart || undefined,
+      rfp_start: rfpStart || undefined,
+      rfp_end: rfpEnd || undefined,
+      // key_dates is a structured KeyDate[] field; the textarea captures freeform notes
+      // which are not yet mapped to structured entries, so we omit key_dates here.
     };
 
-    // Clean up empty objects
-    if (Object.values(procurementInfo.requirements || {}).every((v) => v === undefined)) {
-      delete procurementInfo.requirements;
-    }
-    if (Object.values(procurementInfo.buying_cycle || {}).every((v) => v === undefined)) {
-      delete procurementInfo.buying_cycle;
-    }
+    const procurementInfo: ProcurementInfo = {
+      category_buyers: category_buyers.length > 0 ? category_buyers : undefined,
+      preferred_certifications: preferredCerts.size > 0 ? [...preferredCerts] : undefined,
+      sourcing_provinces: sourcingProvinces.size > 0 ? [...sourcingProvinces] : undefined,
+      buying_cycle: Object.values(buying_cycle).some(Boolean) ? buying_cycle : undefined,
+    };
 
     try {
       const result = await updateProcurementInfo(organizationId, procurementInfo);
-
       if (result.success) {
         setMessage({ type: "success", text: "Procurement information saved successfully!" });
       } else {
-        setMessage({ type: "error", text: result.error || "Failed to save" });
+        setMessage({ type: "error", text: result.error ?? "Failed to save" });
       }
     } catch {
       setMessage({ type: "error", text: "An unexpected error occurred" });
@@ -103,244 +133,168 @@ export default function ProcurementInfoForm({
     }
   };
 
+  const inputCls =
+    "w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-accent focus:border-transparent";
+  const checkCls =
+    "h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent cursor-pointer";
+
   return (
-    <form onSubmit={handleSubmit} className="space-y-8">
-      {/* Product Categories */}
+    <form onSubmit={handleSubmit} className="space-y-10">
+
+      {/* Categories + buyers */}
       <div>
-        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-3">
-          Product Categories
-        </h3>
+        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-1">What We Carry</h3>
         <p className="text-xs text-gray-500 mb-4">
-          Select the categories of products your store carries.
+          Check each category the store carries, then assign the buyer(s) responsible.
+        </p>
+        <div className="space-y-2">
+          {VENDOR_CATEGORIES.map((cat) => {
+            const checked = checkedCategories.has(cat);
+            return (
+              <div key={cat} className="border border-gray-200 rounded-xl overflow-hidden">
+                <label className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-gray-50 transition-colors">
+                  <input
+                    type="checkbox"
+                    className={checkCls}
+                    checked={checked}
+                    onChange={() => toggleCategory(cat)}
+                  />
+                  <span className="font-medium text-[#1A1A1A] text-sm">{cat}</span>
+                </label>
+
+                {checked && (
+                  <div className="px-4 pb-3 pt-1 border-t border-gray-100 bg-gray-50">
+                    <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">
+                      Buyer(s)
+                    </p>
+                    {contacts.length > 0 ? (
+                      <div className="flex flex-wrap gap-2">
+                        {contacts.map((contact) => {
+                          const selected = buyerMap[cat]?.has(contact.id) ?? false;
+                          return (
+                            <button
+                              key={contact.id}
+                              type="button"
+                              onClick={() => toggleBuyer(cat, contact.id)}
+                              className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                                selected
+                                  ? "bg-accent text-white"
+                                  : "bg-white border border-gray-300 text-gray-600 hover:border-gray-400"
+                              }`}
+                            >
+                              {contact.name}
+                              {contact.role_title && (
+                                <span className={selected ? "text-white/70" : "text-gray-400"}>
+                                  · {contact.role_title}
+                                </span>
+                              )}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <p className="text-xs text-gray-400 italic">No contacts available.</p>
+                    )}
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* Vendor preferences */}
+      <div className="border-t border-gray-200 pt-8">
+        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-1">Vendor Preferences</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Certifications this store prioritizes when choosing vendors.
         </p>
         <div className="flex flex-wrap gap-2">
-          {PRODUCT_CATEGORIES.map((category) => (
-            <button
-              key={category}
-              type="button"
-              onClick={() => toggleCategory(category)}
-              className={`px-3 py-1.5 rounded-full text-sm transition-colors ${
-                productCategories.includes(category)
-                  ? "bg-[#EE2A2E] text-white"
-                  : "bg-gray-100 text-gray-600 hover:bg-gray-200"
-              }`}
-            >
-              {category}
-            </button>
-          ))}
+          {CERTIFICATION_NAMES.map((cert) => {
+            const selected = preferredCerts.has(cert);
+            return (
+              <button
+                key={cert}
+                type="button"
+                onClick={() => toggleCert(cert)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  selected ? "bg-green-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {cert}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Procurement Requirements */}
+      {/* Sourcing provinces */}
       <div className="border-t border-gray-200 pt-8">
-        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-4">
-          Procurement Requirements
-        </h3>
-
-        {/* Buy Local */}
-        <div className="mb-6">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={buyLocal}
-              onChange={(e) => setBuyLocal(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
-            />
-            <div>
-              <span className="font-medium text-[#1A1A1A]">Buy Local Policy</span>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Your organization has preferences for local vendors
-              </p>
-            </div>
-          </label>
-          {buyLocal && (
-            <div className="mt-3 ml-7">
-              <input
-                type="text"
-                value={buyLocalNotes}
-                onChange={(e) => setBuyLocalNotes(e.target.value)}
-                placeholder="e.g., 30% local sourcing required for apparel"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Indigenous-Owned */}
-        <div className="mb-6">
-          <label className="flex items-start gap-3">
-            <input
-              type="checkbox"
-              checked={indigenousOwned}
-              onChange={(e) => setIndigenousOwned(e.target.checked)}
-              className="mt-1 h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
-            />
-            <div>
-              <span className="font-medium text-[#1A1A1A]">Indigenous-Owned Vendor Preference</span>
-              <p className="text-xs text-gray-500 mt-0.5">
-                Priority given to indigenous-owned suppliers
-              </p>
-            </div>
-          </label>
-          {indigenousOwned && (
-            <div className="mt-3 ml-7">
-              <input
-                type="text"
-                value={indigenousOwnedNotes}
-                onChange={(e) => setIndigenousOwnedNotes(e.target.value)}
-                placeholder="e.g., Indigenous suppliers given priority for promotional items"
-                className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-              />
-            </div>
-          )}
-        </div>
-
-        {/* Sustainability Certifications */}
-        <div className="mb-6">
-          <label className="block font-medium text-[#1A1A1A] mb-2">
-            Sustainability Certifications
-          </label>
-          <p className="text-xs text-gray-500 mb-3">
-            Add certifications you require or prefer from vendors (e.g., Fair Trade, B Corp, FSC)
-          </p>
-          <div className="flex gap-2 mb-3">
-            <input
-              type="text"
-              value={newCert}
-              onChange={(e) => setNewCert(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addCert();
-                }
-              }}
-              placeholder="Enter certification name"
-              className="flex-1 px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-            />
-            <button
-              type="button"
-              onClick={addCert}
-              className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-md hover:bg-gray-200 transition-colors"
-            >
-              Add
-            </button>
-          </div>
-          {sustainabilityCerts.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {sustainabilityCerts.map((cert) => (
-                <span
-                  key={cert}
-                  className="inline-flex items-center gap-1 px-3 py-1 bg-green-50 text-green-700 text-sm rounded-full"
-                >
-                  {cert}
-                  <button
-                    type="button"
-                    onClick={() => removeCert(cert)}
-                    className="hover:text-green-900"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M6 18 18 6M6 6l12 12" />
-                    </svg>
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-
-        {/* Other Requirements */}
-        <div>
-          <label className="block font-medium text-[#1A1A1A] mb-2">
-            Other Requirements
-          </label>
-          <textarea
-            value={otherRequirements}
-            onChange={(e) => setOtherRequirements(e.target.value)}
-            placeholder="e.g., All vendors must carry $2M liability insurance"
-            rows={3}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-          />
+        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-1">Sourcing Preferences</h3>
+        <p className="text-xs text-gray-500 mb-4">
+          Provinces or territories this store prefers or is required to source from.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {CANADIAN_PROVINCES.map((prov) => {
+            const selected = sourcingProvinces.has(prov);
+            return (
+              <button
+                key={prov}
+                type="button"
+                onClick={() => toggleProvince(prov)}
+                className={`px-3 py-1.5 rounded-full text-sm font-medium transition-colors ${
+                  selected ? "bg-blue-600 text-white" : "bg-gray-100 text-gray-600 hover:bg-gray-200"
+                }`}
+              >
+                {prov}
+              </button>
+            );
+          })}
         </div>
       </div>
 
-      {/* Buying Cycle */}
+      {/* Buying cycle */}
       <div className="border-t border-gray-200 pt-8">
-        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-4">
-          Buying Cycle
-        </h3>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-4">Buying Cycle</h3>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           <div>
-            <label className="block font-medium text-[#1A1A1A] mb-2">
-              Fiscal Year Start
-            </label>
-            <select
-              value={fiscalYearStart}
-              onChange={(e) => setFiscalYearStart(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-            >
+            <label className="block font-medium text-[#1A1A1A] mb-2">Fiscal Year Start</label>
+            <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(e.target.value)} className={inputCls}>
               <option value="">Select month</option>
-              {["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"].map((month) => (
-                <option key={month} value={month}>{month}</option>
+              {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
+                <option key={m} value={m}>{m}</option>
               ))}
             </select>
           </div>
-
           <div>
-            <label className="block font-medium text-[#1A1A1A] mb-2">
-              RFP Window
-            </label>
-            <input
-              type="text"
-              value={rfpWindow}
-              onChange={(e) => setRfpWindow(e.target.value)}
-              placeholder="e.g., January - March"
-              className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-            />
+            <label className="block font-medium text-[#1A1A1A] mb-2">RFP Opens</label>
+            <select value={rfpStart} onChange={(e) => setRfpStart(e.target.value)} className={inputCls}>
+              <option value="">Select month</option>
+              {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <label className="block font-medium text-[#1A1A1A] mb-2">RFP Closes</label>
+            <select value={rfpEnd} onChange={(e) => setRfpEnd(e.target.value)} className={inputCls}>
+              <option value="">Select month</option>
+              {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
+                <option key={m} value={m}>{m}</option>
+              ))}
+            </select>
           </div>
         </div>
-
         <div className="mt-6">
-          <label className="block font-medium text-[#1A1A1A] mb-2">
-            Key Dates
-          </label>
+          <label className="block font-medium text-[#1A1A1A] mb-2">Key Dates</label>
           <textarea
             value={keyDates}
             onChange={(e) => setKeyDates(e.target.value)}
-            placeholder="e.g., Textbook adoption deadline: June 15. Apparel RFP opens: February 1."
+            placeholder="e.g., Textbook adoption deadline: June 15"
             rows={2}
-            className="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
+            className={inputCls}
           />
         </div>
-      </div>
-
-      {/* Buyer Contact */}
-      <div className="border-t border-gray-200 pt-8">
-        <h3 className="text-sm font-semibold text-[#1A1A1A] mb-4">
-          Buyer Contact
-        </h3>
-        <p className="text-xs text-gray-500 mb-3">
-          Select the primary contact for procurement inquiries.
-        </p>
-
-        {contacts.length > 0 ? (
-          <select
-            value={buyerContactId}
-            onChange={(e) => setBuyerContactId(e.target.value)}
-            className="w-full max-w-md px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
-          >
-            <option value="">Select a contact</option>
-            {contacts.map((contact) => (
-              <option key={contact.id} value={contact.id}>
-                {contact.name} {contact.role_title ? `(${contact.role_title})` : ""}
-              </option>
-            ))}
-          </select>
-        ) : (
-          <p className="text-sm text-gray-400 italic">
-            No contacts available. Add contacts to your organization first.
-          </p>
-        )}
       </div>
 
       {/* Submit */}
@@ -355,7 +309,7 @@ export default function ProcurementInfoForm({
         <button
           type="submit"
           disabled={isSubmitting}
-          className="px-6 py-2 bg-[#EE2A2E] text-white font-medium rounded-md hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+          className="px-6 py-2 bg-accent text-white font-medium rounded-md hover:bg-accent-hover disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
         >
           {isSubmitting ? "Saving..." : "Save Changes"}
         </button>
