@@ -71,7 +71,7 @@ export async function listEvents(filters?: {
   let query = adminClient
     .from("events")
     .select("*")
-    .order("starts_at", { ascending: true });
+    .order("starts_at", { ascending: false });
 
   if (filters?.status) query = query.eq("status", filters.status);
   if (filters?.created_by) query = query.eq("created_by", filters.created_by);
@@ -179,8 +179,9 @@ export async function createEvent(
       location: payload.location ?? null,
       virtual_link: payload.virtual_link ?? null,
       is_virtual: payload.is_virtual ?? false,
-      audience_mode: payload.audience_mode ?? "members_only",
+      audience_mode: payload.audience_mode ?? "members",
       capacity: payload.capacity ?? null,
+      metadata: payload.metadata ?? {},
       status: "draft",
       created_by: auth.ctx.userId,
     })
@@ -236,8 +237,9 @@ export async function createEventByMember(
       location: payload.location ?? null,
       virtual_link: payload.virtual_link ?? null,
       is_virtual: payload.is_virtual ?? false,
-      audience_mode: payload.audience_mode ?? "members_only",
+      audience_mode: payload.audience_mode ?? "members",
       capacity: payload.capacity ?? null,
+      metadata: payload.metadata ?? {},
       status,
       created_by: auth.ctx.userId,
     })

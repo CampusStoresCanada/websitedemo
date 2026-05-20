@@ -4,7 +4,9 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createEvent, updateEvent, requestEventChanges } from "@/lib/actions/events";
 import { loadGooglePlacesScript } from "@/lib/google/places";
-import type { Event, CreateEventPayload, UpdateEventPayload } from "@/lib/events/types";
+import type { Event, EventAudienceMode, CreateEventPayload, UpdateEventPayload } from "@/lib/events/types";
+import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
+import { TAG_GROUPS } from "@/lib/events/tags";
 
 /**
  * Convert a UTC ISO string to the "YYYY-MM-DDTHH:mm" local-time string
@@ -46,13 +48,33 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
   const [isVirtual, setIsVirtual] = useState(event?.is_virtual ?? false);
   const [location, setLocation] = useState(event?.location ?? "");
   const [virtualLink, setVirtualLink] = useState(event?.virtual_link ?? "");
-  const [audienceMode, setAudienceMode] = useState<"public" | "members_only">(
-    event?.audience_mode ?? "members_only"
+  // Normalize legacy "members_only" → "members" if it somehow comes from the DB
+  const normalizeAudienceMode = (mode: string | undefined): EventAudienceMode => {
+    if (!mode || mode === "members_only") return "members";
+    return mode as EventAudienceMode;
+  };
+  const [audienceMode, setAudienceMode] = useState<EventAudienceMode>(
+    normalizeAudienceMode(event?.audience_mode)
   );
   const [capacity, setCapacity] = useState<string>(
     event?.capacity != null ? String(event.capacity) : ""
   );
   const [slugOverride, setSlugOverride] = useState(event?.slug ?? "");
+
+  // Tags — stored in metadata.tags
+  const initialTags: string[] = (() => {
+    const meta = event?.metadata;
+    if (!meta || typeof meta !== "object") return [];
+    const t = (meta as Record<string, unknown>)["tags"];
+    return Array.isArray(t) ? (t as string[]) : [];
+  })();
+  const [selectedTags, setSelectedTags] = useState<string[]>(initialTags);
+
+  function toggleTag(tag: string) {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  }
 
   const [isLoading, setIsLoading] = useState(false);
   const [isNotifying, setIsNotifying] = useState(false);
@@ -106,6 +128,10 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
       audience_mode: audienceMode,
       capacity: capacity ? Number(capacity) : undefined,
       ...(isEdit && slugOverride ? { slug: slugOverride } : {}),
+      metadata: {
+        ...((typeof event?.metadata === "object" && event?.metadata) ? event.metadata as Record<string, unknown> : {}),
+        tags: selectedTags,
+      },
     };
   }
 
@@ -312,31 +338,17 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
         </legend>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-2">Audience</label>
-          <div className="flex gap-4">
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="audience_mode"
-                value="members_only"
-                checked={audienceMode === "members_only"}
-                onChange={() => setAudienceMode("members_only")}
-                className="text-accent focus:ring-accent"
-              />
-              <span className="text-sm text-gray-700">Members only</span>
-            </label>
-            <label className="flex items-center gap-2 cursor-pointer">
-              <input
-                type="radio"
-                name="audience_mode"
-                value="public"
-                checked={audienceMode === "public"}
-                onChange={() => setAudienceMode("public")}
-                className="text-accent focus:ring-accent"
-              />
-              <span className="text-sm text-gray-700">Public</span>
-            </label>
-          </div>
+          <label className="block text-sm font-medium text-gray-700 mb-1">Audience</label>
+          <select
+            value={audienceMode}
+            onChange={(e) => setAudienceMode(e.target.value as EventAudienceMode)}
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+          >
+            {(Object.keys(AUDIENCE_MODE_LABELS) as EventAudienceMode[]).map((mode) => (
+              <option key={mode} value={mode}>{AUDIENCE_MODE_LABELS[mode]}</option>
+            ))}
+          </select>
+          <p className="text-xs text-gray-400 mt-1">{AUDIENCE_MODE_DESCRIPTIONS[audienceMode]}</p>
         </div>
 
         <div>
@@ -353,6 +365,50 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             placeholder="e.g. 50"
           />
         </div>
+      </fieldset>
+
+      {/* Tags — for "For you" matching */}
+      <fieldset className="space-y-4">
+        <legend className="text-sm font-semibold text-gray-700 border-b border-gray-200 pb-2 w-full">
+          Tags{" "}
+          <span className="font-normal text-gray-400">
+            — used to surface this event as "For you" to relevant members
+          </span>
+        </legend>
+
+        {TAG_GROUPS.map((group) => (
+          <div key={group.label}>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+              {group.label}
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {group.tags.map((tag) => {
+                const label = "labels" in group ? (group.labels as Record<string, string>)[tag] ?? tag : tag;
+                const isSelected = selectedTags.includes(tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => toggleTag(tag)}
+                    className={`px-3 py-1 rounded-full text-xs font-semibold border transition-all ${
+                      isSelected
+                        ? "bg-[#163D6D] text-white border-[#163D6D]"
+                        : "bg-white text-gray-600 border-gray-300 hover:border-gray-400 hover:text-gray-800"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))}
+
+        {selectedTags.length > 0 && (
+          <p className="text-xs text-gray-400">
+            {selectedTags.length} tag{selectedTags.length !== 1 ? "s" : ""} selected
+          </p>
+        )}
       </fieldset>
 
       {/* Admin note + notify (only when arriving from a review email) */}

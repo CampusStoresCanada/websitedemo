@@ -183,9 +183,13 @@ export interface CircleEventInput {
 
 export interface CircleEventAttendee {
   id: number;
+  event_id: number;
   community_member_id: number;
-  status: string; // "going" | "not_going" | "maybe"
-  created_at: string;
+  rsvp_status: string; // "yes" | "no" | "maybe"
+  member_name: string | null;
+  member_email: string | null;
+  rsvp_date: string;
+  created_at?: string;
 }
 
 // ---- Error ----------------------------------------------------------------

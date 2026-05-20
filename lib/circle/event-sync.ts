@@ -232,6 +232,7 @@ export async function pullCircleEvents(): Promise<{
     .select("id, metadata");
 
   const circleIdToWebsiteId = new Map<number, string>();
+  const circleIdToExistingMeta = new Map<number, Record<string, unknown>>();
   const websitePushedIds = new Set<number>(); // events pushed FROM website
 
   for (const row of existing ?? []) {
@@ -239,6 +240,7 @@ export async function pullCircleEvents(): Promise<{
     if (cid) {
       circleIdToWebsiteId.set(cid, row.id);
       const meta = row.metadata as Record<string, unknown> | null;
+      if (meta) circleIdToExistingMeta.set(cid, meta);
       if (!meta?.["circle_origin"]) websitePushedIds.add(cid);
     }
   }
@@ -258,14 +260,16 @@ export async function pullCircleEvents(): Promise<{
         continue;
       }
 
-      const metadata = {
+      const circleCoreMeta = {
         circle_event_id: ce.id,
         circle_origin: true,
         circle_url: ce.url,
       };
 
       if (circleIdToWebsiteId.has(ce.id)) {
-        // Update existing Circle-native event
+        // Update existing Circle-native event — merge metadata so admin-set
+        // tags and other custom fields are preserved.
+        const existingMeta = circleIdToExistingMeta.get(ce.id) ?? {};
         await db
           .from("events")
           .update({
@@ -277,12 +281,13 @@ export async function pullCircleEvents(): Promise<{
             is_virtual: ce.is_virtual,
             virtual_link: ce.virtual_location ?? null,
             updated_at: new Date().toISOString(),
-            metadata,
+            metadata: { ...existingMeta, ...circleCoreMeta },
           })
           .eq("id", circleIdToWebsiteId.get(ce.id)!);
         stats.updated++;
       } else {
-        // Insert new Circle-native event
+        // Insert new Circle-native event — default to "all-members" tag so it
+        // surfaces in members' "For you" feed. Admins can refine per-event.
         const slug = `circle-${ce.id}-${ce.name
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
@@ -297,7 +302,7 @@ export async function pullCircleEvents(): Promise<{
           virtual_link: ce.virtual_location ?? null,
           audience_mode: "public", // Circle-native events are public by default
           status: "published",
-          metadata,
+          metadata: { ...circleCoreMeta, tags: ["all-members"] },
           slug,
         });
         stats.inserted++;
@@ -361,6 +366,43 @@ export async function syncEventRsvps(
     }
   }
 
+  // Email fallback: for attendees not yet linked in the mapping table,
+  // batch-resolve their Circle emails via a SECURITY DEFINER RPC that
+  // can read auth.users, then write-through to the mapping table.
+  const unmatchedAttendees = attendees.filter(
+    (a) => !userIdByCircleMemberId.has(a.community_member_id) && a.member_email
+  );
+
+  if (unmatchedAttendees.length > 0) {
+    const emails = unmatchedAttendees.map((a) => a.member_email!.toLowerCase());
+
+    const { data: resolvedUsers } = await db.rpc("get_users_by_emails", { p_emails: emails }) as {
+      data: Array<{ id: string; email: string }> | null;
+    };
+
+    if (resolvedUsers && resolvedUsers.length > 0) {
+      const userIdByEmail = new Map(resolvedUsers.map((u) => [u.email.toLowerCase(), u.id]));
+
+      for (const attendee of unmatchedAttendees) {
+        const supabaseUserId = userIdByEmail.get(attendee.member_email!.toLowerCase());
+        if (!supabaseUserId) continue;
+
+        userIdByCircleMemberId.set(attendee.community_member_id, supabaseUserId);
+
+        // Write-through: fill supabase_user_id on the existing mapping row
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        await (db.from("circle_member_mapping") as any)
+          .update({
+            supabase_user_id: supabaseUserId,
+            match_method: "email",
+            updated_at: new Date().toISOString(),
+          })
+          .eq("circle_member_id", attendee.community_member_id)
+          .is("supabase_user_id", null);
+      }
+    }
+  }
+
   // Existing registrations for this event (to avoid duplicates)
   const { data: existingRegs } = await db
     .from("event_registrations")
@@ -394,7 +436,7 @@ export async function syncEventRsvps(
           circle_member_id: attendee.community_member_id,
           circle_attendee_id: attendee.id,
           supabase_user_id: supabaseUserId,
-          rsvp_status: attendee.status,
+          rsvp_status: attendee.rsvp_status,
           reconciled: supabaseUserId ? registeredUserIds.has(supabaseUserId) : false,
           synced_at: new Date().toISOString(),
         });
@@ -407,7 +449,7 @@ export async function syncEventRsvps(
       if (
         supabaseUserId &&
         !registeredUserIds.has(supabaseUserId) &&
-        attendee.status === "going"
+        attendee.rsvp_status === "yes"
       ) {
         await db.from("event_registrations").insert({
           event_id: websiteEventId,

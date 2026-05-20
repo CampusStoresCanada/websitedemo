@@ -9,7 +9,31 @@ export type EventStatus =
   | "cancelled"
   | "completed";
 
-export type EventAudienceMode = "public" | "members_only";
+export type EventAudienceMode =
+  | "public"               // Anyone, no login required
+  | "members_and_partners" // Any authenticated member or partner
+  | "members"              // Member orgs only (not partners)
+  | "partners"             // Partner orgs only
+  | "org_admin"            // Org administrators and above
+  | "board";               // CSC admins / board only
+
+export const AUDIENCE_MODE_LABELS: Record<EventAudienceMode, string> = {
+  public:               "Public",
+  members_and_partners: "Members & Partners",
+  members:              "Members",
+  partners:             "Partners",
+  org_admin:            "Org Administrators",
+  board:                "Board & CSC Admins",
+};
+
+export const AUDIENCE_MODE_DESCRIPTIONS: Record<EventAudienceMode, string> = {
+  public:               "Visible to anyone, no login required",
+  members_and_partners: "Any logged-in member or partner",
+  members:              "Member organizations only",
+  partners:             "Partner organizations only",
+  org_admin:            "Org admins, CSC admins, and board",
+  board:                "CSC admins and super admins only",
+};
 
 // ── DB row ────────────────────────────────────────────────────────
 
@@ -27,6 +51,7 @@ export interface Event {
   audience_mode: EventAudienceMode;
   capacity: number | null;
   status: EventStatus;
+  metadata: Record<string, unknown>;
   created_by: string | null;
   created_at: string;
   updated_at: string;
@@ -110,6 +135,7 @@ export interface CreateEventPayload {
   is_virtual?: boolean;
   audience_mode?: EventAudienceMode;
   capacity?: number;
+  metadata?: Record<string, unknown>;
 }
 
 export interface UpdateEventPayload {
@@ -124,6 +150,7 @@ export interface UpdateEventPayload {
   is_virtual?: boolean;
   audience_mode?: EventAudienceMode;
   capacity?: number | null;
+  metadata?: Record<string, unknown>;
 }
 
 // ── Status transitions ────────────────────────────────────────────

@@ -5,6 +5,9 @@ import { useRouter } from "next/navigation";
 import { createEventByMember } from "@/lib/actions/events";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { loadGooglePlacesScript } from "@/lib/google/places";
+import { TAG_GROUPS } from "@/lib/events/tags";
+import type { EventAudienceMode } from "@/lib/events/types";
+import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
 
 const LENGTHS = [
   { value: 15,  label: "15 min" },
@@ -62,7 +65,15 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
   const [isVirtual, setIsVirtual] = useState(true);
   const [locationOrLink, setLocationOrLink] = useState("");
   const [description, setDescription] = useState("");
-  const [audienceMode, setAudienceMode] = useState<"members_only" | "public">("members_only");
+  const [audienceMode, setAudienceMode] = useState<EventAudienceMode>("members");
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
+  const [tagsOpen, setTagsOpen] = useState(false);
+
+  function toggleTag(tag: string) {
+    setSelectedTags((prev) =>
+      prev.includes(tag) ? prev.filter((t) => t !== tag) : [...prev, tag]
+    );
+  }
 
   const locationInputRef = useRef<HTMLInputElement>(null);
 
@@ -118,6 +129,7 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
         is_virtual: isVirtual,
         ...(!isVirtual && { location: locationOrLink || undefined }),
         audience_mode: audienceMode,
+        ...(selectedTags.length > 0 && { metadata: { tags: selectedTags } }),
       });
 
       if (!result.success) {
@@ -146,8 +158,8 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
       />
 
       {/* Modal */}
-      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200">
-        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100">
+      <div className="relative w-full max-w-md bg-white rounded-2xl shadow-2xl overflow-hidden animate-in fade-in slide-in-from-bottom-4 duration-200 flex flex-col max-h-[90vh]">
+        <div className="flex items-center justify-between px-5 py-4 border-b border-gray-100 shrink-0">
           <h2 className="font-semibold text-gray-900">Create Event</h2>
           <button
             onClick={onClose}
@@ -159,7 +171,7 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
           </button>
         </div>
 
-        <form onSubmit={handleSubmit} className="px-5 py-5 space-y-4">
+        <form id="create-event-form" onSubmit={handleSubmit} className="px-5 py-5 space-y-4 overflow-y-auto">
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -280,31 +292,87 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
 
           {/* Audience */}
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">Audience</label>
-            <div className="flex gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="modal_audience"
-                  value="members_only"
-                  checked={audienceMode === "members_only"}
-                  onChange={() => setAudienceMode("members_only")}
-                  className="text-[#EE2A2E] focus:ring-[#EE2A2E]"
-                />
-                <span className="text-sm text-gray-700">Members only</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="modal_audience"
-                  value="public"
-                  checked={audienceMode === "public"}
-                  onChange={() => setAudienceMode("public")}
-                  className="text-[#EE2A2E] focus:ring-[#EE2A2E]"
-                />
-                <span className="text-sm text-gray-700">Public</span>
-              </label>
-            </div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Audience</label>
+            {(() => {
+              const memberModes: EventAudienceMode[] = ["public", "members_and_partners", "members", "partners"];
+              const adminModes: EventAudienceMode[] = ["public", "members_and_partners", "members", "partners", "org_admin", "board"];
+              const modes = isAdmin ? adminModes : memberModes;
+              return (
+                <>
+                  <select
+                    value={audienceMode}
+                    onChange={(e) => setAudienceMode(e.target.value as EventAudienceMode)}
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+                  >
+                    {modes.map((mode) => (
+                      <option key={mode} value={mode}>{AUDIENCE_MODE_LABELS[mode]}</option>
+                    ))}
+                  </select>
+                  <p className="text-xs text-gray-400 mt-1">{AUDIENCE_MODE_DESCRIPTIONS[audienceMode]}</p>
+                </>
+              );
+            })()}
+          </div>
+
+          {/* Tags — collapsible */}
+          <div className="border border-gray-200 rounded-lg overflow-hidden">
+            <button
+              type="button"
+              onClick={() => setTagsOpen((o) => !o)}
+              className="w-full flex items-center justify-between px-3 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              <span className="font-medium">
+                Relevance Tags
+                {selectedTags.length > 0 && (
+                  <span className="ml-2 text-xs font-bold text-[#163D6D]">
+                    {selectedTags.length} selected
+                  </span>
+                )}
+              </span>
+              <svg
+                className={`w-4 h-4 text-gray-400 transition-transform ${tagsOpen ? "rotate-180" : ""}`}
+                fill="none" viewBox="0 0 24 24" stroke="currentColor"
+              >
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+              </svg>
+            </button>
+
+            {tagsOpen && (
+              <div className="border-t border-gray-200 px-3 py-3 space-y-3 bg-gray-50">
+                <p className="text-xs text-gray-500">
+                  Tag this event so the right members see it in their "For you" feed.
+                </p>
+                {TAG_GROUPS.map((group) => (
+                  <div key={group.label}>
+                    <p className="text-[11px] font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+                      {group.label}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
+                      {group.tags.map((tag) => {
+                        const label = "labels" in group
+                          ? (group.labels as Record<string, string>)[tag] ?? tag
+                          : tag;
+                        const isSelected = selectedTags.includes(tag);
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => toggleTag(tag)}
+                            className={`px-2.5 py-0.5 rounded-full text-xs font-semibold border transition-all ${
+                              isSelected
+                                ? "bg-[#163D6D] text-white border-[#163D6D]"
+                                : "bg-white text-gray-600 border-gray-300 hover:border-gray-400"
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           {!isAdmin && (
@@ -317,23 +385,26 @@ export default function CreateEventModal({ onClose, googleMapsApiKey = null }: C
             <p className="text-sm text-red-600 bg-red-50 rounded-lg px-3 py-2">{error}</p>
           )}
 
-          <div className="flex gap-3 pt-1">
-            <button
-              type="submit"
-              disabled={isPending || !title || !startDate || !startTime}
-              className="flex-1 px-4 py-2.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold text-sm transition-colors"
-            >
-              {isPending ? "Creating…" : isAdmin ? "Create & Edit" : "Submit for Review"}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"
-            >
-              Cancel
-            </button>
-          </div>
         </form>
+
+        {/* Sticky footer — always visible regardless of scroll position */}
+        <div className="shrink-0 flex gap-3 px-5 py-4 border-t border-gray-100 bg-white">
+          <button
+            type="submit"
+            form="create-event-form"
+            disabled={isPending || !title || !startDate || !startTime}
+            className="flex-1 px-4 py-2.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:bg-gray-200 disabled:text-gray-400 text-white font-semibold text-sm transition-colors"
+          >
+            {isPending ? "Creating…" : isAdmin ? "Create & Edit" : "Submit for Review"}
+          </button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="px-4 py-2.5 rounded-lg border border-gray-300 text-gray-700 text-sm font-medium hover:bg-gray-50 transition-colors"
+          >
+            Cancel
+          </button>
+        </div>
       </div>
     </div>
   );

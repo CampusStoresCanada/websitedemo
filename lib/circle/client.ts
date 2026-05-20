@@ -443,8 +443,8 @@ export class CircleAdminClient {
   ): Promise<{ records: CircleEventAttendee[]; has_next_page: boolean }> {
     return this.request<{ records: CircleEventAttendee[]; has_next_page: boolean }>(
       "GET",
-      `/events/${eventId}/event_attendees`,
-      { params: { per_page: options?.per_page ?? 100, page: options?.page ?? 1 } }
+      `/event_attendees`,
+      { params: { event_id: eventId, per_page: options?.per_page ?? 100, page: options?.page ?? 1 } }
     );
   }
 
@@ -466,13 +466,13 @@ export class CircleAdminClient {
   ): Promise<CircleEventAttendee> {
     return this.request<CircleEventAttendee>(
       "POST",
-      `/events/${eventId}/event_attendees`,
-      { body: { community_member_id: communityMemberId } }
+      `/event_attendees`,
+      { body: { event_id: eventId, community_member_id: communityMemberId } }
     );
   }
 
   async destroyEventAttendee(eventId: number, attendeeId: number): Promise<void> {
-    await this.request<void>("DELETE", `/events/${eventId}/event_attendees/${attendeeId}`);
+    await this.request<void>("DELETE", `/event_attendees/${attendeeId}`);
   }
 
   // ---- Community ----------------------------------------------------------

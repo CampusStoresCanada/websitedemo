@@ -235,7 +235,7 @@ function HostedEventRow({
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
-        {/* Attendees — links to attendee management (coming soon) */}
+        {/* Attendees */}
         <Link
           href={`/me/events/${ev.id}/attendees`}
           className="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
@@ -245,6 +245,16 @@ function HostedEventRow({
           </svg>
           Attendees
         </Link>
+
+        {/* Edit — only available for events awaiting review or in draft */}
+        {(ev.status === "pending_review" || ev.status === "draft") && (
+          <Link
+            href={`/me/events/${ev.id}/edit`}
+            className="inline-flex items-center px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors"
+          >
+            Edit
+          </Link>
+        )}
 
         {ev.slug && (
           <Link
