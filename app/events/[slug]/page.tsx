@@ -76,11 +76,12 @@ export default async function EventDetailPage({
   const tickets = ticketsResult.success ? ticketsResult.data : null;
   const attendeeData = attendeesResult.success ? attendeesResult.data : null;
   const hasTickets = tickets && !tickets.noTicketsConfigured;
-  const isMembersOnly = event.audience_mode === "members_only";
   const isCSC = event.creator_org_name === "Campus Stores Canada";
 
-  // Members-only event: unauthenticated users see teaser but not full body
-  const canViewFull = !isMembersOnly || isAuthenticated;
+  // Determine if unauthenticated visitors can see this event's full content.
+  // "public" events are fully open; everything else requires a login.
+  const isPublic = event.audience_mode === "public";
+  const canViewFull = isPublic || isAuthenticated;
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
@@ -112,7 +113,7 @@ export default async function EventDetailPage({
         {/* Main content */}
         <div className="lg:col-span-2">
           <div className="flex flex-wrap gap-2 mb-3">
-            {isMembersOnly && (
+            {!isPublic && (
               <span className="inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -228,7 +229,7 @@ export default async function EventDetailPage({
                 status={event.user_registration_status}
                 spotsRemaining={event.spots_remaining}
                 isAuthenticated={isAuthenticated}
-                isMembersOnly={isMembersOnly}
+                isMembersOnly={!isPublic}
                 isVirtual={event.is_virtual}
                 meetLink={event.virtual_link}
               />

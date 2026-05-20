@@ -51,12 +51,12 @@ function buildCirclePayload(event: {
 
   return {
     name: event.title,
-    description: event.description ?? undefined,
+    body: event.description ?? undefined,
     starts_at: normalise(event.starts_at)!,
     ends_at: normalise(event.ends_at),
-    location: !event.is_virtual ? (event.location ?? undefined) : undefined,
-    is_virtual: event.is_virtual,
-    virtual_location: event.is_virtual ? (event.virtual_link ?? undefined) : undefined,
+    location_type: event.is_virtual ? "virtual" : "in_person",
+    in_person_location: !event.is_virtual ? (event.location ?? undefined) : undefined,
+    virtual_location_url: event.is_virtual ? (event.virtual_link ?? undefined) : undefined,
     space_id: spaceId,
   };
 }
@@ -274,12 +274,12 @@ export async function pullCircleEvents(): Promise<{
           .from("events")
           .update({
             title: ce.name,
-            description: ce.description ?? null,
+            description: ce.body ?? null,
             starts_at: normalise(ce.starts_at),
             ends_at: normalise(ce.ends_at),
-            location: ce.location ?? null,
-            is_virtual: ce.is_virtual,
-            virtual_link: ce.virtual_location ?? null,
+            location: ce.in_person_location ?? null,
+            is_virtual: ce.location_type === "virtual",
+            virtual_link: ce.virtual_location_url ?? null,
             updated_at: new Date().toISOString(),
             metadata: { ...existingMeta, ...circleCoreMeta },
           })
@@ -294,12 +294,12 @@ export async function pullCircleEvents(): Promise<{
           .slice(0, 40)}`;
         await db.from("events").insert({
           title: ce.name,
-          description: ce.description ?? null,
+          description: ce.body ?? null,
           starts_at: normalise(ce.starts_at),
           ends_at: normalise(ce.ends_at),
-          location: ce.location ?? null,
-          is_virtual: ce.is_virtual,
-          virtual_link: ce.virtual_location ?? null,
+          location: ce.in_person_location ?? null,
+          is_virtual: ce.location_type === "virtual",
+          virtual_link: ce.virtual_location_url ?? null,
           audience_mode: "public", // Circle-native events are public by default
           status: "published",
           metadata: { ...circleCoreMeta, tags: ["all-members"] },

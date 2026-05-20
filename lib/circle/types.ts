@@ -156,28 +156,32 @@ export interface CircleSyncQueueItem {
 export interface CircleEvent {
   id: number;
   name: string;
-  description: string | null;
+  /** Rich text / HTML event body — Circle v2 API uses "body", not "description" */
+  body: string | null;
   starts_at: string;
   ends_at: string | null;
-  location: string | null;
-  is_virtual: boolean;
-  virtual_location: string | null; // URL for virtual join link
-  space_id: number;
-  community_id: number;
+  /** "virtual" | "in_person" — Circle v2 uses location_type, not is_virtual */
+  location_type: "virtual" | "in_person" | string;
+  in_person_location: string | null;
+  virtual_location_url: string | null;
+  space_id?: number;
+  space?: { id: number; slug: string; name: string; community_id: number };
+  community_id?: number;
   url: string;
-  attendees_count: number;
+  cover_image_url?: string | null;
+  host?: string | null;
   created_at: string;
   updated_at: string;
 }
 
 export interface CircleEventInput {
   name: string;
-  description?: string;
+  body?: string;
   starts_at: string;
   ends_at?: string;
-  location?: string;
-  is_virtual?: boolean;
-  virtual_location?: string;
+  location_type?: "virtual" | "in_person";
+  in_person_location?: string;
+  virtual_location_url?: string;
   space_id: number;
 }
 
