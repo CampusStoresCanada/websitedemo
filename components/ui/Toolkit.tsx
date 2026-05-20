@@ -13,7 +13,7 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
 import type { PendingContentChange } from "@/lib/database.types";
@@ -3139,6 +3139,12 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
   const context = detectPageContext(pathname);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [canExportAttendees, setCanExportAttendees] = useState(false);
+
+  useEffect(() => {
+    if (context.type !== "event") return;
+    canExportEventAttendees(context.slug).then(setCanExportAttendees);
+  }, [context.type === "event" && context.slug]);
 
   const downloadBlob = (content: string, filename: string, mimeType: string) => {
     const blob = new Blob([content], { type: mimeType });
@@ -3186,12 +3192,12 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
         icon: "📅",
         action: () => run("Add to Calendar", () => exportEventICS(context.slug)),
       },
-      {
+      ...(canExportAttendees ? [{
         label: "Attendee List CSV",
         description: "Names, emails, registration status, and check-in times",
         icon: "📋",
         action: () => run("Attendee List CSV", () => exportEventAttendees(context.slug)),
-      },
+      }] : []),
     ];
   } else if (context.type === "members_directory") {
     if (isPartner) {

@@ -403,6 +403,24 @@ export async function exportMemberBuyersCSV(): Promise<{
   return { csv, filename: `csc-${categorySlug}-buyers-${year}.csv` };
 }
 
+/** Returns whether the current user can export attendees for this event. */
+export async function canExportEventAttendees(slug: string): Promise<boolean> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return false;
+
+  const isAdmin = ["admin", "super_admin"].includes(auth.ctx.globalRole ?? "");
+  if (isAdmin) return true;
+
+  const db = createAdminClient();
+  const { data: event } = await db
+    .from("events")
+    .select("created_by")
+    .eq("slug", slug)
+    .single();
+
+  return !!event && event.created_by === auth.ctx.userId;
+}
+
 /** Export attendee list for an event as CSV.
  *  Accessible by the event creator and global admins only. */
 export async function exportEventAttendees(slug: string): Promise<{
