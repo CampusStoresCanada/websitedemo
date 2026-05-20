@@ -266,14 +266,16 @@ export default async function EventDetailPage({
           {isAuthenticated ? (
             <div className="flex flex-wrap items-center gap-2">
               {attendeeData.attendees.slice(0, 20).map((a, i) =>
-                a.orgSlug ? (
-                  <Link
+                a.profileUrl ? (
+                  <a
                     key={i}
-                    href={`/org/${a.orgSlug}`}
+                    href={a.profileUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
                     className="inline-flex items-center px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 text-sm font-medium transition-colors"
                   >
                     {a.name ?? "Member"}
-                  </Link>
+                  </a>
                 ) : (
                   <span
                     key={i}

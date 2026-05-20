@@ -811,7 +811,7 @@ async function notifyCreatorEventApproved(
  */
 export async function getPublicAttendees(
   eventId: string
-): Promise<{ success: true; data: { total: number; attendees: { name: string | null; orgSlug: string | null }[] } } | { success: false; error: string }> {
+): Promise<{ success: true; data: { total: number; attendees: { name: string | null; profileUrl: string | null }[] } } | { success: false; error: string }> {
   const adminClient = createAdminClient();
 
   const { data, error } = await adminClient
@@ -826,16 +826,17 @@ export async function getPublicAttendees(
 
   const userIds = (data ?? []).map((r: any) => r.user_id);
 
-  const [profileResult, orgResult, countResult] = await Promise.all([
+  const communityUrl = process.env.NEXT_PUBLIC_CIRCLE_COMMUNITY_URL ?? "";
+
+  const [profileResult, circleMappingResult, countResult] = await Promise.all([
     userIds.length > 0
       ? adminClient.from("profiles").select("id, display_name").in("id", userIds)
       : Promise.resolve({ data: [] }),
     userIds.length > 0
       ? adminClient
-          .from("user_organizations")
-          .select("user_id, organization:organizations!inner(slug)")
-          .in("user_id", userIds)
-          .order("created_at", { ascending: true })
+          .from("circle_member_mapping")
+          .select("supabase_user_id, circle_member_id")
+          .in("supabase_user_id", userIds)
       : Promise.resolve({ data: [] }),
     adminClient
       .from("event_registrations")
@@ -845,19 +846,20 @@ export async function getPublicAttendees(
   ]);
 
   const nameMap = new Map((profileResult.data ?? []).map((p: any) => [p.id, p.display_name ?? null]));
-
-  // Keep only the first org membership per user
-  const orgSlugMap = new Map<string, string>();
-  for (const row of orgResult.data ?? []) {
-    if (!orgSlugMap.has((row as any).user_id)) {
-      orgSlugMap.set((row as any).user_id, (row as any).organization?.slug ?? null);
+  const circleIdMap = new Map<string, number>();
+  for (const row of circleMappingResult.data ?? []) {
+    if ((row as any).circle_member_id) {
+      circleIdMap.set((row as any).supabase_user_id, (row as any).circle_member_id);
     }
   }
 
-  const attendees = userIds.map((uid) => ({
-    name: nameMap.get(uid) ?? null,
-    orgSlug: orgSlugMap.get(uid) ?? null,
-  }));
+  const attendees = userIds.map((uid) => {
+    const circleId = circleIdMap.get(uid);
+    return {
+      name: nameMap.get(uid) ?? null,
+      profileUrl: circleId && communityUrl ? `${communityUrl}/members/${circleId}` : null,
+    };
+  });
 
   return { success: true, data: { total: countResult.count ?? attendees.length, attendees } };
 }
