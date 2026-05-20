@@ -304,6 +304,21 @@ export async function sweepInboundFromCircle(): Promise<{
     const member = circleMap.get(contact.email.toLowerCase());
     if (!member) continue;
 
+    // Write public_uid to circle_member_mapping if we have it and it's not stored yet.
+    // This is a cheap conditional write — no extra API call needed since buildEmailMap()
+    // already returned the full member record including public_uid.
+    if (member.public_uid) {
+      try {
+        await adminClient
+          .from("circle_member_mapping")
+          .update({ circle_public_uid: member.public_uid })
+          .eq("contact_id", contact.id)
+          .is("circle_public_uid", null); // only write if not already set (avoids churn)
+      } catch {
+        // Non-fatal — profile URL just won't work until next sweep
+      }
+    }
+
     // Fields we pull from Circle (non-canonical engagement data)
     const incoming: Record<string, unknown> = {};
     if (member.headline != null) incoming.headline = member.headline;

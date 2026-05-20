@@ -16,6 +16,8 @@ export interface CircleMember {
   tag_ids: number[];
   admin: boolean;
   active: boolean;
+  public_uid: string | null;
+  profile_url: string | null;
 }
 
 export interface CircleMemberInput {

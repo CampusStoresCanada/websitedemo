@@ -835,7 +835,7 @@ export async function getPublicAttendees(
     userIds.length > 0
       ? adminClient
           .from("circle_member_mapping")
-          .select("supabase_user_id, circle_member_id")
+          .select("supabase_user_id, circle_public_uid")
           .in("supabase_user_id", userIds)
       : Promise.resolve({ data: [] }),
     adminClient
@@ -846,18 +846,18 @@ export async function getPublicAttendees(
   ]);
 
   const nameMap = new Map((profileResult.data ?? []).map((p: any) => [p.id, p.display_name ?? null]));
-  const circleIdMap = new Map<string, number>();
+  const publicUidMap = new Map<string, string>();
   for (const row of circleMappingResult.data ?? []) {
-    if ((row as any).circle_member_id) {
-      circleIdMap.set((row as any).supabase_user_id, (row as any).circle_member_id);
+    if ((row as any).circle_public_uid) {
+      publicUidMap.set((row as any).supabase_user_id, (row as any).circle_public_uid);
     }
   }
 
   const attendees = userIds.map((uid) => {
-    const circleId = circleIdMap.get(uid);
+    const publicUid = publicUidMap.get(uid);
     return {
       name: nameMap.get(uid) ?? null,
-      profileUrl: circleId && communityUrl ? `${communityUrl}/members/${circleId}` : null,
+      profileUrl: publicUid && communityUrl ? `${communityUrl}/u/${publicUid}` : null,
     };
   });
 
