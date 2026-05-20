@@ -1,13 +1,23 @@
 import Image from "next/image";
 import Link from "next/link";
 import type { HomeMapOrg } from "@/lib/homepage";
+import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
+
+// Each card is w-36 (144px) + mx-6 each side (48px) = 192px
+// Target scroll speed: 80px/s — comfortable, readable
+const CARD_PX = 192;
+const PX_PER_SEC = 50;
+
+function carouselDuration(count: number): string {
+  return `${Math.round((count * CARD_PX) / PX_PER_SEC)}s`;
+}
 
 export default function LogoCarousel({
   members,
   partners,
 }: {
   members: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl">>;
-  partners: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl">>;
+  partners: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl" | "sponsorTier">>;
 }) {
 
   return (
@@ -23,7 +33,10 @@ export default function LogoCarousel({
           <div className="absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-white to-transparent z-10" />
 
           {/* Scrolling container */}
-          <div className="flex animate-scroll">
+          <div
+            className="flex w-max animate-scroll"
+            style={{ animationDuration: carouselDuration(members.length) }}
+          >
             {[...members, ...members].map((org, i) => (
               <div
                 key={`${org.id}-${i}`}
@@ -68,7 +81,10 @@ export default function LogoCarousel({
           <div className="absolute right-0 top-0 bottom-0 w-24 bg-gradient-to-l from-white to-transparent z-10" />
 
           {/* Scrolling container - reverse direction */}
-          <div className="flex animate-scroll-reverse">
+          <div
+            className="flex w-max animate-scroll-reverse"
+            style={{ animationDuration: carouselDuration(partners.length) }}
+          >
             {[...partners, ...partners].map((org, i) => (
               <div
                 key={`${org.id}-${i}`}
@@ -87,13 +103,22 @@ export default function LogoCarousel({
                       className="object-contain max-h-10"
                       unoptimized
                     />
-                  
+
                 ) : (
                   <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
                     <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
                       {org.name}
                     </span>
                   </div>
+                )}
+                {org.sponsorTier && (
+                  <span className="absolute -top-2 -right-2 drop-shadow-sm">
+                    <TierIconPreview
+                      icon={org.sponsorTier.icon ?? "shield"}
+                      color={org.sponsorTier.color}
+                      size={26}
+                    />
+                  </span>
                 )}
                 </Link>
               </div>

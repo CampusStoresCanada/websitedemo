@@ -59,6 +59,7 @@ export default function Header() {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
+  const [hadSession, setHadSession] = useState(false);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
   const [alertTab, setAlertTab] = useState<"notifications" | "replies" | "dms">("notifications");
   const [cartCount, setCartCount] = useState(0);
@@ -163,6 +164,10 @@ export default function Header() {
     const onScroll = () => setIsScrolled(window.scrollY > 0);
     window.addEventListener("scroll", onScroll);
     return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  useEffect(() => {
+    setHadSession(document.cookie.includes("csc_had_session=1"));
   }, []);
 
   useEffect(() => {
@@ -651,6 +656,10 @@ export default function Header() {
                       My Events
                     </Link>
 
+                    <Link href="/me/bookmarks" onClick={() => setShowUserMenu(false)} className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50">
+                      My Bookmarks
+                    </Link>
+
                     {primaryOrg?.organization?.slug ? (
                       <Link
                         href={`/org/${primaryOrg.organization.slug}`}
@@ -701,15 +710,21 @@ export default function Header() {
                   </div>
                 ) : null}
               </div>
-            ) : (
+            ) : hadSession ? (
+              // Returning user — signed out but has a session cookie
               <>
-                <Link href="/login" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
-                  Login
+                <Link href="/signup" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
+                  Become a Member
                 </Link>
-                <Link href="/signup" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
-                  Join CSC
+                <Link href="/login" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+                  Sign In
                 </Link>
               </>
+            ) : (
+              // New visitor — no prior session
+              <Link href="/signup" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+                Become a Member
+              </Link>
             )}
 
             <button
@@ -737,6 +752,7 @@ export default function Header() {
                 <>
                   <Link href="/me" className="px-2 py-2 rounded-md hover:bg-gray-50">My Account</Link>
                   <Link href="/me/events" className="px-2 py-2 rounded-md hover:bg-gray-50">My Events</Link>
+                  <Link href="/me/bookmarks" className="px-2 py-2 rounded-md hover:bg-gray-50">My Bookmarks</Link>
                   {primaryOrg?.organization?.slug ? (
                     <Link href={`/org/${primaryOrg.organization.slug}`} className="px-2 py-2 rounded-md hover:bg-gray-50">
                       My Organization
@@ -751,7 +767,34 @@ export default function Header() {
                     </>
                   ) : null}
                 </>
-              ) : null}
+              ) : (
+                // Unauthenticated — show appropriate CTA
+                <div className="pt-2 mt-1 border-t border-gray-100 flex flex-col gap-2">
+                  {hadSession ? (
+                    <>
+                      <Link
+                        href="/login"
+                        className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
+                      >
+                        Sign In
+                      </Link>
+                      <Link
+                        href="/signup"
+                        className="px-3 py-2 rounded-md text-sm font-medium text-[#6B6B6B] hover:bg-gray-50 text-center"
+                      >
+                        Become a Member
+                      </Link>
+                    </>
+                  ) : (
+                    <Link
+                      href="/signup"
+                      className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
+                    >
+                      Become a Member
+                    </Link>
+                  )}
+                </div>
+              )}
             </nav>
           </div>
         ) : null}

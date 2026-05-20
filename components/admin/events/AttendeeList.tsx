@@ -152,7 +152,7 @@ export default function AttendeeList({ attendees, eventId }: AttendeeListProps) 
                 <button
                   onClick={handleConfirmAdd}
                   disabled={isPending}
-                  className="flex-1 px-4 py-2 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:bg-gray-300 text-white text-sm font-semibold transition-colors"
+                  className="flex-1 px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-gray-300 text-white text-sm font-semibold transition-colors"
                 >
                   {isPending ? "Adding…" : "Confirm — Add as Complimentary"}
                 </button>
@@ -172,7 +172,7 @@ export default function AttendeeList({ attendees, eventId }: AttendeeListProps) 
                 placeholder="Search by name or email…"
                 value={memberSearch}
                 onChange={(e) => setMemberSearch(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
                 autoFocus
               />
               {isLoadingMembers ? (
@@ -214,12 +214,12 @@ export default function AttendeeList({ attendees, eventId }: AttendeeListProps) 
           placeholder="Search name or email…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+          className="flex-1 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
         />
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
+          className="border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent"
         >
           <option value="">All statuses</option>
           <option value="registered">Registered</option>

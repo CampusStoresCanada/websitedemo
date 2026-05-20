@@ -187,7 +187,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             required
             value={title}
             onChange={(e) => setTitle(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="Event title"
           />
         </div>
@@ -199,7 +199,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
               type="text"
               value={slugOverride}
               onChange={(e) => setSlugOverride(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="auto-generated-from-title"
             />
             <p className="text-xs text-gray-400 mt-1">Leave unchanged to keep current slug</p>
@@ -212,7 +212,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             rows={2}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="Brief summary shown in event listings"
           />
         </div>
@@ -223,7 +223,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             rows={8}
             value={bodyHtml}
             onChange={(e) => setBodyHtml(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="<p>Full event details…</p>"
           />
         </div>
@@ -245,7 +245,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
               required
               value={startsAt}
               onChange={(e) => setStartsAt(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             />
           </div>
           <div>
@@ -254,7 +254,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
               type="datetime-local"
               value={endsAt}
               onChange={(e) => setEndsAt(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             />
           </div>
         </div>
@@ -272,7 +272,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             id="is_virtual"
             checked={isVirtual}
             onChange={(e) => setIsVirtual(e.target.checked)}
-            className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
+            className="h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent"
           />
           <label htmlFor="is_virtual" className="text-sm text-gray-700">
             This is a virtual event
@@ -286,7 +286,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
               type="url"
               value={virtualLink}
               onChange={(e) => setVirtualLink(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="https://zoom.us/j/..."
             />
           </div>
@@ -298,7 +298,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
               type="text"
               value={location}
               onChange={(e) => setLocation(e.target.value)}
-              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
               placeholder="Venue name or address"
             />
           </div>
@@ -321,7 +321,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
                 value="members_only"
                 checked={audienceMode === "members_only"}
                 onChange={() => setAudienceMode("members_only")}
-                className="text-[#EE2A2E] focus:ring-[#EE2A2E]"
+                className="text-accent focus:ring-accent"
               />
               <span className="text-sm text-gray-700">Members only</span>
             </label>
@@ -332,7 +332,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
                 value="public"
                 checked={audienceMode === "public"}
                 onChange={() => setAudienceMode("public")}
-                className="text-[#EE2A2E] focus:ring-[#EE2A2E]"
+                className="text-accent focus:ring-accent"
               />
               <span className="text-sm text-gray-700">Public</span>
             </label>
@@ -349,7 +349,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             min={1}
             value={capacity}
             onChange={(e) => setCapacity(e.target.value)}
-            className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+            className="w-32 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
             placeholder="e.g. 50"
           />
         </div>
@@ -401,7 +401,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
           <button
             type="submit"
             disabled={isLoading}
-            className="px-6 py-2.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:bg-gray-300 text-white font-semibold text-sm transition-colors"
+            className="px-6 py-2.5 rounded-lg bg-accent hover:bg-accent-hover disabled:bg-gray-300 text-white font-semibold text-sm transition-colors"
           >
             {isLoading ? "Saving…" : isEdit ? "Save Changes" : "Create Event"}
           </button>

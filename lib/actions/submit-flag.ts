@@ -1,6 +1,7 @@
 "use server";
 
 import { requireAuthenticated } from "@/lib/auth/guards";
+import { sendFlagNotification } from "@/lib/circle/flag-notify";
 
 interface SubmitFlagParams {
   pageUrl: string;
@@ -8,6 +9,8 @@ interface SubmitFlagParams {
   note?: string;
   elementSelector?: string;
   elementContent?: string;
+  /** Explicit org ID from data-org-id — bypasses URL-based detection when provided */
+  organizationId?: string;
 }
 
 interface SubmitFlagResult {
@@ -26,6 +29,7 @@ export async function submitFlag({
   note,
   elementSelector,
   elementContent,
+  organizationId: explicitOrgId,
 }: SubmitFlagParams): Promise<SubmitFlagResult> {
   try {
     const auth = await requireAuthenticated();
@@ -41,18 +45,18 @@ export async function submitFlag({
       .eq("id", userId)
       .single();
 
-    // Try to extract organization ID from URL if it's an org profile page
-    let organizationId: string | null = null;
-    const orgMatch = pageUrl.match(/\/org\/([^\/]+)/);
-    if (orgMatch) {
-      const slug = orgMatch[1];
-      const { data: org } = await supabase
-        .from("organizations")
-        .select("id")
-        .eq("slug", slug)
-        .single();
-      if (org) {
-        organizationId = org.id;
+    // Prefer explicit org ID from data-org-id; fall back to URL parsing
+    let organizationId: string | null = explicitOrgId ?? null;
+    if (!organizationId) {
+      const orgMatch = pageUrl.match(/\/org\/([^\/]+)/);
+      if (orgMatch) {
+        const slug = orgMatch[1];
+        const { data: org } = await supabase
+          .from("organizations")
+          .select("id")
+          .eq("slug", slug)
+          .single();
+        if (org) organizationId = org.id;
       }
     }
 
@@ -75,18 +79,22 @@ export async function submitFlag({
 
     if (insertError) {
       console.error("Error inserting flag:", insertError);
-      return { success: false, error: "Failed to submit flag" };
+      return { success: false, error: `Failed to submit flag: [${insertError.code}] ${insertError.message}` };
     }
 
-    // Log for debugging
-    console.log("=== FLAG SUBMITTED ===");
-    console.log("Flag ID:", flag.id);
-    console.log("Page:", pageUrl);
-    console.log("Organization ID:", organizationId || "(none)");
-    console.log("Priority:", priority);
-    console.log("Note:", note || "(none)");
-    console.log("User:", profile?.display_name || userEmail);
-    console.log("======================");
+    // Fire-and-forget bot notification — don't block the response
+    sendFlagNotification({
+      flagId: flag.id,
+      pageUrl,
+      elementContent: elementContent ?? null,
+      priority,
+      organizationId,
+      reporterName: profile?.display_name ?? null,
+    }).then(({ method }) => {
+      console.log(`[flag] Flag ${flag.id} notification sent via ${method ?? "none"}`);
+    }).catch((err) => {
+      console.error("[flag] Notification failed:", err);
+    });
 
     return { success: true, flagId: flag.id };
   } catch (err) {

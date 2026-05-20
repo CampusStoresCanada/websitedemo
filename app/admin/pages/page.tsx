@@ -1,4 +1,5 @@
 import Link from "next/link";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
 
 export const metadata = {
   title: "Pages & Permissions | Admin | Campus Stores Canada",
@@ -74,13 +75,12 @@ const PAGE_REGISTRY: PageRegistryRow[] = [
 export default function AdminPagesPermissionsPage() {
   return (
     <main>
-      <h1 className="text-2xl font-bold text-gray-900">Pages & Permissions</h1>
-      <p className="mt-2 text-sm text-gray-600">
-        v1.0 registry for discoverability and access correctness. This will grow into a full route
-        health and permissions console.
-      </p>
+      <AdminPageHeader
+        title="Pages & Permissions"
+        description="v1.0 registry for discoverability and access correctness. This will grow into a full route health and permissions console."
+      />
 
-      <div className="mt-6 overflow-hidden rounded-xl border border-gray-200 bg-white">
+      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
         <table className="min-w-full divide-y divide-gray-200 text-sm">
           <thead className="bg-gray-50">
             <tr>
@@ -117,8 +117,8 @@ export default function AdminPagesPermissionsPage() {
 
       <div className="mt-4 text-sm text-gray-600">
         <p>
-          Related tools: <Link className="text-[#D92327] hover:underline" href="/admin/ops">Ops Health</Link>{" "}
-          and <Link className="text-[#D92327] hover:underline" href="/admin/policy">Policy Settings</Link>.
+          Related tools: <Link className="text-accent hover:underline" href="/admin/ops">Ops Health</Link>{" "}
+          and <Link className="text-accent hover:underline" href="/admin/policy">Policy Settings</Link>.
         </p>
       </div>
     </main>

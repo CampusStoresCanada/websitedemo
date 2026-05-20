@@ -40,7 +40,7 @@ export default async function TemplateEditPage({
     return (
       <main>
         <p className="text-sm text-red-600">Template not found.</p>
-        <Link href="/admin/comms/templates" className="text-sm text-[#EE2A2E] hover:underline mt-2 block">
+        <Link href="/admin/comms/templates" className="text-sm text-accent hover:underline mt-2 block">
           ← Back to Templates
         </Link>
       </main>
@@ -92,7 +92,7 @@ export default async function TemplateEditPage({
           <p className="text-xs text-gray-500 mb-1">
             Available variables:{" "}
             {t.variable_keys.map((v) => (
-              <code key={v} className="mr-1 bg-blue-50 rounded px-1 text-[#D92327] text-xs">
+              <code key={v} className="mr-1 bg-blue-50 rounded px-1 text-accent text-xs">
                 {`{{${v}}}`}
               </code>
             ))}
@@ -115,7 +115,7 @@ export default async function TemplateEditPage({
         <div className="flex gap-3">
           <button
             type="submit"
-            className="rounded-lg bg-[#EE2A2E] px-5 py-2 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"
+            className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
           >
             Save Template
           </button>

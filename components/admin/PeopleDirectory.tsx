@@ -94,7 +94,7 @@ export default function PeopleDirectory({
           placeholder="Search name, email, or org..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm w-72 focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm w-72 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
         />
         <select
           value={filterRole}

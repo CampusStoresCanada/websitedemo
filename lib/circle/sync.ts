@@ -7,7 +7,7 @@ import { getIntegrationConfig } from "@/lib/policy/engine";
 import { isCircleConfigured, getAccessGroupIds } from "./config";
 import { getCircleClient } from "./client";
 import { executeCircleSyncOperation } from "./operations";
-import type { CircleSyncOperation, CircleSyncQueueItem } from "./types";
+import type { CircleMember, CircleSyncOperation, CircleSyncQueueItem } from "./types";
 import type { Json } from "@/lib/database.types";
 
 // ---------------------------------------------------------------------------
@@ -141,6 +141,20 @@ export async function processCircleSyncQueue(): Promise<QueueResult> {
     return result;
   }
 
+  // Build email map once for the batch if any link_member items are present.
+  // Avoids fetching all Circle pages once per item (N fetches → 1 fetch).
+  let emailMap: Map<string, CircleMember> | undefined;
+  if (items.some((i) => i.operation === "link_member")) {
+    try {
+      emailMap = await circleClient.buildEmailMap();
+    } catch (err) {
+      result.errors.push(
+        `Email map fetch failed: ${err instanceof Error ? err.message : String(err)}`
+      );
+      // Continue without it — individual items will fall back to per-item fetch
+    }
+  }
+
   for (const item of items) {
     result.processed++;
 
@@ -157,7 +171,8 @@ export async function processCircleSyncQueue(): Promise<QueueResult> {
       // Execute the actual Circle API call
       await executeCircleSyncOperation(
         circleClient,
-        item as unknown as CircleSyncQueueItem
+        item as unknown as CircleSyncQueueItem,
+        emailMap
       );
 
       // Mark completed
@@ -227,71 +242,93 @@ export async function pullInboundFromCircle(): Promise<{
 }> {
   // DISABLED — was generating ~30k GET /community_members/{id} calls/month via
   // per-contact polling every 60 min. Shut down pending a webhook-based approach.
-  // To re-enable: justify a minimum polling interval that keeps monthly calls < 500.
+  // To re-enable: design a webhook listener that pushes changes instead of polling.
   return { checked: 0, updated: 0, errors: ["pullInboundFromCircle disabled"] };
+}
+
+// ---------------------------------------------------------------------------
+// Inbound sweep — daily bulk pull of bio/headline/avatar from Circle
+// ---------------------------------------------------------------------------
+
+/**
+ * Bulk-sweep Circle member profiles into circle_properties.
+ *
+ * Fetches all Circle members in one paginated pass (~5 API calls for 500 members),
+ * then writes only the contacts whose stored circle_properties differ. Safe to
+ * run once per day; costs O(pages) API calls regardless of member count.
+ *
+ * This is the replacement for the per-contact polling approach that was burning
+ * ~30k calls/month. Webhooks handle real-time updates; this is the daily catch-up.
+ */
+export async function sweepInboundFromCircle(): Promise<{
+  checked: number;
+  updated: number;
+  errors: string[];
+}> {
+  const result = { checked: 0, updated: 0, errors: [] as string[] };
 
   const circleClient = getCircleClient();
   if (!circleClient) return result;
 
   const adminClient = createAdminClient();
-  const cutoffTime = new Date(
-    Date.now() - INBOUND_SYNC_INTERVAL_MINUTES * 60 * 1000
-  ).toISOString();
 
-  // Fetch contacts with a circle_id that haven't been inbound-synced recently
+  // One paginated sweep of all Circle members
+  let circleMap: Map<string, CircleMember>;
+  try {
+    circleMap = await circleClient.buildEmailMap();
+  } catch (err) {
+    result.errors.push(
+      `Circle member fetch failed: ${err instanceof Error ? err.message : String(err)}`
+    );
+    return result;
+  }
+
+  // All contacts with a linked circle_id
   const { data: contacts, error } = await adminClient
     .from("contacts")
-    .select("id, email, circle_id, circle_properties")
+    .select("id, email, circle_properties")
     .not("circle_id", "is", null)
-    .or(`synced_from_circle_at.is.null,synced_from_circle_at.lt.${cutoffTime}`)
-    .limit(INBOUND_SYNC_BATCH_SIZE);
+    .not("email", "is", null);
 
   if (error) {
-    result.errors.push(`Failed to fetch contacts: ${error.message}`);
+    result.errors.push(`Contact fetch failed: ${error.message}`);
     return result;
   }
 
   if (!contacts || contacts.length === 0) return result;
 
   for (const contact of contacts) {
+    if (!contact.email) continue;
     result.checked++;
-    const circleId = Number(contact.circle_id);
-    if (!circleId) continue;
+
+    const member = circleMap.get(contact.email.toLowerCase());
+    if (!member) continue;
+
+    // Fields we pull from Circle (non-canonical engagement data)
+    const incoming: Record<string, unknown> = {};
+    if (member.headline != null) incoming.headline = member.headline;
+    if (member.bio != null) incoming.bio = member.bio;
+    if (member.avatar_url != null) incoming.avatar_url = member.avatar_url;
+
+    if (Object.keys(incoming).length === 0) continue;
+
+    // Skip write if nothing actually changed
+    const existing =
+      typeof contact.circle_properties === "object" &&
+      contact.circle_properties !== null
+        ? (contact.circle_properties as Record<string, unknown>)
+        : {};
+
+    const hasChanges = Object.keys(incoming).some(
+      (k) => existing[k] !== incoming[k]
+    );
+    if (!hasChanges) continue;
+
+    const merged = { ...existing, ...incoming };
+    const photoUpdate: Record<string, unknown> = {};
+    if (member.avatar_url) photoUpdate.profile_picture_url = member.avatar_url;
 
     try {
-      const member = await circleClient.getMember(circleId);
-
-      // Extract non-canonical engagement fields only
-      const nonCanonical: Record<string, unknown> = {};
-      if (member.headline !== null) nonCanonical.headline = member.headline;
-      if (member.bio !== null) nonCanonical.bio = member.bio;
-      if (member.avatar_url !== null) nonCanonical.avatar_url = member.avatar_url;
-      nonCanonical.space_ids = member.space_ids;
-      nonCanonical.tag_ids = member.tag_ids;
-      nonCanonical.active = member.active;
-
-      // Merge with any existing circle_properties (don't clobber other keys)
-      const existing =
-        typeof contact.circle_properties === "object" &&
-        contact.circle_properties !== null
-          ? (contact.circle_properties as Record<string, unknown>)
-          : {};
-
-      const merged = { ...existing, ...nonCanonical };
-
-      // Intentional exception to identity lifecycle helper usage:
-      // circle_properties and synced_from_circle_at are external-system
-      // engagement metadata, not identity fields.
-      //
-      // profile_picture_url: Circle is the source of truth for member photos.
-      // Promote avatar_url into the canonical column so it flows to the website
-      // without needing a separate upload. Only update when Circle provides a
-      // value — never blank it out if Circle returns null.
-      const photoUpdate: Record<string, unknown> = {};
-      if (member.avatar_url) {
-        photoUpdate.profile_picture_url = member.avatar_url;
-      }
-
       await adminClient
         .from("contacts")
         .update({
@@ -303,15 +340,9 @@ export async function pullInboundFromCircle(): Promise<{
 
       result.updated++;
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      // 404 means member was deleted in Circle — update their sync timestamp to avoid hammering
-      if (msg.includes("404") || msg.includes("not found")) {
-        await adminClient
-          .from("contacts")
-          .update({ synced_from_circle_at: new Date().toISOString() })
-          .eq("id", contact.id);
-      }
-      result.errors.push(`contact ${contact.id}: ${msg}`);
+      result.errors.push(
+        `contact ${contact.id}: ${err instanceof Error ? err.message : String(err)}`
+      );
     }
   }
 

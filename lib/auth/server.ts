@@ -61,7 +61,7 @@ export async function getServerAuthState(): Promise<ServerAuthState> {
       role,
       status,
       created_at,
-      organization:organizations(id, name, type, slug, logo_url)
+      organization:organizations(id, name, type, slug, logo_url, is_cancoll_member)
     `
     )
     .eq("user_id", userId)

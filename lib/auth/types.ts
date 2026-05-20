@@ -55,6 +55,7 @@ export interface UserOrganization {
     type: string;
     slug: string;
     logo_url: string | null;
+    is_cancoll_member: boolean;
   };
 }
 

@@ -32,7 +32,8 @@ export type CalendarRelatedEntityType =
   | "billing_run"
   | "conference_legal_version"
   | "conference_program_item"
-  | "event";
+  | "event"
+  | "partner_rescrape";
 
 // ── DB row ────────────────────────────────────────────────────────
 

@@ -10,6 +10,7 @@ import {
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
 import type { HomeMapOrg } from "@/lib/homepage";
+import { sponsorMarkerSvg } from "@/lib/sponsorship/markerSvg";
 
 // Set access token
 mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
@@ -26,6 +27,7 @@ interface MapProps {
 // Expose these methods to parent components
 export interface MapRef {
   flyTo: (coords: [number, number], zoom?: number) => void;
+  fitOrgs: (orgs: HomeMapOrg[]) => void;
   resetView: () => void;
   getCoordinatesForOrg: (org: HomeMapOrg) => [number, number] | null;
 }
@@ -53,6 +55,21 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
         duration: 2000,
         essential: true,
       });
+    },
+    fitOrgs: (orgs: HomeMapOrg[]) => {
+      if (!map.current) return;
+      const coords = orgs.map(getCoordinates).filter((c): c is [number, number] => c !== null);
+      if (coords.length === 0) return;
+      if (coords.length === 1) {
+        map.current.flyTo({ center: coords[0], zoom: FOCUSED_ZOOM, duration: 1000, essential: true });
+        return;
+      }
+      const lngs = coords.map(([lng]) => lng);
+      const lats = coords.map(([, lat]) => lat);
+      map.current.fitBounds(
+        [[Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]],
+        { padding: 60, duration: 1000, maxZoom: 10 }
+      );
     },
     resetView: () => {
       map.current?.flyTo({
@@ -141,38 +158,52 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
       const coords = getCoordinates(org);
       if (!coords) return;
 
-      // Create custom marker element (DOM API — no innerHTML to avoid XSS)
+      // Create custom marker element (DOM API)
       const el = document.createElement("div");
       el.className = "map-marker";
       el.dataset.orgId = org.id;
 
-      const inner = document.createElement("div");
-      inner.className = `marker-inner rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
-        org.type === "Member"
-          ? "bg-[#EE2A2E] border-2 border-white shadow-lg"
-          : "bg-[#3B82F6] border-2 border-white shadow-lg"
-      }`;
-      // Size set dynamically via updateMarkerSizes (zoom-responsive)
-      inner.style.width = "40px";
-      inner.style.height = "40px";
-
-      if (org.logoUrl) {
-        const img = document.createElement("img");
-        img.src = org.logoUrl;
-        img.alt = org.name;
-        img.className = "rounded-full object-cover";
-        img.style.width = "24px";
-        img.style.height = "24px";
-        inner.appendChild(img);
+      if (org.sponsorTier) {
+        // ── Sponsor: Lucide icon shape with logo inside ──────────────
+        el.dataset.markerType = "sponsor";
+        el.style.zIndex = "5"; // always above regular markers
+        el.style.cursor = "pointer";
+        el.innerHTML = sponsorMarkerSvg({
+          icon:    org.sponsorTier.icon,
+          color:   org.sponsorTier.color,
+          logoUrl: org.logoUrl,
+          name:    org.name,
+          size:    sponsorMarkerSizeForZoom(map.current?.getZoom() ?? CANADA_ZOOM),
+          uid:     org.slug,
+        });
       } else {
-        const span = document.createElement("span");
-        span.className = "text-white font-bold";
-        span.style.fontSize = "12px";
-        span.textContent = getInitials(org.name);
-        inner.appendChild(span);
-      }
+        // ── Regular: coloured circle ─────────────────────────────────
+        const inner = document.createElement("div");
+        inner.className = `marker-inner rounded-full flex items-center justify-center cursor-pointer transition-all duration-300 ${
+          org.type === "Member"
+            ? "bg-[#EE2A2E] border-2 border-white shadow-lg"
+            : "bg-[#3B82F6] border-2 border-white shadow-lg"
+        }`;
+        inner.style.width = "40px";
+        inner.style.height = "40px";
 
-      el.appendChild(inner);
+        if (org.logoUrl) {
+          const img = document.createElement("img");
+          img.src = org.logoUrl;
+          img.alt = org.name;
+          img.className = "rounded-full object-cover";
+          img.style.width = "24px";
+          img.style.height = "24px";
+          inner.appendChild(img);
+        } else {
+          const span = document.createElement("span");
+          span.className = "text-white font-bold";
+          span.style.fontSize = "12px";
+          span.textContent = getInitials(org.name);
+          inner.appendChild(span);
+        }
+        el.appendChild(inner);
+      }
 
       // Add click handler
       el.addEventListener("click", () => {
@@ -197,21 +228,32 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     const updateMarkerSizes = () => {
       const zoom = map.current?.getZoom() ?? CANADA_ZOOM;
       const size = markerSizeForZoom(zoom);
+      const sponsorSize = sponsorMarkerSizeForZoom(zoom);
       const imgSize = Math.round(size * 0.6);
       const fontSize = `${Math.max(8, Math.round(size * 0.3))}px`;
 
       markersRef.current.forEach((marker) => {
-        const inner = marker.getElement().querySelector(".marker-inner") as HTMLElement;
-        if (!inner) return;
-        inner.style.width = `${size}px`;
-        inner.style.height = `${size}px`;
-        const img = inner.querySelector("img") as HTMLElement;
-        if (img) {
-          img.style.width = `${imgSize}px`;
-          img.style.height = `${imgSize}px`;
+        const el = marker.getElement();
+        if (el.dataset.markerType === "sponsor") {
+          // Resize the SVG element directly using the sponsor curve
+          const svg = el.querySelector("svg") as SVGElement | null;
+          if (svg) {
+            svg.setAttribute("width",  String(sponsorSize));
+            svg.setAttribute("height", String(sponsorSize));
+          }
+        } else {
+          const inner = el.querySelector(".marker-inner") as HTMLElement;
+          if (!inner) return;
+          inner.style.width = `${size}px`;
+          inner.style.height = `${size}px`;
+          const img = inner.querySelector("img") as HTMLElement;
+          if (img) {
+            img.style.width = `${imgSize}px`;
+            img.style.height = `${imgSize}px`;
+          }
+          const span = inner.querySelector("span") as HTMLElement;
+          if (span) span.style.fontSize = fontSize;
         }
-        const span = inner.querySelector("span") as HTMLElement;
-        if (span) span.style.fontSize = fontSize;
       });
     };
 
@@ -229,34 +271,32 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
     markersRef.current.forEach((marker, orgId) => {
       const el = marker.getElement();
-      const inner = el.querySelector(".marker-inner") as HTMLElement;
-      if (!inner) return;
+      const isSponsor = el.dataset.markerType === "sponsor";
+      // For sponsors apply effects to the SVG; for others to .marker-inner
+      const target = (isSponsor
+        ? el.querySelector("svg")
+        : el.querySelector(".marker-inner")) as HTMLElement | null;
+      if (!target) return;
 
       if (hasHighlights && highlightedOrgIds.includes(orgId)) {
-        // Highlight matching marker — pop with glow
-        inner.style.transform = "scale(1.3)";
-        inner.style.boxShadow = "0 0 0 3px rgba(255,255,255,0.9), 0 4px 16px rgba(0,0,0,0.3)";
-        inner.style.filter = "drop-shadow(0 0 6px rgba(214,0,1,0.4))";
-        inner.style.zIndex = "10";
-        el.style.zIndex = "10";
+        target.style.transform = "scale(1.3)";
+        target.style.filter = "drop-shadow(0 0 6px rgba(214,0,1,0.4))";
+        el.style.zIndex = isSponsor ? "15" : "10";
         el.style.opacity = "1";
         el.style.transition = "opacity 0.3s, filter 0.3s";
+        if (!isSponsor) (target as HTMLElement).style.boxShadow = "0 0 0 3px rgba(255,255,255,0.9), 0 4px 16px rgba(0,0,0,0.3)";
       } else if (hasHighlights) {
-        // Dim non-matching markers — desaturate + wash out
-        inner.style.transform = "scale(0.8)";
-        inner.style.boxShadow = "";
-        inner.style.filter = "grayscale(1) brightness(1.3)";
-        inner.style.zIndex = "";
-        el.style.zIndex = "";
+        target.style.transform = "scale(0.8)";
+        target.style.filter = "grayscale(1) brightness(1.3)";
+        if (!isSponsor) (target as HTMLElement).style.boxShadow = "";
+        el.style.zIndex = isSponsor ? "5" : "";
         el.style.opacity = "0.35";
         el.style.transition = "opacity 0.3s, filter 0.3s";
       } else {
-        // Reset all markers to normal
-        inner.style.transform = "";
-        inner.style.boxShadow = "";
-        inner.style.filter = "";
-        inner.style.zIndex = "";
-        el.style.zIndex = "";
+        target.style.transform = "";
+        target.style.filter = "";
+        if (!isSponsor) (target as HTMLElement).style.boxShadow = "";
+        el.style.zIndex = isSponsor ? "5" : "";
         el.style.opacity = "1";
         el.style.transition = "opacity 0.3s, filter 0.3s";
       }
@@ -285,12 +325,22 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
 export default Map;
 
-/** Returns marker diameter in px for the current zoom level */
+/** Returns marker diameter in px for the current zoom level (regular orgs) */
 function markerSizeForZoom(zoom: number): number {
   if (zoom <= 3) return 20;
   if (zoom >= 8) return 40;
-  // Linear interpolation: 20px at zoom 3 → 40px at zoom 8
   return Math.round(20 + ((zoom - 3) / 5) * 20);
+}
+
+/**
+ * Sponsor markers are bigger and scale more aggressively —
+ * they need to read clearly as distinct shapes above the circles.
+ * 36px at zoom ≤ 3  →  64px at zoom ≥ 10
+ */
+function sponsorMarkerSizeForZoom(zoom: number): number {
+  if (zoom <= 3) return 36;
+  if (zoom >= 10) return 64;
+  return Math.round(36 + ((zoom - 3) / 7) * 28);
 }
 
 // Helper to get initials from org name

@@ -1,7 +1,14 @@
+import { unstable_cache } from "next/cache";
 import {
   getOrganizationProfile,
   type BenchmarkingWithOrg,
 } from "@/lib/data";
+
+const getCachedOrgProfile = unstable_cache(
+  (slug: string) => getOrganizationProfile(slug),
+  ["org-profile"],
+  { revalidate: 60, tags: ["org-profile"] }
+);
 import type {
   Organization,
   Contact,
@@ -10,6 +17,7 @@ import type {
 } from "@/lib/database.types";
 import { loadVisibilityConfig, applyFieldMask } from "./engine";
 import type { ViewerContext } from "./viewer";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 // ---------------------------------------------------------------------------
 // Return types with potentially-masked fields
@@ -54,8 +62,7 @@ export async function getOrganizationForViewer(
   slug: string,
   viewer: ViewerContext
 ): Promise<VisibleOrganizationProfile> {
-  // Fetch all raw data (unchanged from current behavior)
-  const raw = await getOrganizationProfile(slug);
+  const raw = await getCachedOrgProfile(slug);
 
   if (!raw.organization) {
     return {
@@ -109,11 +116,68 @@ export async function getOrganizationForViewer(
     };
   });
 
+  // -------------------------------------------------------------------------
+  // Org-controlled section visibility flags
+  // Admins and the org's own org_admin always see everything.
+  // -------------------------------------------------------------------------
+  const isPrivilegedViewer =
+    isOwnOrg ||
+    viewer.viewerLevel === "org_admin" ||
+    viewer.viewerLevel === "admin" ||
+    viewer.viewerLevel === "super_admin";
+
+  const orgFlags = raw.organization as Organization;
+
+  // Contacts: hide entire section if opted out and viewer isn't privileged.
+  // Also filter out individually-hidden contacts for non-privileged viewers.
+  const visibleContacts =
+    !isPrivilegedViewer && orgFlags.show_contacts === false
+      ? []
+      : isPrivilegedViewer
+        ? maskedContacts
+        : maskedContacts.filter((c) => !c.hidden);
+
+  // show_primary_contact and show_store_information are passed through on visibleOrg
+  // and enforced by the rendering layer (MemberProfile) against viewerLevel.
+
+  // Brand colors: hide if opted out and viewer isn't privileged
+  const visibleBrandColors =
+    !isPrivilegedViewer && orgFlags.show_brand_colors === false
+      ? []
+      : raw.brandColors;
+
+  // Benchmarking: hide own data and filter from comparison if opted out
+  let visibleBenchmarking = raw.benchmarking;
+  let visibleAllBenchmarking = raw.allBenchmarking;
+
+  if (!isPrivilegedViewer && orgFlags.show_in_benchmarking === false) {
+    visibleBenchmarking = null;
+  }
+
+  if (viewer.viewerLevel !== "admin" && viewer.viewerLevel !== "super_admin") {
+    // Filter opted-out orgs from the comparison set
+    try {
+      const adminClient = createAdminClient();
+      const { data: optedOut } = await adminClient
+        .from("organizations")
+        .select("id")
+        .eq("show_in_benchmarking", false);
+      if (optedOut && optedOut.length > 0) {
+        const optedOutIds = new Set(optedOut.map((o) => o.id));
+        visibleAllBenchmarking = raw.allBenchmarking.filter(
+          (b) => !optedOutIds.has((b.organization as { id: string }).id)
+        );
+      }
+    } catch {
+      // Non-critical — fall back to unfiltered list
+    }
+  }
+
   return {
     organization: visibleOrg,
-    contacts: maskedContacts,
-    brandColors: raw.brandColors,
-    benchmarking: raw.benchmarking,
-    allBenchmarking: raw.allBenchmarking,
+    contacts: visibleContacts,
+    brandColors: visibleBrandColors,
+    benchmarking: visibleBenchmarking,
+    allBenchmarking: visibleAllBenchmarking,
   };
 }

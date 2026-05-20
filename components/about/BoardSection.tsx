@@ -1,8 +1,8 @@
-import type { SiteContent } from "@/lib/database.types";
-import PersonCard from "./PersonCard";
+import type { SiteContentWithContact } from "@/lib/data";
+import BoardCard from "./BoardCard";
 
 interface BoardSectionProps {
-  members: SiteContent[];
+  members: SiteContentWithContact[];
 }
 
 export default function BoardSection({ members }: BoardSectionProps) {
@@ -23,7 +23,7 @@ export default function BoardSection({ members }: BoardSectionProps) {
         ) : (
           <div className="max-w-5xl mx-auto grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-10">
             {members.map((person) => (
-              <PersonCard key={person.id} person={person} />
+              <BoardCard key={person.id} person={person} />
             ))}
           </div>
         )}

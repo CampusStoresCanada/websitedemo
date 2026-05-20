@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { BrandColor, Benchmarking } from "@/lib/database.types";
@@ -21,9 +21,18 @@ import {
   assignConferenceEntitlement,
   unassignConferenceEntitlementWithDisposition,
 } from "@/lib/actions/conference-people";
+import { updateOrgProfileVisibilitySettings, setContactHidden } from "@/lib/actions/user-management";
+import { fieldProps } from "@/lib/editable-fields";
+import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
+import type { TierIcon } from "@/lib/sponsorship/types";
+
+interface SponsorTierInfo {
+  name: string; slug: string; color: string; icon: TierIcon | null;
+}
 
 interface MemberProfileProps {
   organization: VisibleOrganization;
+  sponsorTier?: SponsorTierInfo | null;
   contacts: VisibleContact[];
   brandColors: BrandColor[];
   benchmarking: Benchmarking | null;
@@ -66,6 +75,7 @@ export default function MemberProfile({
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
+  sponsorTier,
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -79,6 +89,92 @@ export default function MemberProfile({
 
   // Check if current user can edit THIS organization
   const canEditThisOrg = canEditOrg(organization.id);
+
+  // Visibility flag local state (optimistic — synced to DB on toggle)
+  const [showContacts, setShowContacts] = useState(organization.show_contacts ?? true);
+  const [showBrandColors, setShowBrandColors] = useState(organization.show_brand_colors ?? true);
+  const [showInBenchmarking, setShowInBenchmarking] = useState(organization.show_in_benchmarking ?? true);
+  const [showPrimaryContact, setShowPrimaryContact] = useState(organization.show_primary_contact ?? true);
+  const [showStoreInfo, setShowStoreInfo] = useState(organization.show_store_information ?? true);
+  const [, startVisibilityTransition] = useTransition();
+
+  // Per-contact hidden state — keyed by contact.id. Overrides the DB value optimistically.
+  const [contactHiddenOverrides, setContactHiddenOverrides] = useState<Record<string, boolean>>({});
+  const isContactHidden = (contact: VisibleContact) =>
+    contact.id in contactHiddenOverrides ? contactHiddenOverrides[contact.id] : (contact.hidden ?? false);
+
+  async function handleToggleContactHidden(contact: VisibleContact) {
+    const current = isContactHidden(contact);
+    const next = !current;
+    // Optimistic update
+    setContactHiddenOverrides((prev) => ({ ...prev, [contact.id]: next }));
+    const result = await setContactHidden(organization.id, contact.id, next);
+    if (!result.success) {
+      // Revert
+      setContactHiddenOverrides((prev) => ({ ...prev, [contact.id]: current }));
+    }
+  }
+
+  // Viewer is privileged if they can edit this org (they always see everything)
+  const isPrivilegedViewer = canEditThisOrg ||
+    viewerLevel === "org_admin" || viewerLevel === "admin" || viewerLevel === "super_admin";
+
+  type VisibilityFlag = "contacts" | "brandColors" | "benchmarking" | "primaryContact" | "storeInfo";
+
+  async function toggleVisibility(flag: VisibilityFlag) {
+    const next = {
+      contacts: showContacts,
+      brandColors: showBrandColors,
+      benchmarking: showInBenchmarking,
+      primaryContact: showPrimaryContact,
+      storeInfo: showStoreInfo,
+    };
+    next[flag] = !next[flag];
+
+    // Optimistic update
+    if (flag === "contacts") setShowContacts(next.contacts);
+    if (flag === "brandColors") setShowBrandColors(next.brandColors);
+    if (flag === "benchmarking") setShowInBenchmarking(next.benchmarking);
+    if (flag === "primaryContact") setShowPrimaryContact(next.primaryContact);
+    if (flag === "storeInfo") setShowStoreInfo(next.storeInfo);
+
+    const result = await updateOrgProfileVisibilitySettings(organization.id, {
+      showContacts: next.contacts,
+      showBrandColors: next.brandColors,
+      showInBenchmarking: next.benchmarking,
+      showPrimaryContact: next.primaryContact,
+      showStoreInformation: next.storeInfo,
+    });
+
+    if (!result.success) {
+      // Revert on failure
+      if (flag === "contacts") setShowContacts(!next.contacts);
+      if (flag === "brandColors") setShowBrandColors(!next.brandColors);
+      if (flag === "benchmarking") setShowInBenchmarking(!next.benchmarking);
+      if (flag === "primaryContact") setShowPrimaryContact(!next.primaryContact);
+      if (flag === "storeInfo") setShowStoreInfo(!next.storeInfo);
+    } else {
+      startVisibilityTransition(() => router.refresh());
+    }
+  }
+
+  // Helper: inline pill toggle button shown in edit mode
+  function VisEye({ flag, value, label }: { flag: VisibilityFlag; value: boolean; label: string }) {
+    return (
+      <button
+        onClick={() => toggleVisibility(flag)}
+        title={value ? `Visible to visitors — click to hide` : `Hidden from visitors — click to show`}
+        className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${value ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+      >
+        {value ? (
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+        ) : (
+          <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+        )}
+        {label}
+      </button>
+    );
+  }
   const canEditConferenceAttendance =
     editMode &&
     (canEditThisOrg || permissionState === "admin" || permissionState === "super_admin");
@@ -91,8 +187,10 @@ export default function MemberProfile({
     (uo) => uo.organization.id === organization.id && uo.role === "org_admin"
   );
 
-  // Debug log
-  console.log("[MemberProfile] permissionState:", permissionState, "isPartner:", isPartner, "isOrgAdmin:", isOrgAdminForThisOrg);
+  // "View as Partner" toggle — org admins, admins, and super admins
+  const isAdmin = permissionState === "admin" || permissionState === "super_admin";
+  const canViewAsPartner = isOrgAdminForThisOrg || isAdmin;
+  const [partnerViewMode, setPartnerViewMode] = useState(false);
 
   // ---------------------------------------------------------------------------
   // Helpers for rendering pre-masked contact fields
@@ -410,16 +508,14 @@ export default function MemberProfile({
   };
 
   return (
-    <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]">
+    <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]" data-org-id={organization.id}>
       {/* Desktop Layout - absolute positioning for precise mockup matching */}
       <div className="hidden lg:block relative min-h-screen">
         {/* Colorized Hero Strip — left: 14.71%, width: 23.79%, full height */}
         <div
           className="absolute top-0 bottom-0 overflow-hidden group"
           style={{ left: '14.71%', width: '23.79%' }}
-          data-flaggable
-          data-field="organizations.hero_image_url"
-          data-entity-id={organization.id}
+          {...fieldProps("organizations", "hero_image_url", organization.id, organization.id)}
         >
           {heroImage ? (
             <ColorizedImage
@@ -451,9 +547,7 @@ export default function MemberProfile({
           <div
             className="absolute z-20 pointer-events-auto flex items-center justify-center group"
             style={{ left: '5.64%', bottom: '0', width: '42.09vw', height: '42.09vw' }}
-            data-flaggable
-            data-field="organizations.product_overlay_url"
-            data-entity-id={organization.id}
+            {...fieldProps("organizations", "product_overlay_url", organization.id, organization.id)}
           >
             {organization.product_overlay_url ? (
               <Image
@@ -496,7 +590,7 @@ export default function MemberProfile({
           }}
         >
           {/* Logo — 560x155px area, 62px gap to color swatches */}
-          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-flaggable data-field="organizations.logo_url" data-entity-id={organization.id}>
+          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} {...fieldProps("organizations", "logo_url", organization.id, organization.id)}>
             {organization.logo_horizontal_url ? (
               <Image
                 src={organization.logo_horizontal_url}
@@ -522,6 +616,16 @@ export default function MemberProfile({
             )}
           </div>
 
+          {/* Sponsor tier badge */}
+          {sponsorTier && (
+            <div className="flex items-center gap-2 mb-8">
+              <TierIconPreview icon={sponsorTier.icon ?? "shield"} color={sponsorTier.color} size={20} />
+              <span className="text-sm font-semibold" style={{ color: sponsorTier.color }}>
+                {sponsorTier.name} Sponsor
+              </span>
+            </div>
+          )}
+
           {/* Brand Color Swatches — grouped by Primary/Secondary */}
           {(brandColors.length > 0 || (editMode && canEditThisOrg)) && (() => {
             const primaryColors = brandColors.filter(c => c.name?.toLowerCase().includes('primary') || (c.sort_order && c.sort_order <= 5));
@@ -531,6 +635,24 @@ export default function MemberProfile({
 
             return (
               <div className="mb-10 space-y-4">
+                {/* Brand Colors section header with visibility toggle */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-gray-400 font-medium">Brand Colours</span>
+                  {editMode && canEditThisOrg && (
+                    <button
+                      onClick={() => toggleVisibility("brandColors")}
+                      title={showBrandColors ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showBrandColors ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+                    >
+                      {showBrandColors ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                      )}
+                      {showBrandColors ? "Visible" : "Hidden"}
+                    </button>
+                  )}
+                </div>
                 {/* Primary Colors — larger, more prominent */}
                 <div>
                   {hasCategories && (
@@ -549,9 +671,7 @@ export default function MemberProfile({
                               backgroundColor: hexColor,
                               color: isLightColor(color.hex) ? "#000" : "#fff",
                             }}
-                            data-flaggable
-                            data-field="brand_colors.hex"
-                            data-entity-id={color.id}
+                            {...fieldProps("brand_colors", "hex", color.id, organization.id)}
                           >
                             {hexColor.toUpperCase()}
                           </div>
@@ -603,9 +723,7 @@ export default function MemberProfile({
                                 backgroundColor: hexColor,
                                 color: isLightColor(color.hex) ? "#000" : "#fff",
                               }}
-                              data-flaggable
-                              data-field="brand_colors.hex"
-                              data-entity-id={color.id}
+                              {...fieldProps("brand_colors", "hex", color.id, organization.id)}
                             >
                               {hexColor.toUpperCase()}
                             </div>
@@ -645,89 +763,106 @@ export default function MemberProfile({
             );
           })()}
 
-          {/* Primary Contact — Visible to everyone */}
-          <div className="mb-10">
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-              Primary Contact
-            </h3>
-            <div className="flex flex-wrap gap-8 text-gray-500">
-              <span data-flaggable data-field="organizations.email" data-entity-id={organization.id}>
-                {renderOrgField(organization.email, "email")}
-              </span>
-              <span data-flaggable data-field="organizations.phone" data-entity-id={organization.id}>
-                {renderOrgField(organization.phone, "phone")}
-              </span>
-              <span data-flaggable data-field="organizations.website" data-entity-id={organization.id}>
-                {organization.website ? (
-                  <a href={organization.website.startsWith('http') ? organization.website : `https://${organization.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-[#1A1A1A] transition-colors">{organization.website}</a>
-                ) : "—"}
-              </span>
+          {/* Store Contact — hidden when show_primary_contact is off for non-admins */}
+          {(isPrivilegedViewer || showPrimaryContact) && (
+            <div className="mb-10">
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Contact</h3>
+                {editMode && canEditThisOrg && VisEye({ flag: "primaryContact", value: showPrimaryContact, label: showPrimaryContact ? "Visible" : "Hidden" })}
+              </div>
+              <div className="flex flex-wrap gap-8 text-gray-500">
+                <span {...fieldProps("organizations", "email", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg
+                    ? (organization.email || "—")
+                    : renderOrgField(organization.email, "email")}
+                </span>
+                <span {...fieldProps("organizations", "phone", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg
+                    ? (organization.phone || "—")
+                    : renderOrgField(organization.phone, "phone")}
+                </span>
+                <span {...fieldProps("organizations", "website", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg
+                    ? (organization.website || "—")
+                    : organization.website
+                      ? <a href={organization.website.startsWith('http') ? organization.website : `https://${organization.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-[#1A1A1A] transition-colors">{organization.website}</a>
+                      : "—"}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
-          {/* Store Information — Visible to everyone */}
-          <div className="mb-10">
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-              Store Information
-            </h3>
-            <div className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm">
-              {(organization.square_footage || benchmarking?.total_square_footage) && (
-                <>
-                  <span className="text-gray-500">Square Footage</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="organizations.square_footage" data-entity-id={organization.id}>
-                    {formatNumber(organization.square_footage || benchmarking?.total_square_footage)} sq ft
-                  </span>
-                </>
-              )}
-              {(organization.fte || benchmarking?.fulltime_employees) && (
-                <>
-                  <span className="text-gray-500">Full-Time Staff</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="organizations.fte" data-entity-id={organization.id}>
-                    {organization.fte || benchmarking?.fulltime_employees}
-                  </span>
-                </>
-              )}
-              {benchmarking?.enrollment_fte && (
-                <>
-                  <span className="text-gray-500">Student FTE</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.enrollment_fte" data-entity-id={benchmarking.id}>
-                    {formatNumber(benchmarking.enrollment_fte)}
-                  </span>
-                </>
-              )}
-              {benchmarking?.num_store_locations && (
-                <>
-                  <span className="text-gray-500">Store Locations</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.num_store_locations" data-entity-id={benchmarking.id}>
-                    {benchmarking.num_store_locations}
-                  </span>
-                </>
-              )}
-              {benchmarking?.institution_type && (
-                <>
-                  <span className="text-gray-500">Institution Type</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.institution_type" data-entity-id={benchmarking.id}>
-                    {benchmarking.institution_type}
-                  </span>
-                </>
-              )}
-              {benchmarking?.pos_system && (
-                <>
-                  <span className="text-gray-500">POS System</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.pos_system" data-entity-id={benchmarking.id}>
-                    {benchmarking.pos_system}
-                  </span>
-                </>
-              )}
-              {!organization.square_footage && !organization.fte && !benchmarking && (
-                <>
-                  <span className="text-gray-400 col-span-2 italic">
-                    Store information not yet available
-                  </span>
-                </>
-              )}
+          {/* Store Information — hidden when show_store_information is off for non-admins */}
+          {(isPrivilegedViewer || showStoreInfo) && (
+            <div className="mb-10">
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Information</h3>
+                {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
+              </div>
+              <ProtectedSection
+                requiredPermission="member"
+                bannerMessage="Sign in as a member or partner to view store details."
+                ctaText="Sign In"
+                ctaLink="/login"
+              >
+                <div className="grid grid-cols-2 gap-x-12 gap-y-2 text-sm">
+                  {(organization.square_footage || benchmarking?.total_square_footage || (editMode && canEditThisOrg)) && (
+                    <>
+                      <span className="text-gray-500">Square Footage</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "square_footage", organization.id, organization.id)}>
+                        {organization.square_footage || benchmarking?.total_square_footage
+                          ? `${formatNumber(organization.square_footage || benchmarking?.total_square_footage)} sq ft`
+                          : "—"}
+                      </span>
+                    </>
+                  )}
+                  {(organization.fte || (editMode && canEditThisOrg)) && (
+                    <>
+                      <span className="text-gray-500">Full-Time Staff</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "fte", organization.id, organization.id)}>
+                        {organization.fte || "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.enrollment_fte || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">Student FTE</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "enrollment_fte", benchmarking!.id, organization.id)}>
+                        {benchmarking?.enrollment_fte ? formatNumber(benchmarking.enrollment_fte) : "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.num_store_locations || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">Store Locations</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "num_store_locations", benchmarking!.id, organization.id)}>
+                        {benchmarking?.num_store_locations || "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.institution_type || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">Institution Type</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "institution_type", benchmarking!.id, organization.id)}>
+                        {benchmarking?.institution_type || "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.pos_system || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">POS System</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "pos_system", benchmarking!.id, organization.id)}>
+                        {benchmarking?.pos_system || "—"}
+                      </span>
+                    </>
+                  )}
+                  {!organization.square_footage && !organization.fte && !benchmarking && !editMode && (
+                    <span className="text-gray-400 col-span-2 italic">Store information not yet available</span>
+                  )}
+                </div>
+              </ProtectedSection>
             </div>
-          </div>
+          )}
 
           {/* Staffing — Names visible to all, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
@@ -738,9 +873,23 @@ export default function MemberProfile({
               ctaLink="/login"
             >
               <div>
-                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
-                  Staffing
-                </h3>
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Staffing</h3>
+                  {editMode && canEditThisOrg && (
+                    <button
+                      onClick={() => toggleVisibility("contacts")}
+                      title={showContacts ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showContacts ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+                    >
+                      {showContacts ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                      )}
+                      {showContacts ? "Visible" : "Hidden"}
+                    </button>
+                  )}
+                </div>
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
@@ -759,10 +908,10 @@ export default function MemberProfile({
                         return (
                       <tr
                         key={contact.id}
-                        className="border-b border-gray-200"
+                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""}`}
                         data-flaggable
                       >
-                        <td className="py-2 pr-4 text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
                               contact.circle_id ? (
@@ -771,13 +920,13 @@ export default function MemberProfile({
                             )
                           ) : "—"}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" data-flaggable data-field="contacts.role_title" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-gray-400" {...fieldProps("contacts", "role_title", contact.id, organization.id)}>
                           {contact.role_title ? (contact.role_title as string) : <BlurredField placeholderWidth={10} />}
                         </td>
-                        <td className="py-2 text-gray-400" data-flaggable data-field="contacts.work_phone_number" data-entity-id={contact.id}>
+                        <td className="py-2 text-gray-400" {...fieldProps("contacts", "work_phone_number", contact.id, organization.id)}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
                         <td className="py-2 pl-3 text-xs">
@@ -790,16 +939,33 @@ export default function MemberProfile({
                             className="h-4 w-4"
                           />
                         </td>
-                        {/* Delete button - only visible in edit mode */}
+                        {/* Actions — eye toggle + delete, only in edit mode */}
                         {editMode && canEditThisOrg && (
-                          <td
-                            className="py-2 pl-4 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer transition-colors w-8"
-                            data-entity-id={contact.id}
-                            data-deletable
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                            </svg>
+                          <td className="py-2 pl-4 w-16">
+                            <div className="flex items-center gap-1">
+                              {/* Visibility toggle */}
+                              <button
+                                onClick={() => void handleToggleContactHidden(contact)}
+                                title={isContactHidden(contact) ? "Hidden from visitors — click to show" : "Visible to visitors — click to hide"}
+                                className={`p-1 rounded border transition-colors ${isContactHidden(contact) ? "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100" : "border-gray-300 text-gray-400 hover:bg-gray-50"}`}
+                              >
+                                {isContactHidden(contact) ? (
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                                ) : (
+                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                                )}
+                              </button>
+                              {/* Delete */}
+                              <div
+                                className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
+                                data-entity-id={contact.id}
+                                data-deletable
+                              >
+                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                  <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                                </svg>
+                              </div>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -835,31 +1001,75 @@ export default function MemberProfile({
         </div>
       </div>
 
-      {/* Conditional Section: Different views based on user type */}
-      {isPartner ? (
-        /* Partner View — Procurement Information (read-only with permission gating) */
+      {/* "View as Partner" toggle bar — hidden while in toolkit edit mode */}
+      {canViewAsPartner && !isPartner && !editMode && (
+        <div className="bg-gray-50 border-t border-b border-gray-200">
+          <div className="max-w-7xl mx-auto px-8 py-2.5 flex items-center justify-between">
+            <p className="text-xs text-gray-500">
+              {partnerViewMode
+                ? "Viewing as a vendor partner — this is exactly what they see."
+                : "Switch to see what vendor partners see about your institution."}
+            </p>
+            <button
+              onClick={() => setPartnerViewMode((v) => !v)}
+              className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
+                partnerViewMode
+                  ? "bg-[#1A1A1A] text-white hover:bg-gray-700"
+                  : "bg-white border border-gray-300 text-gray-700 hover:border-gray-400"
+              }`}
+            >
+              {partnerViewMode ? (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  </svg>
+                  Back to my view
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  View as Partner
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Conditional Section: edit mode takes over entirely; otherwise partner/normal view */}
+      {!editMode && (isPartner || partnerViewMode) ? (
         <PartnerViewOfMember
           organization={organization}
           contacts={contacts}
         />
-      ) : isOrgAdminForThisOrg ? (
-        /* Org Admin View — Editable Procurement Information */
-        <EditableProcurementSection
-          organization={organization}
-          contacts={contacts}
-        />
-      ) : (
-        /* Member View — Benchmarking Data (Survey Participants Only) */
+      ) : !editMode && (
         benchmarking && allBenchmarking.length > 0 && (
           <div className="bg-white border-t border-gray-200">
             <div className="max-w-7xl mx-auto px-8 py-12">
-              {/* Detailed Benchmarking Data */}
+              {editMode && canEditThisOrg && (
+                <div className="flex items-center gap-2 mb-6">
+                  <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Benchmarking</h3>
+                  <button
+                    onClick={() => toggleVisibility("benchmarking")}
+                    title={showInBenchmarking ? "Included in comparisons — click to opt out" : "Opted out of comparisons — click to include"}
+                    className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showInBenchmarking ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+                  >
+                    {showInBenchmarking ? (
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                    ) : (
+                      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                    )}
+                    {showInBenchmarking ? "Included" : "Opted out"}
+                  </button>
+                </div>
+              )}
               <BenchmarkingDetails
                 benchmarking={benchmarking}
                 organizationName={organization.name}
               />
-
-              {/* Comparison Table */}
               <div className="mt-12 pt-8 border-t border-gray-200">
                 <BenchmarkingComparison
                   allBenchmarking={allBenchmarking}
@@ -869,6 +1079,15 @@ export default function MemberProfile({
             </div>
           </div>
         )
+      )}
+
+      {/* Procurement edit form — toolkit edit mode active, not an actual partner */}
+      {editMode && canEditThisOrg && !isPartner && (
+        <EditableProcurementSection
+          organization={organization}
+          contacts={contacts}
+          autoEdit
+        />
       )}
 
       {/* Mobile Layout */}
@@ -918,6 +1137,16 @@ export default function MemberProfile({
             )}
           </div>
 
+          {/* Sponsor tier badge (mobile) */}
+          {sponsorTier && (
+            <div className="flex items-center gap-2 mb-6">
+              <TierIconPreview icon={sponsorTier.icon ?? "shield"} color={sponsorTier.color} size={18} />
+              <span className="text-sm font-semibold" style={{ color: sponsorTier.color }}>
+                {sponsorTier.name} Sponsor
+              </span>
+            </div>
+          )}
+
           {/* Brand Color Swatches — grouped by Primary/Secondary (mobile) */}
           {(brandColors.length > 0 || (editMode && canEditThisOrg)) && (() => {
             const primaryColors = brandColors.filter(c => c.name?.toLowerCase().includes('primary') || (c.sort_order && c.sort_order <= 5));
@@ -926,6 +1155,24 @@ export default function MemberProfile({
 
             return (
               <div className="mb-8 space-y-3">
+                {/* Brand Colors section header with visibility toggle */}
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-gray-400 font-medium">Brand Colours</span>
+                  {editMode && canEditThisOrg && (
+                    <button
+                      onClick={() => toggleVisibility("brandColors")}
+                      title={showBrandColors ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showBrandColors ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+                    >
+                      {showBrandColors ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                      )}
+                      {showBrandColors ? "Visible" : "Hidden"}
+                    </button>
+                  )}
+                </div>
                 {/* Primary Colors — larger, more prominent */}
                 <div>
                   {hasCategories && (
@@ -1035,71 +1282,86 @@ export default function MemberProfile({
             );
           })()}
 
-          {/* Primary Contact — Visible to everyone */}
-          <div className="mb-8">
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-              Primary Contact
-            </h3>
-            <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
-              <span data-flaggable data-field="organizations.email" data-entity-id={organization.id}>
-                {renderOrgField(organization.email, "email")}
-              </span>
-              <span data-flaggable data-field="organizations.phone" data-entity-id={organization.id}>
-                {renderOrgField(organization.phone, "phone")}
-              </span>
-              <span data-flaggable data-field="organizations.website" data-entity-id={organization.id}>
-                {organization.website ? (
-                  <a href={organization.website.startsWith('http') ? organization.website : `https://${organization.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-[#1A1A1A] transition-colors">{organization.website}</a>
-                ) : "—"}
-              </span>
-            </div>
-          </div>
-
-          {/* Store Information — Visible to everyone */}
-          <div className="mb-8">
-            <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-              Store Information
-            </h3>
-            <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-              {(organization.square_footage || benchmarking?.total_square_footage) && (
-                <>
-                  <span className="text-gray-500">Square Footage</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="organizations.square_footage" data-entity-id={organization.id}>
-                    {formatNumber(organization.square_footage || benchmarking?.total_square_footage)} sq ft
-                  </span>
-                </>
-              )}
-              {(organization.fte || benchmarking?.fulltime_employees) && (
-                <>
-                  <span className="text-gray-500">Full-Time Staff</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="organizations.fte" data-entity-id={organization.id}>
-                    {organization.fte || benchmarking?.fulltime_employees}
-                  </span>
-                </>
-              )}
-              {benchmarking?.enrollment_fte && (
-                <>
-                  <span className="text-gray-500">Student FTE</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.enrollment_fte" data-entity-id={benchmarking.id}>
-                    {formatNumber(benchmarking.enrollment_fte)}
-                  </span>
-                </>
-              )}
-              {benchmarking?.institution_type && (
-                <>
-                  <span className="text-gray-500">Institution Type</span>
-                  <span className="text-[#1A1A1A] font-medium" data-flaggable data-field="benchmarking.institution_type" data-entity-id={benchmarking.id}>
-                    {benchmarking.institution_type}
-                  </span>
-                </>
-              )}
-              {!organization.square_footage && !organization.fte && !benchmarking && (
-                <span className="text-gray-400 col-span-2 italic">
-                  Store information not yet available
+          {/* Primary Contact */}
+          {(isPrivilegedViewer || showPrimaryContact) && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Primary Contact</h3>
+                {editMode && canEditThisOrg && VisEye({ flag: "primaryContact", value: showPrimaryContact, label: showPrimaryContact ? "Visible" : "Hidden" })}
+              </div>
+              <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
+                <span {...fieldProps("organizations", "email", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg ? (organization.email || "—") : renderOrgField(organization.email, "email")}
                 </span>
-              )}
+                <span {...fieldProps("organizations", "phone", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg ? (organization.phone || "—") : renderOrgField(organization.phone, "phone")}
+                </span>
+                <span {...fieldProps("organizations", "website", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg
+                    ? (organization.website || "—")
+                    : organization.website
+                      ? <a href={organization.website.startsWith('http') ? organization.website : `https://${organization.website}`} target="_blank" rel="noopener noreferrer" className="hover:text-[#1A1A1A] transition-colors">{organization.website}</a>
+                      : "—"}
+                </span>
+              </div>
             </div>
-          </div>
+          )}
+
+          {/* Store Information */}
+          {(isPrivilegedViewer || showStoreInfo) && (
+            <div className="mb-8">
+              <div className="flex items-center gap-2 mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Information</h3>
+                {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
+              </div>
+              <ProtectedSection
+                requiredPermission="member"
+                bannerMessage="Sign in as a member or partner to view store details."
+                ctaText="Sign In"
+                ctaLink="/login"
+              >
+                <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
+                  {(organization.square_footage || benchmarking?.total_square_footage || (editMode && canEditThisOrg)) && (
+                    <>
+                      <span className="text-gray-500">Square Footage</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "square_footage", organization.id, organization.id)}>
+                        {organization.square_footage || benchmarking?.total_square_footage
+                          ? `${formatNumber(organization.square_footage || benchmarking?.total_square_footage)} sq ft`
+                          : "—"}
+                      </span>
+                    </>
+                  )}
+                  {(organization.fte || (editMode && canEditThisOrg)) && (
+                    <>
+                      <span className="text-gray-500">Full-Time Staff</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "fte", organization.id, organization.id)}>
+                        {organization.fte || "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.enrollment_fte || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">Student FTE</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "enrollment_fte", benchmarking!.id, organization.id)}>
+                        {benchmarking?.enrollment_fte ? formatNumber(benchmarking.enrollment_fte) : "—"}
+                      </span>
+                    </>
+                  )}
+                  {(benchmarking?.institution_type || (editMode && canEditThisOrg && benchmarking)) && (
+                    <>
+                      <span className="text-gray-500">Institution Type</span>
+                      <span className="text-[#1A1A1A] font-medium" {...fieldProps("benchmarking", "institution_type", benchmarking!.id, organization.id)}>
+                        {benchmarking?.institution_type || "—"}
+                      </span>
+                    </>
+                  )}
+                  {!organization.square_footage && !organization.fte && !benchmarking && !editMode && (
+                    <span className="text-gray-400 col-span-2 italic">Store information not yet available</span>
+                  )}
+                </div>
+              </ProtectedSection>
+            </div>
+          )}
 
           {/* Staffing — Names visible, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
@@ -1110,9 +1372,23 @@ export default function MemberProfile({
               ctaLink="/login"
             >
               <div>
-                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
-                  Staffing
-                </h3>
+                <div className="flex items-center gap-2 mb-4">
+                  <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Staffing</h3>
+                  {editMode && canEditThisOrg && (
+                    <button
+                      onClick={() => toggleVisibility("contacts")}
+                      title={showContacts ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showContacts ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
+                    >
+                      {showContacts ? (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                      ) : (
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                      )}
+                      {showContacts ? "Visible" : "Hidden"}
+                    </button>
+                  )}
+                </div>
                 <div className="space-y-3">
                   {contacts.map((contact) => (
                     (() => {
@@ -1120,11 +1396,11 @@ export default function MemberProfile({
                       return (
                     <div
                       key={contact.id}
-                      className="border-b border-gray-200 pb-3 flex justify-between items-start"
+                      className={`border-b border-gray-200 pb-3 flex justify-between items-start ${isContactHidden(contact) ? "opacity-50" : ""}`}
                       data-flaggable
                     >
                       <div className="flex-1">
-                        <div className="font-medium text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
+                        <div className="font-medium text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
                               contact.circle_id ? (
@@ -1133,10 +1409,10 @@ export default function MemberProfile({
                             )
                           ) : "—"}
                         </div>
-                        <div className="text-sm text-gray-400" data-flaggable data-field="contacts.role_title" data-entity-id={contact.id}>
+                        <div className="text-sm text-gray-400" {...fieldProps("contacts", "role_title", contact.id, organization.id)}>
                           {contact.role_title ? (contact.role_title as string) : "—"}
                         </div>
-                        <div className="text-sm text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
+                        <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
                         <div className="text-xs mt-1 font-medium">
@@ -1153,16 +1429,31 @@ export default function MemberProfile({
                           </label>
                         </div>
                       </div>
-                      {/* Delete button - only visible in edit mode */}
+                      {/* Actions — eye toggle + delete, only in edit mode */}
                       {editMode && canEditThisOrg && (
-                        <div
-                          className="ml-2 p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer transition-colors"
-                          data-entity-id={contact.id}
-                          data-deletable
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                          </svg>
+                        <div className="ml-2 flex flex-col gap-1 items-center">
+                          {/* Visibility toggle */}
+                          <button
+                            onClick={() => void handleToggleContactHidden(contact)}
+                            title={isContactHidden(contact) ? "Hidden from visitors — click to show" : "Visible to visitors — click to hide"}
+                            className={`p-1.5 rounded border transition-colors ${isContactHidden(contact) ? "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100" : "border-gray-300 text-gray-400 hover:bg-gray-50"}`}
+                          >
+                            {isContactHidden(contact) ? (
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            )}
+                          </button>
+                          {/* Delete */}
+                          <div
+                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer transition-colors"
+                            data-entity-id={contact.id}
+                            data-deletable
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                            </svg>
+                          </div>
                         </div>
                       )}
                     </div>

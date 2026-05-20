@@ -3,6 +3,7 @@ import MapHero from "@/components/map/MapHero";
 import ValueProps from "@/components/home/ValueProps";
 import DirectoryJoinCTA from "@/components/directory/DirectoryJoinCTA";
 import { getMembersPageData } from "@/lib/homepage";
+import { getSiteContent } from "@/lib/data";
 
 export const revalidate = 60;
 
@@ -13,16 +14,20 @@ export const metadata: Metadata = {
 };
 
 export default async function MembersPage() {
-  const { mapOrgs } = await getMembersPageData();
+  const [{ mapOrgs }, valuePropsHeader, valuePropsCards] = await Promise.all([
+    getMembersPageData(),
+    getSiteContent("home_value_props_header"),
+    getSiteContent("home_value_props"),
+  ]);
 
   return (
     <div>
       <MapHero
         organizations={mapOrgs}
         stories={[]}
-        initialState={{ explore: true, viewMode: "table", lens: null, focus: "members" }}
+        initialState={{ explore: true, viewMode: "table", lens: "members", focus: "members" }}
       />
-      <ValueProps />
+      <ValueProps header={valuePropsHeader[0] ?? null} cards={valuePropsCards} />
       <DirectoryJoinCTA />
     </div>
   );

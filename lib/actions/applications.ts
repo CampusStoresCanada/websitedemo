@@ -198,7 +198,7 @@ export async function verifyApplicationEmail(
     app.applicant_name ?? "Applicant",
     orgName,
     app.application_type as "member" | "partner",
-    `${baseUrl}/admin/ops`
+    `${baseUrl}/admin/applications`
   );
 
   // Send to admin notification email (configured or fallback)

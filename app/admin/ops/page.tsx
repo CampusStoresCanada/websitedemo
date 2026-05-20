@@ -287,7 +287,7 @@ function alertBadgeClasses(
 ): string {
   if (severity === "critical") return "bg-red-50 text-red-700";
   if (severity === "warning") return "bg-amber-50 text-amber-700";
-  return "bg-blue-50 text-[#D92327]";
+  return "bg-blue-50 text-accent";
 }
 
 function deriveRenewalLevel(run: RenewalRunRow | null): HealthLevel {
@@ -1783,7 +1783,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             <h2 className="text-base font-semibold text-gray-900">Application Review</h2>
             <a
               href="/admin/applications"
-              className="text-sm font-medium text-[#D92327] hover:underline"
+              className="text-sm font-medium text-accent hover:underline"
             >
               Open Applications
             </a>
@@ -2006,7 +2006,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                 ? `/admin/conference/${latestConference.id}/legal`
                 : "/admin/conference"
             }
-            className="text-sm font-medium text-[#D92327] hover:underline"
+            className="text-sm font-medium text-accent hover:underline"
           >
             Open Conference Legal Manager
           </Link>

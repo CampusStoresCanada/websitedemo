@@ -7,24 +7,32 @@ import {
   createSiteContent,
   updateSiteContent,
 } from "@/lib/actions/site-content";
+import type { PendingChangeWithRequester } from "@/lib/actions/pending-content-changes";
 import ContentEntryForm from "./ContentEntryForm";
+import PendingChangesTab from "./PendingChangesTab";
 
 interface ContentManagerProps {
   boardMembers: SiteContent[];
   staffMembers: SiteContent[];
+  pendingChanges: PendingChangeWithRequester[];
+  initialTab?: "pending";
 }
 
-type Tab = "board_of_directors" | "staff";
+type Tab = "board_of_directors" | "staff" | "pending";
 
 export default function ContentManager({
   boardMembers,
   staffMembers,
+  pendingChanges,
+  initialTab,
 }: ContentManagerProps) {
   const router = useRouter();
   const [isPending, startTransition] = useTransition();
-  const [activeTab, setActiveTab] = useState<Tab>("board_of_directors");
+  const [activeTab, setActiveTab] = useState<Tab>(initialTab ?? "board_of_directors");
   const [editingId, setEditingId] = useState<string | null>(null);
   const [showAddForm, setShowAddForm] = useState(false);
+
+  const pendingCount = pendingChanges.length;
 
   const entries =
     activeTab === "board_of_directors" ? boardMembers : staffMembers;
@@ -78,14 +86,23 @@ export default function ContentManager({
       body: data.body,
       image_url: data.image_url,
       display_order: data.display_order,
-    });
+    }, { pageHref: "/about" });
 
-    if (result.success) {
-      setEditingId(null);
-      refresh();
-    } else {
+    if (!result.success) {
       alert(`Error: ${result.error}`);
+      return;
     }
+
+    setEditingId(null);
+
+    if (result.requiresApproval) {
+      alert(
+        `${result.queuedCount ?? 1} change(s) submitted for approval. ` +
+        "An email has been sent to admins for review."
+      );
+    }
+
+    refresh();
   }
 
   async function handleSetActive(id: string, nextActive: boolean, name: string) {
@@ -136,23 +153,47 @@ export default function ContentManager({
         >
           Staff
         </button>
+        <button
+          onClick={() => {
+            setActiveTab("pending");
+            setEditingId(null);
+            setShowAddForm(false);
+          }}
+          className={`relative px-4 py-2 text-sm font-medium rounded-md transition-colors ${
+            activeTab === "pending"
+              ? "bg-white text-[#1A1A1A] shadow-sm"
+              : "text-[#6B6B6B] hover:text-[#1A1A1A]"
+          }`}
+        >
+          Pending Approval
+          {pendingCount > 0 && (
+            <span className="ml-2 inline-flex items-center justify-center w-4 h-4 text-[10px] font-bold rounded-full bg-amber-500 text-white">
+              {pendingCount > 9 ? "9+" : pendingCount}
+            </span>
+          )}
+        </button>
       </div>
 
+      {/* Pending tab content */}
+      {activeTab === "pending" && (
+        <PendingChangesTab changes={pendingChanges} />
+      )}
+
       {/* Add button */}
-      {!showAddForm && (
+      {activeTab !== "pending" && !showAddForm && (
         <button
           onClick={() => {
             setShowAddForm(true);
             setEditingId(null);
           }}
-          className="mb-6 px-4 py-2 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
+          className="mb-6 px-4 py-2 bg-accent text-white text-sm font-medium rounded-lg hover:bg-accent-hover transition-colors"
         >
           + Add {label}
         </button>
       )}
 
       {/* Add form */}
-      {showAddForm && (
+      {activeTab !== "pending" && showAddForm && (
         <div className="mb-6">
           <ContentEntryForm
             section={activeTab}
@@ -163,12 +204,12 @@ export default function ContentManager({
       )}
 
       {/* Loading indicator */}
-      {isPending && (
+      {activeTab !== "pending" && isPending && (
         <div className="text-sm text-[#6B6B6B] mb-4">Refreshing…</div>
       )}
 
       {/* Entry list */}
-      <div className="space-y-3">
+      {activeTab !== "pending" && <div className="space-y-3">
         {entries.length === 0 && !showAddForm && (
           <p className="text-[#6B6B6B] py-8 text-center">
             No {activeTab === "board_of_directors" ? "board members" : "staff"}{" "}
@@ -262,7 +303,7 @@ export default function ContentManager({
             )}
           </div>
         ))}
-      </div>
+      </div>}
     </div>
   );
 }

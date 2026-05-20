@@ -255,7 +255,7 @@ export default function ScheduleOpsClient({
             <button
               type="button"
               onClick={onGenerateDraft}
-              className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+              className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
               disabled={isActing}
             >
               Generate Draft

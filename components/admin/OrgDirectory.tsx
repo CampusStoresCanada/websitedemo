@@ -133,7 +133,7 @@ export default function OrgDirectory({
           placeholder="Search name, city, province..."
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E]"
+          className="rounded-md border border-gray-300 px-3 py-1.5 text-sm w-64 focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
         />
         <select
           value={filterType}
@@ -199,7 +199,7 @@ export default function OrgDirectory({
                   <td className="px-4 py-2.5">
                     <Link
                       href={`/org/${org.slug}/admin`}
-                      className="font-medium text-gray-900 hover:text-[#EE2A2E]"
+                      className="font-medium text-gray-900 hover:text-accent"
                     >
                       {org.name}
                     </Link>

@@ -1,0 +1,16 @@
+
+> websitedemo@0.1.0 test:actions
+> vitest run lib/actions/__tests__
+
+
+ RUN  v4.0.18 /Users/Work/Documents/csc-website/websitedemo
+
+ ✓ lib/actions/__tests__/conference-legal.test.ts (2 tests) 3ms
+ ✓ lib/actions/__tests__/admin-transfer.test.ts (2 tests) 4ms
+ ✓ lib/actions/__tests__/conference-registration-travel-import.test.ts (3 tests) 6ms
+
+ Test Files  3 passed (3)
+      Tests  7 passed (7)
+   Start at  09:34:53
+   Duration  203ms (transform 210ms, setup 0ms, import 256ms, tests 14ms, environment 0ms)
+

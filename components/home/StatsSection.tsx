@@ -26,7 +26,7 @@ export default function StatsSection({ stats }: { stats: HomePageStats }) {
           </div>
           <div className="text-center">
             <div className="text-5xl md:text-6xl font-bold text-white mb-3">
-              {stats.totalFteServed.toLocaleString()}
+              {stats.totalFteServed.toLocaleString()}{stats.fteIsEstimate ? "+" : ""}
             </div>
             <div className="text-[#9B9B9B]">Total FTE Served</div>
           </div>

@@ -64,7 +64,7 @@ export default function LegalManager({ conferenceId }: LegalManagerProps) {
         <h3 className="text-sm font-medium text-gray-700">{versions.length} legal documents</h3>
         <button
           onClick={() => setShowAdd(true)}
-          className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
+          className="px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover"
         >
           Add Version
         </button>
@@ -188,7 +188,7 @@ function LegalVersionEditor({
         <textarea required rows={6} value={content} onChange={(e) => setContent(e.target.value)} className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm" />
       </div>
       <div className="flex gap-2">
-        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50">
+        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50">
           {saving ? "Saving..." : "Create"}
         </button>
         <button type="button" onClick={onCancel} className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">Cancel</button>

@@ -1,8 +1,11 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getMyPendingChanges } from "@/lib/actions/pending-content-changes";
+import { getUserBookmarks } from "@/lib/actions/bookmarks";
 import ProfileEditForm from "./ProfileEditForm";
+import MyPendingChanges from "@/components/me/MyPendingChanges";
 
 export const metadata = {
   title: "My Account | Campus Stores Canada",
@@ -16,7 +19,7 @@ export default async function MyAccountPage() {
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const userSb = auth.ctx.supabase as any;
-  const [profileResult, orgResult, circleResult] = (await Promise.all([
+  const [profileResult, orgResult, circleResult, pendingChangesResult, bookmarksResult] = (await Promise.all([
     userSb
       .from("profiles")
       .select("display_name, global_role")
@@ -35,7 +38,11 @@ export default async function MyAccountPage() {
           .limit(1)
           .maybeSingle()
       : Promise.resolve({ data: null }),
-  ])) as [{ data: any }, { data: any[] | null }, { data: any }];
+    isGlobalAdmin(auth.ctx.globalRole)
+      ? getMyPendingChanges()
+      : Promise.resolve({ success: true, changes: [] }),
+    getUserBookmarks(),
+  ])) as [{ data: any }, { data: any[] | null }, { data: any }, Awaited<ReturnType<typeof getMyPendingChanges>>, Awaited<ReturnType<typeof getUserBookmarks>>];
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: conferencePeopleRows } = (await (adminClient as any)
@@ -192,6 +199,15 @@ export default async function MyAccountPage() {
         )}
       </section>
 
+      {/* My Pending Content Changes */}
+      {(pendingChangesResult.changes?.length ?? 0) > 0 && (
+        <section className="rounded-xl border border-gray-200 bg-white p-5">
+          <h2 className="text-lg font-semibold text-gray-900">Submitted Content Changes</h2>
+          <p className="mt-1 text-xs text-gray-500">Changes you submitted for second-signer approval — last 30 days.</p>
+          <MyPendingChanges changes={pendingChangesResult.changes ?? []} />
+        </section>
+      )}
+
       {/* My Events — link card */}
       <Link
         href="/me/events"
@@ -206,6 +222,29 @@ export default async function MyAccountPage() {
               ? `${(myCreatedEventRows ?? []).length} hosted event${(myCreatedEventRows ?? []).length !== 1 ? "s" : ""}`
               : "No events yet — browse upcoming events"}
           </p>
+        </div>
+        <svg className="w-5 h-5 text-gray-400 group-hover:text-[#EE2A2E] transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+        </svg>
+      </Link>
+
+      {/* My Bookmarks — link card */}
+      <Link
+        href="/me/bookmarks"
+        className="group flex items-center justify-between rounded-xl border border-gray-200 bg-white p-5 hover:border-gray-300 hover:shadow-sm transition-all"
+      >
+        <div className="flex items-center gap-3">
+          <svg className="w-5 h-5 text-yellow-500 shrink-0" fill="currentColor" viewBox="0 0 24 24">
+            <path d="M17.593 3.322c1.1.128 1.907 1.077 1.907 2.185V21L12 17.25 4.5 21V5.507c0-1.108.806-2.057 1.907-2.185a48.507 48.507 0 0 1 11.186 0Z" />
+          </svg>
+          <div>
+            <h2 className="text-lg font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">My Bookmarks</h2>
+            <p className="text-sm text-gray-500 mt-0.5">
+              {(bookmarksResult.bookmarks ?? []).length === 0
+                ? "No bookmarks yet"
+                : `${bookmarksResult.bookmarks.length} bookmark${bookmarksResult.bookmarks.length !== 1 ? "s" : ""}`}
+            </p>
+          </div>
         </div>
         <svg className="w-5 h-5 text-gray-400 group-hover:text-[#EE2A2E] transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />

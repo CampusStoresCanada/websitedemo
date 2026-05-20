@@ -13,6 +13,14 @@ import { SCALE_RANGES } from "@/lib/explore/types";
 import { orgSubtitle, hasActiveCompounds } from "@/lib/explore/filters";
 import { CompoundFilterBar } from "@/components/explore/CompoundFilterBar";
 import { OrgDetailPanel } from "@/components/explore/OrgDetailPanel";
+import {
+  getPartnerOrgProfile,
+  getOrgProcurementPanel,
+  getMemberOrgProfile,
+  type PartnerOrgProfile,
+  type ProcurementPanelData,
+  type MemberOrgProfile,
+} from "@/lib/actions/partner-context";
 import { GroupSummary } from "@/components/explore/GroupSummary";
 
 const MapComponent = dynamic(() => import("./Map"), {
@@ -88,7 +96,26 @@ export default function MapHero({
 }: MapHeroProps) {
   const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
+  const isPartnerViewing = !!user && !isMember;
   const canViewCancoll = isMember || isCancollMember;
+
+  // Partner profile — fetched once for fit scoring and panel personalisation
+  const [partnerProfile, setPartnerProfile] = useState<PartnerOrgProfile | null>(null);
+  useEffect(() => {
+    if (!isPartnerViewing) return;
+    getPartnerOrgProfile().then((p) => setPartnerProfile(p));
+  }, [isPartnerViewing]);
+
+  // Member procurement profile — fetched once so we can personalise the partner detail panel
+  const [memberProfile, setMemberProfile] = useState<MemberOrgProfile | null>(null);
+  useEffect(() => {
+    if (!isMember) return;
+    getMemberOrgProfile().then((p) => setMemberProfile(p));
+  }, [isMember]);
+
+  // Procurement panel — fetched per selected member org, scoped to partner's category
+  const [procurementPanel, setProcurementPanel] = useState<ProcurementPanelData | null>(null);
+  const [procurementPanelLoading, setProcurementPanelLoading] = useState(false);
   const mapRef = useRef<MapRef>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousBodyOverflowRef = useRef<string | null>(null);
@@ -188,6 +215,23 @@ export default function MapHero({
       });
     return () => { cancelled = true; };
   }, [selectedOrg?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Procurement panel — only when a partner selects a member org
+  useEffect(() => {
+    if (!selectedOrg || selectedOrg.type !== "Member" || !isPartnerViewing) {
+      setProcurementPanel(null);
+      return;
+    }
+    let cancelled = false;
+    setProcurementPanelLoading(true);
+    setProcurementPanel(null);
+    getOrgProcurementPanel(selectedOrg.id, partnerProfile?.primaryCategory ?? null).then((data) => {
+      if (cancelled) return;
+      setProcurementPanel(data);
+      setProcurementPanelLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [selectedOrg?.id, isPartnerViewing, partnerProfile?.primaryCategory]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const story = stories[storyIndex] ?? null;
 
@@ -1238,6 +1282,10 @@ export default function MapHero({
               canViewCancoll={canViewCancoll}
               contacts={selectedOrg ? contactsForOrg : []}
               onFilterByValue={handleFilterByValue}
+              partnerCategory={isPartnerViewing ? (partnerProfile?.primaryCategory ?? null) : null}
+              procurementPanel={procurementPanel}
+              procurementPanelLoading={procurementPanelLoading}
+              memberProfile={isMember ? memberProfile : null}
             />
           ) : searchQuery.trim() ? (
             <div>

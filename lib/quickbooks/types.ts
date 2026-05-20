@@ -1,4 +1,4 @@
-// QuickBooks API types — Chunk 21
+// QuickBooks API types — Chunk 21 + Board Portal
 
 export interface QBCustomer {
   Id: string;
@@ -81,6 +81,67 @@ export interface QBExportQueueRow {
   created_at: string;
   processed_at: string | null;
   lease_expires_at: string | null;
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Reports API — P&L + Balance Sheet
+// ─────────────────────────────────────────────────────────────────
+
+/** A single cell in a report row or summary */
+export interface QBColData {
+  value: string;
+  id?:   string;
+}
+
+/** A data row (leaf) in a report section */
+export interface QBDataRow {
+  type:    "Data";
+  ColData: QBColData[];
+}
+
+/** A section row (group) — may nest further rows and has a summary */
+export interface QBSectionRow {
+  type:    "Section";
+  group?:  string;
+  Header?: { ColData: QBColData[] };
+  Rows?:   { Row?: Array<QBDataRow | QBSectionRow> };
+  Summary?: { ColData: QBColData[] };
+}
+
+export type QBReportRow = QBDataRow | QBSectionRow;
+
+export interface QBReportColumn {
+  ColTitle: string;
+  ColType:  string;
+}
+
+export interface QBReportHeader {
+  Time:        string;
+  ReportName:  string;
+  StartPeriod: string;
+  EndPeriod:   string;
+  Currency:    string;
+  DateMacro?:  string;
+}
+
+/** Top-level shape returned by the QBO Reports API */
+export interface QBReport {
+  Header:  QBReportHeader;
+  Columns: { Column: QBReportColumn[] };
+  Rows:    { Row?: QBReportRow[] };
+}
+
+/** Parsed financial summary stored in board_qbo_snapshots */
+export interface QBFinancialSummary {
+  netIncome:          number | null;
+  totalRevenue:       number | null;
+  totalExpenses:      number | null;
+  cashOnHand:         number | null;
+  accountsReceivable: number | null;
+  totalAssets:        number | null;
+  periodStart:        string;       // YYYY-MM-DD
+  periodEnd:          string;       // YYYY-MM-DD
+  reportPulledAt:     string;       // ISO timestamp
 }
 
 export type QBReconciliationStatus = "pending_review" | "matched" | "ignored" | "failed";

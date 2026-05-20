@@ -42,6 +42,19 @@ const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
+    heading: "Board Portal",
+    items: [
+      { href: "/admin/board/meetings", label: "Meetings", matchPrefix: "/admin/board/meetings" },
+      { href: "/admin/board/financials", label: "Financials", matchPrefix: "/admin/board/financials" },
+    ],
+  },
+  {
+    heading: "Sponsorships",
+    items: [
+      { href: "/admin/sponsorships", label: "Sponsorships", matchPrefix: "/admin/sponsorships" },
+    ],
+  },
+  {
     heading: "Communications",
     items: [
       { href: "/admin/comms", label: "Campaigns", matchPrefix: "/admin/comms" },
@@ -109,7 +122,7 @@ export default function AdminSidebar({ globalRole = "admin" }: AdminSidebarProps
                         href={item.href}
                         className={`block rounded-md px-2 py-1.5 text-sm transition-colors ${
                           active
-                            ? "bg-white text-[#EE2A2E] font-medium shadow-sm"
+                            ? "bg-white text-accent font-medium shadow-sm"
                             : "text-gray-600 hover:bg-white hover:text-gray-900"
                         }`}
                       >

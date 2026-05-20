@@ -5331,7 +5331,7 @@ export default function ScheduleDesignWizard({
             onClick={() => setStep(s.id)}
             className={`rounded-full px-3 py-1 text-xs font-medium ${
               step === s.id
-                ? "bg-[#EE2A2E] text-white"
+                ? "bg-accent text-white"
                 : "bg-gray-100 text-gray-700 hover:bg-gray-200"
             }`}
             aria-current={step === s.id ? "step" : undefined}
@@ -5438,7 +5438,7 @@ export default function ScheduleDesignWizard({
                   onClick={() => setModuleStepIndex(index)}
                   className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
                     index === moduleStepIndex
-                      ? "border-[#EE2A2E] bg-[#EE2A2E] text-white"
+                      ? "border-accent bg-accent text-white"
                       : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
                   }`}
                   aria-current={index === moduleStepIndex ? "step" : undefined}
@@ -5851,7 +5851,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyMeetingProductSuggestion}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Create/Update Suggested Meeting Products
                     </button>
@@ -6080,7 +6080,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyTradeShowProductSuggestion}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Create/Update Suggested Trade Show Products
                     </button>
@@ -6488,7 +6488,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyMealProductSuggestion}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Create/Update Suggested Meal Products
                     </button>
@@ -6532,7 +6532,7 @@ export default function ScheduleDesignWizard({
                   <button
                     type="button"
                     onClick={addOffsiteEvent}
-                    className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                   >
                     Add Offsite Event
                   </button>
@@ -6917,7 +6917,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyOffsiteProductSuggestion}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Create/Update Suggested Offsite Products
                     </button>
@@ -7180,7 +7180,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={applyEducationProductSuggestion}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Create/Update Suggested Education Products
                     </button>
@@ -7228,7 +7228,7 @@ export default function ScheduleDesignWizard({
                       <button
                         type="button"
                         onClick={addAudienceList}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                       >
                         Add Audience List
                       </button>
@@ -8259,7 +8259,7 @@ export default function ScheduleDesignWizard({
                     <button
                       type="button"
                       onClick={addSponsorRecord}
-                      className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                     >
                       Add Sponsor
                     </button>
@@ -9294,7 +9294,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Travel Rules")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Travel Rules"}
                       </button>
@@ -9486,7 +9486,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Accommodations")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Accommodations"}
                       </button>
@@ -9649,7 +9649,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Travel Destinations")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Destinations"}
                       </button>
@@ -9783,7 +9783,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Airline Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Airlines"}
                       </button>
@@ -9895,7 +9895,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Travel Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Travel Policies"}
                       </button>
@@ -10018,7 +10018,7 @@ export default function ScheduleDesignWizard({
                         type="button"
                         onClick={() => void saveSection("Reimbursement Policies")}
                         disabled={isSaving}
-                        className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+                        className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
                       >
                         {isSaving ? "Saving..." : "Save Reimbursement Policies"}
                       </button>
@@ -10996,7 +10996,7 @@ export default function ScheduleDesignWizard({
             type="button"
             onClick={nextStep}
             disabled={isSaving || (step === maxStep)}
-            className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+            className="rounded-md bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
             {isSaving
               ? "Saving..."

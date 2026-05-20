@@ -68,7 +68,7 @@ export default function ContentEntryForm({
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           required
-          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           placeholder="Jane Smith"
         />
       </div>
@@ -82,7 +82,7 @@ export default function ContentEntryForm({
           type="text"
           value={subtitle}
           onChange={(e) => setSubtitle(e.target.value)}
-          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           placeholder="Chair, Board of Directors"
         />
       </div>
@@ -96,7 +96,7 @@ export default function ContentEntryForm({
           value={body}
           onChange={(e) => setBody(e.target.value)}
           rows={3}
-          className="w-full px-3 py-2 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] resize-none"
+          className="w-full px-3 py-2 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent resize-none"
           placeholder="Brief bio…"
         />
       </div>
@@ -110,7 +110,7 @@ export default function ContentEntryForm({
           type="url"
           value={imageUrl}
           onChange={(e) => setImageUrl(e.target.value)}
-          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+          className="w-full h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           placeholder="https://…"
         />
       </div>
@@ -124,7 +124,7 @@ export default function ContentEntryForm({
           type="number"
           value={displayOrder}
           onChange={(e) => setDisplayOrder(parseInt(e.target.value) || 0)}
-          className="w-24 h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+          className="w-24 h-10 px-3 rounded-lg border border-[#E5E5E5] text-sm focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
         />
       </div>
 

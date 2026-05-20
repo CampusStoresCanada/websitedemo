@@ -1,15 +1,26 @@
 import { supabase } from "@/lib/supabase";
 import { applyFieldMask, loadVisibilityConfig } from "@/lib/visibility/engine";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { TierIcon } from "@/lib/sponsorship/types";
 
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
+
+export interface SponsorTierInfo {
+  name: string;
+  slug: string;
+  color: string;
+  icon: TierIcon | null;
+}
 
 export interface HomeMapOrg {
   id: string;
   slug: string;
   name: string;
   type: string;
+  /** Set when this org has an active sponsorship agreement */
+  sponsorTier?: SponsorTierInfo | null;
   city: string | null;
   province: string | null;
   latitude: number | null;
@@ -43,10 +54,27 @@ export interface HomeMapOrg {
   institutionType: string | null;
   /** Full-time employees from benchmarking */
   fulltimeEmployees: number | null;
+  /** Partner-only: short company description */
+  companyDescription: string | null;
+  /** Partner-only: featured product name */
+  highlightProductName: string | null;
+  /** Partner-only: URL to partner's product catalogue */
+  catalogueUrl: string | null;
+  /** Partner-only: social/ethical certifications (Canadian Made, Women Owned, etc.) */
+  certifications: string[];
+  /** Partner-only: whether this org is a CANCOLL member — visibility gated to members + CANCOLL partners */
+  isCancollMember: boolean;
+  /** Member procurement: product categories the store carries (from procurement_info.category_buyers) */
+  procurementCategories: string[];
+  /** Member procurement: vendor certification preferences (Buy Canadian, Indigenous Owned, etc.) */
+  preferredCertifications: string[];
+  /** Member procurement: RFP/buying window extracted from procurement_info.buying_cycle */
+  buyingWindow: { rfpStart: string | null; rfpEnd: string | null; fiscalYearStart: string | null } | null;
 }
 
 interface HomeOrgRecord extends HomeMapOrg {
-  companyDescription: string | null;
+  // HomeOrgRecord used to hold companyDescription separately; now it lives on
+  // HomeMapOrg directly so it flows through to OrgList cards and OrgDetailPanel.
 }
 
 interface BenchmarkingSlice {
@@ -105,6 +133,8 @@ export interface HomePageStats {
   activePartners: number;
   provincesRepresented: number;
   totalFteServed: number;
+  /** True when some FTE values are bucket-floor estimates rather than exact benchmarking figures. */
+  fteIsEstimate: boolean;
 }
 
 export interface HomePageData {
@@ -112,7 +142,7 @@ export interface HomePageData {
   stories: MapStory[];
   stats: HomePageStats;
   memberOrgs: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "province" | "organizationType" | "logoUrl">>;
-  partnerOrgs: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "province" | "primaryCategory" | "logoUrl">>;
+  partnerOrgs: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "province" | "primaryCategory" | "logoUrl" | "sponsorTier">>;
 }
 
 // ---------------------------------------------------------------------------
@@ -187,6 +217,34 @@ function normalizeMapOrg(row: Record<string, unknown>): HomeOrgRecord {
     organizationType: (row.organization_type as string | null) ?? null,
     fte: typeof row.fte === "number" ? row.fte : null,
     companyDescription: (row.company_description as string | null) ?? null,
+    highlightProductName: (row.highlight_product_name as string | null) ?? null,
+    catalogueUrl: (row.catalogue_url as string | null) ?? null,
+    certifications: Array.isArray(row.certifications) ? (row.certifications as string[]) : [],
+    isCancollMember: row.is_cancoll_member === true,
+    procurementCategories: (() => {
+      const pi = row.procurement_info as Record<string, unknown> | null | undefined;
+      const buyers = pi?.category_buyers;
+      if (!Array.isArray(buyers)) return [];
+      return buyers
+        .map((b: unknown) => (b as Record<string, unknown>)?.category)
+        .filter((c): c is string => typeof c === "string" && c.length > 0);
+    })(),
+    preferredCertifications: (() => {
+      const pi = row.procurement_info as Record<string, unknown> | null | undefined;
+      const certs = pi?.preferred_certifications;
+      if (!Array.isArray(certs)) return [];
+      return certs.filter((c): c is string => typeof c === "string" && c.length > 0);
+    })(),
+    buyingWindow: (() => {
+      const pi = row.procurement_info as Record<string, unknown> | null | undefined;
+      const bc = pi?.buying_cycle as Record<string, unknown> | null | undefined;
+      if (!bc) return null;
+      const rfpStart = typeof bc.rfp_start === "string" ? bc.rfp_start : null;
+      const rfpEnd = typeof bc.rfp_end === "string" ? bc.rfp_end : null;
+      const fiscalYearStart = typeof bc.fiscal_year_start === "string" ? bc.fiscal_year_start : null;
+      if (!rfpStart && !rfpEnd && !fiscalYearStart) return null;
+      return { rfpStart, rfpEnd, fiscalYearStart };
+    })(),
     enrollmentFte: null, // populated from benchmarking data later
     posSystem: null,
     servicesOffered: null,
@@ -395,7 +453,7 @@ async function fetchMapOrgsWithBenchmarking(
   let orgQuery = supabase
     .from("organizations")
     .select(
-      "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, website, primary_category, organization_type, fte, company_description"
+      "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, website, primary_category, organization_type, fte, company_description, highlight_product_name, catalogue_url, certifications, is_cancoll_member, procurement_info"
     )
     .eq("membership_status", "active")
     .is("archived_at", null)
@@ -445,17 +503,49 @@ async function fetchMapOrgsWithBenchmarking(
   return { orgRecords, benchByOrg };
 }
 
-/** Merge benchmarking slices onto org records and strip companyDescription. */
+/**
+ * Fetches active sponsor agreements and returns a map of organization_id → tier info.
+ * Used to decorate map markers with the sponsor shape/colour.
+ * Uses the admin client because sponsor_agreements has no public RLS read.
+ */
+async function fetchSponsorTierByOrg(): Promise<Map<string, SponsorTierInfo>> {
+  try {
+    const db = createAdminClient() as any;
+    const today = new Date().toISOString().slice(0, 10);
+    const { data } = await db
+      .from("sponsor_agreements")
+      .select("organization_id, tier:sponsor_tiers(name, slug, color, icon)")
+      .eq("status", "active")
+      .lte("start_date", today)
+      .gte("end_date", today);
+    const map = new Map<string, SponsorTierInfo>();
+    for (const row of (data ?? []) as any[]) {
+      if (row.tier && row.organization_id) {
+        map.set(String(row.organization_id), {
+          name:  row.tier.name  ?? "",
+          slug:  row.tier.slug  ?? "",
+          color: row.tier.color ?? "#888",
+          icon:  row.tier.icon  ?? null,
+        });
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+/** Merge benchmarking slices onto org records. */
 function mergeOrgsWithBenchmarking(
   orgRecords: HomeOrgRecord[],
-  benchByOrg: Map<string, BenchmarkingSlice>
+  benchByOrg: Map<string, BenchmarkingSlice>,
+  sponsorByOrg?: Map<string, SponsorTierInfo>
 ): HomeMapOrg[] {
   return orgRecords.map((org) => {
-    const { companyDescription, ...publicOrg } = org;
-    void companyDescription;
     const bench = benchByOrg.get(org.id);
     return {
-      ...publicOrg,
+      ...org,
+      sponsorTier: sponsorByOrg?.get(org.id) ?? null,
       enrollmentFte: bench?.enrollmentFte ?? null,
       posSystem: bench?.posSystem ?? null,
       servicesOffered: bench?.servicesOffered ?? null,
@@ -481,15 +571,21 @@ export interface DirectoryPageData {
 }
 
 export async function getMembersPageData(): Promise<DirectoryPageData> {
-  const result = await fetchMapOrgsWithBenchmarking("Member");
+  const [result, sponsorByOrg] = await Promise.all([
+    fetchMapOrgsWithBenchmarking("Member"),
+    fetchSponsorTierByOrg(),
+  ]);
   if (!result) return { mapOrgs: [] };
-  return { mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg) };
+  return { mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg, sponsorByOrg) };
 }
 
 export async function getPartnersPageData(): Promise<DirectoryPageData> {
-  const result = await fetchMapOrgsWithBenchmarking("Vendor Partner");
+  const [result, sponsorByOrg] = await Promise.all([
+    fetchMapOrgsWithBenchmarking("Vendor Partner"),
+    fetchSponsorTierByOrg(),
+  ]);
   if (!result) return { mapOrgs: [] };
-  return { mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg) };
+  return { mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg, sponsorByOrg) };
 }
 
 // ---------------------------------------------------------------------------
@@ -499,7 +595,7 @@ export async function getPartnersPageData(): Promise<DirectoryPageData> {
 const EMPTY_DATA: HomePageData = {
   mapOrgs: [],
   stories: [],
-  stats: { activeMembers: 0, activePartners: 0, provincesRepresented: 0, totalFteServed: 0 },
+  stats: { activeMembers: 0, activePartners: 0, provincesRepresented: 0, totalFteServed: 0, fteIsEstimate: false },
   memberOrgs: [],
   partnerOrgs: [],
 };
@@ -514,7 +610,13 @@ export async function getHomePageData(): Promise<HomePageData> {
   const partners = orgRecords.filter((org) => org.type === "Vendor Partner");
 
   const provinceSet = new Set(orgRecords.map((org) => org.province).filter(Boolean));
-  const totalFteServed = members.reduce((sum, org) => sum + (org.fte ?? 0), 0);
+  // Use enrollment_fte from benchmarking (most accurate); fall back to 0 for orgs without data.
+  // The about page getStats() uses the full bucket-floor logic — this is the lighter homepage version.
+  const totalFteServed = members.reduce((sum, org) => {
+    const bench = benchByOrg.get(org.id);
+    return sum + (bench?.enrollmentFte ?? 0);
+  }, 0);
+  const fteIsEstimate = members.some((org) => !benchByOrg.get(org.id)?.enrollmentFte);
 
   // 3. Generate ALL story candidates — large pool, randomized later
   const candidates: StoryCandidate[] = [];
@@ -756,14 +858,16 @@ export async function getHomePageData(): Promise<HomePageData> {
   }
 
   // 6. Return projection-only payloads
+  const sponsorByOrg = await fetchSponsorTierByOrg();
   return {
-    mapOrgs: mergeOrgsWithBenchmarking(orgRecords, benchByOrg),
+    mapOrgs: mergeOrgsWithBenchmarking(orgRecords, benchByOrg, sponsorByOrg),
     stories,
     stats: {
       activeMembers: members.length,
       activePartners: partners.length,
       provincesRepresented: provinceSet.size,
       totalFteServed,
+      fteIsEstimate,
     },
     memberOrgs: members.map((org) => ({
       id: org.id,
@@ -780,6 +884,7 @@ export async function getHomePageData(): Promise<HomePageData> {
       province: org.province,
       primaryCategory: org.primaryCategory,
       logoUrl: org.logoUrl,
+      sponsorTier: org.sponsorTier ?? null,
     })),
   };
 }

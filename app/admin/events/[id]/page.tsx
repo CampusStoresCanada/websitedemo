@@ -146,7 +146,7 @@ export default async function AdminEventDetailPage({
             href={`/admin/events/${id}?tab=${t.key}`}
             className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
               tab === t.key
-                ? "border-[#EE2A2E] text-[#EE2A2E]"
+                ? "border-accent text-accent"
                 : "border-transparent text-gray-500 hover:text-gray-700"
             }`}
           >

@@ -39,6 +39,10 @@ export interface CompoundFilters {
   mandate?: string;
   payment?: string;
   shopping?: string;
+  category?: string;
+  certification?: string;
+  /** "true" when filtering to CANCOLL members only */
+  cancoll?: string;
 }
 
 /** Human-readable labels for each lens */

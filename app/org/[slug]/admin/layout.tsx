@@ -41,12 +41,6 @@ export default async function OrgAdminLayout({
         {/* Org admin navigation */}
         <div className="flex gap-4 mb-8 border-b border-gray-300 pb-3">
           <Link
-            href={`/org/${slug}/admin`}
-            className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-md hover:bg-white/50 transition-colors"
-          >
-            Dashboard
-          </Link>
-          <Link
             href={`/org/${slug}/admin/users`}
             className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-md hover:bg-white/50 transition-colors"
           >

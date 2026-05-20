@@ -390,6 +390,56 @@ export class CircleAdminClient {
   async getCommunity(): Promise<Record<string, unknown>> {
     return this.request<Record<string, unknown>>("GET", "/community");
   }
+
+  // ---- Direct messaging ---------------------------------------------------
+
+  /**
+   * Send a direct message TO a member (identified by email) via the Admin API v2.
+   * The message appears as coming from the API key owner.
+   * Returns null if the recipient is the same as the API key owner (self-DM not allowed).
+   */
+  async sendDirectMessage(
+    recipientEmail: string,
+    text: string
+  ): Promise<{ success: boolean; selfDm?: boolean; error?: string }> {
+    try {
+      await this.request("POST", "/messages", {
+        body: {
+          user_email: recipientEmail,
+          rich_text_body: {
+            body: {
+              type: "doc",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text }],
+                },
+              ],
+            },
+            circle_ios_fallback_text: text,
+            format: "chat",
+            attachments: [],
+            community_members: [],
+            entities: [],
+            group_mentions: [],
+            inline_attachments: [],
+            polls: [],
+            sgids_to_object_map: {},
+          },
+        },
+      });
+      return { success: true };
+    } catch (err) {
+      if (err instanceof CircleApiError) {
+        const body = err.responseBody as { message?: string } | null;
+        if (body?.message?.toLowerCase().includes("direct message yourself")) {
+          return { success: false, selfDm: true };
+        }
+        return { success: false, error: body?.message ?? err.message };
+      }
+      return { success: false, error: String(err) };
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -397,9 +447,10 @@ export class CircleAdminClient {
 // ---------------------------------------------------------------------------
 
 let _instance: CircleAdminClient | null = null;
+let _ghostInstance: CircleAdminClient | null = null;
 
 /**
- * Returns a CircleAdminClient singleton, or null if Circle is not configured.
+ * Returns a CircleAdminClient singleton using the main API key.
  */
 export function getCircleClient(): CircleAdminClient | null {
   if (_instance) return _instance;
@@ -409,4 +460,20 @@ export function getCircleClient(): CircleAdminClient | null {
 
   _instance = new CircleAdminClient(config.apiKey, config.communityId);
   return _instance;
+}
+
+/**
+ * Returns a CircleAdminClient using Butler Ghost's API key.
+ * Use this for sending DMs — messages appear as coming from Butler, not the super admin.
+ * Falls back to the main client if CIRCLE_GHOST_KEY is not configured.
+ */
+export function getCircleGhostClient(): CircleAdminClient | null {
+  if (_ghostInstance) return _ghostInstance;
+
+  const config = getCircleConfig();
+  if (!config) return null;
+
+  const key = config.ghostApiKey || config.apiKey;
+  _ghostInstance = new CircleAdminClient(key, config.communityId);
+  return _ghostInstance;
 }

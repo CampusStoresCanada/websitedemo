@@ -19,7 +19,7 @@ export default function Footer() {
             </div>
             <p className="text-sm text-[var(--text-secondary)] max-w-sm">
               Connecting campus stores coast-to-coast with resources,
-              partnerships, and expertise for over 30 years.
+              partnerships, and expertise since 2005.
             </p>
           </div>
 

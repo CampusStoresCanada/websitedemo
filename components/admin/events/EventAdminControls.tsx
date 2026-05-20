@@ -146,7 +146,7 @@ export default function EventAdminControls({
                   <button
                     onClick={() => handleTransition(newStatus)}
                     disabled={isPending}
-                    className="px-3 py-1.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold disabled:opacity-50 transition-colors"
+                    className="px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-semibold disabled:opacity-50 transition-colors"
                   >
                     {isPending ? "Updating…" : `Confirm: ${EVENT_STATUS_LABELS[newStatus]}`}
                   </button>

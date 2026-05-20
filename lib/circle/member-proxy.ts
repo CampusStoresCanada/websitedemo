@@ -121,7 +121,8 @@ export class CircleMemberClient {
   async listChatRooms(): Promise<CircleChatRoom[]> {
     try {
       const result = await this.request<{ records: CircleChatRoom[] }>("GET", "/messages");
-      return result.records ?? (Array.isArray(result) ? result : []);
+      const rooms = result.records ?? (Array.isArray(result) ? result : []);
+      return rooms;
     } catch (err) {
       if (err instanceof CircleApiError && err.isNotFound) {
         console.warn("[circle/member-proxy] listChatRooms 404 — messages endpoint not available");
@@ -158,7 +159,7 @@ export class CircleMemberClient {
   ): Promise<CircleMessage[]> {
     const result = await this.request<{ records: CircleMessage[] }>(
       "GET",
-      `/messages/${chatRoomUuid}/chat_room_messages`,
+      `/chat_rooms/${chatRoomUuid}/chat_room_messages`,
       {
         params: {
           per_page: options?.per_page ?? 20,
@@ -174,15 +175,26 @@ export class CircleMemberClient {
    * Body should be in TipTap JSON format or plain text.
    */
   async sendMessage(
-    chatRoomUuid: string,
-    body: string
+    chatRoomIdOrUuid: number | string,
+    plainText: string
   ): Promise<CircleMessage> {
+    // Circle headless v1: POST /messages
+    // chat_room accepts either the numeric room id or UUID — testing numeric first.
     return this.request<CircleMessage>(
       "POST",
-      `/messages/${chatRoomUuid}/chat_room_messages`,
+      `/messages`,
       {
         body: {
-          body,
+          chat_room: chatRoomIdOrUuid,
+          body: {
+            type: "doc",
+            content: [
+              {
+                type: "paragraph",
+                content: [{ type: "text", text: plainText }],
+              },
+            ],
+          },
         },
       }
     );

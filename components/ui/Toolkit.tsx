@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { hasPermission } from "@/lib/auth/permissions";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import CreateEventModal from "@/components/toolkit/CreateEventModal";
 import { submitFlag } from "@/lib/actions/submit-flag";
@@ -12,7 +13,7 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportMembersDirectory, exportPartnersDirectory } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
 import type { PendingContentChange } from "@/lib/database.types";
@@ -94,17 +95,28 @@ export function ToolkitProvider({ children }: { children: ReactNode }) {
  * - Bookmark: Save to internal favorites (future)
  */
 export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?: string | null }) {
-  const { user, profile } = useAuth();
+  const { user, profile, permissionState, organizations } = useAuth();
   const { editMode, setEditMode, isAdmin, canEditOrg } = useToolkit();
+  const isPartnerViewing = !!user && hasPermission(permissionState, "partner") && !hasPermission(permissionState, "member");
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
 
   // Users eligible to create events (not partner, not unauthenticated)
   const canCreateEvent =
     !!user &&
     !!profile &&
     !["partner"].includes(profile.global_role ?? "");
-  const pathname = usePathname();
-  const router = useRouter();
-  const searchParams = useSearchParams();
+
+  // Detect if we're on an org profile page where the current user is the org_admin
+  const context = detectPageContext(pathname);
+  const orgAdminSlug = useMemo(() => {
+    if (context.type !== "org") return null;
+    const match = (organizations ?? []).find(
+      (uo) => uo.role === "org_admin" && uo.organization.slug === context.slug
+    );
+    return match ? context.slug : null;
+  }, [context, organizations]);
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Review mode — activated when ?review_token= is present in the URL
@@ -463,6 +475,30 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               onClick={() => handleToolClick("explain")}
             />
 
+            {/* Org admin quick links — visible when on that org's own profile page */}
+            {orgAdminSlug && (
+              <>
+                <a
+                  href={`/org/${orgAdminSlug}/admin/users`}
+                  className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
+                  </svg>
+                  Manage Users
+                </a>
+                <a
+                  href={`/org/${orgAdminSlug}/admin/transfer`}
+                  className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
+                >
+                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
+                  </svg>
+                  Transfer Admin
+                </a>
+              </>
+            )}
+
             {/* Edit - Only for admins */}
             {isAdmin && (
               <ToolButton
@@ -534,7 +570,11 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       )}
 
       {activeTool === "export" && (
-        <ExportModal pathname={pathname} onClose={handleClose} />
+        <ExportModal
+          pathname={pathname}
+          onClose={handleClose}
+          isPartner={isPartnerViewing}
+        />
       )}
 
       {activeTool === "share" && (
@@ -3095,7 +3135,7 @@ function BookmarkModal({
 // ExportModal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExportModal({ pathname, onClose }: { pathname: string; onClose: () => void }) {
+function ExportModal({ pathname, onClose, isPartner = false }: { pathname: string; onClose: () => void; isPartner?: boolean }) {
   const context = detectPageContext(pathname);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -3148,14 +3188,25 @@ function ExportModal({ pathname, onClose }: { pathname: string; onClose: () => v
       },
     ];
   } else if (context.type === "members_directory") {
-    options = [
-      {
-        label: "Member Directory CSV",
-        description: "Name, city, province, and website for all members",
-        icon: "📋",
-        action: () => run("Member Directory CSV", () => exportMembersDirectory()),
-      },
-    ];
+    if (isPartner) {
+      options = [
+        {
+          label: "My Buyer Contacts",
+          description: "One row per member that carries your category — buyer name, email, phone, buying window",
+          icon: "📇",
+          action: () => run("My Buyer Contacts", () => exportMemberBuyersCSV()),
+        },
+      ];
+    } else {
+      options = [
+        {
+          label: "Member Directory CSV",
+          description: "Name, city, province, and website for all members",
+          icon: "📋",
+          action: () => run("Member Directory CSV", () => exportMembersDirectory()),
+        },
+      ];
+    }
   } else if (context.type === "partners_directory") {
     options = [
       {

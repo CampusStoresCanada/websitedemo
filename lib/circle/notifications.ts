@@ -6,6 +6,7 @@ import { getCircleClient } from "./client";
 import { isCircleConfigured, getCircleConfig } from "./config";
 import { mintMemberToken } from "./headless-auth";
 import { CircleMemberClient } from "./member-proxy";
+import { CircleApiError } from "./types";
 
 /**
  * Send a DM from the CSC bot user to a Circle member identified by email.
@@ -46,10 +47,20 @@ export async function sendCircleNotification(params: {
 
     const recipientCircleId = members[0].id;
 
-    // 2. Mint bot token
-    const botToken = await mintMemberToken({
-      community_member_id: parseInt(config.botUserId, 10),
-    });
+    // 2. Mint bot token — prefer numeric member ID, fall back to email
+    const numericBotId = parseInt(config.botUserId, 10);
+    if (isNaN(numericBotId) && !config.botEmail) {
+      console.error(
+        "[circle/notifications] CIRCLE_BOT_USER_ID is not a numeric member ID and CIRCLE_BOT_EMAIL is not set. " +
+        "Set CIRCLE_BOT_EMAIL in .env.local to the bot account's email address."
+      );
+      return { success: false, error: "Bot identity not configured" };
+    }
+    const botToken = await mintMemberToken(
+      !isNaN(numericBotId)
+        ? { community_member_id: numericBotId }
+        : { email: config.botEmail }
+    );
 
     // 3. Send DM via member proxy
     const memberClient = new CircleMemberClient(botToken.access_token);
@@ -62,20 +73,20 @@ export async function sendCircleNotification(params: {
         room.other_participants_preview.some((m) => m.community_member_id === recipientCircleId)
     );
 
-    let roomUuid: string;
+    let roomId: number;
     if (directRoom) {
-      roomUuid = directRoom.uuid;
+      roomId = directRoom.id;
     } else {
-      // No existing DM room — create one (Circle deduplicates if one already exists)
       const newRoom = await memberClient.createDirectChatRoom(recipientCircleId);
-      roomUuid = newRoom.uuid;
+      roomId = newRoom.id;
     }
 
-    await memberClient.sendMessage(roomUuid, params.message);
+    await memberClient.sendMessage(roomId, params.message);
     return { success: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);
-    console.error("[circle/notifications] Send failed:", errorMsg);
+    const body = err instanceof CircleApiError ? err.responseBody : undefined;
+    console.error("[circle/notifications] Send failed:", errorMsg, body ? JSON.stringify(body) : "");
     return { success: false, error: errorMsg };
   }
 }

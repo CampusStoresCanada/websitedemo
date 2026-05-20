@@ -572,3 +572,108 @@ export async function setOrgMemberHidden(
 
   return { success: true };
 }
+
+// ---------------------------------------------------------------------------
+// Individual contact visibility
+// ---------------------------------------------------------------------------
+
+/**
+ * Show or hide a single contact record from non-privileged viewers.
+ * The contact remains in the DB; privileged viewers (org_admin, admin, super_admin)
+ * can always see it.
+ *
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function setContactHidden(
+  orgId: string,
+  contactId: string,
+  hidden: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const adminClient = createAdminClient();
+
+  const { error } = await adminClient
+    .from("contacts")
+    .update({ hidden, updated_at: new Date().toISOString() })
+    .eq("id", contactId)
+    .eq("organization_id", orgId);
+
+  if (error) {
+    console.error("[setContactHidden] Update failed:", error);
+    return { success: false, error: "Failed to update contact visibility" };
+  }
+
+  await logAuditEventSafe({
+    action: hidden ? "contact_hidden" : "contact_shown",
+    entityType: "organization",
+    entityId: orgId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { orgId, contactId, hidden },
+  });
+
+  return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Org profile section visibility settings
+// ---------------------------------------------------------------------------
+
+export interface OrgProfileVisibilityFlags {
+  showContacts: boolean;
+  showBrandColors: boolean;
+  showInBenchmarking: boolean;
+  showPrimaryContact: boolean;
+  showStoreInformation: boolean;
+}
+
+/**
+ * Update the org-level section visibility flags.
+ * Controls what non-admin viewers can see on the organization's profile page.
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function updateOrgProfileVisibilitySettings(
+  orgId: string,
+  flags: OrgProfileVisibilityFlags
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const adminClient = createAdminClient();
+
+  const { error } = await adminClient
+    .from("organizations")
+    .update({
+      show_contacts: flags.showContacts,
+      show_brand_colors: flags.showBrandColors,
+      show_in_benchmarking: flags.showInBenchmarking,
+      show_primary_contact: flags.showPrimaryContact,
+      show_store_information: flags.showStoreInformation,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", orgId);
+
+  if (error) {
+    console.error("[updateOrgProfileVisibilitySettings] Update failed:", error);
+    return { success: false, error: "Failed to update visibility settings" };
+  }
+
+  await logAuditEventSafe({
+    action: "organization_profile_visibility_updated",
+    entityType: "organization",
+    entityId: orgId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { orgId, flags },
+  });
+
+  return { success: true };
+}

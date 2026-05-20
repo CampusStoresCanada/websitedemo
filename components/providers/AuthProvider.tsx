@@ -31,6 +31,8 @@ interface AuthContextValue {
   isSurveyParticipant: boolean;
   /** True if the user is tagged as a benchmarking reviewer */
   isBenchmarkingReviewer: boolean;
+  /** True if the viewer's own org is a CANCOLL member — grants visibility of CANCOLL status on partner profiles */
+  isCancollMember: boolean;
   signOut: () => Promise<void>;
   refreshPermissions: () => Promise<void>;
   devOverride: PermissionState | null;
@@ -56,6 +58,7 @@ const AuthContext = createContext<AuthContextValue>({
   decryptionKey: null,
   isSurveyParticipant: false,
   isBenchmarkingReviewer: false,
+  isCancollMember: false,
   signOut: async () => {},
   refreshPermissions: async () => {},
   devOverride: null,
@@ -85,6 +88,7 @@ interface AuthProviderProps {
     organizations: UserOrganization[];
     isSurveyParticipant: boolean;
     isBenchmarkingReviewer: boolean;
+    isCancollMember?: boolean;
   } | null;
 }
 
@@ -203,6 +207,8 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     useState<boolean>(initialAuth?.isSurveyParticipant ?? false);
   const [isBenchmarkingReviewer, setIsBenchmarkingReviewer] =
     useState<boolean>(initialAuth?.isBenchmarkingReviewer ?? false);
+  const [isCancollMember, setIsCancollMember] =
+    useState<boolean>(initialAuth?.isCancollMember ?? false);
   const [isLoading, setIsLoading] = useState(initialAuth ? false : true);
   const [decryptionKey, setDecryptionKey] = useState<CryptoKey | null>(null);
   const [devOverride, setDevOverride] = useState<PermissionState | null>(null);
@@ -228,6 +234,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     organizations: UserOrganization[];
     isSurveyParticipant: boolean;
     isBenchmarkingReviewer: boolean;
+    isCancollMember: boolean;
   } | null>(
     initialAuth
       ? {
@@ -238,6 +245,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           organizations: initialAuth.organizations,
           isSurveyParticipant: initialAuth.isSurveyParticipant,
           isBenchmarkingReviewer: initialAuth.isBenchmarkingReviewer,
+          isCancollMember: initialAuth.isCancollMember ?? false,
         }
       : null
   );
@@ -331,7 +339,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             role,
             status,
             created_at,
-            organization:organizations(id, name, type, slug, logo_url)
+            organization:organizations(id, name, type, slug, logo_url, is_cancoll_member)
           `
           )
           .eq("user_id", userId)
@@ -339,20 +347,25 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       ]);
 
       if (profileResult.error || orgsResult.error) {
-        console.error("[AuthProvider] query errors:", JSON.stringify({
-          profileError: profileResult.error ? {
-            message: profileResult.error.message,
-            code: profileResult.error.code,
-            details: profileResult.error.details,
-            hint: profileResult.error.hint,
-          } : null,
-          orgsError: orgsResult.error ? {
-            message: orgsResult.error.message,
-            code: orgsResult.error.code,
-            details: orgsResult.error.details,
-            hint: orgsResult.error.hint,
-          } : null,
-        }, null, 2));
+        const anyError = profileResult.error ?? orgsResult.error;
+        const isAbort = anyError?.message?.toLowerCase().includes("abort") ||
+          anyError?.details?.toLowerCase().includes("abort");
+        if (!isAbort) {
+          console.error("[AuthProvider] query errors:", JSON.stringify({
+            profileError: profileResult.error ? {
+              message: profileResult.error.message,
+              code: profileResult.error.code,
+              details: profileResult.error.details,
+              hint: profileResult.error.hint,
+            } : null,
+            orgsError: orgsResult.error ? {
+              message: orgsResult.error.message,
+              code: orgsResult.error.code,
+              details: orgsResult.error.details,
+              hint: orgsResult.error.hint,
+            } : null,
+          }, null, 2));
+        }
         throw new Error("Failed to fetch profile or organization membership");
       }
 
@@ -392,12 +405,16 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         }
       }
 
+      // True if any of the viewer's active orgs is a CANCOLL member
+      const hasCANCOLL = userOrgs.some((uo) => uo.organization?.is_cancoll_member === true);
+
       setProfile(userProfile);
       setOrganizations(userOrgs);
       setGlobalRole(role);
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
       setIsBenchmarkingReviewer(userProfile?.is_benchmarking_reviewer ?? false);
+      setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
       setReauthMessage(null);
       setReauthCountdownSeconds(0);
@@ -410,6 +427,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
         isBenchmarkingReviewer: userProfile?.is_benchmarking_reviewer ?? false,
+        isCancollMember: hasCANCOLL,
       };
 
       console.log("[AuthProvider] fetchUserData success:", {
@@ -509,6 +527,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           setIsBenchmarkingReviewer(
             lastKnownGoodRef.current.isBenchmarkingReviewer
           );
+          setIsCancollMember(lastKnownGoodRef.current.isCancollMember);
         } else if (
           consecutivePermissionFailuresRef.current >= MAX_PERMISSION_RETRIES
         ) {
@@ -556,6 +575,11 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       if (event === "SIGNED_OUT" || (event as string) === "USER_DELETED") {
         await loadSession(null, event);
         return;
+      }
+      // Set a persistent cookie so we can distinguish "signed out known user" from
+      // "never signed in" — used by PartnerLinksSection gated placeholder UX.
+      if (event === "SIGNED_IN" && typeof document !== "undefined") {
+        document.cookie = "csc_had_session=1; max-age=31536000; path=/; SameSite=Lax";
       }
       await loadSession(session, event);
     });
@@ -795,6 +819,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       decryptionKey,
       isSurveyParticipant: effectiveSurveyParticipant,
       isBenchmarkingReviewer,
+      isCancollMember,
       signOut,
       refreshPermissions,
       devOverride,
@@ -819,6 +844,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       decryptionKey,
       effectiveSurveyParticipant,
       isBenchmarkingReviewer,
+      isCancollMember,
       signOut,
       refreshPermissions,
       devOverride,

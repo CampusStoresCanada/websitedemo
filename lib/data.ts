@@ -2,6 +2,21 @@ import { supabase } from "./supabase";
 import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
+/** Org data embedded in a board card contact join. */
+export type OrgForCard = Pick<Organization, "id" | "slug" | "logo_url" | "type" | "membership_status" | "archived_at"> & {
+  brand_colors: Pick<BrandColor, "hex" | "sort_order">[];
+};
+
+/** Contact data embedded in a site_content slot join. */
+export type ContactForCard = Pick<Contact, "id" | "name" | "profile_picture_url" | "role_title" | "circle_id"> & {
+  organization: OrgForCard | null;
+};
+
+/** site_content row with the linked contact record (and its org + brand colours) if any. */
+export type SiteContentWithContact = SiteContent & {
+  contact: ContactForCard | null;
+};
+
 // Timeout fallback that works with PostgrestResponse types
 const TIMEOUT_ERROR = { message: "timeout", details: "", hint: "", code: "TIMEOUT", name: "TimeoutError" } as const;
 
@@ -143,6 +158,7 @@ export async function getContactsForOrganization(
       .select("*")
       .eq("organization_id", organizationId)
       .is("archived_at", null)
+      .order("is_primary", { ascending: false })
       .order("name"),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
@@ -278,14 +294,137 @@ export async function getOrganizationProfile(slug: string): Promise<{
   return { organization, contacts, brandColors, benchmarking, allBenchmarking };
 }
 
+// ─────────────────────────────────────────────────────────────────
+// FTE stats helper — exact benchmarking + bucket-floor fallback
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Computes total FTE served across active members.
+ *
+ * Strategy:
+ *   1. Members with benchmarking.enrollment_fte → exact value.
+ *   2. Members without benchmarking but with a computed membership_assessment
+ *      → use the assessment's metric_value (the FTE submitted for billing).
+ *   3. Members with no data at all → use the smallest known benchmarking
+ *      enrollment_fte as a conservative floor (i.e. at least one Royal Roads).
+ *
+ * Returns the total and a flag indicating whether estimates were used
+ * (so the UI can append "+" to the display).
+ */
+async function computeFteStats(): Promise<{ total: number; hasEstimates: boolean }> {
+  const adminClient = createAdminClient();
+
+  // 1. All active member IDs
+  const memberOrgsResult = await withTimeout(
+    adminClient
+      .from("organizations")
+      .select("id")
+      .eq("type", "Member")
+      .eq("membership_status", "active")
+      .is("archived_at", null),
+    DB_TIMEOUT,
+    { data: null, error: TIMEOUT_ERROR }
+  );
+
+  const allMemberIds = ((memberOrgsResult.data ?? []) as { id: string }[]).map((o) => o.id);
+  if (!allMemberIds.length) return { total: 0, hasEstimates: false };
+
+  // 2. Benchmarking FTE + organizations.fte + assessment metric_values (parallel)
+  const [benchmarkingResult, orgFteResult, assessmentResult] = await Promise.all([
+    withTimeout(
+      adminClient
+        .from("benchmarking")
+        .select("organization_id, enrollment_fte, fiscal_year")
+        .in("organization_id", allMemberIds)
+        .not("enrollment_fte", "is", null)
+        .order("fiscal_year", { ascending: false }),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    ),
+    withTimeout(
+      adminClient
+        .from("organizations")
+        .select("id, fte")
+        .in("id", allMemberIds)
+        .not("fte", "is", null),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    ),
+    withTimeout(
+      adminClient
+        .from("membership_assessments")
+        .select("organization_id, metric_value, metric_key, billing_cycle_year")
+        .in("organization_id", allMemberIds)
+        .eq("assessment_status", "computed")
+        .not("metric_value", "is", null)
+        .order("billing_cycle_year", { ascending: false }),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    ),
+  ]);
+
+  // Direct organizations.fte values (populated from Notion sync)
+  const orgFteMap = new Map<string, number>();
+  for (const row of ((orgFteResult.data ?? []) as { id: string; fte: number }[])) {
+    if (row.fte > 0) orgFteMap.set(row.id, row.fte);
+  }
+
+  // Latest benchmarking per org (rows ordered fiscal_year desc → first = latest)
+  const benchmarkedOrgs = new Map<string, number>();
+  for (const row of ((benchmarkingResult.data ?? []) as { organization_id: string; enrollment_fte: number }[])) {
+    if (!benchmarkedOrgs.has(row.organization_id)) {
+      benchmarkedOrgs.set(row.organization_id, row.enrollment_fte);
+    }
+  }
+
+  // Latest assessment metric_value per org — prefer enrollment_fte key, accept any
+  const assessedOrgs = new Map<string, number>();
+  // First pass: enrollment-based metric keys
+  for (const row of ((assessmentResult.data ?? []) as { organization_id: string; metric_value: number; metric_key: string }[])) {
+    if (assessedOrgs.has(row.organization_id)) continue;
+    if (row.metric_key?.includes("enrollment_fte")) {
+      assessedOrgs.set(row.organization_id, row.metric_value);
+    }
+  }
+  // Second pass: any computed metric_value for orgs still missing
+  for (const row of ((assessmentResult.data ?? []) as { organization_id: string; metric_value: number; metric_key: string }[])) {
+    if (!assessedOrgs.has(row.organization_id) && row.metric_value != null) {
+      assessedOrgs.set(row.organization_id, row.metric_value);
+    }
+  }
+
+  // Conservative floor: smallest known enrollment_fte across all benchmarked members
+  const knownFteValues = Array.from(benchmarkedOrgs.values());
+  const conservativeFloor = knownFteValues.length > 0
+    ? Math.min(...knownFteValues)
+    : 90; // Royal Roads approximation if no benchmarking data at all
+
+  // 3. Sum: exact benchmarking first, then org FTE, then assessment, then floor
+  //    Priority: benchmarking.enrollment_fte > organizations.fte (Notion) > assessment metric_value > conservative floor
+  let total = 0;
+  for (const fte of benchmarkedOrgs.values()) {
+    total += fte;
+  }
+  const unbenchmarkedIds = allMemberIds.filter((id) => !benchmarkedOrgs.has(id));
+  for (const id of unbenchmarkedIds) {
+    const orgFte = orgFteMap.get(id);
+    const assessedFte = assessedOrgs.get(id);
+    total += orgFte ?? assessedFte ?? conservativeFloor;
+  }
+
+  return { total, hasEstimates: unbenchmarkedIds.length > 0 };
+}
+
 // Get counts for stats
 export async function getStats(): Promise<{
   memberCount: number;
   partnerCount: number;
   provinceCount: number;
+  totalFteServed: number;
+  fteIsEstimate: boolean;
 }> {
-  // Run all queries in parallel with timeouts
-  const [memberResult, partnerResult, provincesResult] = await Promise.all([
+  // Member/partner counts and province list run in parallel with FTE computation
+  const [memberResult, partnerResult, provincesResult, fteData] = await Promise.all([
     withTimeout(
       supabase
         .from("organizations")
@@ -317,6 +456,7 @@ export async function getStats(): Promise<{
       DB_TIMEOUT,
       { data: null, error: null }
     ),
+    computeFteStats().catch(() => ({ total: 0, hasEstimates: false })),
   ]);
 
   const uniqueProvinces = new Set(
@@ -327,6 +467,8 @@ export async function getStats(): Promise<{
     memberCount: memberResult.count || 0,
     partnerCount: partnerResult.count || 0,
     provinceCount: uniqueProvinces.size,
+    totalFteServed: fteData.total,
+    fteIsEstimate: fteData.hasEstimates,
   };
 }
 
@@ -386,15 +528,75 @@ export async function getDirectoryPartners(): Promise<Partial<Organization>[]> {
 // Site content (admin-editable: board, staff, etc.)
 // ─────────────────────────────────────────────────────────────────
 
-/** Fetch active site content entries for a given section, ordered by display_order. */
-export async function getSiteContent(section: string): Promise<SiteContent[]> {
+// ─────────────────────────────────────────────────────────────────
+// CSC staff — live contact query
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all non-archived contacts from the Campus Stores Canada organization
+ * whose contact_type includes "Staff", ordered by name.
+ *
+ * Uses the admin client so it works server-side without depending on RLS.
+ */
+export async function getCSCStaff(): Promise<Contact[]> {
+  try {
+    const adminClient = createAdminClient();
+
+    // Look up the CSC org by slug — avoids hardcoding a UUID.
+    const orgResult = await withTimeout(
+      adminClient
+        .from("organizations")
+        .select("id")
+        .eq("slug", "campus-stores-canada")
+        .single(),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    );
+
+    if (orgResult.error || !orgResult.data?.id) {
+      console.error("getCSCStaff: could not resolve CSC organization", orgResult.error);
+      return [];
+    }
+
+    const staffResult = await withTimeout(
+      adminClient
+        .from("contacts")
+        .select("*")
+        .eq("organization_id", orgResult.data.id)
+        .contains("contact_type", ["Staff"])
+        .is("archived_at", null)
+        .order("name"),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    );
+
+    if (staffResult.error) {
+      console.error("getCSCStaff: error fetching staff contacts", staffResult.error);
+      return [];
+    }
+
+    return (staffResult.data || []) as Contact[];
+  } catch (err) {
+    console.error("getCSCStaff: unexpected error", err);
+    return [];
+  }
+}
+
+/** Fetch active site content entries for a given section, ordered by display_order.
+ *  Joins the linked contact record (name, profile_picture_url, role_title) when contact_id is set. */
+export async function getSiteContent(section: string): Promise<SiteContentWithContact[]> {
+  const CONTACT_JOIN = `*, contact:contacts!site_content_contact_id_fkey(
+    id, name, profile_picture_url, role_title, circle_id,
+    organization:organizations!contacts_organization_id_fkey(id, slug, logo_url, type, membership_status, archived_at, brand_colors(hex, sort_order))
+  )`;
+
   // Prefer trusted server-side read (service role) so public rendering does not depend on anon RLS policy.
   try {
     const adminClient = createAdminClient();
     const adminResult = await withTimeout(
       adminClient
         .from("site_content")
-        .select("*")
+        .select(CONTACT_JOIN)
         .eq("section", section)
         .or("is_active.eq.true,is_active.is.null")
         .order("display_order"),
@@ -403,16 +605,21 @@ export async function getSiteContent(section: string): Promise<SiteContent[]> {
     );
 
     if (!adminResult.error) {
-      return (adminResult.data || []) as SiteContent[];
+      return (adminResult.data || []) as unknown as SiteContentWithContact[];
     }
-  } catch {
+    // Log the admin client error so it's visible — don't swallow it silently
+    console.warn(
+      `[getSiteContent] Admin client failed for "${section}" (code: ${adminResult.error.code}): ${adminResult.error.message}. Falling back to anon client.`
+    );
+  } catch (err) {
     // Service role may be unavailable in some local setups; fallback to anon client below.
+    console.warn(`[getSiteContent] Admin client threw for "${section}":`, err);
   }
 
   const anonResult = await withTimeout(
     supabase
       .from("site_content")
-      .select("*")
+      .select(CONTACT_JOIN)
       .eq("section", section)
       .or("is_active.eq.true,is_active.is.null")
       .order("display_order"),
@@ -421,7 +628,7 @@ export async function getSiteContent(section: string): Promise<SiteContent[]> {
   );
 
   if (!anonResult.error) {
-    return (anonResult.data || []) as SiteContent[];
+    return (anonResult.data || []) as unknown as SiteContentWithContact[];
   }
 
   const errorCode = typeof anonResult.error.code === "string" ? anonResult.error.code : "";

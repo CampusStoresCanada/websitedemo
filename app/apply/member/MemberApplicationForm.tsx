@@ -36,10 +36,15 @@ export function MemberApplicationForm() {
     setError(null);
     setIsLoading(true);
 
+    const rawWebsite = website.trim();
+    const normalizedWebsite = rawWebsite && !/^https?:\/\//i.test(rawWebsite)
+      ? `https://${rawWebsite}`
+      : rawWebsite;
+
     const formData: MemberApplicationData = {
       organization_name: orgName.trim(),
       institution_type: institutionType,
-      website: website.trim(),
+      website: normalizedWebsite,
       province,
       city: city.trim(),
       contact_name: contactName.trim(),
@@ -154,7 +159,7 @@ export function MemberApplicationForm() {
           </label>
           <input
             id="website"
-            type="url"
+            type="text"
             required
             value={website}
             onChange={(e) => setWebsite(e.target.value)}

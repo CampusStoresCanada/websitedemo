@@ -4,6 +4,8 @@ import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
+import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
+import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -72,6 +74,21 @@ export default async function OrgProfilePage({ params }: PageProps) {
   if (!organization) {
     notFound();
   }
+
+  // Check for active sponsorship
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: sponsorRow } = await (createAdminClient() as any)
+    .from("sponsor_agreements")
+    .select("tier:sponsor_tiers(name, slug, color, icon)")
+    .eq("organization_id", organization.id)
+    .eq("status", "active")
+    .lte("start_date", today)
+    .gte("end_date", today)
+    .limit(1)
+    .maybeSingle();
+  const sponsorTier = sponsorRow?.tier
+    ? { name: sponsorRow.tier.name, slug: sponsorRow.tier.slug, color: sponsorRow.tier.color ?? "#888", icon: sponsorRow.tier.icon ?? null }
+    : null;
 
   const canViewConferenceAttendance = viewer.viewerLevel !== "public";
   let conferenceAttendance: OrgConferenceAttendanceRow[] = [];
@@ -170,6 +187,20 @@ export default async function OrgProfilePage({ params }: PageProps) {
 
   console.log(`[org/${slug}] viewer=${viewer.viewerLevel} contacts sample: ${JSON.stringify(contacts.slice(0,3).map(c => ({ id: c.id, name: c.name, circle_id: (c as Record<string,unknown>).circle_id })))}`);
 
+  // Resolve partner links (filter by viewer, sign storage URLs server-side)
+  const orgExtra = organization as Record<string, unknown>;
+  const rawPartnerLinks = parsePartnerLinks(orgExtra.partner_links ?? []);
+  const { visible: visibleLinks, hasGated, gatedVisibility } =
+    await resolvePartnerLinksForViewer(rawPartnerLinks, viewer.viewerLevel);
+
+  // Org admins and super/admins can edit links — raw links needed for the editor
+  const canEditLinks =
+    viewer.viewerLevel === "super_admin" ||
+    viewer.viewerLevel === "admin" ||
+    (viewer.viewerLevel === "org_admin" &&
+      viewer.viewerOrgAdminIds.includes(organization.id));
+  const editorRawLinks = canEditLinks ? rawPartnerLinks : undefined;
+
   // Render different layouts based on organization type
   if (organization.type === "Member") {
     return (
@@ -182,6 +213,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         viewerLevel={viewer.viewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
+        sponsorTier={sponsorTier}
       />
     );
   }
@@ -195,6 +227,11 @@ export default async function OrgProfilePage({ params }: PageProps) {
       viewerLevel={viewer.viewerLevel}
       conferenceAttendance={conferenceAttendance}
       orgAssignableUsers={orgAssignableUsers}
+      sponsorTier={sponsorTier}
+      visibleLinks={visibleLinks}
+      hasGatedLinks={hasGated}
+      rawLinks={editorRawLinks}
+      canEditLinks={canEditLinks}
     />
   );
 }

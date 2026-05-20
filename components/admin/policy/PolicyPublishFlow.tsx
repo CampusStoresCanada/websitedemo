@@ -130,7 +130,7 @@ export default function PolicyPublishFlow({
                 key={i}
                 className="p-3 bg-blue-50 border border-blue-200 rounded-[var(--radius-md)] text-sm text-blue-800"
               >
-                <span className="text-xs font-medium uppercase text-[#EE2A2E] mr-2">
+                <span className="text-xs font-medium uppercase text-accent mr-2">
                   {impact.category}
                 </span>
                 {impact.description}

@@ -81,6 +81,7 @@ export interface CircleChatRoomParticipant {
 }
 
 export interface CircleChatRoom {
+  id: number;
   uuid: string;
   chat_room_kind: "direct" | "group_chat";
   chat_room_name: string;

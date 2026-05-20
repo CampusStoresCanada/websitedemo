@@ -74,7 +74,7 @@ export default async function ConferenceWarRoomPage({
             href={`/admin/conference/${id}/check-in`}
             target="_blank"
             rel="noopener noreferrer"
-            className="rounded-md border border-[#EE2A2E] bg-[#EE2A2E] px-3 py-2 text-sm font-medium text-white hover:bg-[#b50001]"
+            className="rounded-md border border-accent bg-accent px-3 py-2 text-sm font-medium text-white hover:bg-accent-hover"
           >
             Open Check-in Desk
           </Link>

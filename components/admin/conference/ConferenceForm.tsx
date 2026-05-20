@@ -175,7 +175,7 @@ export default function ConferenceForm({
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="CSC 2027 Annual Conference"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
@@ -186,7 +186,7 @@ export default function ConferenceForm({
             required
             value={year}
             onChange={(e) => setYear(parseInt(e.target.value))}
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
 
@@ -197,7 +197,7 @@ export default function ConferenceForm({
             value={editionCode}
             onChange={(e) => setEditionCode(e.target.value)}
             placeholder="00"
-            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
+            className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent"
           />
         </div>
       </div>
@@ -207,11 +207,11 @@ export default function ConferenceForm({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">City</label>
-            <input type="text" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="text" value={locationCity} onChange={(e) => setLocationCity(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Province</label>
-            <input type="text" value={locationProvince} onChange={(e) => setLocationProvince(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="text" value={locationProvince} onChange={(e) => setLocationProvince(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div className="col-span-2">
             <label className="block text-xs text-gray-500 mb-1">Venue (Google Places)</label>
@@ -221,7 +221,7 @@ export default function ConferenceForm({
               value={locationVenue}
               onChange={(e) => setLocationVenue(e.target.value)}
               placeholder="Start typing venue or address..."
-              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent"
             />
             {placesReady && (
               <p className="mt-1 text-xs text-gray-500">
@@ -242,19 +242,19 @@ export default function ConferenceForm({
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Start Date</label>
-            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">End Date</label>
-            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Opens</label>
-            <input type="datetime-local" value={registrationOpenAt ? utcToLocalInput(registrationOpenAt) : ""} onChange={(e) => setRegistrationOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="datetime-local" value={registrationOpenAt ? utcToLocalInput(registrationOpenAt) : ""} onChange={(e) => setRegistrationOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Closes</label>
-            <input type="datetime-local" value={registrationCloseAt ? utcToLocalInput(registrationCloseAt) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="datetime-local" value={registrationCloseAt ? utcToLocalInput(registrationCloseAt) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
         </div>
       </fieldset>
@@ -264,19 +264,19 @@ export default function ConferenceForm({
         <div className="grid grid-cols-3 gap-4">
           <div>
             <label className="block text-xs text-gray-500 mb-1">Timezone</label>
-            <input type="text" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="text" value={timezone} onChange={(e) => setTimezone(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tax Jurisdiction</label>
-            <input type="text" value={taxJurisdiction} onChange={(e) => setTaxJurisdiction(e.target.value)} placeholder="ON" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="text" value={taxJurisdiction} onChange={(e) => setTaxJurisdiction(e.target.value)} placeholder="ON" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Tax Rate %</label>
-            <input type="number" step="0.01" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} placeholder="13.0" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="number" step="0.01" value={taxRatePct} onChange={(e) => setTaxRatePct(e.target.value)} placeholder="13.0" className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div className="col-span-3">
             <label className="block text-xs text-gray-500 mb-1">Stripe Tax Rate ID</label>
-            <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-[#EE2A2E]" />
+            <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent" />
             <p className="mt-1 text-xs text-gray-400">
               From Stripe Dashboard &rarr; Tax Rates. Must match the jurisdiction rate above.
             </p>
@@ -314,7 +314,7 @@ export default function ConferenceForm({
         <button
           type="submit"
           disabled={isLoading}
-          className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50"
+          className="px-6 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50"
         >
           {isLoading ? "Saving..." : isEdit ? "Save Changes" : "Create Conference"}
         </button>

@@ -1141,7 +1141,7 @@ export default function ConferenceScheduleDesigner({
           <button
             type="button"
             onClick={addRoomInventoryRow}
-            className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
           >
             Add Room
           </button>
@@ -1391,7 +1391,7 @@ export default function ConferenceScheduleDesigner({
               <button
                 type="button"
                 onClick={applyDetailsModal}
-                className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
               >
                 Apply Details
               </button>

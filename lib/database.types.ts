@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _prisma_migrations: {
@@ -1009,6 +984,161 @@ export type Database = {
             columns: ["triggered_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_documents: {
+        Row: {
+          context: string
+          created_at: string
+          document_type: string
+          file_size_bytes: number | null
+          id: string
+          meeting_id: string | null
+          mime_type: string | null
+          onedrive_item_id: string | null
+          onedrive_path: string | null
+          storage_path: string | null
+          title: string
+          updated_at: string
+          uploaded_by: string | null
+          visible_from: string | null
+        }
+        Insert: {
+          context?: string
+          created_at?: string
+          document_type?: string
+          file_size_bytes?: number | null
+          id?: string
+          meeting_id?: string | null
+          mime_type?: string | null
+          onedrive_item_id?: string | null
+          onedrive_path?: string | null
+          storage_path?: string | null
+          title: string
+          updated_at?: string
+          uploaded_by?: string | null
+          visible_from?: string | null
+        }
+        Update: {
+          context?: string
+          created_at?: string
+          document_type?: string
+          file_size_bytes?: number | null
+          id?: string
+          meeting_id?: string | null
+          mime_type?: string | null
+          onedrive_item_id?: string | null
+          onedrive_path?: string | null
+          storage_path?: string | null
+          title?: string
+          updated_at?: string
+          uploaded_by?: string | null
+          visible_from?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_documents_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_documents_uploaded_by_fkey"
+            columns: ["uploaded_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_meetings: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          id: string
+          meeting_date: string
+          meeting_type: string
+          notes: string | null
+          status: string
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          meeting_date: string
+          meeting_type?: string
+          notes?: string | null
+          status?: string
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          meeting_date?: string
+          meeting_type?: string
+          notes?: string | null
+          status?: string
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_meetings_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_qbo_snapshots: {
+        Row: {
+          approved_by: string | null
+          data_json: Json
+          id: string
+          meeting_id: string | null
+          period_end_date: string
+          pulled_at: string
+          report_type: string
+        }
+        Insert: {
+          approved_by?: string | null
+          data_json: Json
+          id?: string
+          meeting_id?: string | null
+          period_end_date: string
+          pulled_at?: string
+          report_type: string
+        }
+        Update: {
+          approved_by?: string | null
+          data_json?: Json
+          id?: string
+          meeting_id?: string | null
+          period_end_date?: string
+          pulled_at?: string
+          report_type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_qbo_snapshots_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_qbo_snapshots_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
             referencedColumns: ["id"]
           },
         ]
@@ -3032,7 +3162,9 @@ export type Database = {
           created_at: string | null
           dietary_restrictions: string | null
           email: string | null
+          hidden: boolean
           id: string
+          is_primary: boolean
           last_contact_date: string | null
           last_edited_time: string | null
           metadata: Json | null
@@ -3064,7 +3196,9 @@ export type Database = {
           created_at?: string | null
           dietary_restrictions?: string | null
           email?: string | null
+          hidden?: boolean
           id?: string
+          is_primary?: boolean
           last_contact_date?: string | null
           last_edited_time?: string | null
           metadata?: Json | null
@@ -3096,7 +3230,9 @@ export type Database = {
           created_at?: string | null
           dietary_restrictions?: string | null
           email?: string | null
+          hidden?: boolean
           id?: string
+          is_primary?: boolean
           last_contact_date?: string | null
           last_edited_time?: string | null
           metadata?: Json | null
@@ -3132,6 +3268,51 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      content_change_tokens: {
+        Row: {
+          change_id: string
+          created_at: string
+          expires_at: string
+          id: string
+          intended_for: string
+          token_hash: string
+          used_at: string | null
+        }
+        Insert: {
+          change_id: string
+          created_at?: string
+          expires_at: string
+          id?: string
+          intended_for: string
+          token_hash: string
+          used_at?: string | null
+        }
+        Update: {
+          change_id?: string
+          created_at?: string
+          expires_at?: string
+          id?: string
+          intended_for?: string
+          token_hash?: string
+          used_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "content_change_tokens_change_id_fkey"
+            columns: ["change_id"]
+            isOneToOne: false
+            referencedRelation: "pending_content_changes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "content_change_tokens_intended_for_fkey"
+            columns: ["intended_for"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -3183,6 +3364,47 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dashboard_widget_config: {
+        Row: {
+          config_json: Json | null
+          display_order: number
+          enabled: boolean
+          id: string
+          role: string
+          updated_at: string
+          updated_by: string | null
+          widget_key: string
+        }
+        Insert: {
+          config_json?: Json | null
+          display_order?: number
+          enabled?: boolean
+          id?: string
+          role: string
+          updated_at?: string
+          updated_by?: string | null
+          widget_key: string
+        }
+        Update: {
+          config_json?: Json | null
+          display_order?: number
+          enabled?: boolean
+          id?: string
+          role?: string
+          updated_at?: string
+          updated_by?: string | null
+          widget_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dashboard_widget_config_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -3517,6 +3739,57 @@ export type Database = {
           {
             foreignKeyName: "events_created_by_fkey"
             columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      explain_requests: {
+        Row: {
+          created_at: string
+          element_selector: string | null
+          element_text: string | null
+          id: string
+          note: string | null
+          organization_id: string | null
+          page_url: string
+          status: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          organization_id?: string | null
+          page_url: string
+          status?: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          organization_id?: string | null
+          page_url?: string
+          status?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "explain_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "explain_requests_user_id_fkey"
+            columns: ["user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -4454,8 +4727,10 @@ export type Database = {
           archived_at: string | null
           banner_url: string | null
           canceled_at: string | null
+          cancoll_tier: string | null
           catalogue: string | null
           catalogue_url: string | null
+          certifications: string[]
           circle_access_group_id: string | null
           circle_id: string | null
           circle_properties: Json | null
@@ -4478,6 +4753,7 @@ export type Database = {
           highlight_product_name: string | null
           highlight_the_deal: string | null
           id: string
+          is_cancoll_member: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null
@@ -4507,6 +4783,7 @@ export type Database = {
           organization: string | null
           organization_type: string | null
           payment_status: string | null
+          partner_links: Json
           phone: string | null
           postal_code: string | null
           primary_category: string | null
@@ -4519,6 +4796,11 @@ export type Database = {
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
           send_next_email: boolean | null
+          show_brand_colors: boolean
+          show_contacts: boolean
+          show_in_benchmarking: boolean
+          show_primary_contact: boolean
+          show_store_information: boolean
           slug: string
           source_of_truth: string
           square_footage: number | null
@@ -4542,8 +4824,10 @@ export type Database = {
           archived_at?: string | null
           banner_url?: string | null
           canceled_at?: string | null
+          cancoll_tier?: string | null
           catalogue?: string | null
           catalogue_url?: string | null
+          certifications?: string[]
           circle_access_group_id?: string | null
           circle_id?: string | null
           circle_properties?: Json | null
@@ -4566,6 +4850,7 @@ export type Database = {
           highlight_product_name?: string | null
           highlight_the_deal?: string | null
           id: string
+          is_cancoll_member?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -4595,6 +4880,7 @@ export type Database = {
           organization?: string | null
           organization_type?: string | null
           payment_status?: string | null
+          partner_links?: Json
           phone?: string | null
           postal_code?: string | null
           primary_category?: string | null
@@ -4607,6 +4893,11 @@ export type Database = {
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
           send_next_email?: boolean | null
+          show_brand_colors?: boolean
+          show_contacts?: boolean
+          show_in_benchmarking?: boolean
+          show_primary_contact?: boolean
+          show_store_information?: boolean
           slug: string
           source_of_truth?: string
           square_footage?: number | null
@@ -4630,8 +4921,10 @@ export type Database = {
           archived_at?: string | null
           banner_url?: string | null
           canceled_at?: string | null
+          cancoll_tier?: string | null
           catalogue?: string | null
           catalogue_url?: string | null
+          certifications?: string[]
           circle_access_group_id?: string | null
           circle_id?: string | null
           circle_properties?: Json | null
@@ -4654,6 +4947,7 @@ export type Database = {
           highlight_product_name?: string | null
           highlight_the_deal?: string | null
           id?: string
+          is_cancoll_member?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -4682,6 +4976,7 @@ export type Database = {
           onboarding_step?: number | null
           organization?: string | null
           organization_type?: string | null
+          partner_links?: Json
           payment_status?: string | null
           phone?: string | null
           postal_code?: string | null
@@ -4695,6 +4990,11 @@ export type Database = {
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
           send_next_email?: boolean | null
+          show_brand_colors?: boolean
+          show_contacts?: boolean
+          show_in_benchmarking?: boolean
+          show_primary_contact?: boolean
+          show_store_information?: boolean
           slug?: string
           source_of_truth?: string
           square_footage?: number | null
@@ -4782,6 +5082,100 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      pending_content_changes: {
+        Row: {
+          anchor_id: string | null
+          batch_id: string | null
+          counter_to_id: string | null
+          created_at: string
+          entity_display_name: string | null
+          expires_at: string
+          field_display_label: string | null
+          id: string
+          page_href: string | null
+          previous_value: Json | null
+          proposed_value: Json
+          requested_at: string
+          requested_by: string
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          status: Database["public"]["Enums"]["pending_change_status"]
+          target_column: string
+          target_entity_id: string
+          target_table: string
+          updated_at: string
+        }
+        Insert: {
+          anchor_id?: string | null
+          batch_id?: string | null
+          counter_to_id?: string | null
+          created_at?: string
+          entity_display_name?: string | null
+          expires_at?: string
+          field_display_label?: string | null
+          id?: string
+          page_href?: string | null
+          previous_value?: Json | null
+          proposed_value: Json
+          requested_at?: string
+          requested_by: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["pending_change_status"]
+          target_column: string
+          target_entity_id: string
+          target_table: string
+          updated_at?: string
+        }
+        Update: {
+          anchor_id?: string | null
+          batch_id?: string | null
+          counter_to_id?: string | null
+          created_at?: string
+          entity_display_name?: string | null
+          expires_at?: string
+          field_display_label?: string | null
+          id?: string
+          page_href?: string | null
+          previous_value?: Json | null
+          proposed_value?: Json
+          requested_at?: string
+          requested_by?: string
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          status?: Database["public"]["Enums"]["pending_change_status"]
+          target_column?: string
+          target_entity_id?: string
+          target_table?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pending_content_changes_counter_to_id_fkey"
+            columns: ["counter_to_id"]
+            isOneToOne: false
+            referencedRelation: "pending_content_changes"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pending_content_changes_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "pending_content_changes_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -6043,9 +6437,54 @@ export type Database = {
           },
         ]
       }
+      share_links: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string
+          id: string
+          max_uses: number
+          note: string | null
+          page_title: string
+          page_url: string
+          use_count: number
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at: string
+          id?: string
+          max_uses?: number
+          note?: string | null
+          page_title: string
+          page_url: string
+          use_count?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          id?: string
+          max_uses?: number
+          note?: string | null
+          page_title?: string
+          page_url?: string
+          use_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "share_links_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       site_content: {
         Row: {
           body: string | null
+          contact_id: string | null
           content_type: string
           created_at: string
           display_order: number
@@ -6061,6 +6500,7 @@ export type Database = {
         }
         Insert: {
           body?: string | null
+          contact_id?: string | null
           content_type?: string
           created_at?: string
           display_order?: number
@@ -6076,6 +6516,7 @@ export type Database = {
         }
         Update: {
           body?: string | null
+          contact_id?: string | null
           content_type?: string
           created_at?: string
           display_order?: number
@@ -6088,6 +6529,287 @@ export type Database = {
           title?: string | null
           updated_at?: string
           updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "site_content_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_content_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_content_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "site_content_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sponsor_agreements: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          custom_benefits: Json | null
+          end_date: string
+          id: string
+          notes: string | null
+          organization_id: string
+          signed_at: string | null
+          signed_by_contact_id: string | null
+          signed_doc_url: string | null
+          start_date: string
+          status: string
+          tier_id: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          custom_benefits?: Json | null
+          end_date: string
+          id?: string
+          notes?: string | null
+          organization_id: string
+          signed_at?: string | null
+          signed_by_contact_id?: string | null
+          signed_doc_url?: string | null
+          start_date: string
+          status?: string
+          tier_id: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          custom_benefits?: Json | null
+          end_date?: string
+          id?: string
+          notes?: string | null
+          organization_id?: string
+          signed_at?: string | null
+          signed_by_contact_id?: string | null
+          signed_doc_url?: string | null
+          start_date?: string
+          status?: string
+          tier_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sponsor_agreements_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_signed_by_contact_id_fkey"
+            columns: ["signed_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_signed_by_contact_id_fkey"
+            columns: ["signed_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_signed_by_contact_id_fkey"
+            columns: ["signed_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_signed_by_contact_id_fkey"
+            columns: ["signed_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_agreements_tier_id_fkey"
+            columns: ["tier_id"]
+            isOneToOne: false
+            referencedRelation: "sponsor_tiers"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sponsor_placement_slots: {
+        Row: {
+          config_schema: Json
+          created_at: string
+          description: string | null
+          display_order: number
+          id: string
+          is_active: boolean
+          key: string
+          label: string
+          location: string
+        }
+        Insert: {
+          config_schema?: Json
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          key: string
+          label: string
+          location: string
+        }
+        Update: {
+          config_schema?: Json
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          id?: string
+          is_active?: boolean
+          key?: string
+          label?: string
+          location?: string
+        }
+        Relationships: []
+      }
+      sponsor_placements: {
+        Row: {
+          agreement_id: string
+          config_json: Json
+          created_at: string
+          display_order: number
+          end_date: string | null
+          id: string
+          is_active: boolean
+          link_url: string | null
+          logo_url: string | null
+          slot_id: string
+          start_date: string | null
+          updated_at: string
+        }
+        Insert: {
+          agreement_id: string
+          config_json?: Json
+          created_at?: string
+          display_order?: number
+          end_date?: string | null
+          id?: string
+          is_active?: boolean
+          link_url?: string | null
+          logo_url?: string | null
+          slot_id: string
+          start_date?: string | null
+          updated_at?: string
+        }
+        Update: {
+          agreement_id?: string
+          config_json?: Json
+          created_at?: string
+          display_order?: number
+          end_date?: string | null
+          id?: string
+          is_active?: boolean
+          link_url?: string | null
+          logo_url?: string | null
+          slot_id?: string
+          start_date?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sponsor_placements_agreement_id_fkey"
+            columns: ["agreement_id"]
+            isOneToOne: false
+            referencedRelation: "sponsor_agreements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sponsor_placements_slot_id_fkey"
+            columns: ["slot_id"]
+            isOneToOne: false
+            referencedRelation: "sponsor_placement_slots"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sponsor_tiers: {
+        Row: {
+          benefits: Json
+          color: string | null
+          created_at: string
+          description: string | null
+          display_order: number
+          icon: string | null
+          id: string
+          is_active: boolean
+          max_sponsors: number | null
+          name: string
+          price_cents: number | null
+          slug: string
+          updated_at: string
+        }
+        Insert: {
+          benefits?: Json
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          max_sponsors?: number | null
+          name: string
+          price_cents?: number | null
+          slug: string
+          updated_at?: string
+        }
+        Update: {
+          benefits?: Json
+          color?: string | null
+          created_at?: string
+          description?: string | null
+          display_order?: number
+          icon?: string | null
+          id?: string
+          is_active?: boolean
+          max_sponsors?: number | null
+          name?: string
+          price_cents?: number | null
+          slug?: string
+          updated_at?: string
         }
         Relationships: []
       }
@@ -6879,6 +7601,41 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      user_bookmarks: {
+        Row: {
+          created_at: string
+          id: string
+          note: string | null
+          title: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          note?: string | null
+          title: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          note?: string | null
+          title?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_bookmarks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -7828,6 +8585,7 @@ export type Database = {
           archived_at: string | null
           banner_url: string | null
           canceled_at: string | null
+          cancoll_tier: string | null
           catalogue: string | null
           catalogue_url: string | null
           circle_access_group_id: string | null
@@ -7852,6 +8610,7 @@ export type Database = {
           highlight_product_name: string | null
           highlight_the_deal: string | null
           id: string
+          is_cancoll_member: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null
@@ -7893,6 +8652,11 @@ export type Database = {
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
           send_next_email: boolean | null
+          show_brand_colors: boolean
+          show_contacts: boolean
+          show_in_benchmarking: boolean
+          show_primary_contact: boolean
+          show_store_information: boolean
           slug: string
           source_of_truth: string
           square_footage: number | null
@@ -8082,6 +8846,7 @@ export type Database = {
         | "locked"
         | "reactivated"
         | "canceled"
+      pending_change_status: "pending" | "approved" | "rejected" | "expired"
       trigger_source:
         | "manual"
         | "renewal"
@@ -8213,9 +8978,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       automation_mode: ["draft_only", "auto_send"],
@@ -8246,6 +9008,7 @@ export const Constants = {
         "reactivated",
         "canceled",
       ],
+      pending_change_status: ["pending", "approved", "rejected", "expired"],
       trigger_source: [
         "manual",
         "renewal",
@@ -8265,3 +9028,10 @@ export type Benchmarking = Database["public"]["Tables"]["benchmarking"]["Row"];
 export type SiteContent = Database["public"]["Tables"]["site_content"]["Row"];
 export type DeltaFlag = Database["public"]["Tables"]["delta_flags"]["Row"];
 export type BenchmarkingSurvey = Database["public"]["Tables"]["benchmarking_surveys"]["Row"];
+
+// Board portal row-type aliases
+export type BoardMeeting = Database["public"]["Tables"]["board_meetings"]["Row"];
+export type BoardDocument = Database["public"]["Tables"]["board_documents"]["Row"];
+export type BoardQboSnapshot = Database["public"]["Tables"]["board_qbo_snapshots"]["Row"];
+export type DashboardWidgetConfig = Database["public"]["Tables"]["dashboard_widget_config"]["Row"];
+export type PendingContentChange = Database["public"]["Tables"]["pending_content_changes"]["Row"];

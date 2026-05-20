@@ -11,6 +11,7 @@ import type {
   QBPayment,
   QBPaymentInput,
   QBTokenResponse,
+  QBReport,
 } from "./types";
 
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
@@ -247,4 +248,44 @@ export async function fetchQBPaymentsSince(since: string): Promise<QBPaymentReco
     `/query?query=${encodeURIComponent(query)}`
   );
   return res.QueryResponse.Payment ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Reports API — P&L and Balance Sheet
+// ─────────────────────────────────────────────────────────────────
+
+export type QBReportType = "ProfitAndLoss" | "BalanceSheet";
+
+export interface FetchReportOptions {
+  /** YYYY-MM-DD — defaults to first day of current month */
+  startDate?: string;
+  /** YYYY-MM-DD — defaults to today */
+  endDate?: string;
+  /** "Accrual" | "Cash" — defaults to Accrual */
+  accountingMethod?: "Accrual" | "Cash";
+}
+
+/**
+ * Fetch a QBO report (ProfitAndLoss or BalanceSheet).
+ * Uses the standard qbRequest helper — same auth, same base URL.
+ */
+export async function fetchQBReport(
+  reportType: QBReportType,
+  options: FetchReportOptions = {}
+): Promise<QBReport> {
+  const today = new Date().toISOString().slice(0, 10);
+  const firstOfMonth = today.slice(0, 8) + "01";
+
+  const startDate        = options.startDate        ?? firstOfMonth;
+  const endDate          = options.endDate          ?? today;
+  const accountingMethod = options.accountingMethod ?? "Accrual";
+
+  const params = new URLSearchParams({
+    start_date:         startDate,
+    end_date:           endDate,
+    accounting_method:  accountingMethod,
+  });
+
+  // Reports live under /reports/<name> — qbRequest appends ?minorversion=65
+  return qbRequest<QBReport>("GET", `/reports/${reportType}?${params.toString()}`);
 }

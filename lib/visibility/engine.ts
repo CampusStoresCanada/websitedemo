@@ -81,9 +81,13 @@ function isVisibleByCrossRules(
  * Determine if a specific field is visible to a viewer.
  *
  * - admin/super_admin: always see everything
- * - org_admin/authenticated/member/partner: private fields are visible
- * - public/member/partner: allowlist + explicit cross-rules for non-private fields
- * - private list is hidden for public viewers
+ * - org_admin (own org): handled by applyFieldMask's isFullAccess path
+ * - member/org_admin (other org): private fields visible
+ * - partner viewing partner org: contact PII hidden (same as public) — partners
+ *   should not see each other's contact details. Own-org access is handled by
+ *   the isFullAccess path in applyFieldMask before reaching this function.
+ * - partner viewing member org: cross-visibility rules only
+ * - public: allowlist only
  * - Unlisted fields: hidden (fail-closed)
  */
 export function isFieldVisible(
@@ -93,7 +97,13 @@ export function isFieldVisible(
   targetOrgType: string | null
 ): boolean {
   if (viewerLevel === "admin" || viewerLevel === "super_admin") return true;
-  if (viewerLevel !== "public" && config.private_fields.includes(fieldPath)) return true;
+
+  // Partners must not see contact PII on other partner orgs.
+  // (Own-org partners reach this as org_admin via isFullAccess in applyFieldMask.)
+  const isPartnerViewingPartner =
+    viewerLevel === "partner" && targetOrgType === "Vendor Partner";
+
+  if (!isPartnerViewingPartner && viewerLevel !== "public" && config.private_fields.includes(fieldPath)) return true;
 
   if (config.public_allowlist.includes(fieldPath)) return true;
 
@@ -232,15 +242,23 @@ export function applyFieldMask<T extends Record<string, unknown>>(
 
   const result: Record<string, unknown> = {};
 
+  // Partners viewing another partner org get no contact PII — not even teasers.
+  // This ensures the raw HTML never contains initials, email domain, or phone prefix
+  // for contacts belonging to a competing vendor.
+  const suppressMaskedReveal =
+    viewerLevel === "partner" && targetOrgType === "Vendor Partner";
+
   for (const [key, value] of Object.entries(data)) {
     const fieldPath = `${tablePrefix}.${key}`;
     const visible = isFieldVisible(fieldPath, viewerLevel, config, targetOrgType);
 
     if (visible) {
       result[key] = value;
-    } else {
+    } else if (!suppressMaskedReveal) {
       const masked = applyMasking(fieldPath, value, config);
       result[key] = masked;
+    } else {
+      result[key] = null;
     }
   }
 

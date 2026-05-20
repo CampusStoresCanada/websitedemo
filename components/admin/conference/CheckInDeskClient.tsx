@@ -53,7 +53,7 @@ const SCAN_STATUS_COPY: Record<
   already_checked_in: {
     title: "Already Checked In",
     description: "No action needed; this attendee was already checked in.",
-    className: "text-[#D92327]",
+    className: "text-accent",
   },
   invalid_token: {
     title: "Invalid Token",

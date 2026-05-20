@@ -5,7 +5,12 @@
 export interface CircleConfig {
   apiKey: string;
   communityId: string;
+  /** Numeric Circle community_member_id for the bot account */
   botUserId: string;
+  /** Email of the bot Circle account — used by mintMemberToken when botUserId is not numeric */
+  botEmail: string;
+  /** Admin API key belonging to Butler Ghost — used to send DMs as Butler */
+  ghostApiKey: string;
   announcementsSpaceId: string;
   headlessAuthToken: string;
 }
@@ -20,6 +25,8 @@ export function getCircleConfig(): CircleConfig | null {
   const apiKey = process.env.CIRCLE_API_KEY;
   const communityId = process.env.CIRCLE_COMMUNITY_ID;
   const botUserId = process.env.CIRCLE_BOT_USER_ID;
+  const botEmail = process.env.CIRCLE_BOT_EMAIL;
+  const ghostApiKey = process.env.CIRCLE_GHOST_KEY;
   const announcementsSpaceId = process.env.CIRCLE_ANNOUNCEMENTS_SPACE_ID;
   const headlessAuthToken = process.env.CIRCLE_HEADLESS_AUTH_TOKEN;
 
@@ -37,6 +44,8 @@ export function getCircleConfig(): CircleConfig | null {
     apiKey,
     communityId,
     botUserId: botUserId ?? "",
+    botEmail: botEmail ?? "",
+    ghostApiKey: ghostApiKey ?? "",
     announcementsSpaceId: announcementsSpaceId ?? "",
     headlessAuthToken: headlessAuthToken ?? "",
   };

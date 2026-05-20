@@ -61,7 +61,7 @@ export default function ConferenceSubNav({
   function tabClass(segment: string): string {
     return `whitespace-nowrap py-2 px-1 text-sm font-medium border-b-2 transition-colors ${
       isActive(segment)
-        ? "border-[#EE2A2E] text-[#EE2A2E]"
+        ? "border-accent text-accent"
         : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
     }`;
   }
@@ -81,7 +81,7 @@ export default function ConferenceSubNav({
           href={`${basePath}/check-in`}
           target="_blank"
           rel="noopener noreferrer"
-          className="rounded-md border border-[#EE2A2E] bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] shrink-0"
+          className="rounded-md border border-accent bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover shrink-0"
         >
           Check-in Desk ↗
         </Link>

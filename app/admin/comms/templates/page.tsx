@@ -54,7 +54,7 @@ export default async function TemplatesPage() {
         </div>
         <Link
           href="/admin/comms/templates/new"
-          className="rounded-lg bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#D92327] transition-colors whitespace-nowrap"
+          className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors whitespace-nowrap"
         >
           New Template
         </Link>
@@ -98,7 +98,7 @@ export default async function TemplatesPage() {
                             {t.variable_keys.map((v) => (
                               <span
                                 key={v}
-                                className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-xs text-[#D92327]"
+                                className="inline-flex items-center rounded bg-blue-50 px-1.5 py-0.5 text-xs text-accent"
                               >
                                 {`{{${v}}}`}
                               </span>
@@ -131,7 +131,7 @@ function TemplateEditButton({ templateId }: { templateId: string }) {
   return (
     <Link
       href={`/admin/comms/templates/${templateId}`}
-      className="text-xs text-[#EE2A2E] hover:underline"
+      className="text-xs text-accent hover:underline"
     >
       Edit
     </Link>

@@ -125,7 +125,7 @@ export function ApplicationsReview({
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value as typeof filterType)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           >
             <option value="all">All</option>
             <option value="member">Members</option>
@@ -137,7 +137,7 @@ export function ApplicationsReview({
           <select
             value={filterStatus}
             onChange={(e) => setFilterStatus(e.target.value)}
-            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+            className="px-3 py-1.5 border border-gray-300 rounded-lg text-sm bg-white focus:outline-none focus:ring-2 focus:ring-accent/20 focus:border-accent"
           >
             <option value="all">All</option>
             <option value="pending_verification">Pending Verification</option>
@@ -147,7 +147,7 @@ export function ApplicationsReview({
           </select>
         </div>
         {pendingCount > 0 && (
-          <span className="text-sm text-[#D92327] bg-blue-50 px-2.5 py-1 rounded-full font-medium">
+          <span className="text-sm text-accent bg-blue-50 px-2.5 py-1 rounded-full font-medium">
             {pendingCount} awaiting review
           </span>
         )}
@@ -258,7 +258,7 @@ export function ApplicationsReview({
                         <td className="px-4 py-3 text-right">
                           <button
                             onClick={() => setExpandedId(app.id)}
-                            className="text-xs text-[#EE2A2E] hover:text-[#D92327] font-medium"
+                            className="text-xs text-accent hover:text-accent font-medium"
                           >
                             View
                           </button>

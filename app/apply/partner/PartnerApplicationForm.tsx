@@ -68,7 +68,7 @@ export function PartnerApplicationForm() {
       postal_code: postalCode.trim().toUpperCase(),
       primary_category: primaryCategory,
       secondary_categories: secondaryCategories.length > 0 ? secondaryCategories : undefined,
-      website: website.trim(),
+      website: (() => { const w = website.trim(); return w && !/^https?:\/\//i.test(w) ? `https://${w}` : w; })(),
       phone: phone.trim(),
       contact_name: contactName.trim(),
       contact_email: contactEmail.trim(),
@@ -188,7 +188,7 @@ export function PartnerApplicationForm() {
           </div>
           <div>
             <label htmlFor="province" className="block text-sm font-medium text-gray-700 mb-1">
-              Province <span className="text-red-500">*</span>
+              Province / Region <span className="text-red-500">*</span>
             </label>
             <select
               id="province"
@@ -198,9 +198,12 @@ export function PartnerApplicationForm() {
               className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors bg-white"
             >
               <option value="">Select…</option>
-              {PROVINCES.map((p) => (
-                <option key={p} value={p}>{p}</option>
-              ))}
+              <option value="Out of Canada">Out of Canada</option>
+              <optgroup label="Canadian Provinces &amp; Territories">
+                {PROVINCES.map((p) => (
+                  <option key={p} value={p}>{p}</option>
+                ))}
+              </optgroup>
             </select>
           </div>
           <div>
@@ -225,7 +228,7 @@ export function PartnerApplicationForm() {
           </label>
           <input
             id="website"
-            type="url"
+            type="text"
             required
             value={website}
             onChange={(e) => setWebsite(e.target.value)}

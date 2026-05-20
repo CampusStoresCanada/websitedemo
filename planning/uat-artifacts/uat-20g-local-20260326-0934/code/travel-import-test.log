@@ -1,0 +1,14 @@
+
+> websitedemo@0.1.0 test
+> vitest run lib/actions/__tests__/conference-registration-travel-import.test.ts
+
+
+ RUN  v4.0.18 /Users/Work/Documents/csc-website/websitedemo
+
+ ✓ lib/actions/__tests__/conference-registration-travel-import.test.ts (3 tests) 6ms
+
+ Test Files  1 passed (1)
+      Tests  3 passed (3)
+   Start at  09:34:52
+   Duration  257ms (transform 71ms, setup 0ms, import 88ms, tests 6ms, environment 0ms)
+

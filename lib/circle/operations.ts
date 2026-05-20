@@ -6,21 +6,26 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { CircleAdminClient } from "./client";
 import { mintMemberToken } from "./headless-auth";
 import { CircleMemberClient } from "./member-proxy";
-import type { CircleSyncQueueItem } from "./types";
+import type { CircleMember, CircleSyncQueueItem } from "./types";
 
 /**
  * Execute a single sync queue item against the Circle API.
  * Throws on failure (caller handles retry logic).
+ *
+ * emailMap — optional pre-built email→member map. When provided, link_member
+ * operations use it instead of fetching all pages themselves, so a batch of N
+ * link operations costs one page sweep instead of N.
  */
 export async function executeCircleSyncOperation(
   client: CircleAdminClient,
-  item: CircleSyncQueueItem
+  item: CircleSyncQueueItem,
+  emailMap?: Map<string, CircleMember>
 ): Promise<void> {
   const payload = item.payload;
 
   switch (item.operation) {
     case "link_member":
-      await handleLinkMember(client, item);
+      await handleLinkMember(client, item, emailMap);
       break;
 
     case "add_tag":
@@ -70,19 +75,22 @@ export async function executeCircleSyncOperation(
 
 async function handleLinkMember(
   client: CircleAdminClient,
-  item: CircleSyncQueueItem
+  item: CircleSyncQueueItem,
+  emailMap?: Map<string, CircleMember>
 ): Promise<void> {
   const email = String(item.payload.email ?? "");
   const name = String(item.payload.name ?? "");
 
   if (!email) throw new Error("link_member requires email in payload");
 
-  // Search for existing Circle member
-  const members = await client.searchMembers(email);
+  // Use pre-built map when available (avoids re-fetching all pages per item)
+  const existing = emailMap
+    ? emailMap.get(email.toLowerCase())
+    : (await client.searchMembers(email))[0];
 
   let circleId: number;
-  if (members.length > 0) {
-    circleId = members[0].id;
+  if (existing) {
+    circleId = existing.id;
   } else if (name) {
     // Create new member
     const created = await client.createMember({
@@ -255,38 +263,8 @@ async function handleUpdateProfile(
   item: CircleSyncQueueItem
 ): Promise<void> {
   // DISABLED — calls PUT /community_members/{id}. Shut down during API usage audit.
-  // To re-enable: verify this operation's monthly call volume is acceptable.
+  // To re-enable: verify monthly call volume is acceptable, then restore implementation.
   return;
-
-  const circleId = await resolveCircleId(item.entity_id);
-  if (!circleId) {
-    // Not linked yet — skip silently (will be linked later via link_member)
-    return;
-  }
-
-  // Payload may carry pre-fetched values; fall back to fetching from DB
-  let name = item.payload.name ? String(item.payload.name) : null;
-  let headline = item.payload.headline ? String(item.payload.headline) : null;
-
-  if (!name || !headline) {
-    const adminClient = createAdminClient();
-    const { data: contact } = await adminClient
-      .from("contacts")
-      .select("name, role_title")
-      .eq("id", item.entity_id)
-      .single();
-
-    if (!name && contact?.name) name = contact.name;
-    if (!headline && contact?.role_title) headline = contact.role_title;
-  }
-
-  const updates: Record<string, string> = {};
-  if (name) updates.name = name;
-  if (headline) updates.headline = headline;
-
-  if (Object.keys(updates).length === 0) return;
-
-  await client.updateMember(circleId, updates);
 }
 
 async function handleDeleteMember(
@@ -295,26 +273,8 @@ async function handleDeleteMember(
 ): Promise<void> {
   // DISABLED — calls DELETE /community_members/{id}. Shut down during API usage audit.
   // WARNING: deprovisioned contacts will NOT be removed from Circle until re-enabled.
-  // To re-enable: confirm this is acceptable and monthly call volume is low.
+  // To re-enable: confirm monthly call volume is acceptable, then restore implementation.
   return;
-
-  const circleId = await resolveCircleId(item.entity_id);
-  if (!circleId) {
-    // Not linked — nothing to delete
-    return;
-  }
-
-  await client.deleteMember(circleId);
-
-  // Clear circle_id so re-add works cleanly on reactivation
-  const adminClient = createAdminClient();
-  await adminClient
-    .from("contacts")
-    .update({
-      circle_id: null,
-      synced_to_circle_at: new Date().toISOString(),
-    })
-    .eq("id", item.entity_id);
 }
 
 // ---------------------------------------------------------------------------

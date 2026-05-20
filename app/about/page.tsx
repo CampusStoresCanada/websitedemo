@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { getStats, getSiteContent } from "@/lib/data";
+import { getStats, getSiteContent, getCSCStaff } from "@/lib/data";
 import AboutHero from "@/components/about/AboutHero";
 import MissionSection from "@/components/about/MissionSection";
 import StatsSection from "@/components/home/StatsSection";
@@ -16,26 +16,30 @@ export const metadata: Metadata = {
 };
 
 export default async function AboutPage() {
-  const [stats, boardMembers, staffMembers] = await Promise.all([
+  const [stats, boardMembers, staffContacts, heroContent, missionContent, whatWeDoItems] = await Promise.all([
     getStats(),
     getSiteContent("board_of_directors"),
-    getSiteContent("staff"),
+    getCSCStaff(),
+    getSiteContent("about_hero"),
+    getSiteContent("about_mission"),
+    getSiteContent("about_what_we_do"),
   ]);
 
   return (
     <div>
-      <AboutHero />
-      <MissionSection />
+      <AboutHero content={heroContent[0] ?? null} />
+      <MissionSection mission={missionContent[0] ?? null} whatWeDo={whatWeDoItems} />
       <StatsSection
         stats={{
           activeMembers: stats.memberCount,
           activePartners: stats.partnerCount,
           provincesRepresented: stats.provinceCount,
-          totalFteServed: 0,
+          totalFteServed: stats.totalFteServed,
+          fteIsEstimate: stats.fteIsEstimate,
         }}
       />
       <BoardSection members={boardMembers} />
-      <StaffSection staff={staffMembers} />
+      <StaffSection staff={staffContacts} />
       <MemberDirectoryTeaser memberCount={stats.memberCount} />
     </div>
   );

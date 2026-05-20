@@ -140,7 +140,7 @@ export default function WarRoomClient({
               onClick={() => setActiveOpsTab(tab.id)}
               className={`rounded-md border px-3 py-1.5 text-xs font-medium ${
                 activeOpsTab === tab.id
-                  ? "border-[#EE2A2E] bg-[#fff5f5] text-[#EE2A2E]"
+                  ? "border-accent bg-[#fff5f5] text-accent"
                   : "border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
               }`}
             >

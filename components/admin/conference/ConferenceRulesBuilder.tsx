@@ -1241,7 +1241,7 @@ export default function ConferenceRulesBuilder({
             type="button"
             onClick={() => void save()}
             disabled={isSaving || hasValidationErrors}
-            className="rounded bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001] disabled:opacity-60"
+            className="rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover disabled:opacity-60"
           >
             {isSaving ? "Saving..." : "Save"}
           </button>
@@ -1276,7 +1276,7 @@ export default function ConferenceRulesBuilder({
               <button
                 type="button"
                 onClick={addWorkflow}
-                className="mt-4 rounded bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                className="mt-4 rounded bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
               >
                 Create first workflow
               </button>

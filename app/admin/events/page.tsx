@@ -5,6 +5,7 @@ import { listEvents } from "@/lib/actions/events";
 import EventStatusBadge from "@/components/admin/events/EventStatusBadge";
 import LocalDate from "@/components/ui/LocalDate";
 import type { EventStatus } from "@/lib/events/types";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
 
 export const metadata: Metadata = {
   title: "Events | Admin | Campus Stores Canada",
@@ -31,20 +32,19 @@ export default async function AdminEventsPage({
   const pendingReview = events.filter((e) => e.status === "pending_review");
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
-      <div className="flex items-center justify-between mb-8">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Events</h1>
-          <p className="text-sm text-gray-500 mt-1">Non-conference events managed by CSC</p>
-        </div>
-        {/* Create via Toolkit modal — point to a fallback direct route */}
-        <Link
-          href="/admin/events/new"
-          className="px-4 py-2 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold transition-colors"
-        >
-          + New Event
-        </Link>
-      </div>
+    <main>
+      <AdminPageHeader
+        title="Events"
+        description="Non-conference events managed by CSC."
+        actions={
+          <Link
+            href="/admin/events/new"
+            className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover transition-colors"
+          >
+            + New Event
+          </Link>
+        }
+      />
 
       {/* Pending review banner */}
       {pendingReview.length > 0 && !status && (
@@ -83,7 +83,7 @@ export default async function AdminEventsPage({
                 href={s ? `/admin/events?status=${s}` : "/admin/events"}
                 className={`px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors ${
                   isActive
-                    ? "border-[#EE2A2E] text-[#EE2A2E]"
+                    ? "border-accent text-accent"
                     : "border-transparent text-gray-500 hover:text-gray-700"
                 }`}
               >
@@ -116,7 +116,7 @@ export default async function AdminEventsPage({
                     <span className="text-xs text-gray-400">Members only</span>
                   )}
                 </div>
-                <p className="font-medium text-gray-900 group-hover:text-[#EE2A2E] transition-colors truncate">
+                <p className="font-medium text-gray-900 group-hover:text-accent transition-colors truncate">
                   {event.title}
                 </p>
                 <p className="text-xs text-gray-500 mt-0.5">
@@ -134,6 +134,6 @@ export default async function AdminEventsPage({
           ))}
         </div>
       )}
-    </div>
+    </main>
   );
 }

@@ -652,7 +652,7 @@ export default function RegistrationsTable({ conferenceId }: RegistrationsTableP
                   <td className="px-4 py-3">
                     <span className={`inline-flex items-center px-2 py-0.5 text-xs font-medium rounded-full ${
                       reg.status === "confirmed" ? "bg-green-100 text-green-700" :
-                      reg.status === "submitted" ? "bg-blue-100 text-[#D92327]" :
+                      reg.status === "submitted" ? "bg-blue-100 text-accent" :
                       reg.status === "canceled" ? "bg-red-100 text-red-700" :
                       "bg-gray-100 text-gray-700"
                     }`}>

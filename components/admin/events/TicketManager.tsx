@@ -172,7 +172,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
         {editing === null && (
           <button
             onClick={openNew}
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold transition-colors"
+            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-accent hover:bg-accent-hover text-white text-sm font-semibold transition-colors"
           >
             + Add Ticket Type
           </button>
@@ -243,7 +243,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 value={form.name}
                 onChange={(e) => patch("name", e.target.value)}
                 placeholder="e.g. Member Rate, Early Bird"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -258,7 +258,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                   value={form.price_dollars}
                   onChange={(e) => patch("price_dollars", e.target.value)}
                   placeholder="0.00"
-                  className="w-full rounded-lg border border-gray-300 pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                  className="w-full rounded-lg border border-gray-300 pl-7 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
                 />
               </div>
             </div>
@@ -270,7 +270,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 value={form.description}
                 onChange={(e) => patch("description", e.target.value)}
                 placeholder="Shown to users during checkout"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -281,7 +281,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 onChange={(e) => {
                   if (e.target.value !== "__custom__") patch("audience_filter_raw", e.target.value);
                 }}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               >
                 {AUDIENCE_FILTER_OPTIONS.map((o) => (
                   <option key={o.value} value={o.value}>{o.label}</option>
@@ -302,7 +302,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 value={form.capacity}
                 onChange={(e) => patch("capacity", e.target.value)}
                 placeholder="Unlimited"
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -312,7 +312,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 type="datetime-local"
                 value={form.available_from}
                 onChange={(e) => patch("available_from", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -322,7 +322,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 type="datetime-local"
                 value={form.available_until}
                 onChange={(e) => patch("available_until", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -333,7 +333,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 min="0"
                 value={form.sort_order}
                 onChange={(e) => patch("sort_order", e.target.value)}
-                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
 
@@ -355,7 +355,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
             <button
               onClick={submit}
               disabled={isPending}
-              className="px-4 py-2 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:opacity-50 text-white text-sm font-semibold transition-colors"
+              className="px-4 py-2 rounded-lg bg-accent hover:bg-accent-hover disabled:opacity-50 text-white text-sm font-semibold transition-colors"
             >
               {isPending ? "Saving…" : "Save"}
             </button>

@@ -179,7 +179,7 @@ export default function ProductManager({
         <h3 className="text-sm font-medium text-gray-700">{products.length} products</h3>
         <button
           onClick={() => setShowAdd(true)}
-          className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
+          className="px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover"
         >
           Add Product
         </button>
@@ -277,7 +277,7 @@ export default function ProductManager({
                       setLinkingProductId(shouldOpen ? p.id : null);
                       if (shouldOpen) ensureLinkEditorState(p);
                     }}
-                    className="text-xs text-[#EE2A2E] hover:underline"
+                    className="text-xs text-accent hover:underline"
                   >
                     Linkages
                   </button>
@@ -289,11 +289,11 @@ export default function ProductManager({
                         await loadRules(p.id);
                       }
                     }}
-                    className="text-xs text-[#EE2A2E] hover:underline"
+                    className="text-xs text-accent hover:underline"
                   >
                     Rules
                   </button>
-                  <button onClick={() => setEditingId(p.id)} className="text-xs text-[#EE2A2E] hover:underline">Edit</button>
+                  <button onClick={() => setEditingId(p.id)} className="text-xs text-accent hover:underline">Edit</button>
                   <button
                     onClick={async () => {
                       if (!window.confirm(`Delete product "${p.name}"? This cannot be undone.`)) return;
@@ -448,7 +448,7 @@ export default function ProductManager({
                       setError(null);
                       setLinkingProductId(null);
                     }}
-                    className="rounded-md bg-[#EE2A2E] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#b50001]"
+                    className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
                   >
                     Save Linkages
                   </button>
@@ -572,7 +572,7 @@ function ProductRulesEditor({
             }
             setIsSaving(false);
           }}
-          className="px-3 py-1.5 text-xs font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50"
+          className="px-3 py-1.5 text-xs font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50"
         >
           {isSaving ? "Saving..." : "Add Rule"}
         </button>
@@ -676,7 +676,7 @@ function ProductEditor({
         </label>
       </div>
       <div className="flex gap-2">
-        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001] disabled:opacity-50">
+        <button type="submit" disabled={saving} className="px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50">
           {saving ? "Saving..." : "Save"}
         </button>
         <button type="button" onClick={onCancel} className="px-3 py-1.5 text-sm text-gray-700 border border-gray-300 rounded-md hover:bg-gray-50">

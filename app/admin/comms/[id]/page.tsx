@@ -21,7 +21,7 @@ export const revalidate = 0;
 
 const STATUS_COLORS: Record<DeliveryStatus, string> = {
   queued: "bg-gray-100 text-gray-600",
-  sent: "bg-blue-100 text-[#D92327]",
+  sent: "bg-blue-100 text-accent",
   delivered: "bg-green-100 text-green-700",
   bounced: "bg-red-100 text-red-700",
   failed: "bg-red-100 text-red-700",
@@ -119,7 +119,7 @@ export default async function CampaignDetailPage({
             >
               <button
                 type="submit"
-                className="rounded-lg bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"
+                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
               >
                 Send Now
               </button>
@@ -165,7 +165,7 @@ export default async function CampaignDetailPage({
           {audiencePreview.sample.length > 0 && (
             <ul className="mt-2 space-y-1">
               {audiencePreview.sample.map((r) => (
-                <li key={r.email} className="text-xs text-[#D92327]">
+                <li key={r.email} className="text-xs text-accent">
                   {r.name ? `${r.name} <${r.email}>` : r.email}
                 </li>
               ))}
@@ -184,7 +184,7 @@ export default async function CampaignDetailPage({
         <div className="mt-4 grid grid-cols-4 gap-4">
           {[
             { label: "Total", value: deliveryStats.total, color: "text-gray-900" },
-            { label: "Sent", value: deliveryStats.sent, color: "text-[#D92327]" },
+            { label: "Sent", value: deliveryStats.sent, color: "text-accent" },
             { label: "Delivered", value: deliveryStats.delivered, color: "text-green-700" },
             { label: "Failed", value: deliveryStats.failed, color: "text-red-600" },
           ].map(({ label, value, color }) => (

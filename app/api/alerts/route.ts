@@ -4,8 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 type AlertKind =
   | "content_flag"
-  | "legacy_flag"
   | "update_request"
+  | "pending_content_change"
   | "application"
   | "application_status"
   | "invoice"
@@ -101,7 +101,7 @@ export async function GET() {
   const [
     updateRequestsRes,
     contentFlagsRes,
-    legacyFlagsRes,
+    pendingContentChangesRes,
     pendingAppsRes,
     myApplicationsRes,
     invoiceAlertsRes,
@@ -136,21 +136,14 @@ export async function GET() {
               .limit(8))
       : Promise.resolve({ data: [], error: null }),
 
-    shouldLoadFlagScoped
-      ? (isAdmin
-          ? adminClient
-              .from("flags")
-              .select("id, page_url, note, priority, status, created_at, organization_id")
-              .in("status", ["open", "in_progress"])
-              .order("created_at", { ascending: false })
-              .limit(8)
-          : adminClient
-              .from("flags")
-              .select("id, page_url, note, priority, status, created_at, organization_id")
-              .in("status", ["open", "in_progress"])
-              .in("organization_id", orgAdminOrgIds)
-              .order("created_at", { ascending: false })
-              .limit(8))
+    isAdmin
+      ? adminClient
+          .from("pending_content_changes")
+          .select("id, target_table, target_column, entity_display_name, requested_at, requested_by")
+          .eq("status", "pending")
+          .gt("expires_at", new Date().toISOString())
+          .order("requested_at", { ascending: false })
+          .limit(8)
       : Promise.resolve({ data: [], error: null }),
 
     isAdmin
@@ -225,17 +218,18 @@ export async function GET() {
     }
   }
 
-  if (!legacyFlagsRes.error) {
+  if (!pendingContentChangesRes.error) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    for (const row of (legacyFlagsRes.data ?? []) as Record<string, any>[]) {
-      const isHighPriority = row.priority === "high";
+    for (const row of (pendingContentChangesRes.data ?? []) as Record<string, any>[]) {
+      const fieldLabel = row.target_column?.replace(/_/g, " ") ?? "content";
+      const entity = row.entity_display_name ?? row.target_table ?? "item";
       alertItems.push({
-        id: `legacy_flag:${row.id}`,
-        kind: "legacy_flag",
-        title: isHighPriority ? "High-priority site flag" : "Site flag pending",
-        message: row.note || row.page_url || "A site issue was flagged for review.",
-        href: "/admin/content",
-        createdAt: row.created_at || new Date().toISOString(),
+        id: `pending_content_change:${row.id}`,
+        kind: "pending_content_change",
+        title: "Content change awaiting approval",
+        message: `${entity}: "${fieldLabel}" field change needs your review.`,
+        href: "/admin/content?tab=pending",
+        createdAt: row.requested_at,
       });
     }
   }
@@ -248,7 +242,7 @@ export async function GET() {
         kind: "application",
         title: "New signup application",
         message: `${row.applicant_name || "Applicant"} (${row.application_type}) is ${row.status}.`,
-        href: "/admin/ops",
+        href: "/admin/applications",
         createdAt: row.created_at || new Date().toISOString(),
       });
     }
@@ -338,7 +332,7 @@ export async function GET() {
       counts: {
         update_requests: updateRequestsRes.data?.length ?? 0,
         content_flags: contentFlagsRes.data?.length ?? 0,
-        legacy_flags: legacyFlagsRes.data?.length ?? 0,
+        pending_content_changes: pendingContentChangesRes.data?.length ?? 0,
         applications_admin_pending: pendingAppsRes.data?.length ?? 0,
         applications_my_status: myApplicationsRes.data?.length ?? 0,
         invoices: invoiceAlertsRes.data?.length ?? 0,

@@ -57,7 +57,7 @@ export default function NewTemplatePage() {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Name <span className="text-[#EE2A2E]">*</span>
+              Name <span className="text-accent">*</span>
             </label>
             <input
               name="name"
@@ -68,7 +68,7 @@ export default function NewTemplatePage() {
           </div>
           <div>
             <label className="block text-sm font-medium text-gray-700">
-              Key <span className="text-[#EE2A2E]">*</span>
+              Key <span className="text-accent">*</span>
             </label>
             <p className="text-xs text-gray-500 mb-1">Unique slug — lowercase, underscores only.</p>
             <input
@@ -112,7 +112,7 @@ export default function NewTemplatePage() {
             Comma-separated. Use these as{" "}
             <code className="bg-gray-100 rounded px-1">{`{{variable_name}}`}</code>{" "}
             tokens in subject and body. e.g.{" "}
-            <code className="text-xs text-[#D92327]">first_name, org_name, conference_year</code>
+            <code className="text-xs text-accent">first_name, org_name, conference_year</code>
           </p>
           <input
             name="variable_keys"
@@ -123,7 +123,7 @@ export default function NewTemplatePage() {
 
         <div>
           <label className="block text-sm font-medium text-gray-700">
-            Subject <span className="text-[#EE2A2E]">*</span>
+            Subject <span className="text-accent">*</span>
           </label>
           <input
             name="subject"
@@ -146,7 +146,7 @@ export default function NewTemplatePage() {
         <div className="flex gap-3 pt-2">
           <button
             type="submit"
-            className="rounded-lg bg-[#EE2A2E] px-5 py-2 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"
+            className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
           >
             Create Template
           </button>

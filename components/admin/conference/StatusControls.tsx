@@ -115,7 +115,7 @@ export default function StatusControls({ conference }: StatusControlsProps) {
                     <button
                       onClick={() => handleTransition(status)}
                       disabled={isLoading}
-                      className="px-3 py-1 text-xs font-medium text-white bg-[#EE2A2E] rounded hover:bg-[#b50001] disabled:opacity-50"
+                      className="px-3 py-1 text-xs font-medium text-white bg-accent rounded hover:bg-accent-hover disabled:opacity-50"
                     >
                       Confirm
                     </button>
@@ -130,7 +130,7 @@ export default function StatusControls({ conference }: StatusControlsProps) {
                   <button
                     onClick={() => setConfirmAction(`transition-${status}`)}
                     disabled={isLoading}
-                    className="px-4 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#D92327] disabled:opacity-50"
+                    className="px-4 py-2 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover disabled:opacity-50"
                   >
                     Move to {CONFERENCE_STATUS_LABELS[status]}
                   </button>
@@ -160,7 +160,7 @@ export default function StatusControls({ conference }: StatusControlsProps) {
             <button
               onClick={handleDuplicate}
               disabled={isLoading}
-              className="px-3 py-1 text-xs font-medium text-white bg-[#EE2A2E] rounded hover:bg-[#b50001] disabled:opacity-50"
+              className="px-3 py-1 text-xs font-medium text-white bg-accent rounded hover:bg-accent-hover disabled:opacity-50"
             >
               Duplicate
             </button>
@@ -188,7 +188,7 @@ export default function StatusControls({ conference }: StatusControlsProps) {
             </ul>
             <button
               onClick={() => router.push(`/admin/conference/${duplicateOutcome.conferenceId}`)}
-              className="mt-3 px-3 py-1.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-md hover:bg-[#b50001]"
+              className="mt-3 px-3 py-1.5 text-sm font-medium text-white bg-accent rounded-md hover:bg-accent-hover"
             >
               Open Duplicated Conference
             </button>

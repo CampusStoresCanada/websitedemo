@@ -61,10 +61,15 @@ function verifyToken(request: NextRequest): boolean {
 // in circle_properties (JSONB) for non-canonical storage.
 // ---------------------------------------------------------------------------
 
+// Confirmed Circle profile field keys for this community (Settings → Profile Fields).
+// Only fields that map to a dedicated contacts column go here.
+// Everything else lands in circle_properties JSONB automatically.
+//   jobtitle        → role_title  (confirmed)
+//   birthday        → circle_properties
+//   topic_preferences → circle_properties (field being replaced — ignore for now)
+//   location        → circle_properties
 const CANONICAL_FIELD_MAP: Record<string, "role_title"> = {
-  headline: "role_title",
-  job_title: "role_title",
-  jobtitle: "role_title", // confirmed Circle field key from webhook test
+  jobtitle: "role_title",
 };
 
 // ---------------------------------------------------------------------------
