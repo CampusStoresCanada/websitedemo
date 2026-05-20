@@ -1,6 +1,8 @@
 "use client";
 
+import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { registerForEvent } from "@/lib/actions/event-registration";
 import EventDateTile from "@/components/events/EventDateTile";
 import LocalDate from "@/components/ui/LocalDate";
 import type { EventWithOrgContext } from "@/lib/events/types";
@@ -8,19 +10,34 @@ import type { EventWithOrgContext } from "@/lib/events/types";
 interface EventCardProps {
   event: EventWithOrgContext;
   forYou?: boolean;
+  isAuthenticated?: boolean;
 }
 
-export default function EventCard({ event, forYou = false }: EventCardProps) {
-  const router       = useRouter();
+export default function EventCard({ event, forYou = false, isAuthenticated = false }: EventCardProps) {
+  const router    = useRouter();
+  const [isPending, startTransition] = useTransition();
+  const [optimisticStatus, setOptimisticStatus] = useState(event.user_registration_status);
+
   const isCSC        = event.creator_org_name === "Campus Stores Canada";
   const isVirtual    = event.is_virtual;
-  const isMembersOnly = event.audience_mode === "members_only";
-  const regStatus    = event.user_registration_status;
+  const isPublic     = event.audience_mode === "public";
+  const regStatus    = optimisticStatus;
   const isRegistered = regStatus === "registered" || regStatus === "promoted" as any;
   const isWaitlisted = regStatus === "waitlisted";
   const meetLink     = event.virtual_link;
   const isPast       = new Date(event.starts_at) < new Date();
   const href         = `/events/${event.slug}`;
+
+  const handleRegister = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (!isAuthenticated) { router.push(`/login?next=${encodeURIComponent(href)}`); return; }
+    startTransition(async () => {
+      const result = await registerForEvent(event.id);
+      if (result.success) {
+        setOptimisticStatus(result.result === "waitlisted" ? "waitlisted" : "registered");
+      }
+    });
+  };
 
   return (
     <div
@@ -54,7 +71,7 @@ export default function EventCard({ event, forYou = false }: EventCardProps) {
                 For you
               </span>
             )}
-            {isMembersOnly && (
+            {!isPublic && (
               <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700">
                 <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
                   <path fillRule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clipRule="evenodd" />
@@ -153,9 +170,13 @@ export default function EventCard({ event, forYou = false }: EventCardProps) {
                 On Waitlist
               </span>
             ) : (
-              <span className="inline-flex items-center px-4 py-2 rounded-lg bg-[#EE2A2E] text-white text-xs font-bold group-hover:bg-[#D92327] transition-colors whitespace-nowrap">
-                Register →
-              </span>
+              <button
+                onClick={handleRegister}
+                disabled={isPending}
+                className="inline-flex items-center px-4 py-2 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] disabled:opacity-60 text-white text-xs font-bold transition-colors whitespace-nowrap"
+              >
+                {isPending ? "…" : event.spots_remaining === 0 ? "Join Waitlist" : "Register →"}
+              </button>
             )}
           </div>
         </div>

@@ -265,14 +265,24 @@ export default async function EventDetailPage({
           </h2>
           {isAuthenticated ? (
             <div className="flex flex-wrap items-center gap-2">
-              {attendeeData.names.slice(0, 20).map((name, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm font-medium"
-                >
-                  {name ?? "Member"}
-                </span>
-              ))}
+              {attendeeData.attendees.slice(0, 20).map((a, i) =>
+                a.orgSlug ? (
+                  <Link
+                    key={i}
+                    href={`/org/${a.orgSlug}`}
+                    className="inline-flex items-center px-3 py-1 rounded-full bg-gray-100 hover:bg-gray-200 text-gray-700 hover:text-gray-900 text-sm font-medium transition-colors"
+                  >
+                    {a.name ?? "Member"}
+                  </Link>
+                ) : (
+                  <span
+                    key={i}
+                    className="inline-flex items-center px-3 py-1 rounded-full bg-gray-100 text-gray-700 text-sm font-medium"
+                  >
+                    {a.name ?? "Member"}
+                  </span>
+                )
+              )}
               {attendeeData.total > 20 && (
                 <span className="text-sm text-gray-400 font-medium">
                   +{attendeeData.total - 20} more

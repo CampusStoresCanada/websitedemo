@@ -811,7 +811,7 @@ async function notifyCreatorEventApproved(
  */
 export async function getPublicAttendees(
   eventId: string
-): Promise<{ success: true; data: { total: number; names: (string | null)[] } } | { success: false; error: string }> {
+): Promise<{ success: true; data: { total: number; attendees: { name: string | null; orgSlug: string | null }[] } } | { success: false; error: string }> {
   const adminClient = createAdminClient();
 
   const { data, error } = await adminClient
@@ -825,20 +825,41 @@ export async function getPublicAttendees(
   if (error) return { success: false, error: error.message };
 
   const userIds = (data ?? []).map((r: any) => r.user_id);
-  const { data: profileRows } = userIds.length > 0
-    ? await adminClient.from("profiles").select("id, display_name").in("id", userIds)
-    : { data: [] };
-  const nameMap = new Map((profileRows ?? []).map((p: any) => [p.id, p.display_name ?? null]));
-  const names = userIds.map((uid) => nameMap.get(uid) ?? null);
 
-  // Total count (may exceed 50)
-  const { count } = await adminClient
-    .from("event_registrations")
-    .select("id", { count: "exact", head: true })
-    .eq("event_id", eventId)
-    .in("status", ["registered", "promoted"]);
+  const [profileResult, orgResult, countResult] = await Promise.all([
+    userIds.length > 0
+      ? adminClient.from("profiles").select("id, display_name").in("id", userIds)
+      : Promise.resolve({ data: [] }),
+    userIds.length > 0
+      ? adminClient
+          .from("user_organizations")
+          .select("user_id, organization:organizations!inner(slug)")
+          .in("user_id", userIds)
+          .order("created_at", { ascending: true })
+      : Promise.resolve({ data: [] }),
+    adminClient
+      .from("event_registrations")
+      .select("id", { count: "exact", head: true })
+      .eq("event_id", eventId)
+      .in("status", ["registered", "promoted"]),
+  ]);
 
-  return { success: true, data: { total: count ?? names.length, names } };
+  const nameMap = new Map((profileResult.data ?? []).map((p: any) => [p.id, p.display_name ?? null]));
+
+  // Keep only the first org membership per user
+  const orgSlugMap = new Map<string, string>();
+  for (const row of orgResult.data ?? []) {
+    if (!orgSlugMap.has((row as any).user_id)) {
+      orgSlugMap.set((row as any).user_id, (row as any).organization?.slug ?? null);
+    }
+  }
+
+  const attendees = userIds.map((uid) => ({
+    name: nameMap.get(uid) ?? null,
+    orgSlug: orgSlugMap.get(uid) ?? null,
+  }));
+
+  return { success: true, data: { total: countResult.count ?? attendees.length, attendees } };
 }
 
 // ── Public list (no auth) ─────────────────────────────────────────

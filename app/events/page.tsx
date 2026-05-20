@@ -148,6 +148,7 @@ export default async function EventsPage({
               <EventCard
                 key={event.id}
                 event={event}
+                isAuthenticated={!!userId}
                 forYou={
                   activeTab === "upcoming" &&
                   !!userId &&

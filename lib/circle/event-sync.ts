@@ -61,6 +61,31 @@ function buildCirclePayload(event: {
   };
 }
 
+/**
+ * Convert Circle's plain-text event body into:
+ *   description — first paragraph, capped at 280 chars (for listings)
+ *   body_html   — full body as simple HTML paragraphs
+ */
+function circleBodyToContent(body: string | null): { description: string | null; body_html: string | null } {
+  if (!body?.trim()) return { description: null, body_html: null };
+
+  const paragraphs = body
+    .split(/\n{2,}/)
+    .map((p) => p.trim())
+    .filter(Boolean);
+
+  const firstPara = paragraphs[0] ?? "";
+  const description = firstPara.length > 280
+    ? firstPara.slice(0, 277) + "…"
+    : firstPara;
+
+  const body_html = paragraphs
+    .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)
+    .join("\n");
+
+  return { description, body_html };
+}
+
 /** Read circle_event_id from event metadata safely. */
 function getCircleEventId(metadata: unknown): number | null {
   if (!metadata || typeof metadata !== "object") return null;
@@ -270,11 +295,13 @@ export async function pullCircleEvents(): Promise<{
         // Update existing Circle-native event — merge metadata so admin-set
         // tags and other custom fields are preserved.
         const existingMeta = circleIdToExistingMeta.get(ce.id) ?? {};
+        const { description, body_html } = circleBodyToContent(ce.body);
         await db
           .from("events")
           .update({
             title: ce.name,
-            description: ce.body ?? null,
+            description,
+            body_html,
             starts_at: normalise(ce.starts_at),
             ends_at: normalise(ce.ends_at),
             location: ce.in_person_location ?? null,
@@ -288,13 +315,15 @@ export async function pullCircleEvents(): Promise<{
       } else {
         // Insert new Circle-native event — default to "all-members" tag so it
         // surfaces in members' "For you" feed. Admins can refine per-event.
+        const { description, body_html } = circleBodyToContent(ce.body);
         const slug = `circle-${ce.id}-${ce.name
           .toLowerCase()
           .replace(/[^a-z0-9]+/g, "-")
           .slice(0, 40)}`;
         await db.from("events").insert({
           title: ce.name,
-          description: ce.body ?? null,
+          description,
+          body_html,
           starts_at: normalise(ce.starts_at),
           ends_at: normalise(ce.ends_at),
           location: ce.in_person_location ?? null,
