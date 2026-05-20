@@ -13,7 +13,7 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
 import type { PendingContentChange } from "@/lib/database.types";
@@ -3185,6 +3185,12 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
         description: "Download .ics file for any calendar app",
         icon: "📅",
         action: () => run("Add to Calendar", () => exportEventICS(context.slug)),
+      },
+      {
+        label: "Attendee List CSV",
+        description: "Names, emails, registration status, and check-in times",
+        icon: "📋",
+        action: () => run("Attendee List CSV", () => exportEventAttendees(context.slug)),
       },
     ];
   } else if (context.type === "members_directory") {

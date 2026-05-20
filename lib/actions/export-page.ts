@@ -403,6 +403,80 @@ export async function exportMemberBuyersCSV(): Promise<{
   return { csv, filename: `csc-${categorySlug}-buyers-${year}.csv` };
 }
 
+/** Export attendee list for an event as CSV.
+ *  Accessible by the event creator and global admins only. */
+export async function exportEventAttendees(slug: string): Promise<{
+  csv?: string;
+  filename?: string;
+  error?: string;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { error: "Not authenticated" };
+
+  const db = createAdminClient();
+  const isAdmin = ["admin", "super_admin"].includes(auth.ctx.globalRole ?? "");
+
+  // Resolve slug → event
+  const { data: event } = await db
+    .from("events")
+    .select("id, title, slug, created_by")
+    .eq("slug", slug)
+    .single();
+
+  if (!event) return { error: "Event not found" };
+  if (!isAdmin && event.created_by !== auth.ctx.userId) {
+    return { error: "Only the event host or a CSC admin can export attendees" };
+  }
+
+  const { data: regs, error: regsError } = await db
+    .from("event_registrations")
+    .select("user_id, status, registered_at")
+    .eq("event_id", event.id)
+    .in("status", ["registered", "promoted", "cancelled"])
+    .order("registered_at", { ascending: true });
+
+  if (regsError) return { error: regsError.message };
+
+  const userIds = (regs ?? []).map((r: any) => r.user_id);
+
+  const [profileResult, checkinResult] = await Promise.all([
+    userIds.length > 0
+      ? db.from("profiles").select("id, display_name, email").in("id", userIds)
+      : Promise.resolve({ data: [] }),
+    db
+      .from("event_checkins")
+      .select("user_id, checked_in_at")
+      .eq("event_id", event.id)
+      .in("user_id", userIds.length > 0 ? userIds : [""]),
+  ]);
+
+  const nameMap = new Map(
+    (profileResult.data ?? []).map((p: any) => [p.id, { name: p.display_name ?? "", email: p.email ?? "" }])
+  );
+  const checkinMap = new Map<string, string | null>();
+  for (const c of checkinResult.data ?? []) checkinMap.set(c.user_id, c.checked_in_at ?? null);
+
+  const parseUTC = (s: string) =>
+    new Date(s.endsWith("Z") || s.includes("+") ? s : s.replace(" ", "T") + "Z");
+
+  const header = ["Name", "Email", "Status", "Registered At", "Checked In"];
+  const rows = (regs ?? []).map((r: any) => {
+    const profile = nameMap.get(r.user_id) ?? { name: "", email: "" };
+    const checkinAt = checkinMap.get(r.user_id);
+    return [
+      profile.name,
+      profile.email,
+      r.status,
+      parseUTC(r.registered_at).toLocaleString("en-CA"),
+      checkinAt ? parseUTC(checkinAt).toLocaleString("en-CA") : checkinMap.has(r.user_id) ? "Yes" : "No",
+    ];
+  });
+
+  const csv = [header, ...rows].map((row) => row.map(csvEscape).join(",")).join("\n");
+  const filename = `attendees-${event.slug ?? event.id}.csv`;
+  return { csv, filename };
+}
+
 // ── Helpers ────────────────────────────────────────────────────────────────
 
 function csvEscape(value: string): string {
