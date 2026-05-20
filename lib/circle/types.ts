@@ -151,6 +151,43 @@ export interface CircleSyncQueueItem {
   idempotency_key: string | null;
 }
 
+// ---- Events ---------------------------------------------------------------
+
+export interface CircleEvent {
+  id: number;
+  name: string;
+  description: string | null;
+  starts_at: string;
+  ends_at: string | null;
+  location: string | null;
+  is_virtual: boolean;
+  virtual_location: string | null; // URL for virtual join link
+  space_id: number;
+  community_id: number;
+  url: string;
+  attendees_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CircleEventInput {
+  name: string;
+  description?: string;
+  starts_at: string;
+  ends_at?: string;
+  location?: string;
+  is_virtual?: boolean;
+  virtual_location?: string;
+  space_id: number;
+}
+
+export interface CircleEventAttendee {
+  id: number;
+  community_member_id: number;
+  status: string; // "going" | "not_going" | "maybe"
+  created_at: string;
+}
+
 // ---- Error ----------------------------------------------------------------
 
 export class CircleApiError extends Error {

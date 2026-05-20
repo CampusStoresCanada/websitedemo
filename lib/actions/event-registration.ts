@@ -13,6 +13,7 @@ import {
   addAttendeeToCalendarEvent,
   removeAttendeeFromCalendarEvent,
 } from "@/lib/google/calendar";
+import { pushRsvpToCircle } from "@/lib/circle/event-sync";
 import type { EventRegistration, EventWaitlistEntry } from "@/lib/events/types";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -135,6 +136,11 @@ export async function registerForEvent(eventId: string): Promise<
     entityId: eventId,
     details: {},
   });
+
+  // Push RSVP to Circle (fire-and-forget)
+  void pushRsvpToCircle(userId, eventId).catch((e) =>
+    console.error("[event-registration] pushRsvpToCircle failed:", e)
+  );
 
   // Send confirmation email + Google Calendar invite — both non-fatal
   void (async () => {

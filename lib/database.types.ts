@@ -12,6 +12,31 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
+  graphql_public: {
+    Tables: {
+      [_ in never]: never
+    }
+    Views: {
+      [_ in never]: never
+    }
+    Functions: {
+      graphql: {
+        Args: {
+          extensions?: Json
+          operationName?: string
+          query?: string
+          variables?: Json
+        }
+        Returns: Json
+      }
+    }
+    Enums: {
+      [_ in never]: never
+    }
+    CompositeTypes: {
+      [_ in never]: never
+    }
+  }
   public: {
     Tables: {
       _prisma_migrations: {
@@ -1401,6 +1426,60 @@ export type Database = {
           {
             foreignKeyName: "cart_items_user_id_fkey"
             columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      circle_event_rsvp_cache: {
+        Row: {
+          circle_attendee_id: number | null
+          circle_event_id: number
+          circle_member_id: number
+          event_id: string | null
+          id: string
+          member_name: string | null
+          reconciled: boolean
+          rsvp_status: string
+          supabase_user_id: string | null
+          synced_at: string
+        }
+        Insert: {
+          circle_attendee_id?: number | null
+          circle_event_id: number
+          circle_member_id: number
+          event_id?: string | null
+          id?: string
+          member_name?: string | null
+          reconciled?: boolean
+          rsvp_status?: string
+          supabase_user_id?: string | null
+          synced_at?: string
+        }
+        Update: {
+          circle_attendee_id?: number | null
+          circle_event_id?: number
+          circle_member_id?: number
+          event_id?: string | null
+          id?: string
+          member_name?: string | null
+          reconciled?: boolean
+          rsvp_status?: string
+          supabase_user_id?: string | null
+          synced_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "circle_event_rsvp_cache_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "circle_event_rsvp_cache_supabase_user_id_fkey"
+            columns: ["supabase_user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -3784,6 +3863,13 @@ export type Database = {
             foreignKeyName: "explain_requests_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "explain_requests_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
@@ -3864,6 +3950,63 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      internal_shares: {
+        Row: {
+          created_at: string
+          created_by: string
+          element_end_selector: string | null
+          element_selector: string | null
+          element_text: string | null
+          id: string
+          note: string | null
+          page_title: string
+          page_url: string
+          recipient_id: string
+          sent_via: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          element_end_selector?: string | null
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          page_title: string
+          page_url: string
+          recipient_id: string
+          sent_via?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          element_end_selector?: string | null
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          page_title?: string
+          page_url?: string
+          recipient_id?: string
+          sent_via?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "internal_shares_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "internal_shares_recipient_id_fkey"
+            columns: ["recipient_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -4744,6 +4887,8 @@ export type Database = {
           created_by: string | null
           email: string | null
           email_domain: string | null
+          embedding: string | null
+          embedding_updated_at: string | null
           files: Json
           fte: number | null
           grace_period_started_at: string | null
@@ -4772,6 +4917,8 @@ export type Database = {
             | null
           membership_status_changed_at: string | null
           metadata: Json
+          nacs_classes: string[] | null
+          nacs_department: string | null
           name: string
           notion_id: string | null
           notion_properties: Json | null
@@ -4782,8 +4929,8 @@ export type Database = {
           onboarding_step: number | null
           organization: string | null
           organization_type: string | null
-          payment_status: string | null
           partner_links: Json
+          payment_status: string | null
           phone: string | null
           postal_code: string | null
           primary_category: string | null
@@ -4817,6 +4964,9 @@ export type Database = {
           type: string
           updated_at: string
           website: string | null
+          website_scraped_at: string | null
+          website_scraped_url: string | null
+          website_summary: string | null
         }
         Insert: {
           action_link_text?: string | null
@@ -4841,6 +4991,8 @@ export type Database = {
           created_by?: string | null
           email?: string | null
           email_domain?: string | null
+          embedding?: string | null
+          embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
           grace_period_started_at?: string | null
@@ -4869,6 +5021,8 @@ export type Database = {
             | null
           membership_status_changed_at?: string | null
           metadata?: Json
+          nacs_classes?: string[] | null
+          nacs_department?: string | null
           name: string
           notion_id?: string | null
           notion_properties?: Json | null
@@ -4879,8 +5033,8 @@ export type Database = {
           onboarding_step?: number | null
           organization?: string | null
           organization_type?: string | null
-          payment_status?: string | null
           partner_links?: Json
+          payment_status?: string | null
           phone?: string | null
           postal_code?: string | null
           primary_category?: string | null
@@ -4914,6 +5068,9 @@ export type Database = {
           type: string
           updated_at: string
           website?: string | null
+          website_scraped_at?: string | null
+          website_scraped_url?: string | null
+          website_summary?: string | null
         }
         Update: {
           action_link_text?: string | null
@@ -4938,6 +5095,8 @@ export type Database = {
           created_by?: string | null
           email?: string | null
           email_domain?: string | null
+          embedding?: string | null
+          embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
           grace_period_started_at?: string | null
@@ -4966,6 +5125,8 @@ export type Database = {
             | null
           membership_status_changed_at?: string | null
           metadata?: Json
+          nacs_classes?: string[] | null
+          nacs_department?: string | null
           name?: string
           notion_id?: string | null
           notion_properties?: Json | null
@@ -5011,6 +5172,9 @@ export type Database = {
           type?: string
           updated_at?: string
           website?: string | null
+          website_scraped_at?: string | null
+          website_scraped_url?: string | null
+          website_summary?: string | null
         }
         Relationships: [
           {
@@ -5025,6 +5189,53 @@ export type Database = {
             columns: ["tenant_id"]
             isOneToOne: false
             referencedRelation: "tenants"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      page_snapshots: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string
+          id: string
+          note: string | null
+          page_title: string
+          page_url: string
+          recipient_email: string | null
+          snapshot: Json
+          type: string
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at: string
+          id?: string
+          note?: string | null
+          page_title: string
+          page_url: string
+          recipient_email?: string | null
+          snapshot: Json
+          type: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          id?: string
+          note?: string | null
+          page_title?: string
+          page_url?: string
+          recipient_email?: string | null
+          snapshot?: Json
+          type?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "page_snapshots_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -6211,6 +6422,50 @@ export type Database = {
           },
         ]
       }
+      share_links: {
+        Row: {
+          created_at: string
+          created_by: string
+          expires_at: string
+          id: string
+          max_uses: number
+          note: string | null
+          page_title: string
+          page_url: string
+          use_count: number
+        }
+        Insert: {
+          created_at?: string
+          created_by: string
+          expires_at: string
+          id?: string
+          max_uses?: number
+          note?: string | null
+          page_title: string
+          page_url: string
+          use_count?: number
+        }
+        Update: {
+          created_at?: string
+          created_by?: string
+          expires_at?: string
+          id?: string
+          max_uses?: number
+          note?: string | null
+          page_title?: string
+          page_url?: string
+          use_count?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "share_links_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       shipments: {
         Row: {
           billing_account: string
@@ -6433,50 +6688,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      share_links: {
-        Row: {
-          created_at: string
-          created_by: string
-          expires_at: string
-          id: string
-          max_uses: number
-          note: string | null
-          page_title: string
-          page_url: string
-          use_count: number
-        }
-        Insert: {
-          created_at?: string
-          created_by: string
-          expires_at: string
-          id?: string
-          max_uses?: number
-          note?: string | null
-          page_title: string
-          page_url: string
-          use_count?: number
-        }
-        Update: {
-          created_at?: string
-          created_by?: string
-          expires_at?: string
-          id?: string
-          max_uses?: number
-          note?: string | null
-          page_title?: string
-          page_url?: string
-          use_count?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "share_links_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -7557,6 +7768,50 @@ export type Database = {
           },
         ]
       }
+      user_bookmarks: {
+        Row: {
+          created_at: string
+          element_end_selector: string | null
+          element_selector: string | null
+          element_text: string | null
+          id: string
+          note: string | null
+          title: string
+          url: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          element_end_selector?: string | null
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          title: string
+          url: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          element_end_selector?: string | null
+          element_selector?: string | null
+          element_text?: string | null
+          id?: string
+          note?: string | null
+          title?: string
+          url?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "user_bookmarks_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       user_organizations: {
         Row: {
           created_at: string | null
@@ -7601,41 +7856,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      user_bookmarks: {
-        Row: {
-          created_at: string
-          id: string
-          note: string | null
-          title: string
-          url: string
-          user_id: string
-        }
-        Insert: {
-          created_at?: string
-          id?: string
-          note?: string | null
-          title: string
-          url: string
-          user_id: string
-        }
-        Update: {
-          created_at?: string
-          id?: string
-          note?: string | null
-          title?: string
-          url?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "user_bookmarks_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -8588,6 +8808,7 @@ export type Database = {
           cancoll_tier: string | null
           catalogue: string | null
           catalogue_url: string | null
+          certifications: string[]
           circle_access_group_id: string | null
           circle_id: string | null
           circle_properties: Json | null
@@ -8601,6 +8822,8 @@ export type Database = {
           created_by: string | null
           email: string | null
           email_domain: string | null
+          embedding: string | null
+          embedding_updated_at: string | null
           files: Json
           fte: number | null
           grace_period_started_at: string | null
@@ -8629,6 +8852,8 @@ export type Database = {
             | null
           membership_status_changed_at: string | null
           metadata: Json
+          nacs_classes: string[] | null
+          nacs_department: string | null
           name: string
           notion_id: string | null
           notion_properties: Json | null
@@ -8639,6 +8864,7 @@ export type Database = {
           onboarding_step: number | null
           organization: string | null
           organization_type: string | null
+          partner_links: Json
           payment_status: string | null
           phone: string | null
           postal_code: string | null
@@ -8673,6 +8899,9 @@ export type Database = {
           type: string
           updated_at: string
           website: string | null
+          website_scraped_at: string | null
+          website_scraped_url: string | null
+          website_summary: string | null
         }[]
         SetofOptions: {
           from: "*"
@@ -8691,6 +8920,10 @@ export type Database = {
       get_user_permission_state: {
         Args: { p_user_id: string }
         Returns: string
+      }
+      increment_share_link_use: {
+        Args: { link_id: string }
+        Returns: undefined
       }
       process_conference_order_paid: {
         Args: {
@@ -8807,6 +9040,19 @@ export type Database = {
           retention_job_id: string
         }[]
       }
+      search_partner_embeddings: {
+        Args: {
+          match_count?: number
+          query_embedding: string
+          query_text?: string
+        }
+        Returns: {
+          id: string
+          score: number
+        }[]
+      }
+      show_limit: { Args: never; Returns: number }
+      show_trgm: { Args: { "": string }; Returns: string[] }
       transition_membership_state: {
         Args: {
           p_actor_id?: string
@@ -8978,6 +9224,9 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
+  graphql_public: {
+    Enums: {},
+  },
   public: {
     Enums: {
       automation_mode: ["draft_only", "auto_send"],

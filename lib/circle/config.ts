@@ -13,6 +13,8 @@ export interface CircleConfig {
   ghostApiKey: string;
   announcementsSpaceId: string;
   headlessAuthToken: string;
+  /** Space ID where CSC events are published in Circle */
+  eventsSpaceId: string;
 }
 
 let _warned = false;
@@ -29,6 +31,7 @@ export function getCircleConfig(): CircleConfig | null {
   const ghostApiKey = process.env.CIRCLE_GHOST_KEY;
   const announcementsSpaceId = process.env.CIRCLE_ANNOUNCEMENTS_SPACE_ID;
   const headlessAuthToken = process.env.CIRCLE_HEADLESS_AUTH_TOKEN;
+  const eventsSpaceId = process.env.CIRCLE_EVENTS_SPACE_ID;
 
   if (!apiKey || !communityId) {
     if (!_warned) {
@@ -48,6 +51,7 @@ export function getCircleConfig(): CircleConfig | null {
     ghostApiKey: ghostApiKey ?? "",
     announcementsSpaceId: announcementsSpaceId ?? "",
     headlessAuthToken: headlessAuthToken ?? "",
+    eventsSpaceId: eventsSpaceId ?? "",
   };
 }
 

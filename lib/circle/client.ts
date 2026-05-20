@@ -10,6 +10,9 @@ import type {
   CircleSpace,
   CircleTag,
   CircleAccessGroup,
+  CircleEvent,
+  CircleEventInput,
+  CircleEventAttendee,
 } from "./types";
 import { CircleApiError } from "./types";
 
@@ -383,6 +386,93 @@ export class CircleAdminClient {
 
     // All candidates returned 404 or empty
     return [];
+  }
+
+  // ---- Events -------------------------------------------------------------
+
+  async listEvents(options?: {
+    space_id?: number;
+    per_page?: number;
+    page?: number;
+  }): Promise<{ records: CircleEvent[]; has_next_page: boolean }> {
+    return this.request<{ records: CircleEvent[]; has_next_page: boolean }>(
+      "GET",
+      "/events",
+      { params: { per_page: options?.per_page ?? 50, page: options?.page ?? 1, ...(options?.space_id ? { space_id: options.space_id } : {}) } }
+    );
+  }
+
+  /** Fetch all Circle events across all pages. */
+  async listAllEvents(spaceId?: number): Promise<CircleEvent[]> {
+    const events: CircleEvent[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.listEvents({ space_id: spaceId, per_page: 50, page });
+      events.push(...(result.records ?? []));
+      if (!result.has_next_page || (result.records ?? []).length === 0) break;
+      page++;
+    }
+    return events;
+  }
+
+  async getEvent(id: number): Promise<CircleEvent> {
+    return this.request<CircleEvent>("GET", `/events/${id}`);
+  }
+
+  async createEvent(payload: CircleEventInput): Promise<CircleEvent> {
+    return this.request<CircleEvent>("POST", "/events", {
+      body: payload as unknown as Record<string, unknown>,
+    });
+  }
+
+  async updateEvent(id: number, payload: Partial<CircleEventInput>): Promise<CircleEvent> {
+    return this.request<CircleEvent>("PUT", `/events/${id}`, {
+      body: payload as unknown as Record<string, unknown>,
+    });
+  }
+
+  async destroyEvent(id: number): Promise<void> {
+    await this.request<void>("DELETE", `/events/${id}`);
+  }
+
+  // ---- Event attendees ----------------------------------------------------
+
+  async listEventAttendees(
+    eventId: number,
+    options?: { per_page?: number; page?: number }
+  ): Promise<{ records: CircleEventAttendee[]; has_next_page: boolean }> {
+    return this.request<{ records: CircleEventAttendee[]; has_next_page: boolean }>(
+      "GET",
+      `/events/${eventId}/event_attendees`,
+      { params: { per_page: options?.per_page ?? 100, page: options?.page ?? 1 } }
+    );
+  }
+
+  async listAllEventAttendees(eventId: number): Promise<CircleEventAttendee[]> {
+    const attendees: CircleEventAttendee[] = [];
+    let page = 1;
+    while (true) {
+      const result = await this.listEventAttendees(eventId, { per_page: 100, page });
+      attendees.push(...(result.records ?? []));
+      if (!result.has_next_page || (result.records ?? []).length === 0) break;
+      page++;
+    }
+    return attendees;
+  }
+
+  async createEventAttendee(
+    eventId: number,
+    communityMemberId: number
+  ): Promise<CircleEventAttendee> {
+    return this.request<CircleEventAttendee>(
+      "POST",
+      `/events/${eventId}/event_attendees`,
+      { body: { community_member_id: communityMemberId } }
+    );
+  }
+
+  async destroyEventAttendee(eventId: number, attendeeId: number): Promise<void> {
+    await this.request<void>("DELETE", `/events/${eventId}/event_attendees/${attendeeId}`);
   }
 
   // ---- Community ----------------------------------------------------------

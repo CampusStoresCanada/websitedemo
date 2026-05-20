@@ -13,6 +13,7 @@ import { createCalendarEventWithMeet, deleteCalendarEvent } from "@/lib/google/c
 import { triggerAutomation } from "@/lib/comms/automation";
 import { sendTransactional } from "@/lib/comms/send";
 import { buildEventActionUrls } from "@/lib/email/eventActionTokens";
+import { pushEventToCircle, updateEventInCircle, removeEventFromCircle } from "@/lib/circle/event-sync";
 import type {
   Event,
   EventWithMeta,
@@ -338,6 +339,11 @@ export async function updateEvent(
   revalidatePath("/admin/events", "page");
   revalidatePath(`/admin/events/${id}`, "page");
 
+  // Sync changes to Circle if already pushed (fire-and-forget)
+  void updateEventInCircle(id).catch((e) =>
+    console.error("[events] updateEventInCircle failed:", e)
+  );
+
   return { success: true, data: data as Event };
 }
 
@@ -415,6 +421,11 @@ export async function approveEvent(
       id, existing.title, existing.starts_at, meetUpdates.google_meet_link, creatorEmail
     ).catch((e) => console.error("[events] notifyCreatorEventApproved failed:", e));
   }
+
+  // Push to Circle (fire-and-forget — non-blocking)
+  void pushEventToCircle(id).catch((e) =>
+    console.error("[events] pushEventToCircle failed:", e)
+  );
 
   return { success: true };
 }
@@ -518,6 +529,17 @@ export async function transitionEventStatus(
     void notifyCreatorEventApproved(
       id, existing.title, existing.starts_at, extraUpdates.google_meet_link ?? undefined, creatorEmailForNotify
     ).catch((e) => console.error("[events] notifyCreatorEventApproved failed:", e));
+  }
+
+  // Circle sync (fire-and-forget)
+  if (newStatus === "published") {
+    void pushEventToCircle(id).catch((e) =>
+      console.error("[events] pushEventToCircle failed:", e)
+    );
+  } else if (newStatus === "cancelled" || newStatus === "completed") {
+    void removeEventFromCircle(id).catch((e) =>
+      console.error("[events] removeEventFromCircle failed:", e)
+    );
   }
 
   // Notify all registrants when an event is cancelled
