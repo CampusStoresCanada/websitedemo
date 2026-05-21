@@ -2,6 +2,8 @@ import Link from "next/link";
 
 export interface ThreeDoorsProps {
   isLoggedIn: boolean;
+  /** true for super_admin and admin roles */
+  isAdmin: boolean;
   /** "Member" | "Vendor Partner" | null (public) */
   userOrgType: string | null;
   userOrgSlug: string | null;
@@ -11,6 +13,7 @@ export interface ThreeDoorsProps {
 
 export default function ThreeDoors({
   isLoggedIn,
+  isAdmin,
   userOrgType,
   userOrgSlug,
   hasSubmission,
@@ -58,6 +61,7 @@ export default function ThreeDoors({
                 <BenchmarkingCTA
                   isMember={isMember}
                   isPartner={isPartner}
+                  isAdmin={isAdmin}
                   isLoggedIn={isLoggedIn}
                   hasSubmission={hasSubmission}
                   activeSurvey={activeSurvey}
@@ -77,12 +81,12 @@ export default function ThreeDoors({
               </div>
               <p className="text-xs font-semibold text-white/50 uppercase tracking-widest mb-1">Vendor Partners</p>
               <h2 className="text-xl font-bold text-white leading-snug">
-                {isMember ? "Who supplies the sector" : "Reach the market"}
+                {isMember || isAdmin ? "Who supplies the sector" : "Reach the market"}
               </h2>
             </div>
 
             <div className="flex flex-col flex-1 px-6 py-6 gap-5">
-              {isMember ? (
+              {isMember || isAdmin ? (
                 <>
                   <p className="text-[#6B6B6B] text-sm leading-relaxed">
                     CSC&rsquo;s vendor partner network includes the suppliers, distributors, and technology providers that campus stores rely on. Browse the full directory to find partners, compare options, and discover new vendors.
@@ -217,6 +221,7 @@ export default function ThreeDoors({
 function BenchmarkingCTA({
   isMember,
   isPartner,
+  isAdmin,
   isLoggedIn,
   hasSubmission,
   activeSurvey,
@@ -224,11 +229,27 @@ function BenchmarkingCTA({
 }: {
   isMember: boolean;
   isPartner: boolean;
+  isAdmin: boolean;
   isLoggedIn: boolean;
   hasSubmission: boolean;
   activeSurvey: { fiscal_year: number } | null;
   userOrgSlug: string | null;
 }) {
+  // Admin / super_admin → full access to all benchmarking data
+  if (isAdmin) {
+    return (
+      <Link
+        href="/benchmarking/admin"
+        className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#163D6D] hover:bg-[#0f2d52] text-white text-sm font-semibold rounded-full transition-colors"
+      >
+        Admin Benchmarking View
+        <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M17 8l4 4m0 0l-4 4m4-4H3" />
+        </svg>
+      </Link>
+    );
+  }
+
   // Member with a submission → go to their report
   if (isMember && hasSubmission && userOrgSlug) {
     return (

@@ -20,8 +20,10 @@ export default async function ResourcesPage() {
     getOptionalAuthContext(),
   ]);
 
-  const hero    = heroContent[0] ?? null;
-  const userId  = authCtx?.userId ?? null;
+  const hero       = heroContent[0] ?? null;
+  const userId     = authCtx?.userId ?? null;
+  const globalRole = (authCtx as any)?.globalRole ?? null;
+  const isAdmin    = globalRole === "super_admin" || globalRole === "admin";
 
   // ── Viewer-dependent data ──────────────────────────────────────────────────
   let userOrgType: string | null   = null;
@@ -100,6 +102,7 @@ export default async function ResourcesPage() {
       {/* ── Three Doors ───────────────────────────────────────────────────── */}
       <ThreeDoors
         isLoggedIn={!!userId}
+        isAdmin={isAdmin}
         userOrgType={userOrgType}
         userOrgSlug={userOrgSlug}
         hasSubmission={hasSubmission}
