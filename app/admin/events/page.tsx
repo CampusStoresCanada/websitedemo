@@ -112,7 +112,7 @@ export default async function AdminEventsPage({
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 mb-1">
                   <EventStatusBadge status={event.status} />
-                  {event.audience_mode === "members_only" && (
+                  {event.audience_mode !== "public" && (
                     <span className="text-xs text-gray-400">Members only</span>
                   )}
                 </div>

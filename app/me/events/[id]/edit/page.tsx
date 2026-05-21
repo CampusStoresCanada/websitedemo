@@ -60,6 +60,7 @@ export default async function MemberEditEventPage({
         <EditEventForm
           event={{
             ...event,
+            starts_at: event.starts_at ?? "",
             metadata: (event.metadata as Record<string, unknown>) ?? {},
           }}
         />

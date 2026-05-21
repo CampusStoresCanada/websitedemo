@@ -54,7 +54,7 @@ function buildCirclePayload(event: {
     body: event.description ?? undefined,
     starts_at: normalise(event.starts_at)!,
     ends_at: normalise(event.ends_at),
-    location_type: event.is_virtual ? "virtual" : "in_person",
+    location_type: (event.is_virtual ? "virtual" : "in_person") as "virtual" | "in_person",
     in_person_location: !event.is_virtual ? (event.location ?? undefined) : undefined,
     virtual_location_url: event.is_virtual ? (event.virtual_link ?? undefined) : undefined,
     space_id: spaceId,

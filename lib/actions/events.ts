@@ -181,7 +181,7 @@ export async function createEvent(
       is_virtual: payload.is_virtual ?? false,
       audience_mode: payload.audience_mode ?? "members",
       capacity: payload.capacity ?? null,
-      metadata: payload.metadata ?? {},
+      metadata: (payload.metadata ?? {}) as import("@/lib/database.types").Json,
       status: "draft",
       created_by: auth.ctx.userId,
     })
@@ -239,7 +239,7 @@ export async function createEventByMember(
       is_virtual: payload.is_virtual ?? false,
       audience_mode: payload.audience_mode ?? "members",
       capacity: payload.capacity ?? null,
-      metadata: payload.metadata ?? {},
+      metadata: (payload.metadata ?? {}) as import("@/lib/database.types").Json,
       status,
       created_by: auth.ctx.userId,
     })

@@ -12,31 +12,6 @@ export type Database = {
   __InternalSupabase: {
     PostgrestVersion: "13.0.5"
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   public: {
     Tables: {
       _prisma_migrations: {
@@ -1489,6 +1464,7 @@ export type Database = {
       circle_member_mapping: {
         Row: {
           circle_member_id: number
+          circle_public_uid: string | null
           contact_id: string | null
           created_at: string
           id: string
@@ -1503,6 +1479,7 @@ export type Database = {
         }
         Insert: {
           circle_member_id: number
+          circle_public_uid?: string | null
           contact_id?: string | null
           created_at?: string
           id?: string
@@ -1517,6 +1494,7 @@ export type Database = {
         }
         Update: {
           circle_member_id?: number
+          circle_public_uid?: string | null
           contact_id?: string | null
           created_at?: string
           id?: string
@@ -8921,6 +8899,13 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: string
       }
+      get_users_by_emails: {
+        Args: { p_emails: string[] }
+        Returns: {
+          email: string
+          id: string
+        }[]
+      }
       increment_share_link_use: {
         Args: { link_id: string }
         Returns: undefined
@@ -9224,9 +9209,6 @@ export type CompositeTypes<
     : never
 
 export const Constants = {
-  graphql_public: {
-    Enums: {},
-  },
   public: {
     Enums: {
       automation_mode: ["draft_only", "auto_send"],
