@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import CancelRsvpButton from "@/components/events/CancelRsvpButton";
 
 export const metadata = {
   title: "My Events | Campus Stores Canada",
@@ -295,6 +296,14 @@ function RsvpRow({ reg, isPast = false }: { reg: any; isPast?: boolean }) {
       </div>
 
       <div className="flex items-center gap-2 shrink-0">
+        {/* Cancel — upcoming only, active registrations */}
+        {!isPast && isActive && (
+          <CancelRsvpButton
+            eventId={ev?.id}
+            status={reg.status as "registered" | "waitlisted" | "promoted"}
+          />
+        )}
+
         {!isPast && isActive && isVirtual && meetLink ? (
           <a
             href={meetLink}

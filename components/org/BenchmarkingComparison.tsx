@@ -36,44 +36,28 @@ function enrollmentTier(fte: number | null | undefined): string {
   return 'XLarge';
 }
 
-// ── Quartile helpers ──────────────────────────────────────────────────────────
-
-type Quartile = 'gold' | 'green' | 'neutral' | 'red';
+// ── Quartile highlight helpers ─────────────────────────────────────────────────
 
 /**
- * Returns which quartile a value falls in relative to an array of peers.
- * Higher rank = better (gold). Pass `invert=true` for cost metrics where lower is better.
+ * Returns 'top' (top 25%), 'bottom' (bottom 25%), or null (middle 50%).
+ * Pass `invert=true` for cost metrics where lower is better (HR%).
  */
-function getQuartile(values: number[], value: number, invert = false): Quartile {
+function getQuartileBand(values: number[], value: number, invert = false): 'top' | 'bottom' | null {
   const valid = values.filter((v) => Number.isFinite(v));
-  if (valid.length < 4) return 'neutral'; // not enough data to rank
+  if (valid.length < 4) return null;
   const sorted = [...valid].sort((a, b) => a - b);
   const below = sorted.filter((v) => v < value).length;
   const pct = below / sorted.length; // 0 = lowest, ~1 = highest
-
   const rank = invert ? 1 - pct : pct;
-  if (rank >= 0.75) return 'gold';
-  if (rank >= 0.50) return 'green';
-  if (rank >= 0.25) return 'neutral';
-  return 'red';
+  if (rank >= 0.75) return 'top';
+  if (rank < 0.25)  return 'bottom';
+  return null;
 }
 
-function quartileBg(q: Quartile): string {
-  switch (q) {
-    case 'gold':    return 'bg-amber-50';
-    case 'green':   return 'bg-green-50';
-    case 'neutral': return '';
-    case 'red':     return 'bg-red-50';
-  }
-}
-
-function quartileDot(q: Quartile): string {
-  switch (q) {
-    case 'gold':    return 'text-amber-500';
-    case 'green':   return 'text-green-500';
-    case 'neutral': return 'text-gray-300';
-    case 'red':     return 'text-red-400';
-  }
+function bandBg(b: 'top' | 'bottom' | null): string {
+  if (b === 'top')    return 'bg-green-100';
+  if (b === 'bottom') return 'bg-orange-100';
+  return '';
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -123,20 +107,18 @@ export default function BenchmarkingComparison({
     });
   }, [withMetrics, peerGroup, currentOrg]);
 
-  // Compute quartile maps within the filtered set
-  const quartileMaps = useMemo(() => {
+  // Compute value arrays for standout detection within the filtered set
+  const standoutMaps = useMemo(() => {
     const extract = (key: keyof typeof filteredData[0]) =>
       filteredData.map((r) => r[key] as number | null).filter((v): v is number => v !== null);
 
     return {
-      totalSales:    extract('totalSales'),
-      grossMargin:   extract('grossMargin'),
-      hrPct:         extract('hrPct'),
-      netMargin:     extract('netMargin'),
-      onlinePct:     extract('onlinePct'),
+      totalSales:      extract('totalSales'),
+      grossMargin:     extract('grossMargin'),
+      hrPct:           extract('hrPct'),
+      netMargin:       extract('netMargin'),
+      onlinePct:       extract('onlinePct'),
       salesPerStudent: extract('salesPerStudent'),
-      total_square_footage: extract('total_square_footage'),
-      enrollment_fte: extract('enrollment_fte'),
     };
   }, [filteredData]);
 
@@ -210,14 +192,14 @@ export default function BenchmarkingComparison({
     </th>
   );
 
-  // Helper: quartile cell class for a given metric value
-  const qClass = (
+  // Helper: quartile band cell bg for a given metric value
+  const sBg = (
     values: number[],
     value: number | null | undefined,
     invert = false
   ): string => {
     if (value == null) return '';
-    return quartileBg(getQuartile(values, value, invert));
+    return bandBg(getQuartileBand(values, value, invert));
   };
 
   return (
@@ -252,18 +234,6 @@ export default function BenchmarkingComparison({
               </button>
             ))}
           </div>
-        </div>
-
-        {/* Quartile legend */}
-        <div className="flex items-center gap-4 text-xs text-gray-500">
-          <span className="font-medium">Quartile:</span>
-          {([ ['gold', 'Top 25%'], ['green', 'Top 50%'], ['neutral', 'Bottom 50%'], ['red', 'Bottom 25%'] ] as [Quartile, string][]).map(([q, label]) => (
-            <span key={q} className="flex items-center gap-1">
-              <span className={`w-2.5 h-2.5 rounded-sm inline-block ${q === 'neutral' ? 'bg-gray-100 border border-gray-200' : quartileBg(q)}`} />
-              {label}
-            </span>
-          ))}
-          <span className="text-gray-400 ml-1">· HR% inverted (lower = better)</span>
         </div>
 
         {/* Table */}
@@ -328,62 +298,44 @@ export default function BenchmarkingComparison({
                     </td>
 
                     {/* Total Sales */}
-                    <td className={`px-3 py-2 font-medium ${qClass(quartileMaps.totalSales, row.totalSales)}`}>
+                    <td className={`px-3 py-2 font-medium ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.totalSales, row.totalSales)}`}>
                       <BlurredValue placeholderWidth={7}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.totalSales != null ? getQuartile(quartileMaps.totalSales, row.totalSales) : null} />
-                          {formatCurrency(row.totalSales)}
-                        </span>
+                        {formatCurrency(row.totalSales)}
                       </BlurredValue>
                     </td>
 
                     {/* Online % */}
-                    <td className={`px-3 py-2 ${qClass(quartileMaps.onlinePct, row.onlinePct)}`}>
+                    <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.onlinePct, row.onlinePct)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.onlinePct != null ? getQuartile(quartileMaps.onlinePct, row.onlinePct) : null} />
-                          {row.onlinePct != null ? `${row.onlinePct.toFixed(1)}%` : '—'}
-                        </span>
+                        {row.onlinePct != null ? `${row.onlinePct.toFixed(1)}%` : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Gross Margin % */}
-                    <td className={`px-3 py-2 ${qClass(quartileMaps.grossMargin, row.grossMargin)}`}>
+                    <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.grossMargin, row.grossMargin)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.grossMargin != null ? getQuartile(quartileMaps.grossMargin, row.grossMargin) : null} />
-                          {row.grossMargin != null ? `${row.grossMargin.toFixed(1)}%` : '—'}
-                        </span>
+                        {row.grossMargin != null ? `${row.grossMargin.toFixed(1)}%` : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* HR % — inverted (lower is better) */}
-                    <td className={`px-3 py-2 ${qClass(quartileMaps.hrPct, row.hrPct, true)}`}>
+                    <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.hrPct, row.hrPct, true)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.hrPct != null ? getQuartile(quartileMaps.hrPct, row.hrPct, true) : null} />
-                          {row.hrPct != null ? `${row.hrPct.toFixed(1)}%` : '—'}
-                        </span>
+                        {row.hrPct != null ? `${row.hrPct.toFixed(1)}%` : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Net Margin % */}
-                    <td className={`px-3 py-2 ${qClass(quartileMaps.netMargin, row.netMargin)}`}>
+                    <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.netMargin, row.netMargin)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.netMargin != null ? getQuartile(quartileMaps.netMargin, row.netMargin) : null} />
-                          {row.netMargin != null ? `${row.netMargin.toFixed(1)}%` : '—'}
-                        </span>
+                        {row.netMargin != null ? `${row.netMargin.toFixed(1)}%` : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Sales per Student */}
-                    <td className={`px-3 py-2 ${qClass(quartileMaps.salesPerStudent, row.salesPerStudent)}`}>
+                    <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.salesPerStudent, row.salesPerStudent)}`}>
                       <BlurredValue placeholderWidth={5}>
-                        <span className="flex items-center gap-1">
-                          <QuartileDot q={row.salesPerStudent != null ? getQuartile(quartileMaps.salesPerStudent, row.salesPerStudent) : null} />
-                          {row.salesPerStudent != null ? `$${Math.round(row.salesPerStudent).toLocaleString()}` : '—'}
-                        </span>
+                        {row.salesPerStudent != null ? `$${Math.round(row.salesPerStudent).toLocaleString()}` : '—'}
                       </BlurredValue>
                     </td>
                   </tr>
@@ -394,23 +346,11 @@ export default function BenchmarkingComparison({
         </div>
 
         <p className="text-xs text-gray-400">
-          Quartile rankings recompute within the selected peer group. GM% = gross margin. HR% = HR expense as % of sales (lower is better).
+          Green = top quartile · Orange = bottom quartile · middle 50% unmarked · highlights recompute within the selected peer group. GM% = gross margin. HR% = HR expense as % of sales (lower is better).
         </p>
       </div>
     </ProtectedSection>
   );
-}
-
-// ── Sub-components ────────────────────────────────────────────────────────────
-
-function QuartileDot({ q }: { q: Quartile | null }) {
-  if (!q) return null;
-  return <span className={`inline-block w-1.5 h-1.5 rounded-full flex-shrink-0 ${
-    q === 'gold' ? 'bg-amber-400' :
-    q === 'green' ? 'bg-green-400' :
-    q === 'neutral' ? 'bg-gray-200' :
-    'bg-red-400'
-  }`} />;
 }
 
 // ── Formatters ────────────────────────────────────────────────────────────────

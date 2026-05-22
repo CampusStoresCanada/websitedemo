@@ -122,7 +122,7 @@ export default function ThreeDoors({
                   </p>
                   <div className="mt-auto pt-2">
                     <Link
-                      href={userOrgSlug ? `/org/${userOrgSlug}` : "/toolkit"}
+                      href="/playbook"
                       className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#1A1A1A] hover:bg-gray-800 text-white text-sm font-semibold rounded-full transition-colors"
                     >
                       Your Partner Toolkit

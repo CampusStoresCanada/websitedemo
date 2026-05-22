@@ -54,6 +54,16 @@ export default function Footer() {
                 </Link>
               </li>
               <li>
+                <Link href="/resources" className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                  Resources
+                </Link>
+              </li>
+              <li>
+                <Link href="/playbook" className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
+                  Partner Playbook
+                </Link>
+              </li>
+              <li>
                 <a
                   href="https://campusstores.ca"
                   target="_blank"

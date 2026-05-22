@@ -3209,6 +3209,45 @@ export type Database = {
           },
         ]
       }
+      contact_inquiries: {
+        Row: {
+          created_at: string
+          email: string
+          id: string
+          is_idn: boolean
+          message: string
+          name: string
+          organization: string | null
+          status: string
+          subject: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          email: string
+          id?: string
+          is_idn?: boolean
+          message: string
+          name: string
+          organization?: string | null
+          status?: string
+          subject: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          email?: string
+          id?: string
+          is_idn?: boolean
+          message?: string
+          name?: string
+          organization?: string | null
+          status?: string
+          subject?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
       contacts: {
         Row: {
           archived_at: string | null
@@ -9251,18 +9290,18 @@ export const Constants = {
   },
 } as const
 
-// Convenience row-type aliases (keep in sync with table names above)
-export type Organization = Database["public"]["Tables"]["organizations"]["Row"];
-export type Contact = Database["public"]["Tables"]["contacts"]["Row"];
-export type BrandColor = Database["public"]["Tables"]["brand_colors"]["Row"];
-export type Benchmarking = Database["public"]["Tables"]["benchmarking"]["Row"];
-export type SiteContent = Database["public"]["Tables"]["site_content"]["Row"];
-export type DeltaFlag = Database["public"]["Tables"]["delta_flags"]["Row"];
-export type BenchmarkingSurvey = Database["public"]["Tables"]["benchmarking_surveys"]["Row"];
 
-// Board portal row-type aliases
-export type BoardMeeting = Database["public"]["Tables"]["board_meetings"]["Row"];
-export type BoardDocument = Database["public"]["Tables"]["board_documents"]["Row"];
-export type BoardQboSnapshot = Database["public"]["Tables"]["board_qbo_snapshots"]["Row"];
+// ── Convenience type aliases ──────────────────────────────────────────────────
+export type Organization      = Database["public"]["Tables"]["organizations"]["Row"];
+export type Contact           = Database["public"]["Tables"]["contacts"]["Row"];
+export type BrandColor        = Database["public"]["Tables"]["brand_colors"]["Row"];
+export type Benchmarking      = Database["public"]["Tables"]["benchmarking"]["Row"];
+export type SiteContent       = Database["public"]["Tables"]["site_content"]["Row"];
+export type DeltaFlag         = Database["public"]["Tables"]["delta_flags"]["Row"];
+export type BenchmarkingSurvey = Database["public"]["Tables"]["benchmarking_surveys"]["Row"];
+export type BoardMeeting      = Database["public"]["Tables"]["board_meetings"]["Row"];
+export type BoardDocument     = Database["public"]["Tables"]["board_documents"]["Row"];
+export type BoardQboSnapshot  = Database["public"]["Tables"]["board_qbo_snapshots"]["Row"];
 export type DashboardWidgetConfig = Database["public"]["Tables"]["dashboard_widget_config"]["Row"];
-export type PendingContentChange = Database["public"]["Tables"]["pending_content_changes"]["Row"];
+export type PendingContentChange  = Database["public"]["Tables"]["pending_content_changes"]["Row"];
+export type ContactInquiry    = Database["public"]["Tables"]["contact_inquiries"]["Row"];

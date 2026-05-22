@@ -110,6 +110,7 @@ const NAV_SECTIONS = [
     items: [
       { href: "/admin/comms",       title: "Campaigns & Templates", description: "Manage email campaigns, templates, and delivery analytics." },
       { href: "/admin/events",      title: "Events",             description: "Create, review, and manage non-conference events." },
+      { href: "/admin/contact",     title: "Contact Inquiries",  description: "Inbound contact form submissions, including IDN requests." },
     ],
   },
   {

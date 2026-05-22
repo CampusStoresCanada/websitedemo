@@ -36,15 +36,12 @@ export default async function ResourcesPage() {
     const db  = createAdminClient();
     const now = new Date().toISOString();
 
-    const [membershipResult, surveyResult] = await Promise.all([
+    const [membershipsResult, surveyResult] = await Promise.all([
       db
         .from("user_organizations")
         .select("organization_id, organizations(id, slug, type)")
         .eq("user_id", userId)
-        .eq("status", "active")
-        .order("created_at", { ascending: true })
-        .limit(1)
-        .maybeSingle(),
+        .eq("status", "active"),
       db
         .from("benchmarking_surveys")
         .select("fiscal_year")
@@ -55,8 +52,16 @@ export default async function ResourcesPage() {
         .maybeSingle(),
     ]);
 
-    const org = (membershipResult.data?.organizations as { id: string; slug: string; type: string } | null);
-    userOrgId   = membershipResult.data?.organization_id ?? null;
+    // Prefer "Member" org over "Staff" / others — super admins belong to both
+    const rows = membershipsResult.data ?? [];
+    type OrgRow = { organization_id: string; organizations: { id: string; slug: string; type: string } | null };
+    const preferredRow =
+      (rows as OrgRow[]).find((r) => r.organizations?.type === "Member") ??
+      (rows as OrgRow[]).find((r) => r.organizations?.type === "Vendor Partner") ??
+      (rows as OrgRow[])[0] ?? null;
+
+    const org = preferredRow?.organizations ?? null;
+    userOrgId   = preferredRow?.organization_id ?? null;
     userOrgSlug = org?.slug ?? null;
     userOrgType = org?.type ?? null;
     activeSurvey = surveyResult.data ?? null;

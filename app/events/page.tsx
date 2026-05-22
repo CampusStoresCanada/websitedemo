@@ -3,10 +3,10 @@ import { Suspense } from "react";
 import { listPublishedEventsWithOrgContext } from "@/lib/actions/events";
 import { getOptionalAuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { deriveUserTags, eventMatchesUserTags } from "@/lib/events/tags";
+import { deriveUserTags } from "@/lib/events/tags";
 import { canSeeEvent } from "@/lib/events/visibility";
-import EventCard from "@/components/events/EventCard";
 import EventTabs from "@/components/events/EventTabs";
+import EventsFilteredList from "@/components/events/EventsFilteredList";
 
 export const metadata: Metadata = {
   title: "Events | Campus Stores Canada",
@@ -19,21 +19,26 @@ async function getUserTags(userId: string): Promise<string[]> {
   try {
     const db = createAdminClient();
 
-    // Get the user's primary org
-    const { data: membership } = await db
+    // Prefer "Member" org — same logic as resources page to avoid wrong org for multi-org users
+    const { data: memberships } = await db
       .from("user_organizations")
-      .select("organization_id")
+      .select("organization_id, organizations(type)")
       .eq("user_id", userId)
-      .order("created_at", { ascending: true })
-      .limit(1)
-      .maybeSingle();
+      .eq("status", "active");
 
-    if (!membership?.organization_id) return [];
+    type Row = { organization_id: string; organizations: { type: string } | null };
+    const rows = (memberships ?? []) as Row[];
+    const preferred =
+      rows.find((r) => r.organizations?.type === "Member") ??
+      rows.find((r) => r.organizations?.type === "Vendor Partner") ??
+      rows[0] ?? null;
+
+    if (!preferred?.organization_id) return [];
 
     const { data: org } = await db
       .from("organizations")
       .select("province, nacs_department, nacs_classes, is_cancoll_member")
-      .eq("id", membership.organization_id)
+      .eq("id", preferred.organization_id)
       .maybeSingle();
 
     if (!org) return [];
@@ -124,40 +129,12 @@ export default async function EventsPage({
       {/* ------------------------------------------------------------------ */}
       <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
 
-        {/* Empty state */}
-        {displayed.length === 0 && (
-          <div className="text-center py-16 text-gray-400">
-            {activeTab === "upcoming" ? (
-              <>
-                <p className="text-lg font-medium">No upcoming events</p>
-                <p className="text-sm mt-1">Check back soon — new events are added regularly.</p>
-              </>
-            ) : (
-              <>
-                <p className="text-lg font-medium">No past events yet</p>
-                <p className="text-sm mt-1">Attended events will appear here.</p>
-              </>
-            )}
-          </div>
-        )}
-
-        {/* Event list */}
-        {displayed.length > 0 && (
-          <div className={`space-y-4 ${activeTab === "past" ? "opacity-80" : ""}`}>
-            {displayed.map((event) => (
-              <EventCard
-                key={event.id}
-                event={event}
-                isAuthenticated={!!userId}
-                forYou={
-                  activeTab === "upcoming" &&
-                  !!userId &&
-                  eventMatchesUserTags(event.metadata, userTags)
-                }
-              />
-            ))}
-          </div>
-        )}
+        <EventsFilteredList
+          events={displayed}
+          isAuthenticated={!!userId}
+          userTags={userTags}
+          activeTab={activeTab}
+        />
       </div>
     </div>
   );
