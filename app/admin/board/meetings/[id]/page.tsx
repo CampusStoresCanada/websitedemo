@@ -6,9 +6,14 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getMeetingFinancialReport } from "@/lib/quickbooks/reports";
+import { getLastFullMonth } from "@/lib/quickbooks/fiscal";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import PullFinancialsButton from "@/components/admin/board/PullFinancialsButton";
 import DocumentDownloadLink from "@/components/admin/board/DocumentDownloadLink";
+import IncomeStatementTable from "@/components/admin/board/financials/IncomeStatementTable";
+import BalanceSheetTable from "@/components/admin/board/financials/BalanceSheetTable";
+import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -81,6 +86,10 @@ export default async function MeetingDetailPage({
   const meeting = meetingRes.data;
   const docs    = docsRes.data ?? [];
 
+  // Financial report: frozen to last closed month before the meeting date
+  const reportPeriod    = getLastFullMonth(meeting.meeting_date);
+  const financialReport = await getMeetingFinancialReport(meeting.id);
+
   // Group documents by type, in TYPE_ORDER
   const grouped: Record<string, typeof docs> = {};
   for (const type of TYPE_ORDER) {
@@ -99,7 +108,12 @@ export default async function MeetingDetailPage({
         description={`${meetingTypeLabel} · ${docs.length} document${docs.length !== 1 ? "s" : ""}`}
         actions={
           <div className="flex items-center gap-2">
-            {isSA && <PullFinancialsButton meetingId={meeting.id} />}
+            {isSA && (
+              <PullFinancialsButton
+                meetingId={meeting.id}
+                endDate={reportPeriod.end}
+              />
+            )}
             <Link
               href="/admin/board/meetings"
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -125,6 +139,14 @@ export default async function MeetingDetailPage({
           {meeting.notes}
         </div>
       )}
+
+      {/* Financial report section */}
+      <MeetingFinancialsTab
+        report={financialReport}
+        reportPeriod={reportPeriod}
+        meetingId={meeting.id}
+        isSA={isSA}
+      />
 
       {/* Document sections */}
       {docs.length === 0 ? (

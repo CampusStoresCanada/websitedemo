@@ -5,9 +5,11 @@ import { useRouter } from "next/navigation";
 
 interface Props {
   meetingId?: string;
+  /** YYYY-MM-DD — if provided, report is frozen to last day of prior month */
+  endDate?: string;
 }
 
-export default function PullFinancialsButton({ meetingId }: Props) {
+export default function PullFinancialsButton({ meetingId, endDate }: Props) {
   const router = useRouter();
   const [state, setState] = useState<"idle" | "loading" | "success" | "error">("idle");
   const [detail, setDetail] = useState<string | null>(null);
@@ -19,7 +21,7 @@ export default function PullFinancialsButton({ meetingId }: Props) {
       const res = await fetch("/api/admin/board/qbo/pull", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ meetingId }),
+        body: JSON.stringify({ meetingId, endDate }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Pull failed");
@@ -33,11 +35,12 @@ export default function PullFinancialsButton({ meetingId }: Props) {
     }
   }
 
+  const baseLabel = meetingId ? "Pull Meeting Financials" : "Pull QBO Reports";
   const label =
     state === "loading" ? "Pulling…" :
     state === "success" ? "Pulled ✓" :
     state === "error"   ? "Failed — retry?" :
-    "Pull QBO Reports";
+    baseLabel;
 
   const cls =
     state === "loading" ? "opacity-60 cursor-not-allowed" :

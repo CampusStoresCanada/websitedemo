@@ -634,6 +634,25 @@ export async function pullAndCacheQBOReports(
 // Read latest snapshot
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Returns the financial snapshot linked to a specific board meeting.
+ * Returns null if no snapshot has been pulled for this meeting yet.
+ */
+export async function getMeetingFinancialReport(meetingId: string): Promise<ComparativeReport | null> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("board_qbo_snapshots")
+    .select("data_json, pulled_at")
+    .eq("meeting_id", meetingId)
+    .order("pulled_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return null;
+  if (!isComparativeReport(data.data_json)) return null;
+  return data.data_json as unknown as ComparativeReport;
+}
+
 /** Returns true if the JSON blob is a new-format ComparativeReport (not the legacy flat summary) */
 function isComparativeReport(obj: unknown): obj is ComparativeReport {
   return (
