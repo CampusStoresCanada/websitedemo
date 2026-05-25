@@ -357,6 +357,10 @@ export interface FetchTransactionsOptions {
 /**
  * Fetch individual transactions for a single account via the GeneralLedger report.
  * Used for the hover popover on income statement rows.
+ *
+ * GL column order varies by QBO minor version — we read the Columns header to
+ * find the right indices rather than assuming fixed positions.
+ * Typical columns: Date | Txn Type | No. | Name | Memo | Split | Amount | Balance
  */
 export async function fetchQBTransactions(
   options: FetchTransactionsOptions
@@ -375,27 +379,58 @@ export async function fetchQBTransactions(
     `/reports/GeneralLedger?${params.toString()}`
   );
 
-  // Parse the GeneralLedger report rows into flat transactions
+  // Build a ColType → index map from the report's column header
+  const colTypeIndex = new Map<string, number>();
+  (report.Columns?.Column ?? []).forEach((col, i) => {
+    colTypeIndex.set(col.ColType, i);
+  });
+
+  // Fall back to common known positions if header isn't present
+  const iDate   = colTypeIndex.get("tx_date")         ?? 0;
+  const iType   = colTypeIndex.get("txn_type")         ?? 1;
+  const iDocNum = colTypeIndex.get("doc_num")          ?? 2;
+  const iName   = colTypeIndex.get("name")             ?? 3;
+  const iMemo   = colTypeIndex.get("memo")             ?? 4;
+  // "subt_nat_amount" is the net amount column in QBO GL reports
+  const iAmount = colTypeIndex.get("subt_nat_amount")  ??
+                  colTypeIndex.get("amount")            ?? 6;
+
   const transactions: QBTransaction[] = [];
+
+  // GL report: top-level Sections are accounts; their children are Data rows
+  // (sometimes with an extra intermediate Section for the account sub-group)
+  function parseRows(rows: Array<import("./types").QBDataRow | import("./types").QBSectionRow>) {
+    for (const row of rows) {
+      if (row.type === "Data") {
+        const cols   = (row as import("./types").QBDataRow).ColData;
+        const date   = cols[iDate]?.value   ?? "";
+        const type   = cols[iType]?.value   ?? "";
+        const docNum = cols[iDocNum]?.value ?? "";
+        const payee  = cols[iName]?.value   ?? "";
+        const memo   = cols[iMemo]?.value   ?? "";
+        const rawAmt = cols[iAmount]?.value ?? "";
+        const amount = parseFloat(rawAmt);
+
+        // Skip blank/header rows and Beginning Balance lines
+        if (!date || date === "Date" || !rawAmt || isNaN(amount)) continue;
+
+        transactions.push({ date, type, docNum, payee, memo, amount });
+      } else if (row.type === "Section") {
+        // Recurse — handles nested sections (e.g. sub-accounts)
+        const sr = row as import("./types").QBSectionRow;
+        parseRows(sr.Rows?.Row ?? []);
+      }
+    }
+  }
 
   for (const row of report.Rows?.Row ?? []) {
     if (row.type !== "Section") continue;
-    for (const inner of (row as import("./types").QBSectionRow).Rows?.Row ?? []) {
-      if (inner.type !== "Data") continue;
-      const cols = (inner as import("./types").QBDataRow).ColData;
-      // GL report columns: Date, Transaction Type, Doc Num, Name, Memo, Amount, Balance
-      const date   = cols[0]?.value ?? "";
-      const type   = cols[1]?.value ?? "";
-      const docNum = cols[2]?.value ?? "";
-      const payee  = cols[3]?.value ?? "";
-      const memo   = cols[4]?.value ?? "";
-      const amount = parseFloat(cols[5]?.value ?? "0") || 0;
-
-      if (!date || date === "Date") continue; // skip header rows
-
-      transactions.push({ date, type, docNum, payee, memo, amount });
-    }
+    const sr = row as import("./types").QBSectionRow;
+    parseRows(sr.Rows?.Row ?? []);
   }
+
+  // Sort chronologically
+  transactions.sort((a, b) => a.date.localeCompare(b.date));
 
   return transactions;
 }
