@@ -605,6 +605,17 @@ export async function pullAndCacheQBOReports(
 // Read latest snapshot
 // ─────────────────────────────────────────────────────────────────
 
+/** Returns true if the JSON blob is a new-format ComparativeReport (not the legacy flat summary) */
+function isComparativeReport(obj: unknown): obj is ComparativeReport {
+  return (
+    typeof obj === "object" &&
+    obj !== null &&
+    "fiscalYearStart" in obj &&
+    "revenue" in obj &&
+    Array.isArray((obj as ComparativeReport).revenue)
+  );
+}
+
 export async function getLatestComparativeReport(): Promise<ComparativeReport | null> {
   const db = createAdminClient();
   const { data } = await db
@@ -612,30 +623,52 @@ export async function getLatestComparativeReport(): Promise<ComparativeReport | 
     .select("data_json, pulled_at")
     .eq("report_type", "combined")
     .order("pulled_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .limit(10);
 
-  if (!data) return null;
-  return data.data_json as unknown as ComparativeReport;
+  if (!data?.length) return null;
+
+  // Find the newest snapshot in the new ComparativeReport format —
+  // old snapshots stored a flat QBFinancialSummary and must be skipped.
+  const newFormat = data.find(row => isComparativeReport(row.data_json));
+  if (!newFormat) return null;
+
+  return newFormat.data_json as unknown as ComparativeReport;
 }
 
 /** Legacy helper — still used by the existing dashboard metric cards */
 export async function getLatestFinancialSummary(): Promise<QBFinancialSummary | null> {
-  const report = await getLatestComparativeReport();
-  if (!report) return null;
+  const db = createAdminClient();
+  const { data } = await db
+    .from("board_qbo_snapshots")
+    .select("data_json, pulled_at")
+    .eq("report_type", "combined")
+    .order("pulled_at", { ascending: false })
+    .limit(10);
 
-  const allRevenue  = (report.revenue[0]?.total.currentYTD  ?? 0) + (report.revenue[1]?.total.currentYTD  ?? 0);
-  const allExpenses = (report.expenses[0]?.total.currentYTD ?? 0) + (report.expenses[1]?.total.currentYTD ?? 0);
+  if (!data) return null;
 
-  return {
-    netIncome:          report.netIncome.currentYTD,
-    totalRevenue:       allRevenue,
-    totalExpenses:      allExpenses,
-    cashOnHand:         report.balanceSheet.assets[0]?.rows.find(r => r.name.toLowerCase().includes("cash"))?.value ?? null,
-    accountsReceivable: report.balanceSheet.assets[0]?.rows.find(r => r.name.toLowerCase().includes("accounts receivable"))?.value ?? null,
-    totalAssets:        report.balanceSheet.totalAssets,
-    periodStart:        report.fiscalYearStart,
-    periodEnd:          report.asOfDate,
-    reportPulledAt:     report.pulledAt,
-  };
+  // Find the newest snapshot that is in the new ComparativeReport format
+  const newFormat = data.find(row => isComparativeReport(row.data_json));
+  if (newFormat) {
+    const report = newFormat.data_json as unknown as ComparativeReport;
+    const allRevenue  = (report.revenue[0]?.total.currentYTD  ?? 0) + (report.revenue[1]?.total.currentYTD  ?? 0);
+    const allExpenses = (report.expenses[0]?.total.currentYTD ?? 0) + (report.expenses[1]?.total.currentYTD ?? 0);
+    return {
+      netIncome:          report.netIncome.currentYTD,
+      totalRevenue:       allRevenue,
+      totalExpenses:      allExpenses,
+      cashOnHand:         report.balanceSheet.assets[0]?.rows.find(r => r.name.toLowerCase().includes("cash"))?.value ?? null,
+      accountsReceivable: report.balanceSheet.assets[0]?.rows.find(r => r.name.toLowerCase().includes("accounts receivable"))?.value ?? null,
+      totalAssets:        report.balanceSheet.totalAssets,
+      periodStart:        report.fiscalYearStart,
+      periodEnd:          report.asOfDate,
+      reportPulledAt:     report.pulledAt,
+    };
+  }
+
+  // Fall back to legacy flat-summary format
+  const legacyRow = data[0];
+  if (!legacyRow) return null;
+  const legacy = legacyRow.data_json as unknown as QBFinancialSummary;
+  return legacy ?? null;
 }
