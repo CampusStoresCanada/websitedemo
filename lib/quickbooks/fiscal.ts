@@ -78,6 +78,26 @@ export function remainingBudgetMonths(fiscalYear: FiscalYear, asOf: string): str
 }
 
 /**
+ * Returns the last fully completed calendar month relative to a given date.
+ * e.g. asOf=2026-05-25 → { start: "2026-04-01", end: "2026-04-30", label: "Apr 2026" }
+ */
+export function getLastFullMonth(asOf?: string): { start: string; end: string; label: string } {
+  const ref = asOf ? new Date(asOf + "T12:00:00Z") : new Date();
+  // Step back to first of current month, then subtract one day to get last day of prior month
+  const lastDay = new Date(Date.UTC(ref.getUTCFullYear(), ref.getUTCMonth(), 0));
+  const firstDay = new Date(Date.UTC(lastDay.getUTCFullYear(), lastDay.getUTCMonth(), 1));
+
+  const fmt = (d: Date) => d.toISOString().slice(0, 10);
+  const label = firstDay.toLocaleDateString("en-CA", {
+    month: "short",
+    year:  "numeric",
+    timeZone: "UTC",
+  });
+
+  return { start: fmt(firstDay), end: fmt(lastDay), label };
+}
+
+/**
  * Returns an array of YYYY-MM-01 strings for every month in the fiscal year
  * up to and including the month of asOf.
  */

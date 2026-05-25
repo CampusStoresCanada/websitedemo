@@ -26,6 +26,7 @@ import {
   priorYTDEnd,
   remainingBudgetMonths,
   elapsedBudgetMonths,
+  getLastFullMonth,
 } from "./fiscal";
 import type {
   QBReport,
@@ -67,8 +68,9 @@ function isConferenceExpense(acctNum: string): boolean {
 // Zero-value helper
 // ─────────────────────────────────────────────────────────────────
 
-function zeroValues(): ComparativeValues {
+function zeroValues(lastMonthLabel = ""): ComparativeValues {
   return {
+    lastMonth: null, lastMonthLabel,
     priorYTD: null, currentYTD: null, priorFullYear: null,
     budget: null, projected: null, variance: null,
   };
@@ -78,12 +80,14 @@ function addValues(a: ComparativeValues, b: ComparativeValues): ComparativeValue
   const add = (x: number | null, y: number | null) =>
     x === null && y === null ? null : (x ?? 0) + (y ?? 0);
   return {
-    priorYTD:      add(a.priorYTD,      b.priorYTD),
-    currentYTD:    add(a.currentYTD,    b.currentYTD),
-    priorFullYear: add(a.priorFullYear, b.priorFullYear),
-    budget:        add(a.budget,        b.budget),
-    projected:     add(a.projected,     b.projected),
-    variance:      add(a.variance,      b.variance),
+    lastMonth:      add(a.lastMonth,     b.lastMonth),
+    lastMonthLabel: a.lastMonthLabel || b.lastMonthLabel,
+    priorYTD:       add(a.priorYTD,      b.priorYTD),
+    currentYTD:     add(a.currentYTD,    b.currentYTD),
+    priorFullYear:  add(a.priorFullYear, b.priorFullYear),
+    budget:         add(a.budget,        b.budget),
+    projected:      add(a.projected,     b.projected),
+    variance:       add(a.variance,      b.variance),
   };
 }
 
@@ -303,16 +307,18 @@ function parseBalanceSheet(report: QBReport, asOfDate: string): BalanceSheetData
  * Uses the QBO P&L tree from the current YTD report as the structural backbone.
  */
 function assembleComparative(
-  plTree:         PLSection[],
-  currentYTDMap:  Map<string, number | null>,
-  priorYTDMap:    Map<string, number | null>,
-  priorFullMap:   Map<string, number | null>,
-  budgetFull:     Map<string, number>,
-  budgetYTD:      Map<string, number>,
-  accountsMap:    Map<string, QBAccount>,
-  asOf:           string,
-  fiscalStart:    string,
-  fiscalEnd:      string,
+  plTree:          PLSection[],
+  currentYTDMap:   Map<string, number | null>,
+  priorYTDMap:     Map<string, number | null>,
+  priorFullMap:    Map<string, number | null>,
+  lastMonthMap:    Map<string, number | null>,
+  lastMonthLabel:  string,
+  budgetFull:      Map<string, number>,
+  budgetYTD:       Map<string, number>,
+  accountsMap:     Map<string, QBAccount>,
+  asOf:            string,
+  fiscalStart:     string,
+  fiscalEnd:       string,
 ): Pick<ComparativeReport, "revenue" | "expenses" | "netIncome" | "accountMap"> {
 
   const accountMap: Record<string, { id: string; name: string; num: string }> = {};
@@ -323,9 +329,10 @@ function assembleComparative(
   }
 
   function buildRowValues(qboId: string): ComparativeValues {
+    const lastMonth     = lastMonthMap.get(qboId)  ?? null;
     const currentYTD    = currentYTDMap.get(qboId) ?? null;
     const priorYTD      = priorYTDMap.get(qboId)   ?? null;
-    const priorFullYear = priorFullMap.get(qboId)   ?? null;
+    const priorFullYear = priorFullMap.get(qboId)  ?? null;
     const budget        = budgetFull.has(qboId) ? budgetFull.get(qboId)! : null;
     const ytdBudget     = budgetYTD.has(qboId)  ? budgetYTD.get(qboId)!  : 0;
 
@@ -341,7 +348,7 @@ function assembleComparative(
       ? projected - budget
       : null;
 
-    return { priorYTD, currentYTD, priorFullYear, budget, projected, variance };
+    return { lastMonth, lastMonthLabel, priorYTD, currentYTD, priorFullYear, budget, projected, variance };
   }
 
   function buildAccountRow(id: string, name: string): ComparativeAccountRow {
@@ -361,7 +368,7 @@ function assembleComparative(
       rows.push(...buildSubsection(child).rows);
     }
 
-    let total = zeroValues();
+    let total = zeroValues(lastMonthLabel);
     for (const r of rows) total = addValues(total, r.values);
 
     return {
@@ -423,7 +430,7 @@ function assembleComparative(
     }
 
     function totalOf(subs: ComparativeSubsection[], directs: ComparativeAccountRow[]): ComparativeValues {
-      let t = zeroValues();
+      let t = zeroValues(lastMonthLabel);
       for (const s of subs) t = addValues(t, s.total);
       for (const r of directs) t = addValues(t, r.values);
       return t;
@@ -455,20 +462,21 @@ function assembleComparative(
   const { gno: gnoExpenses, conf: confExpenses } = buildSegment(expenseSections, "Expenses", "expense",  isConferenceExpense);
 
   // Net income
-  let netIncome = zeroValues();
   const allRevTotals  = addValues(gnoRevenue.total,  confRevenue.total);
   const allExpTotals  = addValues(gnoExpenses.total, confExpenses.total);
 
   const sub = (a: number | null, b: number | null) =>
     a === null && b === null ? null : (a ?? 0) - (b ?? 0);
 
-  netIncome = {
-    priorYTD:      sub(allRevTotals.priorYTD,      allExpTotals.priorYTD),
-    currentYTD:    sub(allRevTotals.currentYTD,    allExpTotals.currentYTD),
-    priorFullYear: sub(allRevTotals.priorFullYear, allExpTotals.priorFullYear),
-    budget:        sub(allRevTotals.budget,        allExpTotals.budget),
-    projected:     sub(allRevTotals.projected,     allExpTotals.projected),
-    variance:      sub(allRevTotals.variance,      allExpTotals.variance),
+  const netIncome: ComparativeValues = {
+    lastMonth:      sub(allRevTotals.lastMonth,     allExpTotals.lastMonth),
+    lastMonthLabel,
+    priorYTD:       sub(allRevTotals.priorYTD,      allExpTotals.priorYTD),
+    currentYTD:     sub(allRevTotals.currentYTD,    allExpTotals.currentYTD),
+    priorFullYear:  sub(allRevTotals.priorFullYear, allExpTotals.priorFullYear),
+    budget:         sub(allRevTotals.budget,        allExpTotals.budget),
+    projected:      sub(allRevTotals.projected,     allExpTotals.projected),
+    variance:       sub(allRevTotals.variance,      allExpTotals.variance),
   };
 
   return {
@@ -508,21 +516,24 @@ export async function pullAndCacheQBOReports(
   const priorFiscal = getPriorFiscalYear(asOf);
   const priorYTDEnd_ = priorYTDEnd(fiscal, asOf);
 
-  const acctMethod = options.accountingMethod ?? "Accrual";
+  const acctMethod   = options.accountingMethod ?? "Accrual";
+  const lastFullMonth = getLastFullMonth(asOf);
 
   // Parallel fetch — all reports + accounts + budgets
   const [
     currentYTDReport,
     priorYTDReport,
     priorFullReport,
+    lastMonthReport,
     balanceSheetReport,
     accounts,
     budgets,
   ] = await Promise.all([
-    fetchQBReport("ProfitAndLoss", { startDate: fiscal.start,       endDate: asOf,          accountingMethod: acctMethod }),
-    fetchQBReport("ProfitAndLoss", { startDate: priorFiscal.start,  endDate: priorYTDEnd_,  accountingMethod: acctMethod }),
-    fetchQBReport("ProfitAndLoss", { startDate: priorFiscal.start,  endDate: priorFiscal.end, accountingMethod: acctMethod }),
-    fetchQBReport("BalanceSheet",  { startDate: fiscal.start,       endDate: asOf }),
+    fetchQBReport("ProfitAndLoss", { startDate: fiscal.start,          endDate: asOf,               accountingMethod: acctMethod }),
+    fetchQBReport("ProfitAndLoss", { startDate: priorFiscal.start,     endDate: priorYTDEnd_,        accountingMethod: acctMethod }),
+    fetchQBReport("ProfitAndLoss", { startDate: priorFiscal.start,     endDate: priorFiscal.end,     accountingMethod: acctMethod }),
+    fetchQBReport("ProfitAndLoss", { startDate: lastFullMonth.start,   endDate: lastFullMonth.end,   accountingMethod: acctMethod }),
+    fetchQBReport("BalanceSheet",  { startDate: fiscal.start,          endDate: asOf }),
     fetchQBAccounts(),
     fetchQBBudgets(),
   ]);
@@ -533,6 +544,7 @@ export async function pullAndCacheQBOReports(
   const currentYTDMap = buildAmountMap(currentYTDReport);
   const priorYTDMap   = buildAmountMap(priorYTDReport);
   const priorFullMap  = buildAmountMap(priorFullReport);
+  const lastMonthMap  = buildAmountMap(lastMonthReport);
 
   // Budget maps
   const fiscalBudget = findFiscalBudget(budgets, fiscal.start);
@@ -546,6 +558,8 @@ export async function pullAndCacheQBOReports(
     currentYTDMap,
     priorYTDMap,
     priorFullMap,
+    lastMonthMap,
+    lastFullMonth.label,
     budgetFull,
     budgetYTD,
     accountsMap,
@@ -560,6 +574,9 @@ export async function pullAndCacheQBOReports(
     fiscalYearStart: fiscal.start,
     fiscalYearEnd:   fiscal.end,
     asOfDate:        asOf,
+    lastMonthLabel:  lastFullMonth.label,
+    lastMonthStart:  lastFullMonth.start,
+    lastMonthEnd:    lastFullMonth.end,
     pulledAt:        new Date().toISOString(),
     accountMap,
     revenue,

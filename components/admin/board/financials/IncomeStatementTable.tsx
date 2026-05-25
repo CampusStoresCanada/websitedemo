@@ -35,29 +35,36 @@ function fmtFiscalLabel(start: string, end: string): string {
 const COL_WIDTH = "w-[120px] min-w-[100px]";
 
 function ColHeaders({ report }: { report: ComparativeReport }) {
-  const currentFY = fmtFiscalLabel(report.fiscalYearStart, report.fiscalYearEnd);
+  const currentFY    = fmtFiscalLabel(report.fiscalYearStart, report.fiscalYearEnd);
   const priorFYStart = String(parseInt(report.fiscalYearStart.slice(0, 4)) - 1) + "-09-01";
   const priorFYEnd   = String(parseInt(report.fiscalYearStart.slice(0, 4)))     + "-08-31";
-  const priorFY  = fmtFiscalLabel(priorFYStart, priorFYEnd);
+  const priorFY      = fmtFiscalLabel(priorFYStart, priorFYEnd);
 
   return (
     <thead>
       {/* Fiscal year labels */}
       <tr className="border-b border-gray-100 bg-gray-50">
         <th className="px-4 py-2 text-left text-xs font-medium text-gray-400" />
-        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`} colSpan={1}>
+        {/* Last month — standalone */}
+        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
+          {report.lastMonthLabel}
+        </th>
+        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`}>
           {priorFY}
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-[#163D6D] border-l border-gray-100`} colSpan={1}>
+        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-[#163D6D] border-l border-gray-100`}>
           {currentFY}
         </th>
-        <th className={`px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`} colSpan={4}>
+        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100" colSpan={4}>
           Full Year {currentFY}
         </th>
       </tr>
       {/* Column sub-labels */}
       <tr className="border-b border-gray-200 bg-gray-50 text-xs">
         <th className="px-4 py-2 text-left font-medium text-gray-500">Account</th>
+        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
+          Actual
+        </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
           YTD Actual<br />
           <span className="font-normal text-gray-400">to {report.asOfDate.slice(5)}</span>
@@ -103,6 +110,10 @@ function ValueCells({
 
   return (
     <>
+      {/* Last month — amber tint */}
+      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-amber-800 ${base} border-l border-gray-100 bg-amber-50/40`}>
+        {fmtCAD(values.lastMonth)}
+      </td>
       <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-gray-500 ${base} border-l border-gray-100`}>
         {fmtCAD(values.priorYTD)}
       </td>
@@ -147,8 +158,8 @@ function AccountRow({
           accountId={row.qboId}
           accountName={row.name}
           acctNum={row.accountNum}
-          startDate={report.fiscalYearStart}
-          endDate={report.asOfDate}
+          startDate={report.lastMonthStart}
+          endDate={report.lastMonthEnd}
         >
           <span className="flex items-center gap-2 cursor-default">
             {row.accountNum && (
@@ -188,7 +199,7 @@ function SubsectionRows({
         >
           {sub.name}
         </td>
-        <td colSpan={6} />
+        <td colSpan={7} />
       </tr>
 
       {/* Account rows */}
@@ -229,7 +240,7 @@ function SegmentRows({
     <>
       {/* Segment header */}
       <tr className="border-b border-gray-200 bg-gray-100">
-        <td className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-500" colSpan={7}>
+        <td className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-500" colSpan={8}>
           {segment.name}
         </td>
       </tr>
@@ -287,7 +298,7 @@ function GrandTotalRow({
 function SectionDivider({ label }: { label: string }) {
   return (
     <tr className="bg-[#163D6D]">
-      <td className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-white" colSpan={7}>
+      <td className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-white" colSpan={8}>
         {label}
       </td>
     </tr>
@@ -297,29 +308,34 @@ function SectionDivider({ label }: { label: string }) {
 // ─── main component ──────────────────────────────────────────────
 
 export default function IncomeStatementTable({ report }: Props) {
+  const lml = report.lastMonthLabel ?? "";
   // Combined totals
   const totalRevValues: ComparativeValues = report.revenue.reduce(
     (acc, seg) => ({
-      priorYTD:      (acc.priorYTD      ?? 0) + (seg.total.priorYTD      ?? 0),
-      currentYTD:    (acc.currentYTD    ?? 0) + (seg.total.currentYTD    ?? 0),
-      priorFullYear: (acc.priorFullYear ?? 0) + (seg.total.priorFullYear ?? 0),
-      budget:        (acc.budget        ?? 0) + (seg.total.budget        ?? 0),
-      projected:     (acc.projected     ?? 0) + (seg.total.projected     ?? 0),
-      variance:      (acc.variance      ?? 0) + (seg.total.variance      ?? 0),
+      lastMonth:      (acc.lastMonth     ?? 0) + (seg.total.lastMonth     ?? 0),
+      lastMonthLabel: lml,
+      priorYTD:       (acc.priorYTD      ?? 0) + (seg.total.priorYTD      ?? 0),
+      currentYTD:     (acc.currentYTD    ?? 0) + (seg.total.currentYTD    ?? 0),
+      priorFullYear:  (acc.priorFullYear ?? 0) + (seg.total.priorFullYear ?? 0),
+      budget:         (acc.budget        ?? 0) + (seg.total.budget        ?? 0),
+      projected:      (acc.projected     ?? 0) + (seg.total.projected     ?? 0),
+      variance:       (acc.variance      ?? 0) + (seg.total.variance      ?? 0),
     }),
-    { priorYTD: 0, currentYTD: 0, priorFullYear: 0, budget: 0, projected: 0, variance: 0 } as ComparativeValues
+    { lastMonth: 0, lastMonthLabel: lml, priorYTD: 0, currentYTD: 0, priorFullYear: 0, budget: 0, projected: 0, variance: 0 } as ComparativeValues
   );
 
   const totalExpValues: ComparativeValues = report.expenses.reduce(
     (acc, seg) => ({
-      priorYTD:      (acc.priorYTD      ?? 0) + (seg.total.priorYTD      ?? 0),
-      currentYTD:    (acc.currentYTD    ?? 0) + (seg.total.currentYTD    ?? 0),
-      priorFullYear: (acc.priorFullYear ?? 0) + (seg.total.priorFullYear ?? 0),
-      budget:        (acc.budget        ?? 0) + (seg.total.budget        ?? 0),
-      projected:     (acc.projected     ?? 0) + (seg.total.projected     ?? 0),
-      variance:      (acc.variance      ?? 0) + (seg.total.variance      ?? 0),
+      lastMonth:      (acc.lastMonth     ?? 0) + (seg.total.lastMonth     ?? 0),
+      lastMonthLabel: lml,
+      priorYTD:       (acc.priorYTD      ?? 0) + (seg.total.priorYTD      ?? 0),
+      currentYTD:     (acc.currentYTD    ?? 0) + (seg.total.currentYTD    ?? 0),
+      priorFullYear:  (acc.priorFullYear ?? 0) + (seg.total.priorFullYear ?? 0),
+      budget:         (acc.budget        ?? 0) + (seg.total.budget        ?? 0),
+      projected:      (acc.projected     ?? 0) + (seg.total.projected     ?? 0),
+      variance:       (acc.variance      ?? 0) + (seg.total.variance      ?? 0),
     }),
-    { priorYTD: 0, currentYTD: 0, priorFullYear: 0, budget: 0, projected: 0, variance: 0 } as ComparativeValues
+    { lastMonth: 0, lastMonthLabel: lml, priorYTD: 0, currentYTD: 0, priorFullYear: 0, budget: 0, projected: 0, variance: 0 } as ComparativeValues
   );
 
   return (

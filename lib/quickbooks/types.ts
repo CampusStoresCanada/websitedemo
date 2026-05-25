@@ -150,8 +150,10 @@ export type QBReconciliationStatus = "pending_review" | "matched" | "ignored" | 
 // Comparative Income Statement — board financial report
 // ─────────────────────────────────────────────────────────────────
 
-/** Five data columns shown on the comparative income statement */
+/** Six data columns shown on the comparative income statement */
 export interface ComparativeValues {
+  lastMonth:     number | null;  // first → last day of most recently completed month
+  lastMonthLabel: string;        // e.g. "Apr 2026"
   priorYTD:      number | null;  // Sep 1 prior year → same month prior year
   currentYTD:    number | null;  // Sep 1 current year → report date
   priorFullYear: number | null;  // Sep 1 prior year → Aug 31 prior year
@@ -188,10 +190,13 @@ export interface ComparativeSegment {
 
 /** Full comparative report stored in board_qbo_snapshots */
 export interface ComparativeReport {
-  fiscalYearStart: string;   // "2025-09-01"
-  fiscalYearEnd:   string;   // "2026-08-31"
-  asOfDate:        string;   // report date ("2026-04-30")
-  pulledAt:        string;   // ISO timestamp
+  fiscalYearStart:  string;   // "2025-09-01"
+  fiscalYearEnd:    string;   // "2026-08-31"
+  asOfDate:         string;   // report date ("2026-04-30")
+  lastMonthLabel:   string;   // "Apr 2026"
+  lastMonthStart:   string;   // "2026-04-01"
+  lastMonthEnd:     string;   // "2026-04-30"
+  pulledAt:         string;   // ISO timestamp
   /** Account code → QBO account ID map (used for hover lookups) */
   accountMap:      Record<string, { id: string; name: string; num: string }>;
   revenue:         ComparativeSegment[];
