@@ -8,6 +8,7 @@ import type { Event, EventAudienceMode, CreateEventPayload, UpdateEventPayload }
 import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
 import { TAG_GROUPS } from "@/lib/events/tags";
 import RichTextEditor from "@/components/ui/RichTextEditor";
+import BoardMeetingDocuments from "@/components/admin/events/BoardMeetingDocuments";
 
 /**
  * Convert a UTC ISO string to the "YYYY-MM-DDTHH:mm" local-time string
@@ -470,6 +471,23 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
           Cancel
         </button>
       </div>
+
+      {/* Board meeting documents — only shown for board-audience events that already exist */}
+      {audienceMode === "board" && isEdit && event?.id && event.starts_at && (
+        <div className="mt-6">
+          <BoardMeetingDocuments
+            eventId={event.id}
+            eventTitle={event.title ?? ""}
+            eventDate={event.starts_at}
+          />
+        </div>
+      )}
+
+      {audienceMode === "board" && !isEdit && (
+        <div className="mt-4 rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-4 py-3 text-sm text-[#163D6D]/70">
+          🏛️ Save this event first — board meeting documents can be added after it's created.
+        </div>
+      )}
     </form>
   );
 }
