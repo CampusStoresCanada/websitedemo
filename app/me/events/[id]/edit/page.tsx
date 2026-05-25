@@ -21,7 +21,7 @@ export default async function MemberEditEventPage({
 
   const { data: event } = await db
     .from("events")
-    .select("id, title, description, starts_at, ends_at, is_virtual, location, virtual_link, audience_mode, metadata, status, created_by")
+    .select("id, title, description, body_html, starts_at, ends_at, is_virtual, location, virtual_link, audience_mode, metadata, status, created_by")
     .eq("id", id)
     .single();
 

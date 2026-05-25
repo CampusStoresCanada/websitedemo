@@ -7,6 +7,7 @@ import { loadGooglePlacesScript } from "@/lib/google/places";
 import { TAG_GROUPS } from "@/lib/events/tags";
 import type { EventAudienceMode } from "@/lib/events/types";
 import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
+import RichTextEditor from "@/components/ui/RichTextEditor";
 
 const LENGTHS = [
   { value: 15,  label: "15 min" },
@@ -54,6 +55,7 @@ interface EditEventFormProps {
     id: string;
     title: string;
     description: string | null;
+    body_html: string | null;
     starts_at: string;
     ends_at: string | null;
     is_virtual: boolean;
@@ -82,6 +84,7 @@ export default function EditEventForm({ event, googleMapsApiKey = null }: EditEv
 
   const [title, setTitle]           = useState(event.title);
   const [description, setDescription] = useState(event.description ?? "");
+  const [bodyHtml, setBodyHtml] = useState(event.body_html ?? "");
   const [startDate, setStartDate]   = useState(parsed.date);
   const [startTime, setStartTime]   = useState(parsed.time);
   const [isVirtual, setIsVirtual]   = useState(event.is_virtual);
@@ -165,6 +168,7 @@ export default function EditEventForm({ event, googleMapsApiKey = null }: EditEv
       const result = await updateEvent(event.id, {
         title,
         description: description || undefined,
+        body_html: bodyHtml || undefined,
         starts_at: startsAtDate.toISOString(),
         ends_at: endsAtDate.toISOString(),
         is_virtual: isVirtual,
@@ -203,14 +207,27 @@ export default function EditEventForm({ event, googleMapsApiKey = null }: EditEv
       {/* Description */}
       <div>
         <label className="block text-sm font-medium text-gray-700 mb-1">
-          Description <span className="font-normal text-gray-400">(optional)</span>
+          Short Summary <span className="font-normal text-gray-400">(shown in listings)</span>
         </label>
         <textarea
-          rows={3}
+          rows={2}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
           className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-[#EE2A2E] focus:border-[#EE2A2E] resize-none"
-          placeholder="Brief summary"
+          placeholder="One or two sentences"
+        />
+      </div>
+
+      {/* Body */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          Full Description <span className="font-normal text-gray-400">(optional)</span>
+        </label>
+        <RichTextEditor
+          value={bodyHtml}
+          onChange={setBodyHtml}
+          placeholder="Full event details — type / for formatting"
+          minHeight="120px"
         />
       </div>
 
