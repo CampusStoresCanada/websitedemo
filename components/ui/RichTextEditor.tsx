@@ -332,10 +332,18 @@ export default function RichTextEditor({
   const [uploading, setUploading] = useState(false);
 
   const handleSlashUpdate = useCallback((next: Omit<SlashState, "selected">) => {
-    setSlash((prev) => ({
-      ...next,
-      selected: next.visible ? (next.query !== prev.query ? 0 : prev.selected) : 0,
-    }));
+    setSlash((prev) => {
+      // If nothing meaningful changed, return the same reference — React skips the re-render
+      if (
+        prev.visible === next.visible &&
+        prev.query === next.query &&
+        prev.from === next.from
+      ) return prev;
+      return {
+        ...next,
+        selected: next.visible ? (next.query !== prev.query ? 0 : prev.selected) : 0,
+      };
+    });
   }, []);
 
   const SlashExtension = useRef(
