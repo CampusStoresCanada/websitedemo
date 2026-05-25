@@ -1,10 +1,25 @@
 /**
- * POST /api/admin/board/meetings — create a new board meeting + Notion page
+ * POST /api/admin/board/meetings — create a new board meeting + Notion page + linked event
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createBoardMeetingPage } from "@/lib/notion/board";
+
+function generateSlug(title: string, startsAt: string): string {
+  const date = new Date(startsAt).toISOString().slice(0, 10);
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 60) +
+    "-" +
+    date
+  );
+}
 
 export async function POST(req: NextRequest) {
   const auth = await requireAdmin();
@@ -70,6 +85,38 @@ export async function POST(req: NextRequest) {
   if (error || !meeting) {
     console.error("[createBoardMeeting] DB insert failed:", error);
     return NextResponse.json({ error: "Failed to create meeting" }, { status: 500 });
+  }
+
+  // Create a linked calendar event so the meeting appears in the Events section
+  // board events default to 10:00 AM UTC; audience_mode="board" gates visibility
+  const startsAt = `${meetingDate}T10:00:00Z`;
+  const endsAt   = `${meetingDate}T12:00:00Z`;
+  const eventTitle = meeting.title;
+  const slug = generateSlug(eventTitle, startsAt);
+
+  const { data: event, error: eventError } = await db
+    .from("events")
+    .insert({
+      slug,
+      title: eventTitle,
+      starts_at: startsAt,
+      ends_at: endsAt,
+      audience_mode: "board",
+      is_virtual: true,
+      status: "published",
+      created_by: auth.ctx.userId,
+    })
+    .select("id")
+    .single();
+
+  if (event && !eventError) {
+    // Link the event back to the board meeting
+    await db
+      .from("board_meetings")
+      .update({ event_id: event.id })
+      .eq("id", meeting.id);
+  } else {
+    console.warn("[createBoardMeeting] Event creation failed (non-fatal):", eventError);
   }
 
   return NextResponse.json({ meeting }, { status: 201 });

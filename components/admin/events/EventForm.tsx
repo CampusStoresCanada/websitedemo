@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createEvent, updateEvent, requestEventChanges } from "@/lib/actions/events";
+import { upsertBoardMeetingForEvent } from "@/lib/actions/board-meeting-event";
 import { loadGooglePlacesScript } from "@/lib/google/places";
 import type { Event, EventAudienceMode, CreateEventPayload, UpdateEventPayload } from "@/lib/events/types";
 import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
@@ -158,10 +159,22 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
       return;
     }
 
+    const createdEvent = (result as { data?: Event }).data;
+
+    // When creating a new board-audience event, auto-create the linked board meeting + Notion page
+    if (!isEdit && audienceMode === "board" && createdEvent?.id && createdEvent?.starts_at) {
+      const dateStr = createdEvent.starts_at.slice(0, 10); // YYYY-MM-DD
+      await upsertBoardMeetingForEvent(createdEvent.id, {
+        meetingType: "regular",
+        title: createdEvent.title,
+        meetingDate: dateStr,
+      });
+    }
+
     if (isEdit) {
       router.refresh();
     } else {
-      router.push(`/admin/events/${(result as { data?: Event }).data?.id}`);
+      router.push(`/admin/events/${createdEvent?.id}`);
     }
   };
 
@@ -495,7 +508,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
 
       {audienceMode === "board" && !isEdit && (
         <div className="mt-4 rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-4 py-3 text-sm text-[#163D6D]/70">
-          🏛️ Save this event first — board meeting documents can be added after it's created.
+          🏛️ Saving will automatically create a linked Board Portal record and Notion scratchpad.
         </div>
       )}
     </form>

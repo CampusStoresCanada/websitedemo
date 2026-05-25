@@ -18,6 +18,7 @@ import MeetingTabs from "@/components/admin/board/MeetingTabs";
 import ActionItemsPanel from "@/components/admin/board/ActionItemsPanel";
 import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEditor";
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
+import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -145,6 +146,7 @@ export default async function MeetingDetailPage({
           endDate={reportPeriod.end}
         />
       )}
+      {isSA && <CancelMeetingButton meetingId={meeting.id} currentStatus={meeting.status} />}
       <Link
         href="/admin/board/meetings"
         className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"

@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { createBoardMeetingPage } from "@/lib/notion/board";
 
 const BUCKET = "board-documents";
 const MAX_BYTES = 52428800; // 50 MB (matches bucket limit)
@@ -101,6 +102,18 @@ export async function upsertBoardMeetingForEvent(
     return { meetingId: existing.id };
   }
 
+  // Create Notion page for the scratchpad (best-effort — don't fail if Notion is down)
+  let notionPageId:  string | null = null;
+  let notionPageUrl: string | null = null;
+
+  try {
+    const page = await createBoardMeetingPage(meetingDate, meetingType, title);
+    notionPageId  = page.id;
+    notionPageUrl = page.url;
+  } catch (err) {
+    console.warn("[upsertBoardMeetingForEvent] Notion page creation failed:", err);
+  }
+
   const { data: created, error } = await db
     .from("board_meetings")
     .insert({
@@ -110,6 +123,8 @@ export async function upsertBoardMeetingForEvent(
       title,
       status: "upcoming",
       created_by: auth.ctx.userId,
+      notion_page_id:  notionPageId,
+      notion_page_url: notionPageUrl,
     })
     .select("id")
     .single();
@@ -177,6 +192,50 @@ export async function uploadBoardDocument(
 
   revalidatePath("/admin/board/meetings");
   return { doc };
+}
+
+// ─── Cancel a board meeting ──────────────────────────────────────────────────
+
+export async function cancelBoardMeeting(
+  meetingId: string,
+): Promise<{ success: true } | { error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { error: "Not authorised" };
+
+  const db = createAdminClient();
+
+  // Get the meeting so we can also cancel its linked event
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, event_id, status")
+    .eq("id", meetingId)
+    .maybeSingle();
+
+  if (!meeting) return { error: "Meeting not found" };
+  if (meeting.status === "cancelled") return { success: true }; // already cancelled
+
+  // Cancel the board meeting record
+  const { error } = await db
+    .from("board_meetings")
+    .update({ status: "cancelled", updated_at: new Date().toISOString() })
+    .eq("id", meetingId);
+
+  if (error) {
+    console.error("[cancelBoardMeeting]", error);
+    return { error: "Failed to cancel meeting" };
+  }
+
+  // Cancel the linked calendar event too (best-effort)
+  if (meeting.event_id) {
+    await db
+      .from("events")
+      .update({ status: "cancelled" })
+      .eq("id", meeting.event_id);
+  }
+
+  revalidatePath("/admin/board/meetings");
+  revalidatePath(`/admin/board/meetings/${meetingId}`);
+  return { success: true };
 }
 
 // ─── Delete a board document ─────────────────────────────────────────────────
