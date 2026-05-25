@@ -7,6 +7,7 @@ import { loadGooglePlacesScript } from "@/lib/google/places";
 import type { Event, EventAudienceMode, CreateEventPayload, UpdateEventPayload } from "@/lib/events/types";
 import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
 import { TAG_GROUPS } from "@/lib/events/tags";
+import RichTextEditor from "@/components/ui/RichTextEditor";
 
 /**
  * Convert a UTC ISO string to the "YYYY-MM-DDTHH:mm" local-time string
@@ -244,13 +245,12 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Full Description (HTML)</label>
-          <textarea
-            rows={8}
+          <label className="block text-sm font-medium text-gray-700 mb-1">Full Description</label>
+          <RichTextEditor
             value={bodyHtml}
-            onChange={(e) => setBodyHtml(e.target.value)}
-            className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
-            placeholder="<p>Full event details…</p>"
+            onChange={setBodyHtml}
+            placeholder="Full event details — type / for formatting"
+            minHeight="160px"
           />
         </div>
       </fieldset>
