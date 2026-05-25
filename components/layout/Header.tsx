@@ -498,6 +498,7 @@ export default function Header() {
                       </button>
                     </div>
 
+                    <div className="overflow-y-auto max-h-72 mt-1">
                     {alertTab === "notifications" ? (
                       mergedNotificationItems.length > 0 ? (
                         mergedNotificationItems.slice(0, 10).map((alert) => (
@@ -582,6 +583,7 @@ export default function Header() {
                         <p className="px-2 py-2 text-xs text-gray-500">No messages yet.</p>
                       )
                     ) : null}
+                    </div>
 
                     <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2">
                       {(notificationsCount > 0 || repliesCount > 0) ? (
