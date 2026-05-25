@@ -196,37 +196,51 @@ function findFiscalBudget(budgets: QBBudget[], fiscalStart: string): QBBudget | 
 }
 
 /**
- * Build a map of QBO account ID → full-year budget amount
- * and a separate map for YTD budget (months elapsed).
+ * Build a map of QBO account ID → full-year budget amount,
+ * plus a map for the YTD budget (months elapsed through asOf)
+ * and a map for the remaining months (months after asOf).
+ *
+ * "Elapsed" months = Sep through the month containing asOf (inclusive).
+ * "Remaining" months = everything after that through Aug.
  */
 function buildBudgetMaps(
-  budget: QBBudget | null,
+  budget:      QBBudget | null,
   fiscalStart: string,
-  asOf: string
+  fiscalEnd:   string,
+  asOf:        string
 ): {
-  fullYear: Map<string, number>;
-  ytd:      Map<string, number>;
+  fullYear:  Map<string, number>;
+  ytd:       Map<string, number>;
+  remaining: Map<string, number>;
 } {
-  const fullYear = new Map<string, number>();
-  const ytd      = new Map<string, number>();
+  const fullYear  = new Map<string, number>();
+  const ytd       = new Map<string, number>();
+  const remaining = new Map<string, number>();
 
-  if (!budget?.BudgetDetail) return { fullYear, ytd };
+  if (!budget?.BudgetDetail) return { fullYear, ytd, remaining };
 
-  const elapsedMonths = new Set(elapsedBudgetMonths({ start: fiscalStart, end: "", label: "" }, asOf));
+  // Set of "YYYY-MM-01" strings for months already elapsed (Sep → current month inclusive)
+  const elapsed   = new Set(elapsedBudgetMonths({ start: fiscalStart, end: fiscalEnd, label: "" }, asOf));
+  // Set of "YYYY-MM-01" strings for months not yet started
+  const remaining_ = new Set(remainingBudgetMonths({ start: fiscalStart, end: fiscalEnd, label: "" }, asOf));
 
   for (const detail of budget.BudgetDetail) {
     const id     = detail.AccountRef.value;
-    const month  = detail.BudgetDate.slice(0, 7) + "-01"; // normalise to YYYY-MM-01
+    // Normalise BudgetDate to YYYY-MM-01 (QBO sometimes sends first-of-month already)
+    const month  = detail.BudgetDate.slice(0, 7) + "-01";
     const amount = detail.Amount;
 
     fullYear.set(id, (fullYear.get(id) ?? 0) + amount);
 
-    if (elapsedMonths.has(month)) {
+    if (elapsed.has(month)) {
       ytd.set(id, (ytd.get(id) ?? 0) + amount);
+    }
+    if (remaining_.has(month)) {
+      remaining.set(id, (remaining.get(id) ?? 0) + amount);
     }
   }
 
-  return { fullYear, ytd };
+  return { fullYear, ytd, remaining };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -307,18 +321,18 @@ function parseBalanceSheet(report: QBReport, asOfDate: string): BalanceSheetData
  * Uses the QBO P&L tree from the current YTD report as the structural backbone.
  */
 function assembleComparative(
-  plTree:          PLSection[],
-  currentYTDMap:   Map<string, number | null>,
-  priorYTDMap:     Map<string, number | null>,
-  priorFullMap:    Map<string, number | null>,
-  lastMonthMap:    Map<string, number | null>,
-  lastMonthLabel:  string,
-  budgetFull:      Map<string, number>,
-  budgetYTD:       Map<string, number>,
-  accountsMap:     Map<string, QBAccount>,
-  asOf:            string,
-  fiscalStart:     string,
-  fiscalEnd:       string,
+  plTree:           PLSection[],
+  currentYTDMap:    Map<string, number | null>,
+  priorYTDMap:      Map<string, number | null>,
+  priorFullMap:     Map<string, number | null>,
+  lastMonthMap:     Map<string, number | null>,
+  lastMonthLabel:   string,
+  budgetFull:       Map<string, number>,
+  budgetRemaining:  Map<string, number>,
+  accountsMap:      Map<string, QBAccount>,
+  asOf:             string,
+  fiscalStart:      string,
+  fiscalEnd:        string,
 ): Pick<ComparativeReport, "revenue" | "expenses" | "netIncome" | "accountMap"> {
 
   const accountMap: Record<string, { id: string; name: string; num: string }> = {};
@@ -329,21 +343,19 @@ function assembleComparative(
   }
 
   function buildRowValues(qboId: string): ComparativeValues {
-    const lastMonth     = lastMonthMap.get(qboId)  ?? null;
-    const currentYTD    = currentYTDMap.get(qboId) ?? null;
-    const priorYTD      = priorYTDMap.get(qboId)   ?? null;
-    const priorFullYear = priorFullMap.get(qboId)  ?? null;
-    const budget        = budgetFull.has(qboId) ? budgetFull.get(qboId)! : null;
-    const ytdBudget     = budgetYTD.has(qboId)  ? budgetYTD.get(qboId)!  : 0;
+    const lastMonth     = lastMonthMap.get(qboId)   ?? null;
+    const currentYTD    = currentYTDMap.get(qboId)  ?? null;
+    const priorYTD      = priorYTDMap.get(qboId)    ?? null;
+    const priorFullYear = priorFullMap.get(qboId)   ?? null;
+    const budget        = budgetFull.has(qboId)      ? budgetFull.get(qboId)!      : null;
+    const remaining     = budgetRemaining.has(qboId) ? budgetRemaining.get(qboId)! : null;
 
-    // Remaining budget = full year budget - YTD budget
-    const remainingBudget = budget !== null ? budget - ytdBudget : null;
+    // Projected = YTD actual + sum of budgeted amounts for remaining months
+    const projected = currentYTD !== null && remaining !== null
+      ? currentYTD + remaining
+      : null;
 
-    // Projected = YTD actual + remaining budget
-    const projected = currentYTD !== null && remainingBudget !== null
-      ? currentYTD + remainingBudget
-      : currentYTD; // if no budget, projected = YTD actual
-
+    // Variance = projected − full-year budget
     const variance = projected !== null && budget !== null
       ? projected - budget
       : null;
@@ -548,7 +560,7 @@ export async function pullAndCacheQBOReports(
 
   // Budget maps
   const fiscalBudget = findFiscalBudget(budgets, fiscal.start);
-  const { fullYear: budgetFull, ytd: budgetYTD } = buildBudgetMaps(fiscalBudget, fiscal.start, asOf);
+  const { fullYear: budgetFull, remaining: budgetRemaining } = buildBudgetMaps(fiscalBudget, fiscal.start, fiscal.end, asOf);
 
   // Use current YTD report as structural backbone
   const plTree = buildPLTree(currentYTDReport);
@@ -561,7 +573,7 @@ export async function pullAndCacheQBOReports(
     lastMonthMap,
     lastFullMonth.label,
     budgetFull,
-    budgetYTD,
+    budgetRemaining,
     accountsMap,
     asOf,
     fiscal.start,

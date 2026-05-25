@@ -34,11 +34,22 @@ function fmtFiscalLabel(start: string, end: string): string {
 
 const COL_WIDTH = "w-[120px] min-w-[100px]";
 
+function fmtMonthYear(dateStr: string): string {
+  // "2026-05-25" → "May '26"
+  const d = new Date(dateStr + "T12:00:00Z");
+  return d.toLocaleDateString("en-CA", { month: "short", year: "2-digit", timeZone: "UTC" });
+}
+
 function ColHeaders({ report }: { report: ComparativeReport }) {
   const currentFY    = fmtFiscalLabel(report.fiscalYearStart, report.fiscalYearEnd);
   const priorFYStart = String(parseInt(report.fiscalYearStart.slice(0, 4)) - 1) + "-09-01";
   const priorFYEnd   = String(parseInt(report.fiscalYearStart.slice(0, 4)))     + "-08-31";
   const priorFY      = fmtFiscalLabel(priorFYStart, priorFYEnd);
+
+  // Prior YTD end = same month/day as asOf but one year earlier
+  const priorYTDEndDate = String(parseInt(report.asOfDate.slice(0, 4)) - 1) + report.asOfDate.slice(4);
+  const priorYTDLabel   = fmtMonthYear(priorYTDEndDate);
+  const currentYTDLabel = fmtMonthYear(report.asOfDate);
 
   return (
     <thead>
@@ -50,10 +61,10 @@ function ColHeaders({ report }: { report: ComparativeReport }) {
           {report.lastMonthLabel}
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`}>
-          {priorFY}
+          {priorFY} YTD
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-[#163D6D] border-l border-gray-100`}>
-          {currentFY}
+          {currentFY} YTD
         </th>
         <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100" colSpan={4}>
           Full Year {currentFY}
@@ -66,24 +77,24 @@ function ColHeaders({ report }: { report: ComparativeReport }) {
           Actual
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          YTD Actual<br />
-          <span className="font-normal text-gray-400">to {report.asOfDate.slice(5)}</span>
+          Actual<br />
+          <span className="font-normal text-gray-400">to {priorYTDLabel}</span>
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-[#163D6D] border-l border-gray-100`}>
-          YTD Actual<br />
-          <span className="font-normal text-[#163D6D]/60">to {report.asOfDate.slice(5)}</span>
+          Actual<br />
+          <span className="font-normal text-[#163D6D]/60">to {currentYTDLabel}</span>
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Prior Year<br /><span className="font-normal text-gray-400">Actual</span>
+          Prior Year<br /><span className="font-normal text-gray-400">Full Actual</span>
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Projected
+          Projected<br /><span className="font-normal text-gray-400">YTD + Rem. Budget</span>
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Budget
+          Budget<br /><span className="font-normal text-gray-400">Full Year</span>
         </th>
         <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Variance
+          Variance<br /><span className="font-normal text-gray-400">Proj. vs Budget</span>
         </th>
       </tr>
     </thead>
