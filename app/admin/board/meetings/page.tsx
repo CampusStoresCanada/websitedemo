@@ -47,19 +47,16 @@ export default async function BoardMeetingsPage() {
   // Doc count per meeting
   const ids = (meetings ?? []).map((m) => m.id);
   const docCountMap: Record<string, number> = {};
-  const docTypeMap: Record<string, Set<string>> = {};
 
   if (ids.length > 0) {
     const { data: docs } = await db
       .from("board_documents")
-      .select("meeting_id, document_type")
+      .select("meeting_id")
       .in("meeting_id", ids);
 
     for (const doc of docs ?? []) {
       if (!doc.meeting_id) continue;
       docCountMap[doc.meeting_id] = (docCountMap[doc.meeting_id] ?? 0) + 1;
-      if (!docTypeMap[doc.meeting_id]) docTypeMap[doc.meeting_id] = new Set();
-      docTypeMap[doc.meeting_id].add(doc.document_type);
     }
   }
 
@@ -105,14 +102,12 @@ export default async function BoardMeetingsPage() {
                 <th className="px-4 py-3 font-medium text-gray-600">Type</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Status</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Documents</th>
-                <th className="px-4 py-3 font-medium text-gray-600">Has</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {rows.map((m) => {
                 const count = docCountMap[m.id] ?? 0;
-                const types = docTypeMap[m.id] ?? new Set<string>();
                 return (
                   <tr key={m.id} className="hover:bg-gray-50 transition-colors">
                     <td className="px-4 py-3 font-medium text-gray-900">{m.meeting_date}</td>
@@ -121,17 +116,6 @@ export default async function BoardMeetingsPage() {
                       <StatusBadge status={m.status} />
                     </td>
                     <td className="px-4 py-3 text-gray-600">{count}</td>
-                    <td className="px-4 py-3">
-                      <div className="flex gap-1">
-                        {["agenda", "minutes", "financials"].map((t) => (
-                          <span
-                            key={t}
-                            title={t}
-                            className={`inline-block h-2 w-2 rounded-full ${types.has(t) ? "bg-green-400" : "bg-gray-200"}`}
-                          />
-                        ))}
-                      </div>
-                    </td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/admin/board/meetings/${m.id}`}
@@ -148,18 +132,6 @@ export default async function BoardMeetingsPage() {
         </div>
       )}
 
-      {/* Legend */}
-      {rows.length > 0 && (
-        <p className="mt-3 text-xs text-gray-400">
-          <span className="inline-flex items-center gap-1 mr-3">
-            <span className="inline-block h-2 w-2 rounded-full bg-green-400" /> Document present
-          </span>
-          <span className="inline-flex items-center gap-1">
-            <span className="inline-block h-2 w-2 rounded-full bg-gray-200" /> Missing
-          </span>
-          {" · "}Dots are Agenda · Minutes · Financials
-        </p>
-      )}
     </main>
   );
 }
