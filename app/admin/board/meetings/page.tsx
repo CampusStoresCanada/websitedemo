@@ -4,7 +4,9 @@
 
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import CreateMeetingButton from "@/components/admin/board/CreateMeetingButton";
 
 export const metadata = {
   title: "Board Meetings | Admin | Campus Stores Canada",
@@ -33,6 +35,8 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 export default async function BoardMeetingsPage() {
+  const auth = await requireAdmin();
+  const isSA = auth.ok && isSuperAdmin(auth.ctx.globalRole);
   const db = createAdminClient();
 
   const { data: meetings } = await db
@@ -67,12 +71,24 @@ export default async function BoardMeetingsPage() {
         title="Board Meetings"
         description="All board meeting records and associated documents."
         actions={
-          <Link
-            href="/admin/board"
-            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-          >
-            ← Board Portal
-          </Link>
+          <div className="flex items-center gap-2">
+            {isSA && <CreateMeetingButton />}
+            {isSA && (
+              <Link
+                href="/admin/board/settings"
+                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                title="Board settings"
+              >
+                ⚙️ Settings
+              </Link>
+            )}
+            <Link
+              href="/admin/board"
+              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+            >
+              ← Board Portal
+            </Link>
+          </div>
         }
       />
 

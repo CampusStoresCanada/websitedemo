@@ -47,20 +47,21 @@ export async function sendCircleNotification(params: {
 
     const recipientCircleId = members[0].id;
 
-    // 2. Mint bot token — prefer numeric member ID, fall back to email
+    // 2. Mint bot token — numeric member ID, email fallback, or sso_id fallback
     const numericBotId = parseInt(config.botUserId, 10);
-    if (isNaN(numericBotId) && !config.botEmail) {
-      console.error(
-        "[circle/notifications] CIRCLE_BOT_USER_ID is not a numeric member ID and CIRCLE_BOT_EMAIL is not set. " +
-        "Set CIRCLE_BOT_EMAIL in .env.local to the bot account's email address."
-      );
+    let mintParams: { community_member_id?: number; email?: string; sso_id?: string };
+    if (!isNaN(numericBotId)) {
+      mintParams = { community_member_id: numericBotId };
+    } else if (config.botEmail) {
+      mintParams = { email: config.botEmail };
+    } else if (config.botUserId) {
+      // Non-numeric string — treat as sso_id (Circle headless auth format)
+      mintParams = { sso_id: config.botUserId };
+    } else {
+      console.error("[circle/notifications] No bot identity configured (CIRCLE_BOT_USER_ID or CIRCLE_BOT_EMAIL)");
       return { success: false, error: "Bot identity not configured" };
     }
-    const botToken = await mintMemberToken(
-      !isNaN(numericBotId)
-        ? { community_member_id: numericBotId }
-        : { email: config.botEmail }
-    );
+    const botToken = await mintMemberToken(mintParams);
 
     // 3. Send DM via member proxy
     const memberClient = new CircleMemberClient(botToken.access_token);

@@ -492,21 +492,32 @@ export class CircleAdminClient {
     recipientEmail: string,
     text: string
   ): Promise<{ success: boolean; selfDm?: boolean; error?: string }> {
+    const content = [{ type: "paragraph", content: [{ type: "text", text }] }];
+    return this.sendDirectMessageRich(recipientEmail, content, text);
+  }
+
+  /**
+   * Send a DM with a ProseMirror content array — supports bold, links, multiple
+   * paragraphs, etc. Pass a plain-text fallbackText for the iOS push notification.
+   *
+   * Content node shape (subset):
+   *   { type: "paragraph", content: TextNode[] }
+   *   TextNode: { type: "text", text: string, marks?: Mark[] }
+   *   Mark: { type: "link", attrs: { href: string; target?: string } }
+   *         { type: "bold" }
+   */
+  async sendDirectMessageRich(
+    recipientEmail: string,
+    content: unknown[],
+    fallbackText: string
+  ): Promise<{ success: boolean; selfDm?: boolean; error?: string }> {
     try {
       await this.request("POST", "/messages", {
         body: {
           user_email: recipientEmail,
           rich_text_body: {
-            body: {
-              type: "doc",
-              content: [
-                {
-                  type: "paragraph",
-                  content: [{ type: "text", text }],
-                },
-              ],
-            },
-            circle_ios_fallback_text: text,
+            body: { type: "doc", content },
+            circle_ios_fallback_text: fallbackText,
             format: "chat",
             attachments: [],
             community_members: [],

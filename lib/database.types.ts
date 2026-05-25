@@ -988,6 +988,62 @@ export type Database = {
           },
         ]
       }
+      board_action_items: {
+        Row: {
+          assigned_to: string | null
+          assignees: string[]
+          complete_token: string
+          created_at: string
+          description: string
+          due_date: string | null
+          id: string
+          meeting_id: string
+          pre_meeting_reminder_sent_at: string | null
+          reminder_sent_at: string | null
+          sort_order: number
+          status: string
+          title: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          assignees?: string[]
+          complete_token?: string
+          created_at?: string
+          description: string
+          due_date?: string | null
+          id?: string
+          meeting_id: string
+          pre_meeting_reminder_sent_at?: string | null
+          reminder_sent_at?: string | null
+          sort_order?: number
+          status?: string
+          title: string
+        }
+        Update: {
+          assigned_to?: string | null
+          assignees?: string[]
+          complete_token?: string
+          created_at?: string
+          description?: string
+          due_date?: string | null
+          id?: string
+          meeting_id?: string
+          pre_meeting_reminder_sent_at?: string | null
+          reminder_sent_at?: string | null
+          sort_order?: number
+          status?: string
+          title?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_action_items_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       board_documents: {
         Row: {
           context: string
@@ -1056,37 +1112,55 @@ export type Database = {
       }
       board_meetings: {
         Row: {
+          agenda_html: string | null
+          agenda_updated_at: string | null
           created_at: string
           created_by: string | null
           event_id: string | null
           id: string
           meeting_date: string
           meeting_type: string
+          minutes_html: string | null
+          minutes_updated_at: string | null
           notes: string | null
+          notion_page_id: string | null
+          notion_page_url: string | null
           status: string
           title: string
           updated_at: string
         }
         Insert: {
+          agenda_html?: string | null
+          agenda_updated_at?: string | null
           created_at?: string
           created_by?: string | null
           event_id?: string | null
           id?: string
           meeting_date: string
           meeting_type?: string
+          minutes_html?: string | null
+          minutes_updated_at?: string | null
           notes?: string | null
+          notion_page_id?: string | null
+          notion_page_url?: string | null
           status?: string
           title: string
           updated_at?: string
         }
         Update: {
+          agenda_html?: string | null
+          agenda_updated_at?: string | null
           created_at?: string
           created_by?: string | null
           event_id?: string | null
           id?: string
           meeting_date?: string
           meeting_type?: string
+          minutes_html?: string | null
+          minutes_updated_at?: string | null
           notes?: string | null
+          notion_page_id?: string | null
+          notion_page_url?: string | null
           status?: string
           title?: string
           updated_at?: string
@@ -9299,19 +9373,3 @@ export const Constants = {
     },
   },
 } as const
-
-
-// ── Convenience type aliases ──────────────────────────────────────────────────
-export type Organization      = Database["public"]["Tables"]["organizations"]["Row"];
-export type Contact           = Database["public"]["Tables"]["contacts"]["Row"];
-export type BrandColor        = Database["public"]["Tables"]["brand_colors"]["Row"];
-export type Benchmarking      = Database["public"]["Tables"]["benchmarking"]["Row"];
-export type SiteContent       = Database["public"]["Tables"]["site_content"]["Row"];
-export type DeltaFlag         = Database["public"]["Tables"]["delta_flags"]["Row"];
-export type BenchmarkingSurvey = Database["public"]["Tables"]["benchmarking_surveys"]["Row"];
-export type BoardMeeting      = Database["public"]["Tables"]["board_meetings"]["Row"];
-export type BoardDocument     = Database["public"]["Tables"]["board_documents"]["Row"];
-export type BoardQboSnapshot  = Database["public"]["Tables"]["board_qbo_snapshots"]["Row"];
-export type DashboardWidgetConfig = Database["public"]["Tables"]["dashboard_widget_config"]["Row"];
-export type PendingContentChange  = Database["public"]["Tables"]["pending_content_changes"]["Row"];
-export type ContactInquiry    = Database["public"]["Tables"]["contact_inquiries"]["Row"];

@@ -10,6 +10,7 @@ interface SendEmailOptions {
   subject: string;
   html: string;
   replyTo?: string;
+  attachments?: Array<{ filename: string; content: string | Buffer }>;
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; error?: string; messageId?: string }> {
@@ -28,6 +29,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       subject,
       html: wrapEmailBody(options.html),
       replyTo: options.replyTo,
+      attachments: options.attachments,
     });
 
     if (error) {

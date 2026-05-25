@@ -10,6 +10,7 @@ interface Props {
   reportPeriod: { start: string; end: string; label: string };
   meetingId:    string;
   isSA:         boolean;
+  compact?:     boolean;
 }
 
 const TABS = [
@@ -22,6 +23,7 @@ export default function MeetingFinancialsTab({
   reportPeriod,
   meetingId,
   isSA,
+  compact = false,
 }: Props) {
   const [activeTab, setActiveTab] = useState<"income" | "balance">("income");
 
@@ -81,7 +83,7 @@ export default function MeetingFinancialsTab({
             ))}
           </div>
 
-          {activeTab === "income" && <IncomeStatementTable report={report} />}
+          {activeTab === "income" && <IncomeStatementTable report={report} compact={compact} />}
           {activeTab === "balance" && (
             <BalanceSheetTable
               data={report.balanceSheet}

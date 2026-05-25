@@ -3,11 +3,15 @@ import { notFound } from "next/navigation";
 import Link from "next/link";
 import { getEventBySlugWithOrgContext, getPublicAttendees } from "@/lib/actions/events";
 import { resolveTicketsForUser } from "@/lib/actions/event-tickets";
-import { getOptionalAuthContext } from "@/lib/auth/guards";
+import { getOptionalAuthContext, isGlobalAdmin, isSuperAdmin } from "@/lib/auth/guards";
+import { getMeetingFinancialReport } from "@/lib/quickbooks/reports";
+import { getLastFullMonth } from "@/lib/quickbooks/fiscal";
+import type { ComparativeReport } from "@/lib/quickbooks/types";
 import EventRegistrationButton from "@/components/events/EventRegistrationButton";
 import TicketSelector from "@/components/events/TicketSelector";
 import EventDetailBanner from "@/components/events/EventDetailBanner";
 import OrgMemberRegistrationPanel from "@/components/events/OrgMemberRegistrationPanel";
+import BoardMeetingSection from "@/components/events/BoardMeetingSection";
 import LocalDate from "@/components/ui/LocalDate";
 
 export const revalidate = 30;
@@ -83,6 +87,75 @@ export default async function EventDetailPage({
   const isPublic = event.audience_mode === "public";
   const canViewFull = isPublic || isAuthenticated;
 
+  // Board meeting data — admin-only, fetched if this event has a linked board meeting
+  const isBoardAdmin = authCtx ? isGlobalAdmin(authCtx.globalRole) : false;
+  const isSA         = authCtx ? isSuperAdmin(authCtx.globalRole) : false;
+  type BoardMeetingData = {
+    meeting:        { id: string; meeting_date: string; meeting_type: string; status: string; notes: string | null; agenda_html: string | null; minutes_html: string | null; notion_page_url: string | null };
+    prevMinutes:    { meeting_date: string; minutes_html: string | null } | null;
+    actionItems:    { id: string; title: string; description: string | null; assignees: string[]; due_date: string | null; status: "open" | "in_progress" | "complete" | "deferred"; complete_token: string }[];
+    docs:           { id: string; title: string; document_type: string; mime_type: string | null; file_size_bytes: number | null }[];
+    profiles:       { id: string; display_name: string | null }[];
+    financialReport: ComparativeReport | null;
+    reportPeriod:   { start: string; end: string; label: string };
+  };
+  let boardMeetingData: BoardMeetingData | null = null;
+
+  if (isBoardAdmin) {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    const adminDb = createAdminClient();
+
+    const { data: meeting } = await adminDb
+      .from("board_meetings")
+      .select("id, meeting_date, meeting_type, status, notes, agenda_html, minutes_html, notion_page_url")
+      .eq("event_id", event.id)
+      .maybeSingle();
+
+    if (meeting) {
+      const reportPeriod = getLastFullMonth(meeting.meeting_date);
+
+      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, { data: prevMeetingRow }] = await Promise.all([
+        adminDb
+          .from("board_action_items")
+          .select("id, title, description, assignees, due_date, status, sort_order, complete_token")
+          .eq("meeting_id", meeting.id)
+          .order("sort_order")
+          .order("created_at"),
+        adminDb
+          .from("board_documents")
+          .select("id, title, document_type, mime_type, file_size_bytes")
+          .eq("meeting_id", meeting.id)
+          .order("document_type")
+          .order("title"),
+        adminDb
+          .from("profiles")
+          .select("id, display_name")
+          .in("global_role", ["admin", "super_admin"]),
+        getMeetingFinancialReport(meeting.id),
+        // Previous meeting (for Past Meeting subtab in Minutes)
+        adminDb
+          .from("board_meetings")
+          .select("meeting_date, minutes_html")
+          .lt("meeting_date", meeting.meeting_date)
+          .order("meeting_date", { ascending: false })
+          .limit(1)
+          .maybeSingle(),
+      ]);
+
+      boardMeetingData = {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        meeting: meeting as any,
+        prevMinutes:     prevMeetingRow ? { meeting_date: prevMeetingRow.meeting_date, minutes_html: prevMeetingRow.minutes_html } : null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        actionItems:     (actionItems ?? []) as any,
+        docs:            docs ?? [],
+        profiles:        profiles ?? [],
+        financialReport: financialReport ?? null,
+        reportPeriod,
+      };
+    }
+  }
+
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
       <div className="mb-6">
@@ -152,6 +225,21 @@ export default async function EventDetailPage({
               </a>
             </div>
           ) : null}
+
+          {/* Board Meeting Materials — sits in the content column, admin-only */}
+          {boardMeetingData && (
+            <BoardMeetingSection
+              meeting={boardMeetingData.meeting}
+              prevMinutes={boardMeetingData.prevMinutes}
+              actionItems={boardMeetingData.actionItems}
+              docs={boardMeetingData.docs}
+              profiles={boardMeetingData.profiles}
+              currentUserId={authCtx?.userId ?? null}
+              financialReport={boardMeetingData.financialReport}
+              reportPeriod={boardMeetingData.reportPeriod}
+              isSA={isSA}
+            />
+          )}
         </div>
 
         {/* Sidebar */}

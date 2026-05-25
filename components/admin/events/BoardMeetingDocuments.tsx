@@ -20,8 +20,6 @@ const MEETING_TYPES = [
 ] as const;
 
 const DOC_SLOTS: { type: BoardDocumentType; label: string; icon: string; hint: string }[] = [
-  { type: "agenda",     label: "Agenda",          icon: "📋", hint: "Meeting agenda" },
-  { type: "minutes",    label: "Past Minutes",    icon: "📝", hint: "Minutes from the previous meeting" },
   { type: "financials", label: "Financials",      icon: "📊", hint: "Financial statements or reports" },
   { type: "other",      label: "Supporting Docs", icon: "📎", hint: "Any other required materials" },
 ];

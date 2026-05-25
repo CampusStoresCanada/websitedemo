@@ -245,15 +245,25 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">Full Description</label>
-          <RichTextEditor
-            value={bodyHtml}
-            onChange={setBodyHtml}
-            placeholder="Full event details — type / for formatting"
-            minHeight="160px"
-          />
-        </div>
+        {audienceMode === "board" ? (
+          <div className="rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-4 py-3 text-sm text-[#163D6D]/80">
+            🏛️ <strong>Board meeting content</strong> — agenda, minutes, action items, and documents are managed in the{" "}
+            <a href="/admin/board/meetings" className="underline font-medium hover:text-[#163D6D]">
+              Board Portal
+            </a>
+            , not here.
+          </div>
+        ) : (
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Full Description</label>
+            <RichTextEditor
+              value={bodyHtml}
+              onChange={setBodyHtml}
+              placeholder="Full event details — type / for formatting"
+              minHeight="160px"
+            />
+          </div>
+        )}
       </fieldset>
 
       {/* Dates */}

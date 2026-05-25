@@ -529,7 +529,19 @@ export async function pullAndCacheQBOReports(
   const priorYTDEnd_ = priorYTDEnd(fiscal, asOf);
 
   const acctMethod   = options.accountingMethod ?? "Accrual";
-  const lastFullMonth = getLastFullMonth(asOf);
+
+  // When endDate is explicitly provided it IS the last day of the month we want.
+  // getLastFullMonth(asOf) would back up one additional month (it finds the month
+  // BEFORE asOf), so we derive the month directly from asOf instead.
+  const lastFullMonth = options.endDate
+    ? (() => {
+        const start = asOf.slice(0, 7) + "-01";
+        const label = new Date(start + "T12:00:00Z").toLocaleDateString("en-CA", {
+          month: "short", year: "numeric", timeZone: "UTC",
+        });
+        return { start, end: asOf, label };
+      })()
+    : getLastFullMonth(asOf);
 
   // Parallel fetch — all reports + accounts + budgets
   const [
@@ -614,12 +626,15 @@ export async function pullAndCacheQBOReports(
   const db = createAdminClient();
   const { data: snapshot, error } = await db
     .from("board_qbo_snapshots")
-    .insert({
-      meeting_id:      options.meetingId ?? null,
-      period_end_date: asOf,
-      report_type:     "combined",
-      data_json:       report as unknown as Json,
-    })
+    .upsert(
+      {
+        meeting_id:      options.meetingId ?? null,
+        period_end_date: asOf,
+        report_type:     "combined",
+        data_json:       report as unknown as Json,
+      },
+      { onConflict: "meeting_id,report_type" }
+    )
     .select("id")
     .single();
 

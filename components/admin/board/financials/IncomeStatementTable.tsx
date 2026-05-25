@@ -10,7 +10,8 @@ import type {
 import TransactionPopover from "./TransactionPopover";
 
 interface Props {
-  report: ComparativeReport;
+  report:   ComparativeReport;
+  compact?: boolean; // drops Prior Year Full + Projected columns to fit narrower viewports
 }
 
 // ─── formatting ──────────────────────────────────────────────────
@@ -32,7 +33,9 @@ function fmtFiscalLabel(start: string, end: string): string {
 
 // ─── column headers ───────────────────────────────────────────────
 
-const COL_WIDTH = "w-[120px] min-w-[100px]";
+// Full: 8 cols × 120px. Compact: 5 cols × 85px (drops Prior Year Full + Projected)
+const COL_WIDTH_FULL    = "w-[120px] min-w-[100px]";
+const COL_WIDTH_COMPACT = "w-[85px]  min-w-[75px]";
 
 function fmtMonthYear(dateStr: string): string {
   // "2026-05-25" → "May '26"
@@ -40,60 +43,67 @@ function fmtMonthYear(dateStr: string): string {
   return d.toLocaleDateString("en-CA", { month: "short", year: "2-digit", timeZone: "UTC" });
 }
 
-function ColHeaders({ report }: { report: ComparativeReport }) {
+function ColHeaders({ report, compact }: { report: ComparativeReport; compact: boolean }) {
+  const cw           = compact ? COL_WIDTH_COMPACT : COL_WIDTH_FULL;
   const currentFY    = fmtFiscalLabel(report.fiscalYearStart, report.fiscalYearEnd);
   const priorFYStart = String(parseInt(report.fiscalYearStart.slice(0, 4)) - 1) + "-09-01";
   const priorFYEnd   = String(parseInt(report.fiscalYearStart.slice(0, 4)))     + "-08-31";
   const priorFY      = fmtFiscalLabel(priorFYStart, priorFYEnd);
 
-  // Prior YTD end = same month/day as asOf but one year earlier
   const priorYTDEndDate = String(parseInt(report.asOfDate.slice(0, 4)) - 1) + report.asOfDate.slice(4);
   const priorYTDLabel   = fmtMonthYear(priorYTDEndDate);
   const currentYTDLabel = fmtMonthYear(report.asOfDate);
+
+  // compact: 5 cols (Last Month | Prior YTD | Current YTD | Budget | Variance)
+  // full:    8 cols (+ Prior Year Full | Projected)
+  const fullYearColSpan = compact ? 2 : 4;
 
   return (
     <thead>
       {/* Fiscal year labels */}
       <tr className="border-b border-gray-100 bg-gray-50">
         <th className="px-4 py-2 text-left text-xs font-medium text-gray-400" />
-        {/* Last month — standalone */}
-        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
+        <th className={`${cw} px-3 py-2 text-center text-xs font-semibold text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
           {report.lastMonthLabel}
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`}>
+        <th className={`${cw} px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100`}>
           {priorFY} YTD
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-center text-xs font-semibold text-[#163D6D] border-l border-gray-100`}>
+        <th className={`${cw} px-3 py-2 text-center text-xs font-semibold text-[#163D6D] border-l border-gray-100`}>
           {currentFY} YTD
         </th>
-        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100" colSpan={4}>
+        <th className="px-3 py-2 text-center text-xs font-semibold text-gray-500 border-l border-gray-100" colSpan={fullYearColSpan}>
           Full Year {currentFY}
         </th>
       </tr>
       {/* Column sub-labels */}
       <tr className="border-b border-gray-200 bg-gray-50 text-xs">
         <th className="px-4 py-2 text-left font-medium text-gray-500">Account</th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
+        <th className={`${cw} px-3 py-2 text-right font-medium text-amber-700 border-l border-gray-100 bg-amber-50/60`}>
           Actual
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
+        <th className={`${cw} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
           Actual<br />
           <span className="font-normal text-gray-400">to {priorYTDLabel}</span>
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-[#163D6D] border-l border-gray-100`}>
+        <th className={`${cw} px-3 py-2 text-right font-medium text-[#163D6D] border-l border-gray-100`}>
           Actual<br />
           <span className="font-normal text-[#163D6D]/60">to {currentYTDLabel}</span>
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Prior Year<br /><span className="font-normal text-gray-400">Full Actual</span>
-        </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
-          Projected<br /><span className="font-normal text-gray-400">YTD + Rem. Budget</span>
-        </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
+        {!compact && (
+          <>
+            <th className={`${cw} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
+              Prior Year<br /><span className="font-normal text-gray-400">Full Actual</span>
+            </th>
+            <th className={`${cw} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
+              Projected<br /><span className="font-normal text-gray-400">YTD + Rem.</span>
+            </th>
+          </>
+        )}
+        <th className={`${cw} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
           Budget<br /><span className="font-normal text-gray-400">Full Year</span>
         </th>
-        <th className={`${COL_WIDTH} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
+        <th className={`${cw} px-3 py-2 text-right font-medium text-gray-500 border-l border-gray-100`}>
           Variance<br /><span className="font-normal text-gray-400">Proj. vs Budget</span>
         </th>
       </tr>
@@ -107,11 +117,14 @@ function ValueCells({
   values,
   isExpense = false,
   isBold = false,
+  compact = false,
 }: {
-  values: ComparativeValues;
+  values:    ComparativeValues;
   isExpense?: boolean;
-  isBold?: boolean;
+  isBold?:   boolean;
+  compact?:  boolean;
 }) {
+  const cw   = compact ? COL_WIDTH_COMPACT : COL_WIDTH_FULL;
   const base = isBold ? "font-semibold" : "font-normal";
   const varColor =
     values.variance === null ? "text-gray-400" :
@@ -121,26 +134,29 @@ function ValueCells({
 
   return (
     <>
-      {/* Last month — amber tint */}
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-amber-800 ${base} border-l border-gray-100 bg-amber-50/40`}>
+      <td className={`${cw} px-3 py-2 text-right tabular-nums text-amber-800 ${base} border-l border-gray-100 bg-amber-50/40`}>
         {fmtCAD(values.lastMonth)}
       </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-gray-500 ${base} border-l border-gray-100`}>
+      <td className={`${cw} px-3 py-2 text-right tabular-nums text-gray-500 ${base} border-l border-gray-100`}>
         {fmtCAD(values.priorYTD)}
       </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-[#163D6D] ${base} border-l border-gray-100`}>
+      <td className={`${cw} px-3 py-2 text-right tabular-nums text-[#163D6D] ${base} border-l border-gray-100`}>
         {fmtCAD(values.currentYTD)}
       </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-gray-500 ${base} border-l border-gray-100`}>
-        {fmtCAD(values.priorFullYear)}
-      </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-gray-700 ${base} border-l border-gray-100`}>
-        {fmtCAD(values.projected)}
-      </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums text-gray-700 ${base} border-l border-gray-100`}>
+      {!compact && (
+        <>
+          <td className={`${cw} px-3 py-2 text-right tabular-nums text-gray-500 ${base} border-l border-gray-100`}>
+            {fmtCAD(values.priorFullYear)}
+          </td>
+          <td className={`${cw} px-3 py-2 text-right tabular-nums text-gray-700 ${base} border-l border-gray-100`}>
+            {fmtCAD(values.projected)}
+          </td>
+        </>
+      )}
+      <td className={`${cw} px-3 py-2 text-right tabular-nums text-gray-700 ${base} border-l border-gray-100`}>
         {fmtCAD(values.budget)}
       </td>
-      <td className={`${COL_WIDTH} px-3 py-2 text-right tabular-nums ${varColor} ${base} border-l border-gray-100`}>
+      <td className={`${cw} px-3 py-2 text-right tabular-nums ${varColor} ${base} border-l border-gray-100`}>
         {fmtCAD(values.variance)}
       </td>
     </>
@@ -154,11 +170,13 @@ function AccountRow({
   indent,
   isExpense,
   report,
+  compact,
 }: {
-  row:      ComparativeAccountRow;
-  indent:   number;
+  row:       ComparativeAccountRow;
+  indent:    number;
   isExpense: boolean;
-  report:   ComparativeReport;
+  report:    ComparativeReport;
+  compact:   boolean;
 }) {
   const pl = indent * 16;
 
@@ -180,7 +198,7 @@ function AccountRow({
           </span>
         </TransactionPopover>
       </td>
-      <ValueCells values={row.values} isExpense={isExpense} />
+      <ValueCells values={row.values} isExpense={isExpense} compact={compact} />
     </tr>
   );
 }
@@ -192,17 +210,19 @@ function SubsectionRows({
   indent,
   isExpense,
   report,
+  compact,
 }: {
-  sub:      ComparativeSubsection;
-  indent:   number;
+  sub:       ComparativeSubsection;
+  indent:    number;
   isExpense: boolean;
-  report:   ComparativeReport;
+  report:    ComparativeReport;
+  compact:   boolean;
 }) {
-  const pl = indent * 16;
+  const pl      = indent * 16;
+  const numCols = compact ? 5 : 7;
 
   return (
     <>
-      {/* Sub-section header */}
       <tr className="border-b border-gray-100 bg-gray-50/60">
         <td
           className="px-4 py-1.5 text-xs font-semibold uppercase tracking-wider text-gray-500"
@@ -210,15 +230,13 @@ function SubsectionRows({
         >
           {sub.name}
         </td>
-        <td colSpan={7} />
+        <td colSpan={numCols} />
       </tr>
 
-      {/* Account rows */}
       {sub.rows.map(row => (
-        <AccountRow key={row.qboId} row={row} indent={indent + 1} isExpense={isExpense} report={report} />
+        <AccountRow key={row.qboId} row={row} indent={indent + 1} isExpense={isExpense} report={report} compact={compact} />
       ))}
 
-      {/* Sub-section total */}
       <tr className="border-b border-gray-200 bg-gray-50/40">
         <td
           className="px-4 py-1.5 text-xs font-semibold text-gray-600"
@@ -226,7 +244,7 @@ function SubsectionRows({
         >
           Total {sub.name}
         </td>
-        <ValueCells values={sub.total} isExpense={isExpense} isBold />
+        <ValueCells values={sub.total} isExpense={isExpense} isBold compact={compact} />
       </tr>
     </>
   );
@@ -238,25 +256,25 @@ function SegmentRows({
   segment,
   isExpense,
   report,
+  compact,
 }: {
-  segment:  ComparativeSegment;
+  segment:   ComparativeSegment;
   isExpense: boolean;
-  report:   ComparativeReport;
+  report:    ComparativeReport;
+  compact:   boolean;
 }) {
-  const hasContent =
-    segment.subsections.length > 0 || segment.directRows.length > 0;
+  const hasContent = segment.subsections.length > 0 || segment.directRows.length > 0;
   if (!hasContent) return null;
+  const numCols = compact ? 6 : 8;
 
   return (
     <>
-      {/* Segment header */}
       <tr className="border-b border-gray-200 bg-gray-100">
-        <td className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-500" colSpan={8}>
+        <td className="px-4 py-2 text-xs font-bold uppercase tracking-widest text-gray-500" colSpan={numCols}>
           {segment.name}
         </td>
       </tr>
 
-      {/* Sub-sections */}
       {segment.subsections.map(sub => (
         <SubsectionRows
           key={sub.qboId || sub.name}
@@ -264,20 +282,19 @@ function SegmentRows({
           indent={0}
           isExpense={isExpense}
           report={report}
+          compact={compact}
         />
       ))}
 
-      {/* Direct rows (not nested under a sub-section) */}
       {segment.directRows.map(row => (
-        <AccountRow key={row.qboId} row={row} indent={0} isExpense={isExpense} report={report} />
+        <AccountRow key={row.qboId} row={row} indent={0} isExpense={isExpense} report={report} compact={compact} />
       ))}
 
-      {/* Segment total */}
       <tr className="border-b border-gray-300 bg-gray-100">
         <td className="px-4 py-2 text-sm font-bold text-gray-700">
           Total {segment.name}
         </td>
-        <ValueCells values={segment.total} isExpense={isExpense} isBold />
+        <ValueCells values={segment.total} isExpense={isExpense} isBold compact={compact} />
       </tr>
     </>
   );
@@ -290,26 +307,29 @@ function GrandTotalRow({
   values,
   isExpense = false,
   accent = false,
+  compact = false,
 }: {
-  label:     string;
-  values:    ComparativeValues;
+  label:      string;
+  values:     ComparativeValues;
   isExpense?: boolean;
-  accent?:   boolean;
+  accent?:    boolean;
+  compact?:   boolean;
 }) {
   return (
     <tr className={`border-b-2 border-gray-300 ${accent ? "bg-[#163D6D]/5" : "bg-gray-50"}`}>
       <td className="px-4 py-2.5 text-sm font-bold text-gray-900">{label}</td>
-      <ValueCells values={values} isExpense={isExpense} isBold />
+      <ValueCells values={values} isExpense={isExpense} isBold compact={compact} />
     </tr>
   );
 }
 
 // ─── section divider ─────────────────────────────────────────────
 
-function SectionDivider({ label }: { label: string }) {
+function SectionDivider({ label, compact }: { label: string; compact: boolean }) {
+  const numCols = compact ? 6 : 8;
   return (
     <tr className="bg-[#163D6D]">
-      <td className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-white" colSpan={8}>
+      <td className="px-4 py-2 text-sm font-bold uppercase tracking-wider text-white" colSpan={numCols}>
         {label}
       </td>
     </tr>
@@ -318,7 +338,7 @@ function SectionDivider({ label }: { label: string }) {
 
 // ─── main component ──────────────────────────────────────────────
 
-export default function IncomeStatementTable({ report }: Props) {
+export default function IncomeStatementTable({ report, compact = false }: Props) {
   const lml = report.lastMonthLabel ?? "";
   // Combined totals
   const totalRevValues: ComparativeValues = report.revenue.reduce(
@@ -358,29 +378,27 @@ export default function IncomeStatementTable({ report }: Props) {
         </h2>
         <p className="mt-0.5 text-sm text-gray-500">
           Fiscal year {report.fiscalYearStart} → {report.fiscalYearEnd} &middot; As of {report.asOfDate}
+          {compact && <span className="ml-2 text-gray-400">· Prior Year &amp; Projected columns hidden</span>}
         </p>
       </div>
 
       <table className="w-full text-sm">
-        <ColHeaders report={report} />
+        <ColHeaders report={report} compact={compact} />
         <tbody>
-          {/* ── REVENUE ── */}
-          <SectionDivider label="Revenue" />
+          <SectionDivider label="Revenue" compact={compact} />
           {report.revenue.map(seg => (
-            <SegmentRows key={seg.name} segment={seg} isExpense={false} report={report} />
+            <SegmentRows key={seg.name} segment={seg} isExpense={false} report={report} compact={compact} />
           ))}
-          <GrandTotalRow label="TOTAL REVENUE" values={totalRevValues} />
+          <GrandTotalRow label="TOTAL REVENUE" values={totalRevValues} compact={compact} />
 
-          {/* ── EXPENSES ── */}
-          <SectionDivider label="Expenses" />
+          <SectionDivider label="Expenses" compact={compact} />
           {report.expenses.map(seg => (
-            <SegmentRows key={seg.name} segment={seg} isExpense report={report} />
+            <SegmentRows key={seg.name} segment={seg} isExpense report={report} compact={compact} />
           ))}
-          <GrandTotalRow label="TOTAL EXPENSES" values={totalExpValues} isExpense />
+          <GrandTotalRow label="TOTAL EXPENSES" values={totalExpValues} isExpense compact={compact} />
 
-          {/* ── NET SURPLUS / DEFICIT ── */}
-          <SectionDivider label="Net Surplus / Deficit" />
-          <GrandTotalRow label="NET SURPLUS (DEFICIT)" values={report.netIncome} accent />
+          <SectionDivider label="Net Surplus / Deficit" compact={compact} />
+          <GrandTotalRow label="NET SURPLUS (DEFICIT)" values={report.netIncome} accent compact={compact} />
         </tbody>
       </table>
 
