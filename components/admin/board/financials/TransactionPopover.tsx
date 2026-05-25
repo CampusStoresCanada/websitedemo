@@ -73,7 +73,7 @@ export default function TransactionPopover({
 
   return (
     <div
-      className="relative inline-block w-full"
+      className="relative block w-full cursor-default select-none"
       onMouseEnter={handleMouseEnter}
       onMouseLeave={handleMouseLeave}
     >

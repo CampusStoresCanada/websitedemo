@@ -172,7 +172,7 @@ function AccountRow({
           startDate={report.lastMonthStart}
           endDate={report.lastMonthEnd}
         >
-          <span className="flex items-center gap-2 cursor-default">
+          <span className="flex items-center gap-2">
             {row.accountNum && (
               <span className="text-xs text-gray-400 tabular-nums font-mono">{row.accountNum}</span>
             )}
