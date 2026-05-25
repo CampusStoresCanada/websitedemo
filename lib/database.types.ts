@@ -1058,6 +1058,7 @@ export type Database = {
         Row: {
           created_at: string
           created_by: string | null
+          event_id: string | null
           id: string
           meeting_date: string
           meeting_type: string
@@ -1069,6 +1070,7 @@ export type Database = {
         Insert: {
           created_at?: string
           created_by?: string | null
+          event_id?: string | null
           id?: string
           meeting_date: string
           meeting_type?: string
@@ -1080,6 +1082,7 @@ export type Database = {
         Update: {
           created_at?: string
           created_by?: string | null
+          event_id?: string | null
           id?: string
           meeting_date?: string
           meeting_type?: string
@@ -1094,6 +1097,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_meetings_event_id_fkey"
+            columns: ["event_id"]
+            isOneToOne: false
+            referencedRelation: "events"
             referencedColumns: ["id"]
           },
         ]

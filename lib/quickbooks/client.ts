@@ -27,21 +27,23 @@ let cacheExpiresAt: number = 0;
 function getConfig() {
   const clientId = process.env.QUICKBOOKS_CLIENT_ID;
   const clientSecret = process.env.QUICKBOOKS_CLIENT_SECRET;
-  const realmId = process.env.QUICKBOOKS_REALM_ID;
   const environment = process.env.QUICKBOOKS_ENVIRONMENT ?? "sandbox";
 
-  if (!clientId || !clientSecret || !realmId) {
-    throw new Error(
-      "Missing QUICKBOOKS_CLIENT_ID, QUICKBOOKS_CLIENT_SECRET, or QUICKBOOKS_REALM_ID"
-    );
+  if (!clientId || !clientSecret) {
+    throw new Error("Missing QUICKBOOKS_CLIENT_ID or QUICKBOOKS_CLIENT_SECRET");
   }
 
   return {
     clientId,
     clientSecret,
-    realmId,
     apiBase: environment === "production" ? API_BASE_PRODUCTION : API_BASE_SANDBOX,
   };
+}
+
+async function getConfig2() {
+  const base = getConfig();
+  const realmId = await getRealmId();
+  return { ...base, realmId };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -49,7 +51,7 @@ function getConfig() {
 // ─────────────────────────────────────────────────────────────────
 
 async function getStoredRefreshToken(): Promise<string> {
-  // app_settings takes precedence over env (handles rotation updates)
+  // app_settings takes precedence over env (handles rotation after OAuth)
   const db = createAdminClient();
   const { data } = await db
     .from("app_settings")
@@ -61,8 +63,24 @@ async function getStoredRefreshToken(): Promise<string> {
 
   // Fall back to env seed value
   const envToken = process.env.QUICKBOOKS_REFRESH_TOKEN;
-  if (!envToken) throw new Error("No QuickBooks refresh token available");
+  if (!envToken) throw new Error("QuickBooks not connected — visit /admin/board/financials to authorise");
   return envToken;
+}
+
+async function getRealmId(): Promise<string> {
+  // Env var takes priority
+  if (process.env.QUICKBOOKS_REALM_ID) return process.env.QUICKBOOKS_REALM_ID;
+
+  // Fall back to value stored during OAuth callback
+  const db = createAdminClient();
+  const { data } = await db
+    .from("app_settings")
+    .select("value")
+    .eq("key", "qbo_realm_id")
+    .single();
+
+  if (data?.value) return data.value;
+  throw new Error("QUICKBOOKS_REALM_ID not set and not found in app_settings");
 }
 
 async function persistRefreshToken(token: string): Promise<void> {
@@ -73,7 +91,7 @@ async function persistRefreshToken(token: string): Promise<void> {
 }
 
 async function fetchFreshAccessToken(): Promise<string> {
-  const { clientId, clientSecret } = getConfig();
+  const { clientId, clientSecret } = await getConfig();
   const refreshToken = await getStoredRefreshToken();
 
   const credentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
@@ -138,7 +156,7 @@ async function qbRequest<T>(
   path: string,
   body?: unknown
 ): Promise<T> {
-  const { apiBase, realmId } = getConfig();
+  const { apiBase, realmId } = await getConfig2();
   const accessToken = await getAccessToken();
   const separator = path.includes("?") ? "&" : "?";
   const url = `${apiBase}/v3/company/${realmId}${path}${separator}minorversion=65`;

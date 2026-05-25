@@ -65,9 +65,42 @@ type SnapshotRow = {
   approved_by: string | null;
 };
 
-export default async function FinancialsPage() {
+function QboStatusBanner({ searchParams }: { searchParams: Record<string, string> }) {
+  if (searchParams.qbo_connected === "true") {
+    return (
+      <div className="mb-6 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-800 flex items-center gap-2">
+        <span>✓</span>
+        <span>QuickBooks connected successfully. You can now pull financial reports.</span>
+      </div>
+    );
+  }
+  if (searchParams.qbo_error) {
+    const messages: Record<string, string> = {
+      forbidden:           "You don't have permission to connect QuickBooks.",
+      state_mismatch:      "OAuth state mismatch — possible CSRF. Please try again.",
+      token_exchange_failed: "Failed to exchange the authorization code. Check your Client ID and Secret.",
+      missing_credentials: "QUICKBOOKS_CLIENT_ID or QUICKBOOKS_CLIENT_SECRET is not set.",
+      missing_params:      "Intuit returned an incomplete response. Please try again.",
+      access_denied:       "Authorization was cancelled.",
+    };
+    return (
+      <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800 flex items-center gap-2">
+        <span>⚠</span>
+        <span>{messages[searchParams.qbo_error] ?? `OAuth error: ${searchParams.qbo_error}`}</span>
+      </div>
+    );
+  }
+  return null;
+}
+
+export default async function FinancialsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string>>;
+}) {
   const auth = await requireAdmin();
   const isSA = auth.ok && isSuperAdmin(auth.ctx.globalRole);
+  const sp = await searchParams;
 
   const db = createAdminClient();
 
@@ -92,6 +125,14 @@ export default async function FinancialsPage() {
         actions={
           <div className="flex items-center gap-2">
             {isSA && <PullFinancialsButton />}
+            {isSA && (
+              <a
+                href="/api/admin/qbo/oauth/initiate"
+                className="rounded-md border border-[#2CA01C] bg-white px-3 py-1.5 text-sm font-medium text-[#2CA01C] hover:bg-green-50 transition-colors"
+              >
+                {latest ? "Re-connect QuickBooks" : "Connect QuickBooks"}
+              </a>
+            )}
             <Link
               href="/admin/board"
               className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -101,6 +142,8 @@ export default async function FinancialsPage() {
           </div>
         }
       />
+
+      <QboStatusBanner searchParams={sp} />
 
       {latest ? (
         <>
@@ -144,7 +187,7 @@ export default async function FinancialsPage() {
           <p className="text-sm text-gray-400">No financial data has been pulled yet.</p>
           {isSA && (
             <p className="mt-2 text-xs text-gray-400">
-              Use the <strong>Pull QBO Reports</strong> button above to fetch the latest data.
+              First, click <strong>Connect QuickBooks</strong> above to authorise, then <strong>Pull QBO Reports</strong>.
             </p>
           )}
         </div>
