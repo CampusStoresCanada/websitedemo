@@ -146,6 +146,115 @@ export interface QBFinancialSummary {
 
 export type QBReconciliationStatus = "pending_review" | "matched" | "ignored" | "failed";
 
+// ─────────────────────────────────────────────────────────────────
+// Comparative Income Statement — board financial report
+// ─────────────────────────────────────────────────────────────────
+
+/** Five data columns shown on the comparative income statement */
+export interface ComparativeValues {
+  priorYTD:      number | null;  // Sep 1 prior year → same month prior year
+  currentYTD:    number | null;  // Sep 1 current year → report date
+  priorFullYear: number | null;  // Sep 1 prior year → Aug 31 prior year
+  budget:        number | null;  // full-year budget approved by BOD
+  projected:     number | null;  // currentYTD + remaining budget months
+  variance:      number | null;  // projected − budget
+}
+
+/** A leaf account row (e.g. "5555 · Printing & Copying") */
+export interface ComparativeAccountRow {
+  qboId:      string;  // QBO account ID — used for transaction hover
+  accountNum: string;  // "5555"
+  name:       string;  // "Printing & Copying"
+  values:     ComparativeValues;
+}
+
+/** A sub-section within a segment (e.g. "Food & Beverage") — maps to QBO parent account */
+export interface ComparativeSubsection {
+  qboId: string;
+  name:  string;
+  rows:  ComparativeAccountRow[];
+  total: ComparativeValues;
+}
+
+/** Top-level segment: "Governance & Operations" or "Campus Stores Conference" */
+export interface ComparativeSegment {
+  name:        string;
+  type:        "revenue" | "expense";
+  subsections: ComparativeSubsection[];
+  /** Direct rows not nested under a sub-section */
+  directRows:  ComparativeAccountRow[];
+  total:       ComparativeValues;
+}
+
+/** Full comparative report stored in board_qbo_snapshots */
+export interface ComparativeReport {
+  fiscalYearStart: string;   // "2025-09-01"
+  fiscalYearEnd:   string;   // "2026-08-31"
+  asOfDate:        string;   // report date ("2026-04-30")
+  pulledAt:        string;   // ISO timestamp
+  /** Account code → QBO account ID map (used for hover lookups) */
+  accountMap:      Record<string, { id: string; name: string; num: string }>;
+  revenue:         ComparativeSegment[];
+  expenses:        ComparativeSegment[];
+  netIncome:       ComparativeValues;
+  /** Balance Sheet data */
+  balanceSheet:    BalanceSheetData;
+}
+
+/** Balance Sheet parsed structure */
+export interface BalanceSheetSection {
+  name:  string;
+  rows:  Array<{ name: string; value: number | null; indent: number }>;
+  total: number | null;
+}
+
+export interface BalanceSheetData {
+  asOfDate:   string;
+  assets:     BalanceSheetSection[];
+  liabilities: BalanceSheetSection[];
+  equity:     BalanceSheetSection[];
+  totalAssets:      number | null;
+  totalLiabilities: number | null;
+  totalEquity:      number | null;
+}
+
+/** A single transaction line returned by the GeneralLedger hover API */
+export interface QBTransaction {
+  date:    string;   // YYYY-MM-DD
+  payee:   string;
+  memo:    string;
+  amount:  number;
+  type:    string;   // "Check", "Bill", "Journal Entry", etc.
+  docNum:  string;
+}
+
+/** QBO Account entity (from Chart of Accounts query) */
+export interface QBAccount {
+  Id:            string;
+  Name:          string;
+  FullyQualifiedName: string;
+  AccountType:   string;
+  AccountSubType?: string;
+  AcctNum?:      string;
+  Active:        boolean;
+  ParentRef?:    { value: string; name?: string };
+  CurrentBalance?: number;
+}
+
+/** QBO Budget entity */
+export interface QBBudget {
+  Id:         string;
+  Name:       string;
+  StartDate:  string;
+  EndDate:    string;
+  BudgetType: string;
+  BudgetDetail?: Array<{
+    AccountRef:  { value: string; name?: string };
+    BudgetDate:  string;   // YYYY-MM-DD (first of month)
+    Amount:      number;
+  }>;
+}
+
 export interface QBReconciliationQueueRow {
   id: string;
   qbo_payment_id: string;

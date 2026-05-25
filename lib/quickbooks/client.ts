@@ -12,6 +12,9 @@ import type {
   QBPaymentInput,
   QBTokenResponse,
   QBReport,
+  QBAccount,
+  QBBudget,
+  QBTransaction,
 } from "./types";
 
 const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
@@ -306,4 +309,93 @@ export async function fetchQBReport(
 
   // Reports live under /reports/<name> — qbRequest appends ?minorversion=65
   return qbRequest<QBReport>("GET", `/reports/${reportType}?${params.toString()}`);
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Chart of Accounts
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all active accounts from QBO (used to map IDs → account numbers).
+ */
+export async function fetchQBAccounts(): Promise<QBAccount[]> {
+  const query = `SELECT * FROM Account WHERE Active = true MAXRESULTS 500`;
+  const res = await qbRequest<{ QueryResponse: { Account?: QBAccount[] } }>(
+    "GET",
+    `/query?query=${encodeURIComponent(query)}`
+  );
+  return res.QueryResponse.Account ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Budgets
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Fetch all budgets from QBO.
+ */
+export async function fetchQBBudgets(): Promise<QBBudget[]> {
+  const query = `SELECT * FROM Budget MAXRESULTS 20`;
+  const res = await qbRequest<{ QueryResponse: { Budget?: QBBudget[] } }>(
+    "GET",
+    `/query?query=${encodeURIComponent(query)}`
+  );
+  return res.QueryResponse.Budget ?? [];
+}
+
+// ─────────────────────────────────────────────────────────────────
+// General Ledger — transaction detail for hover
+// ─────────────────────────────────────────────────────────────────
+
+export interface FetchTransactionsOptions {
+  accountId:  string;   // QBO account ID
+  startDate:  string;   // YYYY-MM-DD
+  endDate:    string;   // YYYY-MM-DD
+  accountingMethod?: "Accrual" | "Cash";
+}
+
+/**
+ * Fetch individual transactions for a single account via the GeneralLedger report.
+ * Used for the hover popover on income statement rows.
+ */
+export async function fetchQBTransactions(
+  options: FetchTransactionsOptions
+): Promise<QBTransaction[]> {
+  const { accountId, startDate, endDate, accountingMethod = "Accrual" } = options;
+
+  const params = new URLSearchParams({
+    start_date:        startDate,
+    end_date:          endDate,
+    accounting_method: accountingMethod,
+    account:           accountId,
+  });
+
+  const report = await qbRequest<QBReport>(
+    "GET",
+    `/reports/GeneralLedger?${params.toString()}`
+  );
+
+  // Parse the GeneralLedger report rows into flat transactions
+  const transactions: QBTransaction[] = [];
+
+  for (const row of report.Rows?.Row ?? []) {
+    if (row.type !== "Section") continue;
+    for (const inner of (row as import("./types").QBSectionRow).Rows?.Row ?? []) {
+      if (inner.type !== "Data") continue;
+      const cols = (inner as import("./types").QBDataRow).ColData;
+      // GL report columns: Date, Transaction Type, Doc Num, Name, Memo, Amount, Balance
+      const date   = cols[0]?.value ?? "";
+      const type   = cols[1]?.value ?? "";
+      const docNum = cols[2]?.value ?? "";
+      const payee  = cols[3]?.value ?? "";
+      const memo   = cols[4]?.value ?? "";
+      const amount = parseFloat(cols[5]?.value ?? "0") || 0;
+
+      if (!date || date === "Date") continue; // skip header rows
+
+      transactions.push({ date, type, docNum, payee, memo, amount });
+    }
+  }
+
+  return transactions;
 }
