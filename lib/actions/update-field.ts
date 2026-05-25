@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
@@ -209,9 +210,11 @@ export async function updateField({
       return { success: false, error: "You don't have permission to edit this" };
     }
 
-    // 3. Tier 2 gate — only applies when outside an org-page context
+    // 3. Tier 2 gate — only applies when outside an org-page context.
+    // super_admins are the final authority and bypass the queue entirely.
     const isOrgPageEdit = Boolean(resolvedOrgId && orgId);
-    if (isTier2(table, column) && !isOrgPageEdit) {
+    const isSuperAdmin = auth.ctx.globalRole === "super_admin";
+    if (isTier2(table, column) && !isOrgPageEdit && !isSuperAdmin) {
       // Queue for second-signer approval
       const anchor = editAnchorId(table, column, entityId);
       const result = await queueTier2Change({
@@ -278,6 +281,14 @@ export async function updateField({
       }).catch((err) => {
         console.warn("[update-field] FYI email failed (non-blocking):", err);
       });
+    }
+
+    // 7. Bust Next.js server cache so router.refresh() sees the new value
+    if (pageHref) {
+      revalidatePath(pageHref);
+    } else {
+      // No specific path — revalidate everything (edits are infrequent admin ops)
+      revalidatePath("/", "layout");
     }
 
     console.log(`[update-field] ${table}.${column} updated`, { entityId, previousValue, newValue, user: userEmail });
