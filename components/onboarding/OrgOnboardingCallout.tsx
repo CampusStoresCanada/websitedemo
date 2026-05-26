@@ -42,6 +42,27 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     fieldHeading: "Now open your Toolkit",
     fieldBody: "Tap the + button at the bottom right to open it.",
   },
+  contacts_sorted: {
+    heading: "Are your people right?",
+    body: "Open Edit and click any person to check their name, title, and email. Update anyone who's moved on or add someone new.",
+    ctaLabel: "Take me there",
+    targetAttr: "contacts_section",
+    completionTrigger: [
+      { table: "contacts", column: "name" },
+      { table: "contacts", column: "work_email" },
+      { table: "contacts", column: "role_title" },
+      { table: "contacts", column: "work_phone_number" },
+    ],
+    guided: false,
+  },
+  visibility_intro: {
+    heading: "Control who's visible",
+    body: "Not everyone wants their contact info public. Click a person in Edit — the eye icon lets you hide them from visitors.",
+    ctaLabel: "Got it",
+    targetAttr: "contacts_section",
+    completionTrigger: { table: "contacts", column: "hidden" },
+    guided: false,
+  },
   profile_logo: {
     heading: "Add your store's logo",
     body: "Open Edit and click your logo area to upload. Any clean horizontal logo works best.",

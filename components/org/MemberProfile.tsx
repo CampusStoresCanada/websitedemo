@@ -117,6 +117,10 @@ export default function MemberProfile({
     if (!result.success) {
       // Revert
       setContactHiddenOverrides((prev) => ({ ...prev, [contact.id]: current }));
+    } else {
+      window.dispatchEvent(new CustomEvent("csc:field-updated", {
+        detail: { table: "contacts", column: "hidden", entityId: contact.id },
+      }));
     }
   }
 
@@ -887,7 +891,7 @@ export default function MemberProfile({
               ctaText="Sign In"
               ctaLink="/login"
             >
-              <div>
+              <div data-onboarding="contacts_section">
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Staffing</h3>
                   {editMode && canEditThisOrg && (
