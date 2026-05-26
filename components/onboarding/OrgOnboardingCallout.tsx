@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboarding";
 import type { OrgAdminStepKey } from "@/lib/onboarding/steps";
+import ToolkitTourModal from "@/components/onboarding/ToolkitTourModal";
 
 interface OrgOnboardingCalloutProps {
   orgSlug: string;
@@ -46,6 +47,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   const { user, organizations, isLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<OrgAdminStepKey | null>(null);
   const [phase, setPhase] = useState<Phase>("intro");
+  const [showTour, setShowTour] = useState(false);
   const fieldHighlightRef = useRef<Element | null>(null);
 
   const isOwnOrgPage = organizations.some(
@@ -159,6 +161,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     } catch { /* non-fatal */ }
     setPhase("done");
     setActiveStep(null);
+    setShowTour(true);
   }
 
   function handleCta() {
@@ -177,6 +180,10 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
 
   // Only render the bubble during intro and show-field phases
   const bubbleVisible = phase === "intro" || phase === "show-field";
+  if (showTour) {
+    return <ToolkitTourModal onDone={() => setShowTour(false)} />;
+  }
+
   if (!activeStep || phase === "done" || !bubbleVisible) return null;
 
   const config = STEP_CONFIGS[activeStep];

@@ -11,6 +11,7 @@ export type { OrgAdminStepKey } from "@/lib/onboarding/steps";
 const CORE_STEPS: OrgAdminStepKey[] = [
   "session_1_welcome",
   "public_contact_email",
+  "toolkit_tour",
   "profile_description",
   "profile_logo",
   "profile_hero",
