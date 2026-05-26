@@ -15,13 +15,20 @@ interface StepConfig {
   heading: string;
   body: string;
   ctaLabel: string;
-  // Phase: show-field — after CTA, field is highlighted, waiting for Toolkit open
-  fieldHeading: string;
-  fieldBody: string;
   // The data-onboarding attribute on the target element
   targetAttr: string;
   // Which field save triggers completion — single or array (any match completes)
   completionTrigger: { table: string; column: string } | { table: string; column: string }[];
+  /**
+   * guided: true  — full 4-phase flow (scroll → open Toolkit → click Edit → pulse field)
+   *                 Used for the very first step before the user knows the Toolkit.
+   * guided: false — CTA scrolls to field and closes callout; component listens quietly
+   *                 for the save. Used for steps after the toolkit tour.
+   */
+  guided: boolean;
+  // Only used when guided: true
+  fieldHeading?: string;
+  fieldBody?: string;
 }
 
 const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
@@ -29,31 +36,30 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     heading: "Set your store's public email",
     body: "This is the address members and partners use to reach you. Use a shared inbox — not a personal address.",
     ctaLabel: "Show me",
-    fieldHeading: "Now open your Toolkit",
-    fieldBody: "Tap the + button at the bottom right to open it.",
     targetAttr: "public_contact_email",
     completionTrigger: { table: "organizations", column: "email" },
+    guided: true,
+    fieldHeading: "Now open your Toolkit",
+    fieldBody: "Tap the + button at the bottom right to open it.",
   },
   profile_logo: {
     heading: "Add your store's logo",
-    body: "A clean logo makes your store instantly recognizable across the network.",
-    ctaLabel: "Show me where",
-    fieldHeading: "Now open your Toolkit",
-    fieldBody: "Tap the + button at the bottom right, then choose Edit.",
+    body: "Open Edit and click your logo area to upload. Any clean horizontal logo works best.",
+    ctaLabel: "Take me there",
     targetAttr: "profile_logo",
     completionTrigger: [
       { table: "organizations", column: "logo_url" },
       { table: "organizations", column: "logo_horizontal_url" },
     ],
+    guided: false,
   },
   profile_hero: {
-    heading: "Give your page a sense of place",
-    body: "A campus or store photo makes your page feel real. Any good photo works.",
-    ctaLabel: "Show me where",
-    fieldHeading: "Now open your Toolkit",
-    fieldBody: "Tap the + button at the bottom right, then choose Edit.",
+    heading: "Add a hero image",
+    body: "Open Edit and click the image strip on the left to upload a campus or store photo.",
+    ctaLabel: "Take me there",
     targetAttr: "profile_hero",
     completionTrigger: { table: "organizations", column: "hero_image_url" },
+    guided: false,
   },
 };
 
@@ -206,7 +212,14 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded");
       setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded"), 2500);
     }
-    setPhase("show-field");
+
+    if (config.guided) {
+      // Full guided flow — wait for Toolkit open, then highlight Edit, then field
+      setPhase("show-field");
+    } else {
+      // User already knows the Toolkit — just scroll, close callout, listen for save
+      setPhase("done");
+    }
   }
 
   // Only render the bubble during intro and show-field phases
@@ -220,8 +233,8 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   const config = STEP_CONFIGS[activeStep];
   if (!config) return null;
 
-  const heading = phase === "intro" ? config.heading    : config.fieldHeading;
-  const body    = phase === "intro" ? config.body       : config.fieldBody;
+  const heading = phase === "intro" ? config.heading : (config.fieldHeading ?? config.heading);
+  const body    = phase === "intro" ? config.body   : (config.fieldBody   ?? config.body);
 
   return (
     <div
