@@ -515,6 +515,7 @@ export default function MemberProfile({
         <div
           className="absolute top-0 bottom-0 overflow-hidden group"
           style={{ left: '14.71%', width: '23.79%' }}
+          data-onboarding="profile_hero"
           {...fieldProps("organizations", "hero_image_url", organization.id, organization.id)}
         >
           {heroImage ? (
@@ -590,7 +591,7 @@ export default function MemberProfile({
           }}
         >
           {/* Logo — 560x155px area, 62px gap to color swatches */}
-          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} {...fieldProps("organizations", "logo_url", organization.id, organization.id)}>
+          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-onboarding="profile_logo" {...fieldProps("organizations", "logo_url", organization.id, organization.id)}>
             {organization.logo_horizontal_url ? (
               <Image
                 src={organization.logo_horizontal_url}

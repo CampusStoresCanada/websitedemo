@@ -465,6 +465,7 @@ export default function PartnerProfile({
           <div
             className="absolute top-0 bottom-0 overflow-hidden group"
             style={{ left: '14.71vw', width: '23.79vw' }}
+            data-onboarding="profile_hero"
             data-flaggable
             data-field="organizations.hero_image_url"
             data-entity-id={organization.id}
@@ -540,7 +541,7 @@ export default function PartnerProfile({
           }}
         >
           {/* Logo — 560x155px area */}
-          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-flaggable data-field="organizations.logo_horizontal_url" data-entity-id={organization.id}>
+          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-onboarding="profile_logo" data-flaggable data-field="organizations.logo_horizontal_url" data-entity-id={organization.id}>
             {(organization.logo_horizontal_url || organization.logo_url) ? (
               <Image
                 src={(organization.logo_horizontal_url || organization.logo_url) as string}

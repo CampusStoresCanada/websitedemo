@@ -20,8 +20,8 @@ interface StepConfig {
   fieldBody: string;
   // The data-onboarding attribute on the target element
   targetAttr: string;
-  // Which field save triggers completion
-  completionTrigger: { table: string; column: string };
+  // Which field save triggers completion — single or array (any match completes)
+  completionTrigger: { table: string; column: string } | { table: string; column: string }[];
 }
 
 const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
@@ -33,6 +33,27 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     fieldBody: "Tap the + button at the bottom right to open it.",
     targetAttr: "public_contact_email",
     completionTrigger: { table: "organizations", column: "email" },
+  },
+  profile_logo: {
+    heading: "Add your store's logo",
+    body: "A clean logo makes your store instantly recognizable across the network.",
+    ctaLabel: "Show me where",
+    fieldHeading: "Now open your Toolkit",
+    fieldBody: "Tap the + button at the bottom right, then choose Edit.",
+    targetAttr: "profile_logo",
+    completionTrigger: [
+      { table: "organizations", column: "logo_url" },
+      { table: "organizations", column: "logo_horizontal_url" },
+    ],
+  },
+  profile_hero: {
+    heading: "Give your page a sense of place",
+    body: "A campus or store photo makes your page feel real. Any good photo works.",
+    ctaLabel: "Show me where",
+    fieldHeading: "Now open your Toolkit",
+    fieldBody: "Tap the + button at the bottom right, then choose Edit.",
+    targetAttr: "profile_hero",
+    completionTrigger: { table: "organizations", column: "hero_image_url" },
   },
 };
 
@@ -48,6 +69,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   const [activeStep, setActiveStep] = useState<OrgAdminStepKey | null>(null);
   const [phase, setPhase] = useState<Phase>("intro");
   const [showTour, setShowTour] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
   const fieldHighlightRef = useRef<Element | null>(null);
 
   const isOwnOrgPage = organizations.some(
@@ -75,7 +97,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     void findActiveStep();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, user?.id, isOwnOrgPage]);
+  }, [isLoading, user?.id, isOwnOrgPage, refreshTick]);
 
   // Phase: show-field → listen for Toolkit FAB click → highlight-edit
   useEffect(() => {
@@ -134,7 +156,10 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       const config = STEP_CONFIGS[activeStep];
       if (!config) return;
       const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
-      if (table === config.completionTrigger.table && column === config.completionTrigger.column) {
+      const triggers = Array.isArray(config.completionTrigger)
+        ? config.completionTrigger
+        : [config.completionTrigger];
+      if (triggers.some((t) => t.table === table && t.column === column)) {
         void markComplete();
       }
     },
@@ -149,6 +174,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
 
   async function markComplete() {
     if (!activeStep) return;
+    const completingStep = activeStep;
     // Clean up field highlight
     if (fieldHighlightRef.current) {
       fieldHighlightRef.current.classList.remove(
@@ -157,11 +183,16 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       fieldHighlightRef.current = null;
     }
     try {
-      await completeOnboardingStep(activeStep);
+      await completeOnboardingStep(completingStep);
     } catch { /* non-fatal */ }
     setPhase("done");
     setActiveStep(null);
-    setShowTour(true);
+    // Tour only fires after the first edit — subsequent steps just advance
+    if (completingStep === "public_contact_email") {
+      setShowTour(true);
+    } else {
+      setRefreshTick((t) => t + 1);
+    }
   }
 
   function handleCta() {
@@ -181,7 +212,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // Only render the bubble during intro and show-field phases
   const bubbleVisible = phase === "intro" || phase === "show-field";
   if (showTour) {
-    return <ToolkitTourModal onDone={() => setShowTour(false)} />;
+    return <ToolkitTourModal onDone={() => { setShowTour(false); setRefreshTick((t) => t + 1); }} />;
   }
 
   if (!activeStep || phase === "done" || !bubbleVisible) return null;
