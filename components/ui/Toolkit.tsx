@@ -119,6 +119,18 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
   }, [context, organizations]);
   const [isExpanded, setIsExpanded] = useState(false);
 
+  // Onboarding — highlight a specific tool button when guided tour requests it
+  const [onboardingHighlight, setOnboardingHighlight] = useState<string | null>(null);
+
+  useEffect(() => {
+    function onHighlightTool(e: Event) {
+      const { tool } = (e as CustomEvent<{ tool: string }>).detail;
+      setOnboardingHighlight(tool);
+    }
+    window.addEventListener("csc:onboarding:highlight-edit", onHighlightTool);
+    return () => window.removeEventListener("csc:onboarding:highlight-edit", onHighlightTool);
+  }, []);
+
   // Review mode — activated when ?review_token= is present in the URL
   const [reviewChange, setReviewChange] = useState<PendingContentChange | null>(null);
   const [reviewToken, setReviewToken] = useState<string | null>(null);
@@ -256,6 +268,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       // Enter edit selection mode
       setEditMode(true);
       setIsExpanded(false);
+      setOnboardingHighlight(null);
+      if (typeof window !== "undefined") {
+        window.dispatchEvent(new CustomEvent("csc:edit-mode-changed", { detail: { active: true } }));
+      }
       return;
     }
     if (tool === "explain") {
@@ -501,6 +517,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
                 icon={<EditIcon />}
                 label="Edit"
                 onClick={() => handleToolClick("edit")}
+                highlighted={onboardingHighlight === "edit"}
               />
             )}
 
@@ -599,11 +616,13 @@ function ToolButton({
   label,
   onClick,
   disabled = false,
+  highlighted = false,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick: () => void;
   disabled?: boolean;
+  highlighted?: boolean;
 }) {
   return (
     <button
@@ -613,7 +632,7 @@ function ToolButton({
         disabled
           ? "bg-gray-200 text-gray-400 cursor-not-allowed"
           : "bg-white hover:bg-gray-50 text-gray-600 hover:scale-105"
-      }`}
+      } ${highlighted ? "ring-2 ring-[#EE2A2E] ring-offset-2 animate-pulse" : ""}`}
       title={label}
     >
       {icon}

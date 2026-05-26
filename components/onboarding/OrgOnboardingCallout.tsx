@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboarding";
 import type { OrgAdminStepKey } from "@/lib/onboarding/steps";
@@ -10,16 +10,17 @@ interface OrgOnboardingCalloutProps {
 }
 
 interface StepConfig {
-  /** Phase 1: introduce the task */
+  // Phase: intro — introduce the task
   heading: string;
   body: string;
   ctaLabel: string;
+  // Phase: show-field — after CTA, field is highlighted, waiting for Toolkit open
+  fieldHeading: string;
+  fieldBody: string;
+  // The data-onboarding attribute on the target element
   targetAttr: string;
-  /** Phase 2: shown after CTA clicked, while waiting for the field save */
-  actionHeading: string;
-  actionBody: string;
-  /** Which table + column save triggers completion */
-  completionTrigger: { table: string; column: string } | null;
+  // Which field save triggers completion
+  completionTrigger: { table: string; column: string };
 }
 
 const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
@@ -27,28 +28,33 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     heading: "Set your store's public email",
     body: "This is the address members and partners use to reach you. Use a shared inbox — not a personal address.",
     ctaLabel: "Show me",
+    fieldHeading: "Now open your Toolkit",
+    fieldBody: "Tap the + button at the bottom right to open it.",
     targetAttr: "public_contact_email",
-    actionHeading: "Open your Toolkit and tap Edit",
-    actionBody: "Then click the email field to update it. The box will close once you save.",
     completionTrigger: { table: "organizations", column: "email" },
   },
-  // Future steps added here as each is built out
 };
+
+type Phase =
+  | "intro"       // callout visible, intro text + CTA
+  | "show-field"  // field highlighted, callout tells user to open Toolkit
+  | "highlight-edit"  // callout hidden, Edit button pulsing in Toolkit
+  | "highlight-field" // callout hidden, email field pulsing, waiting for save
+  | "done";
 
 export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutProps) {
   const { user, organizations, isLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<OrgAdminStepKey | null>(null);
-  const [phase, setPhase] = useState<"intro" | "action">("intro");
-  const [visible, setVisible] = useState(false);
-  const [completing, setCompleting] = useState(false);
+  const [phase, setPhase] = useState<Phase>("intro");
+  const fieldHighlightRef = useRef<Element | null>(null);
 
   const isOwnOrgPage = organizations.some(
     (o) => o.role === "org_admin" && o.organization.slug === orgSlug
   );
 
+  // Find the first incomplete configured step
   useEffect(() => {
     if (isLoading || !user || !isOwnOrgPage) return;
-
     let cancelled = false;
 
     async function findActiveStep() {
@@ -59,7 +65,6 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         if (result.success && (!result.step || !result.step.completed_at)) {
           setActiveStep(stepKey);
           setPhase("intro");
-          setTimeout(() => setVisible(true), 800);
           return;
         }
       }
@@ -70,12 +75,62 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, user?.id, isOwnOrgPage]);
 
-  // Listen for field saves from the Toolkit
+  // Phase: show-field → listen for Toolkit FAB click → highlight-edit
+  useEffect(() => {
+    if (phase !== "show-field") return;
+
+    function onFabClick(e: MouseEvent) {
+      if ((e.target as HTMLElement).closest("[data-toolkit-fab]")) {
+        setPhase("highlight-edit");
+      }
+    }
+    document.addEventListener("click", onFabClick, { capture: true });
+    return () => document.removeEventListener("click", onFabClick, { capture: true });
+  }, [phase]);
+
+  // Phase: highlight-edit → dispatch event to Toolkit, listen for edit mode activation
+  useEffect(() => {
+    if (phase !== "highlight-edit") return;
+
+    window.dispatchEvent(new CustomEvent("csc:onboarding:highlight-edit", { detail: { tool: "edit" } }));
+
+    function onEditMode(e: Event) {
+      if ((e as CustomEvent<{ active: boolean }>).detail.active) {
+        setPhase("highlight-field");
+      }
+    }
+    window.addEventListener("csc:edit-mode-changed", onEditMode);
+    return () => window.removeEventListener("csc:edit-mode-changed", onEditMode);
+  }, [phase]);
+
+  // Phase: highlight-field → add pulsing ring to the target element
+  useEffect(() => {
+    if (phase !== "highlight-field" || !activeStep) return;
+    const config = STEP_CONFIGS[activeStep];
+    if (!config) return;
+
+    const el = document.querySelector(`[data-onboarding="${config.targetAttr}"]`);
+    if (el) {
+      el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
+      fieldHighlightRef.current = el;
+    }
+
+    return () => {
+      if (fieldHighlightRef.current) {
+        fieldHighlightRef.current.classList.remove(
+          "ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse"
+        );
+        fieldHighlightRef.current = null;
+      }
+    };
+  }, [phase, activeStep]);
+
+  // Always listen for field save to complete the step
   const handleFieldUpdated = useCallback(
     (e: Event) => {
       if (!activeStep) return;
       const config = STEP_CONFIGS[activeStep];
-      if (!config?.completionTrigger) return;
+      if (!config) return;
       const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
       if (table === config.completionTrigger.table && column === config.completionTrigger.column) {
         void markComplete();
@@ -91,16 +146,19 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   }, [handleFieldUpdated]);
 
   async function markComplete() {
-    if (!activeStep || completing) return;
-    setCompleting(true);
+    if (!activeStep) return;
+    // Clean up field highlight
+    if (fieldHighlightRef.current) {
+      fieldHighlightRef.current.classList.remove(
+        "ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse"
+      );
+      fieldHighlightRef.current = null;
+    }
     try {
       await completeOnboardingStep(activeStep);
-    } catch {
-      // Non-fatal
-    }
-    setVisible(false);
+    } catch { /* non-fatal */ }
+    setPhase("done");
     setActiveStep(null);
-    setCompleting(false);
   }
 
   function handleCta() {
@@ -108,25 +166,24 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     const config = STEP_CONFIGS[activeStep];
     if (!config) return;
 
-    // Scroll to and highlight the target field
     const el = document.querySelector(`[data-onboarding="${config.targetAttr}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "rounded");
-      setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "rounded"), 2500);
+      el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded");
+      setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded"), 2500);
     }
-
-    // Advance to action phase
-    setPhase("action");
+    setPhase("show-field");
   }
 
-  if (!visible || !activeStep) return null;
+  // Only render the bubble during intro and show-field phases
+  const bubbleVisible = phase === "intro" || phase === "show-field";
+  if (!activeStep || phase === "done" || !bubbleVisible) return null;
 
   const config = STEP_CONFIGS[activeStep];
   if (!config) return null;
 
-  const heading = phase === "intro" ? config.heading : config.actionHeading;
-  const body    = phase === "intro" ? config.body    : config.actionBody;
+  const heading = phase === "intro" ? config.heading    : config.fieldHeading;
+  const body    = phase === "intro" ? config.body       : config.fieldBody;
 
   return (
     <div
@@ -136,9 +193,8 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     >
       <div className="relative bg-[#1A1A1A] text-white rounded-xl shadow-xl px-4 py-3 max-w-[260px]">
 
-        {/* Dismiss */}
         <button
-          onClick={() => setVisible(false)}
+          onClick={() => setPhase("done")}
           className="absolute top-2 right-2 text-white/40 hover:text-white/80 transition-colors"
           aria-label="Dismiss"
         >
@@ -150,12 +206,8 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         <p className="text-[10px] font-semibold text-[#EE2A2E] uppercase tracking-widest mb-1">
           Getting started
         </p>
-        <p className="text-sm font-semibold leading-snug pr-5 mb-1">
-          {heading}
-        </p>
-        <p className="text-xs text-white/70 leading-snug mb-3">
-          {body}
-        </p>
+        <p className="text-sm font-semibold leading-snug pr-5 mb-1">{heading}</p>
+        <p className="text-xs text-white/70 leading-snug mb-3">{body}</p>
 
         {phase === "intro" && (
           <button
@@ -166,7 +218,6 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
           </button>
         )}
 
-        {/* Arrow pointing down toward the Toolkit FAB */}
         <div className="absolute -bottom-2 right-6 w-4 h-2 overflow-hidden">
           <div className="w-3 h-3 bg-[#1A1A1A] rotate-45 translate-y-[-50%] ml-0.5" />
         </div>
