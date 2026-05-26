@@ -12,7 +12,7 @@ import InternalSharePanel from "@/components/ui/InternalSharePanel";
 import PublicHighlightHandler from "@/components/ui/PublicHighlightHandler";
 import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
-import WelcomeModal from "@/components/onboarding/WelcomeModal";
+import OnboardingGate from "@/components/layout/OnboardingGate";
 
 export const metadata: Metadata = {
   title: "Campus Stores Canada | Canada's Campus Store Network",
@@ -45,6 +45,8 @@ export default async function RootLayout({
     ),
   };
 
+  const serverIsOrgAdmin = serverAuth.organizations.some((uo) => uo.role === "org_admin");
+
   return (
     <html lang="en">
       <head>
@@ -54,16 +56,17 @@ export default async function RootLayout({
         <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
           <ToolkitProvider>
             <Header />
-            <main className="min-h-screen">{children}</main>
-            <Footer />
-            {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
-            <Toolkit googleMapsApiKey={process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null} />
-            <Suspense><FlagReviewPanel /></Suspense>
-            <Suspense><ExplainContextPanel /></Suspense>
-            <Suspense><InternalSharePanel /></Suspense>
-            <Suspense><PublicHighlightHandler /></Suspense>
-            <Suspense><BookmarkJumpHandler /></Suspense>
-            <WelcomeModal />
+            <OnboardingGate serverIsOrgAdmin={serverIsOrgAdmin}>
+              <main className="min-h-screen">{children}</main>
+              <Footer />
+              {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
+              <Toolkit googleMapsApiKey={process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null} />
+              <Suspense><FlagReviewPanel /></Suspense>
+              <Suspense><ExplainContextPanel /></Suspense>
+              <Suspense><InternalSharePanel /></Suspense>
+              <Suspense><PublicHighlightHandler /></Suspense>
+              <Suspense><BookmarkJumpHandler /></Suspense>
+            </OnboardingGate>
           </ToolkitProvider>
         </AuthProvider>
       </body>

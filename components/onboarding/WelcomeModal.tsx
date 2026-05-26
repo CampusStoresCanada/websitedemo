@@ -1,66 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { useAuth } from "@/components/providers/AuthProvider";
-import {
-  getOnboardingStep,
-  initOrgAdminJourney,
-  completeOnboardingStep,
-} from "@/lib/actions/onboarding";
+import { completeOnboardingStep } from "@/lib/actions/onboarding";
+
+interface WelcomeModalProps {
+  displayName: string | null;
+  orgName: string | null;
+  orgSlug: string | null;
+  onDone: () => void;
+}
 
 /**
- * WelcomeModal — Session 1 of the org admin onboarding journey.
- *
- * Appears once, on first login, for any user who has the org_admin role.
- * Sets the authority framing: you're the steward of your institution's
- * presence on this platform. You have real tools. Here's where to start.
- *
- * Completing OR dismissing the modal marks session_1_welcome as done —
- * so it never shows again, but the rest of the journey continues.
+ * WelcomeModal — pure UI component for Session 1 of the org admin journey.
+ * All visibility / DB-check logic lives in OnboardingGate.
+ * This just renders the modal and calls onDone when the user dismisses it.
  */
-export default function WelcomeModal() {
-  const { user, profile, organizations, isLoading } = useAuth();
+export default function WelcomeModal({ displayName, orgName, orgSlug, onDone }: WelcomeModalProps) {
   const router = useRouter();
-
-  const [visible, setVisible] = useState(false);
   const [completing, setCompleting] = useState(false);
-
-  // Find the org admin membership
-  const orgAdminMembership = organizations.find((o) => o.role === "org_admin");
-  const orgName = orgAdminMembership?.organization?.name ?? null;
-  const orgSlug = orgAdminMembership?.organization?.slug ?? null;
-  const displayName = profile?.display_name
-    ? profile.display_name.split(" ")[0] // first name only
-    : null;
-
-  useEffect(() => {
-    // Don't run until auth has settled and we know they're an org admin
-    if (isLoading || !user || !orgAdminMembership) return;
-
-    let cancelled = false;
-
-    async function checkAndShow() {
-      try {
-        // Init the journey first (idempotent — safe if already done)
-        await initOrgAdminJourney();
-
-        // Check if session 1 has already been seen
-        const result = await getOnboardingStep("session_1_welcome");
-        if (cancelled) return;
-
-        if (result.success && (!result.step || !result.step.completed_at)) {
-          setVisible(true);
-        }
-      } catch {
-        // Non-fatal — if the check fails, don't show the modal
-      }
-    }
-
-    void checkAndShow();
-    return () => { cancelled = true; };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, user?.id, orgAdminMembership?.organization_id]);
 
   async function handleComplete(destination: string | null) {
     if (completing) return;
@@ -72,14 +30,12 @@ export default function WelcomeModal() {
       // Non-fatal — don't block the user
     }
 
-    setVisible(false);
+    onDone();
 
     if (destination) {
       router.push(destination);
     }
   }
-
-  if (!visible) return null;
 
   return (
     <>
