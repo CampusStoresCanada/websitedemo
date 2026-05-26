@@ -12,6 +12,7 @@ import InternalSharePanel from "@/components/ui/InternalSharePanel";
 import PublicHighlightHandler from "@/components/ui/PublicHighlightHandler";
 import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
+import WelcomeModal from "@/components/onboarding/WelcomeModal";
 
 export const metadata: Metadata = {
   title: "Campus Stores Canada | Canada's Campus Store Network",
@@ -62,6 +63,7 @@ export default async function RootLayout({
             <Suspense><InternalSharePanel /></Suspense>
             <Suspense><PublicHighlightHandler /></Suspense>
             <Suspense><BookmarkJumpHandler /></Suspense>
+            <WelcomeModal />
           </ToolkitProvider>
         </AuthProvider>
       </body>

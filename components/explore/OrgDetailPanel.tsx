@@ -1,11 +1,13 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import type { HomeMapOrg } from "@/lib/homepage";
 import type { ExploreLens } from "@/lib/explore/types";
 import type { CompoundFilters } from "@/lib/explore/types";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
 import type { ProcurementPanelData, MemberOrgProfile } from "@/lib/actions/partner-context";
+import OrgLogo from "@/components/ui/OrgLogo";
 
 type ContactEntry = {
   name: string;
@@ -71,29 +73,11 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
           </button>
         )}
         <Link href={`/org/${org.slug}`} className="flex items-start gap-3 flex-1 min-w-0 group">
-          {org.logoUrl ? (
-            <img
-              src={org.logoUrl}
-              alt={org.name}
-              className="w-14 h-14 rounded-xl object-contain bg-gray-50 border border-gray-200 flex-shrink-0"
-            />
-          ) : (
-            <div
-              className={`w-14 h-14 rounded-xl flex items-center justify-center flex-shrink-0 ${
-                org.type === "Member"
-                  ? "bg-red-50 border border-red-100"
-                  : "bg-blue-50 border border-blue-100"
-              }`}
-            >
-              <span
-                className={`text-lg font-bold ${
-                  org.type === "Member" ? "text-red-300" : "text-blue-300"
-                }`}
-              >
-                {org.name.split(" ").map((w) => w[0]).slice(0, 2).join("").toUpperCase()}
-              </span>
-            </div>
-          )}
+          <OrgLogo
+            name={org.name}
+            logoUrl={org.logoUrl}
+            className="w-14 h-14 rounded-xl border border-gray-200 flex-shrink-0"
+          />
           <div className="min-w-0 pt-0.5">
             <h3 className="text-base font-semibold text-gray-900 leading-tight group-hover:text-[#EE2A2E] transition-colors">
               {org.name}

@@ -4,6 +4,7 @@ import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
+import ToolkitCallout from "@/components/onboarding/ToolkitCallout";
 import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 
@@ -204,7 +205,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
   // Render different layouts based on organization type
   if (organization.type === "Member") {
     return (
-      <MemberProfile
+      <>
+        <ToolkitCallout orgSlug={slug} />
+        <MemberProfile
         organization={organization}
         contacts={contacts}
         brandColors={brandColors}
@@ -215,12 +218,15 @@ export default async function OrgProfilePage({ params }: PageProps) {
         orgAssignableUsers={orgAssignableUsers}
         sponsorTier={sponsorTier}
       />
+      </>
     );
   }
 
   // Partner/Vendor layout
   return (
-    <PartnerProfile
+    <>
+      <ToolkitCallout orgSlug={slug} />
+      <PartnerProfile
       organization={organization}
       contacts={contacts}
       brandColors={brandColors}
@@ -233,5 +239,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
       rawLinks={editorRawLinks}
       canEditLinks={canEditLinks}
     />
+    </>
   );
 }

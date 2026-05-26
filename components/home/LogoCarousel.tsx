@@ -1,7 +1,7 @@
-import Image from "next/image";
 import Link from "next/link";
 import type { HomeMapOrg } from "@/lib/homepage";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
+import OrgLogo from "@/components/ui/OrgLogo";
 
 // Each card is w-36 (144px) + mx-6 each side (48px) = 192px
 // Target scroll speed: 80px/s — comfortable, readable
@@ -46,23 +46,11 @@ export default function LogoCarousel({
                   href={`/org/${org.slug}`}
                   className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors"
                 >
-                {org.logoUrl ? (
-                    <Image
-                      src={org.logoUrl}
-                      alt={org.name || ""}
-                      width={120}
-                      height={40}
-                      className="object-contain max-h-10"
-                      unoptimized
-                    />
-                  
-                ) : (
-                  <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
-                    <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
-                      {org.name}
-                    </span>
-                  </div>
-                )}
+                  <OrgLogo
+                    name={org.name}
+                    logoUrl={org.logoUrl}
+                    className="w-full h-10 rounded"
+                  />
                 </Link>
               </div>
             ))}
@@ -94,23 +82,11 @@ export default function LogoCarousel({
                   href={`/org/${org.slug}`}
                   className="w-36 h-14 relative flex items-center justify-center bg-slate-50 rounded-lg px-3 hover:bg-slate-100 transition-colors"
                 >
-                {org.logoUrl ? (
-                    <Image
-                      src={org.logoUrl}
-                      alt={org.name || ""}
-                      width={120}
-                      height={40}
-                      className="object-contain max-h-10"
-                      unoptimized
-                    />
-
-                ) : (
-                  <div className="w-full h-full bg-slate-100 rounded-lg flex items-center justify-center px-3 hover:bg-slate-200 transition-colors">
-                    <span className="text-[#6B6B6B] font-medium text-xs text-center truncate">
-                      {org.name}
-                    </span>
-                  </div>
-                )}
+                  <OrgLogo
+                    name={org.name}
+                    logoUrl={org.logoUrl}
+                    className="w-full h-10 rounded"
+                  />
                 {org.sponsorTier && (
                   <span className="absolute -top-2 -right-2 drop-shadow-sm">
                     <TierIconPreview

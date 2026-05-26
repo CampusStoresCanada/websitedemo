@@ -1,6 +1,6 @@
 "use client";
 
-import Image from "next/image";
+import { useState } from "react";
 import Link from "next/link";
 import type { Organization } from "@/lib/database.types";
 
@@ -10,21 +10,23 @@ interface HoverCardProps {
 }
 
 export default function HoverCard({ organization }: HoverCardProps) {
+  const [logoFailed, setLogoFailed] = useState(false);
+
   if (!organization) return null;
+
+  const showLogo = organization.logo_url && !logoFailed;
 
   return (
     <div className="absolute top-8 right-8 z-20 animate-in fade-in slide-in-from-top-2 duration-200">
       <div className="bg-white rounded-2xl shadow-2xl p-6 w-80 border border-[#E5E5E5]">
         <div className="flex items-start gap-4 mb-4">
-          {organization.logo_url ? (
+          {showLogo ? (
             <div className="w-14 h-14 rounded-xl bg-white border border-[#E5E5E5] flex items-center justify-center flex-shrink-0 overflow-hidden">
-              <Image
-                src={organization.logo_url}
+              <img
+                src={organization.logo_url!}
                 alt={organization.name}
-                width={48}
-                height={48}
-                className="object-contain"
-                unoptimized
+                onError={() => setLogoFailed(true)}
+                className="w-full h-full object-contain"
               />
             </div>
           ) : (
