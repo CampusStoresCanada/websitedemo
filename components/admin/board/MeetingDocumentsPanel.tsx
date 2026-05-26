@@ -85,7 +85,7 @@ function DeleteButton({ docId, onDeleted }: { docId: string; onDeleted: () => vo
       type="button"
       onClick={() => setConfirming(true)}
       title="Delete document"
-      className="opacity-0 group-hover:opacity-100 ml-2 text-gray-400 hover:text-red-500 transition-all flex-shrink-0"
+      className="ml-2 text-gray-400 hover:text-red-500 transition-colors flex-shrink-0"
     >
       <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" className="w-4 h-4">
         <path d="M2 4h12M5 4V2h6v2M6 7v5M10 7v5M3 4l1 9h8l1-9H3z" />
