@@ -15,6 +15,7 @@ type OrgConferenceAttendanceRow = {
   conferenceYear: number;
   conferenceEditionCode: string;
   conferenceStartDate: string | null;
+  conferenceStatus: string;
   organizationId: string;
   sourceType: string;
   sourceId: string;
@@ -49,6 +50,7 @@ type RawConferenceAttendanceRow = {
     year: number;
     edition_code: string;
     start_date: string | null;
+    status: string;
   } | null;
 };
 
@@ -100,7 +102,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
     const { data: rows } = (await adminClient
       .from("conference_people")
       .select(
-        "id, conference_id, organization_id, source_type, source_id, person_kind, display_name, contact_email, user_id, assignment_status, conference_entitlement_id, entitlement_type, badge_print_status, checked_in_at, conference_instances!inner(name, year, edition_code, start_date)"
+        "id, conference_id, organization_id, source_type, source_id, person_kind, display_name, contact_email, user_id, assignment_status, conference_entitlement_id, entitlement_type, badge_print_status, checked_in_at, conference_instances!inner(name, year, edition_code, start_date, status)"
       )
       .eq("organization_id", organization.id)
       .neq("assignment_status", "canceled")
@@ -149,6 +151,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       conferenceYear: row.conference_instances?.year ?? 0,
       conferenceEditionCode: row.conference_instances?.edition_code ?? "",
       conferenceStartDate: row.conference_instances?.start_date ?? null,
+      conferenceStatus: row.conference_instances?.status ?? "draft",
       organizationId: row.organization_id,
       sourceType: row.source_type,
       sourceId: row.source_id,

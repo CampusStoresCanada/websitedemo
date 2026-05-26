@@ -23,6 +23,7 @@ import {
 } from "@/lib/actions/conference-people";
 import { updateOrgProfileVisibilitySettings, setContactHidden } from "@/lib/actions/user-management";
 import { fieldProps } from "@/lib/editable-fields";
+import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 
@@ -45,6 +46,7 @@ interface MemberProfileProps {
     conferenceYear: number;
     conferenceEditionCode: string;
     conferenceStartDate: string | null;
+    conferenceStatus: string;
     organizationId: string;
     sourceType: string;
     sourceId: string;
@@ -379,6 +381,12 @@ export default function MemberProfile({
       totalSeats: entitlementRows.length,
     };
   }, [conferenceAttendance]);
+
+  // Only show the "Attending Conference" column when there's a public-facing conference.
+  // Draft conferences are internal-only and shouldn't surface to org admins.
+  const hasPublicConference = conferenceAttendance.some((row) =>
+    (PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(row.conferenceStatus)
+  );
 
   const resolveOrgUserForContact = (contact: VisibleContact) => {
     const directUserId = ((contact as unknown as { user_id?: string | null }).user_id ?? "").trim();
@@ -901,7 +909,7 @@ export default function MemberProfile({
                       <th className="pb-2 pr-4 font-semibold">Email</th>
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
-                      <th className="pb-2 pl-3 font-semibold">Attending Conference</th>
+                      {hasPublicConference && <th className="pb-2 pl-3 font-semibold">Attending Conference</th>}
                       {editMode && canEditThisOrg ? <th className="pb-2 pl-4 font-semibold">Actions</th> : null}
                     </tr>
                   </thead>
@@ -933,16 +941,18 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" {...fieldProps("contacts", "work_phone_number", contact.id, organization.id)}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        <td className="py-2 pl-3 text-xs">
-                          <input
-                            type="checkbox"
-                            aria-label={`Attending conference for ${contact.name ?? "contact"}`}
-                            checked={attendance.checked}
-                            disabled={attendance.disabled}
-                            onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
-                            className="h-4 w-4"
-                          />
-                        </td>
+                        {hasPublicConference && (
+                          <td className="py-2 pl-3 text-xs">
+                            <input
+                              type="checkbox"
+                              aria-label={`Attending conference for ${contact.name ?? "contact"}`}
+                              checked={attendance.checked}
+                              disabled={attendance.disabled}
+                              onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
+                              className="h-4 w-4"
+                            />
+                          </td>
+                        )}
                         {/* Actions — eye toggle + delete, only in edit mode */}
                         {editMode && canEditThisOrg && (
                           <td className="py-2 pl-4 w-16">
@@ -1424,19 +1434,21 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
-                        <div className="text-xs mt-1 font-medium">
-                          <label className="inline-flex items-center gap-2">
-                            <span>Attending Conference</span>
-                            <input
-                              type="checkbox"
-                              aria-label={`Attending conference for ${contact.name ?? "contact"}`}
-                              checked={attendance.checked}
-                              disabled={attendance.disabled}
-                              onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
-                              className="h-4 w-4"
-                            />
-                          </label>
-                        </div>
+                        {hasPublicConference && (
+                          <div className="text-xs mt-1 font-medium">
+                            <label className="inline-flex items-center gap-2">
+                              <span>Attending Conference</span>
+                              <input
+                                type="checkbox"
+                                aria-label={`Attending conference for ${contact.name ?? "contact"}`}
+                                checked={attendance.checked}
+                                disabled={attendance.disabled}
+                                onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
+                                className="h-4 w-4"
+                              />
+                            </label>
+                          </div>
+                        )}
                       </div>
                       {/* Actions — eye toggle + delete, only in edit mode */}
                       {editMode && canEditThisOrg && (
