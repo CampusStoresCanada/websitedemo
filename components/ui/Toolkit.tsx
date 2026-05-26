@@ -1449,15 +1449,23 @@ function FieldEditPopover({
   onClose: () => void;
   onSuccess: () => void;
 }) {
-  const [value, setValue] = useState(selectedElement.text);
+  // Parse field into table and column up front (used for multiline detection)
+  const [table, column] = selectedElement.field.split('.') as [string, string];
+
+  // Strip display formatting from the initial value so the input shows a clean,
+  // editable value. formatNumber() adds commas; square_footage appends " sq ft".
+  const cleanInitialText = (() => {
+    const stripped = selectedElement.text.replace(/,/g, '').replace(/\s*sq\s*ft$/i, '').trim();
+    return stripped || selectedElement.text;
+  })();
+
+  const [value, setValue] = useState(cleanInitialText);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [submitResult, setSubmitResult] = useState<"saved" | "pending" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Parse field into table and column up front (used for multiline detection)
-  const [table, column] = selectedElement.field.split('.') as [string, string];
   const multiline = isMultilineField(column, selectedElement.text);
 
   // Focus input on mount + lock body scroll
@@ -1478,7 +1486,7 @@ function FieldEditPopover({
   }, [multiline]);
 
   const handleSubmit = async () => {
-    if (value === selectedElement.text) {
+    if (value === cleanInitialText) {
       // No change, just close
       onClose();
       return;
@@ -1488,11 +1496,20 @@ function FieldEditPopover({
     setError(null);
 
     try {
+      // Coerce to number for numeric columns.
+      // formatNumber() adds commas (e.g. "12,500") and sq ft suffixes — strip those
+      // before sending so Postgres doesn't reject the cast.
+      const stripped = value.replace(/,/g, '').replace(/\s*sq\s*ft$/i, '').trim();
+      const asNum = stripped !== '' ? Number(stripped) : NaN;
+      const coercedValue: string | number | null = (!isNaN(asNum) && stripped !== '')
+        ? asNum
+        : (value || null);
+
       const result = await updateField({
         table: table as "organizations" | "contacts" | "brand_colors" | "benchmarking",
         column,
         entityId: selectedElement.entityId,
-        newValue: value || null,
+        newValue: coercedValue,
       });
 
       if (result.success) {
