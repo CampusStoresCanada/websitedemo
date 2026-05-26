@@ -1510,6 +1510,12 @@ function FieldEditPopover({
       });
 
       if (result.success) {
+        // Notify any listeners (e.g. onboarding callouts) that a field was saved
+        if (typeof window !== "undefined") {
+          window.dispatchEvent(new CustomEvent("csc:field-updated", {
+            detail: { table, column, entityId: selectedElement.entityId },
+          }));
+        }
         if (result.requiresApproval) {
           setSubmitResult("pending");
           setTimeout(onClose, 2000);

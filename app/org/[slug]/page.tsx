@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import ToolkitCallout from "@/components/onboarding/ToolkitCallout";
+import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 
@@ -207,6 +208,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
     return (
       <>
         <ToolkitCallout orgSlug={slug} />
+        <OrgOnboardingCallout orgSlug={slug} />
         <MemberProfile
         organization={organization}
         contacts={contacts}
@@ -226,6 +228,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
   return (
     <>
       <ToolkitCallout orgSlug={slug} />
+      <OrgOnboardingCallout orgSlug={slug} />
       <PartnerProfile
       organization={organization}
       contacts={contacts}

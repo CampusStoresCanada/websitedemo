@@ -3,6 +3,7 @@
 
 export const ORG_ADMIN_STEPS = [
   "session_1_welcome",
+  "public_contact_email",
   "profile_description",
   "profile_logo",
   "profile_hero",

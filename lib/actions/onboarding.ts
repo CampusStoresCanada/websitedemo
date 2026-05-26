@@ -10,6 +10,7 @@ export type { OrgAdminStepKey } from "@/lib/onboarding/steps";
 // Steps that count toward "onboarding complete" (non-conditional ones)
 const CORE_STEPS: OrgAdminStepKey[] = [
   "session_1_welcome",
+  "public_contact_email",
   "profile_description",
   "profile_logo",
   "profile_hero",

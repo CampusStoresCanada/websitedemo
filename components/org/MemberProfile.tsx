@@ -771,9 +771,12 @@ export default function MemberProfile({
                 {editMode && canEditThisOrg && VisEye({ flag: "primaryContact", value: showPrimaryContact, label: showPrimaryContact ? "Visible" : "Hidden" })}
               </div>
               <div className="flex flex-wrap gap-8 text-gray-500">
-                <span {...fieldProps("organizations", "email", organization.id, organization.id)}>
+                <span data-onboarding="public_contact_email" {...fieldProps("organizations", "email", organization.id, organization.id)}>
                   {editMode && canEditThisOrg
-                    ? (organization.email || "—")
+                    ? <span className="flex flex-col gap-0.5">
+                        <span>{organization.email || "—"}</span>
+                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                      </span>
                     : renderOrgField(organization.email, "email")}
                 </span>
                 <span {...fieldProps("organizations", "phone", organization.id, organization.id)}>
@@ -1282,16 +1285,21 @@ export default function MemberProfile({
             );
           })()}
 
-          {/* Primary Contact */}
+          {/* Store Contact */}
           {(isPrivilegedViewer || showPrimaryContact) && (
             <div className="mb-8">
               <div className="flex items-center gap-2 mb-3">
-                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Primary Contact</h3>
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Store Contact</h3>
                 {editMode && canEditThisOrg && VisEye({ flag: "primaryContact", value: showPrimaryContact, label: showPrimaryContact ? "Visible" : "Hidden" })}
               </div>
               <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
-                <span {...fieldProps("organizations", "email", organization.id, organization.id)}>
-                  {editMode && canEditThisOrg ? (organization.email || "—") : renderOrgField(organization.email, "email")}
+                <span data-onboarding="public_contact_email" {...fieldProps("organizations", "email", organization.id, organization.id)}>
+                  {editMode && canEditThisOrg
+                    ? <span className="flex flex-col gap-0.5">
+                        <span>{organization.email || "—"}</span>
+                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                      </span>
+                    : renderOrgField(organization.email, "email")}
                 </span>
                 <span {...fieldProps("organizations", "phone", organization.id, organization.id)}>
                   {editMode && canEditThisOrg ? (organization.phone || "—") : renderOrgField(organization.phone, "phone")}
