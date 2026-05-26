@@ -6,28 +6,31 @@ import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboard
 import type { OrgAdminStepKey } from "@/lib/onboarding/steps";
 
 interface OrgOnboardingCalloutProps {
-  /** The slug of the org page currently being viewed */
   orgSlug: string;
 }
 
 interface StepConfig {
+  /** Phase 1: introduce the task */
   heading: string;
   body: string;
-  /** data-onboarding attribute value on the target element, used to scroll to it */
+  ctaLabel: string;
   targetAttr: string;
+  /** Phase 2: shown after CTA clicked, while waiting for the field save */
+  actionHeading: string;
+  actionBody: string;
   /** Which table + column save triggers completion */
   completionTrigger: { table: string; column: string } | null;
-  /** CTA label — clicking scrolls to the target field */
-  ctaLabel: string;
 }
 
 const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
   public_contact_email: {
     heading: "Set your store's public email",
     body: "This is the address members and partners use to reach you. Use a shared inbox — not a personal address.",
+    ctaLabel: "Show me",
     targetAttr: "public_contact_email",
+    actionHeading: "Open your Toolkit and tap Edit",
+    actionBody: "Then click the email field to update it. The box will close once you save.",
     completionTrigger: { table: "organizations", column: "email" },
-    ctaLabel: "Go to field",
   },
   // Future steps added here as each is built out
 };
@@ -35,6 +38,7 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
 export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutProps) {
   const { user, organizations, isLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<OrgAdminStepKey | null>(null);
+  const [phase, setPhase] = useState<"intro" | "action">("intro");
   const [visible, setVisible] = useState(false);
   const [completing, setCompleting] = useState(false);
 
@@ -42,7 +46,6 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     (o) => o.role === "org_admin" && o.organization.slug === orgSlug
   );
 
-  // Find the first step that has a config and is not yet complete
   useEffect(() => {
     if (isLoading || !user || !isOwnOrgPage) return;
 
@@ -55,12 +58,11 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         if (cancelled) return;
         if (result.success && (!result.step || !result.step.completed_at)) {
           setActiveStep(stepKey);
-          // Small delay so the page has settled
+          setPhase("intro");
           setTimeout(() => setVisible(true), 800);
           return;
         }
       }
-      // All configured steps done — nothing to show
     }
 
     void findActiveStep();
@@ -74,7 +76,6 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       if (!activeStep) return;
       const config = STEP_CONFIGS[activeStep];
       if (!config?.completionTrigger) return;
-
       const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
       if (table === config.completionTrigger.table && column === config.completionTrigger.column) {
         void markComplete();
@@ -102,27 +103,30 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     setCompleting(false);
   }
 
-  function dismiss() {
-    setVisible(false);
-  }
-
-  function scrollToField() {
+  function handleCta() {
     if (!activeStep) return;
     const config = STEP_CONFIGS[activeStep];
     if (!config) return;
+
+    // Scroll to and highlight the target field
     const el = document.querySelector(`[data-onboarding="${config.targetAttr}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      // Brief highlight pulse
       el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "rounded");
-      setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "rounded"), 2000);
+      setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "rounded"), 2500);
     }
+
+    // Advance to action phase
+    setPhase("action");
   }
 
   if (!visible || !activeStep) return null;
 
   const config = STEP_CONFIGS[activeStep];
   if (!config) return null;
+
+  const heading = phase === "intro" ? config.heading : config.actionHeading;
+  const body    = phase === "intro" ? config.body    : config.actionBody;
 
   return (
     <div
@@ -134,7 +138,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
 
         {/* Dismiss */}
         <button
-          onClick={dismiss}
+          onClick={() => setVisible(false)}
           className="absolute top-2 right-2 text-white/40 hover:text-white/80 transition-colors"
           aria-label="Dismiss"
         >
@@ -143,24 +147,24 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
           </svg>
         </button>
 
-        {/* Step label */}
         <p className="text-[10px] font-semibold text-[#EE2A2E] uppercase tracking-widest mb-1">
           Getting started
         </p>
-
         <p className="text-sm font-semibold leading-snug pr-5 mb-1">
-          {config.heading}
+          {heading}
         </p>
         <p className="text-xs text-white/70 leading-snug mb-3">
-          {config.body}
+          {body}
         </p>
 
-        <button
-          onClick={scrollToField}
-          className="w-full py-1.5 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-xs font-semibold rounded-lg transition-colors"
-        >
-          {config.ctaLabel}
-        </button>
+        {phase === "intro" && (
+          <button
+            onClick={handleCta}
+            className="w-full py-1.5 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-xs font-semibold rounded-lg transition-colors"
+          >
+            {config.ctaLabel}
+          </button>
+        )}
 
         {/* Arrow pointing down toward the Toolkit FAB */}
         <div className="absolute -bottom-2 right-6 w-4 h-2 overflow-hidden">
