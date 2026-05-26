@@ -443,10 +443,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       )}
 
       {/* Floating Toolkit Button */}
-      <div className="fixed bottom-8 right-8 z-40 flex flex-col-reverse items-center gap-2">
+      <div className="fixed bottom-8 right-8 z-40 flex flex-col-reverse items-center gap-2 w-12">
         {/* Tool buttons (shown when expanded) */}
         {isExpanded && !flagMode && !editMode && !explainMode && !shareMode && !bookmarkMode && (
-          <div className="flex flex-col gap-2 mb-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div className="absolute bottom-14 right-0 flex flex-col items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
             {/* Bookmark */}
             <ToolButton
               icon={<BookmarkIcon filled={isCurrentPageBookmarked} />}
@@ -475,29 +475,25 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               onClick={() => handleToolClick("explain")}
             />
 
-            {/* Org admin quick links — visible when on that org's own profile page */}
-            {orgAdminSlug && (
-              <>
-                <a
-                  href={`/org/${orgAdminSlug}/admin/users`}
-                  className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
-                >
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z" />
-                  </svg>
-                  Manage Users
-                </a>
-                <a
-                  href={`/org/${orgAdminSlug}/admin/transfer`}
-                  className="flex items-center gap-2.5 w-full px-3 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white text-sm font-medium transition-colors"
-                >
-                  <svg className="w-4 h-4 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 7h12m0 0l-4-4m4 4l-4 4m0 6H4m0 0l4 4m-4-4l4-4" />
-                  </svg>
-                  Transfer Admin
-                </a>
-              </>
-            )}
+            {/*
+             * TODO (post-launch): Fold org-admin management into Edit mode on the org profile page.
+             *
+             * Two features currently live at standalone pages but belong inline in Edit mode:
+             *
+             * 1. MANAGE TEAM — /org/[slug]/admin/users
+             *    A table of all org members with roles + statuses. Should become a "Manage Team"
+             *    section inside Edit mode, visible only to org_admin / super_admin.
+             *    Inline role/status editing per row; invite via InviteUserDialog.
+             *    Components: app/org/[slug]/admin/users/page.tsx, OrgUserTable, InviteUserDialog
+             *
+             * 2. TRANSFER ADMIN — /org/[slug]/admin/transfer
+             *    A deliberate ownership-transfer process backed by admin_transfer_requests (with
+             *    timeout + pending state). Should appear as a clearly-separated "Transfer ownership"
+             *    panel at the bottom of Edit mode — OrgAdmin/SuperAdmin only, behind a button that
+             *    opens a focused confirmation flow.
+             *    Components: app/org/[slug]/admin/transfer/page.tsx, AdminTransferFlow
+             *    Cron: app/api/cron/admin-transfer-timeout/route.ts
+             */}
 
             {/* Edit - Only for admins */}
             {isAdmin && (
@@ -543,6 +539,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
           </button>
         ) : (
           <button
+            data-toolkit-fab
             onClick={() => setIsExpanded(!isExpanded)}
             className={`w-12 h-12 rounded-full shadow-lg flex items-center justify-center transition-all hover:scale-105 ${
               isExpanded

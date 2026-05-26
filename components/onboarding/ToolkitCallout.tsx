@@ -47,21 +47,29 @@ export default function ToolkitCallout({ orgSlug }: ToolkitCalloutProps) {
     }
   }, [isLoading, user, isOwnOrgPage]);
 
-  // Also dismiss if the user opens the Toolkit themselves
+  // Dismiss if the user opens (or interacts with) the Toolkit
   useEffect(() => {
     if (!visible) return;
 
-    function onToolkitOpen(e: MouseEvent) {
+    // If the Toolkit is already expanded when the callout appears, dismiss immediately
+    if (document.querySelector("[data-toolkit-fab]")) {
+      // FAB exists — check if toolkit panel is open (expanded sub-buttons are rendered)
+      const toolkitEl = document.querySelector("[data-toolkit]");
+      if (toolkitEl && toolkitEl.querySelector("button:not([data-toolkit-fab])")) {
+        dismiss();
+        return;
+      }
+    }
+
+    function onToolkitInteract(e: MouseEvent) {
       const target = e.target as HTMLElement;
-      // The Toolkit FAB is the only fixed button at bottom-right with z-50
-      // We detect it by checking if the click target is inside the Toolkit area
-      if (target.closest("[data-toolkit-fab]")) {
+      if (target.closest("[data-toolkit-fab]") || target.closest("[data-toolkit]")) {
         dismiss();
       }
     }
 
-    document.addEventListener("click", onToolkitOpen, { capture: true });
-    return () => document.removeEventListener("click", onToolkitOpen, { capture: true });
+    document.addEventListener("click", onToolkitInteract, { capture: true });
+    return () => document.removeEventListener("click", onToolkitInteract, { capture: true });
   }, [visible]);
 
   function dismiss() {
