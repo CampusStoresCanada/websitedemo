@@ -44,7 +44,7 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
   },
   contacts_sorted: {
     heading: "Are your people right?",
-    body: "Open Edit and click any person to check their name, title, and email. Update anyone who's moved on or add someone new.",
+    body: "Open Edit and click any person to update their info. You'll also see an eye icon — use it to hide anyone who'd rather stay private.",
     ctaLabel: "Take me there",
     targetAttr: "contacts_section",
     completionTrigger: [
@@ -52,15 +52,8 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
       { table: "contacts", column: "work_email" },
       { table: "contacts", column: "role_title" },
       { table: "contacts", column: "work_phone_number" },
+      { table: "contacts", column: "hidden" },
     ],
-    guided: false,
-  },
-  visibility_intro: {
-    heading: "Control who's visible",
-    body: "Not everyone wants their contact info public. Click a person in Edit — the eye icon lets you hide them from visitors.",
-    ctaLabel: "Got it",
-    targetAttr: "contacts_section",
-    completionTrigger: { table: "contacts", column: "hidden" },
     guided: false,
   },
   profile_logo: {
@@ -246,7 +239,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // Only render the bubble during intro and show-field phases
   const bubbleVisible = phase === "intro" || phase === "show-field";
   if (showTour) {
-    return <ToolkitTourModal onDone={() => { setShowTour(false); setRefreshTick((t) => t + 1); }} />;
+    return <ToolkitTourModal onDone={() => setShowTour(false)} />;
   }
 
   if (!activeStep || phase === "done" || !bubbleVisible) return null;
