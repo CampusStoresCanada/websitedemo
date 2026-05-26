@@ -2,28 +2,10 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
+import { ORG_ADMIN_STEPS, type OrgAdminStepKey } from "@/lib/onboarding/steps";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Step keys — canonical list from docs/ONBOARDING_JOURNEY.md
-// ─────────────────────────────────────────────────────────────────────────────
-
-export const ORG_ADMIN_STEPS = [
-  "session_1_welcome",
-  "profile_description",
-  "profile_logo",
-  "profile_hero",
-  "contacts_sorted",
-  "contact_photos",
-  "conference_delegates",
-  "visibility_intro",
-  "network_members",
-  "network_partners",
-  "network_member_space",
-  "events_discovery",
-  "benchmarking_survey",
-] as const;
-
-export type OrgAdminStepKey = (typeof ORG_ADMIN_STEPS)[number];
+// Re-export so existing importers keep working.
+export type { OrgAdminStepKey } from "@/lib/onboarding/steps";
 
 // Steps that count toward "onboarding complete" (non-conditional ones)
 const CORE_STEPS: OrgAdminStepKey[] = [
@@ -188,6 +170,48 @@ export async function completeOnboardingStep(stepKey: OrgAdminStepKey): Promise<
   }
 
   return { success: true, coreStepsComplete };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Reset — dev + super_admin only
+// Wipes all progress rows and clears the onboarding_completed flag so the
+// full journey runs again from scratch. The Toolkit callout localStorage key
+// must be cleared client-side (see DevPanel).
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function resetMyOnboarding(): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  // Gate to dev environment OR super_admins (useful for resetting in staging/prod too)
+  const isDev = process.env.NODE_ENV === "development";
+  const isSuperAdmin = auth.ctx.globalRole === "super_admin";
+  if (!isDev && !isSuperAdmin) {
+    return { success: false, error: "Reset only available in dev or for super admins" };
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+  const now = new Date().toISOString();
+
+  const { error: deleteError } = await db
+    .from("user_onboarding_progress")
+    .delete()
+    .eq("user_id", auth.ctx.userId)
+    .eq("persona", "org_admin");
+
+  if (deleteError) {
+    console.error("[onboarding] resetMyOnboarding delete failed:", deleteError);
+    return { success: false, error: "Failed to clear progress rows" };
+  }
+
+  // Reset the completed flag on the users table
+  await (createAdminClient() as any)
+    .from("users")
+    .update({ onboarding_completed: false, updated_at: now })
+    .eq("id", auth.ctx.userId);
+
+  return { success: true };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
