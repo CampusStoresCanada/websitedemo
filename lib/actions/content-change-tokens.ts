@@ -110,6 +110,3 @@ export async function consumeReviewToken(rawToken: string): Promise<{ ok: boolea
 
   return { ok: true };
 }
-
-/** @deprecated Use peekReviewToken instead. Kept for any callers not yet migrated. */
-export const validateReviewToken = peekReviewToken;
