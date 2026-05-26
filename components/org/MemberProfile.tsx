@@ -14,6 +14,7 @@ import BenchmarkingDetails from "./BenchmarkingDetails";
 import BenchmarkingComparison from "./BenchmarkingComparison";
 import PartnerViewOfMember from "./PartnerViewOfMember";
 import EditableProcurementSection from "./EditableProcurementSection";
+import ContactEditModal from "./ContactEditModal";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToolkit } from "@/components/ui/Toolkit";
@@ -102,6 +103,8 @@ export default function MemberProfile({
 
   // Per-contact hidden state — keyed by contact.id. Overrides the DB value optimistically.
   const [contactHiddenOverrides, setContactHiddenOverrides] = useState<Record<string, boolean>>({});
+  // Contact being edited in the edit modal (null = closed)
+  const [editingContact, setEditingContact] = useState<VisibleContact | null>(null);
   const isContactHidden = (contact: VisibleContact) =>
     contact.id in contactHiddenOverrides ? contactHiddenOverrides[contact.id] : (contact.hidden ?? false);
 
@@ -920,10 +923,11 @@ export default function MemberProfile({
                         return (
                       <tr
                         key={contact.id}
-                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""}`}
+                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
                         data-flaggable
+                        onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}
                       >
-                        <td className="py-2 pr-4 text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
+                        <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
                               contact.circle_id ? (
@@ -932,17 +936,17 @@ export default function MemberProfile({
                             )
                           ) : "—"}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
+                        <td className="py-2 pr-4 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_email", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" {...fieldProps("contacts", "role_title", contact.id, organization.id)}>
+                        <td className="py-2 pr-4 text-gray-400" {...(!editMode ? fieldProps("contacts", "role_title", contact.id, organization.id) : {})}>
                           {contact.role_title ? (contact.role_title as string) : <BlurredField placeholderWidth={10} />}
                         </td>
-                        <td className="py-2 text-gray-400" {...fieldProps("contacts", "work_phone_number", contact.id, organization.id)}>
+                        <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
                         {hasPublicConference && (
-                          <td className="py-2 pl-3 text-xs">
+                          <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
                             <input
                               type="checkbox"
                               aria-label={`Attending conference for ${contact.name ?? "contact"}`}
@@ -953,32 +957,17 @@ export default function MemberProfile({
                             />
                           </td>
                         )}
-                        {/* Actions — eye toggle + delete, only in edit mode */}
+                        {/* Actions — delete only in edit mode; eye moved to contact edit modal */}
                         {editMode && canEditThisOrg && (
-                          <td className="py-2 pl-4 w-16">
-                            <div className="flex items-center gap-1">
-                              {/* Visibility toggle */}
-                              <button
-                                onClick={() => void handleToggleContactHidden(contact)}
-                                title={isContactHidden(contact) ? "Hidden from visitors — click to show" : "Visible to visitors — click to hide"}
-                                className={`p-1 rounded border transition-colors ${isContactHidden(contact) ? "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100" : "border-gray-300 text-gray-400 hover:bg-gray-50"}`}
-                              >
-                                {isContactHidden(contact) ? (
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
-                                ) : (
-                                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
-                                )}
-                              </button>
-                              {/* Delete */}
-                              <div
-                                className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
-                                data-entity-id={contact.id}
-                                data-deletable
-                              >
-                                <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                                  <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                                </svg>
-                              </div>
+                          <td className="py-2 pl-4 w-10" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
+                              data-entity-id={contact.id}
+                              data-deletable
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                              </svg>
                             </div>
                           </td>
                         )}
@@ -1506,6 +1495,17 @@ export default function MemberProfile({
 
         </div>
       </div>
+
+      {/* Contact edit modal */}
+      {editingContact && (
+        <ContactEditModal
+          contact={editingContact}
+          organizationId={organization.id}
+          isHidden={isContactHidden(editingContact)}
+          onToggleHidden={() => void handleToggleContactHidden(editingContact)}
+          onClose={() => setEditingContact(null)}
+        />
+      )}
 
       {/* Back Link */}
       <div className="fixed bottom-8 left-8 z-50">
