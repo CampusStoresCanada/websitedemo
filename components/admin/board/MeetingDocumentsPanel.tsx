@@ -27,16 +27,7 @@ interface Props {
   isSA: boolean;
 }
 
-// ─── Constants ────────────────────────────────────────────────────────────────
-
-const TYPE_ORDER: BoardDocumentType[] = ["agenda", "minutes", "financials", "other"];
-
-const TYPE_LABELS: Record<string, string> = {
-  agenda:     "Agenda",
-  minutes:    "Minutes",
-  financials: "Financials",
-  other:      "Other",
-};
+const DEFAULT_DOC_TYPE: BoardDocumentType = "other";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -187,80 +178,54 @@ export default function MeetingDocumentsPanel({ meetingId, initialDocs, isSA }: 
   const handleUploaded = (doc: Doc) => setDocs((prev) => [...prev, doc]);
   const handleDeleted  = (id: string) => setDocs((prev) => prev.filter((d) => d.id !== id));
 
-  const grouped = TYPE_ORDER.reduce<Record<string, Doc[]>>((acc, type) => {
-    acc[type] = docs.filter((d) => d.document_type === type);
-    return acc;
-  }, {});
-
-  const hasAny = docs.length > 0;
-
   return (
-    <div className="space-y-4">
-      {TYPE_ORDER.map((type) => {
-        const items = grouped[type];
-        return (
-          <div key={type} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-            {/* Section header */}
-            <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-              <h2 className="text-sm font-semibold text-gray-700">{TYPE_LABELS[type]}</h2>
-              {isSA && (
-                <UploadButton
-                  meetingId={meetingId}
-                  docType={type}
-                  onUploaded={handleUploaded}
-                />
-              )}
-            </div>
+    <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center justify-between border-b border-gray-100 bg-gray-50 px-4 py-2.5">
+        <h2 className="text-sm font-semibold text-gray-700">Documents</h2>
+        {isSA && (
+          <UploadButton
+            meetingId={meetingId}
+            docType={DEFAULT_DOC_TYPE}
+            onUploaded={handleUploaded}
+          />
+        )}
+      </div>
 
-            {/* Doc rows */}
-            {items.length > 0 ? (
-              <ul className="divide-y divide-gray-100">
-                {items.map((doc) => (
-                  <li
-                    key={doc.id}
-                    className="group flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
-                  >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <span className="text-lg leading-none" aria-hidden>
-                        {fileIcon(doc.mime_type)}
-                      </span>
-                      <div className="min-w-0">
-                        <div className="text-sm font-medium text-gray-900 truncate">
-                          {doc.title}
-                        </div>
-                        <div className="text-xs text-gray-400">
-                          {formatBytes(doc.file_size_bytes)}
-                          {doc.mime_type && <span className="mx-1 text-gray-300">·</span>}
-                          {doc.mime_type && (
-                            <span>{doc.mime_type.split("/").pop()?.toUpperCase()}</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
+      {docs.length > 0 ? (
+        <ul className="divide-y divide-gray-100">
+          {docs.map((doc) => (
+            <li
+              key={doc.id}
+              className="group flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <span className="text-lg leading-none" aria-hidden>
+                  {fileIcon(doc.mime_type)}
+                </span>
+                <div className="min-w-0">
+                  <div className="text-sm font-medium text-gray-900 truncate">{doc.title}</div>
+                  <div className="text-xs text-gray-400">
+                    {formatBytes(doc.file_size_bytes)}
+                    {doc.mime_type && <span className="mx-1 text-gray-300">·</span>}
+                    {doc.mime_type && <span>{doc.mime_type.split("/").pop()?.toUpperCase()}</span>}
+                  </div>
+                </div>
+              </div>
 
-                    <div className="flex items-center gap-1 flex-shrink-0">
-                      <DocumentDownloadLink docId={doc.id} fileName={doc.title} />
-                      {isSA && (
-                        <DeleteButton
-                          docId={doc.id}
-                          onDeleted={() => handleDeleted(doc.id)}
-                        />
-                      )}
-                    </div>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="px-4 py-4 text-xs text-gray-400 italic">No {TYPE_LABELS[type].toLowerCase()} documents uploaded.</p>
-            )}
-          </div>
-        );
-      })}
-
-      {!hasAny && !isSA && (
-        <div className="rounded-xl border border-dashed border-gray-200 bg-white py-16 text-center">
-          <p className="text-sm text-gray-400">No documents have been uploaded for this meeting yet.</p>
-        </div>
+              <div className="flex items-center gap-1 flex-shrink-0">
+                <DocumentDownloadLink docId={doc.id} fileName={doc.title} />
+                {isSA && (
+                  <DeleteButton docId={doc.id} onDeleted={() => handleDeleted(doc.id)} />
+                )}
+              </div>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-8 text-center text-sm text-gray-400">
+          No documents uploaded yet.{isSA ? " Use the Upload button to add files." : ""}
+        </p>
       )}
     </div>
   );
