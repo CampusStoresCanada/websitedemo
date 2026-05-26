@@ -117,6 +117,7 @@ export default function MapHero({
   const [procurementPanel, setProcurementPanel] = useState<ProcurementPanelData | null>(null);
   const [procurementPanelLoading, setProcurementPanelLoading] = useState(false);
   const mapRef = useRef<MapRef>(null);
+  const sectionRef = useRef<HTMLElement>(null);
   const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const previousBodyOverflowRef = useRef<string | null>(null);
   const exitedAtRef = useRef(0); // timestamp of last exit — cooldown guard
@@ -655,6 +656,14 @@ export default function MapHero({
     setExplore(true);
     setPaused(true);
     if (!persistent) {
+      // Safety check: only lock scroll if the section is actually covering the viewport.
+      // If the user scrolled away while the timer was running, abort the lock.
+      if (sectionRef.current) {
+        const rect = sectionRef.current.getBoundingClientRect();
+        const viewH = window.innerHeight;
+        // Section top must be within ~80px of the viewport top and cover most of the screen
+        if (rect.top > 80 || rect.bottom < viewH * 0.5) return;
+      }
       if (previousBodyOverflowRef.current === null) {
         previousBodyOverflowRef.current = document.body.style.overflow;
       }
@@ -680,6 +689,20 @@ export default function MapHero({
       return () => window.removeEventListener("load", onLoad);
     }
   }, []);
+
+  // Cancel the hover timer if the user scrolls away — never lock scroll with the map off-screen
+  useEffect(() => {
+    if (persistent) return;
+    const cancelOnScroll = () => {
+      if (hoverTimerRef.current) {
+        clearTimeout(hoverTimerRef.current);
+        hoverTimerRef.current = null;
+        setPaused(false);
+      }
+    };
+    window.addEventListener("scroll", cancelOnScroll, { passive: true });
+    return () => window.removeEventListener("scroll", cancelOnScroll);
+  }, [persistent]);
 
   const handleMapMouseMove = useCallback(() => {
     if (!pageReady || explore || persistent) return;
@@ -925,6 +948,7 @@ export default function MapHero({
 
   return (
     <section
+      ref={sectionRef}
       className={[
         "relative overflow-hidden",
         "transition-[height,margin-top] duration-700 ease-in-out",
