@@ -12,25 +12,16 @@ import { getMeetingFinancialReport } from "@/lib/quickbooks/reports";
 import { getLastFullMonth } from "@/lib/quickbooks/fiscal";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import PullFinancialsButton from "@/components/admin/board/PullFinancialsButton";
-import DocumentDownloadLink from "@/components/admin/board/DocumentDownloadLink";
 import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
 import MeetingTabs from "@/components/admin/board/MeetingTabs";
 import ActionItemsPanel from "@/components/admin/board/ActionItemsPanel";
 import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEditor";
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
 import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
+import MeetingDocumentsPanel from "@/components/admin/board/MeetingDocumentsPanel";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-const TYPE_LABELS: Record<string, string> = {
-  agenda:     "Agenda",
-  minutes:    "Minutes",
-  financials: "Financials",
-  other:      "Other",
-};
-
-const TYPE_ORDER = ["agenda", "minutes", "financials", "other"];
 
 function StatusBadge({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -43,22 +34,6 @@ function StatusBadge({ status }: { status: string }) {
       {status}
     </span>
   );
-}
-
-function fileIcon(mimeType: string | null): string {
-  if (!mimeType) return "📄";
-  if (mimeType.includes("pdf")) return "📄";
-  if (mimeType.includes("word") || mimeType.includes("document")) return "📝";
-  if (mimeType.includes("sheet") || mimeType.includes("excel")) return "📊";
-  if (mimeType.includes("presentation") || mimeType.includes("powerpoint")) return "📑";
-  return "📎";
-}
-
-function formatBytes(bytes: number | null): string {
-  if (!bytes) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 type TabKey = "agenda" | "minutes" | "documents" | "financials" | "actions";
@@ -125,12 +100,6 @@ export default async function MeetingDetailPage({
   const agendaHtml  = (meeting as Record<string, string | null>)["agenda_html"]  ?? null;
   const minutesHtml = (meeting as Record<string, string | null>)["minutes_html"] ?? null;
   const notionUrl   = (meeting as Record<string, string | null>)["notion_page_url"] ?? null;
-
-  // Group documents by type
-  const grouped: Record<string, typeof docs> = {};
-  for (const type of TYPE_ORDER) {
-    grouped[type] = docs.filter((d) => d.document_type === type);
-  }
 
   const meetingTypeLabel =
     meeting.meeting_type === "agm"     ? "AGM" :
@@ -209,61 +178,11 @@ export default async function MeetingDetailPage({
 
       {/* ── Documents tab ── */}
       {activeTab === "documents" && (
-        docs.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 bg-white py-16 text-center">
-            <p className="text-sm text-gray-400">
-              No documents have been synced for this meeting yet.
-            </p>
-            {isSA && (
-              <p className="mt-2 text-xs text-gray-400">
-                Use the <strong>Sync OneDrive</strong> button on the Board Portal to pull documents.
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {TYPE_ORDER.map((type) => {
-              const items = grouped[type];
-              if (items.length === 0) return null;
-              return (
-                <div key={type} className="rounded-xl border border-gray-200 bg-white overflow-hidden">
-                  <div className="border-b border-gray-100 bg-gray-50 px-4 py-2.5">
-                    <h2 className="text-sm font-semibold text-gray-700">{TYPE_LABELS[type]}</h2>
-                  </div>
-                  <ul className="divide-y divide-gray-100">
-                    {items.map((doc) => (
-                      <li
-                        key={doc.id}
-                        className="flex items-center justify-between px-4 py-3 hover:bg-gray-50 transition-colors"
-                      >
-                        <div className="flex items-center gap-3 min-w-0">
-                          <span className="text-lg leading-none" aria-hidden>
-                            {fileIcon(doc.mime_type)}
-                          </span>
-                          <div className="min-w-0">
-                            <div className="text-sm font-medium text-gray-900 truncate">
-                              {doc.title}
-                            </div>
-                            <div className="text-xs text-gray-400">
-                              {formatBytes(doc.file_size_bytes)}
-                              {doc.mime_type && (
-                                <span className="ml-1.5 text-gray-300">·</span>
-                              )}
-                              {doc.mime_type && (
-                                <span className="ml-1.5">{doc.mime_type.split("/").pop()?.toUpperCase()}</span>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                        <DocumentDownloadLink docId={doc.id} fileName={doc.title} />
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              );
-            })}
-          </div>
-        )
+        <MeetingDocumentsPanel
+          meetingId={meeting.id}
+          initialDocs={docs}
+          isSA={isSA}
+        />
       )}
 
       {/* ── Financials tab ── */}
