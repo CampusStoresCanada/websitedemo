@@ -15,6 +15,7 @@ export const ORG_ADMIN_STEPS = [
   "network_members",
   "network_partners",
   "network_member_space",
+  "partner_catalogue",
   "events_discovery",
   "benchmarking_survey",
 ] as const;

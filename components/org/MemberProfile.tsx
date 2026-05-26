@@ -1010,7 +1010,7 @@ export default function MemberProfile({
 
       {/* "View as Partner" toggle bar — hidden while in toolkit edit mode */}
       {canViewAsPartner && !isPartner && !editMode && (
-        <div className="bg-gray-50 border-t border-b border-gray-200">
+        <div data-onboarding="view_as_partner" className="bg-gray-50 border-t border-b border-gray-200">
           <div className="max-w-7xl mx-auto px-8 py-2.5 flex items-center justify-between">
             <p className="text-xs text-gray-500">
               {partnerViewMode
@@ -1018,7 +1018,12 @@ export default function MemberProfile({
                 : "Switch to see what vendor partners see about your institution."}
             </p>
             <button
-              onClick={() => setPartnerViewMode((v) => !v)}
+              onClick={() => {
+                setPartnerViewMode((v) => !v);
+                window.dispatchEvent(new CustomEvent("csc:field-updated", {
+                  detail: { table: "organizations", column: "_partner_view_toggled" },
+                }));
+              }}
               className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                 partnerViewMode
                   ? "bg-[#1A1A1A] text-white hover:bg-gray-700"

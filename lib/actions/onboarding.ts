@@ -21,6 +21,7 @@ const CORE_STEPS: OrgAdminStepKey[] = [
   "network_members",
   "network_partners",
   "network_member_space",
+  "partner_catalogue",
   "events_discovery",
 ];
 

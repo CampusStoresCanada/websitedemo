@@ -360,6 +360,9 @@ export default function PartnerLinksEditor({
     setLinks(updated);
     onSaved(updated);
     setStep("list");
+    window.dispatchEvent(new CustomEvent("csc:field-updated", {
+      detail: { table: "organizations", column: "_partner_link_added" },
+    }));
   };
 
   const handleRemove = (linkId: string) => {

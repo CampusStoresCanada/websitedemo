@@ -29,6 +29,8 @@ interface StepConfig {
   // Only used when guided: true
   fieldHeading?: string;
   fieldBody?: string;
+  // If set, only show this step for org admins whose org matches one of these types.
+  orgTypes?: string[];
 }
 
 const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
@@ -75,6 +77,24 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     completionTrigger: { table: "organizations", column: "hero_image_url" },
     guided: false,
   },
+  network_member_space: {
+    heading: "See yourself through a partner's eyes",
+    body: "Scroll down and hit \"View as Partner\" — that's exactly what vendors see when they look you up. Worth knowing.",
+    ctaLabel: "Take me there",
+    targetAttr: "view_as_partner",
+    completionTrigger: { table: "organizations", column: "_partner_view_toggled" },
+    guided: false,
+    orgTypes: ["Member"],
+  },
+  partner_catalogue: {
+    heading: "Get your catalogue in front of members",
+    body: "Members are looking for you. Upload your catalogue, price lists, and documents so they can find what they need without picking up the phone.",
+    ctaLabel: "Take me there",
+    targetAttr: "partner_links",
+    completionTrigger: { table: "organizations", column: "_partner_link_added" },
+    guided: false,
+    orgTypes: ["Partner", "Vendor"],
+  },
 };
 
 type Phase =
@@ -92,9 +112,11 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   const [refreshTick, setRefreshTick] = useState(0);
   const fieldHighlightRef = useRef<Element | null>(null);
 
-  const isOwnOrgPage = organizations.some(
+  const orgMembership = organizations.find(
     (o) => o.role === "org_admin" && o.organization.slug === orgSlug
   );
+  const isOwnOrgPage = Boolean(orgMembership);
+  const orgType: string = orgMembership?.organization?.type ?? "";
 
   // Find the first incomplete configured step
   useEffect(() => {
@@ -104,6 +126,9 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     async function findActiveStep() {
       const steps = Object.keys(STEP_CONFIGS) as OrgAdminStepKey[];
       for (const stepKey of steps) {
+        const config = STEP_CONFIGS[stepKey];
+        // Skip steps that don't apply to this org type
+        if (config?.orgTypes && !config.orgTypes.includes(orgType)) continue;
         const result = await getOnboardingStep(stepKey);
         if (cancelled) return;
         if (result.success && (!result.step || !result.step.completed_at)) {
@@ -117,7 +142,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     void findActiveStep();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, user?.id, isOwnOrgPage, refreshTick]);
+  }, [isLoading, user?.id, isOwnOrgPage, orgType, refreshTick]);
 
   // Phase: show-field → listen for Toolkit FAB click → highlight-edit
   useEffect(() => {

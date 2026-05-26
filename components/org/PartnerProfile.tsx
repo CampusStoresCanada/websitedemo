@@ -776,7 +776,7 @@ export default function PartnerProfile({
           )}
 
           {/* Links & Documents */}
-          <div className="mb-12">
+          <div className="mb-12" data-onboarding="partner_links">
             <PartnerLinksSection
               orgId={organization.id}
               orgName={organization.name}
