@@ -194,7 +194,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
 
   return (
     <div
-      className="fixed bottom-24 right-20 z-40 animate-in fade-in slide-in-from-bottom-2 duration-300"
+      className="fixed bottom-24 right-6 z-40 animate-in fade-in slide-in-from-bottom-2 duration-300"
       role="complementary"
       aria-label="Onboarding guidance"
     >
@@ -225,9 +225,12 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
           </button>
         )}
 
-        <div className="absolute -bottom-2 right-6 w-4 h-2 overflow-hidden">
-          <div className="w-3 h-3 bg-[#1A1A1A] rotate-45 translate-y-[-50%] ml-0.5" />
-        </div>
+        {/* Arrow toward Toolkit FAB — only shown when directing user there */}
+        {phase === "show-field" && (
+          <div className="absolute -bottom-2 right-6 w-4 h-2 overflow-hidden">
+            <div className="w-3 h-3 bg-[#1A1A1A] rotate-45 translate-y-[-50%] ml-0.5" />
+          </div>
+        )}
       </div>
     </div>
   );

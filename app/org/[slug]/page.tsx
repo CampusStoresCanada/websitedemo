@@ -4,7 +4,6 @@ import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
-import ToolkitCallout from "@/components/onboarding/ToolkitCallout";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
@@ -207,7 +206,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
   if (organization.type === "Member") {
     return (
       <>
-        <ToolkitCallout orgSlug={slug} />
         <OrgOnboardingCallout orgSlug={slug} />
         <MemberProfile
         organization={organization}
@@ -227,7 +225,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
   // Partner/Vendor layout
   return (
     <>
-      <ToolkitCallout orgSlug={slug} />
       <OrgOnboardingCallout orgSlug={slug} />
       <PartnerProfile
       organization={organization}
