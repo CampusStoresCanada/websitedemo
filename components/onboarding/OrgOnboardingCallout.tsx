@@ -248,15 +248,20 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     const el = document.querySelector(`[data-onboarding="${config.targetAttr}"]`);
     if (el) {
       el.scrollIntoView({ behavior: "smooth", block: "center" });
-      el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded");
-      setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded"), 2500);
+      if (config.guided) {
+        // Guided: brief flash only — the highlight-field phase takes over
+        el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded");
+        setTimeout(() => el.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded"), 2500);
+      } else {
+        // Non-guided: persistent pulse so they know exactly what to look at
+        el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
+        fieldHighlightRef.current = el;
+      }
     }
 
     if (config.guided) {
-      // Full guided flow — wait for Toolkit open, then highlight Edit, then field
       setPhase("show-field");
     } else {
-      // User already knows the Toolkit — just scroll, close callout, listen for save
       setPhase("done");
     }
   }
