@@ -29,6 +29,12 @@ interface StepConfig {
   // Only used when guided: true
   fieldHeading?: string;
   fieldBody?: string;
+  // If set, this field-updated event advances show-field → highlight-edit
+  // instead of waiting for the FAB click
+  showFieldTrigger?: { table: string; column: string };
+  // If true, the step completes when edit mode activates (highlight-edit phase)
+  // rather than waiting for a field save in highlight-field
+  completesOnEditMode?: boolean;
   // If set, only show this step for org admins whose org matches one of these types.
   orgTypes?: string[];
 }
@@ -79,11 +85,15 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
   },
   network_member_space: {
     heading: "See yourself through a partner's eyes",
-    body: "Scroll down and hit \"View as Partner\" — that's exactly what vendors see when they look you up. Worth knowing.",
+    body: "That bar at the bottom of your page? Hit \"View as Partner\" — that's exactly what vendors see when they look you up.",
     ctaLabel: "Take me there",
     targetAttr: "view_as_partner",
-    completionTrigger: { table: "organizations", column: "_partner_view_toggled" },
-    guided: false,
+    guided: true,
+    fieldHeading: "Now let's make it count",
+    fieldBody: "You're seeing what partners see. Open the Toolkit and click Edit to control it.",
+    showFieldTrigger: { table: "organizations", column: "_partner_view_toggled" },
+    completionTrigger: { table: "organizations", column: "_unused" },
+    completesOnEditMode: true,
     orgTypes: ["Member"],
   },
   partner_catalogue: {
@@ -144,9 +154,10 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, user?.id, isOwnOrgPage, orgType, refreshTick]);
 
-  // Phase: show-field → listen for Toolkit FAB click → highlight-edit
+  // Phase: show-field → listen for Toolkit FAB click OR showFieldTrigger → highlight-edit
   useEffect(() => {
-    if (phase !== "show-field") return;
+    if (phase !== "show-field" || !activeStep) return;
+    const config = STEP_CONFIGS[activeStep];
 
     function onFabClick(e: MouseEvent) {
       if ((e.target as HTMLElement).closest("[data-toolkit-fab]")) {
@@ -154,23 +165,41 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       }
     }
     document.addEventListener("click", onFabClick, { capture: true });
-    return () => document.removeEventListener("click", onFabClick, { capture: true });
-  }, [phase]);
+
+    // Some steps advance via a field event rather than FAB click
+    function onFieldUpdated(e: Event) {
+      if (!config?.showFieldTrigger) return;
+      const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
+      if (table === config.showFieldTrigger.table && column === config.showFieldTrigger.column) {
+        setPhase("highlight-edit");
+      }
+    }
+    window.addEventListener("csc:field-updated", onFieldUpdated);
+
+    return () => {
+      document.removeEventListener("click", onFabClick, { capture: true });
+      window.removeEventListener("csc:field-updated", onFieldUpdated);
+    };
+  }, [phase, activeStep]);
 
   // Phase: highlight-edit → dispatch event to Toolkit, listen for edit mode activation
   useEffect(() => {
-    if (phase !== "highlight-edit") return;
+    if (phase !== "highlight-edit" || !activeStep) return;
+    const config = STEP_CONFIGS[activeStep];
 
     window.dispatchEvent(new CustomEvent("csc:onboarding:highlight-edit", { detail: { tool: "edit" } }));
 
     function onEditMode(e: Event) {
-      if ((e as CustomEvent<{ active: boolean }>).detail.active) {
+      if (!(e as CustomEvent<{ active: boolean }>).detail.active) return;
+      if (config?.completesOnEditMode) {
+        void markComplete();
+      } else {
         setPhase("highlight-field");
       }
     }
     window.addEventListener("csc:edit-mode-changed", onEditMode);
     return () => window.removeEventListener("csc:edit-mode-changed", onEditMode);
-  }, [phase]);
+  }, [phase, activeStep]);
 
   // Phase: highlight-field → add pulsing ring to the target element
   useEffect(() => {
