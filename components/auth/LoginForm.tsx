@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo, useEffect } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
@@ -54,8 +54,7 @@ export default function LoginForm() {
       return;
     }
 
-    router.push(nextPath);
-    router.refresh();
+    window.location.assign(nextPath);
   };
 
   const handleMagicLink = async (e: React.FormEvent) => {
