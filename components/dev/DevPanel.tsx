@@ -5,6 +5,11 @@ import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { createClient } from "@/lib/supabase/client";
 import type { PermissionState } from "@/lib/auth/types";
+import {
+  getMyOnboardingProgress,
+  resetMyOnboarding,
+} from "@/lib/actions/onboarding";
+import type { OnboardingStep } from "@/lib/actions/onboarding";
 
 const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
   [
@@ -29,6 +34,11 @@ export default function DevPanel() {
   const [show, setShow] = useState(false);
   const [loginLoading, setLoginLoading] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
+  const [onboardingSteps, setOnboardingSteps] = useState<OnboardingStep[] | null>(null);
+  const [onboardingLoading, setOnboardingLoading] = useState(false);
+  const [onboardingResetStatus, setOnboardingResetStatus] = useState<"idle" | "done" | "error">("idle");
+  const [cronStatus, setCronStatus] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [cronResult, setCronResult] = useState<string | null>(null);
   const router = useRouter();
   const {
     user,
@@ -54,6 +64,60 @@ export default function DevPanel() {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, []);
+
+  // Load onboarding state whenever the panel opens and a user is logged in
+  useEffect(() => {
+    if (!show || !user) { setOnboardingSteps(null); return; }
+    setOnboardingLoading(true);
+    setOnboardingResetStatus("idle");
+    getMyOnboardingProgress()
+      .then((result) => {
+        setOnboardingSteps(result.steps ?? null);
+      })
+      .catch(() => setOnboardingSteps(null))
+      .finally(() => setOnboardingLoading(false));
+  }, [show, user?.id]);
+
+  const handleOnboardingReset = async () => {
+    setOnboardingLoading(true);
+    setOnboardingResetStatus("idle");
+    try {
+      const result = await resetMyOnboarding();
+      if (result.success) {
+        // Clear the Toolkit callout localStorage flag too
+        try { localStorage.removeItem("csc_toolkit_callout_dismissed"); } catch { /* silent */ }
+        setOnboardingSteps([]);
+        setOnboardingResetStatus("done");
+      } else {
+        setOnboardingResetStatus("error");
+      }
+    } catch {
+      setOnboardingResetStatus("error");
+    } finally {
+      setOnboardingLoading(false);
+    }
+  };
+
+  const triggerNudgeCron = async () => {
+    setCronStatus("running");
+    setCronResult(null);
+    try {
+      const res = await fetch("/api/cron/onboarding-nudge", {
+        headers: { authorization: "Bearer local-dev-trigger" },
+      });
+      const json = await res.json();
+      if (res.ok) {
+        setCronStatus("done");
+        setCronResult(`sent=${json.sent} skipped=${json.skipped} errors=${json.errors?.length ?? 0}`);
+      } else {
+        setCronStatus("error");
+        setCronResult(json.error ?? "unknown error");
+      }
+    } catch (e) {
+      setCronStatus("error");
+      setCronResult(e instanceof Error ? e.message : "fetch failed");
+    }
+  };
 
   const quickLogin = async (email: string, password: string) => {
     setLoginLoading(email);
@@ -198,6 +262,86 @@ export default function DevPanel() {
               No
             </button>
           </div>
+        </div>
+
+        {/* Onboarding */}
+        {user && (
+          <div>
+            <div className="flex items-center justify-between mb-1">
+              <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+                Onboarding
+              </p>
+              <button
+                onClick={() => void handleOnboardingReset()}
+                disabled={onboardingLoading}
+                className="text-[9px] px-2 py-0.5 rounded bg-amber-100 text-amber-700 hover:bg-amber-200 transition-colors disabled:opacity-40 font-semibold"
+              >
+                {onboardingLoading ? "…" : "Reset"}
+              </button>
+            </div>
+
+            {onboardingResetStatus === "done" && (
+              <p className="text-[10px] text-green-600 mb-1">
+                ✓ Reset — reload to see the welcome modal again.
+              </p>
+            )}
+            {onboardingResetStatus === "error" && (
+              <p className="text-[10px] text-red-500 mb-1">Reset failed.</p>
+            )}
+
+            {onboardingLoading && !onboardingSteps && (
+              <p className="text-[10px] text-gray-400">Loading…</p>
+            )}
+
+            {onboardingSteps !== null && (
+              <div className="space-y-0.5 max-h-36 overflow-y-auto">
+                {onboardingSteps.length === 0 ? (
+                  <p className="text-[10px] text-gray-400 italic">Not started</p>
+                ) : (
+                  onboardingSteps.map((step) => (
+                    <div key={step.step_key} className="flex items-center justify-between gap-2">
+                      <span className="text-[9px] text-gray-500 truncate flex-1">
+                        {step.step_key}
+                      </span>
+                      <span className={`text-[9px] font-semibold flex-shrink-0 ${
+                        step.completed_at
+                          ? "text-green-600"
+                          : step.skipped_at
+                          ? "text-gray-400"
+                          : step.sent_at
+                          ? "text-amber-500"
+                          : "text-gray-300"
+                      }`}>
+                        {step.completed_at ? "✓" : step.skipped_at ? "skip" : step.sent_at ? "sent" : "—"}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Nudge Cron */}
+        <div>
+          <div className="flex items-center justify-between mb-1">
+            <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">
+              Nudge Cron
+            </p>
+            <button
+              onClick={() => void triggerNudgeCron()}
+              disabled={cronStatus === "running"}
+              className="text-[9px] px-2 py-0.5 rounded bg-blue-100 text-blue-700 hover:bg-blue-200 transition-colors disabled:opacity-40 font-semibold"
+            >
+              {cronStatus === "running" ? "…" : "Run Now"}
+            </button>
+          </div>
+          {cronStatus === "done" && cronResult && (
+            <p className="text-[10px] text-green-600">✓ {cronResult}</p>
+          )}
+          {cronStatus === "error" && cronResult && (
+            <p className="text-[10px] text-red-500">{cronResult}</p>
+          )}
         </div>
 
         {/* Quick Login */}

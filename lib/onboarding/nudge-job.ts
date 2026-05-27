@@ -1,0 +1,732 @@
+/**
+ * Onboarding Nudge Job
+ *
+ * Runs daily via /api/cron/onboarding-nudge.
+ * Finds org admins with pending onboarding steps and sends them the right nudge
+ * at the right time — no earlier, no later, never for something already done.
+ *
+ * See docs/ONBOARDING_JOURNEY.md for the full step map and timing rationale.
+ */
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { sendEmail } from "@/lib/email/send";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step schedule — one entry per nudge-able step.
+// session_1_welcome is handled by WelcomeModal (in-app only), not here.
+// ─────────────────────────────────────────────────────────────────────────────
+
+type StepSchedule = {
+  /** Days after journey_started_at to send the initial nudge */
+  sendAfterDays: number;
+  /** Days after last send/reminder to fire a reminder (null = no reminder) */
+  reminderEveryDays: number | null;
+  /** Max reminders before giving up (0 = no reminders, 1 = one reminder, etc.) */
+  maxReminders: number;
+  /** Delivery channel for this step */
+  channel: "email" | "in_app" | "both";
+  /** If set, this step only fires when a specific platform condition is true */
+  conditional?: "conference_within_60_days" | "benchmarking_open";
+};
+
+const STEP_SCHEDULE: Record<string, StepSchedule> = {
+  profile_description: {
+    sendAfterDays: 2,
+    reminderEveryDays: 5, // Day 7 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  profile_logo: {
+    sendAfterDays: 2,
+    reminderEveryDays: 8, // Day 10 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  profile_hero: {
+    sendAfterDays: 3,
+    reminderEveryDays: 11, // Day 14 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  contacts_sorted: {
+    sendAfterDays: 4,
+    reminderEveryDays: 10, // Day 14 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  contact_photos: {
+    sendAfterDays: 5,
+    reminderEveryDays: 16, // Day 21 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  conference_delegates: {
+    sendAfterDays: 5,
+    reminderEveryDays: 7, // Weekly
+    maxReminders: 4,
+    channel: "both",
+    conditional: "conference_within_60_days",
+  },
+  visibility_intro: {
+    sendAfterDays: 10,
+    reminderEveryDays: 11, // Day 21 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  network_members: {
+    sendAfterDays: 14,
+    reminderEveryDays: null,
+    maxReminders: 0,
+    channel: "email",
+  },
+  network_partners: {
+    sendAfterDays: 14,
+    reminderEveryDays: null,
+    maxReminders: 0,
+    channel: "email",
+  },
+  network_member_space: {
+    sendAfterDays: 17,
+    reminderEveryDays: 11, // Day 28 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  events_discovery: {
+    sendAfterDays: 18,
+    reminderEveryDays: 12, // Day 30 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  benchmarking_survey: {
+    sendAfterDays: 0, // Fires immediately when survey opens (conditional)
+    reminderEveryDays: 14,
+    maxReminders: 2,
+    channel: "both",
+    conditional: "benchmarking_open",
+  },
+};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Types for the DB rows we read
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface ProgressRow {
+  id: string;
+  user_id: string;
+  step_key: string;
+  journey_started_at: string;
+  sent_at: string | null;
+  completed_at: string | null;
+  skipped_at: string | null;
+  reminder_count: number;
+  last_reminder_sent_at: string | null;
+}
+
+interface UserContext {
+  userId: string;
+  email: string;
+  displayName: string;
+  firstName: string;
+  orgId: string;
+  orgName: string;
+  orgSlug: string;
+  orgProvince: string | null;
+  hasDescription: boolean;
+  hasLogo: boolean;
+  hasHero: boolean;
+  hasContacts: boolean;
+  hasContactPhotos: boolean;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
+function daysSince(isoString: string): number {
+  // Supabase returns timestamptz without a Z — normalise to UTC
+  const normalised = isoString.endsWith("Z") || isoString.includes("+")
+    ? isoString
+    : isoString.replace(" ", "T") + "Z";
+  const ms = Date.now() - new Date(normalised).getTime();
+  return ms / (1000 * 60 * 60 * 24);
+}
+
+function appUrl(): string {
+  return process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Email template builder
+// Conversational tone — like a colleague, not a manual.
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface NudgeEmailOptions {
+  firstName: string;
+  orgName: string;
+  orgSlug: string;
+  orgProvince: string | null;
+  stepKey: string;
+  isReminder: boolean;
+}
+
+function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; html: string } | null {
+  const { firstName, orgName, orgSlug, stepKey, isReminder } = opts;
+  const base = appUrl();
+  const orgUrl = `${base}/org/${orgSlug}`;
+  const reminder = isReminder ? " (just a gentle nudge)" : "";
+
+  switch (stepKey) {
+    case "profile_description":
+      return {
+        subject: isReminder
+          ? `${orgName}'s description — still worth a look`
+          : `Your description is the first thing they read`,
+        html: nudgeHtml({
+          firstName,
+          headline: "First impressions happen fast.",
+          body: `Your organization description is the first thing members and vendor partners read when they land on ${orgName}'s page. Does it still say what you want it to say?<br><br>It only takes a minute to update — click the pencil icon on any field when you're on your org page.`,
+          ctaText: "Go to my org page",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? `You got a nudge about this a few days ago${reminder}.` : undefined,
+        }),
+      };
+
+    case "profile_logo":
+      return {
+        subject: isReminder
+          ? `${orgName} still needs a logo`
+          : `Your logo — is it on here?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "A face to the name.",
+          body: `${orgName} ${isReminder ? "still doesn't have a logo on here." : "doesn't have a logo on the platform yet."} It shows up in the directory, on your org page, and next to your contacts. Worth adding if you haven't already.`,
+          ctaText: "Add a logo",
+          ctaUrl: orgUrl,
+        }),
+      };
+
+    case "profile_hero":
+      return {
+        subject: `Make ${orgName}'s page stand out`,
+        html: nudgeHtml({
+          firstName,
+          headline: "A hero image goes a long way.",
+          body: `A hero image at the top of ${orgName}'s page makes it look like you own the space — because you do. It can be a photo of your store, your campus, your team. Anything that says "this is us."`,
+          ctaText: "Add a hero image",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? "Still worth doing when you get a moment." : undefined,
+        }),
+      };
+
+    case "contacts_sorted":
+      return {
+        subject: `Who's the right person to call at ${orgName}?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Contacts matter more than people think.",
+          body: `When vendor partners want to reach ${orgName}, they look at your contacts page. When members want to know who runs what, they look at your contacts page. Make sure the right people are listed, in the right order, with accurate roles.`,
+          ctaText: "Review my contacts",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? "This one's quick — worth doing today." : undefined,
+        }),
+      };
+
+    case "contact_photos":
+      return {
+        subject: `Faces make a difference`,
+        html: nudgeHtml({
+          firstName,
+          headline: "People connect with people.",
+          body: `The contacts members reach out to most are the ones with photos. It's a small thing that makes a real difference. If your key contacts don't have profile photos yet, it's worth uploading them.`,
+          ctaText: "Update contact photos",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? `Still no photos on some contacts at ${orgName} — quick one when you have a spare minute.` : undefined,
+        }),
+      };
+
+    case "conference_delegates":
+      return {
+        subject: isReminder
+          ? `Conference delegates — any updates for ${orgName}?`
+          : `Have you sorted delegates for the conference?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Conference time is coming.",
+          body: `Have you sorted who's going from ${orgName}? Getting your delegates confirmed early means smoother logistics on our end — and yours. You can manage this right on your org page.`,
+          ctaText: "Sort my delegates",
+          ctaUrl: orgUrl,
+        }),
+      };
+
+    case "visibility_intro":
+      return {
+        subject: `Did you know you control what vendor partners see?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "You're managing three audiences at once.",
+          body: `Here's something a lot of org admins don't realise at first: what your members see about ${orgName}, what vendor partners see, and what the public can see are <em>not the same</em>.<br><br>You control all of it. Some information should be open. Some should stay inside the network. Some should stay inside your own team. That's all configurable from your org page.`,
+          ctaText: "See my visibility settings",
+          ctaUrl: orgUrl,
+          footnote: "Worth understanding before you add more content.",
+        }),
+      };
+
+    case "network_members":
+      return {
+        subject: `Meet the rest of the network`,
+        html: nudgeHtml({
+          firstName,
+          headline: "You've got peers across the country.",
+          body: `The Members directory has every campus store that's part of CSC. ${opts.orgProvince ? `${opts.orgProvince} alone has a handful of stores you'd probably recognize.` : "There are stores from coast to coast you'd probably recognize."} Worth a look — there are people in there you'll want to know.`,
+          ctaText: "See the Members directory",
+          ctaUrl: `${base}/members`,
+        }),
+      };
+
+    case "network_partners":
+      return {
+        subject: `The vendors on CSC can see your profile`,
+        html: nudgeHtml({
+          firstName,
+          headline: "This is who you're connected to.",
+          body: `The Partners directory is all the vendors and suppliers active on CSC. They can already see ${orgName}'s page. It's worth knowing who they are — and having a look at your own page through their eyes.`,
+          ctaText: "Browse Partners",
+          ctaUrl: `${base}/partners`,
+        }),
+      };
+
+    case "network_member_space":
+      return {
+        subject: `Member Space — same you, same platform`,
+        html: nudgeHtml({
+          firstName,
+          headline: "One login. One platform.",
+          body: `Member Space isn't a separate app. Same login you're already using. It's the community layer — discussions, announcements, resources — all connected to the same profile and permissions you have here. Worth exploring if you haven't already.`,
+          ctaText: "Open Member Space",
+          ctaUrl: `${base}/members-space`,
+          footnote: isReminder ? "Still the same login — no new password needed." : undefined,
+        }),
+      };
+
+    case "events_discovery":
+      return {
+        subject: `Events coming up for ${orgName}`,
+        html: nudgeHtml({
+          firstName,
+          headline: "There are events relevant to you.",
+          body: `The CSC events calendar has sessions relevant to your store, your region, and your role. ${opts.orgProvince ? `If you're in ${opts.orgProvince}, there's likely something in your area.` : "Scroll through and see what's coming up near you."} Some of these you can add to your calendar right from the platform.`,
+          ctaText: "Browse events",
+          ctaUrl: `${base}/events`,
+          footnote: isReminder ? "Worth bookmarking the ones relevant to your team." : undefined,
+        }),
+      };
+
+    case "benchmarking_survey":
+      return {
+        subject: isReminder
+          ? `Benchmarking survey — still open`
+          : `The benchmarking survey is open`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Your peers are already in.",
+          body: `The annual benchmarking survey is open. The more stores that participate, the more useful the data is for everyone — including you. ${isReminder ? "It's still open if you haven't had a chance yet." : "It doesn't take long, and the results are worth having."}`,
+          ctaText: "Start the survey",
+          ctaUrl: `${base}/benchmarking`,
+        }),
+      };
+
+    default:
+      return null;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Base email wrapper — clean, minimal, on-brand
+// ─────────────────────────────────────────────────────────────────────────────
+
+interface NudgeHtmlOptions {
+  firstName: string;
+  headline: string;
+  body: string;
+  ctaText: string;
+  ctaUrl: string;
+  footnote?: string;
+}
+
+function nudgeHtml(opts: NudgeHtmlOptions): string {
+  const { firstName, headline, body, ctaText, ctaUrl, footnote } = opts;
+  const footBlock = footnote
+    ? `<p style="margin:20px 0 0;font-size:12px;color:#9CA3AF;">${footnote}</p>`
+    : "";
+
+  return `
+    <div style="font-family:sans-serif;max-width:560px;margin:0 auto;color:#1A1A1A;">
+      <div style="border-top:3px solid #C8102E;padding-top:20px;margin-bottom:24px;">
+        <p style="margin:0;font-size:13px;color:#9CA3AF;text-transform:uppercase;letter-spacing:.05em;">Campus Stores Canada</p>
+      </div>
+      <p style="margin:0 0 4px;font-size:16px;">Hey ${firstName},</p>
+      <h2 style="margin:0 0 16px;font-size:22px;font-weight:700;color:#163D6D;">${headline}</h2>
+      <p style="margin:0 0 24px;font-size:15px;line-height:1.6;color:#374151;">${body}</p>
+      <p style="margin:0 0 32px;">
+        <a href="${ctaUrl}"
+           style="display:inline-block;background:#163D6D;color:#fff;padding:12px 24px;border-radius:6px;text-decoration:none;font-size:14px;font-weight:600;">
+          ${ctaText} →
+        </a>
+      </p>
+      ${footBlock}
+      <hr style="border:none;border-top:1px solid #E5E7EB;margin:32px 0 16px;">
+      <p style="margin:0;font-size:11px;color:#9CA3AF;">
+        You're receiving this because you're an org admin on the CSC platform.
+        Questions? Reply to this email.
+      </p>
+    </div>
+  `;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Conditional checks
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function isConferenceWithin60Days(db: ReturnType<typeof createAdminClient>): Promise<boolean> {
+  const today = new Date();
+  const cutoff = new Date(today.getTime() + 60 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10);
+  const { data } = await db
+    .from("conference_instances")
+    .select("id")
+    .gte("start_date", today.toISOString().slice(0, 10))
+    .lte("start_date", cutoff)
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+async function isBenchmarkingOpen(db: ReturnType<typeof createAdminClient>): Promise<boolean> {
+  const today = new Date().toISOString().slice(0, 10);
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data } = await (db as any)
+    .from("benchmarking_surveys")
+    .select("id")
+    .eq("status", "open")
+    .lte("start_date", today)
+    .gte("end_date", today)
+    .limit(1);
+  return (data ?? []).length > 0;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Auto-completion detection
+// Before sending a nudge, check if the step is already "done" in the real data.
+// If so, mark it complete in the progress table and skip.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function autoCompleteIfDone(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  row: ProgressRow,
+  ctx: UserContext,
+): Promise<boolean> {
+  const now = new Date().toISOString();
+
+  switch (row.step_key) {
+    case "profile_description":
+      if (ctx.hasDescription) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "profile_logo":
+      if (ctx.hasLogo) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "profile_hero":
+      if (ctx.hasHero) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "contacts_sorted":
+      if (ctx.hasContacts) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "contact_photos":
+      if (ctx.hasContactPhotos) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+  }
+  return false;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Main job
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface NudgeJobResult {
+  processed: number;
+  sent: number;
+  skipped: number;
+  errors: string[];
+  log: string[];
+}
+
+export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+  const result: NudgeJobResult = { processed: 0, sent: 0, skipped: 0, errors: [], log: [] };
+
+  // ── 1. Check conditional flags once for this run ──────────────────────────
+  const [conferenceActive, benchmarkingOpen] = await Promise.all([
+    isConferenceWithin60Days(createAdminClient()),
+    isBenchmarkingOpen(createAdminClient()),
+  ]);
+  result.log.push(`conditionals: conference=${conferenceActive}, benchmarking=${benchmarkingOpen}`);
+
+  // ── 2. Find all pending org_admin progress rows ───────────────────────────
+  const { data: pendingRows, error: fetchError } = await db
+    .from("user_onboarding_progress")
+    .select("id, user_id, step_key, journey_started_at, sent_at, completed_at, skipped_at, reminder_count, last_reminder_sent_at")
+    .eq("persona", "org_admin")
+    .is("completed_at", null)
+    .is("skipped_at", null)
+    .neq("step_key", "session_1_welcome"); // handled by WelcomeModal
+
+  if (fetchError) {
+    result.errors.push(`fetch pending rows: ${fetchError.message}`);
+    return result;
+  }
+
+  const rows = (pendingRows ?? []) as ProgressRow[];
+  if (rows.length === 0) {
+    result.log.push("no pending rows");
+    return result;
+  }
+
+  // ── 3. Group by user ──────────────────────────────────────────────────────
+  const byUser = new Map<string, ProgressRow[]>();
+  for (const row of rows) {
+    const arr = byUser.get(row.user_id) ?? [];
+    arr.push(row);
+    byUser.set(row.user_id, arr);
+  }
+
+  // ── 4. Fetch user context for all users in one pass ───────────────────────
+  const userIds = Array.from(byUser.keys());
+
+  // Auth emails
+  const authResult = await createAdminClient().auth.admin.listUsers({ perPage: 1000 });
+  const emailById = new Map<string, string>();
+  for (const u of authResult.data?.users ?? []) {
+    if (u.email) emailById.set(u.id, u.email);
+  }
+
+  // Profiles (display_name)
+  const { data: profiles } = await createAdminClient()
+    .from("profiles")
+    .select("id, display_name")
+    .in("id", userIds);
+  const nameById = new Map<string, string | null>();
+  for (const p of (profiles ?? []) as { id: string; display_name: string | null }[]) {
+    nameById.set(p.id, p.display_name);
+  }
+
+  // Org memberships (first org per user where role = org_admin)
+  const { data: memberships } = await createAdminClient()
+    .from("user_organizations")
+    .select("user_id, organization_id, role")
+    .in("user_id", userIds)
+    .eq("role", "org_admin")
+    .eq("status", "active");
+
+  // First org_id per user
+  const orgIdByUser = new Map<string, string>();
+  for (const m of (memberships ?? []) as { user_id: string; organization_id: string }[]) {
+    if (!orgIdByUser.has(m.user_id)) orgIdByUser.set(m.user_id, m.organization_id);
+  }
+
+  const orgIds = Array.from(new Set(orgIdByUser.values()));
+
+  // Org data
+  const { data: orgs } = await createAdminClient()
+    .from("organizations")
+    .select("id, name, slug, province, company_description, logo_url, hero_image_url")
+    .in("id", orgIds);
+
+  type OrgRow = { id: string; name: string; slug: string; province: string | null; company_description: string | null; logo_url: string | null; hero_image_url: string | null };
+  const orgById = new Map<string, OrgRow>();
+  for (const o of (orgs ?? []) as OrgRow[]) orgById.set(o.id, o);
+
+  // Contact counts + photo check (per org)
+  const { data: contacts } = await createAdminClient()
+    .from("contacts")
+    .select("id, organization_id, profile_picture_url")
+    .in("organization_id", orgIds);
+
+  const orgHasContacts = new Map<string, boolean>();
+  const orgHasPhotos = new Map<string, boolean>();
+  for (const c of (contacts ?? []) as { id: string; organization_id: string; profile_picture_url: string | null }[]) {
+    orgHasContacts.set(c.organization_id, true);
+    if (c.profile_picture_url) orgHasPhotos.set(c.organization_id, true);
+  }
+
+  // ── 5. Build UserContext per user ─────────────────────────────────────────
+  const ctxByUser = new Map<string, UserContext>();
+  for (const userId of userIds) {
+    const email = emailById.get(userId);
+    if (!email) continue;
+    const orgId = orgIdByUser.get(userId);
+    if (!orgId) continue;
+    const org = orgById.get(orgId);
+    if (!org) continue;
+
+    const displayName = nameById.get(userId) ?? email.split("@")[0];
+    const firstName = displayName.split(" ")[0] || displayName;
+
+    ctxByUser.set(userId, {
+      userId,
+      email,
+      displayName,
+      firstName,
+      orgId,
+      orgName: org.name,
+      orgSlug: org.slug,
+      orgProvince: org.province,
+      hasDescription: Boolean(org.company_description?.trim()),
+      hasLogo: Boolean(org.logo_url),
+      hasHero: Boolean(org.hero_image_url),
+      hasContacts: orgHasContacts.get(orgId) ?? false,
+      hasContactPhotos: orgHasPhotos.get(orgId) ?? false,
+    });
+  }
+
+  // ── 6. Process each user's pending rows ───────────────────────────────────
+  for (const [userId, userRows] of byUser) {
+    const ctx = ctxByUser.get(userId);
+    if (!ctx) {
+      result.log.push(`skip ${userId}: no context (no email, org, or profile)`);
+      continue;
+    }
+
+    for (const row of userRows) {
+      result.processed++;
+      const schedule = STEP_SCHEDULE[row.step_key];
+
+      // Unknown step key — skip silently (shouldn't happen in production)
+      if (!schedule) {
+        result.skipped++;
+        continue;
+      }
+
+      // Check conditional flags
+      if (schedule.conditional === "conference_within_60_days" && !conferenceActive) {
+        result.skipped++;
+        result.log.push(`skip ${ctx.email} / ${row.step_key}: conference not active`);
+        continue;
+      }
+      if (schedule.conditional === "benchmarking_open" && !benchmarkingOpen) {
+        result.skipped++;
+        result.log.push(`skip ${ctx.email} / ${row.step_key}: benchmarking not open`);
+        continue;
+      }
+
+      // Auto-complete if the org data already satisfies the condition
+      const alreadyDone = await autoCompleteIfDone(db, row, ctx);
+      if (alreadyDone) {
+        result.skipped++;
+        result.log.push(`auto-complete ${ctx.email} / ${row.step_key}: condition already met`);
+        continue;
+      }
+
+      const daysSinceStart = daysSince(row.journey_started_at);
+      const now = new Date().toISOString();
+
+      // ── Determine what action to take ──
+      let shouldSendInitial = false;
+      let shouldSendReminder = false;
+
+      if (!row.sent_at) {
+        // Not yet sent — check if initial trigger has elapsed
+        shouldSendInitial = daysSinceStart >= schedule.sendAfterDays;
+      } else {
+        // Already sent — check if a reminder is due
+        const lastSent = row.last_reminder_sent_at ?? row.sent_at;
+        const daysSinceLast = daysSince(lastSent);
+        const remindersLeft = schedule.maxReminders - row.reminder_count;
+
+        if (
+          schedule.reminderEveryDays !== null &&
+          remindersLeft > 0 &&
+          daysSinceLast >= schedule.reminderEveryDays
+        ) {
+          shouldSendReminder = true;
+        }
+      }
+
+      if (!shouldSendInitial && !shouldSendReminder) {
+        result.skipped++;
+        continue;
+      }
+
+      // ── Build the email ──
+      const emailContent = buildNudgeEmail({
+        firstName: ctx.firstName,
+        orgName: ctx.orgName,
+        orgSlug: ctx.orgSlug,
+        orgProvince: ctx.orgProvince,
+        stepKey: row.step_key,
+        isReminder: shouldSendReminder,
+      });
+
+      if (!emailContent) {
+        result.skipped++;
+        result.log.push(`no email template for ${row.step_key}`);
+        continue;
+      }
+
+      // ── Send ──
+      const sendResult = await sendEmail({
+        to: ctx.email,
+        subject: emailContent.subject,
+        html: emailContent.html,
+      });
+
+      if (!sendResult.success) {
+        result.errors.push(`send ${ctx.email} / ${row.step_key}: ${sendResult.error}`);
+        continue;
+      }
+
+      result.sent++;
+      result.log.push(`sent ${ctx.email} / ${row.step_key} (${shouldSendReminder ? "reminder" : "initial"})`);
+
+      // ── Update the progress row ──
+      if (shouldSendInitial) {
+        await db.from("user_onboarding_progress").update({
+          sent_at: now,
+          channel: "email",
+          updated_at: now,
+        }).eq("id", row.id);
+      } else {
+        await db.from("user_onboarding_progress").update({
+          last_reminder_sent_at: now,
+          reminder_count: row.reminder_count + 1,
+          updated_at: now,
+        }).eq("id", row.id);
+      }
+    }
+  }
+
+  return result;
+}
