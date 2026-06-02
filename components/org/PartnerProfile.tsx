@@ -19,6 +19,7 @@ import {
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import CategoryEditor from "@/components/org/CategoryEditor";
+import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import PartnerLinksSection from "@/components/org/PartnerLinksSection";
 import type { ResolvedPartnerLink, PartnerLink } from "@/lib/partner-links";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
@@ -29,6 +30,39 @@ import ContactEditModal from "@/components/org/ContactEditModal";
 import { fieldProps } from "@/lib/editable-fields";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import PartnerRFPFeed from "@/components/rfps/PartnerRFPFeed";
+
+// ── Category grouping ─────────────────────────────────────────────────────────
+// primary_category is a flat comma-separated string of parent categories and
+// subcategories mixed together. This groups them so subcategories nest under
+// their parent for display.
+
+const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
+const SUB_TO_PARENT = new Map<string, string>();
+for (const [parent, subs] of Object.entries(CATEGORY_SUBCATEGORIES)) {
+  for (const sub of subs ?? []) {
+    SUB_TO_PARENT.set(sub, parent);
+  }
+}
+
+function groupCategories(flat: string[]): Array<{ parent: string; subs: string[] }> {
+  const groups = new Map<string, string[]>();
+  for (const item of flat) {
+    if (PARENT_SET.has(item)) {
+      if (!groups.has(item)) groups.set(item, []);
+    } else {
+      const parent = SUB_TO_PARENT.get(item);
+      if (parent) {
+        if (!groups.has(parent)) groups.set(parent, []);
+        groups.get(parent)!.push(item);
+      } else {
+        // Unknown item — show as standalone parent
+        if (!groups.has(item)) groups.set(item, []);
+      }
+    }
+  }
+  return [...groups.entries()].map(([parent, subs]) => ({ parent, subs }));
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 interface SponsorTierInfo {
   name: string; slug: string; color: string; icon: TierIcon | null;
@@ -470,6 +504,7 @@ export default function PartnerProfile({
   const categories = categoryValue
     ? categoryValue.split(",").map((c) => c.trim()).filter(Boolean)
     : [];
+  const groupedCategories = groupCategories(categories);
 
   // Partner-specific marketing fields (typed) + NACS taxonomy (cast — added via migration)
   const highlightProductName = organization.highlight_product_name ?? null;
@@ -624,44 +659,58 @@ export default function PartnerProfile({
 
           {/* Categories — primary prominent, secondaries below */}
           {(categories.length > 0 || (editMode && canEditThisOrg)) && (
-            <div className="mb-10">
-              {/* Primary */}
-              <div className="flex items-center gap-3 mb-3">
-                {categories[0] ? (
-                  <span
-                    className="px-6 py-2 rounded-full text-sm font-semibold uppercase tracking-wider bg-transparent"
-                    style={{
-                      color: primaryColor,
-                      boxShadow: `0 0 0 2px white, 0 0 0 4px ${primaryColor}`,
-                    }}
-                  >
-                    {categories[0]}
-                  </span>
-                ) : null}
-                {editMode && canEditThisOrg && (
-                  <button
-                    onClick={() => setShowCategoryEditor(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors bg-transparent"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                    {categories.length === 0 ? "Add categories" : "Edit"}
-                  </button>
-                )}
-              </div>
-              {/* Secondaries */}
-              {categories.length > 1 && (
-                <div className="flex flex-wrap gap-2">
-                  {categories.slice(1).map((category, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 rounded-full text-xs font-medium text-gray-500 border border-gray-300 bg-white/60"
-                    >
-                      {category}
-                    </span>
-                  ))}
+            <div className="mb-10 space-y-3">
+              {groupedCategories.map((group, i) => (
+                <div key={group.parent}>
+                  {/* Parent badge */}
+                  <div className="flex items-center gap-3 mb-2">
+                    {i === 0 ? (
+                      <span
+                        className="px-5 py-1.5 rounded-full text-sm font-semibold uppercase tracking-wider bg-transparent"
+                        style={{ color: primaryColor, boxShadow: `0 0 0 2px white, 0 0 0 4px ${primaryColor}` }}
+                      >
+                        {group.parent}
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 rounded-full text-xs font-medium text-gray-500 border border-gray-300 bg-white/60">
+                        {group.parent}
+                      </span>
+                    )}
+                    {i === 0 && editMode && canEditThisOrg && (
+                      <button
+                        onClick={() => setShowCategoryEditor(true)}
+                        className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors bg-transparent"
+                      >
+                        <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {/* Subcategory chips */}
+                  {group.subs.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 ml-1">
+                      {group.subs.map((sub) => (
+                        <span
+                          key={sub}
+                          className="px-2.5 py-0.5 rounded-full text-xs text-gray-500 bg-gray-100 border border-gray-200"
+                        >
+                          {sub}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              ))}
+              {/* Empty state edit button */}
+              {categories.length === 0 && editMode && canEditThisOrg && (
+                <button
+                  onClick={() => setShowCategoryEditor(true)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors"
+                >
+                  Add categories
+                </button>
               )}
             </div>
           )}
@@ -1005,46 +1054,51 @@ export default function PartnerProfile({
             )}
           </div>
 
-          {/* Categories — primary prominent, secondaries below */}
+          {/* Categories — grouped with subcategories */}
           {(categories.length > 0 || (editMode && canEditThisOrg)) && (
-            <div className="mb-6">
-              {/* Primary */}
-              <div className="flex items-center gap-3 mb-2">
-                {categories[0] ? (
-                  <span
-                    className="px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-transparent"
-                    style={{
-                      color: primaryColor,
-                      boxShadow: `0 0 0 2px white, 0 0 0 3px ${primaryColor}`,
-                    }}
-                  >
-                    {categories[0]}
-                  </span>
-                ) : null}
-                {editMode && canEditThisOrg && (
-                  <button
-                    onClick={() => setShowCategoryEditor(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors bg-transparent"
-                  >
-                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-                    </svg>
-                    {categories.length === 0 ? "Add categories" : "Edit"}
-                  </button>
-                )}
-              </div>
-              {/* Secondaries */}
-              {categories.length > 1 && (
-                <div className="flex flex-wrap gap-2">
-                  {categories.slice(1).map((category, index) => (
-                    <span
-                      key={index}
-                      className="px-3 py-1 rounded-full text-xs font-medium text-gray-500 border border-gray-300 bg-white/60"
-                    >
-                      {category}
-                    </span>
-                  ))}
+            <div className="mb-6 space-y-2">
+              {groupedCategories.map((group, i) => (
+                <div key={group.parent}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    {i === 0 ? (
+                      <span
+                        className="px-4 py-1.5 rounded-full text-xs font-semibold uppercase tracking-wider bg-transparent"
+                        style={{ color: primaryColor, boxShadow: `0 0 0 2px white, 0 0 0 3px ${primaryColor}` }}
+                      >
+                        {group.parent}
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 rounded-full text-xs font-medium text-gray-500 border border-gray-300 bg-white/60">
+                        {group.parent}
+                      </span>
+                    )}
+                    {i === 0 && editMode && canEditThisOrg && (
+                      <button
+                        onClick={() => setShowCategoryEditor(true)}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors"
+                      >
+                        <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                          <path strokeLinecap="round" strokeLinejoin="round" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+                        </svg>
+                        Edit
+                      </button>
+                    )}
+                  </div>
+                  {group.subs.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5 ml-1">
+                      {group.subs.map((sub) => (
+                        <span key={sub} className="px-2 py-0.5 rounded-full text-xs text-gray-500 bg-gray-100 border border-gray-200">
+                          {sub}
+                        </span>
+                      ))}
+                    </div>
+                  )}
                 </div>
+              ))}
+              {categories.length === 0 && editMode && canEditThisOrg && (
+                <button onClick={() => setShowCategoryEditor(true)} className="flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-semibold border border-dashed border-gray-300 text-gray-400 hover:border-gray-500 hover:text-gray-600 transition-colors">
+                  Add categories
+                </button>
               )}
             </div>
           )}
