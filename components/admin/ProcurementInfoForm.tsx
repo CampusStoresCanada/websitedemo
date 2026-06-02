@@ -47,8 +47,6 @@ export default function ProcurementInfoForm({
   const [fiscalYearStart, setFiscalYearStart] = useState(
     initialData?.buying_cycle?.fiscal_year_start ?? ""
   );
-  const [rfpStart, setRfpStart] = useState(initialData?.buying_cycle?.rfp_start ?? "");
-  const [rfpEnd, setRfpEnd] = useState(initialData?.buying_cycle?.rfp_end ?? "");
   // key_dates is stored as KeyDate[] in the type but the form edits it as freeform text.
   // We keep it as a string here and round-trip it through a notes field.
   const [keyDates, setKeyDates] = useState<string>(
@@ -106,8 +104,6 @@ export default function ProcurementInfoForm({
 
     const buying_cycle: BuyingCycle = {
       fiscal_year_start: fiscalYearStart || undefined,
-      rfp_start: rfpStart || undefined,
-      rfp_end: rfpEnd || undefined,
       // key_dates is a structured KeyDate[] field; the textarea captures freeform notes
       // which are not yet mapped to structured entries, so we omit key_dates here.
     };
@@ -260,24 +256,6 @@ export default function ProcurementInfoForm({
           <div>
             <label className="block font-medium text-[#1A1A1A] mb-2">Fiscal Year Start</label>
             <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(e.target.value)} className={inputCls}>
-              <option value="">Select month</option>
-              {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block font-medium text-[#1A1A1A] mb-2">RFP Opens</label>
-            <select value={rfpStart} onChange={(e) => setRfpStart(e.target.value)} className={inputCls}>
-              <option value="">Select month</option>
-              {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
-                <option key={m} value={m}>{m}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="block font-medium text-[#1A1A1A] mb-2">RFP Closes</label>
-            <select value={rfpEnd} onChange={(e) => setRfpEnd(e.target.value)} className={inputCls}>
               <option value="">Select month</option>
               {["January","February","March","April","May","June","July","August","September","October","November","December"].map((m) => (
                 <option key={m} value={m}>{m}</option>

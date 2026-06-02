@@ -21,19 +21,31 @@ interface EditableProcurementSectionProps {
   contacts: VisibleContact[];
   /** When true, opens directly into edit mode (no extra click required) */
   autoEdit?: boolean;
+  /** Lifted state from parent — when provided, overrides internal state */
+  externalData?: ProcurementInfo;
+  onExternalSave?: (data: ProcurementInfo) => void;
 }
 
 export default function EditableProcurementSection({
   organization,
   contacts,
   autoEdit = false,
+  externalData,
+  onExternalSave,
 }: EditableProcurementSectionProps) {
   const { organizations, permissionState } = useAuth();
   const [isEditing, setIsEditing] = useState(autoEdit);
-  const [procurementInfo, setProcurementInfo] = useState<ProcurementInfo | undefined>(
+  const [internalData, setInternalData] = useState<ProcurementInfo | undefined>(
     (organization as Organization & { procurement_info?: ProcurementInfo }).procurement_info ||
       undefined
   );
+
+  // Use external state when provided (lifted from parent), otherwise own state
+  const procurementInfo = externalData !== undefined ? externalData : internalData;
+  const setProcurementInfo = (data: ProcurementInfo) => {
+    setInternalData(data);
+    onExternalSave?.(data);
+  };
 
   const isOrgAdmin = organizations.some(
     (uo) => uo.organization.id === organization.id && uo.role === "org_admin"
@@ -127,25 +139,30 @@ function ViewMode({
               const buyers = entry.contact_ids.map((id) => contactById[id]).filter(Boolean) as VisibleContact[];
               return (
                 <div key={entry.category} className="px-4 py-3 bg-white">
-                  <div className="flex items-start gap-4">
-                    <span className="min-w-[180px] font-medium text-[#1A1A1A] text-sm">{entry.category}</span>
-                    <div className="flex flex-wrap gap-2">
-                      {buyers.length > 0 ? buyers.map((b) => (
-                        <span key={b.id} className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-700">
-                          {b.name as string}
-                          {b.role_title && <span className="text-gray-400">· {b.role_title as string}</span>}
-                        </span>
-                      )) : (
-                        <span className="text-xs text-gray-400 italic">No buyer assigned</span>
-                      )}
+                  <p className="font-medium text-[#1A1A1A] text-sm mb-2">{entry.category}</p>
+                  {buyers.length > 0 ? (
+                    <div className="space-y-2 ml-2">
+                      {buyers.map((b) => {
+                        const buyerSubs = entry.contact_subcategories?.[b.id] ?? [];
+                        return (
+                          <div key={b.id}>
+                            <span className="inline-flex items-center gap-1.5 px-2.5 py-1 bg-gray-100 rounded-full text-xs text-gray-700">
+                              {b.name as string}
+                              {b.role_title && <span className="text-gray-400">· {b.role_title as string}</span>}
+                            </span>
+                            {buyerSubs.length > 0 && (
+                              <div className="mt-1 ml-2 flex flex-wrap gap-1">
+                                {buyerSubs.map((sub) => (
+                                  <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">{sub}</span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
-                  </div>
-                  {entry.subcategories && entry.subcategories.length > 0 && (
-                    <div className="mt-2 ml-[196px] flex flex-wrap gap-1.5">
-                      {entry.subcategories.map((sub) => (
-                        <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">{sub}</span>
-                      ))}
-                    </div>
+                  ) : (
+                    <span className="text-xs text-gray-400 italic ml-2">No buyer assigned</span>
                   )}
                 </div>
               );
@@ -187,7 +204,7 @@ function ViewMode({
         </div>
       )}
 
-      {buying_cycle && (buying_cycle.fiscal_year_start || buying_cycle.rfp_start || buying_cycle.rfp_end || (buying_cycle.key_dates && buying_cycle.key_dates.length > 0)) && (
+      {buying_cycle && (buying_cycle.fiscal_year_start || (buying_cycle.key_dates && buying_cycle.key_dates.length > 0)) && (
         <div>
           <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">Buying Cycle</h3>
           <div className="bg-gray-50 rounded-xl p-5 space-y-3">
@@ -195,16 +212,6 @@ function ViewMode({
               <div>
                 <span className="text-xs uppercase text-gray-400">Fiscal Year Starts</span>
                 <p className="font-medium text-[#1A1A1A]">{buying_cycle.fiscal_year_start}</p>
-              </div>
-            )}
-            {(buying_cycle.rfp_start || buying_cycle.rfp_end) && (
-              <div>
-                <span className="text-xs uppercase text-gray-400">RFP Window</span>
-                <p className="font-medium text-[#1A1A1A]">
-                  {buying_cycle.rfp_start && buying_cycle.rfp_end
-                    ? `${buying_cycle.rfp_start} – ${buying_cycle.rfp_end}`
-                    : buying_cycle.rfp_start ?? buying_cycle.rfp_end}
-                </p>
               </div>
             )}
             {buying_cycle.key_dates && buying_cycle.key_dates.length > 0 && (
@@ -270,10 +277,16 @@ function EditMode({
     }
     return map;
   });
-  const [subcategoryMap, setSubcategoryMap] = useState<Record<string, Set<string>>>(() => {
-    const map: Record<string, Set<string>> = {};
+  // Per-buyer subcategories: category → contact_id → subcategories
+  const [buyerSubMap, setBuyerSubMap] = useState<Record<string, Record<string, Set<string>>>>(() => {
+    const map: Record<string, Record<string, Set<string>>> = {};
     for (const entry of initialData?.category_buyers ?? []) {
-      if (entry.subcategories?.length) map[entry.category] = new Set(entry.subcategories);
+      if (entry.contact_subcategories) {
+        map[entry.category] = {};
+        for (const [cid, subs] of Object.entries(entry.contact_subcategories)) {
+          map[entry.category][cid] = new Set(subs);
+        }
+      }
     }
     return map;
   });
@@ -300,8 +313,6 @@ function EditMode({
     setVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const [fiscalYearStart, setFiscalYearStart] = useState(initialData?.buying_cycle?.fiscal_year_start ?? "");
-  const [rfpStart, setRfpStart] = useState(initialData?.buying_cycle?.rfp_start ?? "");
-  const [rfpEnd, setRfpEnd] = useState(initialData?.buying_cycle?.rfp_end ?? "");
   const [keyDates, setKeyDates] = useState<KeyDate[]>(initialData?.buying_cycle?.key_dates ?? []);
 
   // ── Category helpers ──
@@ -311,7 +322,7 @@ function EditMode({
       if (next.has(cat)) {
         next.delete(cat);
         setBuyerMap((bm) => { const nb = { ...bm }; delete nb[cat]; return nb; });
-        setSubcategoryMap((sm) => { const ns = { ...sm }; delete ns[cat]; return ns; });
+        setBuyerSubMap((bsm) => { const ns = { ...bsm }; delete ns[cat]; return ns; });
       } else {
         next.add(cat);
       }
@@ -322,16 +333,35 @@ function EditMode({
   const toggleBuyer = (cat: string, contactId: string) => {
     setBuyerMap((prev) => {
       const existing = new Set(prev[cat] ?? []);
-      existing.has(contactId) ? existing.delete(contactId) : existing.add(contactId);
+      if (existing.has(contactId)) {
+        existing.delete(contactId);
+        setBuyerSubMap((bsm) => {
+          const catMap = { ...(bsm[cat] ?? {}) };
+          delete catMap[contactId];
+          return { ...bsm, [cat]: catMap };
+        });
+      } else {
+        existing.add(contactId);
+        // Auto-select all subcategories — deselect individually to narrow
+        const subs = CATEGORY_SUBCATEGORIES[cat];
+        if (subs?.length) {
+          setBuyerSubMap((bsm) => ({
+            ...bsm,
+            [cat]: { ...(bsm[cat] ?? {}), [contactId]: new Set(subs) },
+          }));
+        }
+      }
       return { ...prev, [cat]: existing };
     });
   };
 
-  const toggleSubcategory = (cat: string, sub: string) => {
-    setSubcategoryMap((prev) => {
-      const existing = new Set(prev[cat] ?? []);
-      existing.has(sub) ? existing.delete(sub) : existing.add(sub);
-      return { ...prev, [cat]: existing };
+  const toggleBuyerSubcategory = (cat: string, contactId: string, sub: string) => {
+    setBuyerSubMap((prev) => {
+      const catMap = { ...(prev[cat] ?? {}) };
+      const subs = new Set(catMap[contactId] ?? []);
+      subs.has(sub) ? subs.delete(sub) : subs.add(sub);
+      catMap[contactId] = subs;
+      return { ...prev, [cat]: catMap };
     });
   };
 
@@ -346,17 +376,26 @@ function EditMode({
     setIsSubmitting(true);
     setError(null);
 
-    const category_buyers: CategoryBuyer[] = [...checkedCategories].map((cat) => ({
-      category: cat,
-      subcategories: subcategoryMap[cat] ? [...subcategoryMap[cat]] : undefined,
-      contact_ids: [...(buyerMap[cat] ?? [])],
-    }));
+    const category_buyers: CategoryBuyer[] = [...checkedCategories].map((cat) => {
+      const contactSubcategories = buyerSubMap[cat]
+        ? Object.fromEntries(
+            Object.entries(buyerSubMap[cat])
+              .filter(([, subs]) => subs.size > 0)
+              .map(([cid, subs]) => [cid, [...subs]])
+          )
+        : undefined;
+      return {
+        category: cat,
+        contact_ids: [...(buyerMap[cat] ?? [])],
+        contact_subcategories: contactSubcategories && Object.keys(contactSubcategories).length > 0
+          ? contactSubcategories
+          : undefined,
+      };
+    });
 
     const validKeyDates = keyDates.filter((kd) => kd.title.trim() && kd.date);
     const buying_cycle = {
       fiscal_year_start: fiscalYearStart || undefined,
-      rfp_start: rfpStart || undefined,
-      rfp_end: rfpEnd || undefined,
       key_dates: validKeyDates.length > 0 ? validKeyDates : undefined,
     };
 
@@ -407,7 +446,7 @@ function EditMode({
               />
             </div>
             <p className="text-xs text-gray-500 mb-4">
-              Check each category your store carries. Select subcategories to be more specific, then assign the buyer(s) responsible.
+              Check each category your store carries, then click a buyer to assign them. All subcategories are selected by default — deselect any they don't cover.
             </p>
             <div className="space-y-2">
               {VENDOR_CATEGORIES.map((cat) => {
@@ -421,49 +460,22 @@ function EditMode({
                     </label>
 
                     {checked && (
-                      <div className="border-t border-gray-100 bg-gray-50">
-                        {/* Subcategories */}
-                        {subs && subs.length > 0 && (
-                          <div className="px-4 py-3 border-b border-gray-100">
-                            <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold mb-2">Subcategories</p>
-                            <div className="flex flex-wrap gap-2">
-                              {subs.map((sub) => {
-                                const selected = subcategoryMap[cat]?.has(sub) ?? false;
-                                return (
+                      <div className="border-t border-gray-100 bg-gray-50 px-4 py-3">
+                        <div className="flex items-center gap-2 mb-3">
+                          <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Buyer(s) & Their Subcategories</p>
+                          <span className="text-[10px] text-gray-400 italic normal-case">
+                            Hidden contacts are tracked but won't appear to partners.
+                          </span>
+                        </div>
+                        {contacts.length > 0 ? (
+                          <div className="space-y-3">
+                            {contacts.map((contact) => {
+                              const selected = buyerMap[cat]?.has(contact.id) ?? false;
+                              const isHidden = contact.hidden ?? false;
+                              return (
+                                <div key={contact.id}>
+                                  {/* Buyer toggle chip */}
                                   <button
-                                    key={sub}
-                                    type="button"
-                                    onClick={() => toggleSubcategory(cat, sub)}
-                                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
-                                      selected
-                                        ? "bg-[#EE2A2E] text-white"
-                                        : "bg-white border border-gray-300 text-gray-600 hover:border-gray-400"
-                                    }`}
-                                  >
-                                    {sub}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Buyers */}
-                        <div className="px-4 pb-3 pt-3">
-                          <div className="flex items-center gap-2 mb-2">
-                            <p className="text-[10px] uppercase tracking-wider text-gray-400 font-semibold">Buyer(s)</p>
-                            <span className="text-[10px] text-gray-400 italic normal-case">
-                              Contacts hidden in Staffing are tracked here but won't appear to partners.
-                            </span>
-                          </div>
-                          {contacts.length > 0 ? (
-                            <div className="flex flex-wrap gap-2">
-                              {contacts.map((contact) => {
-                                const selected = buyerMap[cat]?.has(contact.id) ?? false;
-                                const isHidden = contact.hidden ?? false;
-                                return (
-                                  <button
-                                    key={contact.id}
                                     type="button"
                                     onClick={() => toggleBuyer(cat, contact.id)}
                                     className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
@@ -489,13 +501,36 @@ function EditMode({
                                       </span>
                                     )}
                                   </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <p className="text-xs text-gray-400 italic">No contacts available — add staff first.</p>
-                          )}
-                        </div>
+
+                                  {/* Subcategory chips for this buyer — only when selected and subs exist */}
+                                  {selected && subs && subs.length > 0 && (
+                                    <div className="mt-1.5 ml-3 flex flex-wrap gap-1.5">
+                                      {subs.map((sub) => {
+                                        const subSelected = buyerSubMap[cat]?.[contact.id]?.has(sub) ?? false;
+                                        return (
+                                          <button
+                                            key={sub}
+                                            type="button"
+                                            onClick={() => toggleBuyerSubcategory(cat, contact.id, sub)}
+                                            className={`px-2 py-0.5 rounded-full text-xs font-medium transition-colors ${
+                                              subSelected
+                                                ? "bg-[#EE2A2E] text-white"
+                                                : "bg-white border border-gray-200 text-gray-500 hover:border-gray-400"
+                                            }`}
+                                          >
+                                            {sub}
+                                          </button>
+                                        );
+                                      })}
+                                    </div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <p className="text-xs text-gray-400 italic">No contacts available — add staff first.</p>
+                        )}
                       </div>
                     )}
                   </div>
@@ -617,24 +652,10 @@ function EditMode({
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-2xl mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-1 gap-6 max-w-xs mb-8">
               <div>
                 <label className="block text-sm font-medium text-[#1A1A1A] mb-2">Fiscal Year Start</label>
                 <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(e.target.value)} className={inputCls}>
-                  <option value="">Select month</option>
-                  {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[#1A1A1A] mb-2">RFP Opens</label>
-                <select value={rfpStart} onChange={(e) => setRfpStart(e.target.value)} className={inputCls}>
-                  <option value="">Select month</option>
-                  {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-[#1A1A1A] mb-2">RFP Closes</label>
-                <select value={rfpEnd} onChange={(e) => setRfpEnd(e.target.value)} className={inputCls}>
                   <option value="">Select month</option>
                   {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>

@@ -15,10 +15,15 @@ interface StepConfig {
   heading: string;
   body: string;
   ctaLabel: string;
-  // The data-onboarding attribute on the target element
-  targetAttr: string;
+  // The data-onboarding attribute on the target element (on-page steps)
+  targetAttr?: string;
+  // For navigation steps: route to send the user to when CTA is clicked
+  targetPath?: string;
   // Which field save triggers completion — single or array (any match completes)
-  completionTrigger: { table: string; column: string } | { table: string; column: string }[];
+  // Optional for steps that complete on CTA click (completesOnCta: true)
+  completionTrigger?: { table: string; column: string } | { table: string; column: string }[];
+  // If true, the step completes immediately when the CTA is clicked (before navigating)
+  completesOnCta?: boolean;
   /**
    * guided: true  — full 4-phase flow (scroll → open Toolkit → click Edit → pulse field)
    *                 Used for the very first step before the user knows the Toolkit.
@@ -104,6 +109,41 @@ const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
     completionTrigger: { table: "organizations", column: "_partner_link_added" },
     guided: false,
     orgTypes: ["Partner", "Vendor"],
+  },
+  network_partners: {
+    heading: "See what's stocked for you",
+    body: "Your member directory comes with a full list of suppliers, vendors, and partners. Explore who's already working with stores like yours.",
+    ctaLabel: "Browse partners",
+    targetPath: "/partners",
+    completesOnCta: true,
+    guided: false,
+    orgTypes: ["Member"],
+  },
+  network_members: {
+    heading: "Meet your members",
+    body: "Here's everyone you serve. Browse the directory to see which stores are active on the platform — they can already find you.",
+    ctaLabel: "See the directory",
+    targetPath: "/members",
+    completesOnCta: true,
+    guided: false,
+    orgTypes: ["Partner", "Vendor"],
+  },
+  events_discovery: {
+    heading: "Stay in the loop",
+    body: "CSC runs conferences, webinars, and regional events throughout the year. See what's coming up and add the ones that matter to your calendar.",
+    ctaLabel: "View upcoming events",
+    targetPath: "/events",
+    completesOnCta: true,
+    guided: false,
+  },
+  benchmarking_survey: {
+    heading: "Help shape the industry",
+    body: "Our annual benchmarking survey takes about 10 minutes and helps every member understand where they stand. Your data stays anonymous.",
+    ctaLabel: "Take the survey",
+    targetPath: "/benchmarking/survey",
+    completesOnCta: true,
+    guided: false,
+    orgTypes: ["Member"],
   },
 };
 
@@ -228,7 +268,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     (e: Event) => {
       if (!activeStep) return;
       const config = STEP_CONFIGS[activeStep];
-      if (!config) return;
+      if (!config || !config.completionTrigger) return;
       const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
       const triggers = Array.isArray(config.completionTrigger)
         ? config.completionTrigger
@@ -269,10 +309,17 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     }
   }
 
-  function handleCta() {
+  async function handleCta() {
     if (!activeStep) return;
     const config = STEP_CONFIGS[activeStep];
     if (!config) return;
+
+    // Navigation step: complete immediately then send the user to another page
+    if (config.completesOnCta && config.targetPath) {
+      await markComplete();
+      window.location.assign(config.targetPath);
+      return;
+    }
 
     const el = document.querySelector(`[data-onboarding="${config.targetAttr}"]`);
     if (el) {

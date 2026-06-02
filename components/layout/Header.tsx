@@ -61,7 +61,7 @@ export default function Header() {
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [hadSession, setHadSession] = useState(false);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
-  const [alertTab, setAlertTab] = useState<"notifications" | "replies" | "dms">("notifications");
+  const [alertTab, setAlertTab] = useState<"notifications" | "dms">("notifications");
   const [cartCount, setCartCount] = useState(0);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const [websiteAlerts, setWebsiteAlerts] = useState<WebsiteAlert[]>([]);
@@ -112,8 +112,7 @@ export default function Header() {
 
   const badge = ROLE_BADGES[permissionState];
   const notificationsCount = websiteAlertCount + circleNotifications.filter(n => !n.isRead).length;
-  const repliesCount = circleReplies.filter(n => !n.isRead).length;
-  const totalAlertCount = dmUnreadCount + notificationsCount + repliesCount;
+  const totalAlertCount = dmUnreadCount + notificationsCount;
   const mergedNotificationItems = useMemo(() => {
     const websiteItems = websiteAlerts.map((item) => ({
       id: `website:${item.id}`,
@@ -136,9 +135,11 @@ export default function Header() {
       isRead: item.isRead,
     }));
     return [...websiteItems, ...circleItems].sort((a, b) => {
-      const aTs = new Date(a.createdAt).getTime();
-      const bTs = new Date(b.createdAt).getTime();
-      return bTs - aTs;
+      // Unread floats above read
+      if (!a.isRead && b.isRead) return -1;
+      if (a.isRead && !b.isRead) return 1;
+      // Within the same read state, newest first
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
   }, [websiteAlerts, circleNotifications]);
   const bannerCount =
@@ -458,6 +459,12 @@ export default function Header() {
                 <button
                   type="button"
                   onClick={() => {
+                    // If the only unread activity is a single DM, go straight to it
+                    const unreadDMs = circleDms.filter(d => d.unreadCount > 0);
+                    if (notificationsCount === 0 && unreadDMs.length === 1) {
+                      window.location.assign(unreadDMs[0].href);
+                      return;
+                    }
                     setShowAlertMenu((value) => !value);
                   }}
                   className="relative inline-flex h-9 w-9 items-center justify-center rounded-full border border-gray-300 text-gray-700 hover:border-gray-400"
@@ -474,20 +481,13 @@ export default function Header() {
                 {showAlertMenu ? (
                   <div className="absolute right-0 top-full mt-2 w-72 rounded-lg border border-gray-200 bg-white shadow-lg p-2 z-50">
                     <p className="px-2 py-1 text-xs uppercase tracking-wide text-gray-400">Alert Center</p>
-                    <div className="mt-1 grid grid-cols-3 gap-1 rounded-md bg-gray-50 p-1 text-xs">
+                    <div className="mt-1 grid grid-cols-2 gap-1 rounded-md bg-gray-50 p-1 text-xs">
                       <button
                         type="button"
                         onClick={() => setAlertTab("notifications")}
                         className={`rounded px-2 py-1.5 text-left ${alertTab === "notifications" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600"}`}
                       >
                         Notifications ({notificationsCount})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setAlertTab("replies")}
-                        className={`rounded px-2 py-1.5 text-left ${alertTab === "replies" ? "bg-white text-gray-900 shadow-sm" : "text-gray-600"}`}
-                      >
-                        Replies ({repliesCount})
                       </button>
                       <button
                         type="button"
@@ -531,34 +531,10 @@ export default function Header() {
                       )
                     ) : null}
 
-                    {alertTab === "replies" ? (
-                      circleReplies.length > 0 ? (
-                        circleReplies.slice(0, 10).map((reply) => (
-                          <a
-                            key={reply.id}
-                            href={reply.href}
-                            onClick={() => {
-                              const id = reply.id.startsWith("circle:") ? reply.id.slice(7) : reply.id;
-                              fetch("/api/circle/notifications", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ notificationId: id }) }).catch(() => {});
-                            }}
-                            className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${reply.isRead ? "opacity-60" : ""}`}
-                          >
-                            {!reply.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
-                            {reply.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
-                            <div className="min-w-0">
-                              <p className={`text-sm ${reply.isRead ? "text-gray-500" : "text-gray-800 font-medium"}`}>{reply.title}</p>
-                              {reply.message && <p className="text-xs text-gray-500 line-clamp-2">{reply.message}</p>}
-                            </div>
-                          </a>
-                        ))
-                      ) : (
-                        <p className="px-2 py-2 text-xs text-gray-500">No replies right now.</p>
-                      )
-                    ) : null}
 
                     {alertTab === "dms" ? (
                       circleDms.length > 0 ? (
-                        circleDms.map((dm) => (
+                        [...circleDms].sort((a, b) => b.unreadCount - a.unreadCount).map((dm) => (
                           <a
                             key={dm.uuid}
                             href={dm.href}
@@ -586,13 +562,12 @@ export default function Header() {
                     </div>
 
                     <div className="mt-2 flex items-center justify-between border-t border-gray-100 pt-2">
-                      {(notificationsCount > 0 || repliesCount > 0) ? (
+                      {notificationsCount > 0 ? (
                         <button
                           type="button"
                           onClick={() => {
                             fetch("/api/circle/notifications", { method: "POST" }).catch(() => {});
                             setCircleNotifications(prev => prev.map(n => ({ ...n, isRead: true })));
-                            setCircleReplies(prev => prev.map(n => ({ ...n, isRead: true })));
                             // Mark website alerts as read
                             const unreadWebsiteKeys = websiteAlerts.filter(a => !a.isRead).map(a => a.id);
                             if (unreadWebsiteKeys.length > 0) {

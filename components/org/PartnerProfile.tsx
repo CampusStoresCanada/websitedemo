@@ -24,6 +24,11 @@ import type { ResolvedPartnerLink, PartnerLink } from "@/lib/partner-links";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
 import { CERTIFICATIONS } from "@/lib/certifications";
 import { updateCertifications, updateCancollStatus } from "@/lib/actions/update-certifications";
+import { setContactHidden } from "@/lib/actions/user-management";
+import ContactEditModal from "@/components/org/ContactEditModal";
+import { fieldProps } from "@/lib/editable-fields";
+import type { RFPWithContext } from "@/lib/types/rfp";
+import PartnerRFPFeed from "@/components/rfps/PartnerRFPFeed";
 
 interface SponsorTierInfo {
   name: string; slug: string; color: string; icon: TierIcon | null;
@@ -41,6 +46,7 @@ interface PartnerProfileProps {
   /** Raw links passed only when viewer can edit */
   rawLinks?: PartnerLink[];
   canEditLinks: boolean;
+  partnerRFPs?: RFPWithContext[];
   conferenceAttendance: Array<{
     id: string;
     conferenceId: string;
@@ -81,6 +87,7 @@ export default function PartnerProfile({
   hasGatedLinks,
   rawLinks,
   canEditLinks,
+  partnerRFPs = [],
 }: PartnerProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -105,6 +112,27 @@ export default function PartnerProfile({
     organization.is_cancoll_member ?? false
   );
   const [cancollSaving, setCancollSaving] = useState(false);
+
+  // Per-contact hidden state — keyed by contact.id. Overrides the DB value optimistically.
+  const [contactHiddenOverrides, setContactHiddenOverrides] = useState<Record<string, boolean>>({});
+  // Contact being edited in the edit modal (null = closed)
+  const [editingContact, setEditingContact] = useState<VisibleContact | null>(null);
+  const isContactHidden = (contact: VisibleContact) =>
+    contact.id in contactHiddenOverrides ? contactHiddenOverrides[contact.id] : (contact.hidden ?? false);
+
+  async function handleToggleContactHidden(contact: VisibleContact) {
+    const current = isContactHidden(contact);
+    const next = !current;
+    setContactHiddenOverrides((prev) => ({ ...prev, [contact.id]: next }));
+    const result = await setContactHidden(organization.id, contact.id, next);
+    if (!result.success) {
+      setContactHiddenOverrides((prev) => ({ ...prev, [contact.id]: current }));
+    } else {
+      window.dispatchEvent(new CustomEvent("csc:field-updated", {
+        detail: { table: "contacts", column: "hidden", entityId: contact.id },
+      }));
+    }
+  }
 
   // Check if current user can edit THIS organization
   const canEditThisOrg = canEditOrg(organization.id);
@@ -432,8 +460,8 @@ export default function PartnerProfile({
   const rawPrimaryColor = brandColors[0]?.hex || "#1E3A5F";
   const primaryColor = rawPrimaryColor.startsWith("#") ? rawPrimaryColor : `#${rawPrimaryColor}`;
 
-  // Use hero_image_url if available, otherwise fall back to banner_url
-  const heroImage = organization.hero_image_url || organization.banner_url;
+  const heroImage = organization.hero_image_url ?? null;
+  const backgroundImage = organization.banner_url ?? null;
 
   // Get primary contact (first contact in list)
   const primaryContact = contacts[0] || null;
@@ -461,6 +489,40 @@ export default function PartnerProfile({
           className="sticky top-0 h-screen flex-shrink-0 relative overflow-hidden"
           style={{ width: '51.61vw' }}
         >
+          {/* Background image layer — behind hero strip and product overlay */}
+          <div
+            className="absolute inset-0 overflow-hidden group"
+            data-onboarding="profile_background"
+            data-flaggable
+            data-field="organizations.banner_url"
+            data-entity-id={organization.id}
+          >
+            {backgroundImage ? (
+              <Image
+                src={backgroundImage}
+                alt=""
+                fill
+                className="object-cover object-center"
+                unoptimized
+              />
+            ) : (
+              <div className="w-full h-full bg-[#EEEEF0]" />
+            )}
+            {editMode && canEditThisOrg && (
+              <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">
+                <div className="bg-white/90 rounded-full p-3 shadow-lg">
+                  <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                  </svg>
+                </div>
+                <span className="absolute bottom-4 text-white text-sm font-medium drop-shadow">
+                  {backgroundImage ? "Change background" : "Add background image"}
+                </span>
+              </div>
+            )}
+          </div>
+
           {/* Colorized Hero Strip — vw units so position is always relative to viewport */}
           <div
             className="absolute top-0 bottom-0 overflow-hidden group"
@@ -489,7 +551,9 @@ export default function PartnerProfile({
                     <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
                   </svg>
                 </div>
-                <span className="absolute bottom-4 text-white text-sm font-medium">Click to change hero image</span>
+                <span className="absolute bottom-4 text-white text-sm font-medium">
+                  {heroImage ? "Change hero strip" : "Add hero strip image"}
+                </span>
               </div>
             )}
           </div>
@@ -816,24 +880,25 @@ export default function PartnerProfile({
                         return (
                       <tr
                         key={contact.id}
-                        className="border-b border-gray-200"
+                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
                         data-flaggable
+                        onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}
                       >
-                        <td className="py-2 pr-4 text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (contact.name as string)
                           ) : "—"}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_email", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </td>
-                        <td className="py-2 pr-4 text-gray-400" data-flaggable data-field="contacts.role_title" data-entity-id={contact.id}>
+                        <td className="py-2 pr-4 text-gray-400" {...(!editMode ? fieldProps("contacts", "role_title", contact.id, organization.id) : {})}>
                           {contact.role_title ? (contact.role_title as string) : "—"}
                         </td>
-                        <td className="py-2 text-gray-400" data-flaggable data-field="contacts.work_phone_number" data-entity-id={contact.id}>
+                        <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        <td className="py-2 pl-3 text-xs">
+                        <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
                           <input
                             type="checkbox"
                             aria-label={`Attending conference for ${contact.name ?? "contact"}`}
@@ -845,14 +910,16 @@ export default function PartnerProfile({
                         </td>
                         {/* Delete button - only visible in edit mode */}
                         {editMode && canEditThisOrg && (
-                          <td
-                            className="py-2 pl-4 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer transition-colors w-8"
-                            data-entity-id={contact.id}
-                            data-deletable
-                          >
-                            <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                            </svg>
+                          <td className="py-2 pl-4 w-10" onClick={(e) => e.stopPropagation()}>
+                            <div
+                              className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
+                              data-entity-id={contact.id}
+                              data-deletable
+                            >
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                              </svg>
+                            </div>
                           </td>
                         )}
                       </tr>
@@ -1078,23 +1145,23 @@ export default function PartnerProfile({
                       return (
                     <div
                       key={contact.id}
-                      className="border-b border-gray-200 pb-3 flex justify-between items-start"
+                      className={`border-b border-gray-200 pb-3 flex justify-between items-start ${isContactHidden(contact) ? "opacity-50" : ""}`}
                       data-flaggable
                     >
-                      <div className="flex-1">
-                        <div className="font-medium text-[#1A1A1A]" data-flaggable data-field="contacts.name" data-entity-id={contact.id}>
+                      <div className={editMode && canEditThisOrg ? "flex-1 cursor-pointer" : "flex-1"} onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}>
+                        <div className="font-medium text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (contact.name as string)
                           ) : "—"}
                         </div>
-                        <div className="text-sm text-gray-400" data-flaggable data-field="contacts.role_title" data-entity-id={contact.id}>
+                        <div className="text-sm text-gray-400" {...fieldProps("contacts", "role_title", contact.id, organization.id)}>
                           {contact.role_title ? (contact.role_title as string) : "—"}
                         </div>
-                        <div className="text-sm text-gray-400" data-flaggable data-field="contacts.work_email" data-entity-id={contact.id}>
+                        <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
                         <div className="text-xs mt-1 font-medium">
-                          <label className="inline-flex items-center gap-2">
+                          <label className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
                             <span>Attending Conference</span>
                             <input
                               type="checkbox"
@@ -1107,16 +1174,31 @@ export default function PartnerProfile({
                           </label>
                         </div>
                       </div>
-                      {/* Delete button - only visible in edit mode */}
+                      {/* Actions — eye toggle + delete, only in edit mode */}
                       {editMode && canEditThisOrg && (
-                        <div
-                          className="ml-2 p-2 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer transition-colors"
-                          data-entity-id={contact.id}
-                          data-deletable
-                        >
-                          <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                            <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
-                          </svg>
+                        <div className="ml-2 flex flex-col gap-1 items-center">
+                          {/* Visibility toggle */}
+                          <button
+                            onClick={() => void handleToggleContactHidden(contact)}
+                            title={isContactHidden(contact) ? "Hidden from the community — click to show" : "Visible to the community — click to hide"}
+                            className={`p-1.5 rounded border transition-colors ${isContactHidden(contact) ? "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100" : "border-gray-300 text-gray-400 hover:bg-gray-50"}`}
+                          >
+                            {isContactHidden(contact) ? (
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M3.98 8.223A10.477 10.477 0 001.934 12C3.226 16.338 7.244 19.5 12 19.5c.993 0 1.953-.138 2.863-.395M6.228 6.228A10.45 10.45 0 0112 4.5c4.756 0 8.773 3.162 10.065 7.498a10.523 10.523 0 01-4.293 5.774M6.228 6.228L3 3m3.228 3.228l3.65 3.65m7.894 7.894L21 21m-3.228-3.228l-3.65-3.65m0 0a3 3 0 10-4.243-4.243m4.242 4.242L9.88 9.88" /></svg>
+                            ) : (
+                              <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}><path strokeLinecap="round" strokeLinejoin="round" d="M2.036 12.322a1.012 1.012 0 010-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178z" /><path strokeLinecap="round" strokeLinejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" /></svg>
+                            )}
+                          </button>
+                          {/* Delete */}
+                          <div
+                            className="p-1.5 text-red-400 hover:text-red-600 hover:bg-red-50 rounded cursor-pointer transition-colors"
+                            data-entity-id={contact.id}
+                            data-deletable
+                          >
+                            <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0" />
+                            </svg>
+                          </div>
                         </div>
                       )}
                     </div>
@@ -1161,6 +1243,26 @@ export default function PartnerProfile({
           Back to Network
         </Link>
       </div>
+
+      {/* Open RFPs in this partner's categories */}
+      {partnerRFPs.length > 0 && (
+        <div className="bg-white border-t border-gray-200">
+          <div className="max-w-7xl mx-auto px-8 py-12">
+            <PartnerRFPFeed rfps={partnerRFPs} />
+          </div>
+        </div>
+      )}
+
+      {/* Contact edit modal */}
+      {editingContact && (
+        <ContactEditModal
+          contact={editingContact}
+          organizationId={organization.id}
+          isHidden={isContactHidden(editingContact)}
+          onToggleHidden={() => void handleToggleContactHidden(editingContact)}
+          onClose={() => setEditingContact(null)}
+        />
+      )}
 
       {/* Category editor modal */}
       {showCategoryEditor && (

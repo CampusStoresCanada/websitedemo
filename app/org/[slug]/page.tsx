@@ -7,6 +7,8 @@ import PartnerProfile from "@/components/org/PartnerProfile";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
+import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
+import type { RFPWithContext } from "@/lib/types/rfp";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -191,6 +193,25 @@ export default async function OrgProfilePage({ params }: PageProps) {
 
   console.log(`[org/${slug}] viewer=${viewer.viewerLevel} contacts sample: ${JSON.stringify(contacts.slice(0,3).map(c => ({ id: c.id, name: c.name, circle_id: (c as Record<string,unknown>).circle_id })))}`);
 
+  // Fetch RFPs — for member orgs fetch their own; for partner orgs fetch matching
+  let orgRFPs: RFPWithContext[] = [];
+  let partnerRFPs: RFPWithContext[] = [];
+
+  if (organization.type === "Member") {
+    const rfpResult = await listRFPsForOrg(organization.id);
+    orgRFPs = rfpResult.rfps ?? [];
+  } else if (organization.type === "Partner" || organization.type === "Vendor") {
+    const orgExtra2 = organization as Record<string, unknown>;
+    const rawCategoryValue = (orgExtra2.primary_category as string | null) ?? "";
+    const partnerCategories = rawCategoryValue
+      .split(",").map((s: string) => s.trim()).filter(Boolean);
+    const viewerOrgType = (organization.type as "Partner" | "Vendor") ?? null;
+    if (partnerCategories.length) {
+      const rfpResult = await listRFPsForPartner(partnerCategories, viewerOrgType);
+      partnerRFPs = rfpResult.rfps ?? [];
+    }
+  }
+
   // Resolve partner links (filter by viewer, sign storage URLs server-side)
   const orgExtra = organization as Record<string, unknown>;
   const rawPartnerLinks = parsePartnerLinks(orgExtra.partner_links ?? []);
@@ -220,6 +241,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
         sponsorTier={sponsorTier}
+        initialRFPs={orgRFPs}
       />
       </>
     );
@@ -241,6 +263,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       hasGatedLinks={hasGated}
       rawLinks={editorRawLinks}
       canEditLinks={canEditLinks}
+      partnerRFPs={partnerRFPs}
     />
     </>
   );

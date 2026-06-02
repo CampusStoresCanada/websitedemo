@@ -4,6 +4,9 @@ import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { BrandColor, Benchmarking } from "@/lib/database.types";
+import type { ProcurementInfo } from "@/lib/types/procurement";
+import type { RFPWithContext } from "@/lib/types/rfp";
+import RFPsSection from "@/components/rfps/RFPsSection";
 import type { BenchmarkingWithOrg } from "@/lib/data";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
@@ -67,6 +70,7 @@ interface MemberProfileProps {
     email: string | null;
     role: string;
   }>;
+  initialRFPs?: RFPWithContext[];
 }
 
 export default function MemberProfile({
@@ -79,6 +83,7 @@ export default function MemberProfile({
   conferenceAttendance,
   orgAssignableUsers,
   sponsorTier,
+  initialRFPs = [],
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -88,7 +93,8 @@ export default function MemberProfile({
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
   const rawPrimaryColor = brandColors[0]?.hex || "#EE2A2E";
   const primaryColor = rawPrimaryColor.startsWith("#") ? rawPrimaryColor : `#${rawPrimaryColor}`;
-  const heroImage = organization.hero_image_url || organization.banner_url;
+  const heroImage = organization.hero_image_url ?? null;
+  const backgroundImage = organization.banner_url ?? null;
 
   // Check if current user can edit THIS organization
   const canEditThisOrg = canEditOrg(organization.id);
@@ -105,6 +111,10 @@ export default function MemberProfile({
   const [contactHiddenOverrides, setContactHiddenOverrides] = useState<Record<string, boolean>>({});
   // Contact being edited in the edit modal (null = closed)
   const [editingContact, setEditingContact] = useState<VisibleContact | null>(null);
+  // Lifted procurement state — shared between EditableProcurementSection and ContactEditModal
+  const [procurementInfo, setProcurementInfo] = useState<ProcurementInfo | undefined>(
+    (organization as any).procurement_info ?? undefined
+  );
   const isContactHidden = (contact: VisibleContact) =>
     contact.id in contactHiddenOverrides ? contactHiddenOverrides[contact.id] : (contact.hidden ?? false);
 
@@ -172,7 +182,7 @@ export default function MemberProfile({
     return (
       <button
         onClick={() => toggleVisibility(flag)}
-        title={value ? `Visible to visitors — click to hide` : `Hidden from visitors — click to show`}
+        title={value ? `Visible to the community — click to hide` : `Hidden from the community — click to show`}
         className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${value ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
       >
         {value ? (
@@ -524,12 +534,48 @@ export default function MemberProfile({
 
   return (
     <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]" data-org-id={organization.id}>
-      {/* Desktop Layout - absolute positioning for precise mockup matching */}
-      <div className="hidden lg:block relative min-h-screen">
-        {/* Colorized Hero Strip — left: 14.71%, width: 23.79%, full height */}
+      {/* Desktop Layout — flex row; hero panel sticky until contacts end */}
+      <div className="hidden lg:flex">
+
+        {/* Left visual panel — sticky, viewport height, releases naturally after Zone 1 */}
+        <div className="sticky top-0 h-screen flex-shrink-0 relative overflow-hidden" style={{ width: '51.61vw' }}>
+
+        {/* Background image layer — fills the left panel behind everything */}
+        <div
+          className="absolute inset-0 overflow-hidden group"
+          data-onboarding="profile_background"
+          {...fieldProps("organizations", "banner_url", organization.id, organization.id)}
+        >
+          {backgroundImage ? (
+            <Image
+              src={backgroundImage}
+              alt=""
+              fill
+              className="object-cover object-center"
+              unoptimized
+            />
+          ) : (
+            <div className="w-full h-full bg-[#EEEEF0]" />
+          )}
+          {editMode && canEditThisOrg && (
+            <div className="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">
+              <div className="bg-white/90 rounded-full p-3 shadow-lg">
+                <svg className="w-6 h-6 text-emerald-600" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6.827 6.175A2.31 2.31 0 015.186 7.23c-.38.054-.757.112-1.134.175C2.999 7.58 2.25 8.507 2.25 9.574V18a2.25 2.25 0 002.25 2.25h15A2.25 2.25 0 0021.75 18V9.574c0-1.067-.75-1.994-1.802-2.169a47.865 47.865 0 00-1.134-.175 2.31 2.31 0 01-1.64-1.055l-.822-1.316a2.192 2.192 0 00-1.736-1.039 48.774 48.774 0 00-5.232 0 2.192 2.192 0 00-1.736 1.039l-.821 1.316z" />
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
+                </svg>
+              </div>
+              <span className="absolute bottom-4 text-white text-sm font-medium drop-shadow">
+                {backgroundImage ? "Change background" : "Add background image"}
+              </span>
+            </div>
+          )}
+        </div>
+
+        {/* Colorized Hero Strip — vw units, sits over background */}
         <div
           className="absolute top-0 bottom-0 overflow-hidden group"
-          style={{ left: '14.71%', width: '23.79%' }}
+          style={{ left: '14.71vw', width: '23.79vw' }}
           data-onboarding="profile_hero"
           {...fieldProps("organizations", "hero_image_url", organization.id, organization.id)}
         >
@@ -544,7 +590,6 @@ export default function MemberProfile({
           ) : (
             <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
           )}
-          {/* Edit mode overlay - shows upload hint */}
           {editMode && canEditThisOrg && (
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/40 transition-colors flex items-center justify-center opacity-0 group-hover:opacity-100 cursor-pointer">
               <div className="bg-white/90 rounded-full p-4 shadow-lg">
@@ -553,16 +598,18 @@ export default function MemberProfile({
                   <path strokeLinecap="round" strokeLinejoin="round" d="M16.5 12.75a4.5 4.5 0 11-9 0 4.5 4.5 0 019 0zM18.75 10.5h.008v.008h-.008V10.5z" />
                 </svg>
               </div>
-              <span className="absolute bottom-4 text-white text-sm font-medium">Click to change hero image</span>
+              <span className="absolute bottom-4 text-white text-sm font-medium">
+                {heroImage ? "Change hero strip" : "Add hero strip image"}
+              </span>
             </div>
           )}
         </div>
 
-        {/* Product Overlay — left edge at 13.32%, anchored to bottom */}
+        {/* Product Overlay — anchored to bottom of sticky panel */}
         {(organization.product_overlay_url || (editMode && canEditThisOrg)) && (
           <div
             className="absolute z-20 pointer-events-auto flex items-center justify-center group"
-            style={{ left: '5.64%', bottom: '0', width: '42.09vw', height: '42.09vw' }}
+            style={{ left: '5.64vw', bottom: '0', width: '42.09vw', height: '42.09vw' }}
             {...fieldProps("organizations", "product_overlay_url", organization.id, organization.id)}
           >
             {organization.product_overlay_url ? (
@@ -595,11 +642,12 @@ export default function MemberProfile({
           </div>
         )}
 
-        {/* Content Area — left edge at 51.61%, right padding 8.78% */}
+        </div>{/* end sticky left panel */}
+
+        {/* Right content panel — Zone 1: logo through contacts */}
         <div
-          className="relative z-10"
+          className="flex-1 relative z-10"
           style={{
-            marginLeft: '51.61%',
             paddingRight: '8.78%',
             paddingTop: '108px',
             paddingBottom: '64px',
@@ -657,7 +705,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg && (
                     <button
                       onClick={() => toggleVisibility("brandColors")}
-                      title={showBrandColors ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      title={showBrandColors ? "Visible to the community — click to hide" : "Hidden from the community — click to show"}
                       className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showBrandColors ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
                     >
                       {showBrandColors ? (
@@ -897,7 +945,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg && (
                     <button
                       onClick={() => toggleVisibility("contacts")}
-                      title={showContacts ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      title={showContacts ? "Visible to the community — click to hide" : "Hidden from the community — click to show"}
                       className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showContacts ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
                     >
                       {showContacts ? (
@@ -1099,37 +1147,32 @@ export default function MemberProfile({
           organization={organization}
           contacts={contacts}
           autoEdit
+          externalData={procurementInfo}
+          onExternalSave={setProcurementInfo}
         />
       )}
 
-      {/* Mobile Layout */}
-      <div className="lg:hidden">
-        <div className="h-64 relative overflow-hidden">
-          {heroImage ? (
-            <ColorizedImage
-              src={heroImage}
-              color={primaryColor}
-              alt={`${organization.name} campus`}
-              className="w-full h-full"
-              intensity={0.6}
-            />
-          ) : (
-            <div className="w-full h-full" style={{ backgroundColor: primaryColor }} />
-          )}
-          {organization.product_overlay_url && (
-            <div className="absolute bottom-0 left-4 translate-y-1/3">
-              <Image
-                src={organization.product_overlay_url}
-                alt="Featured product"
-                width={160}
-                height={200}
-                className="object-contain"
-                style={{ filter: "drop-shadow(0 15px 30px rgba(0,0,0,0.4))" }}
-                unoptimized
-              />
+      {/* RFPs — visible to all viewers with appropriate access; org admins can manage */}
+      {!isPartner && (
+        <div className="bg-white border-t border-gray-200">
+          <div className="max-w-7xl mx-auto px-8 py-12">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-xl font-semibold text-[#1A1A1A]">Open RFPs</h2>
             </div>
-          )}
+            <RFPsSection
+              organizationId={organization.id}
+              contacts={contacts}
+              initialRFPs={initialRFPs}
+              canEdit={canEditThisOrg}
+            />
+          </div>
         </div>
+      )}
+
+      {/* Mobile Layout — no hero strip, clean content focus */}
+      <div className="lg:hidden">
+        {/* Slim colour accent bar in place of the hero */}
+        <div className="h-1.5 w-full" style={{ backgroundColor: primaryColor }} />
 
         <div className="p-8">
           <div className="mb-6">
@@ -1173,7 +1216,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg && (
                     <button
                       onClick={() => toggleVisibility("brandColors")}
-                      title={showBrandColors ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      title={showBrandColors ? "Visible to the community — click to hide" : "Hidden from the community — click to show"}
                       className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showBrandColors ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
                     >
                       {showBrandColors ? (
@@ -1394,7 +1437,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg && (
                     <button
                       onClick={() => toggleVisibility("contacts")}
-                      title={showContacts ? "Visible to visitors — click to hide" : "Hidden from visitors — click to show"}
+                      title={showContacts ? "Visible to the community — click to hide" : "Hidden from the community — click to show"}
                       className={`flex items-center gap-1 text-xs px-2 py-0.5 rounded-full border transition-colors ${showContacts ? "border-emerald-300 text-emerald-600 hover:bg-emerald-50" : "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100"}`}
                     >
                       {showContacts ? (
@@ -1454,7 +1497,7 @@ export default function MemberProfile({
                           {/* Visibility toggle */}
                           <button
                             onClick={() => void handleToggleContactHidden(contact)}
-                            title={isContactHidden(contact) ? "Hidden from visitors — click to show" : "Visible to visitors — click to hide"}
+                            title={isContactHidden(contact) ? "Hidden from the community — click to show" : "Visible to the community — click to hide"}
                             className={`p-1.5 rounded border transition-colors ${isContactHidden(contact) ? "border-amber-300 text-amber-600 bg-amber-50 hover:bg-amber-100" : "border-gray-300 text-gray-400 hover:bg-gray-50"}`}
                           >
                             {isContactHidden(contact) ? (
@@ -1513,6 +1556,8 @@ export default function MemberProfile({
           isHidden={isContactHidden(editingContact)}
           onToggleHidden={() => void handleToggleContactHidden(editingContact)}
           onClose={() => setEditingContact(null)}
+          procurementInfo={procurementInfo}
+          onProcurementSave={setProcurementInfo}
         />
       )}
 

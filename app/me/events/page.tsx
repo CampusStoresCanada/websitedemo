@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CancelRsvpButton from "@/components/events/CancelRsvpButton";
+import ShowMoreList from "@/components/ui/ShowMoreList";
 
 export const metadata = {
   title: "My Events | Campus Stores Canada",
@@ -119,85 +120,82 @@ export default async function MyEventsPage() {
         </Link>
       </div>
 
-      {/* ── Hosting ───────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">Hosting</h2>
+      {/* ── Upcoming ──────────────────────────────────────────────── */}
+      {(upcomingHosted.length > 0 || upcomingRsvps.length > 0) && (
+        <section className="space-y-6">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Upcoming</h2>
 
-        {(hostedEvents ?? []).length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center">
-            <p className="text-sm text-gray-500">You haven't created any events yet.</p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {upcomingHosted.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-400 mb-2">Upcoming</p>
-                <div className="space-y-3">
-                  {upcomingHosted.map((ev: any) => (
-                    <HostedEventRow
-                      key={ev.id}
-                      ev={ev}
-                      registrantCount={registrantCountMap.get(ev.id) ?? 0}
-                    />
-                  ))}
-                </div>
+          {upcomingHosted.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 mb-2">Hosting</p>
+              <div className="space-y-3">
+                {upcomingHosted.map((ev: any) => (
+                  <HostedEventRow
+                    key={ev.id}
+                    ev={ev}
+                    registrantCount={registrantCountMap.get(ev.id) ?? 0}
+                  />
+                ))}
               </div>
-            )}
-            {pastHosted.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-400 mb-2">Past</p>
-                <div className="space-y-3 opacity-60">
-                  {pastHosted.map((ev: any) => (
-                    <HostedEventRow
-                      key={ev.id}
-                      ev={ev}
-                      registrantCount={registrantCountMap.get(ev.id) ?? 0}
-                      isPast
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+            </div>
+          )}
 
-      {/* ── RSVP'd ────────────────────────────────────────────────── */}
-      <section>
-        <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-4">RSVP'd</h2>
+          {upcomingRsvps.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 mb-2">RSVP'd</p>
+              <div className="space-y-3">
+                {upcomingRsvps.map((reg: any) => (
+                  <RsvpRow key={reg.id} reg={reg} />
+                ))}
+              </div>
+            </div>
+          )}
+        </section>
+      )}
 
-        {(myRegistrations ?? []).length === 0 ? (
-          <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center">
-            <p className="text-sm text-gray-500">
-              No event registrations yet.{" "}
-              <Link href="/events" className="text-[#EE2A2E] hover:underline">Browse events →</Link>
-            </p>
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {upcomingRsvps.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-400 mb-2">Upcoming</p>
-                <div className="space-y-3">
-                  {upcomingRsvps.map((reg: any) => (
-                    <RsvpRow key={reg.id} reg={reg} />
-                  ))}
-                </div>
-              </div>
-            )}
-            {pastRsvps.length > 0 && (
-              <div>
-                <p className="text-xs font-medium text-gray-400 mb-2">Past</p>
-                <div className="space-y-3 opacity-60">
-                  {pastRsvps.map((reg: any) => (
-                    <RsvpRow key={reg.id} reg={reg} isPast />
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        )}
-      </section>
+      {/* ── Past ──────────────────────────────────────────────────── */}
+      {(pastHosted.length > 0 || pastRsvps.length > 0) && (
+        <section className="space-y-6 opacity-60">
+          <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-wider">Past</h2>
+
+          {pastHosted.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 mb-2">Hosting</p>
+              <ShowMoreList>
+                {pastHosted.map((ev: any) => (
+                  <HostedEventRow
+                    key={ev.id}
+                    ev={ev}
+                    registrantCount={registrantCountMap.get(ev.id) ?? 0}
+                    isPast
+                  />
+                ))}
+              </ShowMoreList>
+            </div>
+          )}
+
+          {pastRsvps.length > 0 && (
+            <div>
+              <p className="text-xs font-medium text-gray-400 mb-2">RSVP'd</p>
+              <ShowMoreList>
+                {pastRsvps.map((reg: any) => (
+                  <RsvpRow key={reg.id} reg={reg} isPast />
+                ))}
+              </ShowMoreList>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Empty state — nothing at all */}
+      {(hostedEvents ?? []).length === 0 && (myRegistrations ?? []).length === 0 && (
+        <div className="rounded-xl border border-dashed border-gray-200 p-8 text-center">
+          <p className="text-sm text-gray-500">
+            No events yet.{" "}
+            <Link href="/events" className="text-[#EE2A2E] hover:underline">Browse events →</Link>
+          </p>
+        </div>
+      )}
     </main>
   );
 }

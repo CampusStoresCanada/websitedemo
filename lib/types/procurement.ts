@@ -22,8 +22,11 @@ export const VENDOR_CATEGORIES = [
   "Food & Beverages",
   "Gifts & Promotional Products",
   "Graduation & Regalia",
+  "Professional Services",
   "School Office & Lab Supplies",
+  "Store Fixtures & Equipment",
   "Store Operations",
+  "Store Services",
   "Technology & Electronics",
 ] as const;
 
@@ -32,35 +35,26 @@ export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
 /**
  * A single category → buyers mapping.
  * One category can have multiple buyers; a buyer can appear in multiple categories.
+ * Subcategories are per-buyer — each contact selects the subcategories they're
+ * personally responsible for within the category.
  */
 export interface CategoryBuyer {
   /** Vendor category name — from VENDOR_CATEGORIES */
   category: string;
-  /** Selected subcategories within this category */
-  subcategories?: string[];
   /** UUIDs of contacts responsible for purchasing in this category */
   contact_ids: string[];
+  /** Per-contact subcategory selections: contact_id → subcategories they own */
+  contact_subcategories?: Record<string, string[]>;
 }
 
 /**
  * Subcategory taxonomy — keyed by VENDOR_CATEGORIES value.
  * Not every category has subcategories.
  */
-export const CATEGORY_SUBCATEGORIES: Partial<Record<string, readonly string[]>> = {
-  "Accessories": ["Bags & Backpacks", "Drinkware", "Stationery", "Desk Accessories", "Lanyards & Badges"],
-  "Apparel": ["Men's / Unisex", "Women's", "Youth", "Infant & Toddler", "Activewear", "Headwear"],
-  "Books": ["Textbooks", "Trade Books", "Course Materials", "Used Books", "eBooks"],
-  "Campus Living": ["Bedding", "Kitchen", "Bath", "Storage & Organization", "Decor"],
-  "Food & Beverages": ["Ready-to-Eat", "Snacks", "Beverages", "Health Foods", "Branded / Licensed"],
-  "Gifts & Promotional Products": ["Gifts", "Spirit Items", "Souvenirs", "Novelties", "Custom / Branded"],
-  "Graduation & Regalia": ["Caps & Gowns", "Diploma Frames", "Announcements", "Class Rings", "Rental Programs"],
-  "School Office & Lab Supplies": ["Office Supplies", "Lab Supplies", "Art Supplies", "Planners & Agendas"],
-  "Technology & Electronics": ["Computers & Tablets", "Peripherals & Accessories", "Calculators", "Software", "Audio & Video"],
-};
-
 /**
  * Store operations / ancillary services a campus store may offer.
  * Sourced from benchmarking survey values.
+ * Also used as subcategories for the "Store Services" vendor category.
  */
 export const STORE_SERVICES = [
   "Campus Card Services",
@@ -78,6 +72,23 @@ export const STORE_SERVICES = [
 
 export type StoreService = (typeof STORE_SERVICES)[number];
 
+export const CATEGORY_SUBCATEGORIES: Partial<Record<string, readonly string[]>> = {
+  "Accessories": ["Bags & Backpacks", "Drinkware", "Stationery", "Desk Accessories", "Lanyards & Badges"],
+  "Apparel": ["Men's / Unisex", "Women's", "Youth", "Infant & Toddler", "Activewear", "Headwear"],
+  "Books": ["Textbooks", "Trade Books", "Course Materials", "Used Books", "eBooks"],
+  "Campus Living": ["Bedding", "Kitchen", "Bath", "Storage & Organization", "Decor"],
+  "Food & Beverages": ["Ready-to-Eat", "Snacks", "Beverages", "Health Foods", "Branded / Licensed"],
+  "Gifts & Promotional Products": ["Gifts", "Spirit Items", "Souvenirs", "Novelties", "Custom / Branded"],
+  "Graduation & Regalia": ["Caps & Gowns", "Diploma Frames", "Announcements", "Class Rings", "Rental Programs"],
+  "Professional Services": ["Consulting & Advisory", "Staff Training & Development", "Marketing & Branding", "Audit & Compliance", "Recruitment & HR"],
+  "School Office & Lab Supplies": ["Office Supplies", "Lab Supplies", "Art Supplies", "Planners & Agendas"],
+  "Store Fixtures & Equipment": ["Shelving & Displays", "Checkout Counters", "Signage & Wayfinding", "Lighting", "Security & Loss Prevention", "Storage & Back Office"],
+  "Store Operations": ["Point of Sale Systems", "Inventory Management", "E-commerce Platforms", "Textbook Management", "Analytics & Reporting", "Payment Processing"],
+  "Store Services": [...STORE_SERVICES],
+  "Technology & Electronics": ["Computers & Tablets", "Peripherals & Accessories", "Calculators", "Software", "Audio & Video"],
+};
+
+
 /**
  * A single structured key date entry.
  */
@@ -93,10 +104,6 @@ export interface KeyDate {
 export interface BuyingCycle {
   /** Month when fiscal year starts (e.g., "April") */
   fiscal_year_start?: string;
-  /** First month of the RFP submission window (e.g., "January") */
-  rfp_start?: string;
-  /** Last month of the RFP submission window (e.g., "March") */
-  rfp_end?: string;
   /** Structured list of key dates */
   key_dates?: KeyDate[];
 }

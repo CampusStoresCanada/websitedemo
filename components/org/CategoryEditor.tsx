@@ -2,31 +2,17 @@
 
 import { useState, useTransition } from "react";
 import { updateField } from "@/lib/actions/update-field";
+import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 
-// ---------------------------------------------------------------------------
-// NACS taxonomy — mirrors embed-partner/index.ts
-// ---------------------------------------------------------------------------
+// CategoryEditor uses the same taxonomy as the member procurement section
+// so that partner primary_category values map 1:1 to member procurement categories.
+const TAXONOMY: Record<string, readonly string[]> = Object.fromEntries(
+  VENDOR_CATEGORIES.map((cat) => [cat, CATEGORY_SUBCATEGORIES[cat] ?? []])
+);
 
-const NACS_TAXONOMY: Record<string, string[]> = {
-  "Apparel":                   ["Men's/Unisex", "Women's", "Youth", "Infant/Toddler", "Accessories"],
-  "Accessories & Furnishings": ["Headwear", "Bags", "Jewelry", "Watches", "Scarves & Wraps", "Belts", "Furnishings"],
-  "Spirit & Gifts":            ["Novelties", "Pennants & Banners", "Frames & Albums", "Drinkware", "Ceramics", "Plush"],
-  "Sporting Goods":            ["Fan Wear", "Equipment", "Footwear"],
-  "Gifts & Stationery":        ["Stationery", "Greeting Cards", "Gift Wrap", "Paper Products", "Fashion Gifts"],
-  "School & Office Supplies":  ["Writing Instruments", "Desk Accessories", "Planners & Calendars", "Binders", "Notebooks & Pads", "Course Specialty Supplies"],
-  "Campus Living":             ["Dorm Essentials", "Kitchen", "Storage", "Bedding", "Bath"],
-  "Technology & Electronics":  ["Software", "Supplies & Accessories", "Peripherals", "Hardware & Devices"],
-  "Graduation & Regalia":      ["Caps & Gowns", "Announcements", "Rings", "Frames", "Diplomas"],
-  "Food & Beverage":           ["Packaged Food", "Beverages", "Snacks", "Candy", "Specialty Food"],
-  "Health & Beauty":           ["Health", "Beauty", "Personal Care"],
-  "Campus Services":           ["Printing", "Financial Services", "Insurance", "Shipping", "Photography"],
-  "Course Materials":          ["Physical Textbooks", "Digital Course Materials", "Course Packs", "Course-Related Devices"],
-  "Tradebooks":                ["General Books", "Reference", "Trade Paperback"],
-};
-
-function parentDept(label: string): string | null {
-  for (const [dept, classes] of Object.entries(NACS_TAXONOMY)) {
-    if (classes.includes(label)) return dept;
+function parentCategory(label: string): string | null {
+  for (const [cat, subs] of Object.entries(TAXONOMY)) {
+    if ((subs as readonly string[]).includes(label)) return cat;
   }
   return null;
 }
@@ -290,7 +276,7 @@ export default function CategoryEditor({
                 </p>
                 <div className="flex flex-wrap gap-2">
                   {likelySuggestions.map((label) => {
-                    const dept = parentDept(label);
+                    const dept = parentCategory(label);
                     return (
                       <button
                         key={label}
@@ -312,10 +298,10 @@ export default function CategoryEditor({
             {/* Full NACS taxonomy */}
             <div>
               <p className="text-xs uppercase tracking-wider text-gray-400 font-semibold mb-4">
-                NACS Taxonomy
+                Categories
               </p>
               <div className="space-y-5">
-                {Object.entries(NACS_TAXONOMY).map(([dept, classes]) => {
+                {Object.entries(TAXONOMY).map(([dept, classes]) => {
                   const deptSelected = isSelected(dept);
                   return (
                     <div key={dept}>
