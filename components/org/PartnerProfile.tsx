@@ -916,6 +916,38 @@ export default function PartnerProfile({
             />
           </div>
 
+          {/* Your Market — inline top 10, org members only */}
+          {partnerMarket && partnerMarket.topMatches.length > 0 && (
+            <div className="mb-12">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Your Market</h3>
+                <span className="text-xs text-gray-400">{partnerMarket.totalMatches} stores</span>
+              </div>
+              <div className="space-y-1.5">
+                {partnerMarket.topMatches.map((match) => {
+                  const contact = match.buyer ?? match.primaryContact;
+                  return (
+                    <div key={match.orgId} className="flex items-start gap-2.5 rounded-lg border border-gray-100 px-3 py-2.5 hover:border-gray-200 hover:bg-gray-50/50 transition-all">
+                      <span className={`mt-1.5 w-1.5 h-1.5 rounded-full flex-shrink-0 ${match.confidence === "high" ? "bg-green-500" : match.confidence === "medium" ? "bg-amber-400" : "bg-gray-300"}`} />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline gap-1.5 flex-wrap">
+                          <a href={`/org/${match.orgSlug}`} className="text-xs font-semibold text-[#1A1A1A] hover:text-[#EE2A2E] transition-colors">{match.orgName}</a>
+                          {match.province && <span className="text-[10px] text-gray-400">{match.province}</span>}
+                        </div>
+                        {contact && (
+                          <p className="text-[10px] text-gray-500 mt-0.5 truncate">
+                            {contact.name ?? ""}
+                            {contact.email && <span className="text-gray-400"> · {contact.email}</span>}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
           {/* Staffing/Contacts Table — Members and above can see — partners and public are gated */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
