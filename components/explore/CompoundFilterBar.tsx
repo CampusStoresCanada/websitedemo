@@ -2,6 +2,7 @@
 
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
 import { SCALE_RANGES } from "@/lib/explore/types";
+import { CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 
 interface CompoundFilterBarProps {
   compoundFilters: CompoundFilters;
@@ -15,6 +16,11 @@ interface CompoundFilterBarProps {
   partnerCategoryCounts?: Record<string, number>;
   certificationCounts?: Record<string, number>;
   canViewCancoll?: boolean;
+  checkedCategories?: Set<string>;
+  setCheckedCategories?: React.Dispatch<React.SetStateAction<Set<string>>>;
+  checkedSubcategories?: Set<string>;
+  setCheckedSubcategories?: React.Dispatch<React.SetStateAction<Set<string>>>;
+  partnerSubcategoryCounts?: Record<string, Record<string, number>>;
   lens: ExploreLens;
   setLens: React.Dispatch<React.SetStateAction<ExploreLens>>;
   defaultLens?: ExploreLens;
@@ -43,6 +49,11 @@ export function CompoundFilterBar({
   partnerCategoryCounts,
   certificationCounts,
   canViewCancoll = false,
+  checkedCategories,
+  setCheckedCategories,
+  checkedSubcategories,
+  setCheckedSubcategories,
+  partnerSubcategoryCounts,
   lens,
   setLens,
   defaultLens,
@@ -187,19 +198,86 @@ export function CompoundFilterBar({
           {isPartnerFocus ? (
             /* Partner focus: Category first, then Province */
             <>
-              {partnerCategoryCounts && Object.keys(partnerCategoryCounts).length > 0 && (
+              {partnerCategoryCounts && Object.keys(partnerCategoryCounts).length > 0 && checkedCategories && setCheckedCategories && (
                 <div className="p-2.5 border-b border-gray-100">
-                  <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Category</label>
-                  <select
-                    className={selectCls}
-                    value={compoundFilters.category ?? ""}
-                    onChange={(e) => setCompoundFilters((f) => ({ ...f, category: e.target.value || undefined }))}
-                  >
-                    <option value="">All categories</option>
-                    {Object.entries(partnerCategoryCounts).sort(([a], [b]) => a.localeCompare(b)).map(([cat, count]) => (
-                      <option key={cat} value={cat}>{cat} ({count})</option>
-                    ))}
-                  </select>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">Category</label>
+                    {checkedCategories.size > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => { setCheckedCategories(new Set()); setCheckedSubcategories?.(new Set()); }}
+                        className="text-[10px] text-[#EE2A2E] hover:text-[#D92327]"
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                  <div className="space-y-0.5 max-h-52 overflow-y-auto">
+                    {Object.entries(partnerCategoryCounts)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([cat, count]) => {
+                        const isChecked = checkedCategories.has(cat);
+                        const subsForCat = partnerSubcategoryCounts?.[cat] ?? {};
+                        const hasSubs = Object.keys(subsForCat).length > 0;
+                        return (
+                          <div key={cat}>
+                            <label className="flex items-center gap-2 py-1 cursor-pointer group">
+                              <input
+                                type="checkbox"
+                                checked={isChecked}
+                                onChange={() => {
+                                  setCheckedCategories((prev) => {
+                                    const next = new Set(prev);
+                                    if (next.has(cat)) {
+                                      next.delete(cat);
+                                      const catSubs = CATEGORY_SUBCATEGORIES[cat] ?? [];
+                                      setCheckedSubcategories?.((prevSubs) => {
+                                        const ns = new Set(prevSubs);
+                                        for (const s of catSubs) ns.delete(s);
+                                        return ns;
+                                      });
+                                    } else {
+                                      next.add(cat);
+                                    }
+                                    return next;
+                                  });
+                                }}
+                                className="h-3.5 w-3.5 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer flex-shrink-0"
+                              />
+                              <span className={`flex-1 text-xs transition-colors ${isChecked ? "text-[#1A1A1A] font-medium" : "text-gray-600"}`}>{cat}</span>
+                              <span className="text-[10px] text-gray-400 tabular-nums">{count}</span>
+                            </label>
+                            {isChecked && hasSubs && setCheckedSubcategories && checkedSubcategories && (
+                              <div className="ml-5 space-y-0.5 mb-1">
+                                {Object.entries(subsForCat)
+                                  .sort(([, a], [, b]) => b - a)
+                                  .map(([sub, subCount]) => {
+                                    const subChecked = checkedSubcategories.has(sub);
+                                    return (
+                                      <label key={sub} className="flex items-center gap-2 py-0.5 cursor-pointer">
+                                        <input
+                                          type="checkbox"
+                                          checked={subChecked}
+                                          onChange={() => {
+                                            setCheckedSubcategories((prev) => {
+                                              const next = new Set(prev);
+                                              next.has(sub) ? next.delete(sub) : next.add(sub);
+                                              return next;
+                                            });
+                                          }}
+                                          className="h-3 w-3 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer flex-shrink-0"
+                                        />
+                                        <span className={`flex-1 text-[11px] ${subChecked ? "text-[#1A1A1A] font-medium" : "text-gray-500"}`}>{sub}</span>
+                                        <span className="text-[10px] text-gray-400">{subCount}</span>
+                                      </label>
+                                    );
+                                  })}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
                 </div>
               )}
               <div className="p-2.5 border-b border-gray-100">
@@ -219,19 +297,23 @@ export function CompoundFilterBar({
               {certificationCounts && Object.keys(certificationCounts).length > 0 && (
                 <div className="p-2.5 border-b border-gray-100">
                   <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider block mb-1.5">Certification</label>
-                  <select
-                    className={selectCls}
-                    value={compoundFilters.certification ?? ""}
-                    onChange={(e) => setCompoundFilters((f) => ({ ...f, certification: e.target.value || undefined }))}
-                  >
-                    <option value="">All certifications</option>
+                  <div className="space-y-0.5">
                     {Object.entries(certificationCounts)
                       .filter(([cert]) => cert !== "CANCOLL" || canViewCancoll)
                       .sort(([a], [b]) => a.localeCompare(b))
                       .map(([cert, count]) => (
-                        <option key={cert} value={cert}>{cert} ({count})</option>
+                        <label key={cert} className="flex items-center gap-2 py-1 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={compoundFilters.certification === cert}
+                            onChange={(e) => setCompoundFilters((f) => ({ ...f, certification: e.target.checked ? cert : undefined }))}
+                            className="h-3.5 w-3.5 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer flex-shrink-0"
+                          />
+                          <span className="flex-1 text-xs text-gray-600">{cert}</span>
+                          <span className="text-[10px] text-gray-400 tabular-nums">{count}</span>
+                        </label>
                       ))}
-                  </select>
+                  </div>
                 </div>
               )}
             </>

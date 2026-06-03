@@ -1334,6 +1334,11 @@ export default function MapHero({
               partnerCategoryCounts={partnerCategoryCounts}
               certificationCounts={certificationCounts}
               canViewCancoll={canViewCancoll}
+              checkedCategories={checkedCategories}
+              setCheckedCategories={setCheckedCategories}
+              checkedSubcategories={checkedSubcategories}
+              setCheckedSubcategories={setCheckedSubcategories}
+              partnerSubcategoryCounts={partnerSubcategoryCounts}
               lens={lens}
               setLens={setLens}
               defaultLens={initialState?.lens ?? null}
