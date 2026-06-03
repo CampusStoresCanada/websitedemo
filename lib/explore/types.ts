@@ -43,6 +43,8 @@ export interface CompoundFilters {
   certification?: string;
   /** "true" when filtering to CANCOLL members only */
   cancoll?: string;
+  /** "true" when filtering to partners who have a catalogue */
+  hasCatalogue?: string;
 }
 
 /** Human-readable labels for each lens */

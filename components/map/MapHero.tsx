@@ -10,6 +10,7 @@ import type { HomeMapOrg, MapStory } from "@/lib/homepage";
 import type { MapRef } from "./Map";
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
 import { SCALE_RANGES } from "@/lib/explore/types";
+import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { orgSubtitle, hasActiveCompounds } from "@/lib/explore/filters";
 import { CompoundFilterBar } from "@/components/explore/CompoundFilterBar";
 import { OrgDetailPanel } from "@/components/explore/OrgDetailPanel";
@@ -43,6 +44,40 @@ const DirectoryTable = dynamic(
 // ---------------------------------------------------------------------------
 // Constants
 // ---------------------------------------------------------------------------
+
+// ── Partner category helpers ──────────────────────────────────────────────────
+const PARENT_CATEGORY_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
+const SUB_TO_PARENT_MAP = new Map<string, string>();
+for (const [parent, subs] of Object.entries(CATEGORY_SUBCATEGORIES)) {
+  for (const sub of subs ?? []) SUB_TO_PARENT_MAP.set(sub, parent);
+}
+
+/** Split a comma-separated primary_category string and identify parent categories */
+function parsePartnerCategories(raw: string | null): { parents: string[]; subcategories: string[] } {
+  if (!raw) return { parents: [], subcategories: [] };
+  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
+  const parents: string[] = [];
+  const subcategories: string[] = [];
+  for (const item of items) {
+    if (PARENT_CATEGORY_SET.has(item)) parents.push(item);
+    else subcategories.push(item);
+  }
+  return { parents, subcategories };
+}
+
+/** Check if an org's primary_category contains a given parent category */
+function orgHasParentCategory(org: HomeMapOrg, cat: string): boolean {
+  if (!org.primaryCategory) return false;
+  const { parents } = parsePartnerCategories(org.primaryCategory);
+  return parents.includes(cat);
+}
+
+/** Check if an org's primary_category contains a given subcategory */
+function orgHasSubcategory(org: HomeMapOrg, sub: string): boolean {
+  if (!org.primaryCategory) return false;
+  return org.primaryCategory.split(",").map((s) => s.trim()).includes(sub);
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 const STORY_CYCLE_MS = 9000;
 const HOVER_DWELL_MS = 2000;
@@ -137,6 +172,7 @@ export default function MapHero({
   const [lens, setLens] = useState<ExploreLens>(initialState?.lens ?? null);
   const [scaleFilter, setScaleFilter] = useState<ScaleRange | null>(null);
   const [partnerCategoryFilter, setPartnerCategoryFilter] = useState<string | null>(null);
+  const [partnerSubcategoryFilter, setPartnerSubcategoryFilter] = useState<string | null>(null);
   const [posFilter, setPosFilter] = useState<string | null>(null);
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [mandateFilter, setMandateFilter] = useState<string | null>(null);
@@ -274,9 +310,13 @@ export default function MapHero({
       case "members": return [...members];
       case "partners": return [...partners];
       case "partner_category":
-        return partnerCategoryFilter
-          ? partners.filter((o) => o.primaryCategory === partnerCategoryFilter)
-          : partners.filter((o) => !!o.primaryCategory);
+        if (partnerSubcategoryFilter) {
+          return partners.filter((o) => orgHasSubcategory(o, partnerSubcategoryFilter));
+        }
+        if (partnerCategoryFilter) {
+          return partners.filter((o) => orgHasParentCategory(o, partnerCategoryFilter));
+        }
+        return partners.filter((o) => !!o.primaryCategory);
       case "scale":
         if (scaleFilter) {
           const range = SCALE_RANGES.find((r) => r.key === scaleFilter)!;
@@ -314,7 +354,8 @@ export default function MapHero({
     }
     if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
-    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => o.primaryCategory === compoundFilters.category);
+    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
+    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
@@ -390,14 +431,37 @@ export default function MapHero({
     [lensMembers]
   );
 
+  // Count by parent category (split the comma-separated field)
   const partnerCategoryCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const org of lensPartners) {
       if (!org.primaryCategory) continue;
-      counts[org.primaryCategory] = (counts[org.primaryCategory] || 0) + 1;
+      const { parents } = parsePartnerCategories(org.primaryCategory);
+      // If no recognised parents, fall back to counting the first item as-is
+      const toCount = parents.length > 0 ? parents : [org.primaryCategory.split(",")[0].trim()];
+      for (const p of toCount) {
+        counts[p] = (counts[p] || 0) + 1;
+      }
     }
     return counts;
   }, [lensPartners]);
+
+  // Subcategory counts for the currently selected parent category
+  const partnerSubcategoryCounts = useMemo(() => {
+    if (!partnerCategoryFilter) return {};
+    const counts: Record<string, number> = {};
+    const subs = CATEGORY_SUBCATEGORIES[partnerCategoryFilter] ?? [];
+    for (const org of lensPartners) {
+      if (!orgHasParentCategory(org, partnerCategoryFilter)) continue;
+      const { subcategories } = parsePartnerCategories(org.primaryCategory);
+      for (const sub of subcategories) {
+        if (subs.includes(sub as never)) {
+          counts[sub] = (counts[sub] || 0) + 1;
+        }
+      }
+    }
+    return counts;
+  }, [lensPartners, partnerCategoryFilter]);
 
   const certificationCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -555,7 +619,8 @@ export default function MapHero({
     }
     if (compoundFilters.payment) pool = pool.filter((o) => o.paymentOptions?.includes(compoundFilters.payment!));
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
-    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => o.primaryCategory === compoundFilters.category);
+    if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
+    if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
@@ -746,6 +811,7 @@ export default function MapHero({
     setSearchQuery("");
     setScaleFilter(null);
     setPartnerCategoryFilter(null);
+    setPartnerSubcategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -823,6 +889,7 @@ export default function MapHero({
     setLens(null);
     setScaleFilter(null);
     setPartnerCategoryFilter(null);
+    setPartnerSubcategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -837,6 +904,8 @@ export default function MapHero({
     } else if (scaleFilter) {
       setScaleFilter(null);
       setCompoundFilters({});
+    } else if (partnerSubcategoryFilter) {
+      setPartnerSubcategoryFilter(null);
     } else if (partnerCategoryFilter) {
       setPartnerCategoryFilter(null);
       setCompoundFilters({});
@@ -868,6 +937,7 @@ export default function MapHero({
     setSearchQuery("");
     setScaleFilter(null);
     setPartnerCategoryFilter(null);
+    setPartnerSubcategoryFilter(null);
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -1381,7 +1451,48 @@ export default function MapHero({
                   ))}
               </div>
             </div>
-          ) : lens === "partner_category" && partnerCategoryFilter ? (
+          ) : lens === "partner_category" && partnerCategoryFilter && !partnerSubcategoryFilter ? (
+            <div>
+              {/* Subcategory drill-down — only shown if subcategories exist for this parent */}
+              {Object.keys(partnerSubcategoryCounts).length > 0 && (
+                <div className="px-4 pt-4 pb-2">
+                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Refine by subcategory</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(partnerSubcategoryCounts)
+                      .sort(([, a], [, b]) => b - a)
+                      .map(([sub, count]) => (
+                        <button
+                          key={sub}
+                          type="button"
+                          onClick={() => setPartnerSubcategoryFilter(sub)}
+                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200 bg-white hover:border-[#EE2A2E] hover:text-[#EE2A2E] transition-colors"
+                        >
+                          {sub}
+                          <span className="text-gray-400">{count}</span>
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              )}
+              {/* Catalogue filter */}
+              {filteredOrgs.some((o) => o.catalogueUrl) && (
+                <div className="px-4 pb-3">
+                  <button
+                    type="button"
+                    onClick={() => setCompoundFilters((f) => ({ ...f, hasCatalogue: f.hasCatalogue === "true" ? undefined : "true" }))}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${compoundFilters.hasCatalogue ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]" : "border-gray-200 text-gray-600 hover:border-gray-400"}`}
+                  >
+                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12" />
+                    </svg>
+                    Has catalogue
+                  </button>
+                </div>
+              )}
+              <GroupSummary orgs={filteredOrgs} lens={lens} />
+              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
+            </div>
+          ) : lens === "partner_category" && partnerSubcategoryFilter ? (
             <div>
               <GroupSummary orgs={filteredOrgs} lens={lens} />
               <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
