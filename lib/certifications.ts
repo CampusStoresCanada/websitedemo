@@ -63,9 +63,9 @@ export const CANCOLL_CERT: Certification = {
   description: "Canada's largest college & university purchasing group — negotiates discounted pricing with vendors to help campus stores save students money.",
 };
 
-/** Map from certification name → config */
+/** Map from certification name → config — includes CANCOLL for rendering */
 export const CERTIFICATION_BY_NAME = Object.fromEntries(
-  CERTIFICATIONS.map((c) => [c.name, c])
+  [...CERTIFICATIONS, CANCOLL_CERT].map((c) => [c.name, c])
 );
 
 /** All valid certification names — use for validation */

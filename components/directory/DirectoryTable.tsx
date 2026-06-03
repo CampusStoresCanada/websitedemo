@@ -564,6 +564,7 @@ export default function DirectoryTable({
                           {org.certifications.length > 0 ? (
                             <CertificationBadges
                               certifications={org.certifications}
+                              showCancoll={isMember}
                               highlightSet={new Set(memberProfile?.preferredCertifications ?? [])}
                               size="sm"
                             />
