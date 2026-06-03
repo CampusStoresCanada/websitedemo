@@ -12,8 +12,8 @@ import type { PermissionState, EncryptedField } from "@/lib/auth/types";
 // <PageOwnerProvider> so ProtectedSection bypasses permission checks entirely.
 // This lets a partner org admin see all content on their own profile page.
 const PageOwnerContext = createContext(false);
-export function PageOwnerProvider({ children }: { children: React.ReactNode }) {
-  return <PageOwnerContext.Provider value={true}>{children}</PageOwnerContext.Provider>;
+export function PageOwnerProvider({ children, isOwner }: { children: React.ReactNode; isOwner: boolean }) {
+  return <PageOwnerContext.Provider value={isOwner}>{children}</PageOwnerContext.Provider>;
 }
 export function useIsPageOwner() { return useContext(PageOwnerContext); }
 // ──────────────────────────────────────────────────────────────────────────────

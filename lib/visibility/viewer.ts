@@ -67,11 +67,8 @@ export async function getViewerContext(): Promise<ViewerContext> {
     const isMemberOrgAdmin = ctx.orgAdminOrgIds.some(
       (orgId) => typeByOrgId.get(orgId) === "Member"
     );
-    const isPartnerOrgAdmin = ctx.orgAdminOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Vendor Partner"
-    );
 
-    if (isMemberOrgAdmin || isPartnerOrgAdmin) {
+    if (isMemberOrgAdmin) {
       viewerLevel = "org_admin";
     } else if (hasMemberOrg) {
       viewerLevel = "member";

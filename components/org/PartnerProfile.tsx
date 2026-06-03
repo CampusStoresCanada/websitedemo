@@ -1346,7 +1346,12 @@ export default function PartnerProfile({
     </div>
   );
 
-  return isOrgAdminForThisOrg
-    ? <PageOwnerProvider>{content}</PageOwnerProvider>
-    : content;
+  // Always render the provider so it's present when auth loads.
+  // isOrgAdminForThisOrg starts false, updates to true after auth resolves,
+  // causing ProtectedSection to re-render and open for the org admin.
+  return (
+    <PageOwnerProvider isOwner={isOrgAdminForThisOrg}>
+      {content}
+    </PageOwnerProvider>
+  );
 }
