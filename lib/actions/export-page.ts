@@ -504,6 +504,64 @@ function csvEscape(value: string): string {
   return value;
 }
 
+// ── Partner market export ────────────────────────────────────────────────────
+
+export async function exportPartnerMarketCSV(): Promise<{
+  csv?: string;
+  filename?: string;
+  error?: string;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { error: "Not authenticated" };
+
+  // Get the calling user's partner org
+  const db = createAdminClient() as any; // eslint-disable-line @typescript-eslint/no-explicit-any
+
+  const { data: memberships } = await (auth.ctx.supabase as any)
+    .from("user_organizations")
+    .select("organization_id, role, organization:organizations(id, name, type, primary_category)")
+    .eq("user_id", auth.ctx.userId)
+    .eq("status", "active");
+
+  const partnerMembership = (memberships ?? []).find(
+    (m: any) => m.organization?.type === "Vendor Partner" && m.role === "org_admin"
+  );
+
+  if (!partnerMembership) return { error: "Partner org admin access required" };
+
+  const { getPartnerMarketData } = await import("@/lib/actions/partner-market");
+  const result = await getPartnerMarketData(
+    partnerMembership.organization_id,
+    partnerMembership.organization?.primary_category ?? null
+  );
+
+  if (!result.success || !result.data) return { error: result.error ?? "Failed to load market data" };
+
+  const { matches } = result.data;
+  if (matches.length === 0) return { error: "No matching members found. Add categories to your profile first." };
+
+  const CONF_LABEL: Record<string, string> = { high: "High", medium: "Medium", low: "Low" };
+
+  const rows = [
+    ["Institution", "Province", "Matching Category", "Subcategories", "Confidence", "Buyer Name", "Buyer Title", "Buyer Email", "General Email"],
+    ...matches.map(m => [
+      m.orgName,
+      m.province ?? "",
+      m.matchingCategory,
+      m.matchingSubcategories.join("; "),
+      CONF_LABEL[m.confidence] ?? m.confidence,
+      m.buyer?.name ?? m.primaryContact?.name ?? "",
+      m.buyer?.roleTitle ?? m.primaryContact?.roleTitle ?? "",
+      m.buyer?.email ?? m.primaryContact?.email ?? "",
+      m.publicEmail ?? "",
+    ]),
+  ];
+
+  const csv = rows.map(r => r.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(",")).join("\n");
+  const orgName = (partnerMembership.organization?.name as string ?? "partner").replace(/[^a-z0-9]/gi, "-").toLowerCase();
+  return { csv, filename: `${orgName}-market-${new Date().toISOString().slice(0, 10)}.csv` };
+}
+
 function icsEscape(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\n/g, "\\n");
 }

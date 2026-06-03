@@ -13,7 +13,8 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV, exportPartnerMarketCSV } from "@/lib/actions/export-page";
+import { checkNudgeCooldown, notifyMembersWithoutProcurement } from "@/lib/actions/partner-market";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
 import type { PendingContentChange } from "@/lib/database.types";
@@ -98,6 +99,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
   const { user, profile, permissionState, organizations } = useAuth();
   const { editMode, setEditMode, isAdmin, canEditOrg } = useToolkit();
   const isPartnerViewing = !!user && hasPermission(permissionState, "partner") && !hasPermission(permissionState, "member");
+  const partnerOwnOrgSlugs = organizations
+    .filter(uo => uo.organization?.type === "Vendor Partner" && uo.role === "org_admin")
+    .map(uo => uo.organization?.slug)
+    .filter(Boolean) as string[];
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -588,6 +593,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
           pathname={pathname}
           onClose={handleClose}
           isPartner={isPartnerViewing}
+          partnerOwnOrgSlugs={partnerOwnOrgSlugs}
         />
       )}
 
@@ -3174,11 +3180,28 @@ function BookmarkModal({
 // ExportModal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExportModal({ pathname, onClose, isPartner = false }: { pathname: string; onClose: () => void; isPartner?: boolean }) {
+function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs = [] }: { pathname: string; onClose: () => void; isPartner?: boolean; partnerOwnOrgSlugs?: string[] }) {
   const context = detectPageContext(pathname);
+  const isPartnerOwnPage = context.type === "org" && partnerOwnOrgSlugs.includes(context.slug);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [nudgeStatus, setNudgeStatus] = useState<"idle" | "checking" | "ready" | "cooldown" | "sending" | "sent">("idle");
+  const [nudgeCooldownMsg, setNudgeCooldownMsg] = useState<string | null>(null);
   const [canExportAttendees, setCanExportAttendees] = useState(false);
+
+  useEffect(() => {
+    if (!isPartnerOwnPage) return;
+    setNudgeStatus("checking");
+    checkNudgeCooldown().then(({ canSend, availableAt }) => {
+      if (canSend) {
+        setNudgeStatus("ready");
+      } else {
+        setNudgeStatus("cooldown");
+        const date = availableAt ? new Date(availableAt).toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" }) : "next week";
+        setNudgeCooldownMsg(`Already sent this week — available again ${date}.`);
+      }
+    });
+  }, [isPartnerOwnPage]);
 
   useEffect(() => {
     if (context.type !== "event") return;
@@ -3222,6 +3245,14 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
         icon: "🏢",
         action: () => run("Org Info CSV", () => exportOrgInfo(context.slug)),
       },
+      ...(isPartnerOwnPage ? [
+        {
+          label: "My Market Buyers CSV",
+          description: "All member stores in your categories — buyer name, title, email, and match confidence",
+          icon: "📇",
+          action: () => run("My Market Buyers CSV", () => exportPartnerMarketCSV()),
+        },
+      ] : []),
     ];
   } else if (context.type === "event") {
     options = [
@@ -3307,6 +3338,41 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
                   </div>
                 </button>
               ))}
+            </div>
+          )}
+          {/* Notify members without procurement — partner own page only */}
+          {isPartnerOwnPage && nudgeStatus !== "idle" && nudgeStatus !== "checking" && (
+            <div className="mt-3 pt-3 border-t border-gray-100">
+              {nudgeStatus === "cooldown" ? (
+                <p className="text-xs text-gray-400 text-center">{nudgeCooldownMsg}</p>
+              ) : nudgeStatus === "sent" ? (
+                <p className="text-xs text-green-600 text-center">Notifications sent — members will hear from Ghost Butler shortly.</p>
+              ) : (
+                <button
+                  onClick={async () => {
+                    setNudgeStatus("sending");
+                    const res = await notifyMembersWithoutProcurement("__self__", null);
+                    if (res.success) {
+                      setNudgeStatus("sent");
+                    } else {
+                      setNudgeStatus("ready");
+                      setError(res.error ?? "Failed to send");
+                    }
+                  }}
+                  disabled={nudgeStatus === "sending"}
+                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-dashed border-gray-200 hover:border-amber-300 hover:bg-amber-50 transition-colors text-left disabled:opacity-50"
+                >
+                  <span className="text-2xl">📣</span>
+                  <div>
+                    <p className="font-medium text-sm text-[#1A1A1A]">
+                      {nudgeStatus === "sending" ? "Sending…" : "Notify members without procurement"}
+                    </p>
+                    <p className="text-xs text-gray-400 mt-0.5">
+                      Ghost Butler will reach out to member stores that haven't set up their procurement data yet. Once per week, platform-wide.
+                    </p>
+                  </div>
+                </button>
+              )}
             </div>
           )}
           {error && <p className="text-red-500 text-xs mt-3 text-center">{error}</p>}

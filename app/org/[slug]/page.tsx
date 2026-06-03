@@ -9,6 +9,8 @@ import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
 import type { RFPWithContext } from "@/lib/types/rfp";
+import { getPartnerMarketData } from "@/lib/actions/partner-market";
+import type { MarketData } from "@/lib/actions/partner-market";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -196,6 +198,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
   // Fetch RFPs — for member orgs fetch their own; for partner orgs fetch matching
   let orgRFPs: RFPWithContext[] = [];
   let partnerRFPs: RFPWithContext[] = [];
+  let partnerMarket: MarketData | null = null;
 
   if (organization.type === "Member") {
     const rfpResult = await listRFPsForOrg(organization.id);
@@ -209,6 +212,21 @@ export default async function OrgProfilePage({ params }: PageProps) {
     if (partnerCategories.length) {
       const rfpResult = await listRFPsForPartner(partnerCategories, viewerOrgType);
       partnerRFPs = rfpResult.rfps ?? [];
+    }
+
+    // Fetch market data for org admins of this partner
+    const isPartnerOrgAdmin =
+      viewer.viewerLevel === "org_admin" &&
+      viewer.viewerOrgAdminIds.includes(organization.id);
+    const isGlobalAdminViewer =
+      viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+
+    if (isPartnerOrgAdmin || isGlobalAdminViewer) {
+      const marketResult = await getPartnerMarketData(
+        organization.id,
+        (orgExtra2.primary_category as string | null) ?? null
+      );
+      partnerMarket = marketResult.data ?? null;
     }
   }
 
@@ -264,6 +282,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       rawLinks={editorRawLinks}
       canEditLinks={canEditLinks}
       partnerRFPs={partnerRFPs}
+      partnerMarket={partnerMarket}
     />
     </>
   );

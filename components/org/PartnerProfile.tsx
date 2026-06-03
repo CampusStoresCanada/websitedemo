@@ -30,6 +30,8 @@ import ContactEditModal from "@/components/org/ContactEditModal";
 import { fieldProps } from "@/lib/editable-fields";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import PartnerRFPFeed from "@/components/rfps/PartnerRFPFeed";
+import type { MarketData } from "@/lib/actions/partner-market";
+import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 
 // ── Category grouping ─────────────────────────────────────────────────────────
 // primary_category is a flat comma-separated string of parent categories and
@@ -81,6 +83,7 @@ interface PartnerProfileProps {
   rawLinks?: PartnerLink[];
   canEditLinks: boolean;
   partnerRFPs?: RFPWithContext[];
+  partnerMarket?: MarketData | null;
   conferenceAttendance: Array<{
     id: string;
     conferenceId: string;
@@ -122,6 +125,7 @@ export default function PartnerProfile({
   rawLinks,
   canEditLinks,
   partnerRFPs = [],
+  partnerMarket = null,
 }: PartnerProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -1297,6 +1301,11 @@ export default function PartnerProfile({
           Back to Network
         </Link>
       </div>
+
+      {/* Market intelligence — org admin only */}
+      {partnerMarket && (
+        <PartnerMarketPanel market={partnerMarket} />
+      )}
 
       {/* Open RFPs in this partner's categories */}
       {partnerRFPs.length > 0 && (
