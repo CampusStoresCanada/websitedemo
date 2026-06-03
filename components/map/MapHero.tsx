@@ -636,6 +636,13 @@ export default function MapHero({
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
     if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
     if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
+    if (lens !== "partner_category") {
+      if (checkedSubcategories.size > 0) {
+        pool = pool.filter((o) => [...checkedSubcategories].some((sub) => orgHasSubcategory(o, sub)));
+      } else if (checkedCategories.size > 0) {
+        pool = pool.filter((o) => [...checkedCategories].some((cat) => orgHasParentCategory(o, cat)));
+      }
+    }
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
