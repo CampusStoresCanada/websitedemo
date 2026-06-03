@@ -75,8 +75,21 @@ interface PageProps {
 export default async function OrgProfilePage({ params }: PageProps) {
   const { slug } = await params;
   const viewer = await getViewerContext();
+
+  // Quick org ID lookup so we can elevate viewer level before fetching masked data.
+  // If the viewer is a member of this org, they see their own page unmasked.
+  const { data: orgIdRow } = await createAdminClient()
+    .from("organizations")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id)
+    ? { ...viewer, viewerLevel: "org_admin" as const }
+    : viewer;
+
   const { organization, contacts, brandColors, benchmarking, allBenchmarking } =
-    await getOrganizationForViewer(slug, viewer);
+    await getOrganizationForViewer(slug, effectiveViewer);
 
   if (!organization) {
     notFound();
@@ -232,11 +245,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
 
   // Resolve partner links (filter by viewer, sign storage URLs server-side)
   const orgExtra = organization as Record<string, unknown>;
-  // When someone is the org admin of the org they're viewing, elevate their
-  // effective viewer level so they can see all content on their own page.
-  const effectiveViewerLevel = viewer.viewerOrgAdminIds.includes(organization.id)
-    ? "org_admin" as const
-    : viewer.viewerLevel;
+  // effectiveViewer already has the elevated level when viewing own org.
+  const effectiveViewerLevel = effectiveViewer.viewerLevel;
 
   const rawPartnerLinks = parsePartnerLinks(orgExtra.partner_links ?? []);
   const { visible: visibleLinks, hasGated, gatedVisibility } =
