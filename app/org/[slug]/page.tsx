@@ -215,9 +215,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
     }
 
     // Fetch market data for org admins of this partner
-    const isPartnerOrgAdmin =
-      viewer.viewerLevel === "org_admin" &&
-      viewer.viewerOrgAdminIds.includes(organization.id);
+    // viewerOrgAdminIds covers all org types — don't rely on viewerLevel which
+    // returns "partner" for Vendor Partner org admins, not "org_admin"
+    const isPartnerOrgAdmin = viewer.viewerOrgAdminIds.includes(organization.id);
     const isGlobalAdminViewer =
       viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
 
@@ -232,16 +232,21 @@ export default async function OrgProfilePage({ params }: PageProps) {
 
   // Resolve partner links (filter by viewer, sign storage URLs server-side)
   const orgExtra = organization as Record<string, unknown>;
+  // When someone is the org admin of the org they're viewing, elevate their
+  // effective viewer level so they can see all content on their own page.
+  const effectiveViewerLevel = viewer.viewerOrgAdminIds.includes(organization.id)
+    ? "org_admin" as const
+    : viewer.viewerLevel;
+
   const rawPartnerLinks = parsePartnerLinks(orgExtra.partner_links ?? []);
   const { visible: visibleLinks, hasGated, gatedVisibility } =
-    await resolvePartnerLinksForViewer(rawPartnerLinks, viewer.viewerLevel);
+    await resolvePartnerLinksForViewer(rawPartnerLinks, effectiveViewerLevel);
 
   // Org admins and super/admins can edit links — raw links needed for the editor
   const canEditLinks =
     viewer.viewerLevel === "super_admin" ||
     viewer.viewerLevel === "admin" ||
-    (viewer.viewerLevel === "org_admin" &&
-      viewer.viewerOrgAdminIds.includes(organization.id));
+    viewer.viewerOrgAdminIds.includes(organization.id);
   const editorRawLinks = canEditLinks ? rawPartnerLinks : undefined;
 
   // Render different layouts based on organization type
@@ -255,7 +260,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         brandColors={brandColors}
         benchmarking={benchmarking}
         allBenchmarking={allBenchmarking}
-        viewerLevel={viewer.viewerLevel}
+        viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
         sponsorTier={sponsorTier}
