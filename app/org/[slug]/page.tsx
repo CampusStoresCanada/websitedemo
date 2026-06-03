@@ -9,7 +9,7 @@ import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
 import type { RFPWithContext } from "@/lib/types/rfp";
-import { getPartnerMarketData } from "@/lib/actions/partner-market";
+import { getPartnerMarketData, checkNudgeCooldown } from "@/lib/actions/partner-market";
 import type { MarketData } from "@/lib/actions/partner-market";
 
 type OrgConferenceAttendanceRow = {
@@ -212,6 +212,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
   let orgRFPs: RFPWithContext[] = [];
   let partnerRFPs: RFPWithContext[] = [];
   let partnerMarket: MarketData | null = null;
+  let canNudge = false;
+  let nudgeAvailableAt: string | null = null;
 
   if (organization.type === "Member") {
     const rfpResult = await listRFPsForOrg(organization.id);
@@ -238,6 +240,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
         (orgExtra2.primary_category as string | null) ?? null
       );
       partnerMarket = marketResult.data ?? { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 };
+      const cooldown = await checkNudgeCooldown();
+      canNudge = cooldown.canSend;
+      nudgeAvailableAt = cooldown.availableAt ?? null;
     }
   }
 
@@ -296,6 +301,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
       canEditLinks={canEditLinks}
       partnerRFPs={partnerRFPs}
       partnerMarket={partnerMarket}
+      canNudge={canNudge}
+      nudgeAvailableAt={nudgeAvailableAt}
     />
     </>
   );

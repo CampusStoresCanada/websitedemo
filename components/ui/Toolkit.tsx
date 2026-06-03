@@ -3185,23 +3185,7 @@ function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs 
   const isPartnerOwnPage = context.type === "org" && partnerOwnOrgSlugs.includes(context.slug);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [nudgeStatus, setNudgeStatus] = useState<"idle" | "checking" | "ready" | "cooldown" | "sending" | "sent">("idle");
-  const [nudgeCooldownMsg, setNudgeCooldownMsg] = useState<string | null>(null);
   const [canExportAttendees, setCanExportAttendees] = useState(false);
-
-  useEffect(() => {
-    if (!isPartnerOwnPage) return;
-    setNudgeStatus("checking");
-    checkNudgeCooldown().then(({ canSend, availableAt }) => {
-      if (canSend) {
-        setNudgeStatus("ready");
-      } else {
-        setNudgeStatus("cooldown");
-        const date = availableAt ? new Date(availableAt).toLocaleDateString("en-CA", { weekday: "long", month: "long", day: "numeric" }) : "next week";
-        setNudgeCooldownMsg(`Already sent this week — available again ${date}.`);
-      }
-    });
-  }, [isPartnerOwnPage]);
 
   useEffect(() => {
     if (context.type !== "event") return;
@@ -3338,41 +3322,6 @@ function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs 
                   </div>
                 </button>
               ))}
-            </div>
-          )}
-          {/* Notify members without procurement — partner own page only */}
-          {isPartnerOwnPage && nudgeStatus !== "idle" && nudgeStatus !== "checking" && (
-            <div className="mt-3 pt-3 border-t border-gray-100">
-              {nudgeStatus === "cooldown" ? (
-                <p className="text-xs text-gray-400 text-center">{nudgeCooldownMsg}</p>
-              ) : nudgeStatus === "sent" ? (
-                <p className="text-xs text-green-600 text-center">Notifications sent — members will hear from Ghost Butler shortly.</p>
-              ) : (
-                <button
-                  onClick={async () => {
-                    setNudgeStatus("sending");
-                    const res = await notifyMembersWithoutProcurement("__self__", null);
-                    if (res.success) {
-                      setNudgeStatus("sent");
-                    } else {
-                      setNudgeStatus("ready");
-                      setError(res.error ?? "Failed to send");
-                    }
-                  }}
-                  disabled={nudgeStatus === "sending"}
-                  className="w-full flex items-center gap-4 p-4 rounded-xl border border-dashed border-gray-200 hover:border-amber-300 hover:bg-amber-50 transition-colors text-left disabled:opacity-50"
-                >
-                  <span className="text-2xl">📣</span>
-                  <div>
-                    <p className="font-medium text-sm text-[#1A1A1A]">
-                      {nudgeStatus === "sending" ? "Sending…" : "Notify members without procurement"}
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">
-                      Ghost Butler will reach out to member stores that haven't set up their procurement data yet. Once per week, platform-wide.
-                    </p>
-                  </div>
-                </button>
-              )}
             </div>
           )}
           {error && <p className="text-red-500 text-xs mt-3 text-center">{error}</p>}

@@ -84,6 +84,8 @@ interface PartnerProfileProps {
   canEditLinks: boolean;
   partnerRFPs?: RFPWithContext[];
   partnerMarket?: MarketData | null;
+  canNudge?: boolean;
+  nudgeAvailableAt?: string | null;
   conferenceAttendance: Array<{
     id: string;
     conferenceId: string;
@@ -126,6 +128,8 @@ export default function PartnerProfile({
   canEditLinks,
   partnerRFPs = [],
   partnerMarket = null,
+  canNudge = false,
+  nudgeAvailableAt = null,
 }: PartnerProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -1316,7 +1320,11 @@ export default function PartnerProfile({
 
       {/* Market intelligence — org admin only */}
       {partnerMarket && (
-        <PartnerMarketPanel market={partnerMarket} />
+        <PartnerMarketPanel
+          market={partnerMarket}
+          canNudge={canNudge}
+          nudgeAvailableAt={nudgeAvailableAt}
+        />
       )}
 
       {/* Open RFPs in this partner's categories */}
