@@ -77,7 +77,7 @@ export function canFlagContent(isAuthenticated: boolean): boolean {
  * Permission hierarchy:
  * - super_admin: Global super admin
  * - admin: Global admin
- * - org_admin: Org admin of a MEMBER organization (has member-level access + editing)
+ * - org_admin: Org admin of a Member or Vendor Partner organization
  * - member: Regular member of a Member organization
  * - partner: Anyone associated with a Vendor Partner organization (including org_admins)
  * - public: Not logged in or no org association
@@ -92,16 +92,17 @@ export function derivePermissionState(
   const activeOrgs = organizations.filter((uo) => uo.status === "active");
   const orgTypes = activeOrgs.map((uo) => uo.organization?.type).filter(Boolean);
 
-  // Check if user is org_admin of a MEMBER organization
-  const isMemberOrgAdmin = activeOrgs.some(
-    (uo) => uo.role === "org_admin" && uo.organization?.type === "Member"
+  // Org admins of either Member or Vendor Partner orgs get org_admin permission
+  const isOrgAdmin = activeOrgs.some(
+    (uo) => uo.role === "org_admin" &&
+      (uo.organization?.type === "Member" || uo.organization?.type === "Vendor Partner")
   );
-  if (isMemberOrgAdmin) return "org_admin";
+  if (isOrgAdmin) return "org_admin";
 
   // Member organization users (non-admin) get member permission
   if (orgTypes.includes("Member")) return "member";
 
-  // Partner organization users (including org_admins) get partner permission
+  // Partner organization users (non-admin) get partner permission
   if (orgTypes.includes("Vendor Partner")) return "partner";
 
   return "public";
