@@ -982,7 +982,10 @@ export default function MemberProfile({
                         key={contact.id}
                         className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
                         data-flaggable
-                        onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}
+                        onClick={editMode && canEditThisOrg ? (e) => {
+                          if ((e.target as HTMLElement).closest('[data-deletable]')) return;
+                          setEditingContact(contact);
+                        } : undefined}
                       >
                         <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
@@ -1016,7 +1019,7 @@ export default function MemberProfile({
                         )}
                         {/* Actions — delete only in edit mode; eye moved to contact edit modal */}
                         {editMode && canEditThisOrg && (
-                          <td className="py-2 pl-4 w-10" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 pl-4 w-10">
                             <div
                               className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
                               data-entity-id={contact.id}

@@ -942,7 +942,10 @@ export default function PartnerProfile({
                         key={contact.id}
                         className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
                         data-flaggable
-                        onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}
+                        onClick={editMode && canEditThisOrg ? (e) => {
+                          if ((e.target as HTMLElement).closest('[data-deletable]')) return;
+                          setEditingContact(contact);
+                        } : undefined}
                       >
                         <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
@@ -958,7 +961,7 @@ export default function PartnerProfile({
                         <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                        <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()} /* conference checkbox — intentional */>
                           <input
                             type="checkbox"
                             aria-label={`Attending conference for ${contact.name ?? "contact"}`}
@@ -970,7 +973,7 @@ export default function PartnerProfile({
                         </td>
                         {/* Delete button - only visible in edit mode */}
                         {editMode && canEditThisOrg && (
-                          <td className="py-2 pl-4 w-10" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 pl-4 w-10">
                             <div
                               className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
                               data-entity-id={contact.id}
