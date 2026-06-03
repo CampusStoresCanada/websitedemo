@@ -240,12 +240,13 @@ export function ProtectedSection({
   bannerMessage,
   ctaText,
   ctaLink,
-}: ProtectedSectionProps) {
+  bypass = false,
+}: ProtectedSectionProps & { bypass?: boolean }) {
   const { permissionState, isLoading, isSurveyParticipant, user } = useAuth();
   const isPageOwner = useIsPageOwner();
   const gateState = useViewerGateState(user);
 
-  const isAuthorized = isPageOwner || (!isLoading && (() => {
+  const isAuthorized = bypass || isPageOwner || (!isLoading && (() => {
     if (requiredPermission === "survey_participant") {
       return hasPermission(permissionState, "org_admin") && isSurveyParticipant;
     }

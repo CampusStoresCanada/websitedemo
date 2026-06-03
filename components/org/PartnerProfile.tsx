@@ -518,7 +518,7 @@ export default function PartnerProfile({
   const nacsDepartment = (orgExtra.nacs_department as string | null) ?? null;
   const nacsClasses = (orgExtra.nacs_classes as string[] | null) ?? null;
 
-  const content = (
+  return (
     <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]" data-org-id={organization.id}>
       {/* Desktop Layout */}
       <div className="hidden lg:flex min-h-screen">
@@ -732,6 +732,7 @@ export default function PartnerProfile({
           {/* Store Contact — Members and above can see — partners and public are gated */}
           {primaryContact && (
             <ProtectedSection
+              bypass={isOrgAdminForThisOrg}
               requiredPermission="member"
             >
               <div className="mb-10">
@@ -909,6 +910,7 @@ export default function PartnerProfile({
           {/* Staffing/Contacts Table — Members and above can see — partners and public are gated */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
+              bypass={isOrgAdminForThisOrg}
               requiredPermission="member"
             >
               <div>
@@ -1110,6 +1112,7 @@ export default function PartnerProfile({
           {/* Store Contact — Members and above can see */}
           {primaryContact && (
             <ProtectedSection
+              bypass={isOrgAdminForThisOrg}
               requiredPermission="member"
             >
               <div className="mb-8">
@@ -1190,6 +1193,7 @@ export default function PartnerProfile({
           {/* Staffing — Names visible, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
+              bypass={isOrgAdminForThisOrg}
               requiredPermission="member"
             >
               <div>
@@ -1346,12 +1350,4 @@ export default function PartnerProfile({
     </div>
   );
 
-  // Always render the provider so it's present when auth loads.
-  // isOrgAdminForThisOrg starts false, updates to true after auth resolves,
-  // causing ProtectedSection to re-render and open for the org admin.
-  return (
-    <PageOwnerProvider isOwner={isOrgAdminForThisOrg}>
-      {content}
-    </PageOwnerProvider>
-  );
 }
