@@ -216,7 +216,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
   if (organization.type === "Member") {
     const rfpResult = await listRFPsForOrg(organization.id);
     orgRFPs = rfpResult.rfps ?? [];
-  } else if (organization.type === "Partner" || organization.type === "Vendor") {
+  } else if (organization.type === "Partner" || organization.type === "Vendor" || organization.type === "Vendor Partner") {
     const orgExtra2 = organization as Record<string, unknown>;
     const rawCategoryValue = (orgExtra2.primary_category as string | null) ?? "";
     const partnerCategories = rawCategoryValue
