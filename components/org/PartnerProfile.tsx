@@ -180,8 +180,13 @@ export default function PartnerProfile({
   const isAdmin = permissionState === "admin" || permissionState === "super_admin";
 
   // Check if user is org_admin for THIS specific organization
+  // True if the viewer belongs to this org in any capacity (admin or member).
+  // Members of an org see their own page in full — no ProtectedSection gates.
   const isOrgAdminForThisOrg = organizations.some(
     (uo) => uo.organization.id === organization.id && uo.role === "org_admin"
+  );
+  const isOwnOrgPage = organizations.some(
+    (uo) => uo.organization.id === organization.id
   );
 
   const handleToggleCertification = async (name: string) => {
@@ -732,7 +737,7 @@ export default function PartnerProfile({
           {/* Store Contact — Members and above can see — partners and public are gated */}
           {primaryContact && (
             <ProtectedSection
-              bypass={isOrgAdminForThisOrg}
+              bypass={isOwnOrgPage}
               requiredPermission="member"
             >
               <div className="mb-10">
@@ -910,7 +915,7 @@ export default function PartnerProfile({
           {/* Staffing/Contacts Table — Members and above can see — partners and public are gated */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
-              bypass={isOrgAdminForThisOrg}
+              bypass={isOwnOrgPage}
               requiredPermission="member"
             >
               <div>
@@ -1112,7 +1117,7 @@ export default function PartnerProfile({
           {/* Store Contact — Members and above can see */}
           {primaryContact && (
             <ProtectedSection
-              bypass={isOrgAdminForThisOrg}
+              bypass={isOwnOrgPage}
               requiredPermission="member"
             >
               <div className="mb-8">
@@ -1193,7 +1198,7 @@ export default function PartnerProfile({
           {/* Staffing — Names visible, contact details blurred for public */}
           {(contacts.length > 0 || (editMode && canEditThisOrg)) && (
             <ProtectedSection
-              bypass={isOrgAdminForThisOrg}
+              bypass={isOwnOrgPage}
               requiredPermission="member"
             >
               <div>

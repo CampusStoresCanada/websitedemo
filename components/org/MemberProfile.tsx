@@ -205,6 +205,10 @@ export default function MemberProfile({
   const isOrgAdminForThisOrg = organizations.some(
     (uo) => uo.organization.id === organization.id && uo.role === "org_admin"
   );
+  // Any member of this org sees their own page in full
+  const isOwnOrgPage = organizations.some(
+    (uo) => uo.organization.id === organization.id
+  );
 
   // "View as Partner" toggle — org admins, admins, and super admins
   const isAdmin = permissionState === "admin" || permissionState === "super_admin";
@@ -867,7 +871,8 @@ export default function MemberProfile({
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
               <ProtectedSection
-                requiredPermission="member"
+                bypass={isOwnOrgPage}
+              requiredPermission="member"
                 bannerMessage="Sign in as a member or partner to view store details."
                 ctaText="Sign In"
                 ctaLink="/login"
@@ -1375,7 +1380,8 @@ export default function MemberProfile({
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
               <ProtectedSection
-                requiredPermission="member"
+                bypass={isOwnOrgPage}
+              requiredPermission="member"
                 bannerMessage="Sign in as a member or partner to view store details."
                 ctaText="Sign In"
                 ctaLink="/login"
