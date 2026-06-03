@@ -7,7 +7,7 @@ import type { BrandColor } from "@/lib/database.types";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
 import ColorizedImage from "@/components/ui/ColorizedImage";
-import { ProtectedSection } from "@/components/ui/GreyBlur";
+import { ProtectedSection, PageOwnerProvider } from "@/components/ui/GreyBlur";
 import BlurredField from "@/components/ui/BlurredField";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
@@ -518,7 +518,7 @@ export default function PartnerProfile({
   const nacsDepartment = (orgExtra.nacs_department as string | null) ?? null;
   const nacsClasses = (orgExtra.nacs_classes as string[] | null) ?? null;
 
-  return (
+  const content = (
     <div className="min-h-screen bg-[#EEEEF0] font-[family-name:var(--font-raleway)]" data-org-id={organization.id}>
       {/* Desktop Layout */}
       <div className="hidden lg:flex min-h-screen">
@@ -1345,4 +1345,8 @@ export default function PartnerProfile({
       )}
     </div>
   );
+
+  return isOrgAdminForThisOrg
+    ? <PageOwnerProvider>{content}</PageOwnerProvider>
+    : content;
 }

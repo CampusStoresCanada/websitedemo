@@ -7,6 +7,17 @@ import { hasPermission } from "@/lib/auth/permissions";
 import { decryptPayload } from "@/lib/auth/crypto";
 import type { PermissionState, EncryptedField } from "@/lib/auth/types";
 
+// ─── Page owner context ────────────────────────────────────────────────────────
+// When a user is the org admin of the page they're viewing, wrap the page in
+// <PageOwnerProvider> so ProtectedSection bypasses permission checks entirely.
+// This lets a partner org admin see all content on their own profile page.
+const PageOwnerContext = createContext(false);
+export function PageOwnerProvider({ children }: { children: React.ReactNode }) {
+  return <PageOwnerContext.Provider value={true}>{children}</PageOwnerContext.Provider>;
+}
+export function useIsPageOwner() { return useContext(PageOwnerContext); }
+// ──────────────────────────────────────────────────────────────────────────────
+
 // =============================================================================
 // Shared viewer-state hook
 // =============================================================================
@@ -104,16 +115,17 @@ export default function GreyBlur({
   ctaLink,
 }: GreyBlurProps) {
   const { permissionState, isLoading, decryptionKey, isSurveyParticipant, user } = useAuth();
+  const isPageOwner = useIsPageOwner();
   const [decryptedData, setDecryptedData] = useState<unknown>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const gateState = useViewerGateState(user);
 
-  const isAuthorized = !isLoading && (() => {
+  const isAuthorized = isPageOwner || (!isLoading && (() => {
     if (requiredPermission === "survey_participant") {
       return hasPermission(permissionState, "org_admin") && isSurveyParticipant;
     }
     return hasPermission(permissionState, requiredPermission);
-  })();
+  })());
 
   useEffect(() => {
     if (isAuthorized && encryptedField && decryptionKey && !decryptedData && !isDecrypting) {
@@ -230,14 +242,15 @@ export function ProtectedSection({
   ctaLink,
 }: ProtectedSectionProps) {
   const { permissionState, isLoading, isSurveyParticipant, user } = useAuth();
+  const isPageOwner = useIsPageOwner();
   const gateState = useViewerGateState(user);
 
-  const isAuthorized = !isLoading && (() => {
+  const isAuthorized = isPageOwner || (!isLoading && (() => {
     if (requiredPermission === "survey_participant") {
       return hasPermission(permissionState, "org_admin") && isSurveyParticipant;
     }
     return hasPermission(permissionState, requiredPermission);
-  })();
+  })());
 
   // Resolve banner content
   let message: string;
