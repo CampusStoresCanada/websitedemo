@@ -75,9 +75,22 @@ export async function updateCancollStatus(
   }
 
   const supabase = await createClient();
+
+  // Fetch current certifications so we can add/remove CANCOLL without touching others
+  const { data: org } = await supabase
+    .from("organizations")
+    .select("certifications")
+    .eq("id", orgId)
+    .single();
+
+  const current: string[] = Array.isArray(org?.certifications) ? (org.certifications as string[]) : [];
+  const updated = isCancollMember
+    ? current.includes("CANCOLL") ? current : [...current, "CANCOLL"]
+    : current.filter((c) => c !== "CANCOLL");
+
   const { error } = await supabase
     .from("organizations")
-    .update({ is_cancoll_member: isCancollMember })
+    .update({ is_cancoll_member: isCancollMember, certifications: updated })
     .eq("id", orgId);
 
   if (error) {

@@ -369,10 +369,10 @@ export default function MapHero({
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
-        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+        o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
     return pool;
   }, [lensPool, compoundFilters, lens, checkedCategories, checkedSubcategories]);
 
@@ -481,9 +481,6 @@ export default function MapHero({
       for (const cert of (org.certifications ?? [])) {
         counts[cert] = (counts[cert] || 0) + 1;
       }
-      if (org.isCancollMember) {
-        counts["CANCOLL"] = (counts["CANCOLL"] || 0) + 1;
-      }
     }
     return counts;
   }, [lensPartners]);
@@ -549,10 +546,10 @@ export default function MapHero({
         if (compoundFilters.certification) {
           const cert = compoundFilters.certification;
           pool = pool.filter((o) =>
-            cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+            o.certifications?.includes(cert)
           );
         }
-        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
         return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id), searchRanking: rankingMap.size > 0 ? rankingMap : undefined };
       }
 
@@ -566,7 +563,7 @@ export default function MapHero({
       );
       // Apply compound filters even on search results
       if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
-      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
       return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
     }
 
@@ -646,10 +643,10 @@ export default function MapHero({
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
-        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+        o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
   }, [organizations, members, partners, lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
