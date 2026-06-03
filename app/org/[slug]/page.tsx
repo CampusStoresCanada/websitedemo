@@ -11,6 +11,8 @@ import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import { getPartnerMarketData, checkNudgeCooldown } from "@/lib/actions/partner-market";
 import type { MarketData } from "@/lib/actions/partner-market";
+import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
+import type { SupplierData } from "@/lib/actions/member-suppliers";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -214,10 +216,17 @@ export default async function OrgProfilePage({ params }: PageProps) {
   let partnerMarket: MarketData | null = null;
   let canNudge = false;
   let nudgeAvailableAt: string | null = null;
+  let memberSuppliers: SupplierData | null = null;
 
   if (organization.type === "Member") {
     const rfpResult = await listRFPsForOrg(organization.id);
     orgRFPs = rfpResult.rfps ?? [];
+
+    // Fetch supplier data for any member of this org
+    if (viewer.viewerOrgIds.includes(organization.id)) {
+      const supplierResult = await getMemberSupplierData(viewer.userEmail, organization.id);
+      memberSuppliers = supplierResult.data ?? { matches: [], topMatches: [], totalMatches: 0, hasAssignments: false };
+    }
   } else if (organization.type === "Partner" || organization.type === "Vendor" || organization.type === "Vendor Partner") {
     const orgExtra2 = organization as Record<string, unknown>;
     const rawCategoryValue = (orgExtra2.primary_category as string | null) ?? "";
@@ -278,6 +287,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         orgAssignableUsers={orgAssignableUsers}
         sponsorTier={sponsorTier}
         initialRFPs={orgRFPs}
+        memberSuppliers={memberSuppliers}
       />
       </>
     );

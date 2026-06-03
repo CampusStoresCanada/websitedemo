@@ -7,6 +7,8 @@ import type { BrandColor, Benchmarking } from "@/lib/database.types";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import RFPsSection from "@/components/rfps/RFPsSection";
+import type { SupplierData } from "@/lib/actions/member-suppliers";
+import MemberSupplierPanel from "@/components/org/MemberSupplierPanel";
 import type { BenchmarkingWithOrg } from "@/lib/data";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
@@ -71,6 +73,7 @@ interface MemberProfileProps {
     role: string;
   }>;
   initialRFPs?: RFPWithContext[];
+  memberSuppliers?: SupplierData | null;
 }
 
 export default function MemberProfile({
@@ -84,6 +87,7 @@ export default function MemberProfile({
   orgAssignableUsers,
   sponsorTier,
   initialRFPs = [],
+  memberSuppliers = null,
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -1158,6 +1162,11 @@ export default function MemberProfile({
           externalData={procurementInfo}
           onExternalSave={setProcurementInfo}
         />
+      )}
+
+      {/* My Suppliers — full panel for org members */}
+      {memberSuppliers && (
+        <MemberSupplierPanel data={memberSuppliers} />
       )}
 
       {/* RFPs — visible to all viewers with appropriate access; org admins can manage */}
