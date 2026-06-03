@@ -140,9 +140,9 @@ export async function getMemberSupplierData(
       else if (buyerHasSubs && partnerHasSubs) score = 2;
       else if (buyerHasSubs || partnerHasSubs) score = 1.5;
 
-      // Certification bonus
-      const certMatch = preferredCerts.some(c => pCerts.includes(c));
-      if (certMatch) score += 0.5;
+      // Certification bonus — 0.25 per matching cert so multiple matches compound
+      const certMatchCount = preferredCerts.filter(c => pCerts.includes(c)).length;
+      score += certMatchCount * 0.25;
 
       if (score > bestScore) {
         bestScore = score;
@@ -152,7 +152,7 @@ export async function getMemberSupplierData(
     }
 
     if (bestScore > 0) {
-      const certMatch = preferredCerts.some(c => pCerts.includes(c));
+      const certMatch = preferredCerts.some(c => pCerts.includes(c)); // at least one match
       scored.push({ partner: p, score: bestScore, matchCat: bestCat, matchSubs: bestSubs, certMatch });
     }
   }
