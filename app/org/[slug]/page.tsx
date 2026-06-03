@@ -227,19 +227,17 @@ export default async function OrgProfilePage({ params }: PageProps) {
       partnerRFPs = rfpResult.rfps ?? [];
     }
 
-    // Fetch market data for org admins of this partner
-    // viewerOrgAdminIds covers all org types — don't rely on viewerLevel which
-    // returns "partner" for Vendor Partner org admins, not "org_admin"
-    const isPartnerOrgAdmin = viewer.viewerOrgAdminIds.includes(organization.id);
+    // Fetch market data for any member of this partner org (or global admins)
+    const isOrgMember = viewer.viewerOrgIds.includes(organization.id);
     const isGlobalAdminViewer =
       viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
 
-    if (isPartnerOrgAdmin || isGlobalAdminViewer) {
+    if (isOrgMember || isGlobalAdminViewer) {
       const marketResult = await getPartnerMarketData(
         organization.id,
         (orgExtra2.primary_category as string | null) ?? null
       );
-      partnerMarket = marketResult.data ?? null;
+      partnerMarket = marketResult.data ?? { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 };
     }
   }
 
