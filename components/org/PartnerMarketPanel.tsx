@@ -64,7 +64,7 @@ export default function PartnerMarketPanel({ market, canNudge = false, nudgeAvai
   }
 
   return (
-    <div className="bg-white border-t border-gray-200">
+    <div id="your-market" className="bg-white border-t border-gray-200">
       <div className="max-w-7xl mx-auto px-8 py-12">
 
         {/* Header */}

@@ -652,7 +652,7 @@ export default function Header() {
 
                     {partnerOrgAdmin?.organization?.slug ? (
                       <Link
-                        href={`/org/${partnerOrgAdmin.organization.slug}`}
+                        href={`/org/${partnerOrgAdmin.organization.slug}#your-market`}
                         onClick={() => setShowUserMenu(false)}
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
