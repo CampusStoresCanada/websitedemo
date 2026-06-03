@@ -83,11 +83,13 @@ export function CompoundFilterBar({
     operating_model: "Operating Model",
   };
 
-  if (lens) {
+  // Only show the lens pill on pages where the user chose it — not on focused
+  // pages (/partners, /members) where the lens is forced by initialState.
+  if (lens && lens !== defaultLens) {
     primaryPills.push({
       label: LENS_PILL[lens] ?? lens,
       onRemove: () => {
-        setLens(null);
+        setLens(defaultLens ?? null);
         setScaleFilter(null);
         setPosFilter(null);
         setServiceFilter(null);
