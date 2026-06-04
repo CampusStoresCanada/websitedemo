@@ -2,28 +2,15 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
-import { ORG_ADMIN_STEPS, type OrgAdminStepKey } from "@/lib/onboarding/steps";
+import {
+  type Persona,
+  type AnyStepKey,
+  STEPS_BY_PERSONA,
+  CORE_STEPS_BY_PERSONA,
+} from "@/lib/onboarding/steps";
 
-// Re-export so existing importers keep working.
-export type { OrgAdminStepKey } from "@/lib/onboarding/steps";
-
-// Steps that count toward "onboarding complete" (non-conditional ones)
-const CORE_STEPS: OrgAdminStepKey[] = [
-  "session_1_welcome",
-  "public_contact_email",
-  "toolkit_tour",
-  "profile_description",
-  "profile_logo",
-  "profile_hero",
-  "contacts_sorted",
-  "contact_photos",
-  "visibility_intro",
-  "network_members",
-  "network_partners",
-  "network_member_space",
-  "partner_catalogue",
-  "events_discovery",
-];
+// Re-exports for backward compat
+export type { OrgAdminStepKey, AnyStepKey } from "@/lib/onboarding/steps";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -43,65 +30,104 @@ export interface OnboardingStep {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Init — idempotent, safe to call multiple times
-// Creates all step rows for the org_admin journey if they don't already exist.
+// Derive the user's persona from their org memberships
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function initOrgAdminJourney(): Promise<{ success: boolean; error?: string }> {
+export async function derivePersona(): Promise<Persona | null> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return null;
+
+  const db = createAdminClient();
+
+  // Fetch the user's active org memberships with org types
+  const { data: memberships } = await db
+    .from("user_organizations")
+    .select("role, organizations(type)")
+    .eq("user_id", auth.ctx.userId)
+    .eq("status", "active");
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const orgs = (memberships ?? []) as Array<{ role: string; organizations: { type: string } | null }>;
+
+  const isMemberOrgAdmin = orgs.some(
+    (o) => o.role === "org_admin" && o.organizations?.type === "Member"
+  );
+  const isPartnerOrgAdmin = orgs.some(
+    (o) => o.role === "org_admin" && o.organizations?.type === "Vendor Partner"
+  );
+  const isMemberUser = orgs.some((o) => o.organizations?.type === "Member");
+  const isPartnerUser = orgs.some((o) => o.organizations?.type === "Vendor Partner");
+
+  // Precedence: org admin roles first, then member roles
+  if (isMemberOrgAdmin) return "org_admin_member";
+  if (isPartnerOrgAdmin) return "org_admin_partner";
+  if (isMemberUser) return "member_member";
+  if (isPartnerUser) return "member_partner";
+  return null;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Init — idempotent, creates all step rows for the user's persona journey
+// ─────────────────────────────────────────────────────────────────────────────
+
+export async function initJourney(): Promise<{ success: boolean; persona?: Persona; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  // Only org admins (or global admins managing on behalf) get this journey
-  const isOrgAdmin = auth.ctx.orgAdminOrgIds.length > 0;
-  const isGlobalAdmin =
-    auth.ctx.globalRole === "super_admin" || auth.ctx.globalRole === "admin";
-
-  if (!isOrgAdmin && !isGlobalAdmin) {
-    return { success: false, error: "Not an org admin" };
-  }
+  const persona = await derivePersona();
+  if (!persona) return { success: false, error: "No qualifying org membership" };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = createAdminClient() as any; // user_onboarding_progress not yet in generated types
+  const db = createAdminClient() as any;
   const now = new Date().toISOString();
+  const steps = STEPS_BY_PERSONA[persona];
 
-  const rows = ORG_ADMIN_STEPS.map((key) => ({
+  const rows = steps.map((key) => ({
     user_id: auth.ctx.userId,
-    persona: "org_admin" as const,
+    persona,
     step_key: key,
     journey_started_at: now,
   }));
 
   const { error } = await db
     .from("user_onboarding_progress")
-    .upsert(rows, { onConflict: "user_id,step_key", ignoreDuplicates: true });
+    .upsert(rows, { onConflict: "user_id,persona,step_key", ignoreDuplicates: true });
 
   if (error) {
-    console.error("[onboarding] initOrgAdminJourney failed:", error);
+    console.error("[onboarding] initJourney failed:", error);
     return { success: false, error: "Failed to initialize journey" };
   }
 
-  return { success: true };
+  return { success: true, persona };
+}
+
+/** @deprecated Use initJourney() — kept for backward compat */
+export async function initOrgAdminJourney() {
+  return initJourney();
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Check a single step for the current user
+// Check a single step for the current user + their persona
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function getOnboardingStep(stepKey: OrgAdminStepKey): Promise<{
-  success: boolean;
-  step?: OnboardingStep | null;
-  error?: string;
-}> {
+export async function getOnboardingStep(
+  stepKey: AnyStepKey,
+  personaOverride?: Persona
+): Promise<{ success: boolean; step?: OnboardingStep | null; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
+  const persona = personaOverride ?? await derivePersona();
+  if (!persona) return { success: true, step: null };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = createAdminClient() as any; // user_onboarding_progress not yet in generated types
+  const db = createAdminClient() as any;
 
   const { data, error } = await db
     .from("user_onboarding_progress")
     .select("*")
     .eq("user_id", auth.ctx.userId)
+    .eq("persona", persona)
     .eq("step_key", stepKey)
     .maybeSingle();
 
@@ -114,32 +140,33 @@ export async function getOnboardingStep(stepKey: OrgAdminStepKey): Promise<{
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mark a step completed (by user action)
+// Mark a step completed
 // ─────────────────────────────────────────────────────────────────────────────
 
-export async function completeOnboardingStep(stepKey: OrgAdminStepKey): Promise<{
-  success: boolean;
-  coreStepsComplete?: boolean;
-  error?: string;
-}> {
+export async function completeOnboardingStep(
+  stepKey: AnyStepKey,
+  personaOverride?: Persona
+): Promise<{ success: boolean; coreStepsComplete?: boolean; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
+  const persona = personaOverride ?? await derivePersona();
+  if (!persona) return { success: false, error: "No qualifying org membership" };
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = createAdminClient() as any; // user_onboarding_progress not yet in generated types
+  const db = createAdminClient() as any;
   const now = new Date().toISOString();
 
-  // Upsert so it works even if the row wasn't pre-created by initOrgAdminJourney
   const { error } = await db.from("user_onboarding_progress").upsert(
     {
       user_id: auth.ctx.userId,
-      persona: "org_admin",
+      persona,
       step_key: stepKey,
       completed_at: now,
-      journey_started_at: now, // will be ignored if row already exists via ignoreDuplicates=false
+      journey_started_at: now,
       updated_at: now,
     },
-    { onConflict: "user_id,step_key" }
+    { onConflict: "user_id,persona,step_key" }
   );
 
   if (error) {
@@ -147,22 +174,21 @@ export async function completeOnboardingStep(stepKey: OrgAdminStepKey): Promise<
     return { success: false, error: "Failed to mark step complete" };
   }
 
-  // Check if all core steps are now done — if so, mark users.onboarding_completed
+  // Check if all core steps for this persona are done
   const { data: completedRows } = await db
     .from("user_onboarding_progress")
     .select("step_key")
     .eq("user_id", auth.ctx.userId)
-    .eq("persona", "org_admin")
+    .eq("persona", persona)
     .not("completed_at", "is", null);
 
   const completedKeys = new Set(
     ((completedRows ?? []) as { step_key: string }[]).map((r) => r.step_key)
   );
-  const coreStepsComplete = CORE_STEPS.every((k) => completedKeys.has(k));
+  const coreSteps = CORE_STEPS_BY_PERSONA[persona];
+  const coreStepsComplete = coreSteps.every((k) => completedKeys.has(k));
 
   if (coreStepsComplete) {
-    // Best-effort — non-blocking. Cast to any since users table is typed via admin client.
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     void (createAdminClient() as any)
       .from("users")
       .update({ onboarding_completed: true, updated_at: now })
@@ -177,16 +203,12 @@ export async function completeOnboardingStep(stepKey: OrgAdminStepKey): Promise<
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Reset — dev + super_admin only
-// Wipes all progress rows and clears the onboarding_completed flag so the
-// full journey runs again from scratch. The Toolkit callout localStorage key
-// must be cleared client-side (see DevPanel).
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function resetMyOnboarding(): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  // Gate to dev environment OR super_admins (useful for resetting in staging/prod too)
   const isDev = process.env.NODE_ENV === "development";
   const isSuperAdmin = auth.ctx.globalRole === "super_admin";
   if (!isDev && !isSuperAdmin) {
@@ -197,18 +219,17 @@ export async function resetMyOnboarding(): Promise<{ success: boolean; error?: s
   const db = createAdminClient() as any;
   const now = new Date().toISOString();
 
+  // Wipe ALL persona rows for this user
   const { error: deleteError } = await db
     .from("user_onboarding_progress")
     .delete()
-    .eq("user_id", auth.ctx.userId)
-    .eq("persona", "org_admin");
+    .eq("user_id", auth.ctx.userId);
 
   if (deleteError) {
     console.error("[onboarding] resetMyOnboarding delete failed:", deleteError);
     return { success: false, error: "Failed to clear progress rows" };
   }
 
-  // Reset the completed flag on the users table
   await (createAdminClient() as any)
     .from("users")
     .update({ onboarding_completed: false, updated_at: now })
@@ -218,27 +239,33 @@ export async function resetMyOnboarding(): Promise<{ success: boolean; error?: s
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Get all steps for current user (for the progress widget — built later)
+// Get all steps for current user
 // ─────────────────────────────────────────────────────────────────────────────
 
 export async function getMyOnboardingProgress(): Promise<{
   success: boolean;
   steps?: OnboardingStep[];
+  persona?: Persona | null;
   coreStepsComplete?: boolean;
   error?: string;
 }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = createAdminClient() as any; // user_onboarding_progress not yet in generated types
+  const persona = await derivePersona();
 
-  const { data, error } = await db
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+
+  const query = db
     .from("user_onboarding_progress")
     .select("*")
     .eq("user_id", auth.ctx.userId)
-    .eq("persona", "org_admin")
     .order("created_at", { ascending: true });
+
+  if (persona) query.eq("persona", persona);
+
+  const { data, error } = await query;
 
   if (error) {
     console.error("[onboarding] getMyOnboardingProgress failed:", error);
@@ -246,10 +273,9 @@ export async function getMyOnboardingProgress(): Promise<{
   }
 
   const steps = (data ?? []) as OnboardingStep[];
-  const completedKeys = new Set(
-    steps.filter((s) => s.completed_at).map((s) => s.step_key)
-  );
-  const coreStepsComplete = CORE_STEPS.every((k) => completedKeys.has(k));
+  const completedKeys = new Set(steps.filter((s) => s.completed_at).map((s) => s.step_key));
+  const coreSteps = persona ? CORE_STEPS_BY_PERSONA[persona] : [];
+  const coreStepsComplete = coreSteps.every((k) => completedKeys.has(k));
 
-  return { success: true, steps, coreStepsComplete };
+  return { success: true, steps, persona, coreStepsComplete };
 }

@@ -44,7 +44,7 @@ interface StepConfig {
   orgTypes?: string[];
 }
 
-const STEP_CONFIGS: Partial<Record<OrgAdminStepKey, StepConfig>> = {
+const STEP_CONFIGS: Partial<Record<string, StepConfig>> = {
   public_contact_email: {
     heading: "Set your store's public email",
     body: "This is the address members and partners use to reach you. Use a shared inbox — not a personal address.",
@@ -155,6 +155,7 @@ type Phase =
   | "done";
 
 export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutProps) {
+  if (process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true") return null;
   const { user, organizations, isLoading } = useAuth();
   const [activeStep, setActiveStep] = useState<OrgAdminStepKey | null>(null);
   const [phase, setPhase] = useState<Phase>("intro");
