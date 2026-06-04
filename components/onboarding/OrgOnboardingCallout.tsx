@@ -123,6 +123,22 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       completesOnCta: true,
       guided: false,
     },
+    procurement: {
+      heading: "Tell vendors what you buy",
+      body: "Scroll down to your Procurement section. Set which categories you carry and who buys them — vendors use this to find the right contact at your store.",
+      ctaLabel: "Show me",
+      targetAttr: "procurement_section",
+      completionTrigger: { table: "organizations", column: "procurement_info" },
+      guided: false,
+    },
+    opening_rfp: {
+      heading: "Ready to run an RFP?",
+      body: "Use the Export tool in the Toolkit to post an RFP and notify the right vendors automatically.",
+      ctaLabel: "See my RFPs",
+      targetAttr: "rfps_section",
+      completesOnCta: true,
+      guided: false,
+    },
   },
 
   // ── Org Admin: Vendor Partner ──────────────────────────────────────────────
@@ -160,7 +176,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       heading: "Tell members what you sell",
       body: "Open Edit and set your categories. Members filter by these when they're looking for suppliers — be specific.",
       ctaLabel: "Take me there",
-      targetAttr: "partner_links", // TODO: add data-onboarding="profile_categories"
+      targetAttr: "profile_categories",
       completionTrigger: { table: "organizations", column: "primary_category" },
       guided: false,
     },

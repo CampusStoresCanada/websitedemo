@@ -672,7 +672,7 @@ export default function PartnerProfile({
 
           {/* Categories — primary prominent, secondaries below */}
           {(categories.length > 0 || (editMode && canEditThisOrg)) && (
-            <div className="mb-10 space-y-3">
+            <div className="mb-10 space-y-3" data-onboarding="profile_categories">
               {groupedCategories.map((group, i) => (
                 <div key={group.parent}>
                   {/* Parent badge */}
@@ -774,7 +774,7 @@ export default function PartnerProfile({
 
           {/* Description */}
           {organization.company_description && (
-            <div className="mb-10">
+            <div className="mb-10" data-onboarding="profile_description">
               <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
                 Description
               </h3>
@@ -856,7 +856,7 @@ export default function PartnerProfile({
 
           {/* Featured Product */}
           {highlightProductName && (
-            <div className="mb-10">
+            <div className="mb-10" data-onboarding="profile_featured_product">
               <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
                 Featured Product
               </h3>

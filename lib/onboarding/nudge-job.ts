@@ -495,11 +495,11 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   ]);
   result.log.push(`conditionals: conference=${conferenceActive}, benchmarking=${benchmarkingOpen}`);
 
-  // ── 2. Find all pending org_admin progress rows ───────────────────────────
+  // ── 2. Find all pending progress rows across all personas ────────────────
   const { data: pendingRows, error: fetchError } = await db
     .from("user_onboarding_progress")
-    .select("id, user_id, step_key, journey_started_at, sent_at, completed_at, skipped_at, reminder_count, last_reminder_sent_at")
-    .eq("persona", "org_admin")
+    .select("id, user_id, step_key, persona, journey_started_at, sent_at, completed_at, skipped_at, reminder_count, last_reminder_sent_at")
+    .in("persona", ["org_admin_member", "org_admin_partner", "member_member", "member_partner", "org_admin"])
     .is("completed_at", null)
     .is("skipped_at", null)
     .neq("step_key", "session_1_welcome"); // handled by WelcomeModal

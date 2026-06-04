@@ -618,6 +618,7 @@ export default function MemberProfile({
           <div
             className="absolute z-20 pointer-events-auto flex items-center justify-center group"
             style={{ left: '5.64vw', bottom: '0', width: '42.09vw', height: '42.09vw' }}
+            data-onboarding="profile_featured_product"
             {...fieldProps("organizations", "product_overlay_url", organization.id, organization.id)}
           >
             {organization.product_overlay_url ? (
@@ -1154,6 +1155,7 @@ export default function MemberProfile({
       )}
 
       {/* Procurement edit form — toolkit edit mode active, not an actual partner */}
+      <div data-onboarding="procurement_section">
       {editMode && canEditThisOrg && !isPartner && (
         <EditableProcurementSection
           organization={organization}
@@ -1169,9 +1171,11 @@ export default function MemberProfile({
         <MemberSupplierPanel data={memberSuppliers} />
       )}
 
+      </div>{/* end procurement_section */}
+
       {/* RFPs — visible to all viewers with appropriate access; org admins can manage */}
       {!isPartner && (
-        <div className="bg-white border-t border-gray-200">
+        <div data-onboarding="rfps_section" className="bg-white border-t border-gray-200">
           <div className="max-w-7xl mx-auto px-8 py-12">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-[#1A1A1A]">Open RFPs</h2>
