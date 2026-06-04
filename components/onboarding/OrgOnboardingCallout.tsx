@@ -71,8 +71,8 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     contacts_sorted: {
       heading: "Are your people right?",
-      body: "Open Edit and click any person to update their info. Use the eye icon to hide anyone who'd rather stay private.",
-      ctaLabel: "Take me there",
+      body: "Let's make sure the right staff are listed — and that their info is current.",
+      ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: [
         { table: "contacts", column: "name" },
@@ -81,15 +81,19 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
         { table: "contacts", column: "work_phone_number" },
         { table: "contacts", column: "hidden" },
       ],
-      guided: false,
+      guided: true,
+      fieldHeading: "Now open your Toolkit",
+      fieldBody: "Tap the + button at the bottom right, then click Edit. Then click any person to update their info.",
     },
     visibility_intro: {
-      heading: "You control who sees what",
-      body: "Every eye icon on the page is a visibility toggle. Open Edit, click on a person, and you can hide them from the community without removing them.",
+      heading: "You decide who's visible",
+      body: "Anyone on your staff list can be hidden from the community — without being removed. Let's try it.",
       ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: { table: "contacts", column: "hidden" },
-      guided: false,
+      guided: true,
+      fieldHeading: "Open your Toolkit and click Edit",
+      fieldBody: "Then click any person — you'll see an eye icon next to their name. That's their visibility toggle.",
     },
     network_partners: {
       heading: "See what's stocked for you",
@@ -181,24 +185,28 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       guided: false,
     },
     contacts_sorted: {
-      heading: "Are your people right?",
-      body: "Open Edit and click any person to update their info. Members want to know who to call.",
-      ctaLabel: "Take me there",
+      heading: "Who's on your team?",
+      body: "Members want to know who to call at your company. Let's make sure the right people are listed with accurate info.",
+      ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: [
         { table: "contacts", column: "name" },
         { table: "contacts", column: "work_email" },
         { table: "contacts", column: "role_title" },
       ],
-      guided: false,
+      guided: true,
+      fieldHeading: "Now open your Toolkit",
+      fieldBody: "Tap the + button at the bottom right, click Edit, then click any person to update their info.",
     },
     visibility_intro: {
-      heading: "You control who sees what",
-      body: "The eye icon next to any contact hides them from the community. Useful for internal staff you don't want listed publicly.",
+      heading: "You decide who's visible",
+      body: "Any contact can be hidden from the community without being removed. Useful for internal staff.",
       ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: { table: "contacts", column: "hidden" },
-      guided: false,
+      guided: true,
+      fieldHeading: "Open your Toolkit and click Edit",
+      fieldBody: "Then click any person — the eye icon toggles their visibility. Try it on someone.",
     },
     network_members: {
       heading: "Meet your market",
@@ -230,10 +238,10 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   member_member: {
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "The eye icon next to your name in the Staffing section controls whether you appear in the directory. Open the Flag tool and tap your name if anything needs updating.",
-      ctaLabel: "Show me",
+      body: "The eye icon next to your name controls whether you appear in the directory. Your org admin can toggle it — use the Flag tool if anything needs changing.",
+      ctaLabel: "Show me where",
       targetAttr: "contacts_section",
-      completionTrigger: { table: "contacts", column: "hidden" },
+      completesOnCta: true,
       guided: false,
     },
     network_partners: {
@@ -274,10 +282,10 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   member_partner: {
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "The eye icon next to your name in the Staffing section controls whether you appear in the directory.",
-      ctaLabel: "Show me",
+      body: "The eye icon next to your name controls whether you appear when member stores search for contacts at your company. Your org admin can toggle it — Flag them if anything needs changing.",
+      ctaLabel: "Show me where",
       targetAttr: "contacts_section",
-      completionTrigger: { table: "contacts", column: "hidden" },
+      completesOnCta: true,
       guided: false,
     },
     network_members: {
