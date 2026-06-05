@@ -28,10 +28,13 @@ export default function OnboardingGate({ children, serverHasOnboarding }: Onboar
 
   // Reset the gate whenever the user changes (e.g. DevPanel account switch).
   // useState initializer only runs once so we need an effect to handle re-auth.
+  // Always go back to "checking" — don't inspect organizations here because they
+  // haven't loaded yet for the new user. The main check effect opens the gate
+  // if the user has no qualifying memberships.
   useEffect(() => {
     if (onboardingDisabled) return;
     if (!user) { setState("open"); return; }
-    setState(organizations.length > 0 ? "checking" : "open");
+    setState("checking");
     setPersona(null);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
