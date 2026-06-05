@@ -401,26 +401,14 @@ export default function DirectoryTable({
           </svg>
           <span>
             Your store&apos;s product categories aren&apos;t on file yet — partners can&apos;t be ranked by fit until they are.{" "}
-            {memberProfile.isOrgAdmin ? (
-              <a
-                href={memberProfile.orgSlug ? `/org/${memberProfile.orgSlug}` : "/"}
-                className="font-medium underline underline-offset-2 hover:text-amber-900"
-              >
-                Go to your store profile and enable Edit mode →
-              </a>
-            ) : memberProfile.primaryContactId ? (
-              <a
-                href={`/api/circle/profile/${memberProfile.primaryContactId}`}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-medium underline underline-offset-2 hover:text-amber-900"
-              >
-                Message {memberProfile.primaryContactName ?? "your store director"} on Circle →
-              </a>
-            ) : (
-              <span className="font-medium">Talk to your store director</span>
-            )}{" "}
-            to get your categories, preferences, and buying cycle on record.
+            <a
+              href={memberProfile.orgSlug ? `/org/${memberProfile.orgSlug}#contacts_section` : "/me"}
+              className="font-medium underline underline-offset-2 hover:text-amber-900"
+            >
+              {memberProfile.isOrgAdmin
+                ? "Go to your store profile and set up procurement →"
+                : "Click your name in your store's Staffing section to set your buying categories →"}
+            </a>
           </span>
         </div>
       )}
