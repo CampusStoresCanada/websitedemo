@@ -28,6 +28,10 @@ interface StepConfig {
   fieldBody?: string;
   showFieldTrigger?: { table: string; column: string };
   completesOnEditMode?: boolean;
+  /** In show-field phase, pulse the Toolkit FAB button to draw attention */
+  highlightFabInShowField?: boolean;
+  /** Complete the step when the user taps the Toolkit FAB (instead of transitioning to highlight-edit) */
+  completesOnFabClick?: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -237,11 +241,14 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   // ── Member: campus store employee ─────────────────────────────────────────
   member_member: {
     view_org_page: {
-      heading: "This is your store on the network",
-      body: "This is how your institution appears to partners and other members. The + button at the bottom right gives you tools to interact with any page across the whole network.",
-      ctaLabel: "Got it",
-      guided: false,
-      completesOnCta: true,
+      heading: "This website works a little differently",
+      body: "Everything you need is in the Toolkit — that + button at the bottom right. It follows you everywhere on the network.",
+      ctaLabel: "Show me",
+      guided: true,
+      fieldHeading: "There it is",
+      fieldBody: "Tap the + button to open your Toolkit and see what it can do.",
+      highlightFabInShowField: true,
+      completesOnFabClick: true,
     },
     visibility_intro: {
       heading: "You control your own visibility",
@@ -429,14 +436,31 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, user?.id, isOwnOrgPage, persona, refreshTick]);
 
-  // Phase: show-field → FAB click or showFieldTrigger → highlight-edit
+  // Phase: show-field → FAB click or showFieldTrigger → highlight-edit (or complete)
   useEffect(() => {
     if (phase !== "show-field" || !activeStep || !persona) return;
     const config = CONFIGS[persona][activeStep];
 
+    // Optionally pulse the Toolkit FAB to draw attention
+    let fabEl: Element | null = null;
+    if (config?.highlightFabInShowField) {
+      fabEl = document.querySelector("[data-toolkit-fab]");
+      if (fabEl) {
+        fabEl.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "animate-pulse", "rounded-full");
+      }
+    }
+
     function onFabClick(e: MouseEvent) {
       if ((e.target as HTMLElement).closest("[data-toolkit-fab]")) {
-        setPhase("highlight-edit");
+        // Remove pulse before acting
+        if (fabEl) {
+          fabEl.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "animate-pulse", "rounded-full");
+        }
+        if (config?.completesOnFabClick) {
+          void markComplete();
+        } else {
+          setPhase("highlight-edit");
+        }
       }
     }
     document.addEventListener("click", onFabClick, { capture: true });
@@ -453,6 +477,9 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     return () => {
       document.removeEventListener("click", onFabClick, { capture: true });
       window.removeEventListener("csc:field-updated", onFieldUpdated);
+      if (fabEl) {
+        fabEl.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-2", "animate-pulse", "rounded-full");
+      }
     };
   }, [phase, activeStep, persona]);
 
