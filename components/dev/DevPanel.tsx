@@ -10,6 +10,8 @@ import {
   resetMyOnboarding,
 } from "@/lib/actions/onboarding";
 import type { OnboardingStep } from "@/lib/actions/onboarding";
+import type { Persona } from "@/lib/onboarding/steps";
+import { STEPS_BY_PERSONA } from "@/lib/onboarding/steps";
 
 const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
   [
@@ -26,7 +28,7 @@ const TEST_ACCOUNTS = [
   { email: "google@campusstores.ca", password: "Mkpspxw8BA!vb3T", label: "Super Admin (Steve)" },
   { email: "daviess@algonquincollege.com", password: "CSCBoard2026!", label: "Admin (Shawn)" },
   { email: "adam.hustwitt@nscc.ca", password: "CSCMember2026!", label: "Org Admin — Member" },
-  { email: "adam.raisin@cesiumtelecom.com", password: "CSCMember2026!", label: "Org Admin — Partner" },
+  { email: "maria.sucher@vitalsource.com", password: "CSCMember2026!", label: "Org Admin — Partner (VitalSource)" },
   { email: "acain01@uoguelph.ca", password: "CSCUser2026!", label: "Member User" },
 ];
 
@@ -35,6 +37,7 @@ export default function DevPanel() {
   const [loginLoading, setLoginLoading] = useState<string | null>(null);
   const [loginError, setLoginError] = useState<string | null>(null);
   const [onboardingSteps, setOnboardingSteps] = useState<OnboardingStep[] | null>(null);
+  const [onboardingPersona, setOnboardingPersona] = useState<Persona | null>(null);
   const [onboardingLoading, setOnboardingLoading] = useState(false);
   const [onboardingResetStatus, setOnboardingResetStatus] = useState<"idle" | "done" | "error">("idle");
   const [cronStatus, setCronStatus] = useState<"idle" | "running" | "done" | "error">("idle");
@@ -67,14 +70,15 @@ export default function DevPanel() {
 
   // Load onboarding state whenever the panel opens and a user is logged in
   useEffect(() => {
-    if (!show || !user) { setOnboardingSteps(null); return; }
+    if (!show || !user) { setOnboardingSteps(null); setOnboardingPersona(null); return; }
     setOnboardingLoading(true);
     setOnboardingResetStatus("idle");
     getMyOnboardingProgress()
       .then((result) => {
         setOnboardingSteps(result.steps ?? null);
+        setOnboardingPersona(result.persona ?? null);
       })
-      .catch(() => setOnboardingSteps(null))
+      .catch(() => { setOnboardingSteps(null); setOnboardingPersona(null); })
       .finally(() => setOnboardingLoading(false));
   }, [show, user?.id]);
 
@@ -294,29 +298,44 @@ export default function DevPanel() {
             )}
 
             {onboardingSteps !== null && (
-              <div className="space-y-0.5 max-h-36 overflow-y-auto">
-                {onboardingSteps.length === 0 ? (
-                  <p className="text-[10px] text-gray-400 italic">Not started</p>
-                ) : (
-                  onboardingSteps.map((step) => (
-                    <div key={step.step_key} className="flex items-center justify-between gap-2">
-                      <span className="text-[9px] text-gray-500 truncate flex-1">
-                        {step.step_key}
-                      </span>
-                      <span className={`text-[9px] font-semibold flex-shrink-0 ${
-                        step.completed_at
-                          ? "text-green-600"
-                          : step.skipped_at
-                          ? "text-gray-400"
-                          : step.sent_at
-                          ? "text-amber-500"
-                          : "text-gray-300"
-                      }`}>
-                        {step.completed_at ? "✓" : step.skipped_at ? "skip" : step.sent_at ? "sent" : "—"}
-                      </span>
-                    </div>
-                  ))
-                )}
+              <div>
+                {/* Persona badge */}
+                <div className="mb-1.5 flex items-center gap-1.5">
+                  {onboardingPersona ? (
+                    <span className="text-[9px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">
+                      {onboardingPersona}
+                    </span>
+                  ) : (
+                    <span className="text-[9px] text-gray-400 italic">no persona</span>
+                  )}
+                </div>
+                {/* All expected steps for this persona, merged with DB progress */}
+                <div className="space-y-0.5 max-h-40 overflow-y-auto">
+                  {(() => {
+                    const allSteps = onboardingPersona
+                      ? (STEPS_BY_PERSONA[onboardingPersona] as readonly string[])
+                      : onboardingSteps.map(s => s.step_key);
+                    const progressByKey = new Map(onboardingSteps.map(s => [s.step_key, s]));
+                    const displaySteps = allSteps.length > 0 ? allSteps : onboardingSteps.map(s => s.step_key);
+                    return displaySteps.map((stepKey) => {
+                      const step = progressByKey.get(stepKey);
+                      return (
+                        <div key={stepKey} className="flex items-center justify-between gap-2">
+                          <span className="text-[9px] text-gray-500 truncate flex-1">{stepKey}</span>
+                          <span className={`text-[9px] font-semibold flex-shrink-0 ${
+                            step?.completed_at ? "text-green-600"
+                            : step?.skipped_at ? "text-gray-400"
+                            : step?.sent_at ? "text-amber-500"
+                            : step ? "text-gray-300"
+                            : "text-gray-200"
+                          }`}>
+                            {step?.completed_at ? "✓" : step?.skipped_at ? "skip" : step?.sent_at ? "sent" : step ? "—" : "·"}
+                          </span>
+                        </div>
+                      );
+                    });
+                  })()}
+                </div>
               </div>
             )}
           </div>
