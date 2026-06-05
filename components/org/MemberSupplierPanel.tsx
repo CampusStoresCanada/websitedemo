@@ -109,7 +109,20 @@ export default function MemberSupplierPanel({ data }: MemberSupplierPanelProps) 
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-6">
             <p className="text-sm font-medium text-gray-700 mb-1">Your supplier list isn't set up yet.</p>
             <p className="text-sm text-gray-500 leading-relaxed">
-              Click your name in the Staffing section above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
+              Click your name in the{" "}
+              <button
+                type="button"
+                onClick={() => {
+                  const el = document.querySelector('[data-onboarding="contacts_section"]');
+                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  el?.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
+                  setTimeout(() => el?.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse"), 2500);
+                }}
+                className="font-medium text-[#EE2A2E] hover:text-[#D92327] underline underline-offset-2 transition-colors"
+              >
+                Staffing section
+              </button>
+              {" "}above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
             </p>
           </div>
         )}
