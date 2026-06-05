@@ -1585,7 +1585,13 @@ export default function MemberProfile({
           isHidden={isContactHidden(editingContact)}
           onToggleHidden={() => void handleToggleContactHidden(editingContact)}
           onClose={() => setEditingContact(null)}
-          procurementInfo={procurementInfo}
+          procurementInfo={
+            // Always show Procurement tab for own contacts — even if org has no procurement
+            // data yet, so the member can set their buying categories from scratch.
+            isOwnOrgPage || isOwnContact(editingContact)
+              ? (procurementInfo ?? {})
+              : procurementInfo
+          }
           onProcurementSave={setProcurementInfo}
         />
       )}
