@@ -1,5 +1,6 @@
 "use client";
 
+import React from "react";
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
 import { SCALE_RANGES } from "@/lib/explore/types";
 import { CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
@@ -139,6 +140,15 @@ export function CompoundFilterBar({
 
   const totalActive = primaryPills.length + compoundPills.length;
 
+  // Fire once when a filter is first applied — used by onboarding callout
+  const hasActiveCompound = compoundPills.length > 0 || (checkedCategories?.size ?? 0) > 0 || (checkedSubcategories?.size ?? 0) > 0;
+  const filterFiredRef = React.useRef(false);
+  if (hasActiveCompound && !filterFiredRef.current && typeof window !== "undefined") {
+    filterFiredRef.current = true;
+    window.dispatchEvent(new CustomEvent("csc:filter-applied"));
+  }
+  if (!hasActiveCompound) filterFiredRef.current = false; // reset when cleared
+
   const pillCls = "inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[10px] font-medium";
   const xBtn = "hover:bg-white/20 rounded-full p-0.5 transition-colors";
   const xIcon = (
@@ -171,6 +181,7 @@ export function CompoundFilterBar({
         {/* Add refinement button */}
         <button
           type="button"
+          data-onboarding="refine-button"
           onClick={() => setShowFilterMenu(!showFilterMenu)}
           className="inline-flex items-center gap-1 rounded-full border border-dashed border-gray-300 px-2.5 py-1 text-[10px] font-medium text-gray-500 hover:border-gray-400 hover:text-gray-700 transition-colors"
         >

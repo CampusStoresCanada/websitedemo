@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import MapHero from "@/components/map/MapHero";
+import DirectoryOnboardingCallout from "@/components/onboarding/DirectoryOnboardingCallout";
 import ValueProps from "@/components/home/ValueProps";
 import DirectoryJoinCTA from "@/components/directory/DirectoryJoinCTA";
 import { getMembersPageData } from "@/lib/homepage";
@@ -22,6 +23,7 @@ export default async function MembersPage() {
 
   return (
     <div>
+      <DirectoryOnboardingCallout page="members" />
       <MapHero
         organizations={mapOrgs}
         stories={[]}

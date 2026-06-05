@@ -112,7 +112,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       body: "See how other campus stores show up — and find peers who might share your challenges.",
       ctaLabel: "See the directory",
       targetPath: "/members",
-      completesOnCta: true,
+      completesOnCta: false, // completion happens on the /members page via DirectoryOnboardingCallout
       guided: false,
     },
     events_discovery: {

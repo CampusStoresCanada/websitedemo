@@ -1264,7 +1264,12 @@ export default function MapHero({
               {/* Table / Map toggle */}
               <button
                 type="button"
-                onClick={() => setViewMode(viewMode === "map" ? "table" : "map")}
+                data-onboarding="view-toggle"
+                onClick={() => {
+                  const next = viewMode === "map" ? "table" : "map";
+                  setViewMode(next);
+                  window.dispatchEvent(new CustomEvent("csc:view-mode-changed", { detail: { mode: next } }));
+                }}
                 className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-700 transition-colors"
                 title={viewMode === "map" ? "Switch to table view" : "Switch to map view"}
               >
