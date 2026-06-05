@@ -236,6 +236,13 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
 
   // ── Member: campus store employee ─────────────────────────────────────────
   member_member: {
+    view_org_page: {
+      heading: "This is your store on the network",
+      body: "This is how your institution appears to partners and other members. The + button at the bottom right gives you tools to interact with any page across the whole network.",
+      ctaLabel: "Got it",
+      guided: false,
+      completesOnCta: true,
+    },
     visibility_intro: {
       heading: "You control your own visibility",
       body: "The eye icon next to your name controls whether you appear in the directory. Your org admin can toggle it — use the Flag tool if anything needs changing.",
@@ -280,6 +287,13 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
 
   // ── Member: vendor partner employee ───────────────────────────────────────
   member_partner: {
+    view_org_page: {
+      heading: "This is your company on the network",
+      body: "This is what campus stores see when they look you up. The + button at the bottom right gives you tools to interact with any page across the whole network.",
+      ctaLabel: "Got it",
+      guided: false,
+      completesOnCta: true,
+    },
     visibility_intro: {
       heading: "You control your own visibility",
       body: "The eye icon next to your name controls whether you appear when member stores search for contacts at your company. Your org admin can toggle it — Flag them if anything needs changing.",
@@ -528,6 +542,12 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     if (!activeStep || !persona) return;
     const config = CONFIGS[persona][activeStep];
     if (!config) return;
+
+    // Acknowledge-only step: complete with no navigation
+    if (config.completesOnCta && !config.targetPath) {
+      await markComplete();
+      return;
+    }
 
     // Navigation step: complete and navigate
     if (config.completesOnCta && config.targetPath) {

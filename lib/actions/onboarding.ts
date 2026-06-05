@@ -49,6 +49,8 @@ export async function derivePersona(): Promise<Persona | null> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orgs = (memberships ?? []) as Array<{ role: string; organizations: { type: string } | null }>;
 
+  console.log("[derivePersona] orgs:", JSON.stringify(orgs));
+
   const isMemberOrgAdmin = orgs.some(
     (o) => o.role === "org_admin" && o.organizations?.type === "Member"
   );
@@ -57,6 +59,7 @@ export async function derivePersona(): Promise<Persona | null> {
   );
   const isMemberUser = orgs.some((o) => o.organizations?.type === "Member");
   const isPartnerUser = orgs.some((o) => o.organizations?.type === "Vendor Partner");
+  console.log("[derivePersona] flags:", { isMemberOrgAdmin, isPartnerOrgAdmin, isMemberUser, isPartnerUser });
 
   // Precedence: org admin roles first, then member roles
   if (isMemberOrgAdmin) return "org_admin_member";

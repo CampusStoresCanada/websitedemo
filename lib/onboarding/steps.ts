@@ -74,6 +74,7 @@ export type OrgAdminPartnerStepKey = (typeof ORG_ADMIN_PARTNER_STEPS)[number];
 
 export const MEMBER_MEMBER_STEPS = [
   "session_1_welcome",
+  "view_org_page",
   "toolkit_tour",
   "visibility_intro",
   "network_members",
@@ -90,6 +91,7 @@ export type MemberMemberStepKey = (typeof MEMBER_MEMBER_STEPS)[number];
 
 export const MEMBER_PARTNER_STEPS = [
   "session_1_welcome",
+  "view_org_page",
   "toolkit_tour",
   "visibility_intro",
   "network_members",
