@@ -91,7 +91,14 @@ export default function MemberProfile({
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
-  const { permissionState, organizations } = useAuth();
+  const { permissionState, organizations, user } = useAuth();
+  const userEmail = user?.email?.toLowerCase() ?? null;
+  // Members can click their own contact entry to edit visibility
+  function isOwnContact(contact: VisibleContact): boolean {
+    if (!userEmail) return false;
+    const contactEmail = ((contact.work_email || contact.email) as string | null)?.toLowerCase();
+    return !!contactEmail && contactEmail === userEmail;
+  }
   const { editMode, canEditOrg } = useToolkit();
   const [savingContactId, setSavingContactId] = useState<string | null>(null);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
@@ -985,9 +992,9 @@ export default function MemberProfile({
                         return (
                       <tr
                         key={contact.id}
-                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${(editMode && canEditThisOrg) || isOwnContact(contact) ? "cursor-pointer hover:bg-gray-50" : ""}${isOwnContact(contact) && !editMode ? " ring-1 ring-inset ring-[#EE2A2E]/20" : ""}`}
                         data-flaggable
-                        onClick={editMode && canEditThisOrg ? (e) => {
+                        onClick={(editMode && canEditThisOrg) || isOwnContact(contact) ? (e) => {
                           if ((e.target as HTMLElement).closest('[data-deletable]')) return;
                           setEditingContact(contact);
                         } : undefined}

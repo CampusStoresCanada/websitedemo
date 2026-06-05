@@ -245,10 +245,10 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "The eye icon next to your name controls whether you appear in the directory. Your org admin can toggle it — use the Flag tool if anything needs changing.",
-      ctaLabel: "Show me where",
+      body: "Click on your name in the Staffing section below. You'll see a toggle that controls whether you appear in the network directory.",
+      ctaLabel: "Show me",
       targetAttr: "contacts_section",
-      completesOnCta: true,
+      completionTrigger: { table: "contacts", column: "hidden" },
       guided: false,
     },
     network_partners: {
@@ -296,10 +296,10 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "The eye icon next to your name controls whether you appear when member stores search for contacts at your company. Your org admin can toggle it — Flag them if anything needs changing.",
-      ctaLabel: "Show me where",
+      body: "Click on your name in the Staffing section below. You'll see a toggle that controls whether you appear when member stores search for contacts at your company.",
+      ctaLabel: "Show me",
       targetAttr: "contacts_section",
-      completesOnCta: true,
+      completionTrigger: { table: "contacts", column: "hidden" },
       guided: false,
     },
     network_members: {
