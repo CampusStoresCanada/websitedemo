@@ -104,12 +104,12 @@ export default function MemberSupplierPanel({ data }: MemberSupplierPanelProps) 
           )}
         </div>
 
-        {/* No buying assignments yet — Flag prompt */}
+        {/* No buying assignments yet */}
         {!data.hasAssignments && (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-6">
             <p className="text-sm font-medium text-gray-700 mb-1">Your supplier list isn't set up yet.</p>
             <p className="text-sm text-gray-500 leading-relaxed">
-              Use the <span className="font-medium text-gray-700">Flag</span> tool in the Toolkit, then tap your name in the Staffing section to let your org admin know what categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
+              Click your name in the Staffing section above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
             </p>
           </div>
         )}
