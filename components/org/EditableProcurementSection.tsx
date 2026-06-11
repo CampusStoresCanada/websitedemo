@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo, ProcurementVisibility, CategoryBuyer, KeyDate } from "@/lib/types/procurement";
 import {

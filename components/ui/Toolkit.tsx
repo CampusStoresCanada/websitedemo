@@ -17,7 +17,7 @@ import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees,
 import { checkNudgeCooldown, notifyMembersWithoutProcurement } from "@/lib/actions/partner-market";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
-import type { PendingContentChange } from "@/lib/database.types";
+import type { PendingContentChange } from "@/lib/types/db";
 import { addContact } from "@/lib/actions/add-contact";
 import { deleteContact } from "@/lib/actions/delete-contact";
 import { addBrandColor } from "@/lib/actions/add-brand-color";
@@ -3430,7 +3430,7 @@ function ShareExternalTab({ pathname, pageTitle, selectedElement }: {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "");
 
   const handleCreate = async () => {
     setCreating(true);

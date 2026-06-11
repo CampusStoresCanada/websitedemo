@@ -1,5 +1,5 @@
 import Image from "next/image";
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 
 interface OrgHighlightProps {
   organization: Organization;

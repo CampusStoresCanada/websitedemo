@@ -14,7 +14,7 @@ import type {
   Contact,
   BrandColor,
   Benchmarking,
-} from "@/lib/database.types";
+} from "@/lib/types/db";
 import { loadVisibilityConfig, applyFieldMask } from "./engine";
 import type { ViewerContext } from "./viewer";
 import { createAdminClient } from "@/lib/supabase/admin";

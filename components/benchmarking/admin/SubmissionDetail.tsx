@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Benchmarking, DeltaFlag } from "@/lib/database.types";
+import type { Benchmarking, DeltaFlag } from "@/lib/types/db";
 import { verifySubmission, unverifySubmission } from "@/lib/actions/benchmarking-admin";
 import SurveySection1 from "@/components/benchmarking/sections/SurveySection1";
 import SurveySection2 from "@/components/benchmarking/sections/SurveySection2";

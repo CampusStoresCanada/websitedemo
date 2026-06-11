@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { SiteContent } from "@/lib/database.types";
+import type { SiteContent } from "@/lib/types/db";
 
 interface ContentEntryFormProps {
   /** Existing entry to edit, or undefined for new entry */

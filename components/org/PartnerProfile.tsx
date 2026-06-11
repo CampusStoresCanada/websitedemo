@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import type { BrandColor } from "@/lib/database.types";
+import type { BrandColor } from "@/lib/types/db";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
 import ColorizedImage from "@/components/ui/ColorizedImage";

@@ -133,7 +133,7 @@ export default function SurveyPreview({ fieldConfig }: SurveyPreviewProps) {
     priorYearData: null,
     onFieldChange: noopFieldChange,
     onDeltaFlag: noopDeltaFlag,
-    deltaFlags: [] as import("@/lib/database.types").DeltaFlag[],
+    deltaFlags: [] as import("@/lib/types/db").DeltaFlag[],
     isReadOnly: false,
     organizationName: useSampleData ? "Sample Campus Bookstore" : "Your Organization",
     organizationProvince: "Ontario",

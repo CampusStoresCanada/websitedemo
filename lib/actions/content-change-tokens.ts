@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import crypto from "crypto";
-import type { PendingContentChange } from "@/lib/database.types";
+import type { PendingContentChange } from "@/lib/types/db";
 
 const TOKEN_EXPIRY_MS = 48 * 60 * 60 * 1000; // 48 hours — matches pending change lifetime
 

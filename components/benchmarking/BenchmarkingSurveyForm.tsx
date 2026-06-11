@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
-import type { Benchmarking, DeltaFlag } from "@/lib/database.types";
+import type { Benchmarking, DeltaFlag } from "@/lib/types/db";
 import {
   saveBenchmarkingField,
   submitBenchmarkingSurvey,

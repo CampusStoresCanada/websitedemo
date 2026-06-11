@@ -1,6 +1,6 @@
 "use client";
 
-import type { Benchmarking } from "@/lib/database.types";
+import type { Benchmarking } from "@/lib/types/db";
 import { ProtectedSection, BlurredValue } from "@/components/ui/GreyBlur";
 
 interface BenchmarkingDetailsProps {

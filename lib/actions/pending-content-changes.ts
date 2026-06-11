@@ -11,7 +11,7 @@ import {
   sendContentChangeRejected,
 } from "@/lib/email/send";
 import { createReviewToken } from "@/lib/actions/content-change-tokens";
-import type { PendingContentChange } from "@/lib/database.types";
+import type { PendingContentChange } from "@/lib/types/db";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
