@@ -238,6 +238,88 @@ export async function cancelBoardMeeting(
   return { success: true };
 }
 
+// ─── Create + link a calendar event for an unlinked board meeting ────────────
+
+function slugify(title: string, date: string): string {
+  return (
+    title
+      .toLowerCase()
+      .replace(/[^a-z0-9\s-]/g, "")
+      .trim()
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 60) +
+    "-" +
+    date
+  );
+}
+
+export async function createEventForMeeting(
+  meetingId: string,
+): Promise<{ success: true; slug: string } | { error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { error: "Not authorised" };
+
+  const db = createAdminClient();
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, title, meeting_date, meeting_type, event_id, created_by")
+    .eq("id", meetingId)
+    .maybeSingle();
+
+  if (!meeting) return { error: "Meeting not found" };
+  if (meeting.event_id) return { error: "Meeting already has a linked event" };
+
+  const slug = slugify(meeting.title, meeting.meeting_date);
+
+  // Deduplicate slug if needed
+  const { data: existing } = await db
+    .from("events")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  const finalSlug = existing ? `${slug}-2` : slug;
+
+  const startsAt = `${meeting.meeting_date}T14:00:00Z`;
+  const endsAt   = `${meeting.meeting_date}T16:00:00Z`;
+
+  const { data: event, error: eventError } = await db
+    .from("events")
+    .insert({
+      slug:          finalSlug,
+      title:         meeting.title,
+      starts_at:     startsAt,
+      ends_at:       endsAt,
+      audience_mode: "board",
+      is_virtual:    true,
+      status:        "published",
+      created_by:    meeting.created_by ?? auth.ctx.userId,
+    })
+    .select("id")
+    .single();
+
+  if (eventError || !event) {
+    console.error("[createEventForMeeting] event insert failed:", eventError);
+    return { error: "Failed to create event" };
+  }
+
+  const { error: linkError } = await db
+    .from("board_meetings")
+    .update({ event_id: event.id })
+    .eq("id", meetingId);
+
+  if (linkError) {
+    console.error("[createEventForMeeting] link failed:", linkError);
+    return { error: "Event created but link failed" };
+  }
+
+  revalidatePath("/admin/board/meetings");
+  revalidatePath(`/admin/board/meetings/${meetingId}`);
+  return { success: true, slug: finalSlug };
+}
+
 // ─── Delete a board document ─────────────────────────────────────────────────
 
 export async function deleteBoardDocument(
