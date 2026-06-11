@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { CircleAdminClient } from "./client";
 import { mintMemberToken } from "./headless-auth";
 import { CircleMemberClient } from "./member-proxy";
-import type { CircleMember, CircleSyncQueueItem } from "./types";
+import type { CircleMember, CircleMemberInput, CircleSyncQueueItem } from "./types";
 
 /**
  * Execute a single sync queue item against the Circle API.
@@ -262,9 +262,16 @@ async function handleUpdateProfile(
   client: CircleAdminClient,
   item: CircleSyncQueueItem
 ): Promise<void> {
-  // DISABLED — calls PUT /community_members/{id}. Shut down during API usage audit.
-  // To re-enable: verify monthly call volume is acceptable, then restore implementation.
-  return;
+  const circleId = await resolveCircleId(item.entity_id);
+  if (!circleId) return; // not linked to Circle — nothing to push
+
+  const updates: Partial<CircleMemberInput> = {};
+  if (typeof item.payload.name === "string") updates.name = item.payload.name;
+  if (typeof item.payload.headline === "string") updates.headline = item.payload.headline;
+
+  if (Object.keys(updates).length === 0) return;
+
+  await client.updateMember(circleId, updates);
 }
 
 async function handleDeleteMember(

@@ -17,30 +17,43 @@ export default async function PeopleAdminPage() {
 
   const adminClient = createAdminClient();
 
-  type ProfileWithOrgs = {
-    id: string;
-    display_name: string | null;
-    global_role: string | null;
-    created_at: string | null;
-    user_organizations: Array<{
-      organization_id: string;
-      role: string;
-      status: string;
-      organizations: { id: string; name: string; slug: string } | null;
-    }>;
-  };
-
-  // Load profiles with org memberships
-  // eslint-disable-next-line @typescript-eslint/ban-ts-comment
-  // @ts-expect-error -- nested Supabase select causes "type instantiation excessively deep" false positive
+  // Load profiles
   const { data: rawProfiles } = await adminClient
     .from("profiles")
-    .select(
-      `id, display_name, global_role, created_at,
-       user_organizations(organization_id, role, status, organizations(id, name, slug))`
-    )
+    .select("id, display_name, global_role, created_at")
     .order("display_name");
-  const profiles = (rawProfiles ?? []) as unknown as ProfileWithOrgs[];
+  const profiles = rawProfiles ?? [];
+
+  // Load active org memberships separately — there's no direct FK between
+  // profiles and user_organizations (both reference auth.users), so PostgREST
+  // can't embed them in a single query.
+  type Membership = {
+    user_id: string;
+    role: string;
+    status: string;
+    organizations: { id: string; name: string; slug: string } | null;
+  };
+  const { data: rawMemberships } = await adminClient
+    .from("user_organizations")
+    .select("user_id, role, status, organizations(id, name, slug)")
+    .eq("status", "active");
+
+  const orgsByUser = new Map<
+    string,
+    Array<{ org_id: string; org_name: string; org_slug: string; role: string; status: string }>
+  >();
+  for (const m of (rawMemberships ?? []) as unknown as Membership[]) {
+    if (!m.organizations) continue;
+    const list = orgsByUser.get(m.user_id) ?? [];
+    list.push({
+      org_id: m.organizations.id,
+      org_name: m.organizations.name,
+      org_slug: m.organizations.slug,
+      role: m.role,
+      status: m.status,
+    });
+    orgsByUser.set(m.user_id, list);
+  }
 
   // Load auth emails
   const { data: authUsers } = await adminClient.auth.admin.listUsers();
@@ -58,15 +71,7 @@ export default async function PeopleAdminPage() {
     email: emailMap[p.id] ?? null,
     global_role: p.global_role ?? "user",
     created_at: p.created_at,
-    orgs: (p.user_organizations ?? [])
-      .filter((uo) => uo.status === "active" && uo.organizations)
-      .map((uo) => ({
-        org_id: uo.organizations!.id,
-        org_name: uo.organizations!.name,
-        org_slug: uo.organizations!.slug,
-        role: uo.role,
-        status: uo.status,
-      })),
+    orgs: orgsByUser.get(p.id) ?? [],
   }));
 
   return (

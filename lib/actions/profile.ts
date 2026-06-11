@@ -18,7 +18,9 @@ export interface UpdateProfileResult {
  * Update the authenticated user's display name (profiles) and optionally
  * their role title on the linked contact (contacts).
  *
- * Enqueues a Circle profile sync so the change propagates automatically.
+ * Keeps the linked contact's name in step with the profile, and only
+ * enqueues a Circle sync when name/role_title actually changed — Circle
+ * pushes cost API quota, so no-op saves shouldn't generate calls.
  */
 export async function updateProfile(
   data: UpdateProfileData
@@ -45,47 +47,41 @@ export async function updateProfile(
     return { success: false, error: profileErr.message };
   }
 
-  // If role_title provided and user has a linked contact, update it too
-  let contactId: string | null = null;
+  // Sync the linked contact (CRM/Circle record), pushing only the fields
+  // that changed to Circle.
   if (auth.ctx.userEmail) {
-    const updates: Record<string, string> = {};
-    if (data.role_title !== undefined) {
-      updates.role_title = data.role_title.trim();
-    }
+    const { data: contact } = await db
+      .from("contacts")
+      .select("id, name, role_title, circle_id")
+      .eq("email", auth.ctx.userEmail)
+      .limit(1)
+      .maybeSingle();
 
-    if (Object.keys(updates).length > 0) {
-      const { data: contact } = await db
-        .from("contacts")
-        .select("id")
-        .eq("email", auth.ctx.userEmail)
-        .limit(1)
-        .maybeSingle();
+    if (contact) {
+      const contactUpdates: Record<string, string> = {};
+      const circleChanges: { name?: string; headline?: string } = {};
 
-      if (contact?.id) {
-        contactId = contact.id;
-        await db
-          .from("contacts")
-          .update(updates)
-          .eq("id", contact.id);
+      if (displayName !== contact.name) {
+        contactUpdates.name = displayName;
+        circleChanges.name = displayName;
       }
-    } else {
-      // Still need contactId for Circle sync even without role_title update
-      const { data: contact } = await db
-        .from("contacts")
-        .select("id")
-        .eq("email", auth.ctx.userEmail)
-        .limit(1)
-        .maybeSingle();
-      contactId = contact?.id ?? null;
-    }
-  }
 
-  // Enqueue Circle profile sync (fire-and-forget)
-  if (contactId) {
-    void enqueueContactProfileSync(contactId, {
-      name: displayName,
-      ...(data.role_title !== undefined ? { headline: data.role_title.trim() } : {}),
-    });
+      if (data.role_title !== undefined) {
+        const roleTitle = data.role_title.trim();
+        if (roleTitle !== (contact.role_title ?? "")) {
+          contactUpdates.role_title = roleTitle;
+          circleChanges.headline = roleTitle;
+        }
+      }
+
+      if (Object.keys(contactUpdates).length > 0) {
+        await db.from("contacts").update(contactUpdates).eq("id", contact.id);
+      }
+
+      if (contact.circle_id && Object.keys(circleChanges).length > 0) {
+        void enqueueContactProfileSync(contact.id, circleChanges);
+      }
+    }
   }
 
   return { success: true };
