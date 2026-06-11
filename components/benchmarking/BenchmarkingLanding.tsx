@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { BenchmarkingSurvey } from "@/lib/database.types";
+import type { BenchmarkingSurvey } from "@/lib/types/db";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { parseUTC } from "@/lib/utils";
 

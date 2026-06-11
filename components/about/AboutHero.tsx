@@ -1,4 +1,4 @@
-import type { SiteContent } from "@/lib/database.types";
+import type { SiteContent } from "@/lib/types/db";
 import { fieldProps } from "@/lib/editable-fields";
 
 interface AboutHeroProps {

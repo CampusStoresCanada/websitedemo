@@ -1,6 +1,6 @@
 "use client";
 
-import type { PendingContentChange } from "@/lib/database.types";
+import type { PendingContentChange } from "@/lib/types/db";
 import { fieldDisplayLabel } from "@/lib/editable-fields";
 
 interface MyPendingChangesProps {

@@ -1,4 +1,4 @@
-import type { Contact } from "@/lib/database.types";
+import type { Contact } from "@/lib/types/db";
 import StaffCard from "./StaffCard";
 
 interface StaffSectionProps {

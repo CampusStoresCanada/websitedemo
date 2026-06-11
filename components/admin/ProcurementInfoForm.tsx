@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { Contact } from "@/lib/database.types";
+import type { Contact } from "@/lib/types/db";
 import type { ProcurementInfo, CategoryBuyer, BuyingCycle } from "@/lib/types/procurement";
 import {
   VENDOR_CATEGORIES,

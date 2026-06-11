@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import type { SiteContent } from "@/lib/database.types";
+import type { SiteContent } from "@/lib/types/db";
 import {
   createSiteContent,
   updateSiteContent,

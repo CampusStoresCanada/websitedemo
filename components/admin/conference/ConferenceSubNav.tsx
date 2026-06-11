@@ -24,6 +24,7 @@ const CONFIG_TABS = [
 /** Registration & commerce management tabs */
 const MANAGEMENT_TABS = [
   { segment: "registrations", label: "Registrations" },
+  { segment: "booths", label: "Booths" },
   { segment: "wishlist", label: "Wishlist" },
   { segment: "billing-runs", label: "Billing Runs" },
   { segment: "swaps", label: "Swaps" },

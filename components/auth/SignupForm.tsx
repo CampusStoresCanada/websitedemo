@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
-type SignupStep = "email" | "org-select" | "profile" | "confirmation";
+type SignupStep = "email" | "org-select" | "profile" | "confirmation" | "account-exists";
 
 interface OrgMatch {
   id: string;
@@ -117,6 +117,17 @@ export default function SignupForm() {
         return;
       }
 
+      // Supabase returns a 200 with no error for emails that already have a
+      // confirmed account (anti-enumeration behaviour) — it does NOT create
+      // a new account or update the password. Detect this via the empty
+      // identities array and send the user to sign in / reset their password
+      // instead of telling them an account was created.
+      if (authData.user && authData.user.identities?.length === 0) {
+        setIsLoading(false);
+        setStep("account-exists");
+        return;
+      }
+
       // If we have a selected org, create an application
       if (selectedOrg && authData.user) {
         const { error: appError } = await supabase
@@ -161,6 +172,51 @@ export default function SignupForm() {
     : allOrgs;
 
   // --- STEP RENDERS ---
+
+  if (step === "account-exists") {
+    return (
+      <div className="text-center py-6">
+        <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-amber-50 flex items-center justify-center">
+          <svg
+            className="w-8 h-8 text-amber-500"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.5}
+            stroke="currentColor"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M16.5 10.5V6.75a4.5 4.5 0 1 0-9 0v3.75m-.75 11.25h10.5a2.25 2.25 0 0 0 2.25-2.25v-6.75a2.25 2.25 0 0 0-2.25-2.25H6.75a2.25 2.25 0 0 0-2.25 2.25v6.75a2.25 2.25 0 0 0 2.25 2.25Z"
+            />
+          </svg>
+        </div>
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">
+          You already have an account
+        </h2>
+        <p className="text-gray-600 text-sm mb-6">
+          An account for{" "}
+          <span className="font-medium text-gray-900">{email}</span> already
+          exists. Sign in below, or reset your password if you don&apos;t
+          remember it.
+        </p>
+        <div className="flex flex-col gap-3">
+          <Link
+            href="/login"
+            className="inline-flex items-center justify-center px-6 py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
+          >
+            Go to Login
+          </Link>
+          <Link
+            href="/forgot-password"
+            className="text-sm text-gray-500 hover:text-gray-700"
+          >
+            Reset your password
+          </Link>
+        </div>
+      </div>
+    );
+  }
 
   if (step === "confirmation") {
     return (

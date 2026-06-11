@@ -159,7 +159,12 @@ export async function updateField({
       const cOrgId = contactData.organization_id as string | null;
       resolvedOrgId = resolvedOrgId ?? cOrgId;
       resolvedDisplayName = resolvedDisplayName || (contactData.name as string) || "";
-      canEdit = Boolean(cOrgId && canManageOrganization(auth.ctx, cOrgId));
+      const isOrgAdmin = Boolean(cOrgId && canManageOrganization(auth.ctx, cOrgId));
+      // Members can edit their own contact fields (matched by email)
+      const contactEmail = (contactData.work_email || contactData.email) as string | null;
+      const isOwnContact = !!auth.ctx.userEmail && !!contactEmail &&
+        contactEmail.toLowerCase() === auth.ctx.userEmail.toLowerCase();
+      canEdit = isOrgAdmin || isOwnContact;
     } else if (table === "brand_colors") {
       const { data: color } = await supabase
         .from("brand_colors")

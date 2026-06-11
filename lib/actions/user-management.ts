@@ -591,7 +591,24 @@ export async function setContactHidden(
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, orgId)) {
+
+  const isOrgAdmin = canManageOrganization(auth.ctx, orgId);
+
+  // Members can toggle their own contact's visibility (matched by email)
+  let isOwnContact = false;
+  if (!isOrgAdmin && auth.ctx.userEmail) {
+    const adminClient = createAdminClient();
+    const { data: contact } = await adminClient
+      .from("contacts")
+      .select("id")
+      .eq("id", contactId)
+      .eq("organization_id", orgId)
+      .or(`email.eq.${auth.ctx.userEmail},work_email.eq.${auth.ctx.userEmail}`)
+      .maybeSingle();
+    isOwnContact = !!contact;
+  }
+
+  if (!isOrgAdmin && !isOwnContact) {
     return { success: false, error: "Not authorized for this organization" };
   }
 

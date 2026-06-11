@@ -19,6 +19,7 @@ import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEdito
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
 import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
 import MeetingDocumentsPanel from "@/components/admin/board/MeetingDocumentsPanel";
+import LinkEventButton from "@/components/admin/board/LinkEventButton";
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -56,12 +57,21 @@ export default async function MeetingDetailPage({
 
   const meetingRes = await db
     .from("board_meetings")
-    .select("id, title, meeting_date, meeting_type, status, notes, created_at, notion_page_url, agenda_html, minutes_html")
+    .select("id, title, meeting_date, meeting_type, status, notes, created_at, notion_page_url, agenda_html, minutes_html, event_id")
     .eq("id", id)
     .maybeSingle();
 
   if (!meetingRes.data) notFound();
   const meeting = meetingRes.data;
+
+  const eventId = (meeting as Record<string, string | null>)["event_id"] ?? null;
+
+  // Fetch the linked event slug so we can build deep links
+  let eventSlug: string | null = null;
+  if (eventId) {
+    const { data: ev } = await db.from("events").select("slug").eq("id", eventId).maybeSingle();
+    eventSlug = ev?.slug ?? null;
+  }
 
   const [docsRes, actionsRes, prevMeetingRes] = await Promise.all([
     db
@@ -140,6 +150,13 @@ export default async function MeetingDetailPage({
         <span>{meetingTypeLabel}</span>
         <span className="text-gray-400">·</span>
         <span>{meeting.meeting_date}</span>
+        <span className="text-gray-400">·</span>
+        <LinkEventButton
+          meetingId={meeting.id}
+          eventId={eventId}
+          eventSlug={eventSlug}
+          isSA={isSA}
+        />
       </div>
 
       {/* Notes */}

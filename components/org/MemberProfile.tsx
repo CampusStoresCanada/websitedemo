@@ -3,10 +3,12 @@
 import { useMemo, useState, useTransition } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
-import type { BrandColor, Benchmarking } from "@/lib/database.types";
+import type { BrandColor, Benchmarking } from "@/lib/types/db";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import RFPsSection from "@/components/rfps/RFPsSection";
+import type { SupplierData } from "@/lib/actions/member-suppliers";
+import MemberSupplierPanel from "@/components/org/MemberSupplierPanel";
 import type { BenchmarkingWithOrg } from "@/lib/data";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
@@ -71,6 +73,7 @@ interface MemberProfileProps {
     role: string;
   }>;
   initialRFPs?: RFPWithContext[];
+  memberSuppliers?: SupplierData | null;
 }
 
 export default function MemberProfile({
@@ -84,10 +87,18 @@ export default function MemberProfile({
   orgAssignableUsers,
   sponsorTier,
   initialRFPs = [],
+  memberSuppliers = null,
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
-  const { permissionState, organizations } = useAuth();
+  const { permissionState, organizations, user } = useAuth();
+  const userEmail = user?.email?.toLowerCase() ?? null;
+  // Members can click their own contact entry to edit visibility
+  function isOwnContact(contact: VisibleContact): boolean {
+    if (!userEmail) return false;
+    const contactEmail = ((contact.work_email || contact.email) as string | null)?.toLowerCase();
+    return !!contactEmail && contactEmail === userEmail;
+  }
   const { editMode, canEditOrg } = useToolkit();
   const [savingContactId, setSavingContactId] = useState<string | null>(null);
   const [attendanceError, setAttendanceError] = useState<string | null>(null);
@@ -204,6 +215,10 @@ export default function MemberProfile({
   // Check if user is org_admin for THIS specific organization (can edit procurement info)
   const isOrgAdminForThisOrg = organizations.some(
     (uo) => uo.organization.id === organization.id && uo.role === "org_admin"
+  );
+  // Any member of this org sees their own page in full
+  const isOwnOrgPage = organizations.some(
+    (uo) => uo.organization.id === organization.id
   );
 
   // "View as Partner" toggle — org admins, admins, and super admins
@@ -610,6 +625,7 @@ export default function MemberProfile({
           <div
             className="absolute z-20 pointer-events-auto flex items-center justify-center group"
             style={{ left: '5.64vw', bottom: '0', width: '42.09vw', height: '42.09vw' }}
+            data-onboarding="profile_featured_product"
             {...fieldProps("organizations", "product_overlay_url", organization.id, organization.id)}
           >
             {organization.product_overlay_url ? (
@@ -867,7 +883,8 @@ export default function MemberProfile({
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
               <ProtectedSection
-                requiredPermission="member"
+                bypass={isOwnOrgPage}
+              requiredPermission="member"
                 bannerMessage="Sign in as a member or partner to view store details."
                 ctaText="Sign In"
                 ctaLink="/login"
@@ -975,9 +992,12 @@ export default function MemberProfile({
                         return (
                       <tr
                         key={contact.id}
-                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${editMode && canEditThisOrg ? "cursor-pointer hover:bg-gray-50" : ""}`}
+                        className={`border-b border-gray-200 ${isContactHidden(contact) ? "opacity-50" : ""} ${(editMode && canEditThisOrg) || isOwnContact(contact) ? "cursor-pointer hover:bg-gray-50" : ""}${isOwnContact(contact) && !editMode ? " ring-1 ring-inset ring-[#EE2A2E]/20" : ""}`}
                         data-flaggable
-                        onClick={editMode && canEditThisOrg ? () => setEditingContact(contact) : undefined}
+                        onClick={(editMode && canEditThisOrg) || isOwnContact(contact) ? (e) => {
+                          if ((e.target as HTMLElement).closest('[data-deletable]')) return;
+                          setEditingContact(contact);
+                        } : undefined}
                       >
                         <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
@@ -1011,7 +1031,7 @@ export default function MemberProfile({
                         )}
                         {/* Actions — delete only in edit mode; eye moved to contact edit modal */}
                         {editMode && canEditThisOrg && (
-                          <td className="py-2 pl-4 w-10" onClick={(e) => e.stopPropagation()}>
+                          <td className="py-2 pl-4 w-10">
                             <div
                               className="p-1 text-red-400 hover:text-red-600 hover:bg-red-50 cursor-pointer rounded transition-colors"
                               data-entity-id={contact.id}
@@ -1142,6 +1162,7 @@ export default function MemberProfile({
       )}
 
       {/* Procurement edit form — toolkit edit mode active, not an actual partner */}
+      <div data-onboarding="procurement_section">
       {editMode && canEditThisOrg && !isPartner && (
         <EditableProcurementSection
           organization={organization}
@@ -1152,9 +1173,16 @@ export default function MemberProfile({
         />
       )}
 
+      {/* My Suppliers — full panel for org members */}
+      {memberSuppliers && (
+        <MemberSupplierPanel data={memberSuppliers} />
+      )}
+
+      </div>{/* end procurement_section */}
+
       {/* RFPs — visible to all viewers with appropriate access; org admins can manage */}
       {!isPartner && (
-        <div className="bg-white border-t border-gray-200">
+        <div data-onboarding="rfps_section" className="bg-white border-t border-gray-200">
           <div className="max-w-7xl mx-auto px-8 py-12">
             <div className="flex items-center justify-between mb-6">
               <h2 className="text-xl font-semibold text-[#1A1A1A]">Open RFPs</h2>
@@ -1375,7 +1403,8 @@ export default function MemberProfile({
                 {editMode && canEditThisOrg && VisEye({ flag: "storeInfo", value: showStoreInfo, label: showStoreInfo ? "Visible" : "Hidden" })}
               </div>
               <ProtectedSection
-                requiredPermission="member"
+                bypass={isOwnOrgPage}
+              requiredPermission="member"
                 bannerMessage="Sign in as a member or partner to view store details."
                 ctaText="Sign In"
                 ctaLink="/login"
@@ -1556,7 +1585,13 @@ export default function MemberProfile({
           isHidden={isContactHidden(editingContact)}
           onToggleHidden={() => void handleToggleContactHidden(editingContact)}
           onClose={() => setEditingContact(null)}
-          procurementInfo={procurementInfo}
+          procurementInfo={
+            // Always show Procurement tab for own contacts — even if org has no procurement
+            // data yet, so the member can set their buying categories from scratch.
+            isOwnOrgPage || isOwnContact(editingContact)
+              ? (procurementInfo ?? {})
+              : procurementInfo
+          }
           onProcurementSave={setProcurementInfo}
         />
       )}

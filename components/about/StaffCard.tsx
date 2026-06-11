@@ -1,6 +1,6 @@
 "use client";
 
-import type { Contact } from "@/lib/database.types";
+import type { Contact } from "@/lib/types/db";
 import { fieldProps } from "@/lib/editable-fields";
 import { useAuth } from "@/components/providers/AuthProvider";
 

@@ -7,6 +7,7 @@ import type { ViewerLevel } from "./defaults";
 export interface ViewerContext {
   viewerLevel: ViewerLevel;
   userId: string | null;
+  userEmail: string | null;
   /** Organization IDs the viewer is an active member of */
   viewerOrgIds: string[];
   /** Organization IDs the viewer is an org_admin of */
@@ -29,6 +30,7 @@ function deriveViewerLevel(ctx: AuthContext): ViewerLevel {
 const ANONYMOUS_VIEWER: ViewerContext = {
   viewerLevel: "public",
   userId: null,
+  userEmail: null,
   viewerOrgIds: [],
   viewerOrgAdminIds: [],
 };
@@ -80,6 +82,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
   return {
     viewerLevel,
     userId: ctx.userId,
+    userEmail: ctx.userEmail ?? null,
     viewerOrgIds: ctx.activeOrgIds,
     viewerOrgAdminIds: ctx.orgAdminOrgIds,
   };

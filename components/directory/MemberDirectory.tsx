@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useMemo } from "react";
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 import DirectoryCard from "./DirectoryCard";
 
 interface MemberDirectoryProps {

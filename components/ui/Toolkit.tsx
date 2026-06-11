@@ -13,10 +13,11 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV, exportPartnerMarketCSV } from "@/lib/actions/export-page";
+import { checkNudgeCooldown, notifyMembersWithoutProcurement } from "@/lib/actions/partner-market";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
-import type { PendingContentChange } from "@/lib/database.types";
+import type { PendingContentChange } from "@/lib/types/db";
 import { addContact } from "@/lib/actions/add-contact";
 import { deleteContact } from "@/lib/actions/delete-contact";
 import { addBrandColor } from "@/lib/actions/add-brand-color";
@@ -98,6 +99,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
   const { user, profile, permissionState, organizations } = useAuth();
   const { editMode, setEditMode, isAdmin, canEditOrg } = useToolkit();
   const isPartnerViewing = !!user && hasPermission(permissionState, "partner") && !hasPermission(permissionState, "member");
+  const partnerOwnOrgSlugs = organizations
+    .filter(uo => uo.organization?.type === "Vendor Partner" && uo.role === "org_admin")
+    .map(uo => uo.organization?.slug)
+    .filter(Boolean) as string[];
   const pathname = usePathname();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -588,6 +593,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
           pathname={pathname}
           onClose={handleClose}
           isPartner={isPartnerViewing}
+          partnerOwnOrgSlugs={partnerOwnOrgSlugs}
         />
       )}
 
@@ -3174,8 +3180,9 @@ function BookmarkModal({
 // ExportModal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExportModal({ pathname, onClose, isPartner = false }: { pathname: string; onClose: () => void; isPartner?: boolean }) {
+function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs = [] }: { pathname: string; onClose: () => void; isPartner?: boolean; partnerOwnOrgSlugs?: string[] }) {
   const context = detectPageContext(pathname);
+  const isPartnerOwnPage = context.type === "org" && partnerOwnOrgSlugs.includes(context.slug);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [canExportAttendees, setCanExportAttendees] = useState(false);
@@ -3222,6 +3229,14 @@ function ExportModal({ pathname, onClose, isPartner = false }: { pathname: strin
         icon: "🏢",
         action: () => run("Org Info CSV", () => exportOrgInfo(context.slug)),
       },
+      ...(isPartnerOwnPage ? [
+        {
+          label: "My Market Buyers CSV",
+          description: "All member stores in your categories — buyer name, title, email, and match confidence",
+          icon: "📇",
+          action: () => run("My Market Buyers CSV", () => exportPartnerMarketCSV()),
+        },
+      ] : []),
     ];
   } else if (context.type === "event") {
     options = [
@@ -3415,7 +3430,7 @@ function ShareExternalTab({ pathname, pageTitle, selectedElement }: {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL || (typeof window !== "undefined" ? window.location.origin : "");
 
   const handleCreate = async () => {
     setCreating(true);

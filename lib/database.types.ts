@@ -1853,6 +1853,287 @@ export type Database = {
           },
         ]
       }
+      conference_booth_approvals: {
+        Row: {
+          approver_1_at: string | null
+          approver_1_id: string | null
+          approver_2_at: string | null
+          approver_2_id: string | null
+          booth_id: string
+          charge_after: string | null
+          charge_error: string | null
+          charged_at: string | null
+          conference_id: string
+          created_at: string
+          id: string
+          internal_notes: string | null
+          line_items: Json
+          order_id: string | null
+          organization_id: string
+          payment_type: string
+          po_document_url: string | null
+          po_number: string | null
+          refund_amount_cents: number | null
+          refunded_at: string | null
+          rejected_at: string | null
+          rejected_by: string | null
+          rejection_reason: string | null
+          status: string
+          stripe_customer_id: string | null
+          stripe_payment_intent_id: string | null
+          stripe_payment_method_id: string | null
+          stripe_refund_id: string | null
+          stripe_setup_intent_id: string | null
+          submitted_by: string
+          subtotal_cents: number
+          tax_cents: number
+          total_cents: number
+          updated_at: string
+        }
+        Insert: {
+          approver_1_at?: string | null
+          approver_1_id?: string | null
+          approver_2_at?: string | null
+          approver_2_id?: string | null
+          booth_id: string
+          charge_after?: string | null
+          charge_error?: string | null
+          charged_at?: string | null
+          conference_id: string
+          created_at?: string
+          id?: string
+          internal_notes?: string | null
+          line_items?: Json
+          order_id?: string | null
+          organization_id: string
+          payment_type: string
+          po_document_url?: string | null
+          po_number?: string | null
+          refund_amount_cents?: number | null
+          refunded_at?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_payment_method_id?: string | null
+          stripe_refund_id?: string | null
+          stripe_setup_intent_id?: string | null
+          submitted_by: string
+          subtotal_cents: number
+          tax_cents?: number
+          total_cents: number
+          updated_at?: string
+        }
+        Update: {
+          approver_1_at?: string | null
+          approver_1_id?: string | null
+          approver_2_at?: string | null
+          approver_2_id?: string | null
+          booth_id?: string
+          charge_after?: string | null
+          charge_error?: string | null
+          charged_at?: string | null
+          conference_id?: string
+          created_at?: string
+          id?: string
+          internal_notes?: string | null
+          line_items?: Json
+          order_id?: string | null
+          organization_id?: string
+          payment_type?: string
+          po_document_url?: string | null
+          po_number?: string | null
+          refund_amount_cents?: number | null
+          refunded_at?: string | null
+          rejected_at?: string | null
+          rejected_by?: string | null
+          rejection_reason?: string | null
+          status?: string
+          stripe_customer_id?: string | null
+          stripe_payment_intent_id?: string | null
+          stripe_payment_method_id?: string | null
+          stripe_refund_id?: string | null
+          stripe_setup_intent_id?: string | null
+          submitted_by?: string
+          subtotal_cents?: number
+          tax_cents?: number
+          total_cents?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_booth_approvals_approver_1_id_fkey"
+            columns: ["approver_1_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_approver_2_id_fkey"
+            columns: ["approver_2_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_booth_id_fkey"
+            columns: ["booth_id"]
+            isOneToOne: false
+            referencedRelation: "conference_booths"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_rejected_by_fkey"
+            columns: ["rejected_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_approvals_submitted_by_fkey"
+            columns: ["submitted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_booths: {
+        Row: {
+          booth_number: string
+          booth_product_id: string | null
+          conference_id: string
+          created_at: string
+          id: string
+          map_cx: number
+          map_cy: number
+          map_h: number
+          map_w: number
+          notes: string | null
+          order_id: string | null
+          organization_id: string | null
+          registration_id: string | null
+          reserved_at: string | null
+          reserved_until: string | null
+          sold_at: string | null
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          booth_number: string
+          booth_product_id?: string | null
+          conference_id: string
+          created_at?: string
+          id?: string
+          map_cx: number
+          map_cy: number
+          map_h?: number
+          map_w?: number
+          notes?: string | null
+          order_id?: string | null
+          organization_id?: string | null
+          registration_id?: string | null
+          reserved_at?: string | null
+          reserved_until?: string | null
+          sold_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          booth_number?: string
+          booth_product_id?: string | null
+          conference_id?: string
+          created_at?: string
+          id?: string
+          map_cx?: number
+          map_cy?: number
+          map_h?: number
+          map_w?: number
+          notes?: string | null
+          order_id?: string | null
+          organization_id?: string | null
+          registration_id?: string | null
+          reserved_at?: string | null
+          reserved_until?: string | null
+          sold_at?: string | null
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_booths_booth_product_id_fkey"
+            columns: ["booth_product_id"]
+            isOneToOne: false
+            referencedRelation: "conference_products"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booths_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booths_order_id_fkey"
+            columns: ["order_id"]
+            isOneToOne: false
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booths_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booths_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booths_registration_id_fkey"
+            columns: ["registration_id"]
+            isOneToOne: false
+            referencedRelation: "conference_registrations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conference_check_in_events: {
         Row: {
           check_in_source: string
@@ -2032,11 +2313,14 @@ export type Database = {
       conference_instances: {
         Row: {
           board_decision_at: string | null
+          booth_sales_general_open_at: string | null
+          booth_sales_sponsor_open_at: string | null
           created_at: string
           created_by: string | null
           duplicated_from_id: string | null
           edition_code: string
           end_date: string | null
+          floor_plan_url: string | null
           id: string
           location_city: string | null
           location_province: string | null
@@ -2056,11 +2340,14 @@ export type Database = {
         }
         Insert: {
           board_decision_at?: string | null
+          booth_sales_general_open_at?: string | null
+          booth_sales_sponsor_open_at?: string | null
           created_at?: string
           created_by?: string | null
           duplicated_from_id?: string | null
           edition_code?: string
           end_date?: string | null
+          floor_plan_url?: string | null
           id?: string
           location_city?: string | null
           location_province?: string | null
@@ -2080,11 +2367,14 @@ export type Database = {
         }
         Update: {
           board_decision_at?: string | null
+          booth_sales_general_open_at?: string | null
+          booth_sales_sponsor_open_at?: string | null
           created_at?: string
           created_by?: string | null
           duplicated_from_id?: string | null
           edition_code?: string
           end_date?: string | null
+          floor_plan_url?: string | null
           id?: string
           location_city?: string | null
           location_province?: string | null
@@ -4269,6 +4559,45 @@ export type Database = {
           },
         ]
       }
+      market_nudge_log: {
+        Row: {
+          id: string
+          recipients_count: number
+          sent_at: string
+          triggered_by_org_id: string | null
+          triggered_by_user_id: string | null
+        }
+        Insert: {
+          id?: string
+          recipients_count?: number
+          sent_at?: string
+          triggered_by_org_id?: string | null
+          triggered_by_user_id?: string | null
+        }
+        Update: {
+          id?: string
+          recipients_count?: number
+          sent_at?: string
+          triggered_by_org_id?: string | null
+          triggered_by_user_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_nudge_log_triggered_by_org_id_fkey"
+            columns: ["triggered_by_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_nudge_log_triggered_by_org_id_fkey"
+            columns: ["triggered_by_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_scores: {
         Row: {
           conference_id: string
@@ -6372,6 +6701,106 @@ export type Database = {
           },
         ]
       }
+      rfps: {
+        Row: {
+          category: string
+          closes_at: string
+          contact_id: string | null
+          created_at: string | null
+          created_by: string | null
+          description: string | null
+          document_storage_path: string | null
+          id: string
+          notifications_sent_at: string | null
+          opens_at: string
+          organization_id: string
+          status: string
+          subcategories: string[] | null
+          title: string
+          updated_at: string | null
+          visibility: string
+        }
+        Insert: {
+          category: string
+          closes_at: string
+          contact_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          document_storage_path?: string | null
+          id?: string
+          notifications_sent_at?: string | null
+          opens_at?: string
+          organization_id: string
+          status?: string
+          subcategories?: string[] | null
+          title: string
+          updated_at?: string | null
+          visibility?: string
+        }
+        Update: {
+          category?: string
+          closes_at?: string
+          contact_id?: string | null
+          created_at?: string | null
+          created_by?: string | null
+          description?: string | null
+          document_storage_path?: string | null
+          id?: string
+          notifications_sent_at?: string | null
+          opens_at?: string
+          organization_id?: string
+          status?: string
+          subcategories?: string[] | null
+          title?: string
+          updated_at?: string | null
+          visibility?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "rfps_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rfps_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rfps_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rfps_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rfps_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "rfps_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       scheduler_runs: {
         Row: {
           activated_at: string | null
@@ -7913,6 +8342,57 @@ export type Database = {
           },
         ]
       }
+      user_onboarding_progress: {
+        Row: {
+          channel: string | null
+          completed_at: string | null
+          created_at: string
+          id: string
+          journey_started_at: string
+          last_reminder_sent_at: string | null
+          persona: string
+          reminder_count: number
+          sent_at: string | null
+          skip_reason: string | null
+          skipped_at: string | null
+          step_key: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          channel?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          journey_started_at?: string
+          last_reminder_sent_at?: string | null
+          persona: string
+          reminder_count?: number
+          sent_at?: string | null
+          skip_reason?: string | null
+          skipped_at?: string | null
+          step_key: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          channel?: string | null
+          completed_at?: string | null
+          created_at?: string
+          id?: string
+          journey_started_at?: string
+          last_reminder_sent_at?: string | null
+          persona?: string
+          reminder_count?: number
+          sent_at?: string | null
+          skip_reason?: string | null
+          skipped_at?: string | null
+          step_key?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       user_organizations: {
         Row: {
           created_at: string | null
@@ -8775,8 +9255,26 @@ export type Database = {
         }
         Relationships: []
       }
+      user_onboarding_summary: {
+        Row: {
+          completed_steps: number | null
+          journey_started_at: string | null
+          last_completed_at: string | null
+          pending_steps: number | null
+          persona: string | null
+          skipped_steps: number | null
+          started_at: string | null
+          total_steps: number | null
+          user_id: string | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
+      approve_booth_request: {
+        Args: { p_approval_id: string; p_notes?: string }
+        Returns: string
+      }
       commit_swap_request: {
         Args: {
           p_actor_id?: string
@@ -8809,6 +9307,10 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      confirm_booth_sale: {
+        Args: { p_booth_id: string; p_order_id: string; p_org_id: string }
+        Returns: string
       }
       create_conference_order_from_cart:
         | {
@@ -9011,6 +9513,14 @@ export type Database = {
           isSetofReturn: true
         }
       }
+      find_rfp_notification_recipients: {
+        Args: { p_subcategories: string[]; p_visibility: string }
+        Returns: {
+          display_name: string
+          email: string
+          user_id: string
+        }[]
+      }
       get_contact_with_org: {
         Args: { contact_id_param: string }
         Returns: {
@@ -9132,6 +9642,15 @@ export type Database = {
         }
         Returns: Json
       }
+      reject_booth_request: {
+        Args: { p_approval_id: string; p_reason: string }
+        Returns: string
+      }
+      release_expired_booth_holds: { Args: never; Returns: number }
+      reserve_booth: {
+        Args: { p_booth_id: string; p_org_id: string }
+        Returns: string
+      }
       rollback_policy_to_version: {
         Args: { p_reason?: string; p_target_set_id: string; p_user_id?: string }
         Returns: Json
@@ -9161,6 +9680,23 @@ export type Database = {
       }
       show_limit: { Args: never; Returns: number }
       show_trgm: { Args: { "": string }; Returns: string[] }
+      submit_booth_approval_request: {
+        Args: {
+          p_booth_id: string
+          p_conference_id: string
+          p_line_items: Json
+          p_org_id: string
+          p_payment_type: string
+          p_po_number?: string
+          p_stripe_customer_id?: string
+          p_stripe_payment_method_id?: string
+          p_stripe_setup_intent_id?: string
+          p_subtotal_cents: number
+          p_tax_cents: number
+          p_total_cents: number
+        }
+        Returns: string
+      }
       transition_membership_state: {
         Args: {
           p_actor_id?: string

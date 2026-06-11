@@ -41,7 +41,7 @@ export default async function BoardMeetingsPage() {
 
   const { data: meetings } = await db
     .from("board_meetings")
-    .select("id, title, meeting_date, meeting_type, status, notes")
+    .select("id, title, meeting_date, meeting_type, status, notes, event_id")
     .order("meeting_date", { ascending: false });
 
   // Doc count per meeting
@@ -102,6 +102,7 @@ export default async function BoardMeetingsPage() {
                 <th className="px-4 py-3 font-medium text-gray-600">Type</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Status</th>
                 <th className="px-4 py-3 font-medium text-gray-600">Documents</th>
+                <th className="px-4 py-3 font-medium text-gray-600">Event</th>
                 <th className="px-4 py-3" />
               </tr>
             </thead>
@@ -116,6 +117,12 @@ export default async function BoardMeetingsPage() {
                       <StatusBadge status={m.status} />
                     </td>
                     <td className="px-4 py-3 text-gray-600">{count}</td>
+                    <td className="px-4 py-3">
+                      {m.event_id
+                        ? <span className="inline-flex items-center gap-1 text-xs text-green-600 font-medium"><span>✓</span> Linked</span>
+                        : <span className="inline-flex items-center gap-1 text-xs text-amber-500"><span>⚠</span> None</span>
+                      }
+                    </td>
                     <td className="px-4 py-3 text-right">
                       <Link
                         href={`/admin/board/meetings/${m.id}`}

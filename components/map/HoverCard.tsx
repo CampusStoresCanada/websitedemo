@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 
 interface HoverCardProps {
   organization: Organization | null;

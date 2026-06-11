@@ -2,7 +2,7 @@
 
 import { requireAdmin, requireSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { SiteContent, Contact } from "@/lib/database.types";
+import type { SiteContent, Contact } from "@/lib/types/db";
 import { revalidatePath } from "next/cache";
 import { EDITABLE_COLUMNS, editAnchorId, fieldDisplayLabel } from "@/lib/editable-fields";
 import { queueTier2Change } from "@/lib/actions/pending-content-changes";

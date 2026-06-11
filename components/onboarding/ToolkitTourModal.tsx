@@ -5,6 +5,8 @@ import { completeOnboardingStep } from "@/lib/actions/onboarding";
 
 interface ToolkitTourModalProps {
   onDone: () => void;
+  /** The viewer's persona — used to filter which tools are most relevant */
+  persona?: string | null;
 }
 
 // Icons and colours match the Toolkit exactly — same SVG paths, same mode-button colours.
@@ -71,15 +73,14 @@ const TOOLS = [
   },
 ];
 
-export default function ToolkitTourModal({ onDone }: ToolkitTourModalProps) {
+export default function ToolkitTourModal({ onDone, persona }: ToolkitTourModalProps) {
   const [completing, setCompleting] = useState(false);
 
   async function handleDone() {
     if (completing) return;
     setCompleting(true);
-    try {
-      await completeOnboardingStep("toolkit_tour");
-    } catch { /* non-fatal */ }
+    // Completion is handled by the caller (OrgOnboardingCallout or WelcomeModal)
+    // so it can pass the correct persona. Just call onDone.
     onDone();
   }
 
@@ -107,7 +108,10 @@ export default function ToolkitTourModal({ onDone }: ToolkitTourModalProps) {
             </p>
 
             <div className="grid grid-cols-1 gap-3 mb-7">
-              {TOOLS.map((tool) => (
+              {TOOLS.filter(tool =>
+                // Member personas don't have Edit access — skip that tool for them
+                !(tool.name === "Edit" && (persona === "member_member" || persona === "member_partner"))
+              ).map((tool) => (
                 <div key={tool.name} className="flex items-start gap-3">
                   <div className={`w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0 ${tool.color}`}>
                     {tool.icon}

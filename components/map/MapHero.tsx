@@ -171,8 +171,8 @@ export default function MapHero({
   // --- Explore state ---
   const [lens, setLens] = useState<ExploreLens>(initialState?.lens ?? null);
   const [scaleFilter, setScaleFilter] = useState<ScaleRange | null>(null);
-  const [partnerCategoryFilter, setPartnerCategoryFilter] = useState<string | null>(null);
-  const [partnerSubcategoryFilter, setPartnerSubcategoryFilter] = useState<string | null>(null);
+  const [checkedCategories, setCheckedCategories] = useState<Set<string>>(new Set());
+  const [checkedSubcategories, setCheckedSubcategories] = useState<Set<string>>(new Set());
   const [posFilter, setPosFilter] = useState<string | null>(null);
   const [serviceFilter, setServiceFilter] = useState<string | null>(null);
   const [mandateFilter, setMandateFilter] = useState<string | null>(null);
@@ -309,14 +309,15 @@ export default function MapHero({
     switch (lens) {
       case "members": return [...members];
       case "partners": return [...partners];
-      case "partner_category":
-        if (partnerSubcategoryFilter) {
-          return partners.filter((o) => orgHasSubcategory(o, partnerSubcategoryFilter));
+      case "partner_category": {
+        let pool = partners.filter((o) => !!o.primaryCategory);
+        if (checkedSubcategories.size > 0) {
+          pool = pool.filter((o) => [...checkedSubcategories].some((sub) => orgHasSubcategory(o, sub)));
+        } else if (checkedCategories.size > 0) {
+          pool = pool.filter((o) => [...checkedCategories].some((cat) => orgHasParentCategory(o, cat)));
         }
-        if (partnerCategoryFilter) {
-          return partners.filter((o) => orgHasParentCategory(o, partnerCategoryFilter));
-        }
-        return partners.filter((o) => !!o.primaryCategory);
+        return pool;
+      }
       case "scale":
         if (scaleFilter) {
           const range = SCALE_RANGES.find((r) => r.key === scaleFilter)!;
@@ -338,7 +339,7 @@ export default function MapHero({
       default:
         return [...organizations];
     }
-  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, discoveryFocus]);
+  }, [organizations, members, partners, lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, searchQuery, discoveryFocus]);
 
   // Apply active compound filters on top of lensPool so all dimension counts
   // reflect the full current cohort (cross-filtered facets).
@@ -356,15 +357,24 @@ export default function MapHero({
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
     if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
     if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
+    // Refine panel category checkboxes — applied outside partner_category lens
+    // so they work on /partners where the lens is forced to "partners"
+    if (lens !== "partner_category") {
+      if (checkedSubcategories.size > 0) {
+        pool = pool.filter((o) => [...checkedSubcategories].some((sub) => orgHasSubcategory(o, sub)));
+      } else if (checkedCategories.size > 0) {
+        pool = pool.filter((o) => [...checkedCategories].some((cat) => orgHasParentCategory(o, cat)));
+      }
+    }
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
-        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+        o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
     return pool;
-  }, [lensPool, compoundFilters, lens]);
+  }, [lensPool, compoundFilters, lens, checkedCategories, checkedSubcategories]);
 
   const lensMembers = useMemo(() => cohortPool.filter((o) => o.type === "Member"), [cohortPool]);
   const lensPartners = useMemo(() => cohortPool.filter((o) => o.type === "Vendor Partner"), [cohortPool]);
@@ -446,31 +456,30 @@ export default function MapHero({
     return counts;
   }, [lensPartners]);
 
-  // Subcategory counts for the currently selected parent category
+  // Subcategory counts per checked parent category
   const partnerSubcategoryCounts = useMemo(() => {
-    if (!partnerCategoryFilter) return {};
-    const counts: Record<string, number> = {};
-    const subs = CATEGORY_SUBCATEGORIES[partnerCategoryFilter] ?? [];
-    for (const org of lensPartners) {
-      if (!orgHasParentCategory(org, partnerCategoryFilter)) continue;
-      const { subcategories } = parsePartnerCategories(org.primaryCategory);
-      for (const sub of subcategories) {
-        if (subs.includes(sub as never)) {
-          counts[sub] = (counts[sub] || 0) + 1;
+    const counts: Record<string, Record<string, number>> = {};
+    for (const cat of checkedCategories) {
+      counts[cat] = {};
+      const subs = CATEGORY_SUBCATEGORIES[cat] ?? [];
+      for (const org of lensPartners) {
+        if (!orgHasParentCategory(org, cat)) continue;
+        const { subcategories } = parsePartnerCategories(org.primaryCategory);
+        for (const sub of subcategories) {
+          if (subs.includes(sub as never)) {
+            counts[cat][sub] = (counts[cat][sub] || 0) + 1;
+          }
         }
       }
     }
     return counts;
-  }, [lensPartners, partnerCategoryFilter]);
+  }, [lensPartners, checkedCategories]);
 
   const certificationCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const org of lensPartners) {
       for (const cert of (org.certifications ?? [])) {
         counts[cert] = (counts[cert] || 0) + 1;
-      }
-      if (org.isCancollMember) {
-        counts["CANCOLL"] = (counts["CANCOLL"] || 0) + 1;
       }
     }
     return counts;
@@ -537,10 +546,10 @@ export default function MapHero({
         if (compoundFilters.certification) {
           const cert = compoundFilters.certification;
           pool = pool.filter((o) =>
-            cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+            o.certifications?.includes(cert)
           );
         }
-        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
         return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id), searchRanking: rankingMap.size > 0 ? rankingMap : undefined };
       }
 
@@ -554,7 +563,7 @@ export default function MapHero({
       );
       // Apply compound filters even on search results
       if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
-      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
       return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
     }
 
@@ -565,13 +574,16 @@ export default function MapHero({
         pool = [...members]; break;
       case "partners":
         pool = [...partners]; break;
-      case "partner_category":
-        if (partnerCategoryFilter) {
-          pool = partners.filter((o) => o.primaryCategory === partnerCategoryFilter);
-        } else {
-          pool = partners.filter((o) => !!o.primaryCategory);
+      case "partner_category": {
+        let catPool = partners.filter((o) => !!o.primaryCategory);
+        if (checkedSubcategories.size > 0) {
+          catPool = catPool.filter((o) => [...checkedSubcategories].some((sub) => orgHasSubcategory(o, sub)));
+        } else if (checkedCategories.size > 0) {
+          catPool = catPool.filter((o) => [...checkedCategories].some((cat) => orgHasParentCategory(o, cat)));
         }
+        pool = catPool;
         break;
+      }
       case "scale":
         if (scaleFilter) {
           const range = SCALE_RANGES.find((r) => r.key === scaleFilter)!;
@@ -621,16 +633,23 @@ export default function MapHero({
     if (compoundFilters.shopping) pool = pool.filter((o) => o.shoppingServices?.includes(compoundFilters.shopping!));
     if (compoundFilters.hasCatalogue === "true") pool = pool.filter((o) => !!o.catalogueUrl);
     if (compoundFilters.category && lens !== "partner_category") pool = pool.filter((o) => orgHasParentCategory(o, compoundFilters.category!));
+    if (lens !== "partner_category") {
+      if (checkedSubcategories.size > 0) {
+        pool = pool.filter((o) => [...checkedSubcategories].some((sub) => orgHasSubcategory(o, sub)));
+      } else if (checkedCategories.size > 0) {
+        pool = pool.filter((o) => [...checkedCategories].some((cat) => orgHasParentCategory(o, cat)));
+      }
+    }
     if (compoundFilters.certification) {
       const cert = compoundFilters.certification;
       pool = pool.filter((o) =>
-        cert === "CANCOLL" ? o.isCancollMember : o.certifications?.includes(cert)
+        o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
-  }, [organizations, members, partners, lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
+  }, [organizations, members, partners, lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
 
   // Map highlighted IDs: attract mode uses stories, explore uses filters
   const mapHighlightedIds = useMemo(() => {
@@ -694,7 +713,7 @@ export default function MapHero({
           break;
         case "partner_coverage":
           setLens("partner_category");
-          if (val) setPartnerCategoryFilter(val);
+          if (val) setCheckedCategories(new Set([val]));
           break;
         case "partner_spotlight":
           setLens("partners");
@@ -810,8 +829,8 @@ export default function MapHero({
     setSelectedOrg(null);
     setSearchQuery("");
     setScaleFilter(null);
-    setPartnerCategoryFilter(null);
-    setPartnerSubcategoryFilter(null);
+    setCheckedCategories(new Set());
+    setCheckedSubcategories(new Set());
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -888,8 +907,8 @@ export default function MapHero({
     // Drop lens and all sub-filters — go to compound-only mode
     setLens(null);
     setScaleFilter(null);
-    setPartnerCategoryFilter(null);
-    setPartnerSubcategoryFilter(null);
+    setCheckedCategories(new Set());
+    setCheckedSubcategories(new Set());
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -904,10 +923,10 @@ export default function MapHero({
     } else if (scaleFilter) {
       setScaleFilter(null);
       setCompoundFilters({});
-    } else if (partnerSubcategoryFilter) {
-      setPartnerSubcategoryFilter(null);
-    } else if (partnerCategoryFilter) {
-      setPartnerCategoryFilter(null);
+    } else if (checkedSubcategories.size > 0) {
+      setCheckedSubcategories(new Set());
+    } else if (checkedCategories.size > 0) {
+      setCheckedCategories(new Set());
       setCompoundFilters({});
     } else if (posFilter) {
       setPosFilter(null);
@@ -928,7 +947,7 @@ export default function MapHero({
       setCompoundFilters({});
       setShowFilterMenu(false);
     }
-  }, [selectedOrg, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, lens, searchQuery, compoundFilters]);
+  }, [selectedOrg, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, lens, searchQuery, compoundFilters]);
 
   /** Jump straight back to the discovery menu (lens picker). */
   const goHome = useCallback(() => {
@@ -936,8 +955,8 @@ export default function MapHero({
     setLens(initialState?.lens ?? null);
     setSearchQuery("");
     setScaleFilter(null);
-    setPartnerCategoryFilter(null);
-    setPartnerSubcategoryFilter(null);
+    setCheckedCategories(new Set());
+    setCheckedSubcategories(new Set());
     setPosFilter(null);
     setServiceFilter(null);
     setMandateFilter(null);
@@ -969,7 +988,8 @@ export default function MapHero({
         action: () => {
           setSelectedOrg(null);
           setScaleFilter(null);
-          setPartnerCategoryFilter(null);
+          setCheckedCategories(new Set());
+          setCheckedSubcategories(new Set());
           setPosFilter(null);
           setServiceFilter(null);
           setMandateFilter(null);
@@ -992,8 +1012,9 @@ export default function MapHero({
     if (lens === "scale" && scaleFilter) {
       const range = SCALE_RANGES.find((r) => r.key === scaleFilter);
       crumbs.push({ label: range?.label ?? scaleFilter, action: () => { setSelectedOrg(null); } });
-    } else if (lens === "partner_category" && partnerCategoryFilter) {
-      crumbs.push({ label: partnerCategoryFilter, action: () => { setSelectedOrg(null); } });
+    } else if (lens === "partner_category" && checkedCategories.size > 0) {
+      const label = checkedCategories.size === 1 ? [...checkedCategories][0] : `${checkedCategories.size} categories`;
+      crumbs.push({ label, action: () => { setSelectedOrg(null); } });
     } else if (lens === "pos_platform" && posFilter) {
       crumbs.push({ label: posFilter, action: () => { setSelectedOrg(null); } });
     } else if (lens === "services" && serviceFilter) {
@@ -1008,7 +1029,7 @@ export default function MapHero({
     }
 
     return crumbs;
-  }, [lens, scaleFilter, partnerCategoryFilter, posFilter, serviceFilter, mandateFilter, selectedOrg, searchQuery, compoundFilters]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, selectedOrg, searchQuery, compoundFilters]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const hasNavContext = breadcrumbs.length > 0;
 
@@ -1243,7 +1264,12 @@ export default function MapHero({
               {/* Table / Map toggle */}
               <button
                 type="button"
-                onClick={() => setViewMode(viewMode === "map" ? "table" : "map")}
+                data-onboarding="view-toggle"
+                onClick={() => {
+                  const next = viewMode === "map" ? "table" : "map";
+                  setViewMode(next);
+                  window.dispatchEvent(new CustomEvent("csc:view-mode-changed", { detail: { mode: next } }));
+                }}
                 className="w-8 h-8 rounded-full bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-500 hover:text-gray-700 transition-colors"
                 title={viewMode === "map" ? "Switch to table view" : "Switch to map view"}
               >
@@ -1326,6 +1352,11 @@ export default function MapHero({
               partnerCategoryCounts={partnerCategoryCounts}
               certificationCounts={certificationCounts}
               canViewCancoll={canViewCancoll}
+              checkedCategories={checkedCategories}
+              setCheckedCategories={setCheckedCategories}
+              checkedSubcategories={checkedSubcategories}
+              setCheckedSubcategories={setCheckedSubcategories}
+              partnerSubcategoryCounts={partnerSubcategoryCounts}
               lens={lens}
               setLens={setLens}
               defaultLens={initialState?.lens ?? null}
@@ -1415,87 +1446,124 @@ export default function MapHero({
               <GroupSummary orgs={filteredOrgs} lens={lens} />
               <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
-          ) : lens === "partner_category" && !partnerCategoryFilter ? (
+          ) : lens === "partner_category" ? (
             <div>
-              <div className="px-5 py-4 bg-gray-50 border-b border-gray-100">
+              {/* Header summary */}
+              <div className="px-5 py-3 bg-gray-50 border-b border-gray-100 flex items-center justify-between">
                 <p className="text-sm text-gray-600">
-                  Partner categories across{" "}
-                  <span className="font-semibold text-gray-900">{partnersWithCategory}</span> categorized
-                  organizations
+                  <span className="font-semibold text-gray-900">{partnersWithCategory}</span> categorized partners
                 </p>
-              </div>
-              <div className="p-4 space-y-2">
-                {Object.entries(partnerCategoryCounts)
-                  .sort(([, a], [, b]) => b - a)
-                  .map(([category, count]) => (
-                    <button
-                      key={category}
-                      type="button"
-                      onClick={() => {
-                        setPartnerCategoryFilter(category);
-                      }}
-                      className="w-full rounded-xl border border-gray-200 px-4 py-3.5 text-left hover:border-blue-200 hover:bg-blue-50/30 transition-colors group"
-                    >
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-semibold text-gray-900 group-hover:text-[#EE2A2E] transition-colors">
-                          {category}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <span className="text-lg font-bold text-gray-900">{count}</span>
-                          <svg className="w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
-                          </svg>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-              </div>
-            </div>
-          ) : lens === "partner_category" && partnerCategoryFilter && !partnerSubcategoryFilter ? (
-            <div>
-              {/* Subcategory drill-down — only shown if subcategories exist for this parent */}
-              {Object.keys(partnerSubcategoryCounts).length > 0 && (
-                <div className="px-4 pt-4 pb-2">
-                  <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-2">Refine by subcategory</p>
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(partnerSubcategoryCounts)
-                      .sort(([, a], [, b]) => b - a)
-                      .map(([sub, count]) => (
-                        <button
-                          key={sub}
-                          type="button"
-                          onClick={() => setPartnerSubcategoryFilter(sub)}
-                          className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border border-gray-200 bg-white hover:border-[#EE2A2E] hover:text-[#EE2A2E] transition-colors"
-                        >
-                          {sub}
-                          <span className="text-gray-400">{count}</span>
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              )}
-              {/* Catalogue filter */}
-              {filteredOrgs.some((o) => o.catalogueUrl) && (
-                <div className="px-4 pb-3">
+                {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue) && (
                   <button
                     type="button"
-                    onClick={() => setCompoundFilters((f) => ({ ...f, hasCatalogue: f.hasCatalogue === "true" ? undefined : "true" }))}
-                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-colors ${compoundFilters.hasCatalogue ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E]" : "border-gray-200 text-gray-600 hover:border-gray-400"}`}
+                    onClick={() => { setCheckedCategories(new Set()); setCheckedSubcategories(new Set()); setCompoundFilters({}); }}
+                    className="text-xs text-[#EE2A2E] hover:text-[#D92327] font-medium transition-colors"
                   >
-                    <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12" />
-                    </svg>
-                    Has catalogue
+                    Clear all
                   </button>
+                )}
+              </div>
+
+              {/* Checkbox list */}
+              <div className="overflow-y-auto p-3 space-y-1">
+                {Object.entries(partnerCategoryCounts)
+                  .sort(([, a], [, b]) => b - a)
+                  .map(([category, count]) => {
+                    const isChecked = checkedCategories.has(category);
+                    const subsForCat = partnerSubcategoryCounts[category] ?? {};
+                    const hasSubs = Object.keys(subsForCat).length > 0;
+                    return (
+                      <div key={category}>
+                        {/* Parent category checkbox */}
+                        <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer group">
+                          <input
+                            type="checkbox"
+                            checked={isChecked}
+                            onChange={() => {
+                              setCheckedCategories((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(category)) {
+                                  next.delete(category);
+                                  // Clear any subcategories belonging to this parent
+                                  const catSubs = CATEGORY_SUBCATEGORIES[category] ?? [];
+                                  setCheckedSubcategories((prevSubs) => {
+                                    const ns = new Set(prevSubs);
+                                    for (const s of catSubs) ns.delete(s);
+                                    return ns;
+                                  });
+                                } else {
+                                  next.add(category);
+                                }
+                                return next;
+                              });
+                            }}
+                            className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
+                          />
+                          <span className={`flex-1 text-sm font-medium transition-colors ${isChecked ? "text-[#1A1A1A]" : "text-gray-700"}`}>
+                            {category}
+                          </span>
+                          <span className="text-xs text-gray-400 tabular-nums">{count}</span>
+                        </label>
+
+                        {/* Subcategory checkboxes — shown when parent is checked and has subs */}
+                        {isChecked && hasSubs && (
+                          <div className="ml-7 mb-1 space-y-0.5">
+                            {Object.entries(subsForCat)
+                              .sort(([, a], [, b]) => b - a)
+                              .map(([sub, subCount]) => {
+                                const subChecked = checkedSubcategories.has(sub);
+                                return (
+                                  <label key={sub} className="flex items-center gap-2 px-3 py-1.5 rounded-md hover:bg-gray-50 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={subChecked}
+                                      onChange={() => {
+                                        setCheckedSubcategories((prev) => {
+                                          const next = new Set(prev);
+                                          next.has(sub) ? next.delete(sub) : next.add(sub);
+                                          return next;
+                                        });
+                                      }}
+                                      className="h-3.5 w-3.5 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
+                                    />
+                                    <span className={`flex-1 text-xs transition-colors ${subChecked ? "text-[#1A1A1A] font-medium" : "text-gray-500"}`}>
+                                      {sub}
+                                    </span>
+                                    <span className="text-[10px] text-gray-400 tabular-nums">{subCount}</span>
+                                  </label>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+
+                {/* Has catalogue filter */}
+                {partners.some((o) => o.catalogueUrl) && (
+                  <div className="mt-3 pt-3 border-t border-gray-100">
+                    <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 mb-1">Resources</p>
+                    <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={compoundFilters.hasCatalogue === "true"}
+                        onChange={() => setCompoundFilters((f) => ({ ...f, hasCatalogue: f.hasCatalogue === "true" ? undefined : "true" }))}
+                        className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
+                      />
+                      <span className="text-sm text-gray-700">Has catalogue</span>
+                      <span className="text-xs text-gray-400 tabular-nums ml-auto">{partners.filter((o) => o.catalogueUrl).length}</span>
+                    </label>
+                  </div>
+                )}
+              </div>
+
+              {/* Results */}
+              {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue) && (
+                <div className="border-t border-gray-100">
+                  <GroupSummary orgs={filteredOrgs} lens={lens} />
+                  <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
                 </div>
               )}
-              <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
-            </div>
-          ) : lens === "partner_category" && partnerSubcategoryFilter ? (
-            <div>
-              <GroupSummary orgs={filteredOrgs} lens={lens} />
-              <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />
             </div>
           ) : lens === "scale" && !scaleFilter ? (
             <div>

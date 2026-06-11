@@ -9,6 +9,10 @@ import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
 import type { RFPWithContext } from "@/lib/types/rfp";
+import { getPartnerMarketData, checkNudgeCooldown } from "@/lib/actions/partner-market";
+import type { MarketData } from "@/lib/actions/partner-market";
+import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
+import type { SupplierData } from "@/lib/actions/member-suppliers";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -73,8 +77,21 @@ interface PageProps {
 export default async function OrgProfilePage({ params }: PageProps) {
   const { slug } = await params;
   const viewer = await getViewerContext();
+
+  // Quick org ID lookup so we can elevate viewer level before fetching masked data.
+  // If the viewer is a member of this org, they see their own page unmasked.
+  const { data: orgIdRow } = await createAdminClient()
+    .from("organizations")
+    .select("id")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id)
+    ? { ...viewer, viewerLevel: "org_admin" as const }
+    : viewer;
+
   const { organization, contacts, brandColors, benchmarking, allBenchmarking } =
-    await getOrganizationForViewer(slug, viewer);
+    await getOrganizationForViewer(slug, effectiveViewer);
 
   if (!organization) {
     notFound();
@@ -196,11 +213,21 @@ export default async function OrgProfilePage({ params }: PageProps) {
   // Fetch RFPs — for member orgs fetch their own; for partner orgs fetch matching
   let orgRFPs: RFPWithContext[] = [];
   let partnerRFPs: RFPWithContext[] = [];
+  let partnerMarket: MarketData | null = null;
+  let canNudge = false;
+  let nudgeAvailableAt: string | null = null;
+  let memberSuppliers: SupplierData | null = null;
 
   if (organization.type === "Member") {
     const rfpResult = await listRFPsForOrg(organization.id);
     orgRFPs = rfpResult.rfps ?? [];
-  } else if (organization.type === "Partner" || organization.type === "Vendor") {
+
+    // Fetch supplier data for any member of this org
+    if (viewer.viewerOrgIds.includes(organization.id)) {
+      const supplierResult = await getMemberSupplierData(viewer.userEmail, organization.id);
+      memberSuppliers = supplierResult.data ?? { matches: [], topMatches: [], totalMatches: 0, hasAssignments: false };
+    }
+  } else if (organization.type === "Partner" || organization.type === "Vendor" || organization.type === "Vendor Partner") {
     const orgExtra2 = organization as Record<string, unknown>;
     const rawCategoryValue = (orgExtra2.primary_category as string | null) ?? "";
     const partnerCategories = rawCategoryValue
@@ -210,20 +237,38 @@ export default async function OrgProfilePage({ params }: PageProps) {
       const rfpResult = await listRFPsForPartner(partnerCategories, viewerOrgType);
       partnerRFPs = rfpResult.rfps ?? [];
     }
+
+    // Fetch market data for any member of this partner org (or global admins)
+    const isOrgMember = viewer.viewerOrgIds.includes(organization.id);
+    const isGlobalAdminViewer =
+      viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+
+    if (isOrgMember || isGlobalAdminViewer) {
+      const marketResult = await getPartnerMarketData(
+        organization.id,
+        (orgExtra2.primary_category as string | null) ?? null
+      );
+      partnerMarket = marketResult.data ?? { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 };
+      const cooldown = await checkNudgeCooldown();
+      canNudge = cooldown.canSend;
+      nudgeAvailableAt = cooldown.availableAt ?? null;
+    }
   }
 
   // Resolve partner links (filter by viewer, sign storage URLs server-side)
   const orgExtra = organization as Record<string, unknown>;
+  // effectiveViewer already has the elevated level when viewing own org.
+  const effectiveViewerLevel = effectiveViewer.viewerLevel;
+
   const rawPartnerLinks = parsePartnerLinks(orgExtra.partner_links ?? []);
   const { visible: visibleLinks, hasGated, gatedVisibility } =
-    await resolvePartnerLinksForViewer(rawPartnerLinks, viewer.viewerLevel);
+    await resolvePartnerLinksForViewer(rawPartnerLinks, effectiveViewerLevel);
 
   // Org admins and super/admins can edit links — raw links needed for the editor
   const canEditLinks =
     viewer.viewerLevel === "super_admin" ||
     viewer.viewerLevel === "admin" ||
-    (viewer.viewerLevel === "org_admin" &&
-      viewer.viewerOrgAdminIds.includes(organization.id));
+    viewer.viewerOrgAdminIds.includes(organization.id);
   const editorRawLinks = canEditLinks ? rawPartnerLinks : undefined;
 
   // Render different layouts based on organization type
@@ -237,11 +282,12 @@ export default async function OrgProfilePage({ params }: PageProps) {
         brandColors={brandColors}
         benchmarking={benchmarking}
         allBenchmarking={allBenchmarking}
-        viewerLevel={viewer.viewerLevel}
+        viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
         sponsorTier={sponsorTier}
         initialRFPs={orgRFPs}
+        memberSuppliers={memberSuppliers}
       />
       </>
     );
@@ -264,6 +310,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
       rawLinks={editorRawLinks}
       canEditLinks={canEditLinks}
       partnerRFPs={partnerRFPs}
+      partnerMarket={partnerMarket}
+      canNudge={canNudge}
+      nudgeAvailableAt={nudgeAvailableAt}
     />
     </>
   );

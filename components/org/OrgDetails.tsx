@@ -1,4 +1,4 @@
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 
 interface OrgDetailsProps {
   organization: Organization;

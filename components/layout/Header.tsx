@@ -94,6 +94,12 @@ export default function Header() {
 
   const primaryOrg = organizations[0];
   const isAdmin = isGlobalAdmin(globalRole);
+  const partnerOrgAdmin = organizations.find(
+    uo => uo.organization?.type === "Vendor Partner" && uo.role === "org_admin"
+  );
+  const memberOrg = organizations.find(
+    uo => uo.organization?.type === "Member"
+  );
 
   const conferenceContext = useMemo(() => {
     const parts = pathname.split("/").filter(Boolean);
@@ -644,6 +650,26 @@ export default function Header() {
                         className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
                       >
                         My Organization
+                      </Link>
+                    ) : null}
+
+                    {partnerOrgAdmin?.organization?.slug ? (
+                      <Link
+                        href={`/org/${partnerOrgAdmin.organization.slug}#your-market`}
+                        onClick={() => setShowUserMenu(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        My Market
+                      </Link>
+                    ) : null}
+
+                    {memberOrg?.organization?.slug ? (
+                      <Link
+                        href={`/org/${memberOrg.organization.slug}#my-suppliers`}
+                        onClick={() => setShowUserMenu(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        My Suppliers
                       </Link>
                     ) : null}
 

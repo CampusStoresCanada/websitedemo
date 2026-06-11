@@ -102,6 +102,7 @@ export function derivePermissionState(
   if (orgTypes.includes("Member")) return "member";
 
   // Partner organization users (including org_admins) get partner permission
+  // Note: partner org admins get page-level elevation via PageOwnerProvider on their own org pages
   if (orgTypes.includes("Vendor Partner")) return "partner";
 
   return "public";

@@ -1,6 +1,6 @@
 "use client";
 
-import type { Organization } from "@/lib/database.types";
+import type { Organization } from "@/lib/types/db";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo, KeyDate } from "@/lib/types/procurement";
 import { hasProcurementInfo } from "@/lib/types/procurement";
@@ -72,22 +72,27 @@ export default function PartnerViewOfMember({
 
                 {/* Category list always visible (teaser) */}
                 <div className="space-y-2 mb-4">
-                  {categoryBuyers.map((entry) => (
-                    <div key={entry.category}>
-                      <span className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-full inline-block">
-                        {entry.category}
-                      </span>
-                      {entry.subcategories && entry.subcategories.length > 0 && (
-                        <div className="ml-3 mt-1.5 flex flex-wrap gap-1.5">
-                          {entry.subcategories.map((sub) => (
-                            <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">
-                              {sub}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
+                  {categoryBuyers.map((entry) => {
+                    const subcategories = entry.contact_subcategories
+                      ? Array.from(new Set(Object.values(entry.contact_subcategories).flat()))
+                      : [];
+                    return (
+                      <div key={entry.category}>
+                        <span className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-full inline-block">
+                          {entry.category}
+                        </span>
+                        {subcategories.length > 0 && (
+                          <div className="ml-3 mt-1.5 flex flex-wrap gap-1.5">
+                            {subcategories.map((sub) => (
+                              <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">
+                                {sub}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
 
                 {/* Buyer detail — partners only; contacts hidden in Staffing are excluded */}
@@ -214,7 +219,7 @@ export default function PartnerViewOfMember({
 
             {/* Buying cycle — partners only */}
             {vis.buyingCycle && buyingCycle &&
-              (buyingCycle.fiscal_year_start || buyingCycle.rfp_start || buyingCycle.rfp_end || (buyingCycle.key_dates && buyingCycle.key_dates.length > 0)) && (
+              (buyingCycle.fiscal_year_start || (buyingCycle.key_dates && buyingCycle.key_dates.length > 0)) && (
                 <ProtectedSection
                   requiredPermission="partner"
                   bannerMessage="Partner members can view RFP timelines and buying cycles."
@@ -231,18 +236,6 @@ export default function PartnerViewOfMember({
                           <span className="text-xs uppercase text-gray-400">Fiscal Year Starts</span>
                           <p className="font-medium text-[#1A1A1A]">
                             <BlurredValue placeholderWidth={10}>{buyingCycle.fiscal_year_start}</BlurredValue>
-                          </p>
-                        </div>
-                      )}
-                      {(buyingCycle.rfp_start || buyingCycle.rfp_end) && (
-                        <div>
-                          <span className="text-xs uppercase text-gray-400">RFP Window</span>
-                          <p className="font-medium text-[#1A1A1A]">
-                            <BlurredValue placeholderWidth={14}>
-                              {buyingCycle.rfp_start && buyingCycle.rfp_end
-                                ? `${buyingCycle.rfp_start} – ${buyingCycle.rfp_end}`
-                                : buyingCycle.rfp_start ?? buyingCycle.rfp_end ?? ""}
-                            </BlurredValue>
                           </p>
                         </div>
                       )}

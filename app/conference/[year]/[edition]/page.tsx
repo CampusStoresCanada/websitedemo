@@ -49,6 +49,11 @@ export default async function ConferenceEditionHubPage({
       title: "Orders",
       description: "Review conference order and checkout history.",
     },
+    {
+      href: `/conference/${year}/${edition}/booths`,
+      title: "Booth Selection",
+      description: "View the trade show floor plan and select an exhibitor booth.",
+    },
   ] as const;
 
   return (

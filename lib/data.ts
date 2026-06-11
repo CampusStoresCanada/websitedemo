@@ -1,5 +1,5 @@
 import { supabase } from "./supabase";
-import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./database.types";
+import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./types/db";
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /** Org data embedded in a board card contact join. */

@@ -2,32 +2,46 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { getOnboardingStep, initOrgAdminJourney } from "@/lib/actions/onboarding";
+import { getOnboardingStep, initJourney, derivePersona } from "@/lib/actions/onboarding";
+import type { Persona } from "@/lib/onboarding/steps";
 import WelcomeModal from "@/components/onboarding/WelcomeModal";
 
 interface OnboardingGateProps {
   children: React.ReactNode;
   /**
-   * Server-side hint: is the current user an org admin?
-   * Used to skip the async check entirely for non-org-admins,
-   * so the gate never adds latency for ordinary visitors.
+   * Server-side hint: does the current user have any org membership?
+   * Used to skip the async check entirely for anonymous visitors.
    */
-  serverIsOrgAdmin: boolean;
+  serverHasOnboarding: boolean;
 }
 
 type GateState = "checking" | "modal" | "open";
 
-export default function OnboardingGate({ children, serverIsOrgAdmin }: OnboardingGateProps) {
+export default function OnboardingGate({ children, serverHasOnboarding }: OnboardingGateProps) {
   const { user, profile, organizations, isLoading } = useAuth();
 
-  // Non-org-admins skip the gate entirely — start open immediately.
-  const [state, setState] = useState<GateState>(serverIsOrgAdmin ? "checking" : "open");
+  const onboardingDisabled = process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true";
+  const [state, setState] = useState<GateState>(
+    onboardingDisabled || !serverHasOnboarding ? "open" : "checking"
+  );
+  const [persona, setPersona] = useState<Persona | null>(null);
+
+  // Reset the gate whenever the user changes (e.g. DevPanel account switch).
+  // useState initializer only runs once so we need an effect to handle re-auth.
+  // Always go back to "checking" — don't inspect organizations here because they
+  // haven't loaded yet for the new user. The main check effect opens the gate
+  // if the user has no qualifying memberships.
+  useEffect(() => {
+    if (onboardingDisabled) return;
+    if (!user) { setState("open"); return; }
+    setState("checking");
+    setPersona(null);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   useEffect(() => {
     if (isLoading || state !== "checking") return;
-
-    const orgAdminMembership = organizations.find((o) => o.role === "org_admin");
-    if (!orgAdminMembership) {
+    if (!user || organizations.length === 0) {
       setState("open");
       return;
     }
@@ -36,15 +50,27 @@ export default function OnboardingGate({ children, serverIsOrgAdmin }: Onboardin
 
     async function check() {
       try {
-        // Ensure the journey rows exist (idempotent)
-        await initOrgAdminJourney();
-        const result = await getOnboardingStep("session_1_welcome");
+        // Init the journey (idempotent) and get the user's persona
+        const initResult = await initJourney();
+        if (cancelled) return;
+        if (!initResult.success || !initResult.persona) {
+          setState("open");
+          return;
+        }
+
+        const p = initResult.persona;
+        const result = await getOnboardingStep("session_1_welcome", p);
         if (cancelled) return;
 
         const needsModal = result.success && (!result.step || !result.step.completed_at);
-        setState(needsModal ? "modal" : "open");
-      } catch {
-        // If the check fails for any reason, open the gate so the user isn't stuck
+        if (needsModal) {
+          setPersona(p);
+          setState("modal");
+        } else {
+          setState("open");
+        }
+      } catch (e) {
+        console.error("[OnboardingGate] check failed:", e);
         if (!cancelled) setState("open");
       }
     }
@@ -52,35 +78,33 @@ export default function OnboardingGate({ children, serverIsOrgAdmin }: Onboardin
     void check();
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isLoading, state, organizations]);
+  }, [isLoading, state, user?.id, organizations.length]);
 
-  const orgAdminMembership = organizations.find((o) => o.role === "org_admin");
+  // Resolve display values for the modal
   const displayName = profile?.display_name ? profile.display_name.split(" ")[0] : null;
-  const orgName = orgAdminMembership?.organization?.name ?? null;
-  const orgSlug = orgAdminMembership?.organization?.slug ?? null;
+  const orgMembership = persona
+    ? organizations.find((o) =>
+        persona === "org_admin_member" || persona === "member_member"
+          ? o.organization?.type === "Member"
+          : o.organization?.type === "Vendor Partner"
+      )
+    : null;
+  const orgName = orgMembership?.organization?.name ?? null;
+  const orgSlug = orgMembership?.organization?.slug ?? null;
 
   return (
     <>
-      {/* Modal renders outside the gated content so it's always on top */}
-      {state === "modal" && (
+      {state === "modal" && persona && (
         <WelcomeModal
           displayName={displayName}
           orgName={orgName}
           orgSlug={orgSlug}
+          persona={persona}
           onDone={() => setState("open")}
         />
       )}
 
-      {/*
-       * Page content — rendered immediately so it loads in the background,
-       * but invisible + non-interactive until the gate opens.
-       * The opacity transition gives a clean fade-in after the modal clears.
-       */}
-      <div
-        className={`transition-opacity duration-300 ${
-          state === "open" ? "opacity-100" : "opacity-0 pointer-events-none"
-        }`}
-      >
+      <div className={`transition-opacity duration-300 ${state === "open" ? "opacity-100" : "opacity-0 pointer-events-none"}`}>
         {children}
       </div>
     </>

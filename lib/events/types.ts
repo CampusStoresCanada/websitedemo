@@ -160,7 +160,7 @@ export const EVENT_STATUS_TRANSITIONS: Record<EventStatus, EventStatus[]> = {
   draft:          ["published", "cancelled"],
   published:      ["completed", "cancelled"],
   completed:      [],
-  cancelled:      [],
+  cancelled:      ["draft"],
 };
 
 export const EVENT_STATUS_LABELS: Record<EventStatus, string> = {

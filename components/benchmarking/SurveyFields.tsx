@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
-import type { DeltaFlag } from "@/lib/database.types";
+import type { DeltaFlag } from "@/lib/types/db";
 import FieldTooltip from "./FieldTooltip";
 
 // ─────────────────────────────────────────────────────────────────

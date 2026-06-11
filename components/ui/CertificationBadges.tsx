@@ -7,7 +7,11 @@ interface CertificationBadgesProps {
   certifications: string[];
   /** sm = 32px (panels), md = 40px (profile page) */
   size?: "sm" | "md";
-  /** When true, appends the CANCOLL badge (caller has already verified viewer eligibility) */
+  /**
+   * Whether CANCOLL should be visible to this viewer.
+   * CANCOLL lives in the certifications array but is only shown to members/admins.
+   * Defaults to false (hidden from public).
+   */
   showCancoll?: boolean;
   /**
    * When provided, badges whose name is in this set are highlighted with a
@@ -22,10 +26,10 @@ interface CertificationBadgesProps {
  */
 export function CertificationBadges({ certifications, size = "md", showCancoll = false, highlightSet }: CertificationBadgesProps) {
   const certs: Certification[] = certifications
+    .filter((name) => name !== "CANCOLL" || showCancoll) // gate CANCOLL by viewer permission
     .map((name) => CERTIFICATION_BY_NAME[name])
     .filter(Boolean) as Certification[];
 
-  if (showCancoll) certs.push(CANCOLL_CERT);
   if (certs.length === 0) return null;
 
   const px = size === "sm" ? 32 : 40;

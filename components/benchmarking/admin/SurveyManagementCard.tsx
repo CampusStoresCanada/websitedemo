@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import type { BenchmarkingSurvey } from "@/lib/database.types";
+import type { BenchmarkingSurvey } from "@/lib/types/db";
 import {
   createBenchmarkingSurvey,
   updateSurveyStatus,

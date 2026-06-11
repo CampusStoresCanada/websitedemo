@@ -7,6 +7,7 @@ import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import Placeholder from "@tiptap/extension-placeholder";
 import { useCallback, useEffect, useRef } from "react";
+import { useSlashCommands } from "@/components/ui/SlashCommands";
 import {
   Bold,
   Italic,
@@ -77,6 +78,10 @@ export default function TemplateBodyEditor({
   fieldName = "body_html",
 }: TemplateBodyEditorProps) {
   const hiddenRef = useRef<HTMLTextAreaElement>(null);
+  const editorRef = useRef<ReturnType<typeof useEditor>>(null);
+
+  // "/" menu for headings, lists, etc.
+  const slash = useSlashCommands(editorRef);
 
   const editor = useEditor({
     extensions: [
@@ -87,8 +92,14 @@ export default function TemplateBodyEditor({
       Placeholder.configure({
         placeholder: "Write your email body here. Use {{variable_name}} tokens for dynamic content…",
       }),
+      slash.extension,
     ],
     content: initialHtml,
+    editorProps: {
+      handleKeyDown(_, event) {
+        return slash.handleKeyDown(event);
+      },
+    },
     onUpdate({ editor }) {
       if (hiddenRef.current) {
         hiddenRef.current.value = editor.getHTML();
@@ -96,6 +107,8 @@ export default function TemplateBodyEditor({
     },
     immediatelyRender: false,
   });
+
+  editorRef.current = editor ?? null;
 
   useEffect(() => {
     if (hiddenRef.current && editor) {
@@ -221,12 +234,17 @@ export default function TemplateBodyEditor({
         "
       />
 
+      {/* Slash menu portal */}
+      {slash.menu}
+
       {/* ── Status bar ── */}
       <div className="border-t border-gray-100 bg-gray-50 px-4 py-1.5 flex items-center justify-between">
         <span className="text-xs text-gray-400">
           {editor.storage.characterCount?.characters?.() ?? editor.getText().length} characters
         </span>
-        <span className="text-xs text-gray-300">HTML output · saved on submit</span>
+        <span className="text-xs text-gray-300 flex items-center gap-1">
+          Type <kbd className="text-[10px] border border-gray-200 rounded px-1 py-px font-mono leading-none">/</kbd> for formatting · HTML output saved on submit
+        </span>
       </div>
 
       {/* Hidden field submitted with the form */}

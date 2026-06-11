@@ -45,7 +45,8 @@ export default async function RootLayout({
     ),
   };
 
-  const serverIsOrgAdmin = serverAuth.organizations.some((uo) => uo.role === "org_admin");
+  // True for any user who has a qualifying persona (all 4 journeys)
+  const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
 
   return (
     <html lang="en">
@@ -56,7 +57,7 @@ export default async function RootLayout({
         <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
           <ToolkitProvider>
             <Header />
-            <OnboardingGate serverIsOrgAdmin={serverIsOrgAdmin}>
+            <OnboardingGate serverHasOnboarding={serverHasOnboarding}>
               <main className="min-h-screen">{children}</main>
               <Footer />
               {process.env.NODE_ENV === "development" ? <DevPanel /> : null}

@@ -6,7 +6,6 @@ import {
   createSuggestedMeetingProducts,
   createSuggestedMealProducts,
   createSuggestedOffsiteProducts,
-  createSuggestedTradeShowProducts,
   regenerateProgramFromSetup,
   reconcileConferenceSetupAndPeople,
   reconcileConferenceScheduleSetup,
@@ -15,6 +14,9 @@ import {
   type ConferenceScheduleModuleRow,
 } from "@/lib/actions/conference-schedule-design";
 import { loadGooglePlacesScript } from "@/lib/google/places";
+import ExpoFloorPlanManager from "./ExpoFloorPlanManager";
+import type { BoothRow } from "@/lib/actions/conference-booths";
+import { getBoothPackagesFromProducts } from "@/lib/constants/floor-plan";
 
 type ParamsRow = {
   id: string;
@@ -44,9 +46,18 @@ interface ScheduleDesignWizardProps {
     id: string;
     slug: string;
     name: string;
+    description: string | null;
     price_cents: number;
+    max_per_account: number | null;
+    display_order: number;
     is_active: boolean;
+    metadata: unknown;
   }>;
+  floorPlanUrl?: string | null;
+  initialBooths?: BoothRow[];
+  vendorOrgs?: Array<{ id: string; name: string }>;
+  conferenceYear?: number;
+  editionCode?: string;
 }
 
 const MODULES: Array<{
@@ -147,12 +158,6 @@ const MODULES: Array<{
     key: "virtual_hybrid",
     label: "Virtual / Hybrid",
     description: "Streaming and hybrid attendee schedule mapping.",
-    v12Stub: true,
-  },
-  {
-    key: "expo_floor_plan",
-    label: "Expo Floor Plan",
-    description: "Booth map, assignments, and floor-plan constraints.",
     v12Stub: true,
   },
 ];
@@ -1265,6 +1270,11 @@ export default function ScheduleDesignWizard({
   conferenceRegistrationCloseAt = null,
   googleMapsApiKey = null,
   initialProducts = [],
+  floorPlanUrl = null,
+  initialBooths = [],
+  vendorOrgs = [],
+  conferenceYear,
+  editionCode,
 }: ScheduleDesignWizardProps) {
   const offsiteEventCounterRef = useRef(1);
   const audienceListCounterRef = useRef(1);
@@ -1328,7 +1338,6 @@ export default function ScheduleDesignWizard({
   const [airportLookupErrorById, setAirportLookupErrorById] = useState<Record<string, string>>({});
   const savedTravelSectionSignaturesRef = useRef<TravelSectionSignatures | null>(null);
   const [meetingProductResult, setMeetingProductResult] = useState<string | null>(null);
-  const [tradeShowProductResult, setTradeShowProductResult] = useState<string | null>(null);
   const [educationProductResult, setEducationProductResult] = useState<string | null>(null);
   const [mealProductResult, setMealProductResult] = useState<string | null>(null);
   const [offsiteProductResult, setOffsiteProductResult] = useState<string | null>(null);
@@ -1735,6 +1744,11 @@ export default function ScheduleDesignWizard({
   const tradeShowConfig = useMemo(
     () => ((modules.trade_show?.config_json ?? {}) as Record<string, unknown>),
     [modules.trade_show?.config_json]
+  );
+  const boothInventoryTotal = initialBooths.length;
+  const boothPackages = useMemo(
+    () => getBoothPackagesFromProducts(initialProducts),
+    [initialProducts]
   );
   const tradeShowDays = useMemo(
     () =>
@@ -2148,9 +2162,8 @@ export default function ScheduleDesignWizard({
       if (tradeShowDays.length === 0) {
         add("blocking", "trade-show-days-missing", "Trade show days are not configured", "Select at least one trade show day.", "trade_show");
       }
-      const booths = Number(tradeShowConfig.booth_count_total ?? 0);
-      if (!Number.isFinite(booths) || booths <= 0) {
-        add("blocking", "trade-show-booths-missing", "Trade show booth inventory is missing", "Set total booth count greater than zero.", "trade_show");
+      if (boothInventoryTotal === 0) {
+        add("blocking", "trade-show-booths-missing", "Trade show booth inventory is missing", "Add booths to the floor plan in the Trade Show module.", "trade_show");
       }
     }
 
@@ -5232,23 +5245,6 @@ export default function ScheduleDesignWizard({
     );
   };
 
-  const applyTradeShowProductSuggestion = async () => {
-    setSaveError(null);
-    setTradeShowProductResult(null);
-    const result = await createSuggestedTradeShowProducts(conferenceId);
-    if (!result.success || !result.data) {
-      setSaveError(result.error ?? "Failed to create suggested trade show products.");
-      return;
-    }
-    setTradeShowProductResult(
-      `Suggested products updated. Created: ${result.data.created.join(", ") || "none"}; Updated: ${
-        result.data.updated.join(", ") || "none"
-      }; Skipped: ${result.data.skipped.join(", ") || "none"}; Blocked: ${
-        result.data.blocked.join(", ") || "none"
-      }; Capacity basis: ${result.data.totalBoothInventory} booth inventory.`
-    );
-  };
-
   const applyEducationProductSuggestion = async () => {
     setSaveError(null);
     setEducationProductResult(null);
@@ -6022,18 +6018,15 @@ export default function ScheduleDesignWizard({
                 )}
 
                 <div className="grid gap-3 md:grid-cols-2">
-                  <label className="block text-sm text-gray-700">
+                  <div className="block text-sm text-gray-700">
                     Total booth count
-                    <input
-                      type="number"
-                      min={1}
-                      value={Number(tradeShowConfig.booth_count_total ?? 40)}
-                      onChange={(e) =>
-                        updateModuleConfig("trade_show", { booth_count_total: Number(e.target.value) })
-                      }
-                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                    />
-                  </label>
+                    <p className="mt-1 rounded-md border border-gray-200 bg-gray-50 px-3 py-2 font-medium text-gray-900">
+                      {boothInventoryTotal} {boothInventoryTotal === 1 ? "booth" : "booths"}
+                    </p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      From the floor plan booth inventory below.
+                    </p>
+                  </div>
                   <label className="block text-sm text-gray-700">
                     Booth sale mode
                     <select
@@ -6047,18 +6040,6 @@ export default function ScheduleDesignWizard({
                       <option value="single_day">Single-day booth inventory</option>
                     </select>
                   </label>
-                  <label className="block text-sm text-gray-700">
-                    Floor zones
-                    <input
-                      type="number"
-                      min={1}
-                      value={Number(tradeShowConfig.floor_zone_count ?? 1)}
-                      onChange={(e) =>
-                        updateModuleConfig("trade_show", { floor_zone_count: Number(e.target.value) })
-                      }
-                      className="mt-1 block w-full rounded-md border border-gray-300 px-3 py-2"
-                    />
-                  </label>
                   <label className="flex items-center gap-2 rounded-md border border-gray-200 px-3 py-2 text-sm text-gray-700">
                     <input
                       type="checkbox"
@@ -6071,30 +6052,25 @@ export default function ScheduleDesignWizard({
                   </label>
                 </div>
 
-                <div className="rounded-md border border-green-200 bg-green-50 p-3">
-                  <p className="text-sm font-medium text-green-900">Suggested products</p>
-                  <p className="mt-1 text-xs text-green-800">
-                    Use trade show setup values to create/update booth inventory products.
+                <div className="border-t border-gray-100 pt-4">
+                  <p className="text-sm font-semibold text-gray-900">Floor Plan &amp; Booth Inventory</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    Define booth packages, upload the floor plan image, place booths on the map, and
+                    manage per-booth status, package assignment, and exhibitor. The booth count above
+                    is derived from this inventory.
                   </p>
-                  <div className="mt-2">
-                    <button
-                      type="button"
-                      onClick={applyTradeShowProductSuggestion}
-                      className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
-                    >
-                      Create/Update Suggested Trade Show Products
-                    </button>
+                  <div className="mt-4">
+                    <ExpoFloorPlanManager
+                      conferenceId={conferenceId}
+                      conferenceYear={conferenceYear ?? new Date().getFullYear()}
+                      editionCode={editionCode ?? "00"}
+                      floorPlanUrl={floorPlanUrl}
+                      initialBooths={initialBooths}
+                      initialBoothPackages={boothPackages}
+                      conferenceDates={conferenceDates}
+                      vendorOrgs={vendorOrgs}
+                    />
                   </div>
-                  {tradeShowProductResult && (
-                    <p className="mt-2 text-xs text-green-800">{tradeShowProductResult}</p>
-                  )}
-                </div>
-
-                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
-                  <p className="font-semibold">Deferred to v1.2</p>
-                  <p className="mt-1">
-                    Booth sizes, booth inclusions/packages, premium booth tiers, and floorplan builder.
-                  </p>
                 </div>
               </div>
             </div>

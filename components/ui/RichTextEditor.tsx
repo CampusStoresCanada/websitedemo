@@ -15,11 +15,10 @@ import TiptapLink from "@tiptap/extension-link";
 import Placeholder from "@tiptap/extension-placeholder";
 import TiptapImage from "@tiptap/extension-image";
 import Mention from "@tiptap/extension-mention";
-import { Extension } from "@tiptap/core";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
 import data from "@emoji-mart/data";
 import Picker from "@emoji-mart/react";
 import { uploadEditorImage } from "@/lib/actions/upload-editor-image";
+import { useSlashCommands } from "@/components/ui/SlashCommands";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -40,101 +39,6 @@ interface GiphyResult {
   preview: string;   // fixed-width still
 }
 
-// ─── Slash commands ───────────────────────────────────────────────────────────
-
-interface SlashCmd {
-  title: string;
-  description: string;
-  shortcut: string;
-  action: (e: EditorInstance) => void;
-}
-
-const SLASH_COMMANDS: SlashCmd[] = [
-  { title: "Heading 1",     description: "Large section heading",   shortcut: "H1", action: (e) => e.chain().focus().toggleHeading({ level: 1 }).run() },
-  { title: "Heading 2",     description: "Medium section heading",  shortcut: "H2", action: (e) => e.chain().focus().toggleHeading({ level: 2 }).run() },
-  { title: "Bullet List",   description: "Unordered list",          shortcut: "–",  action: (e) => e.chain().focus().toggleBulletList().run() },
-  { title: "Numbered List", description: "Ordered list",            shortcut: "1.", action: (e) => e.chain().focus().toggleOrderedList().run() },
-  { title: "Blockquote",    description: "Highlighted callout",     shortcut: '"',  action: (e) => e.chain().focus().toggleBlockquote().run() },
-  { title: "Code Block",    description: "Monospace code",          shortcut: "<>", action: (e) => e.chain().focus().toggleCodeBlock().run() },
-];
-
-// ─── Slash plugin ─────────────────────────────────────────────────────────────
-
-interface SlashState {
-  visible: boolean;
-  query: string;
-  from: number;
-  rect: DOMRect | null;
-  selected: number;
-}
-const CLOSED_SLASH: SlashState = { visible: false, query: "", from: 0, rect: null, selected: 0 };
-
-function buildSlashPlugin(onUpdate: (s: Omit<SlashState, "selected">) => void) {
-  return new Plugin({
-    key: new PluginKey("slashCommands"),
-    view: () => ({
-      update(view) {
-        const { $from } = view.state.selection;
-        const text = $from.parent.textContent.slice(0, $from.parentOffset);
-        const idx = text.lastIndexOf("/");
-        if (idx === -1 || /\s/.test(text.slice(idx + 1))) {
-          onUpdate({ visible: false, query: "", from: 0, rect: null });
-          return;
-        }
-        const coords = view.coordsAtPos($from.pos);
-        onUpdate({
-          visible: true,
-          query: text.slice(idx + 1),
-          from: $from.start() + idx,
-          rect: new DOMRect(coords.left, coords.top, 0, coords.bottom - coords.top),
-        });
-      },
-    }),
-  });
-}
-
-// ─── Slash menu ───────────────────────────────────────────────────────────────
-
-function SlashMenu({
-  commands, rect, selected, onSelect,
-}: {
-  commands: SlashCmd[];
-  rect: DOMRect;
-  selected: number;
-  onSelect: (c: SlashCmd) => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    ref.current?.querySelectorAll("button")[selected]?.scrollIntoView({ block: "nearest" });
-  }, [selected]);
-
-  return createPortal(
-    <div
-      ref={ref}
-      className="fixed z-[9999] w-60 max-h-72 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl text-sm"
-      style={{ top: rect.bottom + window.scrollY + 6, left: rect.left + window.scrollX }}
-    >
-      {commands.length === 0
-        ? <p className="px-3 py-2 text-xs text-gray-400">No commands match</p>
-        : commands.map((cmd, i) => (
-          <button
-            key={cmd.title}
-            type="button"
-            onMouseDown={(e) => { e.preventDefault(); onSelect(cmd); }}
-            className={`w-full flex items-center gap-3 px-3 py-2 text-left transition-colors ${i === selected ? "bg-gray-100" : "hover:bg-gray-50"}`}
-          >
-            <span className="w-7 h-7 flex-shrink-0 flex items-center justify-center rounded bg-gray-100 text-[10px] font-bold text-gray-500">{cmd.shortcut}</span>
-            <div className="min-w-0">
-              <p className="font-medium text-gray-800 leading-tight">{cmd.title}</p>
-              <p className="text-[11px] text-gray-400 leading-tight">{cmd.description}</p>
-            </div>
-          </button>
-        ))}
-    </div>,
-    document.body,
-  );
-}
-
 // ─── Mention suggestion list ──────────────────────────────────────────────────
 
 function MentionList({
@@ -148,7 +52,7 @@ function MentionList({
   return createPortal(
     <div
       className="fixed z-[9999] w-64 max-h-60 overflow-y-auto rounded-lg border border-gray-200 bg-white py-1 shadow-xl text-sm"
-      style={{ top: rect.bottom + window.scrollY + 6, left: rect.left + window.scrollX }}
+      style={{ top: rect.bottom + 6, left: rect.left }}
     >
       {items.length === 0
         ? <p className="px-3 py-2 text-xs text-gray-400">No results</p>
@@ -157,7 +61,7 @@ function MentionList({
             key={item.id}
             type="button"
             onMouseDown={(e) => { e.preventDefault(); onSelect(item); }}
-            className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === selected ? "bg-gray-100" : "hover:bg-gray-50"}`}
+            className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors ${i === selected ? "bg-[#163D6D]/10" : "hover:bg-gray-50"}`}
           >
             <span className={`w-6 h-6 flex-shrink-0 flex items-center justify-center rounded-full text-[10px] font-bold text-white ${item.type === "org" ? "bg-[#163D6D]" : "bg-gray-400"}`}>
               {item.type === "org" ? "O" : "C"}
@@ -312,10 +216,10 @@ export default function RichTextEditor({
   className = "",
   minHeight = "120px",
 }: RichTextEditorProps) {
-  // ── Slash state ──
-  const [slash, setSlash] = useState<SlashState>(CLOSED_SLASH);
-  const slashRef = useRef(slash);
-  slashRef.current = slash;
+  const editorRef = useRef<EditorInstance | null>(null);
+
+  // ── Slash commands ("/" menu for headings, lists, etc.) ──
+  const slash = useSlashCommands(editorRef);
 
   // ── Mention state ──
   const [mention, setMention] = useState<{
@@ -330,28 +234,6 @@ export default function RichTextEditor({
   // ── Image upload ──
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
-
-  const handleSlashUpdate = useCallback((next: Omit<SlashState, "selected">) => {
-    setSlash((prev) => {
-      // If nothing meaningful changed, return the same reference — React skips the re-render
-      if (
-        prev.visible === next.visible &&
-        prev.query === next.query &&
-        prev.from === next.from
-      ) return prev;
-      return {
-        ...next,
-        selected: next.visible ? (next.query !== prev.query ? 0 : prev.selected) : 0,
-      };
-    });
-  }, []);
-
-  const SlashExtension = useRef(
-    Extension.create({
-      name: "slashCommands",
-      addProseMirrorPlugins: () => [buildSlashPlugin(handleSlashUpdate)],
-    }),
-  ).current;
 
   // Mention suggestion handler (passed to Mention extension)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -407,24 +289,17 @@ export default function RichTextEditor({
     },
   }).current;
 
-  const editorRef = useRef<EditorInstance | null>(null);
-
   const selectMention = useCallback((item: MentionItem) => {
-    editorRef.current
-      ?.chain()
+    const editor = editorRef.current;
+    if (!editor) return;
+    const { $from } = editor.state.selection;
+    editor
+      .chain()
       .focus()
+      .deleteRange({ from: mentionRef.current.from, to: $from.pos })
       .insertContent(`<a href="${item.href}" data-mention="${item.id}">@${item.label}</a> `)
       .run();
     setMention((p) => ({ ...p, visible: false }));
-  }, []);
-
-  const runSlash = useCallback((cmd: SlashCmd) => {
-    if (!editorRef.current) return;
-    const s = slashRef.current;
-    const { $from } = editorRef.current.state.selection;
-    editorRef.current.chain().focus().deleteRange({ from: s.from, to: $from.pos }).run();
-    cmd.action(editorRef.current);
-    setSlash(CLOSED_SLASH);
   }, []);
 
   const editor = useEditor({
@@ -437,22 +312,13 @@ export default function RichTextEditor({
         HTMLAttributes: { class: "text-[var(--brand-red)] font-medium cursor-pointer" },
         suggestion: mentionSuggestion,
       }),
-      SlashExtension,
+      slash.extension,
     ],
     content: value,
     editorProps: {
       attributes: { class: "outline-none", style: `min-height: ${minHeight}` },
       handleKeyDown(_, event) {
-        const s = slashRef.current;
-        if (!s.visible) return false;
-        const filtered = SLASH_COMMANDS.filter(
-          (c) => s.query === "" || c.title.toLowerCase().includes(s.query.toLowerCase()),
-        );
-        if (event.key === "ArrowDown") { event.preventDefault(); setSlash((p) => ({ ...p, selected: Math.min(p.selected + 1, filtered.length - 1) })); return true; }
-        if (event.key === "ArrowUp")   { event.preventDefault(); setSlash((p) => ({ ...p, selected: Math.max(p.selected - 1, 0) })); return true; }
-        if (event.key === "Enter" && filtered[s.selected]) { event.preventDefault(); runSlash(filtered[s.selected]); return true; }
-        if (event.key === "Escape")    { setSlash(CLOSED_SLASH); return true; }
-        return false;
+        return slash.handleKeyDown(event);
       },
     },
     onUpdate({ editor }) { onChange(editor.getHTML()); },
@@ -490,10 +356,6 @@ export default function RichTextEditor({
     }
     editorRef.current?.chain().focus().setImage({ src: result.url }).run();
   }, []);
-
-  const filteredSlash = SLASH_COMMANDS.filter(
-    (c) => slash.query === "" || c.title.toLowerCase().includes(slash.query.toLowerCase()),
-  );
 
   if (!editor) return null;
 
@@ -621,9 +483,7 @@ export default function RichTextEditor({
       </div>
 
       {/* Slash menu portal */}
-      {slash.visible && slash.rect && (
-        <SlashMenu commands={filteredSlash} rect={slash.rect} selected={slash.selected} onSelect={runSlash} />
-      )}
+      {slash.menu}
 
       {/* Mention list portal */}
       {mention.visible && mention.rect && mention.items.length > 0 && (
