@@ -5,6 +5,18 @@ import type { SupplierMatch, SupplierData } from "@/lib/actions/member-suppliers
 
 interface MemberSupplierPanelProps {
   data: SupplierData;
+  /** Org name suffix for multi-org contexts (e.g., My Account with several Member orgs) */
+  orgName?: string;
+  /** Unique anchor id — defaults to "my-suppliers"; override to avoid collisions when rendering multiple instances on one page */
+  anchorId?: string;
+  /** Override the outer wrapper classes — e.g., to fit a rounded-card layout instead of the org page's full-bleed section */
+  containerClassName?: string;
+  /**
+   * Where the "not set up yet" prompt points:
+   *  - "org" (default): the org page's Staffing section → Procurement tab
+   *  - "account": the My Account "Edit my info" button → Procurement tab
+   */
+  emptyStateContext?: "org" | "account";
 }
 
 function ConfidencePip({ confidence }: { confidence: "high" | "medium" | "low" }) {
@@ -82,14 +94,22 @@ function SupplierCard({ match }: { match: SupplierMatch }) {
   );
 }
 
-export default function MemberSupplierPanel({ data }: MemberSupplierPanelProps) {
+export default function MemberSupplierPanel({
+  data,
+  orgName,
+  anchorId = "my-suppliers",
+  containerClassName,
+  emptyStateContext = "org",
+}: MemberSupplierPanelProps) {
   return (
-    <div id="my-suppliers" className="bg-white border-t border-gray-200">
+    <div id={anchorId} className={containerClassName ?? "bg-white border-t border-gray-200"}>
       <div className="max-w-7xl mx-auto px-8 py-12">
 
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h2 className="text-xl font-semibold text-[#1A1A1A]">My Suppliers</h2>
+            <h2 className="text-xl font-semibold text-[#1A1A1A]">
+              My Suppliers{orgName ? ` — ${orgName}` : ""}
+            </h2>
             {data.hasAssignments && data.totalMatches > 0 && (
               <p className="text-sm text-gray-500 mt-1">
                 {data.totalMatches} {data.totalMatches === 1 ? "supplier" : "suppliers"} matched to your buying categories
@@ -108,22 +128,41 @@ export default function MemberSupplierPanel({ data }: MemberSupplierPanelProps) 
         {!data.hasAssignments && (
           <div className="rounded-xl border border-dashed border-gray-200 bg-gray-50 px-5 py-6">
             <p className="text-sm font-medium text-gray-700 mb-1">Your supplier list isn't set up yet.</p>
-            <p className="text-sm text-gray-500 leading-relaxed">
-              Click your name in the{" "}
-              <button
-                type="button"
-                onClick={() => {
-                  const el = document.querySelector('[data-onboarding="contacts_section"]');
-                  el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                  el?.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
-                  setTimeout(() => el?.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse"), 2500);
-                }}
-                className="font-medium text-[#EE2A2E] hover:text-[#D92327] underline underline-offset-2 transition-colors"
-              >
-                Staffing section
-              </button>
-              {" "}above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
-            </p>
+            {emptyStateContext === "account" ? (
+              <p className="text-sm text-gray-500 leading-relaxed">
+                Click{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.querySelector('[data-onboarding="self-edit-trigger"]');
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el?.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded-lg", "animate-pulse");
+                    setTimeout(() => el?.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded-lg", "animate-pulse"), 2500);
+                  }}
+                  className="font-medium text-[#EE2A2E] hover:text-[#D92327] underline underline-offset-2 transition-colors"
+                >
+                  Edit my info
+                </button>
+                {" "}above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
+              </p>
+            ) : (
+              <p className="text-sm text-gray-500 leading-relaxed">
+                Click your name in the{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const el = document.querySelector('[data-onboarding="contacts_section"]');
+                    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    el?.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
+                    setTimeout(() => el?.classList.remove("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse"), 2500);
+                  }}
+                  className="font-medium text-[#EE2A2E] hover:text-[#D92327] underline underline-offset-2 transition-colors"
+                >
+                  Staffing section
+                </button>
+                {" "}above, then open the <span className="font-medium text-gray-700">Procurement</span> tab to select the categories you buy. Once your buying assignments are set up, your personalized supplier list will appear here.
+              </p>
+            )}
           </div>
         )}
 

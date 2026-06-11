@@ -132,8 +132,8 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       guided: false,
     },
     procurement: {
-      heading: "Tell vendors what you buy",
-      body: "Scroll down to your Procurement section. Set which categories you carry and who buys them — vendors use this to find the right contact at your store.",
+      heading: "Set up your store's procurement",
+      body: "Scroll down to your Procurement section and set which categories you carry — then assign buyers to each one. Each buyer can also manage their own assignments from their My Account.",
       ctaLabel: "Show me",
       targetAttr: "procurement_section",
       completionTrigger: { table: "organizations", column: "procurement_info" },
@@ -252,10 +252,18 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "Click on your name in the Staffing section below. You'll see a toggle that controls whether you appear in the network directory.",
-      ctaLabel: "Show me",
-      targetAttr: "contacts_section",
-      completionTrigger: { table: "contacts", column: "hidden" },
+      body: "Head to My Account to manage how you appear on the network — including your visibility in the directory and your procurement categories.",
+      ctaLabel: "Go to My Account",
+      targetPath: "/me",
+      completesOnCta: true,
+      guided: false,
+    },
+    procurement: {
+      heading: "Tell vendors what you buy",
+      body: "In My Account, open Edit my info and set the categories you personally buy for. Vendors use this to find the right contact at your store.",
+      ctaLabel: "Go to My Account",
+      targetPath: "/me",
+      completesOnCta: true,
       guided: false,
     },
     network_partners: {
@@ -303,10 +311,10 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "Click on your name in the Staffing section below. You'll see a toggle that controls whether you appear when member stores search for contacts at your company.",
-      ctaLabel: "Show me",
-      targetAttr: "contacts_section",
-      completionTrigger: { table: "contacts", column: "hidden" },
+      body: "Head to My Account to manage how you appear when member stores search for contacts at your company.",
+      ctaLabel: "Go to My Account",
+      targetPath: "/me",
+      completesOnCta: true,
       guided: false,
     },
     network_members: {

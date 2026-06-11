@@ -5,6 +5,12 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getMyPendingChanges } from "@/lib/actions/pending-content-changes";
 import { getUserBookmarks } from "@/lib/actions/bookmarks";
 import MyPendingChanges from "@/components/me/MyPendingChanges";
+import SelfEditModal, { type OrgEditData } from "@/components/me/SelfEditModal";
+import type { ProcurementInfo } from "@/lib/types/procurement";
+import { getMemberSupplierData, type SupplierData } from "@/lib/actions/member-suppliers";
+import { getPartnerMarketData, checkNudgeCooldown, type MarketData } from "@/lib/actions/partner-market";
+import MemberSupplierPanel from "@/components/org/MemberSupplierPanel";
+import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 
 export const metadata = {
   title: "My Account | Campus Stores Canada",
@@ -24,31 +30,22 @@ export default async function MyAccountPage() {
   const userId = auth.ctx.userId;
   const userEmail = auth.ctx.userEmail;
 
-  const [profileResult, orgResult, contactResult, mappingResult, pendingChangesResult, bookmarksResult] =
+  const [profileResult, orgResult, allContactsResult, pendingChangesResult, bookmarksResult] =
     await Promise.all([
       db.from("profiles").select("display_name, global_role").eq("id", userId).maybeSingle(),
       db
         .from("user_organizations")
-        .select("id, role, organization:organizations(id, name, slug, type)")
+        .select("id, role, organization:organizations(id, name, slug, type, primary_category)")
         .eq("user_id", userId)
         .eq("status", "active"),
-      // Fix: check both email and work_email
+      // Fetch all contact rows for this user across all orgs
       userEmail
         ? (db as any)
             .from("contacts")
-            .select("id, name, role_title, circle_id, work_phone_number")
+            .select("id, name, role_title, email, work_email, work_phone_number, phone, hidden, organization_id, circle_id")
             .or(`email.eq.${userEmail},work_email.eq.${userEmail}`)
-            .limit(1)
-            .maybeSingle()
-        : Promise.resolve({ data: null }),
-      // Get Circle public_uid for direct profile link
-      (db as any)
-        .from("circle_member_mapping")
-        .select("circle_public_uid")
-        .eq("supabase_user_id", userId)
-        .not("circle_public_uid", "is", null)
-        .limit(1)
-        .maybeSingle(),
+            .is("archived_at", null)
+        : Promise.resolve({ data: [] }),
       isGlobalAdmin(auth.ctx.globalRole)
         ? getMyPendingChanges()
         : Promise.resolve({ success: true, changes: [] }),
@@ -76,28 +73,105 @@ export default async function MyAccountPage() {
   const orgs = (orgResult.data ?? []) as Array<{
     id: string;
     role: string;
-    organization: { id: string; name: string; slug: string; type: string };
+    organization: { id: string; name: string; slug: string; type: string; primary_category: string | null };
   }>;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const contact = (contactResult as any).data as {
+  const allContacts = ((allContactsResult as any).data ?? []) as Array<{
     id: string;
     name: string | null;
     role_title: string | null;
-    circle_id: number | null;
+    email: string | null;
+    work_email: string | null;
     work_phone_number: string | null;
-  } | null;
+    phone: string | null;
+    hidden: boolean | null;
+    organization_id: string | null;
+    circle_id: number | null;
+  }>;
+
+  // Contact used for display (first found, for header name/role)
+  const contact = allContacts[0] ?? null;
+
+  // Fetch procurement_info for member-type orgs
+  const memberOrgIds = orgs
+    .filter((o) => o.organization.type === "Member")
+    .map((o) => o.organization.id);
+
+  const procurementByOrgId: Record<string, ProcurementInfo> = {};
+  if (memberOrgIds.length > 0) {
+    const { data: procRows } = await db
+      .from("organizations")
+      .select("id, procurement_info")
+      .in("id", memberOrgIds) as { data: Array<{ id: string; procurement_info: unknown }> | null };
+    for (const row of procRows ?? []) {
+      if (row.procurement_info) {
+        procurementByOrgId[row.id] = row.procurement_info as ProcurementInfo;
+      }
+    }
+  }
+
+  // Build per-org edit data — only orgs where the user has a contact row
+  const contactByOrgId = new Map(allContacts.map((c) => [c.organization_id, c]));
+  const orgEditData: OrgEditData[] = orgs
+    .filter((o) => contactByOrgId.has(o.organization.id))
+    .map((o) => ({
+      orgId: o.organization.id,
+      orgName: o.organization.name,
+      orgType: o.organization.type,
+      role: o.role,
+      contact: contactByOrgId.get(o.organization.id)!,
+      procurementInfo: procurementByOrgId[o.organization.id] ?? null,
+    }));
+
+  // ── Possible Suppliers — for each Member org where this user has a contact,
+  // show partners matched to their personal buying-category assignments
+  // (mirrors MemberSupplierPanel on the org page, consolidated here).
+  const supplierSections: Array<{ orgId: string; orgName: string; data: SupplierData }> = [];
+  for (const org of orgEditData) {
+    if (org.orgType !== "Member") continue;
+    const result = await getMemberSupplierData(userEmail ?? null, org.orgId);
+    if (result.success && result.data) {
+      supplierSections.push({ orgId: org.orgId, orgName: org.orgName, data: result.data });
+    }
+  }
+
+  // ── Your Market — for each Vendor Partner org where this user has a contact,
+  // show member stores matched to the org's categories (org-level, not personal).
+  const marketSections: Array<{
+    orgId: string;
+    orgName: string;
+    data: MarketData;
+    canNudge: boolean;
+    nudgeAvailableAt: string | null;
+  }> = [];
+  for (const o of orgs) {
+    if (o.organization.type !== "Vendor Partner") continue;
+    if (!contactByOrgId.has(o.organization.id)) continue;
+    const result = await getPartnerMarketData(o.organization.id, o.organization.primary_category);
+    if (!result.success || !result.data) continue;
+
+    let canNudge = false;
+    let nudgeAvailableAt: string | null = null;
+    if (o.role === "org_admin") {
+      const cooldown = await checkNudgeCooldown();
+      canNudge = cooldown.canSend;
+      nudgeAvailableAt = cooldown.availableAt ?? null;
+    }
+
+    marketSections.push({
+      orgId: o.organization.id,
+      orgName: o.organization.name,
+      data: result.data,
+      canNudge,
+      nudgeAvailableAt,
+    });
+  }
 
   const profile = profileResult.data as { display_name: string | null; global_role: string } | null;
 
   const displayName = profile?.display_name || contact?.name || userEmail?.split("@")[0] || "You";
   const roleTitle   = contact?.role_title ?? null;
-  const circlePublicUid = (mappingResult as any)?.data?.circle_public_uid as string | null ?? null;
-  const circleCommunityUrl = process.env.NEXT_PUBLIC_CIRCLE_COMMUNITY_URL ?? "https://memberspace.campusstores.ca";
-  const circleProfileUrl = circlePublicUid
-    ? `${circleCommunityUrl}/u/${circlePublicUid}`
-    : null;
-
   const initials = displayName
     .split(" ")
     .map((p) => p[0])
@@ -158,19 +232,9 @@ export default async function MyAccountPage() {
             )}
           </div>
 
-          {/* Circle profile link */}
-          {circleProfileUrl && (
-            <a
-              href={circleProfileUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:border-gray-300 hover:bg-gray-50 transition-colors whitespace-nowrap"
-            >
-              Edit profile
-              <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M13.5 6H5.25A2.25 2.25 0 003 8.25v10.5A2.25 2.25 0 005.25 21h10.5A2.25 2.25 0 0018 18.75V10.5m-10.5 6L21 3m0 0h-5.25M21 3v5.25" />
-              </svg>
-            </a>
+          {/* Self-edit — only shown when there are editable contact rows */}
+          {orgEditData.length > 0 && (
+            <SelfEditModal orgEditData={orgEditData} />
           )}
         </div>
       </div>
@@ -236,6 +300,31 @@ export default async function MyAccountPage() {
           ))}
         </div>
       )}
+
+      {/* ── Possible Suppliers (Member orgs — matched to your buying categories) ── */}
+      {supplierSections.map((section) => (
+        <MemberSupplierPanel
+          key={section.orgId}
+          data={section.data}
+          orgName={supplierSections.length > 1 ? section.orgName : undefined}
+          anchorId={`my-suppliers-${section.orgId}`}
+          containerClassName="rounded-2xl bg-white border border-gray-200 overflow-hidden"
+          emptyStateContext="account"
+        />
+      ))}
+
+      {/* ── Your Market (Vendor Partner orgs — member stores matched to your categories) ── */}
+      {marketSections.map((section) => (
+        <PartnerMarketPanel
+          key={section.orgId}
+          market={section.data}
+          canNudge={section.canNudge}
+          nudgeAvailableAt={section.nudgeAvailableAt}
+          orgName={marketSections.length > 1 ? section.orgName : undefined}
+          anchorId={`your-market-${section.orgId}`}
+          containerClassName="rounded-2xl bg-white border border-gray-200 overflow-hidden"
+        />
+      ))}
 
       {/* ── Conferences ── */}
       {myConferenceLinks.length > 0 && (

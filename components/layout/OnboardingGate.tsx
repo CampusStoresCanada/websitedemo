@@ -69,7 +69,8 @@ export default function OnboardingGate({ children, serverHasOnboarding }: Onboar
         } else {
           setState("open");
         }
-      } catch {
+      } catch (e) {
+        console.error("[OnboardingGate] check failed:", e);
         if (!cancelled) setState("open");
       }
     }

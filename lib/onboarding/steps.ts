@@ -77,6 +77,7 @@ export const MEMBER_MEMBER_STEPS = [
   "view_org_page",
   "toolkit_tour",
   "visibility_intro",
+  "procurement",
   "network_members",
   "network_partners",
   "events_discovery",

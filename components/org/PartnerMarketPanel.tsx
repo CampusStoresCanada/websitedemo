@@ -9,6 +9,12 @@ interface PartnerMarketPanelProps {
   market: MarketData;
   canNudge?: boolean;
   nudgeAvailableAt?: string | null;
+  /** Org name suffix for multi-org contexts (e.g., My Account with several Partner orgs) */
+  orgName?: string;
+  /** Unique anchor id — defaults to "your-market"; override to avoid collisions when rendering multiple instances on one page */
+  anchorId?: string;
+  /** Override the outer wrapper classes — e.g., to fit a rounded-card layout instead of the org page's full-bleed section */
+  containerClassName?: string;
 }
 
 function ConfidencePip({ confidence }: { confidence: "high" | "medium" | "low" }) {
@@ -46,7 +52,14 @@ function ContactLine({ match }: { match: MarketMatch }) {
   return <p className="text-xs text-gray-400 mt-0.5 italic">No contact on file</p>;
 }
 
-export default function PartnerMarketPanel({ market, canNudge = false, nudgeAvailableAt = null }: PartnerMarketPanelProps) {
+export default function PartnerMarketPanel({
+  market,
+  canNudge = false,
+  nudgeAvailableAt = null,
+  orgName,
+  anchorId = "your-market",
+  containerClassName,
+}: PartnerMarketPanelProps) {
   const [nudgeSent, setNudgeSent] = useState(false);
   const [nudgeSending, setNudgeSending] = useState(false);
   const [nudgeError, setNudgeError] = useState<string | null>(null);
@@ -64,13 +77,15 @@ export default function PartnerMarketPanel({ market, canNudge = false, nudgeAvai
   }
 
   return (
-    <div id="your-market" className="bg-white border-t border-gray-200">
+    <div id={anchorId} className={containerClassName ?? "bg-white border-t border-gray-200"}>
       <div className="max-w-7xl mx-auto px-8 py-12">
 
         {/* Header */}
         <div className="flex items-start justify-between mb-6">
           <div>
-            <h2 className="text-xl font-semibold text-[#1A1A1A]">Your Market</h2>
+            <h2 className="text-xl font-semibold text-[#1A1A1A]">
+              Your Market{orgName ? ` — ${orgName}` : ""}
+            </h2>
             {market.totalMatches > 0 && (
               <p className="text-sm text-gray-500 mt-1">
                 {market.totalMatches} member {market.totalMatches === 1 ? "store" : "stores"} carry your categories

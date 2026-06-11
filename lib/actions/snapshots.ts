@@ -276,7 +276,14 @@ export async function shareInternally({
   }
 
   // Build URL with ?ishare=<id> so recipient lands with highlight + panel
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  let appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  if (!appUrl) {
+    const { headers } = await import("next/headers");
+    const h = await headers();
+    const host  = h.get("host") ?? "";
+    const proto = h.get("x-forwarded-proto") ?? "https";
+    if (host) appUrl = `${proto}://${host}`;
+  }
   const fullPageUrl = `${appUrl}${pathname}`;
   const shareUrl = `${fullPageUrl}${fullPageUrl.includes("?") ? "&" : "?"}ishare=${shareResult.id}`;
 
