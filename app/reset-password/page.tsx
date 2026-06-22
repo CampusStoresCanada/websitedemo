@@ -1,51 +1,34 @@
 "use client";
 
-import { useState, useMemo, useEffect, Suspense } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useMemo, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 
 function ResetPasswordContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const supabase = useMemo(() => createClient(), []);
+
+  const [email, setEmail] = useState(searchParams.get("email") ?? "");
+  const [code, setCode] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const [isValidSession, setIsValidSession] = useState<boolean | null>(null);
-  const router = useRouter();
-  const supabase = useMemo(() => createClient(), []);
-
-  // Handle the password recovery flow
-  useEffect(() => {
-    let isMounted = true;
-
-    const checkSession = async () => {
-      // Check for existing session
-      const { data: { session } } = await supabase.auth.getSession();
-
-      if (isMounted) {
-        setIsValidSession(!!session);
-      }
-    };
-
-    checkSession();
-
-    // Listen for auth state changes
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, session) => {
-      if (event === "PASSWORD_RECOVERY" || (event === "SIGNED_IN" && session)) {
-        setIsValidSession(true);
-      }
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, [supabase]);
+  const [resendNotice, setResendNotice] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
+    setResendNotice(null);
+
+    const trimmedCode = code.trim();
+    if (!/^\d{6}$/.test(trimmedCode)) {
+      setError("Enter the 6-digit code from your email.");
+      return;
+    }
 
     if (password !== confirmPassword) {
       setError("Passwords do not match");
@@ -59,12 +42,26 @@ function ResetPasswordContent() {
 
     setIsLoading(true);
 
-    const { error } = await supabase.auth.updateUser({
-      password,
+    // Step 1: verify the emailed recovery code. This establishes a recovery
+    // session locally — no magic link, no PKCE code_verifier, so it works
+    // regardless of which browser/device requested vs. completes the reset.
+    const { error: verifyError } = await supabase.auth.verifyOtp({
+      email: email.trim(),
+      token: trimmedCode,
+      type: "recovery",
     });
 
-    if (error) {
-      setError(error.message);
+    if (verifyError) {
+      setError("That code is invalid or has expired. Request a new one below.");
+      setIsLoading(false);
+      return;
+    }
+
+    // Step 2: with the recovery session active, set the new password.
+    const { error: updateError } = await supabase.auth.updateUser({ password });
+
+    if (updateError) {
+      setError(updateError.message);
       setIsLoading(false);
       return;
     }
@@ -72,65 +69,32 @@ function ResetPasswordContent() {
     setSuccess(true);
     setIsLoading(false);
 
-    // Redirect to home after a short delay
     setTimeout(() => {
       router.push("/");
       router.refresh();
     }, 2000);
   };
 
-  // Loading state while checking session
-  if (isValidSession === null) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="text-center">
-          <div className="w-8 h-8 border-2 border-gray-300 border-t-[#EE2A2E] rounded-full animate-spin mx-auto mb-4" />
-          <p className="text-gray-600">Verifying reset link...</p>
-        </div>
-      </div>
-    );
-  }
+  const handleResend = async () => {
+    setError(null);
+    setResendNotice(null);
 
-  // Invalid or expired link
-  if (!isValidSession) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-red-50 flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-red-500"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Zm-9 3.75h.008v.008H12v-.008Z"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                Invalid or expired link
-              </h2>
-              <p className="text-gray-600 mb-6">
-                This password reset link is invalid or has expired. Please request a new one.
-              </p>
-              <Link
-                href="/forgot-password"
-                className="inline-block py-2.5 px-6 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] transition-colors"
-              >
-                Request New Link
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
+    if (!email.trim()) {
+      setError("Enter your email to resend a code.");
+      return;
+    }
+
+    const { error: resendError } = await supabase.auth.resetPasswordForEmail(
+      email.trim()
     );
-  }
+
+    if (resendError) {
+      setError(resendError.message);
+      return;
+    }
+
+    setResendNotice("A new code is on its way.");
+  };
 
   // Success state
   if (success) {
@@ -173,10 +137,11 @@ function ResetPasswordContent() {
         <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
           <div className="text-center mb-8">
             <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Set new password
+              Enter your reset code
             </h1>
             <p className="text-gray-600">
-              Enter your new password below.
+              We sent a 6-digit code to your email. Enter it below along with
+              your new password.
             </p>
           </div>
 
@@ -186,7 +151,53 @@ function ResetPasswordContent() {
             </div>
           )}
 
+          {resendNotice && (
+            <div className="mb-4 p-3 rounded-lg bg-green-50 border border-green-200 text-sm text-green-700">
+              {resendNotice}
+            </div>
+          )}
+
           <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label
+                htmlFor="email"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                Email
+              </label>
+              <input
+                id="email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                required
+                autoComplete="email"
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
+                placeholder="you@yourschool.ca"
+              />
+            </div>
+            <div>
+              <label
+                htmlFor="code"
+                className="block text-sm font-medium text-gray-700 mb-1"
+              >
+                6-digit code
+              </label>
+              <input
+                id="code"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                value={code}
+                onChange={(e) =>
+                  setCode(e.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                required
+                maxLength={6}
+                className="w-full px-3 py-2.5 border border-gray-300 rounded-lg text-lg tracking-[0.5em] text-center font-mono focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E] transition-colors"
+                placeholder="000000"
+              />
+            </div>
             <div>
               <label
                 htmlFor="password"
@@ -233,6 +244,25 @@ function ResetPasswordContent() {
               {isLoading ? "Updating..." : "Update Password"}
             </button>
           </form>
+
+          <div className="mt-6 pt-6 border-t border-gray-200 text-center space-y-2">
+            <p className="text-sm text-gray-500">
+              Didn&apos;t get a code?{" "}
+              <button
+                type="button"
+                onClick={handleResend}
+                className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
+              >
+                Resend
+              </button>
+            </p>
+            <Link
+              href="/login"
+              className="inline-block text-sm text-gray-600 hover:text-gray-900"
+            >
+              Back to login
+            </Link>
+          </div>
         </div>
       </div>
     </div>

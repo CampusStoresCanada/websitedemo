@@ -2,13 +2,14 @@
 
 import { useState, useMemo } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
 export default function ForgotPasswordPage() {
   const [email, setEmail] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [emailSent, setEmailSent] = useState(false);
+  const router = useRouter();
   const supabase = useMemo(() => createClient(), []);
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -16,9 +17,11 @@ export default function ForgotPasswordPage() {
     setIsLoading(true);
     setError(null);
 
-    const { error } = await supabase.auth.resetPasswordForEmail(email, {
-      redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
-    });
+    // Sends a 6-digit recovery code (Supabase {{ .Token }}). No magic link, so
+    // Exchange/ATP Safe Links can't pre-click and burn the token. The user
+    // enters the code on /reset-password, which we hand the email to so they
+    // don't have to re-type it.
+    const { error } = await supabase.auth.resetPasswordForEmail(email);
 
     if (error) {
       setError(error.message);
@@ -26,62 +29,8 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    setEmailSent(true);
-    setIsLoading(false);
+    router.push(`/reset-password?email=${encodeURIComponent(email)}`);
   };
-
-  if (emailSent) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
-        <div className="max-w-md w-full">
-          <div className="bg-white rounded-2xl shadow-sm border border-gray-200 p-8">
-            <div className="text-center">
-              <div className="w-16 h-16 mx-auto mb-6 rounded-full bg-green-50 flex items-center justify-center">
-                <svg
-                  className="w-8 h-8 text-green-500"
-                  fill="none"
-                  viewBox="0 0 24 24"
-                  strokeWidth={1.5}
-                  stroke="currentColor"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    d="M21.75 6.75v10.5a2.25 2.25 0 0 1-2.25 2.25h-15a2.25 2.25 0 0 1-2.25-2.25V6.75m19.5 0A2.25 2.25 0 0 0 19.5 4.5h-15a2.25 2.25 0 0 0-2.25 2.25m19.5 0v.243a2.25 2.25 0 0 1-1.07 1.916l-7.5 4.615a2.25 2.25 0 0 1-2.36 0L3.32 8.91a2.25 2.25 0 0 1-1.07-1.916V6.75"
-                  />
-                </svg>
-              </div>
-              <h2 className="text-xl font-semibold text-gray-900 mb-2">
-                Check your email
-              </h2>
-              <p className="text-gray-600 mb-6">
-                We&apos;ve sent a password reset link to{" "}
-                <span className="font-medium text-gray-900">{email}</span>
-              </p>
-              <p className="text-sm text-gray-500 mb-6">
-                Didn&apos;t receive the email? Check your spam folder or{" "}
-                <button
-                  onClick={() => {
-                    setEmailSent(false);
-                    setEmail("");
-                  }}
-                  className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
-                >
-                  try again
-                </button>
-              </p>
-              <Link
-                href="/login"
-                className="text-sm text-[#EE2A2E] hover:text-[#D92327] font-medium"
-              >
-                Back to login
-              </Link>
-            </div>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center px-4">
@@ -92,7 +41,7 @@ export default function ForgotPasswordPage() {
               Reset your password
             </h1>
             <p className="text-gray-600">
-              Enter your email and we&apos;ll send you a link to reset your password.
+              Enter your email and we&apos;ll send you a 6-digit code to reset your password.
             </p>
           </div>
 
@@ -126,7 +75,7 @@ export default function ForgotPasswordPage() {
               disabled={isLoading}
               className="w-full py-2.5 bg-[#EE2A2E] text-white text-sm font-medium rounded-lg hover:bg-[#D92327] disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {isLoading ? "Sending..." : "Send Reset Link"}
+              {isLoading ? "Sending..." : "Send Reset Code"}
             </button>
           </form>
 
