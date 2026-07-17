@@ -58,6 +58,11 @@ function getGatedContent(state: ViewerGateState): {
   message: string;
   cta: string | null;
   link: string | null;
+  /** Second, lower-emphasis option — used for new_visitor since we can't
+   * tell a brand-new prospect apart from an existing member who's never
+   * logged in on this browser (no session cookie either way). */
+  secondaryCta: string | null;
+  secondaryLink: string | null;
 } {
   switch (state) {
     case "new_visitor":
@@ -65,24 +70,32 @@ function getGatedContent(state: ViewerGateState): {
         message: "This content is available to CSC member stores.",
         cta: "Become a Member",
         link: "/membership",
+        secondaryCta: "Sign In",
+        secondaryLink: "/login",
       };
     case "returning":
       return {
         message: "Sign in to access member content.",
         cta: "Sign In",
         link: "/login",
+        secondaryCta: null,
+        secondaryLink: null,
       };
     case "partner":
       return {
         message: "This content is for member stores only.",
         cta: null,
         link: null,
+        secondaryCta: null,
+        secondaryLink: null,
       };
     case "insufficient":
       return {
         message: "This content is available to CSC member stores.",
         cta: "Become a Member",
         link: "/membership",
+        secondaryCta: null,
+        secondaryLink: null,
       };
   }
 }
@@ -145,6 +158,8 @@ export default function GreyBlur({
   let message: string;
   let cta: string | null;
   let link: string | null;
+  let secondaryCta: string | null = null;
+  let secondaryLink: string | null = null;
 
   if (unauthorizedMessage && ctaText && ctaLink) {
     // Caller override — used for survey_participant custom flows
@@ -166,6 +181,8 @@ export default function GreyBlur({
     message = content.message;
     cta = content.cta;
     link = content.link;
+    secondaryCta = content.secondaryCta;
+    secondaryLink = content.secondaryLink;
   }
 
   return (
@@ -195,6 +212,14 @@ export default function GreyBlur({
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
+            </Link>
+          )}
+          {secondaryCta && secondaryLink && (
+            <Link
+              href={secondaryLink}
+              className="block mt-3 text-sm text-gray-500 hover:text-gray-700"
+            >
+              {secondaryCta}
             </Link>
           )}
         </div>
@@ -258,6 +283,8 @@ export function ProtectedSection({
   let message: string;
   let cta: string | null;
   let link: string | null;
+  let secondaryCta: string | null = null;
+  let secondaryLink: string | null = null;
 
   if (bannerMessage && ctaText && ctaLink) {
     message = bannerMessage;
@@ -278,6 +305,8 @@ export function ProtectedSection({
     message = content.message;
     cta = content.cta;
     link = content.link;
+    secondaryCta = content.secondaryCta;
+    secondaryLink = content.secondaryLink;
   }
 
   return (
@@ -294,14 +323,21 @@ export function ProtectedSection({
               </div>
               <p className="text-sm text-gray-600">{message}</p>
             </div>
-            {cta && link && (
-              <Link
-                href={link}
-                className="flex-shrink-0 px-4 py-2 bg-[#1A1A1A] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
-              >
-                {cta}
-              </Link>
-            )}
+            <div className="flex-shrink-0 flex items-center gap-3">
+              {secondaryCta && secondaryLink && (
+                <Link href={secondaryLink} className="text-sm text-gray-500 hover:text-gray-700">
+                  {secondaryCta}
+                </Link>
+              )}
+              {cta && link && (
+                <Link
+                  href={link}
+                  className="px-4 py-2 bg-[#1A1A1A] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
+                >
+                  {cta}
+                </Link>
+              )}
+            </div>
           </div>
         )}
         {children}

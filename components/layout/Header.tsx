@@ -773,10 +773,17 @@ export default function Header() {
                 </Link>
               </>
             ) : (
-              // New visitor — no prior session
-              <Link href="/membership" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
-                Become a Member
-              </Link>
+              // New visitor — no prior session. We genuinely don't know if
+              // this is a brand-new prospect or an existing member who's
+              // never logged in on this browser, so offer both paths.
+              <>
+                <Link href="/login" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
+                  Sign In
+                </Link>
+                <Link href="/membership" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+                  Become a Member
+                </Link>
+              </>
             )}
 
             <button
@@ -845,12 +852,20 @@ export default function Header() {
                       </Link>
                     </>
                   ) : (
-                    <Link
-                      href="/membership"
-                      className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
-                    >
-                      Become a Member
-                    </Link>
+                    <>
+                      <Link
+                        href="/membership"
+                        className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
+                      >
+                        Become a Member
+                      </Link>
+                      <Link
+                        href="/login"
+                        className="px-3 py-2 rounded-md text-sm font-medium text-[#6B6B6B] hover:bg-gray-50 text-center"
+                      >
+                        Sign In
+                      </Link>
+                    </>
                   )}
                 </div>
               )}

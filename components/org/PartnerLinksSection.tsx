@@ -105,13 +105,21 @@ function GatedPlaceholder({
           <p className="text-xs text-gray-400 mt-0.5 mb-3">
             Catalogues, price lists, and order portals are shared with CSC member stores.
           </p>
-          <a
-            href="/join"
-            className="inline-block px-4 py-1.5 rounded-full text-xs font-semibold text-white transition-all hover:opacity-90"
-            style={{ backgroundColor: primaryColor }}
-          >
-            Become a member
-          </a>
+          <div className="flex items-center justify-center gap-3">
+            <a
+              href="/membership"
+              className="inline-block px-4 py-1.5 rounded-full text-xs font-semibold text-white transition-all hover:opacity-90"
+              style={{ backgroundColor: primaryColor }}
+            >
+              Become a member
+            </a>
+            <a
+              href="/login"
+              className="inline-block text-xs font-medium text-gray-500 hover:text-gray-700"
+            >
+              Log in
+            </a>
+          </div>
         </>
       )}
     </div>
