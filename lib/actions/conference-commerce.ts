@@ -1,40 +1,63 @@
 "use server";
 
 import crypto from "node:crypto";
-import { requireAdmin, requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { stripe } from "@/lib/stripe/client";
-import { ensureStripeCustomer } from "@/lib/stripe/billing";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+// Relative imports: these pure modules are pulled in unmocked by vitest, where
+// the "@/" alias isn't resolved (see project notes on the test setup).
+import { availability, canBuy, priceForTier } from "../conference/entity-pricing";
 import {
-  buildEligibilityContext,
-  checkProductEligibility,
-  mapSchedulerEligibleRoleForProductSlug,
-  validatePartnerMeetingMetadata,
-} from "@/lib/conference-commerce/eligibility";
+  MEMBERSHIP_RENEWAL_KIND,
+  membershipCoversConference,
+  offerRequiresMembershipRenewal,
+} from "../conference/membership-gate";
 import {
-  evaluateRulesEngine,
-  mergeRulesEngineLayers,
-  type RulesEngineAction,
-  type RulesEngineEvalContext,
-  type RulesEngineTrigger,
-  type RulesEngineV1,
-} from "@/lib/conference/rules-engine";
-import { getEffectivePolicies } from "@/lib/policy/engine";
+  offerRequiresOwnershipOfEntityIds,
+  expandWithInstanceOfParents,
+  ownershipRequirementSatisfied,
+  OWNERSHIP_ROLE,
+} from "../conference/ownership-gate";
+// computeMembershipAssessment has no import-time side effects (createAdminClient
+// is only a function reference), so a relative import is safe here.
+import { computeMembershipAssessment } from "../membership/pricing";
+import { computeNewExpiresAt, nextCycleStartOnOrAfter, cyclesNeededFrom } from "../membership/renewal-activation";
+// getRenewalConfig has no import-time side effects (createAdminClient is only
+// a function reference), so a relative import is safe here.
+import { getRenewalConfig } from "../policy/engine";
+// getPartnershipRateCents/applyProration use the "@/" alias so they can be
+// mocked wholesale in tests — lib/stripe/billing.ts transitively imports the
+// real Stripe client via a relative path that an alias-keyed mock can't
+// intercept, so loading the real file would throw on a missing
+// STRIPE_SECRET_KEY in test environments.
+import { getPartnershipRateCents, applyProration } from "@/lib/stripe/billing";
+import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
+import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
+import { indexById } from "../conference/entity-graph";
+import { findOverlappingRegistration } from "../conference/registration-overlap";
+import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
+import type { BuildEntity, EntityRefView } from "./conference-entities";
+
+/**
+ * Conference commerce — v3 Offers only.
+ *
+ * The catalog is the v3 entity graph: things flagged `is_for_sale` are Offers.
+ * Orgs add Offers to the cart (who-can-buy gated by the Offer's `who` audiences,
+ * priced at the buyer's tier) and check out through Stripe. The paid webhook
+ * mints v3 grants via process_conference_order_paid → mint_v3_for_order.
+ *
+ * The old product/grant catalog, its rules engine, and wishlist deferred billing
+ * were retired in the v3 cutover. See docs/CONFERENCE_V2_BLUEPRINT.md.
+ */
 
 type CartRow = Database["public"]["Tables"]["cart_items"]["Row"];
-type ProductRow = Database["public"]["Tables"]["conference_products"]["Row"];
 type OrderRow = Database["public"]["Tables"]["conference_orders"]["Row"];
 type OrderItemRow = Database["public"]["Tables"]["conference_order_items"]["Row"];
-type WishlistRow = Database["public"]["Tables"]["wishlist_intents"]["Row"];
 
 type CommerceFailure = { success: false; error: string; code?: string };
 type CommerceSuccess<T> = { success: true; data: T };
-
-interface CartItemWithProduct extends CartRow {
-  product: ProductRow;
-}
 
 interface CheckoutInput {
   conferenceId: string;
@@ -42,119 +65,6 @@ interface CheckoutInput {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey?: string;
-}
-
-interface SchedulerEligibleRecord {
-  role: "delegate" | "exhibitor";
-  registrationId: string;
-  orderId: string;
-  orderItemId: string;
-  productSlug: string;
-}
-
-interface BillingMetadata {
-  billing_attempt_count?: number;
-  last_billing_attempt_at?: string;
-  last_billing_error?: string;
-  last_billing_payment_intent_id?: string;
-}
-
-type WishlistStatus =
-  | "wishlisted"
-  | "board_pending"
-  | "board_approved"
-  | "board_declined"
-  | "billing_pending"
-  | "billing_paid"
-  | "billing_failed_retryable"
-  | "billing_failed_final"
-  | "reservation_expired"
-  | "registered";
-
-const WISHLIST_TRANSITIONS: Record<WishlistStatus, WishlistStatus[]> = {
-  wishlisted: ["board_pending", "board_approved", "board_declined"],
-  board_pending: ["board_approved", "board_declined"],
-  board_approved: ["billing_pending", "billing_failed_retryable", "registered"],
-  board_declined: [],
-  billing_pending: ["billing_paid", "billing_failed_retryable", "billing_failed_final"],
-  billing_paid: ["registered"],
-  billing_failed_retryable: ["billing_pending", "billing_failed_final", "reservation_expired"],
-  billing_failed_final: ["reservation_expired"],
-  reservation_expired: [],
-  registered: [],
-};
-
-// Defaults — overridden at runtime by policy keys billing.wishlist_max_retry_attempts
-// and billing.wishlist_retry_backoff_minutes if present.
-const WISHLIST_MAX_RETRY_ATTEMPTS_DEFAULT = 3;
-const WISHLIST_RETRY_BACKOFF_MINUTES_DEFAULT = 60;
-
-function isFinalBillingFailure(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  const message = error.message.toLowerCase();
-  return (
-    message.includes("stolen_card") ||
-    message.includes("lost_card") ||
-    message.includes("fraudulent") ||
-    message.includes("invalid_account")
-  );
-}
-
-function parseBillingMetadata(metadata: unknown): BillingMetadata {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return {};
-  return metadata as BillingMetadata;
-}
-
-function stripeErrorDetails(error: unknown): {
-  errorCode: string | null;
-  declineCode: string | null;
-  message: string;
-  paymentIntentId: string | null;
-} {
-  const fallbackMessage = error instanceof Error ? error.message : String(error);
-  const maybeStripe = error as {
-    code?: string;
-    decline_code?: string;
-    message?: string;
-    payment_intent?: string | { id?: string } | null;
-    raw?: { code?: string; decline_code?: string; message?: string };
-  };
-
-  const paymentIntentValue = maybeStripe?.payment_intent;
-  const paymentIntentId =
-    typeof paymentIntentValue === "string"
-      ? paymentIntentValue
-      : paymentIntentValue && typeof paymentIntentValue === "object"
-        ? paymentIntentValue.id ?? null
-        : null;
-
-  return {
-    errorCode: maybeStripe.raw?.code ?? maybeStripe.code ?? null,
-    declineCode: maybeStripe.raw?.decline_code ?? maybeStripe.decline_code ?? null,
-    message: maybeStripe.raw?.message ?? maybeStripe.message ?? fallbackMessage,
-    paymentIntentId,
-  };
-}
-
-function extractRegistrationIdsFromMetadata(
-  metadata: Record<string, unknown> | null
-): string[] {
-  if (!metadata) return [];
-  const single = typeof metadata.registration_id === "string" ? [metadata.registration_id] : [];
-  const list = Array.isArray(metadata.registration_ids)
-    ? metadata.registration_ids.filter((value): value is string => typeof value === "string")
-    : [];
-  const brands = Array.isArray(metadata.brands)
-    ? metadata.brands
-        .map((brand) =>
-          brand && typeof brand === "object" && "registration_id" in brand
-            ? (brand as { registration_id?: unknown }).registration_id
-            : null
-        )
-        .filter((value): value is string => typeof value === "string")
-    : [];
-
-  return [...new Set([...single, ...list, ...brands])];
 }
 
 async function assertUserCanManageOrg(params: {
@@ -173,403 +83,418 @@ async function assertUserCanManageOrg(params: {
     return { ok: false, error: "You are not authorized to manage commerce for this organization." };
   }
 
+  return { ok: true, userId: auth.ctx.userId, userEmail: auth.ctx.userEmail };
+}
+
+/** Map an organization's type to the permission tier the v3 Offer pricing uses. */
+function orgTypeToTier(orgType: string | null): string {
+  if (orgType === "Member") return "member";
+  if (orgType === "Vendor Partner") return "partner";
+  if (orgType === "Non-Member") return "non_member";
+  return "public";
+}
+
+async function loadBuyerTier(organizationId: string): Promise<string> {
+  const adminClient = createAdminClient();
+  const { data: org } = await adminClient
+    .from("organizations")
+    .select("type")
+    .eq("id", organizationId)
+    .single();
+  return orgTypeToTier(org?.type ?? null);
+}
+
+type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * An offer's effective refs for one role, walking one level of `instance_of`
+ * inheritance — a booth INSTANCE (e.g. "Booth 601") inherits the refs set on
+ * its TYPE entity, matching how effectiveRefs() in
+ * lib/conference/entity-graph.ts resolves inheritance for the admin Build
+ * tab. That function needs the full workspace graph loaded; this is a narrow,
+ * targeted version for the buyer-facing commerce path, which only ever loads
+ * one entity at a time. Without this, marking a ref on a booth TYPE (the
+ * natural place an admin would do it) would silently fail to gate any actual
+ * booth instance a buyer purchases. Shared by the membership-renewal
+ * `requires` gate and the `requires_ownership_of` gate — both need the same
+ * instance_of-aware lookup, just for a different role.
+ */
+async function loadEffectiveRefsByRole(
+  adminClient: AdminClient,
+  offerEntityId: string,
+  role: string
+): Promise<Array<{ toEntityId: string; toKind: string }>> {
+  const { data: ownRefs } = await adminClient
+    .from("conference_entity_refs")
+    .select("role, to_entity_id, target:conference_entities!conference_entity_refs_to_entity_id_fkey(kind)")
+    .eq("from_entity_id", offerEntityId)
+    .in("role", [role, "instance_of"]);
+
+  const matched: Array<{ toEntityId: string; toKind: string }> = [];
+  let typeId: string | null = null;
+  for (const r of ownRefs ?? []) {
+    if (r.role === "instance_of") {
+      typeId = r.to_entity_id;
+      continue;
+    }
+    const target = Array.isArray(r.target) ? r.target[0] : r.target;
+    if (target) matched.push({ toEntityId: r.to_entity_id, toKind: target.kind });
+  }
+
+  if (typeId) {
+    const { data: typeRefs } = await adminClient
+      .from("conference_entity_refs")
+      .select("to_entity_id, target:conference_entities!conference_entity_refs_to_entity_id_fkey(kind)")
+      .eq("from_entity_id", typeId)
+      .eq("role", role);
+    for (const r of typeRefs ?? []) {
+      const target = Array.isArray(r.target) ? r.target[0] : r.target;
+      // Instance's own refs win over the type's, same precedence
+      // effectiveRefs() uses for every other role.
+      if (target && !matched.some((x) => x.toEntityId === r.to_entity_id)) {
+        matched.push({ toEntityId: r.to_entity_id, toKind: target.kind });
+      }
+    }
+  }
+
+  return matched;
+}
+
+/**
+ * A membership-renewal offer has no catalog price (price_cents is
+ * deliberately null) — its real price is always computed per-org, mirroring
+ * the same FTE-tier / partnership-rate logic the invoice-based renewal flow
+ * uses (createMembershipInvoice/createPartnershipInvoice in
+ * lib/stripe/billing.ts), just without actually issuing a Stripe Invoice.
+ *
+ * persist:false for cart previews (repeated renders shouldn't clobber a
+ * frozen cron-computed assessment for the org's year); persist:true exactly
+ * once, at checkout time, when the price is about to actually be charged.
+ *
+ * Three cases, in order:
+ * 1. Lapsed org (membership_status grace/locked) — they had a membership
+ *    cycle they never paid for. Charge that missed cycle in FULL (no
+ *    discount — they had the full year's access, or should have), plus full
+ *    price for the upcoming cycle(s) needed to cover the conference.
+ * 2. No backlog, but within renewal.pre_renewal_skip_stub_days of the next
+ *    cycle start — not worth billing a small prorated stub for the dying
+ *    cycle's last few days. Skip it; charge only the upcoming cycle(s), full
+ *    price.
+ * 3. No backlog, outside that window, and genuinely joining fresh (no valid
+ *    expiry to extend from) — bill the existing billing.proration_rules
+ *    stub for the current partial cycle, plus full price for any ADDITIONAL
+ *    cycles bridged to reach a further-future conference (the discount
+ *    compensates for a short first period, not a free extra year).
+ *
+ * An org with a currently-valid (non-lapsed) expiry that's simply being
+ * extended further isn't a late join at all — always full price, matching
+ * how the renewal cron's own on-time renewals never apply proration either.
+ */
+async function priceMembershipRenewalForOrg(
+  organizationId: string,
+  conferenceEndDate: string | null,
+  opts: { persist: boolean; assumePartnership?: boolean }
+): Promise<number> {
+  const adminClient = createAdminClient();
+  const { data: org } = await adminClient
+    .from("organizations")
+    .select("type, membership_status, membership_expires_at")
+    .eq("id", organizationId)
+    .single();
+
+  const priceForCycle = async (cycleBillingPeriodStart: string): Promise<number> => {
+    // A booth is a Partner-track purchase — the renewal it drags along is
+    // always priced as partnership dues, regardless of the buying org's
+    // current type (a Member org buying its first booth still owes the flat
+    // partnership rate, not FTE-tiered member dues).
+    if (opts.assumePartnership || org?.type === "Vendor Partner") return getPartnershipRateCents();
+    const assessment = await computeMembershipAssessment(organizationId, {
+      billingPeriodStart: cycleBillingPeriodStart,
+      persist: opts.persist,
+    });
+    return assessment.computedAmountCents;
+  };
+
+  const { billingPeriodStart, isLateJoin, cyclesBridged } = await computeNewExpiresAt(
+    org?.membership_expires_at ?? null,
+    conferenceEndDate
+  );
+  const perCycleCents = await priceForCycle(billingPeriodStart);
+  const upcomingCents = perCycleCents * cyclesBridged;
+
+  if (!isLateJoin) {
+    // Currently-valid membership just being extended further — never a
+    // discount, regardless of the day count.
+    return upcomingCents;
+  }
+
+  // Case 1: genuinely lapsed with an unpaid prior cycle. Once that missed
+  // cycle is paid, the org is "caught up" as of its OLD expiry — bridge
+  // forward from THERE (a real cycle boundary), not from today, and drop
+  // the first bridge step: it's the same span as the missed cycle just
+  // billed, not a new additional one.
+  if (
+    (org?.membership_status === "grace" || org?.membership_status === "locked") &&
+    org?.membership_expires_at
+  ) {
+    const missedCycleStart = org.membership_expires_at.split("T")[0];
+    const missedCycleCents = await priceForCycle(missedCycleStart);
+    const cyclesFromMissed = await cyclesNeededFrom(missedCycleStart, conferenceEndDate);
+    const additionalCycles = cyclesFromMissed - 1;
+    return missedCycleCents + perCycleCents * additionalCycles;
+  }
+
+  // Case 2 vs 3: no backlog — is this close enough to the next cycle start
+  // that billing a stub for the remainder isn't worth it?
+  const { cycle_start_month_day: cycleStartMonthDay, pre_renewal_skip_stub_days: skipStubDays } =
+    await getRenewalConfig();
+  const now = new Date();
+  const cycleStartDate = nextCycleStartOnOrAfter(now, cycleStartMonthDay);
+  const daysUntilCycleStart = Math.round(
+    (new Date(`${cycleStartDate}T00:00:00Z`).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+  );
+
+  if (daysUntilCycleStart <= skipStubDays) {
+    // Case 2: skip the stub — price starting from the upcoming cycle start
+    // (a real boundary), not from today, so the very next cycle counts as
+    // cycle 1 rather than stacking on top of an uncounted stub.
+    const cyclesFromCycleStart = await cyclesNeededFrom(cycleStartDate, conferenceEndDate);
+    return perCycleCents * cyclesFromCycleStart;
+  }
+
+  // Case 3: still meaningfully far from the reset — prorate the stub itself,
+  // then full price for however many additional full cycles are needed
+  // beyond it (cyclesBridged from today already counts the stub as step 1).
+  const { amountCents: proratedStubCents } = await applyProration(perCycleCents, now);
+  return proratedStubCents + perCycleCents * (cyclesBridged - 1);
+}
+
+/**
+ * The unit price for a cart/order line — the membership-renewal offer's
+ * price is always computed per-org (its catalog price_cents is deliberately
+ * null), everything else uses the normal tier price.
+ */
+async function effectiveUnitPriceCents(
+  offer: BuildEntity,
+  buyerTier: string,
+  organizationId: string,
+  conferenceEndDate: string | null,
+  opts: { persist: boolean; assumePartnership?: boolean }
+): Promise<number> {
+  if (offer.kind === MEMBERSHIP_RENEWAL_KIND) {
+    return priceMembershipRenewalForOrg(organizationId, conferenceEndDate, opts);
+  }
+  return priceForTier(offer, buyerTier);
+}
+
+// Build a minimal BuildEntity so the pure pricing/eligibility rules can run
+// over a single Offer loaded from the DB (no full workspace needed here).
+function minimalOfferEntity(input: {
+  id: string;
+  kind: string;
+  name: string;
+  priceCents: number | null;
+  currency: string;
+  inventory: number | null;
+  tierPrices: Record<string, number>;
+  refs: EntityRefView[];
+}): BuildEntity {
   return {
-    ok: true,
-    userId: auth.ctx.userId,
-    userEmail: auth.ctx.userEmail,
+    id: input.id, kind: input.kind, name: input.name, isForSale: true,
+    priceCents: input.priceCents, currency: input.currency, attributes: {},
+    needsDefinition: false, inventory: input.inventory, tierPrices: input.tierPrices, refs: input.refs,
   };
 }
 
-async function getCartItemsWithProducts(params: {
+/**
+ * A membership-renewal line can be required by more than one cart item at
+ * once (an org can hold multiple booths — each booth requiring the same
+ * renewal). `linked_to` is stored as an array of the requiring cart item
+ * ids so the renewal line is only ever removed once ALL of them are gone —
+ * reads a legacy single-string value too, from before this was an array.
+ */
+function linkedToIds(metadata: unknown): string[] {
+  const raw = (metadata as { linked_to?: unknown } | null)?.linked_to;
+  if (Array.isArray(raw)) return raw.filter((v): v is string => typeof v === "string");
+  if (typeof raw === "string") return [raw];
+  return [];
+}
+
+export type AttendeeRef = { name: string; email: string | null };
+
+/**
+ * A registration cart line holds one attendee slot per unit of quantity —
+ * buying 4 Day Passes in one line means 4 people, not 1. `null` at an index
+ * means that unit is explicitly deferred ("assign later"), same meaning as
+ * never having set it. Always read through this so a short/missing array
+ * (e.g. before any assignment, or right after a quantity bump) reads as
+ * "every slot open" rather than throwing on a missing index.
+ */
+function parseAttendees(metadata: unknown, quantity: number): (AttendeeRef | null)[] {
+  const raw = (metadata as { attendees?: unknown } | null)?.attendees;
+  const list = Array.isArray(raw) ? raw : [];
+  const slots: (AttendeeRef | null)[] = [];
+  for (let i = 0; i < quantity; i++) {
+    const entry = list[i];
+    slots.push(
+      entry && typeof entry === "object" && typeof (entry as { name?: unknown }).name === "string"
+        ? { name: (entry as { name: string }).name, email: (entry as { email?: string | null }).email ?? null }
+        : null
+    );
+  }
+  return slots;
+}
+
+/** Load the v3 Offer cart lines (as BuildEntities) so eligibility + tier pricing can run. */
+async function getOfferCartRows(params: {
   conferenceId: string;
   organizationId: string;
   userId: string;
-}): Promise<CartItemWithProduct[]> {
+}): Promise<{
+  rows: Array<{
+    cartItemId: string;
+    cartQuantity: number;
+    offer: BuildEntity;
+    linkedToCartItemIds: string[];
+    attendees: (AttendeeRef | null)[];
+  }>;
+  byId: Map<string, BuildEntity>;
+}> {
   const adminClient = createAdminClient();
-
-  const { data: cartItems, error: cartError } = await adminClient
+  const now = new Date().toISOString();
+  const { data: cartRows } = await adminClient
     .from("cart_items")
-    .select("*")
+    .select("id, quantity, offer_entity_id, metadata")
     .eq("conference_id", params.conferenceId)
     .eq("organization_id", params.organizationId)
     .eq("user_id", params.userId)
-    .order("created_at", { ascending: true });
+    .not("offer_entity_id", "is", null)
+    // Exclude expired reservations — they'll be cleaned up lazily on next add.
+    .or(`expires_at.is.null,expires_at.gt.${now}`);
 
-  if (cartError) throw new Error(cartError.message);
+  const offerIds = (cartRows ?? []).map((r) => r.offer_entity_id).filter((x): x is string => Boolean(x));
+  if (offerIds.length === 0) return { rows: [], byId: new Map() };
 
-  if (!cartItems || cartItems.length === 0) return [];
+  const [{ data: offers }, { data: whoRefs }] = await Promise.all([
+    adminClient
+      .from("conference_entities")
+      .select("id, kind, name, price_cents, currency, inventory, tier_prices")
+      .in("id", offerIds),
+    adminClient
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, audience:conference_entities!conference_entity_refs_to_entity_id_fkey(id, attributes)")
+      .in("from_entity_id", offerIds)
+      .eq("role", "who"),
+  ]);
 
-  const productIds = cartItems.map((item) => item.product_id);
-  const { data: products, error: productsError } = await adminClient
-    .from("conference_products")
-    .select("*")
-    .in("id", productIds);
+  const byId = new Map<string, BuildEntity>();
+  const whoByFrom = new Map<string, EntityRefView[]>();
+  for (const r of whoRefs ?? []) {
+    const aud = Array.isArray(r.audience) ? r.audience[0] : r.audience;
+    if (!aud) continue;
+    const audEntity = minimalOfferEntity({ id: aud.id, kind: "audience", name: "", priceCents: null, currency: "CAD", inventory: null, tierPrices: {}, refs: [] });
+    audEntity.attributes = (aud.attributes as Record<string, string | number | null>) ?? {};
+    byId.set(aud.id, audEntity);
+    const list = whoByFrom.get(r.from_entity_id) ?? [];
+    list.push({ toEntityId: aud.id, toName: "", toKind: "audience", role: "who", quantity: null });
+    whoByFrom.set(r.from_entity_id, list);
+  }
 
-  if (productsError) throw new Error(productsError.message);
-
-  const productById = new Map((products ?? []).map((product) => [product.id, product]));
-
-  return cartItems
-    .map((item) => {
-      const product = productById.get(item.product_id);
-      if (!product) return null;
-      return { ...item, product };
+  const offerById = new Map((offers ?? []).map((o) => [o.id, o]));
+  const rows = (cartRows ?? [])
+    .map((cr) => {
+      const o = cr.offer_entity_id ? offerById.get(cr.offer_entity_id) : undefined;
+      if (!o) return null;
+      const offer = minimalOfferEntity({
+        id: o.id, kind: o.kind, name: o.name, priceCents: o.price_cents, currency: o.currency,
+        inventory: o.inventory, tierPrices: (o.tier_prices as Record<string, number>) ?? {}, refs: whoByFrom.get(o.id) ?? [],
+      });
+      byId.set(o.id, offer);
+      const linkedToCartItemIds = linkedToIds(cr.metadata);
+      const attendees = o.kind === "registration" ? parseAttendees(cr.metadata, cr.quantity) : [];
+      return { cartItemId: cr.id, cartQuantity: cr.quantity, offer, linkedToCartItemIds, attendees };
     })
-    .filter((value): value is CartItemWithProduct => Boolean(value));
+    .filter(
+      (
+        x
+      ): x is {
+        cartItemId: string;
+        cartQuantity: number;
+        offer: BuildEntity;
+        linkedToCartItemIds: string[];
+        attendees: (AttendeeRef | null)[];
+      } => x !== null
+    );
+
+  return { rows, byId };
 }
 
-async function loadEligibilityArtifacts(params: {
+/**
+ * Best-effort pre-add hint for the floor plan / offers pages: is ANY offer
+ * in this conference gated on membership, and if so, does this org already
+ * cover the conference's dates? Checks whether a `requires` ref to a
+ * membership-renewal entity exists anywhere in the conference's catalog
+ * (typically set once, on a booth's type entity) — a cheap existence check,
+ * not the authoritative per-purchase gate (that's addOfferToCart, which
+ * additionally walks instance_of per R1). This is purely informational, so
+ * a booth this check misses would still be correctly gated at add time.
+ */
+export async function getConferenceMembershipGateInfo(params: {
   conferenceId: string;
   organizationId: string;
-  userId: string;
-  includeCartItems?: Array<{ slug: string; quantity: number }>;
-}): Promise<{
-  orgTypeRaw: string | null;
-  membershipStatus: string | null;
-  registrationTypes: string[];
-  paidOrderItems: Array<{ slug: string; quantity: number }>;
-  pendingOrderItems: Array<{ slug: string; quantity: number }>;
-  cartItems: Array<{ slug: string; quantity: number }>;
-}> {
-  const adminClient = createAdminClient();
-  const pendingWindowStartIso = new Date(Date.now() - 30 * 60 * 1000).toISOString();
-
-  const [{ data: org }, { data: registrations }, { data: paidOrderItemsRows }, { data: pendingOrderItemsRows }, cartItems] =
-    await Promise.all([
-      adminClient
-        .from("organizations")
-        .select("type, membership_status")
-        .eq("id", params.organizationId)
-        .single(),
-      adminClient
-        .from("conference_registrations")
-        .select("registration_type")
-        .eq("conference_id", params.conferenceId)
-        .eq("organization_id", params.organizationId)
-        .in("status", ["submitted", "confirmed"]),
-      adminClient
-        .from("conference_order_items")
-        .select("quantity, conference_orders!inner(status, conference_id, organization_id), conference_products!inner(slug)")
-        .eq("conference_orders.conference_id", params.conferenceId)
-        .eq("conference_orders.organization_id", params.organizationId)
-        .eq("conference_orders.status", "paid"),
-      adminClient
-        .from("conference_order_items")
-        .select("quantity, conference_orders!inner(status, conference_id, organization_id, created_at), conference_products!inner(slug)")
-        .eq("conference_orders.conference_id", params.conferenceId)
-        .eq("conference_orders.organization_id", params.organizationId)
-        .eq("conference_orders.status", "pending")
-        .gte("conference_orders.created_at", pendingWindowStartIso),
-      params.includeCartItems
-        ? Promise.resolve(params.includeCartItems)
-        : getCartItemsWithProducts({
-            conferenceId: params.conferenceId,
-            organizationId: params.organizationId,
-            userId: params.userId,
-          }).then((rows) => rows.map((row) => ({ slug: row.product.slug, quantity: row.quantity }))),
-    ]);
-
-  const paidOrderItems = (paidOrderItemsRows ?? []).map((row) => ({
-    slug: (row as unknown as { conference_products: { slug: string } }).conference_products.slug,
-    quantity: row.quantity,
-  }));
-  const pendingOrderItems = (pendingOrderItemsRows ?? []).map((row) => ({
-    slug: (row as unknown as { conference_products: { slug: string } }).conference_products.slug,
-    quantity: row.quantity,
-  }));
-
-  return {
-    orgTypeRaw: org?.type ?? null,
-    membershipStatus: org?.membership_status ?? null,
-    registrationTypes: (registrations ?? []).map((row) => row.registration_type),
-    paidOrderItems,
-    pendingOrderItems,
-    cartItems,
-  };
-}
-
-function countReservedRegistrationItems(items: Array<{ slug: string; quantity: number }>): number {
-  return items.reduce((sum, item) => {
-    return mapSchedulerEligibleRoleForProductSlug(item.slug) ? sum + Math.max(0, item.quantity) : sum;
-  }, 0);
-}
-
-function getOrgRegistrationCountForRules(artifacts: {
-  registrationTypes: string[];
-  pendingOrderItems: Array<{ slug: string; quantity: number }>;
-}): number {
-  return artifacts.registrationTypes.length + countReservedRegistrationItems(artifacts.pendingOrderItems);
-}
-
-function getConcurrentCheckoutWarning(params: {
-  engine: RulesEngineV1;
-  pendingOrderItems: Array<{ slug: string; quantity: number }>;
-}): string | null {
-  const pendingRegistrationItems = countReservedRegistrationItems(params.pendingOrderItems);
-  if (pendingRegistrationItems <= 0) return null;
-  const customTemplate = params.engine.workflows.find(
-    (workflow) =>
-      workflow.enabled &&
-      workflow.scope === "commerce" &&
-      typeof workflow.conflict_message_template === "string" &&
-      workflow.conflict_message_template.trim().length > 0
-  )?.conflict_message_template;
-  return (
-    customTemplate ??
-    "[Rule] has changed. This has affected [scope of changes]. [Old value] is now [new value]. Contact CSC if you think this is incorrect: support@campusstorescanada.com"
-  );
-}
-
-async function loadProductRules(productId: string) {
-  const adminClient = createAdminClient();
-  const { data: rules, error } = await adminClient
-    .from("conference_product_rules")
-    .select("*")
-    .eq("product_id", productId)
-    .order("display_order", { ascending: true });
-
-  if (error) throw new Error(error.message);
-  return rules ?? [];
-}
-
-async function loadAllProductRulesForConference(conferenceId: string) {
-  const adminClient = createAdminClient();
-  const { data: rules, error } = await adminClient
-    .from("conference_product_rules")
-    .select("*, conference_products!inner(conference_id)")
-    .eq("conference_products.conference_id", conferenceId)
-    .order("display_order", { ascending: true });
-
-  if (error) throw new Error(error.message);
-
-  const rulesByProductId = new Map<string, typeof rules>();
-  for (const rule of rules ?? []) {
-    const existing = rulesByProductId.get(rule.product_id) ?? [];
-    existing.push(rule);
-    rulesByProductId.set(rule.product_id, existing);
-  }
-  return rulesByProductId;
-}
-
-async function loadConferenceRulesEngine(conferenceId: string): Promise<RulesEngineV1> {
-  const adminClient = createAdminClient();
-  const { data } = await adminClient
-    .from("conference_schedule_modules")
-    .select("config_json")
-    .eq("conference_id", conferenceId)
-    .eq("module_key", "registration_ops")
-    .maybeSingle();
-
-  const config =
-    data?.config_json && typeof data.config_json === "object" && !Array.isArray(data.config_json)
-      ? (data.config_json as Record<string, unknown>)
-      : {};
-  return mergeRulesEngineLayers({
-    tenantEngine: config.tenant_rules_engine_v1 ?? null,
-    conferenceEngine: config.rules_engine_v1 ?? null,
-  });
-}
-
-function collectRulesEngineBlockErrors(params: {
-  engine: RulesEngineV1;
-  trigger: RulesEngineTrigger;
-  context: RulesEngineEvalContext;
-}): string[] {
-  const evaluation = evaluateRulesEngine(params.engine, params.trigger, params.context);
-  const errors: string[] = [];
-  for (const action of evaluation.actions) {
-    if (action.type !== "block_purchase") continue;
-    if (isActionTargetMatch(action, params.context)) {
-      errors.push(action.message || "Purchase blocked by policy rule.");
-    }
-  }
-  return errors;
-}
-
-function isActionTargetMatch(
-  action: RulesEngineAction,
-  context: RulesEngineEvalContext
-): boolean {
-  if ("target_product_id" in action) {
-    const matchesProductId = !action.target_product_id || action.target_product_id === context.product_id;
-    const matchesSlug = !action.target_product_slug || action.target_product_slug === context.product_slug;
-    return matchesProductId && matchesSlug;
-  }
-  return true;
-}
-
-function evaluateRulesEngineActionsForContext(params: {
-  engine: RulesEngineV1;
-  trigger: RulesEngineTrigger;
-  context: RulesEngineEvalContext;
-}): RulesEngineAction[] {
-  const evaluation = evaluateRulesEngine(params.engine, params.trigger, params.context);
-  return evaluation.actions.filter((action) => isActionTargetMatch(action, params.context));
-}
-
-function applyRulesEnginePricingActions(basePriceCents: number, actions: RulesEngineAction[]): number {
-  let current = basePriceCents;
-  for (const action of actions) {
-    if (action.type === "apply_price_override_cents") {
-      const next = Number(action.amount_cents);
-      current = Number.isFinite(next) ? Math.max(0, Math.round(next)) : current;
-      continue;
-    }
-    if (action.type === "apply_discount_percent") {
-      const pct = Number(action.percent);
-      if (!Number.isFinite(pct)) continue;
-      const bounded = Math.max(0, Math.min(100, pct));
-      current = Math.max(0, Math.round(current * (1 - bounded / 100)));
-    }
-  }
-  return current;
-}
-
-function resolveProductVisibilityFromActions(actions: RulesEngineAction[]): boolean {
-  let visible = true;
-  for (const action of actions) {
-    if (action.type === "set_product_visibility") {
-      visible = action.visible;
-    }
-  }
-  return visible;
-}
-
-function isRegistrationProductSlug(slug: string): boolean {
-  return mapSchedulerEligibleRoleForProductSlug(slug) !== null;
-}
-
-function groupUnitPrices(unitPrices: number[]): Array<{ unitPriceCents: number; quantity: number }> {
-  const grouped: Array<{ unitPriceCents: number; quantity: number }> = [];
-  for (const price of unitPrices) {
-    const last = grouped[grouped.length - 1];
-    if (last && last.unitPriceCents === price) {
-      last.quantity += 1;
-      continue;
-    }
-    grouped.push({ unitPriceCents: price, quantity: 1 });
-  }
-  return grouped;
-}
-
-export async function listConferenceProducts(
-  conferenceId: string,
-  organizationId: string,
-  options?: {
-    includeIneligible?: boolean;
-  }
-): Promise<CommerceSuccess<Array<ProductRow & { eligibilityErrors: string[] }>> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId });
+}): Promise<
+  | CommerceSuccess<{
+      gated: boolean;
+      coversConference: boolean;
+      previewPriceCents: number | null;
+      newExpiresAt: string | null;
+    }>
+  | CommerceFailure
+> {
+  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
     const adminClient = createAdminClient();
-    const { data: products, error } = await adminClient
-      .from("conference_products")
-      .select("*")
-      .eq("conference_id", conferenceId)
-      .eq("is_active", true)
-      .order("display_order", { ascending: true });
 
-    if (error) return { success: false, error: error.message };
+    const { data: requiresRefs } = await adminClient
+      .from("conference_entity_refs")
+      .select("to_entity_id, target:conference_entities!conference_entity_refs_to_entity_id_fkey(kind)")
+      .eq("conference_id", params.conferenceId)
+      .eq("role", "requires");
 
-    const artifacts = await loadEligibilityArtifacts({
-      conferenceId,
-      organizationId,
-      userId: authz.userId,
-    });
+    const gated = (requiresRefs ?? []).some(
+      (r) => (Array.isArray(r.target) ? r.target[0] : r.target)?.kind === MEMBERSHIP_RENEWAL_KIND
+    );
 
-    const context = buildEligibilityContext({
-      conferenceId,
-      organizationId,
-      userId: authz.userId,
-      organizationType: artifacts.orgTypeRaw,
-      membershipStatus: artifacts.membershipStatus,
-      registrationTypes: artifacts.registrationTypes,
-      cartItems: artifacts.cartItems,
-      paidOrderItems: artifacts.paidOrderItems,
-    });
-    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
-
-    const allRules = await loadAllProductRulesForConference(conferenceId);
-    const rulesEngine = await loadConferenceRulesEngine(conferenceId);
-    const enriched: Array<
-      ProductRow & { eligibilityErrors: string[]; __hiddenByRules?: boolean }
-    > = [];
-    for (const product of products ?? []) {
-      const rules = allRules.get(product.id) ?? [];
-      const eligibility = checkProductEligibility({
-        product,
-        quantity: 1,
-        rules,
-        context,
-      });
-      const engineErrors = collectRulesEngineBlockErrors({
-        engine: rulesEngine,
-        trigger: "checkout_attempt",
-        context: {
-          org_membership_status: artifacts.membershipStatus,
-          org_type: artifacts.orgTypeRaw,
-          user_is_authenticated: true,
-          org_registration_count: orgRegistrationCountForRules,
-          product_id: product.id,
-          product_slug: product.slug,
-        },
-      });
-      const pricingActions = evaluateRulesEngineActionsForContext({
-        engine: rulesEngine,
-        trigger: "checkout_attempt",
-        context: {
-          org_membership_status: artifacts.membershipStatus,
-          org_type: artifacts.orgTypeRaw,
-          user_is_authenticated: true,
-          org_registration_count: orgRegistrationCountForRules,
-          product_id: product.id,
-          product_slug: product.slug,
-        },
-      });
-      const effectiveUnitPrice = applyRulesEnginePricingActions(
-        product.price_cents,
-        pricingActions
-      );
-      const visibilityActions = evaluateRulesEngineActionsForContext({
-        engine: rulesEngine,
-        trigger: "product_catalog_load",
-        context: {
-          org_membership_status: artifacts.membershipStatus,
-          org_type: artifacts.orgTypeRaw,
-          user_is_authenticated: true,
-          org_registration_count: orgRegistrationCountForRules,
-          product_id: product.id,
-          product_slug: product.slug,
-        },
-      });
-      const isVisibleForCatalog = resolveProductVisibilityFromActions(
-        visibilityActions
-      );
-      enriched.push({
-        ...product,
-        price_cents: effectiveUnitPrice,
-        eligibilityErrors: [...eligibility.errors, ...engineErrors],
-        __hiddenByRules: !isVisibleForCatalog,
-      });
+    if (!gated) {
+      return { success: true, data: { gated: false, coversConference: true, previewPriceCents: null, newExpiresAt: null } };
     }
 
-    const includeIneligible = options?.includeIneligible === true;
-    const visibleProducts = includeIneligible
-      ? enriched.filter((product) => product.__hiddenByRules !== true)
-      : enriched.filter(
-          (product) =>
-            product.__hiddenByRules !== true && product.eligibilityErrors.length === 0
-        );
+    const [{ data: conference }, { data: org }] = await Promise.all([
+      adminClient.from("conference_instances").select("end_date").eq("id", params.conferenceId).maybeSingle(),
+      adminClient.from("organizations").select("membership_expires_at").eq("id", params.organizationId).single(),
+    ]);
+
+    const coversConference = conference?.end_date
+      ? membershipCoversConference(org?.membership_expires_at ?? null, conference.end_date)
+      : true;
+
+    if (coversConference) {
+      return { success: true, data: { gated, coversConference, previewPriceCents: null, newExpiresAt: null } };
+    }
+
+    const { billingPeriodEnd } = await computeNewExpiresAt(org?.membership_expires_at ?? null, conference?.end_date ?? null);
+    // Only ever called from the floor-plan page (booths) — always a Partner-track preview.
+    const previewPriceCents = await priceMembershipRenewalForOrg(
+      params.organizationId,
+      conference?.end_date ?? null,
+      { persist: false, assumePartnership: true }
+    );
 
     return {
       success: true,
-      data: visibleProducts.map((product) => {
-        const next = { ...product };
-        delete (next as { __hiddenByRules?: boolean }).__hiddenByRules;
-        return next;
-      }),
+      data: { gated, coversConference, previewPriceCents, newExpiresAt: billingPeriodEnd },
     };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
@@ -579,83 +504,103 @@ export async function listConferenceProducts(
 export async function getConferenceCart(
   conferenceId: string,
   organizationId: string
-): Promise<CommerceSuccess<{ items: CartItemWithProduct[]; subtotalCents: number; taxCents: number; totalCents: number }> | CommerceFailure> {
+): Promise<CommerceSuccess<{
+  offerItems: Array<{
+    cartItemId: string;
+    offerEntityId: string;
+    name: string;
+    kind: string;
+    quantity: number;
+    unitPriceCents: number;
+    linkedToCartItemIds: string[];
+    attendees: (AttendeeRef | null)[];
+  }>;
+  subtotalCents: number;
+  taxCents: number;
+  totalCents: number;
+}> | CommerceFailure> {
   const authz = await assertUserCanManageOrg({ organizationId });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {
     const adminClient = createAdminClient();
-    const [items, conference, artifacts, rulesEngine] = await Promise.all([
-      getCartItemsWithProducts({ conferenceId, organizationId, userId: authz.userId }),
+    const [offerCart, conference, buyerTier] = await Promise.all([
+      getOfferCartRows({ conferenceId, organizationId, userId: authz.userId }),
       adminClient
         .from("conference_instances")
-        .select("tax_rate_pct")
+        .select("tax_rate_pct, end_date")
         .eq("id", conferenceId)
         .single()
         .then((result) => {
           if (result.error) throw new Error(result.error.message);
           return result.data;
         }),
-      loadEligibilityArtifacts({
-        conferenceId,
-        organizationId,
-        userId: authz.userId,
-      }),
-      loadConferenceRulesEngine(conferenceId),
+      loadBuyerTier(organizationId),
     ]);
 
     const taxRate = Number(conference.tax_rate_pct ?? 0);
-
     let subtotalCents = 0;
     let taxCents = 0;
-    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
-    for (const item of items) {
-      const pricingActions = evaluateRulesEngineActionsForContext({
-        engine: rulesEngine,
-        trigger: "checkout_attempt",
-        context: {
-          org_membership_status: artifacts.membershipStatus,
-          org_type: artifacts.orgTypeRaw,
-          user_is_authenticated: true,
-          org_registration_count: orgRegistrationCountForRules,
-          product_id: item.product.id,
-          product_slug: item.product.slug,
-        },
-      });
-      const effectiveUnitPrice = applyRulesEnginePricingActions(
-        item.product.price_cents,
-        pricingActions
-      );
-      const lineSubtotal = item.quantity * effectiveUnitPrice;
-      const lineTax =
-        item.product.is_tax_exempt || !item.product.is_taxable
-          ? 0
-          : Math.round(lineSubtotal * (taxRate / 100));
-      subtotalCents += lineSubtotal;
-      taxCents += lineTax;
-    }
+    // A membership-renewal line linked to a booth is always Partner-track dues,
+    // regardless of the buying org's current type.
+    const cartItemKindById = new Map(offerCart.rows.map((r) => [r.cartItemId, r.offer.kind]));
+
+    // v3 Offer lines: priced at the buyer's tier (or, for a membership-renewal
+    // line, per-org — see effectiveUnitPriceCents), taxed at the conference rate.
+    const offerItems = await Promise.all(
+      offerCart.rows.map(async ({ cartItemId, cartQuantity, offer, linkedToCartItemIds, attendees }) => {
+        const linkedToBooth = linkedToCartItemIds.some((id) => cartItemKindById.get(id) === "booth");
+        const unitPriceCents = await effectiveUnitPriceCents(
+          offer,
+          buyerTier,
+          organizationId,
+          conference.end_date ?? null,
+          { persist: false, assumePartnership: linkedToBooth }
+        );
+        const lineSubtotal = cartQuantity * unitPriceCents;
+        subtotalCents += lineSubtotal;
+        taxCents += Math.round(lineSubtotal * (taxRate / 100));
+        return {
+          cartItemId,
+          offerEntityId: offer.id,
+          name: offer.name,
+          kind: offer.kind,
+          quantity: cartQuantity,
+          unitPriceCents,
+          linkedToCartItemIds,
+          attendees,
+        };
+      })
+    );
 
     return {
       success: true,
-      data: {
-        items,
-        subtotalCents,
-        taxCents,
-        totalCents: subtotalCents + taxCents,
-      },
+      data: { offerItems, subtotalCents, taxCents, totalCents: subtotalCents + taxCents },
     };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
 }
 
-export async function addCartItem(params: {
+/**
+ * Add a v3 Offer to the cart — the gate is the same model the cockpit shows:
+ * the buyer's tier must be eligible (canBuy over the Offer's `who` audiences)
+ * and inventory must not be exceeded.
+ */
+export async function addOfferToCart(params: {
   conferenceId: string;
   organizationId: string;
-  productId: string;
+  offerEntityId: string;
   quantity?: number;
-  metadata?: Record<string, unknown> | null;
-}): Promise<CommerceSuccess<CartRow> | CommerceFailure> {
+  /** One slot per unit being added — `null`/omitted entries are "assign later." Registration offers only. */
+  attendees?: (AttendeeRef | null)[];
+}): Promise<
+  | CommerceSuccess<{
+      unitPriceCents: number;
+      membershipRenewalAdded?: { cartItemId: string; priceCents: number };
+    }>
+  | CommerceFailure
+> {
   const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
   if (!authz.ok) return { success: false, error: authz.error };
 
@@ -664,128 +609,313 @@ export async function addCartItem(params: {
   try {
     const adminClient = createAdminClient();
 
-    const { data: product, error: productError } = await adminClient
-      .from("conference_products")
-      .select("*")
-      .eq("id", params.productId)
-      .eq("conference_id", params.conferenceId)
-      .eq("is_active", true)
-      .single();
+    // Look up the conference's cart reservation timeout (default 15 min) and
+    // end date (needed for the membership-coverage gate below).
+    const { data: confRow } = await adminClient
+      .from("conference_instances")
+      .select("cart_reservation_minutes, end_date")
+      .eq("id", params.conferenceId)
+      .maybeSingle();
+    const reservationMinutes = confRow?.cart_reservation_minutes ?? 15;
+    const expiresAt = new Date(Date.now() + reservationMinutes * 60 * 1000).toISOString();
 
-    if (productError || !product) {
-      return { success: false, error: productError?.message ?? "Product not found" };
-    }
-
-    const metadataCheck = validatePartnerMeetingMetadata({
-      slug: product.slug,
-      quantity,
-      metadata: params.metadata ?? null,
-    });
-    if (!metadataCheck.eligible) {
-      return { success: false, code: "INVALID_METADATA", error: metadataCheck.errors.join(" ") };
-    }
-
-    const { data: existing } = await adminClient
+    // Lazy cleanup: remove this org's own expired cart items before adding a new one.
+    await adminClient
       .from("cart_items")
-      .select("*")
+      .delete()
       .eq("conference_id", params.conferenceId)
       .eq("organization_id", params.organizationId)
       .eq("user_id", authz.userId)
-      .eq("product_id", params.productId)
-      .maybeSingle();
+      .lt("expires_at", new Date().toISOString());
 
-    const cartPreview = await getCartItemsWithProducts({
-      conferenceId: params.conferenceId,
-      organizationId: params.organizationId,
-      userId: authz.userId,
-    });
+    const { data: offerRow, error: offerError } = await adminClient
+      .from("conference_entities")
+      .select("id, kind, name, is_for_sale, price_cents, currency, inventory, tier_prices, attributes")
+      .eq("id", params.offerEntityId)
+      .eq("conference_id", params.conferenceId)
+      .single();
+    if (offerError || !offerRow) return { success: false, error: offerError?.message ?? "Offer not found." };
 
-    const cartForContext = cartPreview
-      .filter((item) => item.product_id !== params.productId)
-      .map((item) => ({ slug: item.product.slug, quantity: item.quantity }));
-
-    if (existing) {
-      cartForContext.push({ slug: product.slug, quantity: existing.quantity });
+    // Some offers are deliberately kept off the general storefront
+    // (is_for_sale: false) but still directly purchasable by an org that
+    // knows the entity id — e.g. the $500 Book Partner registration, which
+    // only Vendor Partner orgs in a specific category should ever reach, and
+    // never via listConferenceOffers(). Gated on category here since the
+    // generic who-audience/tier system has no concept of primary_category.
+    const offerAttrs = (offerRow.attributes as Record<string, unknown> | null) ?? {};
+    const directPurchaseOnly = offerAttrs.direct_purchase_only === true;
+    if (!offerRow.is_for_sale && !directPurchaseOnly) {
+      return { success: false, error: "This thing isn't for sale." };
+    }
+    if (directPurchaseOnly) {
+      const requiredCategory = offerAttrs.direct_purchase_category;
+      const { data: buyerOrg } = await adminClient
+        .from("organizations")
+        .select("type, primary_category")
+        .eq("id", params.organizationId)
+        .single();
+      const categoryOk = typeof requiredCategory !== "string" || buyerOrg?.primary_category === requiredCategory;
+      if (buyerOrg?.type !== "Vendor Partner" || !categoryOk) {
+        return { success: false, error: "Not eligible for this registration." };
+      }
     }
 
-    const artifacts = await loadEligibilityArtifacts({
-      conferenceId: params.conferenceId,
-      organizationId: params.organizationId,
-      userId: authz.userId,
-      includeCartItems: cartForContext,
+    // The membership-renewal entity is only ever attached automatically by
+    // this gate — never independently addable, even via a direct call.
+    if (offerRow.kind === MEMBERSHIP_RENEWAL_KIND) {
+      return { success: false, error: "Membership renewal can't be added directly — it's attached automatically when required by another purchase." };
+    }
+
+    // Orgs can hold multiple booths (board decision) — no per-org cap here.
+    // What still has to hold is per-booth exclusivity: this specific booth
+    // can't be held by a DIFFERENT org's active cart reservation, nor
+    // already sold to anyone (checked below via entity_purchases/inventory).
+    if (offerRow.kind === "booth") {
+      const { data: heldByOther } = await adminClient
+        .from("cart_items")
+        .select("id, organization_id, organization:organizations!cart_items_organization_id_fkey(name)")
+        .eq("conference_id", params.conferenceId)
+        .eq("offer_entity_id", params.offerEntityId)
+        .neq("organization_id", params.organizationId)
+        .not("expires_at", "is", null)
+        .gt("expires_at", new Date().toISOString())
+        .limit(1)
+        .maybeSingle();
+      if (heldByOther) {
+        const org = Array.isArray(heldByOther.organization) ? heldByOther.organization[0] : heldByOther.organization;
+        return {
+          success: false,
+          code: "BOOTH_RESERVED",
+          error: `This booth is currently reserved by ${org?.name ?? "another organization"}. Try again once their hold expires.`,
+        };
+      }
+    }
+
+    // The Offer's `who` audiences carry the permission tiers that may buy it.
+    const { data: whoRefs } = await adminClient
+      .from("conference_entity_refs")
+      .select("to_entity_id, audience:conference_entities!conference_entity_refs_to_entity_id_fkey(id, attributes)")
+      .eq("from_entity_id", params.offerEntityId)
+      .eq("role", "who");
+
+    const byId = new Map<string, BuildEntity>();
+    const offerRefs: EntityRefView[] = [];
+    for (const r of whoRefs ?? []) {
+      const aud = Array.isArray(r.audience) ? r.audience[0] : r.audience;
+      if (!aud) continue;
+      byId.set(aud.id, minimalOfferEntity({
+        id: aud.id, kind: "audience", name: "", priceCents: null, currency: "CAD",
+        inventory: null, tierPrices: {}, refs: [],
+      }));
+      // carry the audience's source_role via attributes for eligibleTiers()
+      byId.get(aud.id)!.attributes = (aud.attributes as Record<string, string | number | null>) ?? {};
+      offerRefs.push({ toEntityId: aud.id, toName: "", toKind: "audience", role: "who", quantity: null });
+    }
+
+    const offer = minimalOfferEntity({
+      id: offerRow.id, kind: offerRow.kind, name: offerRow.name, priceCents: offerRow.price_cents,
+      currency: offerRow.currency, inventory: offerRow.inventory,
+      tierPrices: (offerRow.tier_prices as Record<string, number>) ?? {}, refs: offerRefs,
     });
 
-    const context = buildEligibilityContext({
-      conferenceId: params.conferenceId,
-      organizationId: params.organizationId,
-      userId: authz.userId,
-      organizationType: artifacts.orgTypeRaw,
-      membershipStatus: artifacts.membershipStatus,
-      registrationTypes: artifacts.registrationTypes,
-      cartItems: cartForContext,
-      paidOrderItems: artifacts.paidOrderItems,
-    });
-    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
-    const [rules, rulesEngine] = await Promise.all([
-      loadProductRules(product.id),
-      loadConferenceRulesEngine(params.conferenceId),
+    const buyerTier = await loadBuyerTier(params.organizationId);
+
+    const eligible = canBuy(offer, buyerTier, byId);
+    if (!eligible.ok) return { success: false, code: "INELIGIBLE", error: eligible.reason ?? "Not eligible to buy this." };
+
+    // Ownership gate: some offers (e.g. a booth-bundled registration) only
+    // make sense once the org already holds a specific thing (e.g. a Bronze
+    // booth, not just any booth) — set directly on this offer, or inherited
+    // from its instance_of type. Checked by identity (own id or instance_of
+    // parent), not by kind, since e.g. Bronze and plain Exhibitor booths are
+    // both kind "booth" but bundle different add-ons. A prerequisite already
+    // in the SAME cart counts as held too, since both can ride the same checkout.
+    const ownershipRefs = await loadEffectiveRefsByRole(adminClient, params.offerEntityId, OWNERSHIP_ROLE);
+    const requiredEntityIds = offerRequiresOwnershipOfEntityIds(
+      ownershipRefs.map((r) => ({ role: OWNERSHIP_ROLE, ...r }))
+    );
+    if (requiredEntityIds.length > 0) {
+      const [{ data: ownedBalances }, { data: cartOffers }] = await Promise.all([
+        adminClient
+          .from("entity_balances")
+          .select("entity_id")
+          .eq("conference_id", params.conferenceId)
+          .eq("organization_id", params.organizationId),
+        adminClient
+          .from("cart_items")
+          .select("offer_entity_id")
+          .eq("conference_id", params.conferenceId)
+          .eq("organization_id", params.organizationId)
+          .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`),
+      ]);
+      const heldEntityIds = [
+        ...(ownedBalances ?? []).map((b) => b.entity_id),
+        ...(cartOffers ?? []).map((c) => c.offer_entity_id),
+      ].filter((id): id is string => Boolean(id));
+      const { data: instanceOfRows } =
+        heldEntityIds.length > 0
+          ? await adminClient
+              .from("conference_entity_refs")
+              .select("from_entity_id, to_entity_id")
+              .eq("role", "instance_of")
+              .in("from_entity_id", heldEntityIds)
+          : { data: [] as Array<{ from_entity_id: string; to_entity_id: string }> };
+      const instanceOfParentByChild = new Map((instanceOfRows ?? []).map((r) => [r.from_entity_id, r.to_entity_id]));
+      const heldIdentityIds = expandWithInstanceOfParents(heldEntityIds, instanceOfParentByChild);
+      if (!ownershipRequirementSatisfied(requiredEntityIds, heldIdentityIds)) {
+        return {
+          success: false,
+          code: "REQUIRES_OWNERSHIP",
+          error: "Your organization needs to already hold the prerequisite for this.",
+        };
+      }
+    }
+
+    // Inventory at add time = already sold + what's already in this cart line.
+    const [{ data: sales }, { data: existing }] = await Promise.all([
+      adminClient.from("entity_purchases").select("quantity").eq("offer_entity_id", params.offerEntityId),
+      adminClient.from("cart_items").select("id, quantity, metadata")
+        .eq("conference_id", params.conferenceId)
+        .eq("organization_id", params.organizationId)
+        .eq("user_id", authz.userId)
+        .eq("offer_entity_id", params.offerEntityId)
+        .maybeSingle(),
     ]);
-    const concurrencyWarning = getConcurrentCheckoutWarning({
-      engine: rulesEngine,
-      pendingOrderItems: artifacts.pendingOrderItems,
-    });
-    const eligibility = checkProductEligibility({
-      product,
-      quantity,
-      rules,
-      context,
-    });
-    const engineErrors = collectRulesEngineBlockErrors({
-      engine: rulesEngine,
-      trigger: "cart_item_add",
-      context: {
-        org_membership_status: artifacts.membershipStatus,
-        org_type: artifacts.orgTypeRaw,
-        user_is_authenticated: true,
-        org_registration_count: orgRegistrationCountForRules,
-        product_id: product.id,
-        product_slug: product.slug,
-      },
-    });
-
-    if (!eligibility.eligible || engineErrors.length > 0) {
+    const sold = (sales ?? []).reduce((n, s) => n + s.quantity, 0);
+    // A booth is one physical space, not a countable commodity — re-adding the
+    // same booth just refreshes the reservation, it never bumps the quantity.
+    const wanted = offerRow.kind === "booth" ? 1 : (existing?.quantity ?? 0) + quantity;
+    const avail = availability(offer, sold);
+    if (avail.remaining != null && wanted > avail.remaining) {
       return {
         success: false,
-        code: "INELIGIBLE",
-        error: [...eligibility.errors, ...engineErrors, ...(concurrencyWarning ? [concurrencyWarning] : [])].join(
-          " "
-        ),
+        code: "SOLD_OUT",
+        error: avail.soldOut ? "Sold out." : `Only ${avail.remaining} left.`,
       };
     }
 
-    const upsertPayload: Database["public"]["Tables"]["cart_items"]["Insert"] = {
-      conference_id: params.conferenceId,
-      organization_id: params.organizationId,
-      user_id: authz.userId,
-      product_id: params.productId,
-      quantity: existing ? existing.quantity + quantity : quantity,
-      metadata: (params.metadata ?? existing?.metadata ?? null) as Database["public"]["Tables"]["cart_items"]["Insert"]["metadata"],
-      updated_at: new Date().toISOString(),
-    };
+    // New attendee slots for the units being added this call — padded/trimmed
+    // to exactly `quantity` so the stored array always lines up with how many
+    // units it's actually appended for (extra/missing entries would drift the
+    // seat↔attendee zip at mint time).
+    const newSlots: (AttendeeRef | null)[] = Array.from({ length: quantity }, (_, i) => params.attendees?.[i] ?? null);
 
-    const { data: saved, error: saveError } = await adminClient
-      .from("cart_items")
-      .upsert(upsertPayload, {
-        onConflict: "user_id,organization_id,conference_id,product_id",
-      })
-      .select("*")
-      .single();
-
-    if (saveError || !saved) {
-      return { success: false, error: saveError?.message ?? "Failed to save cart item" };
+    let boothCartItemId: string;
+    if (existing) {
+      // Refresh expires_at on every re-add so the reservation window extends,
+      // and append this call's attendee slots after whatever's already there —
+      // topping up quantity must not clobber attendees already assigned to
+      // earlier units in the line.
+      const existingAttendees = parseAttendees(existing.metadata, existing.quantity);
+      const nextMetadata =
+        offerRow.kind === "registration" ? { attendees: [...existingAttendees, ...newSlots] } : existing.metadata;
+      const { error: updErr } = await adminClient
+        .from("cart_items")
+        .update({
+          quantity: wanted,
+          updated_at: new Date().toISOString(),
+          expires_at: expiresAt,
+          metadata: nextMetadata,
+        })
+        .eq("id", existing.id);
+      if (updErr) return { success: false, error: updErr.message };
+      boothCartItemId = existing.id;
+    } else {
+      const { data: inserted, error: insErr } = await adminClient
+        .from("cart_items")
+        .insert({
+          conference_id: params.conferenceId,
+          organization_id: params.organizationId,
+          user_id: authz.userId,
+          offer_entity_id: params.offerEntityId,
+          quantity: wanted,
+          expires_at: expiresAt,
+          metadata: offerRow.kind === "registration" ? { attendees: newSlots } : null,
+        })
+        .select("id")
+        .single();
+      if (insErr || !inserted) return { success: false, error: insErr?.message ?? "Failed to add to cart." };
+      boothCartItemId = inserted.id;
     }
 
-    return { success: true, data: saved };
+    // Membership gate: if this offer `requires` a membership-renewal entity
+    // (set directly, or inherited from its instance_of type) and this org's
+    // membership doesn't cover the conference's dates, auto-attach a linked
+    // membership-renewal cart line so both ride the same checkout. Only
+    // applies to member/partner buyers — a non_member-tier org has no
+    // membership to renew (membership_expires_at is null by definition), so
+    // without this guard the coverage check always fails and silently bills
+    // them for a renewal on top of the offer itself. Some Day Pass entities
+    // (e.g. "Wednesday Day Pass") are shared across both audiences with the
+    // same `requires` ref, since the requirement is real for the member side.
+    let membershipRenewalAdded: { cartItemId: string; priceCents: number } | undefined;
+    const requiresRefs = await loadEffectiveRefsByRole(adminClient, params.offerEntityId, "requires");
+    const membershipEntityId = offerRequiresMembershipRenewal(
+      requiresRefs.map((r) => ({ role: "requires", ...r }))
+    );
+    if (membershipEntityId && confRow?.end_date && (buyerTier === "member" || buyerTier === "partner")) {
+      const { data: orgRow } = await adminClient
+        .from("organizations")
+        .select("membership_expires_at")
+        .eq("id", params.organizationId)
+        .single();
+
+      if (!membershipCoversConference(orgRow?.membership_expires_at ?? null, confRow.end_date)) {
+        const priceCents = await priceMembershipRenewalForOrg(params.organizationId, confRow.end_date, {
+          persist: false,
+          assumePartnership: offerRow.kind === "booth",
+        });
+
+        const { data: existingMembershipItem } = await adminClient
+          .from("cart_items")
+          .select("id, metadata")
+          .eq("conference_id", params.conferenceId)
+          .eq("organization_id", params.organizationId)
+          .eq("user_id", authz.userId)
+          .eq("offer_entity_id", membershipEntityId)
+          .maybeSingle();
+
+        if (existingMembershipItem) {
+          // A second booth (an org can hold multiple) can require the same
+          // renewal line — add to the set of requiring items rather than
+          // overwriting it, so removing just one booth later doesn't strip
+          // the renewal out from under the other(s).
+          const existingLinks = linkedToIds(existingMembershipItem.metadata);
+          const linkedTo = existingLinks.includes(boothCartItemId) ? existingLinks : [...existingLinks, boothCartItemId];
+          await adminClient
+            .from("cart_items")
+            .update({
+              expires_at: expiresAt,
+              updated_at: new Date().toISOString(),
+              metadata: { linked_to: linkedTo },
+            })
+            .eq("id", existingMembershipItem.id);
+          membershipRenewalAdded = { cartItemId: existingMembershipItem.id, priceCents };
+        } else {
+          const { data: insertedMembership, error: membershipInsErr } = await adminClient
+            .from("cart_items")
+            .insert({
+              conference_id: params.conferenceId,
+              organization_id: params.organizationId,
+              user_id: authz.userId,
+              offer_entity_id: membershipEntityId,
+              quantity: 1,
+              expires_at: expiresAt,
+              metadata: { linked_to: [boothCartItemId] },
+            })
+            .select("id")
+            .single();
+          if (!membershipInsErr && insertedMembership) {
+            membershipRenewalAdded = { cartItemId: insertedMembership.id, priceCents };
+          }
+        }
+      }
+    }
+
+    return {
+      success: true,
+      data: { unitPriceCents: priceForTier(offer, buyerTier), membershipRenewalAdded },
+    };
   } catch (error) {
     return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
@@ -794,7 +924,6 @@ export async function addCartItem(params: {
 export async function updateCartItemQuantity(params: {
   cartItemId: string;
   quantity: number;
-  metadata?: Record<string, unknown> | null;
 }): Promise<CommerceSuccess<CartRow> | CommerceFailure> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -818,109 +947,36 @@ export async function updateCartItemQuantity(params: {
     }
 
     if (params.quantity <= 0) {
-      const { error: deleteError } = await adminClient
-        .from("cart_items")
-        .delete()
-        .eq("id", item.id);
+      const { error: deleteError } = await adminClient.from("cart_items").delete().eq("id", item.id);
       if (deleteError) return { success: false, error: deleteError.message };
-      return {
-        success: true,
-        data: { ...item, quantity: 0, updated_at: new Date().toISOString() },
-      };
+      return { success: true, data: { ...item, quantity: 0, updated_at: new Date().toISOString() } };
     }
 
-    const { data: product, error: productError } = await adminClient
-      .from("conference_products")
-      .select("*")
-      .eq("id", item.product_id)
-      .single();
-
-    if (productError || !product) {
-      return { success: false, error: productError?.message ?? "Product not found" };
+    // A booth is one physical space, not a countable commodity — its quantity is immutably 1.
+    let nextQuantity = params.quantity;
+    let isRegistration = false;
+    if (item.offer_entity_id) {
+      const { data: offerRow } = await adminClient
+        .from("conference_entities")
+        .select("kind")
+        .eq("id", item.offer_entity_id)
+        .maybeSingle();
+      if (offerRow?.kind === "booth") nextQuantity = 1;
+      isRegistration = offerRow?.kind === "registration";
     }
 
-    const metadata = params.metadata ?? (item.metadata as Record<string, unknown> | null);
-    const metadataCheck = validatePartnerMeetingMetadata({
-      slug: product.slug,
-      quantity: params.quantity,
-      metadata,
-    });
-    if (!metadataCheck.eligible) {
-      return { success: false, code: "INVALID_METADATA", error: metadataCheck.errors.join(" ") };
-    }
-
-    const cartPreview = await getCartItemsWithProducts({
-      conferenceId: item.conference_id,
-      organizationId: item.organization_id,
-      userId: item.user_id,
-    });
-
-    const cartForContext = cartPreview
-      .filter((row) => row.id !== item.id)
-      .map((row) => ({ slug: row.product.slug, quantity: row.quantity }));
-
-    const artifacts = await loadEligibilityArtifacts({
-      conferenceId: item.conference_id,
-      organizationId: item.organization_id,
-      userId: item.user_id,
-      includeCartItems: cartForContext,
-    });
-
-    const context = buildEligibilityContext({
-      conferenceId: item.conference_id,
-      organizationId: item.organization_id,
-      userId: item.user_id,
-      organizationType: artifacts.orgTypeRaw,
-      membershipStatus: artifacts.membershipStatus,
-      registrationTypes: artifacts.registrationTypes,
-      cartItems: cartForContext,
-      paidOrderItems: artifacts.paidOrderItems,
-    });
-    const orgRegistrationCountForRules = getOrgRegistrationCountForRules(artifacts);
-    const [rules, rulesEngine] = await Promise.all([
-      loadProductRules(product.id),
-      loadConferenceRulesEngine(item.conference_id),
-    ]);
-    const concurrencyWarning = getConcurrentCheckoutWarning({
-      engine: rulesEngine,
-      pendingOrderItems: artifacts.pendingOrderItems,
-    });
-    const eligibility = checkProductEligibility({
-      product,
-      quantity: params.quantity,
-      rules,
-      context,
-    });
-    const engineErrors = collectRulesEngineBlockErrors({
-      engine: rulesEngine,
-      trigger: "cart_item_add",
-      context: {
-        org_membership_status: artifacts.membershipStatus,
-        org_type: artifacts.orgTypeRaw,
-        user_is_authenticated: true,
-        org_registration_count: orgRegistrationCountForRules,
-        product_id: product.id,
-        product_slug: product.slug,
-      },
-    });
-
-    if (!eligibility.eligible || engineErrors.length > 0) {
-      return {
-        success: false,
-        code: "INELIGIBLE",
-        error: [...eligibility.errors, ...engineErrors, ...(concurrencyWarning ? [concurrencyWarning] : [])].join(
-          " "
-        ),
-      };
-    }
+    // Resize the attendee-slot array to match — growing pads with open
+    // ("assign later") slots, shrinking drops from the end. There's no
+    // "which unit are you removing" signal from a bare quantity edit, so the
+    // last slot(s) are what go; if one was assigned, that assignment is lost,
+    // same as removing a physical seat would be.
+    const nextMetadata = isRegistration
+      ? { attendees: parseAttendees(item.metadata, nextQuantity) }
+      : item.metadata;
 
     const { data: updated, error: updateError } = await adminClient
       .from("cart_items")
-      .update({
-        quantity: params.quantity,
-        metadata: (metadata ?? null) as Database["public"]["Tables"]["cart_items"]["Update"]["metadata"],
-        updated_at: new Date().toISOString(),
-      })
+      .update({ quantity: nextQuantity, updated_at: new Date().toISOString(), metadata: nextMetadata })
       .eq("id", item.id)
       .select("*")
       .single();
@@ -935,6 +991,123 @@ export async function updateCartItemQuantity(params: {
   }
 }
 
+/**
+ * Set (or clear) who a single unit of a registration cart line is for — the
+ * cart-side counterpart of the org/slug seat-assignment matrix, just applied
+ * before checkout instead of after. `attendee: null` means "assign later,"
+ * same meaning as never having set that slot.
+ */
+/** email if present, else the trimmed lowercased name — the identity key used to spot the same person picked twice. */
+function attendeeKey(attendee: AttendeeRef): string {
+  return (attendee.email?.trim().toLowerCase() || attendee.name.trim().toLowerCase());
+}
+
+export async function setCartItemAttendee(params: {
+  cartItemId: string;
+  index: number;
+  attendee: AttendeeRef | null;
+}): Promise<CommerceSuccess<{ warning: string | null }> | CommerceFailure> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const adminClient = createAdminClient();
+  const { data: item, error: itemError } = await adminClient
+    .from("cart_items")
+    .select("id, user_id, organization_id, conference_id, quantity, metadata, offer_entity_id")
+    .eq("id", params.cartItemId)
+    .single();
+  if (itemError || !item) return { success: false, error: itemError?.message ?? "Cart item not found" };
+
+  if (
+    !isGlobalAdmin(auth.ctx.globalRole) &&
+    item.user_id !== auth.ctx.userId &&
+    !auth.ctx.activeOrgIds.includes(item.organization_id)
+  ) {
+    return { success: false, error: "Not authorized" };
+  }
+
+  if (params.index < 0 || params.index >= item.quantity) {
+    return { success: false, error: "That unit doesn't exist on this cart line." };
+  }
+
+  const slots = parseAttendees(item.metadata, item.quantity);
+
+  // Same person, two units of the same line — never legitimate (both units
+  // grant the exact same access), so this is a hard block, not a warning.
+  if (params.attendee) {
+    const key = attendeeKey(params.attendee);
+    const dupIndex = slots.findIndex((s, i) => i !== params.index && s && attendeeKey(s) === key);
+    if (dupIndex !== -1) {
+      return {
+        success: false,
+        error: `${params.attendee.name} is already assigned to unit #${dupIndex + 1} of this line — pick someone else.`,
+      };
+    }
+  }
+
+  slots[params.index] = params.attendee;
+
+  const { error } = await adminClient
+    .from("cart_items")
+    .update({ metadata: { attendees: slots }, updated_at: new Date().toISOString() })
+    .eq("id", item.id);
+  if (error) return { success: false, error: error.message };
+
+  // Cross-registration overlap: warn (don't block) if this person already
+  // holds — or is staged elsewhere in this same cart for — a registration
+  // that covers the same day as this one (e.g. already has Full Conference,
+  // which already includes Wednesday, and is now also being given a
+  // Wednesday Day Pass).
+  let warning: string | null = null;
+  if (params.attendee?.email && item.offer_entity_id) {
+    const email = params.attendee.email.trim().toLowerCase();
+
+    const [{ data: people }, { data: siblingItems }, entitiesRes, refsRes] = await Promise.all([
+      adminClient
+        .from("conference_people")
+        .select("id")
+        .eq("conference_id", item.conference_id)
+        .eq("organization_id", item.organization_id)
+        .ilike("contact_email", email),
+      adminClient
+        .from("cart_items")
+        .select("offer_entity_id, quantity, metadata")
+        .eq("conference_id", item.conference_id)
+        .eq("organization_id", item.organization_id)
+        .eq("user_id", item.user_id)
+        .neq("id", item.id)
+        .not("offer_entity_id", "is", null)
+        .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`),
+      adminClient.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", item.conference_id),
+      adminClient.from("conference_entity_refs").select("from_entity_id, to_entity_id, role, quantity").eq("conference_id", item.conference_id),
+    ]);
+
+    const personIds = (people ?? []).map((p) => p.id);
+    const { data: heldSeats } =
+      personIds.length > 0
+        ? await adminClient
+            .from("entity_balance_seats")
+            .select("entity_id")
+            .eq("conference_id", item.conference_id)
+            .in("holder_person_id", personIds)
+        : { data: [] as Array<{ entity_id: string }> };
+
+    const siblingEntityIds = (siblingItems ?? [])
+      .filter((row) => parseAttendees(row.metadata, row.quantity).some((a) => a && a.email?.trim().toLowerCase() === email))
+      .map((row) => row.offer_entity_id)
+      .filter((id): id is string => Boolean(id));
+
+    const otherEntityIds = [...(heldSeats ?? []).map((s) => s.entity_id), ...siblingEntityIds];
+    const byId = indexById(buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []));
+    const overlap = findOverlappingRegistration(item.offer_entity_id, otherEntityIds, byId);
+    if (overlap.overlapping) {
+      warning = `${params.attendee.name} already holds "${overlap.conflictingEntityName}", which already covers the same day — you may want to fix this assignment.`;
+    }
+  }
+
+  return { success: true, data: { warning } };
+}
+
 export async function removeCartItem(cartItemId: string): Promise<CommerceSuccess<null> | CommerceFailure> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -942,7 +1115,7 @@ export async function removeCartItem(cartItemId: string): Promise<CommerceSucces
   const adminClient = createAdminClient();
   const { data: item, error: itemError } = await adminClient
     .from("cart_items")
-    .select("id, user_id, organization_id")
+    .select("id, user_id, organization_id, metadata")
     .eq("id", cartItemId)
     .single();
 
@@ -954,6 +1127,34 @@ export async function removeCartItem(cartItemId: string): Promise<CommerceSucces
     !auth.ctx.activeOrgIds.includes(item.organization_id)
   ) {
     return { success: false, error: "Not authorized" };
+  }
+
+  // A membership-renewal line auto-attached to a booth can't be removed on
+  // its own — removing just the top-up while keeping the booth would
+  // silently reintroduce the ungated state. Remove the linked booth instead.
+  if (linkedToIds(item.metadata).length > 0) {
+    return {
+      success: false,
+      code: "LINKED_ITEM",
+      error: "This is required by another item in your cart — remove that item to remove this one too.",
+    };
+  }
+
+  // Removing a booth also removes any membership-renewal line IT required —
+  // but that line can be shared by more than one booth (an org can hold
+  // multiple), so only drop this booth from the shared line's requiring set,
+  // and only delete the line once every requiring booth is gone.
+  const { data: linkedItems } = await adminClient
+    .from("cart_items")
+    .select("id, metadata")
+    .contains("metadata", { linked_to: [cartItemId] });
+  for (const linkedItem of linkedItems ?? []) {
+    const remaining = linkedToIds(linkedItem.metadata).filter((id) => id !== cartItemId);
+    if (remaining.length > 0) {
+      await adminClient.from("cart_items").update({ metadata: { linked_to: remaining } }).eq("id", linkedItem.id);
+    } else {
+      await adminClient.from("cart_items").delete().eq("id", linkedItem.id);
+    }
   }
 
   const { error } = await adminClient.from("cart_items").delete().eq("id", cartItemId);
@@ -978,6 +1179,18 @@ export async function clearCart(params: {
     .eq("user_id", authz.userId);
 
   if (error) return { success: false, error: error.message };
+
+  // A checkout may already be in flight (pending order created, Stripe never
+  // confirmed) — clearing the cart should release that capacity immediately
+  // too, not leave it locked until the order's own expiry catches up.
+  await adminClient
+    .from("conference_orders")
+    .update({ status: "canceled" })
+    .eq("conference_id", params.conferenceId)
+    .eq("organization_id", params.organizationId)
+    .eq("user_id", authz.userId)
+    .eq("status", "pending");
+
   return { success: true, data: null };
 }
 
@@ -990,145 +1203,90 @@ export async function createConferenceCheckout(
   try {
     const adminClient = createAdminClient();
 
-    const cart = await getCartItemsWithProducts({
+    const offerCart = await getOfferCartRows({
       conferenceId: input.conferenceId,
       organizationId: input.organizationId,
       userId: authz.userId,
     });
 
-    if (cart.length === 0) {
+    if (offerCart.rows.length === 0) {
       return { success: false, code: "EMPTY_CART", error: "Cart is empty." };
-    }
-
-    const artifacts = await loadEligibilityArtifacts({
-      conferenceId: input.conferenceId,
-      organizationId: input.organizationId,
-      userId: authz.userId,
-      includeCartItems: cart.map((item) => ({ slug: item.product.slug, quantity: item.quantity })),
-    });
-
-    const context = buildEligibilityContext({
-      conferenceId: input.conferenceId,
-      organizationId: input.organizationId,
-      userId: authz.userId,
-      organizationType: artifacts.orgTypeRaw,
-      membershipStatus: artifacts.membershipStatus,
-      registrationTypes: artifacts.registrationTypes,
-      cartItems: cart.map((item) => ({ slug: item.product.slug, quantity: item.quantity })),
-      paidOrderItems: artifacts.paidOrderItems,
-    });
-
-    const productIds = cart.map((item) => item.product.id);
-    const rulesEngine = await loadConferenceRulesEngine(input.conferenceId);
-    const { data: allCartRules, error: rulesError } = await adminClient
-      .from("conference_product_rules")
-      .select("*")
-      .in("product_id", productIds)
-      .order("display_order", { ascending: true });
-    if (rulesError) throw new Error(rulesError.message);
-    const cartRulesByProduct = new Map<string, typeof allCartRules>();
-    for (const rule of allCartRules ?? []) {
-      const existing = cartRulesByProduct.get(rule.product_id) ?? [];
-      existing.push(rule);
-      cartRulesByProduct.set(rule.product_id, existing);
-    }
-
-    const priceOverridesByProductId: Record<string, number> = {};
-    const mixedUnitPricesByProductId: Record<string, number[]> = {};
-    const baseRegistrationCount = getOrgRegistrationCountForRules(artifacts);
-    let claimedRegistrationUnitsInCheckout = 0;
-    const concurrencyWarning = getConcurrentCheckoutWarning({
-      engine: rulesEngine,
-      pendingOrderItems: artifacts.pendingOrderItems,
-    });
-    for (const item of cart) {
-      const rules = cartRulesByProduct.get(item.product.id) ?? [];
-      const eligibility = checkProductEligibility({
-        product: item.product,
-        quantity: item.quantity,
-        rules,
-        context,
-      });
-      if (!eligibility.eligible) {
-        return {
-          success: false,
-          code: "INELIGIBLE",
-          error: `${item.product.name}: ${[
-            ...eligibility.errors,
-            ...(concurrencyWarning ? [concurrencyWarning] : []),
-          ].join(" ")}`,
-        };
-      }
-
-      const unitPrices: number[] = [];
-      for (let unitIndex = 0; unitIndex < item.quantity; unitIndex += 1) {
-        const perUnitRegistrationCount = baseRegistrationCount + claimedRegistrationUnitsInCheckout;
-        const perUnitActions = evaluateRulesEngineActionsForContext({
-          engine: rulesEngine,
-          trigger: "checkout_attempt",
-          context: {
-            org_membership_status: artifacts.membershipStatus,
-            org_type: artifacts.orgTypeRaw,
-            user_is_authenticated: true,
-            org_registration_count: perUnitRegistrationCount,
-            product_id: item.product.id,
-            product_slug: item.product.slug,
-          },
-        });
-        const perUnitBlocks = perUnitActions.filter((action) => action.type === "block_purchase");
-        if (perUnitBlocks.length > 0) {
-          const blockMessage = perUnitBlocks[0]?.message || "Purchase blocked by policy rule.";
-          return {
-            success: false,
-            code: "INELIGIBLE",
-            error: `${item.product.name}: ${[
-              blockMessage,
-              ...(concurrencyWarning ? [concurrencyWarning] : []),
-            ].join(" ")}`,
-          };
-        }
-        const effectiveUnitPrice = applyRulesEnginePricingActions(
-          item.product.price_cents,
-          perUnitActions
-        );
-        unitPrices.push(effectiveUnitPrice);
-        if (isRegistrationProductSlug(item.product.slug)) {
-          claimedRegistrationUnitsInCheckout += 1;
-        }
-      }
-
-      const uniqueUnitPrices = Array.from(new Set(unitPrices));
-      if (uniqueUnitPrices.length === 1) {
-        const onlyPrice = uniqueUnitPrices[0];
-        if (onlyPrice !== item.product.price_cents) {
-          priceOverridesByProductId[item.product.id] = onlyPrice;
-        }
-      } else {
-        mixedUnitPricesByProductId[item.product.id] = unitPrices;
-      }
-
-      const metadataCheck = validatePartnerMeetingMetadata({
-        slug: item.product.slug,
-        quantity: item.quantity,
-        metadata: (item.metadata as Record<string, unknown> | null) ?? null,
-      });
-      if (!metadataCheck.eligible) {
-        return {
-          success: false,
-          code: "INVALID_METADATA",
-          error: `${item.product.name}: ${metadataCheck.errors.join(" ")}`,
-        };
-      }
     }
 
     const { data: conference, error: conferenceError } = await adminClient
       .from("conference_instances")
-      .select("tax_rate_pct, stripe_tax_rate_id")
+      .select("tax_rate_pct, stripe_tax_rate_id, end_date")
       .eq("id", input.conferenceId)
       .single();
 
     if (conferenceError || !conference) {
       return { success: false, error: conferenceError?.message ?? "Conference not found" };
+    }
+
+    // v3 Offer lines: eligibility (who-can-buy) + the buyer's tier price (or,
+    // for a membership-renewal line, its per-org price). persist:true here —
+    // this is the actual checkout, the moment the assessment should freeze.
+    const buyerTier = await loadBuyerTier(input.organizationId);
+
+    // Ownership gate re-check (defense in depth — addOfferToCart already
+    // checked this at add time, but a prerequisite item could have been
+    // removed from the cart since). A prerequisite elsewhere in this SAME
+    // cart still counts as held, since both ride the same checkout. Checked
+    // by identity (own id or instance_of parent), not by kind — Bronze and
+    // plain Exhibitor booths are both kind "booth" but bundle different add-ons.
+    const [{ data: ownedBalances }] = await Promise.all([
+      adminClient
+        .from("entity_balances")
+        .select("entity_id")
+        .eq("conference_id", input.conferenceId)
+        .eq("organization_id", input.organizationId),
+    ]);
+    const heldEntityIds = [
+      ...(ownedBalances ?? []).map((b) => b.entity_id),
+      ...offerCart.rows.map((r) => r.offer.id),
+    ].filter((id): id is string => Boolean(id));
+    const { data: instanceOfRows } =
+      heldEntityIds.length > 0
+        ? await adminClient
+            .from("conference_entity_refs")
+            .select("from_entity_id, to_entity_id")
+            .eq("role", "instance_of")
+            .in("from_entity_id", heldEntityIds)
+        : { data: [] as Array<{ from_entity_id: string; to_entity_id: string }> };
+    const instanceOfParentByChild = new Map((instanceOfRows ?? []).map((r) => [r.from_entity_id, r.to_entity_id]));
+    const heldIdentityIds = expandWithInstanceOfParents(heldEntityIds, instanceOfParentByChild);
+    // A membership-renewal line linked to a booth is always Partner-track dues,
+    // regardless of the buying org's current type — look up what each linked
+    // cart item actually is.
+    const cartItemKindById = new Map(offerCart.rows.map((r) => [r.cartItemId, r.offer.kind]));
+
+    const offerPrices: Record<string, number> = {};
+    for (const { offer, linkedToCartItemIds } of offerCart.rows) {
+      const eligible = canBuy(offer, buyerTier, offerCart.byId);
+      if (!eligible.ok) {
+        return { success: false, code: "INELIGIBLE", error: `${offer.name}: ${eligible.reason ?? "Not eligible to buy this."}` };
+      }
+
+      const ownershipRefs = await loadEffectiveRefsByRole(adminClient, offer.id, OWNERSHIP_ROLE);
+      const requiredEntityIds = offerRequiresOwnershipOfEntityIds(
+        ownershipRefs.map((r) => ({ role: OWNERSHIP_ROLE, ...r }))
+      );
+      if (!ownershipRequirementSatisfied(requiredEntityIds, heldIdentityIds)) {
+        return {
+          success: false,
+          code: "REQUIRES_OWNERSHIP",
+          error: `${offer.name}: your organization needs to already hold the prerequisite to check out with this.`,
+        };
+      }
+
+      const linkedToBooth = linkedToCartItemIds.some((id) => cartItemKindById.get(id) === "booth");
+      offerPrices[offer.id] = await effectiveUnitPriceCents(
+        offer,
+        buyerTier,
+        input.organizationId,
+        conference.end_date ?? null,
+        { persist: true, assumePartnership: linkedToBooth }
+      );
     }
 
     const idempotencyKey =
@@ -1144,10 +1302,7 @@ export async function createConferenceCheckout(
         p_checkout_idempotency_key: idempotencyKey,
         p_tax_rate_pct: Number(conference.tax_rate_pct ?? 0),
         p_currency: "CAD",
-        p_price_overrides:
-          Object.keys(priceOverridesByProductId).length > 0
-            ? priceOverridesByProductId
-            : null,
+        p_offer_prices: Object.keys(offerPrices).length > 0 ? offerPrices : null,
       }
     );
 
@@ -1159,131 +1314,28 @@ export async function createConferenceCheckout(
       };
     }
 
-    if (Object.keys(mixedUnitPricesByProductId).length > 0) {
-      const { data: createdOrderItems, error: createdOrderItemsError } = await adminClient
-        .from("conference_order_items")
-        .select("id, order_id, product_id, quantity, metadata, conference_products!inner(is_taxable, is_tax_exempt)")
-        .eq("order_id", order.id);
-      if (createdOrderItemsError || !createdOrderItems) {
-        return {
-          success: false,
-          error:
-            createdOrderItemsError?.message ??
-            "Failed to load order items for mixed-price checkout processing.",
-        };
-      }
-
-      for (const row of createdOrderItems) {
-        const unitPrices = mixedUnitPricesByProductId[row.product_id];
-        if (!unitPrices) continue;
-        if (unitPrices.length !== row.quantity) {
-          return {
-            success: false,
-            error: "Unable to reconcile mixed-price checkout quantities. Please try again.",
-          };
-        }
-        const grouped = groupUnitPrices(unitPrices);
-        const productTax =
-          (row as unknown as { conference_products?: { is_taxable?: boolean; is_tax_exempt?: boolean } })
-            .conference_products ?? {};
-        const isTaxable = Boolean(productTax.is_taxable) && !Boolean(productTax.is_tax_exempt);
-        const replacementRows: Array<Database["public"]["Tables"]["conference_order_items"]["Insert"]> = grouped.map(
-          (group) => {
-            const lineSubtotal = group.quantity * group.unitPriceCents;
-            const lineTax = isTaxable ? Math.round(lineSubtotal * (Number(conference.tax_rate_pct ?? 0) / 100)) : 0;
-            return {
-              order_id: order.id,
-              product_id: row.product_id,
-              quantity: group.quantity,
-              unit_price_cents: group.unitPriceCents,
-              tax_cents: lineTax,
-              total_cents: lineSubtotal + lineTax,
-              metadata: row.metadata ?? null,
-            };
-          }
-        );
-
-        const { error: deleteItemError } = await adminClient
-          .from("conference_order_items")
-          .delete()
-          .eq("id", row.id);
-        if (deleteItemError) {
-          return {
-            success: false,
-            error: deleteItemError.message,
-          };
-        }
-        const { error: insertReplacementError } = await adminClient
-          .from("conference_order_items")
-          .insert(replacementRows);
-        if (insertReplacementError) {
-          return {
-            success: false,
-            error: insertReplacementError.message,
-          };
-        }
-      }
-
-      const { data: refreshedRows, error: refreshedRowsError } = await adminClient
-        .from("conference_order_items")
-        .select("tax_cents, total_cents")
-        .eq("order_id", order.id);
-      if (refreshedRowsError || !refreshedRows) {
-        return {
-          success: false,
-          error: refreshedRowsError?.message ?? "Failed to recalculate mixed-price order totals.",
-        };
-      }
-      const recalculatedTaxCents = refreshedRows.reduce((sum, entry) => sum + (entry.tax_cents ?? 0), 0);
-      const recalculatedTotalCents = refreshedRows.reduce((sum, entry) => sum + (entry.total_cents ?? 0), 0);
-      const recalculatedSubtotalCents = recalculatedTotalCents - recalculatedTaxCents;
-      const { error: orderTotalsError } = await adminClient
-        .from("conference_orders")
-        .update({
-          subtotal_cents: recalculatedSubtotalCents,
-          tax_cents: recalculatedTaxCents,
-          total_cents: recalculatedTotalCents,
-        })
-        .eq("id", order.id);
-      if (orderTotalsError) {
-        return {
-          success: false,
-          error: orderTotalsError.message,
-        };
-      }
-    }
-
-    const { data: orderItems, error: orderItemsError } = await adminClient
+    const { data: offerOrderItems, error: offerOrderItemsError } = await adminClient
       .from("conference_order_items")
-      .select("quantity, unit_price_cents, conference_products!inner(name, is_taxable, is_tax_exempt)")
-      .eq("order_id", order.id);
+      .select("quantity, unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(name)")
+      .eq("order_id", order.id)
+      .not("offer_entity_id", "is", null);
+    if (offerOrderItemsError) return { success: false, error: offerOrderItemsError.message };
 
-    if (orderItemsError || !orderItems || orderItems.length === 0) {
-      return {
-        success: false,
-        error: orderItemsError?.message ?? "Order items not found for checkout session.",
-      };
+    if ((offerOrderItems?.length ?? 0) === 0) {
+      return { success: false, error: "Order items not found for checkout session." };
     }
 
-    const lineItems = orderItems.map((item) => {
-      const product = (
-        item as unknown as {
-          conference_products: { name: string; is_taxable: boolean; is_tax_exempt: boolean };
-        }
-      ).conference_products;
-      const isTaxable = product.is_taxable && !product.is_tax_exempt;
+    const lineItems = (offerOrderItems ?? []).map((item) => {
+      const offer = (item as unknown as { offer: { name: string } | null }).offer;
       return {
         quantity: item.quantity,
         price_data: {
           currency: order.currency.toLowerCase(),
           unit_amount: item.unit_price_cents,
-          product_data: {
-            name: product.name,
-          },
+          product_data: { name: offer?.name ?? "Conference offer" },
         },
-        ...(conference.stripe_tax_rate_id && isTaxable
-          ? { tax_rates: [conference.stripe_tax_rate_id] }
-          : {}),
+        // Offers are taxed at the conference rate in the order RPC.
+        ...(conference.stripe_tax_rate_id ? { tax_rates: [conference.stripe_tax_rate_id] } : {}),
       };
     });
 
@@ -1340,11 +1392,7 @@ export async function createConferenceCheckout(
 
     return {
       success: true,
-      data: {
-        checkoutUrl: session.url,
-        orderId: order.id,
-        checkoutSessionId: session.id,
-      },
+      data: { checkoutUrl: session.url, orderId: order.id, checkoutSessionId: session.id },
     };
   } catch (error) {
     await logAuditEventSafe({
@@ -1385,12 +1433,7 @@ export async function listConferenceOrdersForOrganization(params: {
 export async function getConferenceOrderDetails(orderId: string): Promise<
   | CommerceSuccess<{
       order: OrderRow;
-      items: Array<
-        OrderItemRow & {
-          product_name: string | null;
-          product_slug: string | null;
-        }
-      >;
+      items: Array<OrderItemRow & { product_name: string | null; product_slug: string | null }>;
     }>
   | CommerceFailure
 > {
@@ -1416,7 +1459,7 @@ export async function getConferenceOrderDetails(orderId: string): Promise<
 
   const { data: items, error: itemsError } = await adminClient
     .from("conference_order_items")
-    .select("*, conference_products(name, slug)")
+    .select("*, offer:conference_entities!conference_order_items_offer_entity_id_fkey(name, kind)")
     .eq("order_id", orderId);
 
   if (itemsError) return { success: false, error: itemsError.message };
@@ -1424,11 +1467,9 @@ export async function getConferenceOrderDetails(orderId: string): Promise<
   const normalizedItems = (items ?? []).map((item) => ({
     ...(item as unknown as OrderItemRow),
     product_name:
-      (item as unknown as { conference_products?: { name?: string } }).conference_products?.name ??
-      null,
+      (item as unknown as { offer?: { name?: string } }).offer?.name ?? null,
     product_slug:
-      (item as unknown as { conference_products?: { slug?: string } }).conference_products?.slug ??
-      null,
+      (item as unknown as { offer?: { kind?: string } }).offer?.kind ?? null,
   }));
 
   return { success: true, data: { order, items: normalizedItems } };
@@ -1481,16 +1522,26 @@ export async function calculateConferenceRefund(
   if (daysUntilConference > 90) refundPct = 100;
   else if (daysUntilConference >= 30) refundPct = 50;
 
-  const refundAmountCents = Math.round(order.total_cents * (refundPct / 100));
+  // A membership renewal bundled into this order is non-refundable once
+  // paid — reverting membership_expires_at on a later refund is operationally
+  // risky (no clean "undo" for anything that legitimately happened while
+  // membership was active in the meantime), and matches how the normal
+  // invoice-refund path (processRefund in lib/stripe/billing.ts) also never
+  // reverts membership state on refund. Only the rest of the order refunds.
+  const { data: membershipLines } = await adminClient
+    .from("conference_order_items")
+    .select("total_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(kind)")
+    .eq("order_id", orderId);
+  const membershipLineCents = (membershipLines ?? [])
+    .filter((l) => (Array.isArray(l.offer) ? l.offer[0] : l.offer)?.kind === MEMBERSHIP_RENEWAL_KIND)
+    .reduce((sum, l) => sum + l.total_cents, 0);
+  const refundableBaseCents = Math.max(0, order.total_cents - membershipLineCents);
+
+  const refundAmountCents = Math.round(refundableBaseCents * (refundPct / 100));
 
   return {
     success: true,
-    data: {
-      refundPct,
-      refundAmountCents,
-      eligible: refundPct > 0,
-      daysUntilConference,
-    },
+    data: { refundPct, refundAmountCents, eligible: refundPct > 0, daysUntilConference },
   };
 }
 
@@ -1641,9 +1692,7 @@ export async function requestConferenceRefund(
         stripeRefundId: stripeRefund.id,
         overrideReason: options?.overrideReason ?? null,
         usedManagedOverride: Boolean(
-          typeof overrideAmountCents === "number" &&
-            !isAdmin &&
-            options?.allowManagedOverride
+          typeof overrideAmountCents === "number" && !isAdmin && options?.allowManagedOverride
         ),
       },
     });
@@ -1718,801 +1767,165 @@ export async function getConferenceReceiptUrl(
   }
 }
 
-export async function createWishlistIntent(params: {
+/**
+ * DEV ONLY: complete the current Offer cart without Stripe. Runs the exact RPCs
+ * the live Stripe webhook drives (create_conference_order_from_cart →
+ * process_conference_order_paid → mint_v3_for_order), plus the same
+ * attendee-minting step (mintRegistrationAttendeesFromOrder) the webhook runs
+ * afterward — so cart attendee assignments actually seat, not just mint
+ * unassigned, and the whole buy → assign loop is testable end-to-end in dev.
+ * Global-admin gated and blocked in production; the real buyer path is
+ * createConferenceCheckout + Stripe.
+ */
+export async function devCompleteConferenceCheckout(params: {
   conferenceId: string;
   organizationId: string;
-  productId: string;
-  quantity?: number;
-  metadata?: Record<string, unknown> | null;
-}): Promise<CommerceSuccess<Database["public"]["Tables"]["wishlist_intents"]["Row"]> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
-  if (!authz.ok) return { success: false, error: authz.error };
+}): Promise<CommerceSuccess<{ orderId: string }> | CommerceFailure> {
+  if (process.env.NODE_ENV === "production") {
+    return { success: false, error: "Dev checkout is not available in production." };
+  }
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Dev checkout requires a global admin." };
+  }
 
-  const adminClient = createAdminClient();
-  const { data, error } = await adminClient
-    .from("wishlist_intents")
-    .insert({
-      conference_id: params.conferenceId,
-      organization_id: params.organizationId,
-      user_id: authz.userId,
-      product_id: params.productId,
-      quantity: Math.max(1, params.quantity ?? 1),
-      status: "wishlisted",
-      metadata: (params.metadata ?? null) as Database["public"]["Tables"]["wishlist_intents"]["Insert"]["metadata"],
-    })
-    .select("*")
-    .single();
-
-  if (error || !data) return { success: false, error: error?.message ?? "Failed to create wishlist intent" };
-  await logAuditEventSafe({
-    action: "wishlist_intent_create",
-    entityType: "wishlist_intent",
-    entityId: data.id,
-    actorId: authz.userId,
-    actorType: "user",
-    details: {
-      success: true,
+  try {
+    const adminClient = createAdminClient();
+    const offerCart = await getOfferCartRows({
       conferenceId: params.conferenceId,
       organizationId: params.organizationId,
-      productId: params.productId,
-      quantity: Math.max(1, params.quantity ?? 1),
-    },
-  });
-  return { success: true, data };
-}
+      userId: auth.ctx.userId,
+    });
+    if (offerCart.rows.length === 0) {
+      return { success: false, code: "EMPTY_CART", error: "Cart is empty." };
+    }
 
-export async function listWishlistIntentsForConference(params: {
-  conferenceId: string;
-  status?: string;
-}): Promise<
-  CommerceSuccess<
-    Array<
-      Database["public"]["Tables"]["wishlist_intents"]["Row"] & {
-        organization_name: string | null;
-        product_name: string | null;
+    const { data: conference, error: conferenceError } = await adminClient
+      .from("conference_instances")
+      .select("tax_rate_pct, end_date")
+      .eq("id", params.conferenceId)
+      .single();
+    if (conferenceError || !conference) {
+      return { success: false, error: conferenceError?.message ?? "Conference not found" };
+    }
+
+    const buyerTier = await loadBuyerTier(params.organizationId);
+    const cartItemKindById = new Map(offerCart.rows.map((r) => [r.cartItemId, r.offer.kind]));
+    const offerPrices: Record<string, number> = {};
+    for (const { offer, linkedToCartItemIds } of offerCart.rows) {
+      const eligible = canBuy(offer, buyerTier, offerCart.byId);
+      if (!eligible.ok) {
+        return { success: false, code: "INELIGIBLE", error: `${offer.name}: ${eligible.reason ?? "Not eligible to buy this."}` };
       }
-    >
-  > | CommerceFailure
-> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
+      const linkedToBooth = linkedToCartItemIds.some((id) => cartItemKindById.get(id) === "booth");
+      offerPrices[offer.id] = await effectiveUnitPriceCents(
+        offer,
+        buyerTier,
+        params.organizationId,
+        conference.end_date ?? null,
+        { persist: true, assumePartnership: linkedToBooth }
+      );
+    }
 
-  const adminClient = createAdminClient();
-  let query = adminClient
-    .from("wishlist_intents")
-    .select(
-      "*, organizations!inner(name), conference_products!inner(name)"
-    )
-    .eq("conference_id", params.conferenceId)
-    .order("wishlisted_at", { ascending: true })
-    .order("id", { ascending: true });
+    const { data: order, error: orderError } = await adminClient.rpc("create_conference_order_from_cart", {
+      p_user_id: auth.ctx.userId,
+      p_organization_id: params.organizationId,
+      p_conference_id: params.conferenceId,
+      p_checkout_idempotency_key: `dev-${crypto.randomUUID()}`,
+      p_tax_rate_pct: Number(conference.tax_rate_pct ?? 0),
+      p_currency: "CAD",
+      p_offer_prices: offerPrices,
+    });
+    if (orderError || !order) {
+      return { success: false, code: orderError?.code, error: orderError?.message ?? "Failed to create order." };
+    }
 
-  if (params.status) {
-    query = query.eq("status", params.status);
+    const { error: paidError } = await adminClient.rpc("process_conference_order_paid", {
+      p_order_id: order.id,
+      p_checkout_session_id: `dev_${order.id}`,
+    });
+    if (paidError) return { success: false, error: paidError.message };
+
+    // Mirrors the real webhook's attendee-minting step — without this, cart
+    // attendee assignments would silently mint as unassigned seats, making
+    // this button useless for testing the assignment flow.
+    await mintRegistrationAttendeesFromOrder(adminClient, order.id, params.conferenceId, params.organizationId);
+
+    // Mirrors the real webhook's Bronze/Connected-tier auto-agreement hook,
+    // so this dev path is testable without a real Stripe payment. A cart can
+    // hold more than one booth (an org can hold multiple), so every booth
+    // line needs its own call, not just the first.
+    const boothOffers = offerCart.rows.map((r) => r.offer).filter((o) => o.kind === "booth");
+    for (const boothOffer of boothOffers) {
+      if (boothOffer.priceCents != null) {
+        await createSponsorAgreementFromBoothPurchase({
+          organizationId: params.organizationId,
+          boothEntityId: boothOffer.id,
+          boothEntityName: boothOffer.name,
+          boothPriceCents: boothOffer.priceCents,
+        });
+      }
+    }
+
+    // Cart consumed by the completed order.
+    await adminClient
+      .from("cart_items")
+      .delete()
+      .eq("conference_id", params.conferenceId)
+      .eq("organization_id", params.organizationId)
+      .eq("user_id", auth.ctx.userId);
+
+    await logAuditEventSafe({
+      action: "conference_dev_checkout_complete",
+      entityType: "conference_order",
+      entityId: order.id,
+      actorId: auth.ctx.userId,
+      actorType: "user",
+      details: { conferenceId: params.conferenceId, organizationId: params.organizationId, dev: true },
+    });
+
+    return { success: true, data: { orderId: order.id } };
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error) };
   }
-
-  const { data, error } = await query;
-  if (error) return { success: false, error: error.message };
-
-  const normalized = (data ?? []).map((row) => ({
-    ...(row as unknown as Database["public"]["Tables"]["wishlist_intents"]["Row"]),
-    organization_name:
-      (row as unknown as { organizations?: { name?: string } }).organizations?.name ?? null,
-    product_name:
-      (row as unknown as { conference_products?: { name?: string } }).conference_products?.name ??
-      null,
-  }));
-
-  return { success: true, data: normalized };
 }
 
-export async function setWishlistBoardDecision(params: {
-  intentId: string;
-  decision: "approve" | "decline";
-}): Promise<
-  CommerceSuccess<Database["public"]["Tables"]["wishlist_intents"]["Row"]> | CommerceFailure
-> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
+/**
+ * Cron: cancel pending conference_orders whose reservation window has lapsed
+ * (checkout started, Stripe never confirmed) so their capacity frees back up
+ * for real. create_conference_order_from_cart already stops COUNTING a
+ * pending order past its expires_at — this is what actually flips the status
+ * so it stops needing that special-casing everywhere else. The underlying
+ * Stripe Checkout Session isn't touched here; it expires on its own 24h timer.
+ */
+export async function expireStalePendingConferenceOrders(): Promise<{ success: boolean; expiredCount?: number }> {
   const adminClient = createAdminClient();
-  const status = params.decision === "approve" ? "board_approved" : "board_declined";
 
   const { data, error } = await adminClient
-    .from("wishlist_intents")
-    .update({
-      status,
-      board_decided_at: new Date().toISOString(),
-    })
-    .eq("id", params.intentId)
-    .select("*")
-    .single();
+    .from("conference_orders")
+    .update({ status: "canceled" })
+    .eq("status", "pending")
+    .lt("expires_at", new Date().toISOString())
+    .select("id");
 
-  if (error || !data) {
+  if (error) {
+    console.error("[conference-commerce] expireStalePendingConferenceOrders failed:", error);
+    return { success: false };
+  }
+
+  const count = data?.length ?? 0;
+
+  if (count > 0) {
     await logAuditEventSafe({
-      action: "wishlist_board_decision",
-      entityType: "wishlist_intent",
-      entityId: params.intentId,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        success: false,
-        decision: params.decision,
-        error: error?.message ?? "Failed to update wishlist decision.",
-      },
+      action: "conference_orders_expired",
+      entityType: "system",
+      entityId: "system",
+      actorId: "system",
+      actorType: "system",
+      details: { expiredCount: count },
     });
-    return { success: false, error: error?.message ?? "Failed to update wishlist decision." };
   }
 
-  await logAuditEventSafe({
-    action: "wishlist_board_decision",
-    entityType: "wishlist_intent",
-    entityId: data.id,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      success: true,
-      conferenceId: data.conference_id,
-      decision: params.decision,
-    },
-  });
-
-  return { success: true, data };
-}
-
-export async function updateWishlistIntentStatus(params: {
-  intentId: string;
-  nextStatus: WishlistStatus;
-}): Promise<CommerceSuccess<WishlistRow> | CommerceFailure> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  const { data: current, error: currentError } = await adminClient
-    .from("wishlist_intents")
-    .select("*")
-    .eq("id", params.intentId)
-    .single();
-
-  if (currentError || !current) {
-    return { success: false, error: currentError?.message ?? "Wishlist intent not found." };
-  }
-
-  const fromStatus = current.status as WishlistStatus;
-  const allowed = WISHLIST_TRANSITIONS[fromStatus] ?? [];
-  if (!allowed.includes(params.nextStatus)) {
-    return {
-      success: false,
-      error: `Invalid wishlist transition: ${fromStatus} -> ${params.nextStatus}`,
-    };
-  }
-
-  const nowIso = new Date().toISOString();
-  const update: Database["public"]["Tables"]["wishlist_intents"]["Update"] = {
-    status: params.nextStatus,
-  };
-
-  if (params.nextStatus === "board_approved" || params.nextStatus === "board_declined") {
-    update.board_decided_at = nowIso;
-  }
-  if (
-    params.nextStatus === "billing_pending" ||
-    params.nextStatus === "billing_paid" ||
-    params.nextStatus === "billing_failed_retryable" ||
-    params.nextStatus === "billing_failed_final"
-  ) {
-    update.billing_attempted_at = nowIso;
-  }
-  if (params.nextStatus === "billing_paid") {
-    update.billing_paid_at = nowIso;
-  }
-  if (params.nextStatus === "reservation_expired") {
-    update.expires_at = nowIso;
-  }
-
-  const { data: updated, error: updateError } = await adminClient
-    .from("wishlist_intents")
-    .update(update)
-    .eq("id", params.intentId)
-    .select("*")
-    .single();
-
-  if (updateError || !updated) {
-    await logAuditEventSafe({
-      action: "wishlist_status_update",
-      entityType: "wishlist_intent",
-      entityId: params.intentId,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        success: false,
-        fromStatus,
-        nextStatus: params.nextStatus,
-        error: updateError?.message ?? "Failed to update wishlist status.",
-      },
-    });
-    return { success: false, error: updateError?.message ?? "Failed to update wishlist status." };
-  }
-
-  await logAuditEventSafe({
-    action: "wishlist_status_update",
-    entityType: "wishlist_intent",
-    entityId: updated.id,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      success: true,
-      conferenceId: updated.conference_id,
-      fromStatus,
-      nextStatus: params.nextStatus,
-    },
-  });
-
-  return { success: true, data: updated };
-}
-
-export async function listBillingRunsForConference(params: {
-  conferenceId: string;
-  limit?: number;
-}): Promise<
-  CommerceSuccess<
-    Array<
-      Database["public"]["Tables"]["billing_runs"]["Row"] & {
-        triggered_by_email: string | null;
-      }
-    >
-  > | CommerceFailure
-> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  let query = adminClient
-    .from("billing_runs")
-    .select("*, profiles(email)")
-    .eq("conference_id", params.conferenceId)
-    .order("started_at", { ascending: false });
-
-  if (params.limit) query = query.limit(params.limit);
-
-  const { data, error } = await query;
-  if (error) return { success: false, error: error.message };
-
-  const normalized = (data ?? []).map((row) => ({
-    ...(row as unknown as Database["public"]["Tables"]["billing_runs"]["Row"]),
-    triggered_by_email:
-      (row as unknown as { profiles?: { email?: string } }).profiles?.email ?? null,
-  }));
-
-  return { success: true, data: normalized };
-}
-
-export async function listWishlistBillingAttemptsForConference(params: {
-  conferenceId: string;
-  billingRunId?: string;
-  limit?: number;
-}): Promise<
-  CommerceSuccess<
-    Array<
-      Database["public"]["Tables"]["wishlist_billing_attempts"]["Row"] & {
-        organization_name: string | null;
-        product_name: string | null;
-      }
-    >
-  > | CommerceFailure
-> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  let query = adminClient
-    .from("wishlist_billing_attempts")
-    .select("*, organizations(name), conference_products(name)")
-    .eq("conference_id", params.conferenceId)
-    .order("attempted_at", { ascending: false });
-
-  if (params.billingRunId) {
-    query = query.eq("billing_run_id", params.billingRunId);
-  }
-  if (params.limit) {
-    query = query.limit(params.limit);
-  }
-
-  const { data, error } = await query;
-  if (error) return { success: false, error: error.message };
-
-  const normalized = (data ?? []).map((row) => ({
-    ...(row as unknown as Database["public"]["Tables"]["wishlist_billing_attempts"]["Row"]),
-    organization_name:
-      (row as unknown as { organizations?: { name?: string } }).organizations?.name ?? null,
-    product_name:
-      (row as unknown as { conference_products?: { name?: string } }).conference_products?.name ??
-      null,
-  }));
-
-  return { success: true, data: normalized };
-}
-
-export async function runWishlistBilling(conferenceId: string): Promise<CommerceSuccess<{ billingRunId: string; processed: number }> | CommerceFailure> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-
-  const { data: billingRun, error: billingRunError } = await adminClient
-    .from("billing_runs")
-    .insert({
-      conference_id: conferenceId,
-      status: "running",
-      started_at: new Date().toISOString(),
-      triggered_by: auth.ctx.userId,
-      metadata: { mode: "wishlist_fifo" },
-    })
-    .select("*")
-    .single();
-
-  if (billingRunError || !billingRun) {
-    await logAuditEventSafe({
-      action: "wishlist_billing_run",
-      entityType: "billing_run",
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        success: false,
-        conferenceId,
-        reason: "start_failed",
-        error: billingRunError?.message ?? "Failed to start billing run",
-      },
-    });
-    return { success: false, error: billingRunError?.message ?? "Failed to start billing run" };
-  }
-
-  // Fetch conference tax info for computing tax-inclusive amounts
-  const { data: conferenceForTax, error: confTaxError } = await adminClient
-    .from("conference_instances")
-    .select("tax_rate_pct")
-    .eq("id", conferenceId)
-    .single();
-
-  if (confTaxError || !conferenceForTax) {
-    await adminClient
-      .from("billing_runs")
-      .update({ status: "failed", completed_at: new Date().toISOString() })
-      .eq("id", billingRun.id);
-    await logAuditEventSafe({
-      action: "wishlist_billing_run",
-      entityType: "billing_run",
-      entityId: billingRun.id,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        success: false,
-        conferenceId,
-        reason: "conference_not_found",
-        error: confTaxError?.message ?? "Conference not found",
-      },
-    });
-    return { success: false, error: confTaxError?.message ?? "Conference not found" };
-  }
-
-  const wishlistTaxRate = Number(conferenceForTax.tax_rate_pct ?? 0);
-
-  // Load policy-configurable retry/backoff (fall back to code defaults)
-  let maxRetryAttempts = WISHLIST_MAX_RETRY_ATTEMPTS_DEFAULT;
-  let retryBackoffMinutes = WISHLIST_RETRY_BACKOFF_MINUTES_DEFAULT;
-  try {
-    const retryPolicies = await getEffectivePolicies([
-      "billing.wishlist_max_retry_attempts",
-      "billing.wishlist_retry_backoff_minutes",
-    ]);
-    if (typeof retryPolicies["billing.wishlist_max_retry_attempts"] === "number") {
-      maxRetryAttempts = retryPolicies["billing.wishlist_max_retry_attempts"] as number;
-    }
-    if (typeof retryPolicies["billing.wishlist_retry_backoff_minutes"] === "number") {
-      retryBackoffMinutes = retryPolicies["billing.wishlist_retry_backoff_minutes"] as number;
-    }
-  } catch {
-    // Policy keys may not exist yet; use defaults silently
-  }
-
-  const { data: intents, error: intentsError } = await adminClient
-    .from("wishlist_intents")
-    .select("id, status, metadata, quantity, organization_id, stripe_payment_method_id, product_id, conference_products!inner(price_cents, currency, is_taxable, is_tax_exempt)")
-    .eq("conference_id", conferenceId)
-    .in("status", ["board_approved", "billing_failed_retryable"])
-    .order("wishlisted_at", { ascending: true })
-    .order("id", { ascending: true });
-
-  if (intentsError) {
-    await adminClient
-      .from("billing_runs")
-      .update({ status: "failed", completed_at: new Date().toISOString() })
-      .eq("id", billingRun.id);
-    await logAuditEventSafe({
-      action: "wishlist_billing_run",
-      entityType: "billing_run",
-      entityId: billingRun.id,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: {
-        success: false,
-        conferenceId,
-        reason: "load_intents_failed",
-        error: intentsError.message,
-      },
-    });
-    return { success: false, error: intentsError.message };
-  }
-
-  const now = new Date();
-  let processed = 0;
-  let successful = 0;
-  let failed = 0;
-  let skippedBackoff = 0;
-  let skippedMaxAttempts = 0;
-  const logAttempt = async (params: {
-    wishlistIntentId: string;
-    organizationId: string;
-    productId: string;
-    attemptNumber: number;
-    amountCents: number;
-    currency: string;
-    status: "attempted" | "succeeded" | "failed" | "skipped";
-    stripePaymentIntentId?: string | null;
-    stripeChargeId?: string | null;
-    stripeErrorCode?: string | null;
-    stripeDeclineCode?: string | null;
-    errorMessage?: string | null;
-    metadata?: Record<string, unknown>;
-    attemptedAt?: string;
-    completedAt?: string;
-  }) => {
-    await adminClient.from("wishlist_billing_attempts").insert({
-      conference_id: conferenceId,
-      billing_run_id: billingRun.id,
-      wishlist_intent_id: params.wishlistIntentId,
-      organization_id: params.organizationId,
-      product_id: params.productId,
-      attempt_number: params.attemptNumber,
-      amount_cents: params.amountCents,
-      currency: params.currency || "CAD",
-      status: params.status,
-      stripe_payment_intent_id: params.stripePaymentIntentId ?? null,
-      stripe_charge_id: params.stripeChargeId ?? null,
-      stripe_error_code: params.stripeErrorCode ?? null,
-      stripe_decline_code: params.stripeDeclineCode ?? null,
-      error_message: params.errorMessage ?? null,
-      metadata: (params.metadata ?? null) as Database["public"]["Tables"]["wishlist_billing_attempts"]["Insert"]["metadata"],
-      attempted_at: params.attemptedAt ?? new Date().toISOString(),
-      completed_at: params.completedAt ?? new Date().toISOString(),
-    });
-  };
-
-  for (const intent of intents ?? []) {
-    const billingMeta = parseBillingMetadata(intent.metadata);
-    const attemptCount = Math.max(0, billingMeta.billing_attempt_count ?? 0);
-    const lastAttemptAt = billingMeta.last_billing_attempt_at
-      ? new Date(billingMeta.last_billing_attempt_at)
-      : null;
-    const minutesSinceLastAttempt = lastAttemptAt
-      ? (now.getTime() - lastAttemptAt.getTime()) / (1000 * 60)
-      : Number.POSITIVE_INFINITY;
-
-    if (attemptCount >= maxRetryAttempts) {
-      skippedMaxAttempts += 1;
-      await logAttempt({
-        wishlistIntentId: intent.id,
-        organizationId: intent.organization_id,
-        productId: intent.product_id,
-        attemptNumber: attemptCount,
-        amountCents: 0,
-        currency: "CAD",
-        status: "skipped",
-        errorMessage: "Max retry attempts reached.",
-        metadata: { reason: "max_attempts" },
-      });
-      await adminClient
-        .from("wishlist_intents")
-        .update({
-          status: "billing_failed_final",
-          metadata: {
-            ...(intent.metadata && typeof intent.metadata === "object" && !Array.isArray(intent.metadata)
-              ? intent.metadata
-              : {}),
-            billing_attempt_count: attemptCount,
-            last_billing_error: "Max retry attempts reached.",
-            last_billing_attempt_at: billingMeta.last_billing_attempt_at ?? null,
-          },
-        })
-        .eq("id", intent.id);
-      continue;
-    }
-
-    if (
-      intent.status === "billing_failed_retryable" &&
-      Number.isFinite(minutesSinceLastAttempt) &&
-      minutesSinceLastAttempt < retryBackoffMinutes
-    ) {
-      skippedBackoff += 1;
-      await logAttempt({
-        wishlistIntentId: intent.id,
-        organizationId: intent.organization_id,
-        productId: intent.product_id,
-        attemptNumber: attemptCount,
-        amountCents: 0,
-        currency: "CAD",
-        status: "skipped",
-        errorMessage: `Backoff active (${Math.floor(minutesSinceLastAttempt)} min since last attempt).`,
-        metadata: { reason: "retry_backoff" },
-      });
-      continue;
-    }
-
-    processed += 1;
-    const product = (
-      intent as unknown as {
-        conference_products: {
-          price_cents: number;
-          currency: string;
-          is_taxable: boolean;
-          is_tax_exempt: boolean;
-        };
-      }
-    ).conference_products;
-    const priceCents = product.price_cents;
-    const currency = product.currency;
-    const subtotal = priceCents * intent.quantity;
-    const isTaxable = product.is_taxable && !product.is_tax_exempt;
-    const lineTax = isTaxable ? Math.round(subtotal * (wishlistTaxRate / 100)) : 0;
-    const amount = subtotal + lineTax;
-    const attemptedAt = new Date().toISOString();
-    const nextAttemptCount = attemptCount + 1;
-
-    if (!intent.stripe_payment_method_id) {
-      failed += 1;
-      await logAttempt({
-        wishlistIntentId: intent.id,
-        organizationId: intent.organization_id,
-        productId: intent.product_id,
-        attemptNumber: nextAttemptCount,
-        amountCents: amount,
-        currency: currency || "CAD",
-        status: "failed",
-        errorMessage: "No payment method on file.",
-      });
-      await adminClient
-        .from("wishlist_intents")
-        .update({
-          status:
-            nextAttemptCount >= maxRetryAttempts
-              ? "billing_failed_final"
-              : "billing_failed_retryable",
-          billing_attempted_at: attemptedAt,
-          metadata: {
-            ...(intent.metadata && typeof intent.metadata === "object" && !Array.isArray(intent.metadata)
-              ? intent.metadata
-              : {}),
-            billing_attempt_count: nextAttemptCount,
-            last_billing_attempt_at: attemptedAt,
-            last_billing_error: "No payment method on file.",
-          },
-        })
-        .eq("id", intent.id);
-      continue;
-    }
-
-    try {
-      const customerId = await ensureStripeCustomer(intent.organization_id);
-      await logAttempt({
-        wishlistIntentId: intent.id,
-        organizationId: intent.organization_id,
-        productId: intent.product_id,
-        attemptNumber: nextAttemptCount,
-        amountCents: amount,
-        currency: currency || "CAD",
-        status: "attempted",
-        metadata: { customer_id: customerId },
-      });
-      const paymentIntent = await stripe.paymentIntents.create({
-        amount,
-        currency: (currency || "CAD").toLowerCase(),
-        customer: customerId,
-        payment_method: intent.stripe_payment_method_id,
-        confirm: true,
-        off_session: true,
-        metadata: {
-          checkout_kind: "conference_wishlist",
-          conference_id: conferenceId,
-          wishlist_intent_id: intent.id,
-          organization_id: intent.organization_id,
-          product_id: intent.product_id,
-          billing_run_id: billingRun.id,
-          attempt_number: String(nextAttemptCount),
-        },
-      });
-
-      if (paymentIntent.status === "succeeded" || paymentIntent.status === "processing") {
-        successful += 1;
-        const latestCharge =
-          typeof paymentIntent.latest_charge === "string"
-            ? paymentIntent.latest_charge
-            : paymentIntent.latest_charge?.id ?? null;
-        await logAttempt({
-          wishlistIntentId: intent.id,
-          organizationId: intent.organization_id,
-          productId: intent.product_id,
-          attemptNumber: nextAttemptCount,
-          amountCents: amount,
-          currency: currency || "CAD",
-          status: "succeeded",
-          stripePaymentIntentId: paymentIntent.id,
-          stripeChargeId: latestCharge,
-          metadata: { payment_status: paymentIntent.status },
-        });
-        await adminClient
-          .from("wishlist_intents")
-          .update({
-            status: "billing_paid",
-            billing_attempted_at: attemptedAt,
-            billing_paid_at: new Date().toISOString(),
-            metadata: {
-              ...(intent.metadata && typeof intent.metadata === "object" && !Array.isArray(intent.metadata)
-                ? intent.metadata
-                : {}),
-              billing_attempt_count: nextAttemptCount,
-              last_billing_attempt_at: attemptedAt,
-              last_billing_error: null,
-              last_billing_payment_intent_id: paymentIntent.id,
-            },
-          })
-          .eq("id", intent.id);
-      } else {
-        failed += 1;
-        await logAttempt({
-          wishlistIntentId: intent.id,
-          organizationId: intent.organization_id,
-          productId: intent.product_id,
-          attemptNumber: nextAttemptCount,
-          amountCents: amount,
-          currency: currency || "CAD",
-          status: "failed",
-          stripePaymentIntentId: paymentIntent.id,
-          errorMessage: `Unexpected payment intent status: ${paymentIntent.status}`,
-        });
-        await adminClient
-          .from("wishlist_intents")
-          .update({
-            status:
-              nextAttemptCount >= maxRetryAttempts
-                ? "billing_failed_final"
-                : "billing_failed_retryable",
-            billing_attempted_at: attemptedAt,
-            metadata: {
-              ...(intent.metadata && typeof intent.metadata === "object" && !Array.isArray(intent.metadata)
-                ? intent.metadata
-                : {}),
-              billing_attempt_count: nextAttemptCount,
-              last_billing_attempt_at: attemptedAt,
-              last_billing_error: `Unexpected payment intent status: ${paymentIntent.status}`,
-            },
-          })
-          .eq("id", intent.id);
-      }
-    } catch (error) {
-      failed += 1;
-      const finalFailure = isFinalBillingFailure(error) || nextAttemptCount >= maxRetryAttempts;
-      const details = stripeErrorDetails(error);
-      await logAttempt({
-        wishlistIntentId: intent.id,
-        organizationId: intent.organization_id,
-        productId: intent.product_id,
-        attemptNumber: nextAttemptCount,
-        amountCents: amount,
-        currency: currency || "CAD",
-        status: "failed",
-        stripePaymentIntentId: details.paymentIntentId,
-        stripeErrorCode: details.errorCode,
-        stripeDeclineCode: details.declineCode,
-        errorMessage: details.message,
-        metadata: { final_failure: finalFailure },
-      });
-      await adminClient
-        .from("wishlist_intents")
-        .update({
-          status: finalFailure ? "billing_failed_final" : "billing_failed_retryable",
-          billing_attempted_at: attemptedAt,
-          metadata: {
-            ...(intent.metadata && typeof intent.metadata === "object" && !Array.isArray(intent.metadata)
-              ? intent.metadata
-              : {}),
-            billing_attempt_count: nextAttemptCount,
-            last_billing_attempt_at: attemptedAt,
-            last_billing_error: details.message,
-          },
-        })
-        .eq("id", intent.id);
-    }
-  }
-
-  await adminClient
-    .from("billing_runs")
-    .update({
-      status: "completed",
-      completed_at: new Date().toISOString(),
-      total_items: processed,
-      failed_items: failed,
-      successful_items: successful,
-      metadata: {
-        mode: "wishlist_fifo",
-        max_retry_attempts: maxRetryAttempts,
-        retry_backoff_minutes: retryBackoffMinutes,
-        skipped_backoff: skippedBackoff,
-        skipped_max_attempts: skippedMaxAttempts,
-      },
-    })
-    .eq("id", billingRun.id);
-
-  await logAuditEventSafe({
-    action: "wishlist_billing_run",
-    entityType: "billing_run",
-    entityId: billingRun.id,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      success: true,
-      conferenceId,
-      processed,
-      successful,
-      failed,
-      skippedBackoff,
-      skippedMaxAttempts,
-    },
-  });
-
-  return {
-    success: true,
-    data: {
-      billingRunId: billingRun.id,
-      processed,
-    },
-  };
-}
-
-export async function getSchedulerEligibleConferenceRegistrations(
-  conferenceId: string
-): Promise<CommerceSuccess<SchedulerEligibleRecord[]> | CommerceFailure> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-  const { data: orderItems, error: orderItemsError } = await adminClient
-    .from("conference_order_items")
-    .select("id, order_id, metadata, conference_orders!inner(id, conference_id, status), conference_products!inner(slug)")
-    .eq("conference_orders.conference_id", conferenceId)
-    .eq("conference_orders.status", "paid");
-
-  if (orderItemsError) {
-    return { success: false, error: orderItemsError.message };
-  }
-
-  const records: SchedulerEligibleRecord[] = [];
-  for (const item of orderItems ?? []) {
-    const slug = (item as unknown as { conference_products: { slug: string } }).conference_products.slug;
-    const role = mapSchedulerEligibleRoleForProductSlug(slug);
-    if (!role) continue;
-
-    const metadata = (item.metadata ?? null) as Record<string, unknown> | null;
-    const registrationIds = extractRegistrationIdsFromMetadata(metadata);
-    for (const registrationId of registrationIds) {
-      records.push({
-        role,
-        registrationId,
-        orderId: item.order_id,
-        orderItemId: item.id,
-        productSlug: slug,
-      });
-    }
-  }
-
-  return { success: true, data: records };
+  return { success: true, expiredCount: count };
 }

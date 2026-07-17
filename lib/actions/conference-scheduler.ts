@@ -7,9 +7,9 @@ import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
-import { mapSchedulerEligibleRoleForProductSlug } from "@/lib/conference-commerce/eligibility";
 import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
-import { resolveMeetingGeometryFromModulesConfig } from "@/lib/conference/meeting-geometry";
+import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
+import { buildSuiteOrgAssignmentsBySuiteId, findDuplicateSuiteOrgAssignment } from "@/lib/conference/suite-assignment";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -70,6 +70,29 @@ function formatTimeFromDate(date: Date): string {
   return `${hh}:${mm}:${ss}`;
 }
 
+/**
+ * Suite→org assignment is just a plain entity attribute with no built-in
+ * limit, so this is the one place that actually enforces "one org, one
+ * suite" before a schedule can be generated — see suite-assignment.ts for
+ * why that limit matters.
+ */
+async function buildSuiteOrgAssignments(
+  adminClient: ReturnType<typeof createAdminClient>,
+  suites: Array<{ id: string; suite_number: number }>,
+  suiteOrgAssignmentsBySuiteNumber: Record<string, string>
+): Promise<Record<string, string>> {
+  const duplicate = findDuplicateSuiteOrgAssignment(suites, suiteOrgAssignmentsBySuiteNumber);
+  if (duplicate) {
+    const { data: org } = await adminClient.from("organizations").select("name").eq("id", duplicate.orgId).maybeSingle();
+    throw new Error(
+      `DUPLICATE_SUITE_ASSIGNMENT: ${org?.name ?? duplicate.orgId} is assigned to suites #${duplicate.suiteNumbers.join(", #")}. ` +
+        "An organization can only be pinned to one suite's meeting schedule, regardless of how many booths it purchased — " +
+        "unassign the extra suite(s) in Build before running the scheduler."
+    );
+  }
+  return buildSuiteOrgAssignmentsBySuiteId(suites, suiteOrgAssignmentsBySuiteNumber);
+}
+
 async function ensureMeetingScaffolding(
   conferenceId: string
 ): Promise<{
@@ -79,25 +102,12 @@ async function ensureMeetingScaffolding(
   suiteOrgAssignmentsBySuiteId: Record<string, string>;
 }> {
   const adminClient = createAdminClient();
-  const { data: meetingsModule, error: meetingsModuleError } = await adminClient
-    .from("conference_schedule_modules")
-    .select("enabled, config_json")
-    .eq("conference_id", conferenceId)
-    .eq("module_key", "meetings")
-    .maybeSingle();
-
-  if (meetingsModuleError) {
-    throw new Error(`Failed to load meetings module config: ${meetingsModuleError.message}`);
-  }
-
-  const moduleCfg =
-    meetingsModule?.enabled && meetingsModule.config_json && typeof meetingsModule.config_json === "object"
-      ? (meetingsModule.config_json as Record<string, unknown>)
-      : {};
-  const geometry = resolveMeetingGeometryFromModulesConfig(moduleCfg);
+  // v3: geometry comes from the entity graph (Day-cadence + Suite things), not the
+  // schedule_modules config. Same MeetingGeometryResolution shape downstream.
+  const geometry = await loadConferenceMeetingGeometry(conferenceId);
   if (geometry.dayConfigs.length === 0 || geometry.suitesTarget <= 0) {
     throw new Error(
-      "MEETINGS_SETUP_INCOMPLETE: configure meeting days, per-day counts, and meeting suites before running scheduler."
+      "MEETINGS_SETUP_INCOMPLETE: add suite things and set meeting cadence (start/end/slot duration) on day things in Build before running the scheduler."
     );
   }
 
@@ -111,9 +121,12 @@ async function ensureMeetingScaffolding(
 
   let suites = existingSuites ?? [];
   if (suites.length === 0) {
-    const suiteRows = Array.from({ length: geometry.suitesTarget }, (_, index) => ({
+    // Seed the operational suite rows 1:1 from the Suite entities (carry their
+    // number + a link back), instead of N anonymous rows from a count.
+    const suiteRows = geometry.suites.map((s) => ({
       conference_id: conferenceId,
-      suite_number: index + 1,
+      suite_number: s.suiteNumber,
+      entity_id: s.id,
       is_active: true,
     }));
 
@@ -136,13 +149,11 @@ async function ensureMeetingScaffolding(
 
   if (slotsError) throw new Error(slotsError.message);
   if (existingSlots && existingSlots.length > 0) {
-    const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
-    for (const suite of suites) {
-      const assignedOrgId = geometry.suiteOrgAssignmentsBySuiteNumber[String(suite.suite_number)];
-      if (assignedOrgId) {
-        suiteOrgAssignmentsBySuiteId[suite.id] = assignedOrgId;
-      }
-    }
+    const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
+      adminClient,
+      suites,
+      geometry.suiteOrgAssignmentsBySuiteNumber
+    );
     return {
       suitesCount: suites.length,
       meetingSlots: existingSlots,
@@ -184,13 +195,11 @@ async function ensureMeetingScaffolding(
 
   if (insertSlotsError) throw new Error(insertSlotsError.message);
 
-  const suiteOrgAssignmentsBySuiteId: Record<string, string> = {};
-  for (const suite of suites) {
-    const assignedOrgId = geometry.suiteOrgAssignmentsBySuiteNumber[String(suite.suite_number)];
-    if (assignedOrgId) {
-      suiteOrgAssignmentsBySuiteId[suite.id] = assignedOrgId;
-    }
-  }
+  const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
+    adminClient,
+    suites,
+    geometry.suiteOrgAssignmentsBySuiteNumber
+  );
 
   return {
     suitesCount: suites.length,
@@ -200,67 +209,15 @@ async function ensureMeetingScaffolding(
   };
 }
 
-function extractRegistrationIdsFromMetadata(metadata: Json | null): string[] {
-  if (!metadata || typeof metadata !== "object" || Array.isArray(metadata)) return [];
-  const value = metadata as Record<string, unknown>;
-
-  const single = typeof value.registration_id === "string" ? [value.registration_id] : [];
-  const list = Array.isArray(value.registration_ids)
-    ? value.registration_ids.filter((item): item is string => typeof item === "string")
-    : [];
-  const brands = Array.isArray(value.brands)
-    ? value.brands
-        .map((brand) =>
-          brand && typeof brand === "object" && "registration_id" in brand
-            ? (brand as { registration_id?: unknown }).registration_id
-            : null
-        )
-        .filter((item): item is string => typeof item === "string")
-    : [];
-
-  return [...new Set([...single, ...list, ...brands])];
-}
-
 async function loadEligibleCandidates(conferenceId: string): Promise<{
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
 }> {
   const adminClient = createAdminClient();
 
-  const { data: orderItems, error: orderItemsError } = await adminClient
-    .from("conference_order_items")
-    .select(
-      "metadata, conference_orders!inner(conference_id, status), conference_products!inner(slug)"
-    )
-    .eq("conference_orders.conference_id", conferenceId)
-    .eq("conference_orders.status", "paid");
-
-  if (orderItemsError) {
-    throw new Error(`Failed to load paid order eligibility: ${orderItemsError.message}`);
-  }
-
-  const delegateIds = new Set<string>();
-  const exhibitorIds = new Set<string>();
-
-  for (const orderItem of orderItems ?? []) {
-    const slug = (orderItem as unknown as { conference_products: { slug: string } }).conference_products
-      .slug;
-    const role = mapSchedulerEligibleRoleForProductSlug(slug);
-    if (!role) continue;
-
-    const registrationIds = extractRegistrationIdsFromMetadata(orderItem.metadata as Json | null);
-    for (const registrationId of registrationIds) {
-      if (role === "delegate") delegateIds.add(registrationId);
-      if (role === "exhibitor") exhibitorIds.add(registrationId);
-    }
-  }
-
-  if (delegateIds.size === 0 || exhibitorIds.size === 0) {
-    throw new Error(
-      "INSUFFICIENT_PAID_ELIGIBILITY: no paid delegate/exhibitor registration pairs available for scheduling."
-    );
-  }
-
+  // Schedulable candidates are the conference's submitted/confirmed registrations
+  // of the relevant type. (The old paid-product eligibility gate was retired with
+  // the v3 cutover — see docs/CONFERENCE_V2_BLUEPRINT.md.)
   const [delegatesResult, exhibitorsResult] = await Promise.all([
     adminClient
       .from("conference_registrations")
@@ -268,7 +225,6 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
         "id, organization_id, user_id, category_responsibilities, buying_timeline, top_priorities, meeting_intent, purchasing_authority, top_5_preferences, blackout_list"
       )
       .eq("conference_id", conferenceId)
-      .in("id", [...delegateIds])
       .in("status", ["submitted", "confirmed"])
       .in("registration_type", ["delegate", "observer"]),
     adminClient
@@ -277,7 +233,6 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
         "id, organization_id, user_id, primary_category, secondary_categories, buying_cycles_targeted, meeting_outcome_intent, sales_readiness"
       )
       .eq("conference_id", conferenceId)
-      .in("id", [...exhibitorIds])
       .in("status", ["submitted", "confirmed"])
       .eq("registration_type", "exhibitor"),
   ]);

@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { ResolvedPartnerLink, PartnerLink, PartnerLinkType } from "@/lib/partner-links";
 import { LINK_TYPE_LABELS } from "@/lib/partner-links";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
+import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import PartnerLinksEditor from "./PartnerLinksEditor";
 
 // ---------------------------------------------------------------------------
@@ -56,12 +57,9 @@ function GatedPlaceholder({
   viewerLevel: ViewerLevel;
   primaryColor: string;
 }) {
-  // Detect if user has previously signed in via a persistent cookie.
-  // We set `csc_had_session=1` (max-age=1yr) on login so we can distinguish
-  // "signed out known user" from "never signed in".
-  const hadSession =
-    typeof document !== "undefined" &&
-    document.cookie.includes("csc_had_session=1");
+  // Detect if user has previously resolved to an identity via a persistent
+  // cookie, so we can distinguish "signed out known user" from "never signed in".
+  const hadSession = hadPriorSession();
 
   if (viewerLevel === "partner") {
     return (

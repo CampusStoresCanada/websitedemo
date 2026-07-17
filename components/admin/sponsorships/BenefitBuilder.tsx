@@ -20,7 +20,10 @@ const CATEGORY_ORDER: Array<keyof typeof CATEGORY_LABELS> = [
 const REFERENCE_SOURCE: Partial<Record<BenefitKey, keyof BenefitReferenceOptions>> = {
   conference_exhibitor:     "conferenceInstances",
   conference_travel_host:   "conferenceInstances",
-  conference_offsite_host:  "offsiteEvents",
+  // The conference's own offsite events (Meet & Greet Reception, Tuesday/Wednesday
+  // Offsite, etc.) live in the v3 catalog as programItems, not the general `events`
+  // table — that table is for site-wide events unrelated to a specific conference.
+  conference_offsite_host:  "programItems",
   conference_speaking_slot: "programItems",
 };
 

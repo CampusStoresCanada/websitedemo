@@ -73,3 +73,28 @@ export async function uploadFloorPlanImage({
 
   return { success: true, url: publicUrl };
 }
+
+/** Clear a conference's floor-plan background image (column + stored files). */
+export async function removeFloorPlanImage(
+  conferenceId: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+
+  // Remove any uploaded files for this conference, then clear the column.
+  const folder = `floor-plans/${conferenceId}`;
+  const { data: files } = await db.storage.from("event-content").list(folder);
+  if (files && files.length > 0) {
+    await db.storage.from("event-content").remove(files.map((f) => `${folder}/${f.name}`));
+  }
+
+  const { error: updateError } = await db
+    .from("conference_instances")
+    .update({ floor_plan_url: null })
+    .eq("id", conferenceId);
+  if (updateError) return { success: false, error: updateError.message };
+
+  return { success: true };
+}

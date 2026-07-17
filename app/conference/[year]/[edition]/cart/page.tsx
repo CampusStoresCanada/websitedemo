@@ -1,14 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
+import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import { getConferenceCart } from "@/lib/actions/conference-commerce";
+import { getContactsForOrganization } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CartClient from "./cart-client";
 
 interface OrganizationMembership {
   id: string;
   name: string;
+  slug: string;
 }
 
 export const metadata = { title: "Conference Cart" };
@@ -40,7 +43,7 @@ export default async function ConferenceCartPage({
   const adminClient = createAdminClient();
   const { data: userOrgs } = await adminClient
     .from("user_organizations")
-    .select("organization_id, organizations(id, name)")
+    .select("organization_id, organizations(id, name, slug)")
     .eq("user_id", auth.ctx.userId)
     .eq("status", "active");
 
@@ -60,7 +63,10 @@ export default async function ConferenceCartPage({
   }
 
   const selectedOrg = memberships.find((org) => org.id === query.org) ?? memberships[0];
-  const cartResult = await getConferenceCart(conference.id, selectedOrg.id);
+  const [cartResult, orgContacts] = await Promise.all([
+    getConferenceCart(conference.id, selectedOrg.id),
+    getContactsForOrganization(selectedOrg.id),
+  ]);
   if (!cartResult.success) {
     return (
       <main className="max-w-5xl mx-auto py-12 px-4">
@@ -72,16 +78,18 @@ export default async function ConferenceCartPage({
 
   return (
     <main className="max-w-5xl mx-auto py-8 px-4 space-y-6">
+      {conferenceResult.isDraftPreview && <DraftPreviewBanner status={conference.status} />}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>
           <p className="text-sm text-gray-600">Conference cart</p>
         </div>
         <Link
-          href={`/conference/${year}/${edition}/products?org=${selectedOrg.id}`}
+          href={`/conference/${year}/${edition}`}
           className="inline-flex items-center rounded-md border border-gray-300 px-4 py-2 text-sm font-medium text-gray-800 hover:border-gray-400"
         >
-          Back to Products
+          Back to Conference
         </Link>
       </div>
 
@@ -109,7 +117,10 @@ export default async function ConferenceCartPage({
         conferenceEdition={edition}
         organizationId={selectedOrg.id}
         organizationName={selectedOrg.name}
+        orgSlug={selectedOrg.slug}
+        isDevAdmin={isGlobalAdmin(auth.ctx.globalRole)}
         initialCart={cartResult.data}
+        contacts={orgContacts.map((c) => ({ id: c.id, name: c.name ?? "", email: c.work_email ?? c.email ?? null }))}
       />
     </main>
   );

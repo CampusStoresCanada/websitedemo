@@ -55,6 +55,8 @@ export interface Event {
   created_by: string | null;
   created_at: string;
   updated_at: string;
+  /** The conference catalog entity this event is bound to, if any — see lib/events/conference-link.ts. */
+  conference_entity_id: string | null;
 }
 
 export interface EventRegistration {
@@ -136,6 +138,7 @@ export interface CreateEventPayload {
   audience_mode?: EventAudienceMode;
   capacity?: number;
   metadata?: Record<string, unknown>;
+  conference_entity_id?: string | null;
 }
 
 export interface UpdateEventPayload {
@@ -151,6 +154,7 @@ export interface UpdateEventPayload {
   audience_mode?: EventAudienceMode;
   capacity?: number | null;
   metadata?: Record<string, unknown>;
+  conference_entity_id?: string | null;
 }
 
 // ── Status transitions ────────────────────────────────────────────

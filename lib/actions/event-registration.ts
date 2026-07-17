@@ -14,6 +14,7 @@ import {
   removeAttendeeFromCalendarEvent,
 } from "@/lib/google/calendar";
 import { pushRsvpToCircle } from "@/lib/circle/event-sync";
+import { checkConferenceEventEligibility } from "@/lib/events/conference-link";
 import type { EventRegistration, EventWaitlistEntry } from "@/lib/events/types";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -43,12 +44,22 @@ export async function registerForEvent(eventId: string): Promise<
   // Load event
   const { data: event, error: evErr } = await adminClient
     .from("events")
-    .select("id, slug, title, status, audience_mode, capacity, starts_at, google_meet_link, google_event_id, is_virtual")
+    .select("id, slug, title, status, audience_mode, capacity, starts_at, google_meet_link, google_event_id, is_virtual, conference_entity_id")
     .eq("id", eventId)
     .single();
 
   if (evErr || !event) return { success: false, error: "Event not found" };
   if (event.status !== "published") return { success: false, error: "Event is not open for registration" };
+
+  // Conference-linked events are gated by the precise registration-ownership
+  // graph (resolve_person_access), not just the broad audience_mode check —
+  // audience_mode still controls whether the event is discoverable at all.
+  if (event.conference_entity_id) {
+    const eligibility = await checkConferenceEventEligibility(userId, event.conference_entity_id);
+    if (!eligibility.eligible) {
+      return { success: false, error: eligibility.reason ?? "You're not eligible to RSVP for this event" };
+    }
+  }
 
   // Check for existing registration or waitlist entry
   const { data: existing } = await adminClient

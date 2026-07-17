@@ -214,6 +214,12 @@ export default function ScheduleOpsClient({
   }
 
   async function onPromote(runId: string) {
+    if (summary.activeRunManualCount > 0) {
+      const ok = window.confirm(
+        `The active schedule has ${summary.activeRunManualCount} hand-edited meeting(s). Promoting this run replaces the active schedule and discards those manual edits. Continue?`
+      );
+      if (!ok) return;
+    }
     setIsActing(true);
     setError(null);
     try {
@@ -268,6 +274,11 @@ export default function ScheduleOpsClient({
             <p className="mt-1 text-sm font-medium text-gray-900">
               {activeRun ? `${activeRun.runMode} / ${activeRun.status}` : "None"}
             </p>
+            {summary.activeRunManualCount > 0 ? (
+              <p className="mt-0.5 text-[11px] font-medium text-amber-700">
+                {summary.activeRunManualCount} manual edit{summary.activeRunManualCount === 1 ? "" : "s"}
+              </p>
+            ) : null}
           </div>
           <div className="rounded border border-gray-200 bg-gray-50 p-3">
             <p className="text-xs uppercase tracking-wide text-gray-500">Selected Run</p>

@@ -2,20 +2,24 @@
 
 import { useState } from "react";
 import { updateField } from "@/lib/actions/update-field";
+import { addContact } from "@/lib/actions/add-contact";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
 import type { VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 
 interface ContactEditModalProps {
-  contact: VisibleContact;
+  /** null = create-mode: same form, empty defaults, inserts instead of updating. */
+  contact: VisibleContact | null;
   organizationId: string;
-  isHidden: boolean;
-  onToggleHidden: () => void;
+  isHidden?: boolean;
+  onToggleHidden?: () => void;
   onClose: () => void;
-  /** Pass for Member orgs to enable the Procurement tab */
+  /** Pass for Member orgs to enable the Procurement tab. Ignored in create-mode. */
   procurementInfo?: ProcurementInfo;
   onProcurementSave?: (data: ProcurementInfo) => void;
+  /** Create-mode only: fires with the new contact once it's saved. */
+  onCreated?: (contact: { id: string; name: string; email: string | null }) => void;
 }
 
 interface FieldState {
@@ -35,22 +39,25 @@ export default function ContactEditModal({
   onClose,
   procurementInfo,
   onProcurementSave,
+  onCreated,
 }: ContactEditModalProps) {
-  const showProcurement = procurementInfo !== undefined;
+  const isCreate = contact === null;
+  const showProcurement = !isCreate && procurementInfo !== undefined;
   const [tab, setTab] = useState<Tab>("details");
 
   // ── Details tab state ──────────────────────────────────────────────────────
   const [fields, setFields] = useState<FieldState>({
-    name: (contact.name as string | null) ?? "",
-    work_email: (contact.work_email as string | null) ?? (contact.email as string | null) ?? "",
-    role_title: (contact.role_title as string | null) ?? "",
-    work_phone_number: (contact.work_phone_number as string | null) ?? (contact.phone as string | null) ?? "",
+    name: (contact?.name as string | null) ?? "",
+    work_email: (contact?.work_email as string | null) ?? (contact?.email as string | null) ?? "",
+    role_title: (contact?.role_title as string | null) ?? "",
+    work_phone_number: (contact?.work_phone_number as string | null) ?? (contact?.phone as string | null) ?? "",
   });
 
-  // ── Procurement tab state ──────────────────────────────────────────────────
+  // ── Procurement tab state (edit-mode only — a new contact has no assignments yet) ──
   // Which categories is this contact already a buyer for?
   const [buyerCategories, setBuyerCategories] = useState<Set<string>>(() => {
     const set = new Set<string>();
+    if (!contact) return set;
     for (const entry of procurementInfo?.category_buyers ?? []) {
       if (entry.contact_ids.includes(contact.id)) set.add(entry.category);
     }
@@ -59,6 +66,7 @@ export default function ContactEditModal({
   // Which subcategories has THIS contact selected per category?
   const [subcategoryMap, setSubcategoryMap] = useState<Record<string, Set<string>>>(() => {
     const map: Record<string, Set<string>> = {};
+    if (!contact) return map;
     for (const entry of procurementInfo?.category_buyers ?? []) {
       if (entry.contact_ids.includes(contact.id)) {
         const mySubs = entry.contact_subcategories?.[contact.id];
@@ -76,6 +84,33 @@ export default function ContactEditModal({
   async function handleDetailsSave() {
     setSaving(true);
     setError(null);
+
+    if (!contact) {
+      const name = fields.name.trim();
+      if (!name) {
+        setError("Name is required.");
+        setSaving(false);
+        return;
+      }
+      const result = await addContact({
+        organizationId,
+        name,
+        workEmail: fields.work_email.trim() || undefined,
+        roleTitle: fields.role_title.trim() || undefined,
+        workPhoneNumber: fields.work_phone_number.trim() || undefined,
+      });
+      setSaving(false);
+      if (!result.success || !result.contactId) {
+        setError(result.error ?? "Failed to add contact.");
+        return;
+      }
+      window.dispatchEvent(
+        new CustomEvent("csc:field-updated", { detail: { table: "contacts", column: "name", entityId: result.contactId } })
+      );
+      onCreated?.({ id: result.contactId, name, email: fields.work_email.trim() || null });
+      onClose();
+      return;
+    }
 
     const original: FieldState = {
       name: (contact.name as string | null) ?? "",
@@ -110,8 +145,9 @@ export default function ContactEditModal({
     onClose();
   }
 
-  // ── Procurement save ───────────────────────────────────────────────────────
+  // ── Procurement save (unreachable in create-mode — tab isn't rendered) ─────
   async function handleProcurementSave() {
+    if (!contact) return;
     setSaving(true);
     setError(null);
 
@@ -174,7 +210,7 @@ export default function ContactEditModal({
     return handleProcurementSave();
   }
 
-  const saveLabel = saving ? "Saving…" : "Save";
+  const saveLabel = saving ? "Saving…" : isCreate ? "Add contact" : "Save";
 
   return (
     <>
@@ -187,7 +223,7 @@ export default function ContactEditModal({
 
           {/* Header */}
           <div className="flex items-center justify-between px-6 pt-5 pb-4 border-b border-gray-100 shrink-0">
-            <h2 className="text-base font-semibold text-[#1A1A1A]">Edit contact</h2>
+            <h2 className="text-base font-semibold text-[#1A1A1A]">{isCreate ? "Add contact" : "Edit contact"}</h2>
             <button
               onClick={onClose}
               className="text-gray-400 hover:text-gray-600 transition-colors"
@@ -271,7 +307,8 @@ export default function ContactEditModal({
                   />
                 </div>
 
-                {/* Visibility toggle */}
+                {/* Visibility toggle — edit-mode only, nothing to toggle before a contact exists */}
+                {!isCreate && (
                 <div className="pt-1 border-t border-gray-100">
                   <button
                     onClick={onToggleHidden}
@@ -297,6 +334,7 @@ export default function ContactEditModal({
                     <span className="text-xs text-gray-400">{isHidden ? "Click to show" : "Click to hide"}</span>
                   </button>
                 </div>
+                )}
               </div>
             )}
 

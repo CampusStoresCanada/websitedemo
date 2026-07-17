@@ -18,17 +18,12 @@ import { checkNudgeCooldown, notifyMembersWithoutProcurement } from "@/lib/actio
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
 import type { PendingContentChange } from "@/lib/types/db";
-import { addContact } from "@/lib/actions/add-contact";
 import { deleteContact } from "@/lib/actions/delete-contact";
+import ContactEditModal from "@/components/org/ContactEditModal";
 import { addBrandColor } from "@/lib/actions/add-brand-color";
 import { deleteBrandColor } from "@/lib/actions/delete-brand-color";
 import { uploadOrganizationImage } from "@/lib/actions/upload-organization-image";
 import ImageUploadModal, { type OrgImageType } from "@/components/ui/ImageUploadModal";
-import {
-  assignConferenceEntitlement,
-  listOrganizationAssignableUsers,
-  unassignConferenceEntitlement,
-} from "@/lib/actions/conference-people";
 
 // Context to expose edit mode to child components
 interface ToolkitContextValue {
@@ -104,6 +99,11 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
     .map(uo => uo.organization?.slug)
     .filter(Boolean) as string[];
   const pathname = usePathname();
+  // Printable, single-document pages (e.g. the business-case one-pager) skip the
+  // element-picker and share the whole page by default, plus get a
+  // "Print / Save as PDF" action inside the Share modal instead of a bespoke
+  // per-page button.
+  const isPrintablePage = /\/business-case\/?$/.test(pathname);
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -234,9 +234,6 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
     colorType?: 'primary' | 'secondary'; // For add color action
     organizationId?: string; // For add contact/color action
     conferenceId?: string;
-    entitlementId?: string;
-    entitlementType?: string;
-    sourceType?: string;
   } | null>(null);
 
   // Check bookmark status for current page
@@ -245,13 +242,26 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
     checkIsBookmarked(pathname).then(setIsCurrentPageBookmarked);
   }, [pathname, user]);
 
-  // Non-logged-in users: show a "Join CSC" FAB on key pages
+  // Non-logged-in users: no account to power Flag/Edit/Bookmark/Send-to-member,
+  // so business-case pages get a standalone Print FAB instead of the full
+  // toolkit — this is the one action a director with no CSC account still needs.
   if (!user) {
+    if (isPrintablePage) {
+      return (
+        <button
+          onClick={() => window.print()}
+          className="fixed bottom-6 right-6 z-50 print:hidden px-5 py-3 bg-[#1A1A1A] hover:bg-gray-800 text-white text-sm font-semibold rounded-full shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
+        >
+          <PrintIcon className="w-4 h-4" />
+          Print / Save as PDF
+        </button>
+      );
+    }
     const showJoinPages = ["/", "/members", "/partners"];
     if (!showJoinPages.includes(pathname)) return null;
     return (
       <a
-        href="/apply/member"
+        href="/membership"
         className="fixed bottom-6 right-6 z-50 px-5 py-3 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-full shadow-lg hover:shadow-xl transition-all flex items-center gap-2"
       >
         <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -286,6 +296,14 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       return;
     }
     if (tool === "share") {
+      if (isPrintablePage) {
+        // Single cohesive document — skip the element-picker and go straight
+        // to sharing the whole page.
+        setShareSelectedElement(null);
+        setActiveTool("share");
+        setIsExpanded(false);
+        return;
+      }
       // Enter share selection mode (pick-first, like flag/explain)
       setShareMode(true);
       setShareSelectedElement(null);
@@ -464,7 +482,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       )}
 
       {/* Floating Toolkit Button */}
-      <div className="fixed bottom-8 right-8 z-40 flex flex-col-reverse items-center gap-2 w-12">
+      <div className="fixed bottom-8 right-8 z-40 flex flex-col-reverse items-center gap-2 w-12 print:hidden">
         {/* Tool buttons (shown when expanded) */}
         {isExpanded && !flagMode && !editMode && !explainMode && !shareMode && !bookmarkMode && (
           <div className="absolute bottom-14 right-0 flex flex-col items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
@@ -604,6 +622,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
           selectedElement={shareSelectedElement}
           onClearSelectedElement={() => setShareSelectedElement(null)}
           defaultTab={shareSelectedElement ? "internal" : "external"}
+          showPrintOption={isPrintablePage}
         />
       )}
 
@@ -1099,9 +1118,6 @@ function EditSelectionOverlay({
     colorType?: 'primary' | 'secondary';
     organizationId?: string;
     conferenceId?: string;
-    entitlementId?: string;
-    entitlementType?: string;
-    sourceType?: string;
   }) => void;
   onCancel: () => void;
   hoveredElement: HTMLElement | null;
@@ -1220,9 +1236,6 @@ function EditSelectionOverlay({
         const entityId = hoveredElement.getAttribute('data-entity-id') || '';
         const organizationId = hoveredElement.getAttribute('data-organization-id') || '';
         const conferenceId = hoveredElement.getAttribute('data-conference-id') || '';
-        const entitlementId = hoveredElement.getAttribute('data-entitlement-id') || '';
-        const entitlementType = hoveredElement.getAttribute('data-entitlement-type') || '';
-        const sourceType = hoveredElement.getAttribute('data-source-type') || '';
         const colorType = hoveredElement.getAttribute('data-color-type') as 'primary' | 'secondary' | null;
         const rect = hoveredElement.getBoundingClientRect();
 
@@ -1246,9 +1259,6 @@ function EditSelectionOverlay({
           colorType: colorType || undefined,
           organizationId: organizationId || undefined,
           conferenceId: conferenceId || undefined,
-          entitlementId: entitlementId || undefined,
-          entitlementType: entitlementType || undefined,
-          sourceType: sourceType || undefined,
         });
       }
     };
@@ -1353,9 +1363,6 @@ function EditConfirmationPopover({
     colorType?: 'primary' | 'secondary';
     organizationId?: string;
     conferenceId?: string;
-    entitlementId?: string;
-    entitlementType?: string;
-    sourceType?: string;
   };
   onClose: () => void;
   onSuccess: () => void;
@@ -1383,11 +1390,15 @@ function EditConfirmationPopover({
   }
 
   if (selectedElement.isAddAction) {
+    // Same modal as editing an existing contact (ContactEditModal with
+    // contact: null) — add and edit used to be two different-looking
+    // components on this same page; this is the fix for that mismatch.
     return (
-      <AddContactPopover
-        selectedElement={selectedElement}
+      <ContactEditModal
+        contact={null}
+        organizationId={selectedElement.organizationId ?? ""}
         onClose={onClose}
-        onSuccess={onSuccess}
+        onCreated={onSuccess}
       />
     );
   }
@@ -1416,16 +1427,6 @@ function EditConfirmationPopover({
       <ImageUploadModal
         imageType={imageType}
         orgId={selectedElement.entityId}
-        onClose={onClose}
-        onSuccess={onSuccess}
-      />
-    );
-  }
-
-  if (selectedElement.field === "conference_people.assignment_status") {
-    return (
-      <ConferenceAttendancePopover
-        selectedElement={selectedElement}
         onClose={onClose}
         onSuccess={onSuccess}
       />
@@ -1588,6 +1589,9 @@ function FieldEditPopover({
   if (popoverStyle.top + estimatedHeight > window.innerHeight) {
     popoverStyle.top = Math.max(8, selectedElement.rect.top - estimatedHeight - 8);
   }
+  // Final safety clamp — a stale/glitched rect (e.g. captured mid-layout on first
+  // load) must never strand the popover off-screen and inaccessible.
+  popoverStyle.top = Math.min(Math.max(8, popoverStyle.top), window.innerHeight - estimatedHeight - 8);
 
   // Ensure doesn't go off right edge — multiline fields get more room
   const maxWidth = Math.min(
@@ -1720,242 +1724,6 @@ function FieldEditPopover({
   );
 }
 
-function ConferenceAttendancePopover({
-  selectedElement,
-  onClose,
-  onSuccess,
-}: {
-  selectedElement: {
-    rect: DOMRect;
-    organizationId?: string;
-    conferenceId?: string;
-    entitlementId?: string;
-    entitlementType?: string;
-    sourceType?: string;
-  };
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [members, setMembers] = useState<Array<{ userId: string; displayName: string | null; email: string | null; role: string }>>([]);
-  const [selectedUserId, setSelectedUserId] = useState("");
-  const [inviteEmail, setInviteEmail] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [submitted, setSubmitted] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const organizationId = selectedElement.organizationId ?? "";
-  const conferenceId = selectedElement.conferenceId ?? "";
-  const entitlementId = selectedElement.entitlementId ?? "";
-  const entitlementType = selectedElement.entitlementType ?? "delegate";
-  const isEntitlement = selectedElement.sourceType === "entitlement";
-
-  useEffect(() => {
-    let active = true;
-    if (!organizationId) return;
-    void (async () => {
-      const result = await listOrganizationAssignableUsers(organizationId);
-      if (!active) return;
-      if (!result.success) {
-        setError(result.error ?? "Failed to load organization users.");
-        return;
-      }
-      setMembers(result.data ?? []);
-    })();
-    return () => {
-      active = false;
-    };
-  }, [organizationId]);
-
-  const validateContext = () => {
-    if (!isEntitlement) return "Conference attendance editing is only supported for entitlement rows.";
-    if (!organizationId || !conferenceId || !entitlementId) {
-      return "Missing conference assignment context on selected row.";
-    }
-    return null;
-  };
-
-  const handleAssign = async () => {
-    const contextError = validateContext();
-    if (contextError) {
-      setError(contextError);
-      return;
-    }
-    if (!selectedUserId) {
-      setError("Choose an org user first.");
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    const result = await assignConferenceEntitlement(conferenceId, organizationId, entitlementId, {
-      entitlementType,
-      targetUserId: selectedUserId,
-    });
-    if (!result.success) {
-      setError(result.error ?? "Failed to assign entitlement.");
-      setIsSubmitting(false);
-      return;
-    }
-    setSubmitted(true);
-    setTimeout(onSuccess, 500);
-  };
-
-  const handleInviteAssign = async () => {
-    const contextError = validateContext();
-    if (contextError) {
-      setError(contextError);
-      return;
-    }
-    if (!inviteEmail.trim()) {
-      setError("Enter an email to invite.");
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    const result = await assignConferenceEntitlement(conferenceId, organizationId, entitlementId, {
-      entitlementType,
-      targetEmail: inviteEmail.trim().toLowerCase(),
-    });
-    if (!result.success) {
-      setError(result.error ?? "Failed to invite + assign.");
-      setIsSubmitting(false);
-      return;
-    }
-    setSubmitted(true);
-    setTimeout(onSuccess, 500);
-  };
-
-  const handleUnassign = async () => {
-    const contextError = validateContext();
-    if (contextError) {
-      setError(contextError);
-      return;
-    }
-    setIsSubmitting(true);
-    setError(null);
-    const result = await unassignConferenceEntitlement(conferenceId, organizationId, entitlementId);
-    if (!result.success) {
-      setError(result.error ?? "Failed to unassign entitlement.");
-      setIsSubmitting(false);
-      return;
-    }
-    setSubmitted(true);
-    setTimeout(onSuccess, 500);
-  };
-
-  const popoverStyle = {
-    top: selectedElement.rect.bottom + 8,
-    left: Math.max(16, selectedElement.rect.left),
-  };
-  if (popoverStyle.top + 270 > window.innerHeight) {
-    popoverStyle.top = Math.max(16, selectedElement.rect.top - 270);
-  }
-  const maxWidth = Math.min(440, window.innerWidth - popoverStyle.left - 16);
-
-  return (
-    <>
-      <div
-        data-edit-overlay
-        className="fixed inset-0 z-[55] bg-black/10"
-        onClick={() => !isSubmitting && onClose()}
-      />
-      <div
-        data-edit-overlay
-        className="fixed pointer-events-none z-[56] border-2 border-emerald-500 bg-emerald-500/20 rounded"
-        style={{
-          top: selectedElement.rect.top - 2,
-          left: selectedElement.rect.left - 2,
-          width: selectedElement.rect.width + 4,
-          height: selectedElement.rect.height + 4,
-        }}
-      />
-      <div
-        data-edit-overlay
-        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-3 space-y-3"
-        style={{ ...popoverStyle, width: maxWidth }}
-      >
-        {submitted ? (
-          <div className="flex items-center gap-2 text-emerald-600">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span className="font-medium">Conference attendance updated.</span>
-          </div>
-        ) : (
-          <>
-            <div className="text-xs text-gray-400 uppercase tracking-wider">conference attendance</div>
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">Assign / Reassign</label>
-              <div className="flex gap-2">
-                <select
-                  value={selectedUserId}
-                  onChange={(e) => setSelectedUserId(e.target.value)}
-                  disabled={isSubmitting}
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                >
-                  <option value="">Choose organization user</option>
-                  {members.map((member) => (
-                    <option key={member.userId} value={member.userId}>
-                      {member.displayName ?? member.email ?? member.userId} ({member.role})
-                    </option>
-                  ))}
-                </select>
-                <button
-                  type="button"
-                  onClick={handleAssign}
-                  disabled={isSubmitting}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Assign
-                </button>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <label className="block text-xs font-medium text-gray-600">Invite + Assign</label>
-              <div className="flex gap-2">
-                <input
-                  type="email"
-                  value={inviteEmail}
-                  onChange={(e) => setInviteEmail(e.target.value)}
-                  disabled={isSubmitting}
-                  placeholder="name@school.ca"
-                  className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={handleInviteAssign}
-                  disabled={isSubmitting}
-                  className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-                >
-                  Invite
-                </button>
-              </div>
-            </div>
-            <div className="flex items-center justify-between">
-              <button
-                type="button"
-                onClick={handleUnassign}
-                disabled={isSubmitting}
-                className="rounded-lg border border-amber-400 px-3 py-2 text-sm font-medium text-amber-800 hover:bg-amber-50"
-              >
-                Unassign
-              </button>
-              <button
-                type="button"
-                onClick={onClose}
-                disabled={isSubmitting}
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Cancel
-              </button>
-            </div>
-            {error ? <p className="text-xs text-red-600">{error}</p> : null}
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
 /**
  * Delete Contact Popover - Confirmation for deleting a contact row
  */
@@ -2003,6 +1771,8 @@ function DeleteContactPopover({
   if (popoverStyle.top + 80 > window.innerHeight) {
     popoverStyle.top = selectedElement.rect.top - 80;
   }
+  // Final safety clamp so a stale rect can't strand the popover off-screen.
+  popoverStyle.top = Math.min(Math.max(8, popoverStyle.top), window.innerHeight - 80 - 8);
 
   return (
     <>
@@ -2060,191 +1830,6 @@ function DeleteContactPopover({
                 className="flex-1 px-3 py-2 bg-red-500 hover:bg-red-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
               >
                 {isSubmitting ? "..." : "Delete"}
-              </button>
-            </div>
-            {error && (
-              <div className="text-red-500 text-xs mt-2">{error}</div>
-            )}
-          </>
-        )}
-      </div>
-    </>
-  );
-}
-
-/**
- * Add Contact Popover - Form for adding a new contact
- */
-function AddContactPopover({
-  selectedElement,
-  onClose,
-  onSuccess,
-}: {
-  selectedElement: { rect: DOMRect; organizationId?: string };
-  onClose: () => void;
-  onSuccess: () => void;
-}) {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [role, setRole] = useState("");
-  const [phone, setPhone] = useState("");
-  const [isSubmitting, setIsSubmitting] = useState(false);
-  const [added, setAdded] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const nameInputRef = useRef<HTMLInputElement>(null);
-
-  // Focus name input on mount
-  useEffect(() => {
-    nameInputRef.current?.focus();
-  }, []);
-
-  const handleSubmit = async () => {
-    if (!name.trim()) {
-      setError("Name is required");
-      return;
-    }
-
-    if (!selectedElement.organizationId) {
-      setError("Organization not found");
-      return;
-    }
-
-    setIsSubmitting(true);
-    setError(null);
-
-    try {
-      const result = await addContact({
-        organizationId: selectedElement.organizationId,
-        name: name.trim(),
-        workEmail: email.trim() || undefined,
-        roleTitle: role.trim() || undefined,
-        workPhoneNumber: phone.trim() || undefined,
-      });
-
-      if (result.success) {
-        setAdded(true);
-        setTimeout(onSuccess, 600);
-      } else {
-        setError(result.error || "Failed to add contact");
-        setIsSubmitting(false);
-      }
-    } catch {
-      setError("An error occurred");
-      setIsSubmitting(false);
-    }
-  };
-
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    } else if (e.key === 'Escape') {
-      onClose();
-    }
-  };
-
-  // Position near the selected element
-  const popoverStyle = {
-    top: selectedElement.rect.bottom + 8,
-    left: Math.max(16, selectedElement.rect.left),
-  };
-
-  if (popoverStyle.top + 200 > window.innerHeight) {
-    popoverStyle.top = Math.max(16, selectedElement.rect.top - 220);
-  }
-
-  return (
-    <>
-      {/* Light backdrop */}
-      <div
-        data-edit-overlay
-        className="fixed inset-0 z-[55] bg-black/10"
-        onClick={() => !isSubmitting && onClose()}
-      />
-
-      {/* Highlight the add button */}
-      <div
-        data-edit-overlay
-        className="fixed pointer-events-none z-[56] border-2 border-emerald-500 bg-emerald-500/20 rounded"
-        style={{
-          top: selectedElement.rect.top - 2,
-          left: selectedElement.rect.left - 2,
-          width: selectedElement.rect.width + 4,
-          height: selectedElement.rect.height + 4,
-        }}
-      />
-
-      {/* Add contact form popover */}
-      <div
-        data-edit-overlay
-        className="fixed z-[60] bg-white rounded-lg shadow-xl border border-gray-200 p-4 w-80"
-        style={popoverStyle}
-      >
-        {added ? (
-          <div className="flex items-center gap-2 text-emerald-600">
-            <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="m4.5 12.75 6 6 9-13.5" />
-            </svg>
-            <span className="font-medium">Contact added!</span>
-          </div>
-        ) : (
-          <>
-            <div className="text-sm font-medium text-gray-700 mb-3">
-              Add New Contact
-            </div>
-            <div className="space-y-2">
-              <input
-                ref={nameInputRef}
-                type="text"
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSubmitting}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100"
-                placeholder="Name *"
-              />
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSubmitting}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100"
-                placeholder="Email"
-              />
-              <input
-                type="text"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSubmitting}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100"
-                placeholder="Role/Title"
-              />
-              <input
-                type="tel"
-                value={phone}
-                onChange={(e) => setPhone(e.target.value)}
-                onKeyDown={handleKeyDown}
-                disabled={isSubmitting}
-                className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 focus:border-transparent disabled:bg-gray-100"
-                placeholder="Phone"
-              />
-            </div>
-            <div className="flex gap-2 mt-3">
-              <button
-                onClick={onClose}
-                disabled={isSubmitting}
-                className="flex-1 px-3 py-2 bg-gray-100 hover:bg-gray-200 text-gray-700 rounded-lg text-sm transition-colors disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={isSubmitting}
-                className="flex-1 px-3 py-2 bg-emerald-500 hover:bg-emerald-600 text-white rounded-lg text-sm transition-colors disabled:opacity-50"
-              >
-                {isSubmitting ? "..." : "Add Contact"}
               </button>
             </div>
             {error && (
@@ -2345,6 +1930,8 @@ function AddBrandColorPopover({
   if (popoverStyle.top + 150 > window.innerHeight) {
     popoverStyle.top = Math.max(16, selectedElement.rect.top - 160);
   }
+  // Final safety clamp so a stale rect can't strand the popover off-screen.
+  popoverStyle.top = Math.min(Math.max(8, popoverStyle.top), window.innerHeight - 160 - 8);
 
   return (
     <>
@@ -2480,6 +2067,8 @@ function DeleteBrandColorPopover({
   if (popoverStyle.top + 80 > window.innerHeight) {
     popoverStyle.top = selectedElement.rect.top - 80;
   }
+  // Final safety clamp so a stale rect can't strand the popover off-screen.
+  popoverStyle.top = Math.min(Math.max(8, popoverStyle.top), window.innerHeight - 80 - 8);
 
   return (
     <>
@@ -3341,12 +2930,14 @@ function ShareModal({
   selectedElement,
   onClearSelectedElement,
   defaultTab = "external",
+  showPrintOption = false,
 }: {
   pathname: string;
   onClose: () => void;
   selectedElement: { text: string; selector: string; endSelector?: string } | null;
   onClearSelectedElement: () => void;
   defaultTab?: "external" | "internal";
+  showPrintOption?: boolean;
 }) {
   const [tab, setTab] = useState<"external" | "internal">(defaultTab);
 
@@ -3374,6 +2965,22 @@ function ShareModal({
             <p className="text-xs text-gray-400 truncate">{pathname}</p>
           </div>
         </div>
+
+        {/* Print / Save as PDF — only offered on pages designed to print well */}
+        {showPrintOption && (
+          <div className="px-5 pt-3">
+            <button
+              onClick={() => {
+                onClose();
+                setTimeout(() => window.print(), 50);
+              }}
+              className="w-full flex items-center justify-center gap-1.5 py-2 text-xs font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 hover:text-gray-900 transition-colors"
+            >
+              <PrintIcon className="w-4 h-4" />
+              Print / Save as PDF
+            </button>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-1 px-5 pt-3">
@@ -4478,6 +4085,14 @@ function ExportIcon() {
   return (
     <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
       <path strokeLinecap="round" strokeLinejoin="round" d="M3 16.5v2.25A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75V16.5m-13.5-9L12 3m0 0 4.5 4.5M12 3v13.5" />
+    </svg>
+  );
+}
+
+function PrintIcon({ className = "w-5 h-5" }: { className?: string }) {
+  return (
+    <svg className={className} fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M6.72 13.829c-.24.03-.48.062-.72.096m.72-.096a42.415 42.415 0 0 1 10.56 0m-10.56 0L6.34 18m10.94-4.171c.24.03.48.062.72.096m-.72-.096L17.66 18m0 0 .229 2.523a1.125 1.125 0 0 1-1.12 1.227H7.231c-.662 0-1.18-.568-1.12-1.227L6.34 18m11.318 0h1.091A2.25 2.25 0 0 0 21 15.75V9.456c0-1.081-.768-2.015-1.837-2.175a48.055 48.055 0 0 0-1.913-.247M6.34 18H5.25A2.25 2.25 0 0 1 3 15.75V9.456c0-1.081.768-2.015 1.837-2.175a48.041 48.041 0 0 1 1.913-.247m10.5 0a48.536 48.536 0 0 0-10.5 0m10.5 0V3.375c0-.621-.504-1.125-1.125-1.125h-8.25c-.621 0-1.125.504-1.125 1.125v3.659M18 10.5h.008v.008H18V10.5Zm-3 0h.008v.008H15V10.5Z" />
     </svg>
   );
 }

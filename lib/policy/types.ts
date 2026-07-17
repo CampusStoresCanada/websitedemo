@@ -57,6 +57,15 @@ export interface RenewalConfig {
   reactivation_days: number
   refund_window_days: number
   access_lock_mode: string
+  /** MM-DD the membership/partnership fiscal year starts (e.g. "09-01"). The
+   * single source of truth for when the shared renewal cycle resets — used
+   * everywhere a "new expiry" or "days until renewal" gets computed. */
+  cycle_start_month_day: string
+  /** Within this many days of the next cycle start, an org with no
+   * outstanding unpaid prior cycle skips being billed a small prorated stub
+   * for the dying cycle's last few days — they're just signed up starting
+   * with the upcoming full cycle instead. */
+  pre_renewal_skip_stub_days: number
 }
 
 export interface BillingConfig {

@@ -1,28 +1,21 @@
 import { NextResponse } from "next/server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { getActiveConferenceInstance } from "@/lib/actions/conference-availability";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const adminClient = createAdminClient();
-    const { data, error } = (await adminClient
-      .from("conference_instances")
-      .select("year, edition_code")
-      .eq("status", "registration_open")
-      .order("registration_open_at", { ascending: false })
-      .limit(1)
-      .maybeSingle()) as { data: { year: number; edition_code: string } | null; error: any };
+    const active = await getActiveConferenceInstance();
 
-    if (error || !data) {
+    if (!active) {
       return NextResponse.json({ found: false }, { status: 200 });
     }
 
     return NextResponse.json(
       {
         found: true,
-        year: String(data.year),
-        edition: data.edition_code,
+        year: String(active.year),
+        edition: active.edition_code,
       },
       { status: 200 }
     );

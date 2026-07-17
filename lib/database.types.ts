@@ -1423,10 +1423,11 @@ export type Database = {
         Row: {
           conference_id: string
           created_at: string
+          expires_at: string | null
           id: string
           metadata: Json | null
+          offer_entity_id: string | null
           organization_id: string
-          product_id: string
           quantity: number
           updated_at: string
           user_id: string
@@ -1434,10 +1435,11 @@ export type Database = {
         Insert: {
           conference_id: string
           created_at?: string
+          expires_at?: string | null
           id?: string
           metadata?: Json | null
+          offer_entity_id?: string | null
           organization_id: string
-          product_id: string
           quantity?: number
           updated_at?: string
           user_id: string
@@ -1445,10 +1447,11 @@ export type Database = {
         Update: {
           conference_id?: string
           created_at?: string
+          expires_at?: string | null
           id?: string
           metadata?: Json | null
+          offer_entity_id?: string | null
           organization_id?: string
-          product_id?: string
           quantity?: number
           updated_at?: string
           user_id?: string
@@ -1459,6 +1462,13 @@ export type Database = {
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "cart_items_offer_entity_id_fkey"
+            columns: ["offer_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
             referencedColumns: ["id"]
           },
           {
@@ -1473,13 +1483,6 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "cart_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
             referencedColumns: ["id"]
           },
           {
@@ -1853,283 +1856,63 @@ export type Database = {
           },
         ]
       }
-      conference_booth_approvals: {
+      conference_bursary_applications: {
         Row: {
-          approver_1_at: string | null
-          approver_1_id: string | null
-          approver_2_at: string | null
-          approver_2_id: string | null
-          booth_id: string
-          charge_after: string | null
-          charge_error: string | null
-          charged_at: string | null
           conference_id: string
+          contact_email: string
+          contact_name: string
           created_at: string
           id: string
-          internal_notes: string | null
-          line_items: Json
-          order_id: string | null
-          organization_id: string
-          payment_type: string
-          po_document_url: string | null
-          po_number: string | null
-          refund_amount_cents: number | null
-          refunded_at: string | null
-          rejected_at: string | null
-          rejected_by: string | null
-          rejection_reason: string | null
-          status: string
-          stripe_customer_id: string | null
-          stripe_payment_intent_id: string | null
-          stripe_payment_method_id: string | null
-          stripe_refund_id: string | null
-          stripe_setup_intent_id: string | null
-          submitted_by: string
-          subtotal_cents: number
-          tax_cents: number
-          total_cents: number
-          updated_at: string
-        }
-        Insert: {
-          approver_1_at?: string | null
-          approver_1_id?: string | null
-          approver_2_at?: string | null
-          approver_2_id?: string | null
-          booth_id: string
-          charge_after?: string | null
-          charge_error?: string | null
-          charged_at?: string | null
-          conference_id: string
-          created_at?: string
-          id?: string
-          internal_notes?: string | null
-          line_items?: Json
-          order_id?: string | null
-          organization_id: string
-          payment_type: string
-          po_document_url?: string | null
-          po_number?: string | null
-          refund_amount_cents?: number | null
-          refunded_at?: string | null
-          rejected_at?: string | null
-          rejected_by?: string | null
-          rejection_reason?: string | null
-          status?: string
-          stripe_customer_id?: string | null
-          stripe_payment_intent_id?: string | null
-          stripe_payment_method_id?: string | null
-          stripe_refund_id?: string | null
-          stripe_setup_intent_id?: string | null
-          submitted_by: string
-          subtotal_cents: number
-          tax_cents?: number
-          total_cents: number
-          updated_at?: string
-        }
-        Update: {
-          approver_1_at?: string | null
-          approver_1_id?: string | null
-          approver_2_at?: string | null
-          approver_2_id?: string | null
-          booth_id?: string
-          charge_after?: string | null
-          charge_error?: string | null
-          charged_at?: string | null
-          conference_id?: string
-          created_at?: string
-          id?: string
-          internal_notes?: string | null
-          line_items?: Json
-          order_id?: string | null
-          organization_id?: string
-          payment_type?: string
-          po_document_url?: string | null
-          po_number?: string | null
-          refund_amount_cents?: number | null
-          refunded_at?: string | null
-          rejected_at?: string | null
-          rejected_by?: string | null
-          rejection_reason?: string | null
-          status?: string
-          stripe_customer_id?: string | null
-          stripe_payment_intent_id?: string | null
-          stripe_payment_method_id?: string | null
-          stripe_refund_id?: string | null
-          stripe_setup_intent_id?: string | null
-          submitted_by?: string
-          subtotal_cents?: number
-          tax_cents?: number
-          total_cents?: number
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conference_booth_approvals_approver_1_id_fkey"
-            columns: ["approver_1_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_approver_2_id_fkey"
-            columns: ["approver_2_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_booth_id_fkey"
-            columns: ["booth_id"]
-            isOneToOne: false
-            referencedRelation: "conference_booths"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: false
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_order_id_fkey"
-            columns: ["order_id"]
-            isOneToOne: false
-            referencedRelation: "conference_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "active_organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_rejected_by_fkey"
-            columns: ["rejected_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booth_approvals_submitted_by_fkey"
-            columns: ["submitted_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      conference_booths: {
-        Row: {
-          booth_number: string
-          booth_product_id: string | null
-          conference_id: string
-          created_at: string
-          id: string
-          map_cx: number
-          map_cy: number
-          map_h: number
-          map_w: number
           notes: string | null
-          order_id: string | null
-          organization_id: string | null
-          registration_id: string | null
-          reserved_at: string | null
-          reserved_until: string | null
-          sold_at: string | null
+          organization_id: string
           status: string
+          submitted_by_user_id: string | null
           updated_at: string
         }
         Insert: {
-          booth_number: string
-          booth_product_id?: string | null
           conference_id: string
+          contact_email: string
+          contact_name: string
           created_at?: string
           id?: string
-          map_cx: number
-          map_cy: number
-          map_h?: number
-          map_w?: number
           notes?: string | null
-          order_id?: string | null
-          organization_id?: string | null
-          registration_id?: string | null
-          reserved_at?: string | null
-          reserved_until?: string | null
-          sold_at?: string | null
+          organization_id: string
           status?: string
+          submitted_by_user_id?: string | null
           updated_at?: string
         }
         Update: {
-          booth_number?: string
-          booth_product_id?: string | null
           conference_id?: string
+          contact_email?: string
+          contact_name?: string
           created_at?: string
           id?: string
-          map_cx?: number
-          map_cy?: number
-          map_h?: number
-          map_w?: number
           notes?: string | null
-          order_id?: string | null
-          organization_id?: string | null
-          registration_id?: string | null
-          reserved_at?: string | null
-          reserved_until?: string | null
-          sold_at?: string | null
+          organization_id?: string
           status?: string
+          submitted_by_user_id?: string | null
           updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conference_booths_booth_product_id_fkey"
-            columns: ["booth_product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booths_conference_id_fkey"
+            foreignKeyName: "conference_bursary_applications_conference_id_fkey"
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "conference_booths_order_id_fkey"
-            columns: ["order_id"]
-            isOneToOne: false
-            referencedRelation: "conference_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booths_organization_id_fkey"
+            foreignKeyName: "conference_bursary_applications_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "active_organizations"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "conference_booths_organization_id_fkey"
+            foreignKeyName: "conference_bursary_applications_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_booths_registration_id_fkey"
-            columns: ["registration_id"]
-            isOneToOne: false
-            referencedRelation: "conference_registrations"
             referencedColumns: ["id"]
           },
         ]
@@ -2202,110 +1985,151 @@ export type Database = {
           },
         ]
       }
-      conference_entitlement_assignment_events: {
+      conference_days: {
         Row: {
-          actor_id: string | null
-          actor_type: string
-          conference_entitlement_id: string
           conference_id: string
           created_at: string
+          date: string
+          day_profile: string
           id: string
-          metadata: Json | null
-          next_status: string
-          next_user_id: string | null
-          organization_id: string
-          person_id: string | null
-          previous_status: string | null
-          previous_user_id: string | null
-          reason: string | null
+          label: string | null
+          sort: number
+          updated_at: string
         }
         Insert: {
-          actor_id?: string | null
-          actor_type?: string
-          conference_entitlement_id: string
           conference_id: string
           created_at?: string
+          date: string
+          day_profile?: string
           id?: string
-          metadata?: Json | null
-          next_status: string
-          next_user_id?: string | null
-          organization_id: string
-          person_id?: string | null
-          previous_status?: string | null
-          previous_user_id?: string | null
-          reason?: string | null
+          label?: string | null
+          sort?: number
+          updated_at?: string
         }
         Update: {
-          actor_id?: string | null
-          actor_type?: string
-          conference_entitlement_id?: string
           conference_id?: string
           created_at?: string
+          date?: string
+          day_profile?: string
           id?: string
-          metadata?: Json | null
-          next_status?: string
-          next_user_id?: string | null
-          organization_id?: string
-          person_id?: string | null
-          previous_status?: string | null
-          previous_user_id?: string | null
-          reason?: string | null
+          label?: string | null
+          sort?: number
+          updated_at?: string
         }
         Relationships: [
           {
-            foreignKeyName: "conference_entitlement_assignmen_conference_entitlement_id_fkey"
-            columns: ["conference_entitlement_id"]
+            foreignKeyName: "conference_days_conference_id_fkey"
+            columns: ["conference_id"]
             isOneToOne: false
-            referencedRelation: "conference_order_items"
+            referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      conference_entities: {
+        Row: {
+          attributes: Json
+          conference_id: string
+          created_at: string
+          currency: string
+          id: string
+          inventory: number | null
+          is_for_sale: boolean
+          kind: string
+          name: string
+          needs_definition: boolean
+          price_cents: number | null
+          tier_prices: Json
+          updated_at: string
+        }
+        Insert: {
+          attributes?: Json
+          conference_id: string
+          created_at?: string
+          currency?: string
+          id?: string
+          inventory?: number | null
+          is_for_sale?: boolean
+          kind: string
+          name: string
+          needs_definition?: boolean
+          price_cents?: number | null
+          tier_prices?: Json
+          updated_at?: string
+        }
+        Update: {
+          attributes?: Json
+          conference_id?: string
+          created_at?: string
+          currency?: string
+          id?: string
+          inventory?: number | null
+          is_for_sale?: boolean
+          kind?: string
+          name?: string
+          needs_definition?: boolean
+          price_cents?: number | null
+          tier_prices?: Json
+          updated_at?: string
+        }
+        Relationships: [
           {
-            foreignKeyName: "conference_entitlement_assignment_events_actor_id_fkey"
-            columns: ["actor_id"]
+            foreignKeyName: "conference_entities_conference_id_fkey"
+            columns: ["conference_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
+        ]
+      }
+      conference_entity_refs: {
+        Row: {
+          conference_id: string
+          created_at: string
+          from_entity_id: string
+          id: string
+          quantity: number | null
+          role: string
+          to_entity_id: string
+        }
+        Insert: {
+          conference_id: string
+          created_at?: string
+          from_entity_id: string
+          id?: string
+          quantity?: number | null
+          role: string
+          to_entity_id: string
+        }
+        Update: {
+          conference_id?: string
+          created_at?: string
+          from_entity_id?: string
+          id?: string
+          quantity?: number | null
+          role?: string
+          to_entity_id?: string
+        }
+        Relationships: [
           {
-            foreignKeyName: "conference_entitlement_assignment_events_conference_id_fkey"
+            foreignKeyName: "conference_entity_refs_conference_id_fkey"
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "conference_entitlement_assignment_events_next_user_id_fkey"
-            columns: ["next_user_id"]
+            foreignKeyName: "conference_entity_refs_from_entity_id_fkey"
+            columns: ["from_entity_id"]
             isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "conference_entities"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "conference_entitlement_assignment_events_organization_id_fkey"
-            columns: ["organization_id"]
+            foreignKeyName: "conference_entity_refs_to_entity_id_fkey"
+            columns: ["to_entity_id"]
             isOneToOne: false
-            referencedRelation: "active_organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_entitlement_assignment_events_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_entitlement_assignment_events_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "conference_people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_entitlement_assignment_events_previous_user_id_fkey"
-            columns: ["previous_user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
+            referencedRelation: "conference_entities"
             referencedColumns: ["id"]
           },
         ]
@@ -2315,8 +2139,11 @@ export type Database = {
           board_decision_at: string | null
           booth_sales_general_open_at: string | null
           booth_sales_sponsor_open_at: string | null
+          bursary_goal_cents: number | null
+          cart_reservation_minutes: number
           created_at: string
           created_by: string | null
+          documents: Json
           duplicated_from_id: string | null
           edition_code: string
           end_date: string | null
@@ -2342,8 +2169,11 @@ export type Database = {
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
+          bursary_goal_cents?: number | null
+          cart_reservation_minutes?: number
           created_at?: string
           created_by?: string | null
+          documents?: Json
           duplicated_from_id?: string | null
           edition_code?: string
           end_date?: string | null
@@ -2369,8 +2199,11 @@ export type Database = {
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
+          bursary_goal_cents?: number | null
+          cart_reservation_minutes?: number
           created_at?: string
           created_by?: string | null
+          documents?: Json
           duplicated_from_id?: string | null
           edition_code?: string
           end_date?: string | null
@@ -2418,6 +2251,7 @@ export type Database = {
           document_type: string
           effective_at: string
           id: string
+          policy_entity_id: string | null
           version: number
         }
         Insert: {
@@ -2428,6 +2262,7 @@ export type Database = {
           document_type: string
           effective_at: string
           id?: string
+          policy_entity_id?: string | null
           version: number
         }
         Update: {
@@ -2438,6 +2273,7 @@ export type Database = {
           document_type?: string
           effective_at?: string
           id?: string
+          policy_entity_id?: string | null
           version?: number
         }
         Relationships: [
@@ -2455,14 +2291,21 @@ export type Database = {
             referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "conference_legal_versions_policy_entity_id_fkey"
+            columns: ["policy_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
         ]
       }
       conference_order_items: {
         Row: {
           id: string
           metadata: Json | null
+          offer_entity_id: string | null
           order_id: string
-          product_id: string
           quantity: number
           tax_cents: number
           total_cents: number
@@ -2471,8 +2314,8 @@ export type Database = {
         Insert: {
           id?: string
           metadata?: Json | null
+          offer_entity_id?: string | null
           order_id: string
-          product_id: string
           quantity: number
           tax_cents: number
           total_cents: number
@@ -2481,8 +2324,8 @@ export type Database = {
         Update: {
           id?: string
           metadata?: Json | null
+          offer_entity_id?: string | null
           order_id?: string
-          product_id?: string
           quantity?: number
           tax_cents?: number
           total_cents?: number
@@ -2490,17 +2333,17 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "conference_order_items_offer_entity_id_fkey"
+            columns: ["offer_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "conference_order_items_order_id_fkey"
             columns: ["order_id"]
             isOneToOne: false
             referencedRelation: "conference_orders"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_order_items_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
             referencedColumns: ["id"]
           },
         ]
@@ -2511,6 +2354,7 @@ export type Database = {
           conference_id: string
           created_at: string
           currency: string
+          expires_at: string | null
           id: string
           invoice_id: string | null
           organization_id: string
@@ -2530,6 +2374,7 @@ export type Database = {
           conference_id: string
           created_at?: string
           currency?: string
+          expires_at?: string | null
           id?: string
           invoice_id?: string | null
           organization_id: string
@@ -2549,6 +2394,7 @@ export type Database = {
           conference_id?: string
           created_at?: string
           currency?: string
+          expires_at?: string | null
           id?: string
           invoice_id?: string | null
           organization_id?: string
@@ -2601,65 +2447,6 @@ export type Database = {
           },
         ]
       }
-      conference_parameters: {
-        Row: {
-          conference_days: number
-          conference_id: string
-          created_at: string
-          delegate_target_meetings: number | null
-          flex_time_end: string | null
-          flex_time_start: string | null
-          id: string
-          meeting_end_time: string
-          meeting_slots_per_day: number
-          meeting_start_time: string
-          slot_buffer_minutes: number
-          slot_duration_minutes: number
-          total_meeting_suites: number
-          updated_at: string
-        }
-        Insert: {
-          conference_days: number
-          conference_id: string
-          created_at?: string
-          delegate_target_meetings?: number | null
-          flex_time_end?: string | null
-          flex_time_start?: string | null
-          id?: string
-          meeting_end_time: string
-          meeting_slots_per_day: number
-          meeting_start_time: string
-          slot_buffer_minutes?: number
-          slot_duration_minutes: number
-          total_meeting_suites: number
-          updated_at?: string
-        }
-        Update: {
-          conference_days?: number
-          conference_id?: string
-          created_at?: string
-          delegate_target_meetings?: number | null
-          flex_time_end?: string | null
-          flex_time_start?: string | null
-          id?: string
-          meeting_end_time?: string
-          meeting_slots_per_day?: number
-          meeting_start_time?: string
-          slot_buffer_minutes?: number
-          slot_duration_minutes?: number
-          total_meeting_suites?: number
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conference_parameters_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: true
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       conference_people: {
         Row: {
           accessibility_needs: string | null
@@ -2676,7 +2463,6 @@ export type Database = {
           canonical_person_id: string | null
           check_in_source: string | null
           checked_in_at: string | null
-          conference_entitlement_id: string | null
           conference_id: string
           conference_staff_id: string | null
           contact_email: string | null
@@ -2687,8 +2473,6 @@ export type Database = {
           display_name: string | null
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
-          entitlement_status: string | null
-          entitlement_type: string | null
           hotel_confirmation_code: string | null
           hotel_name: string | null
           id: string
@@ -2699,12 +2483,14 @@ export type Database = {
           preferred_departure_airport: string | null
           reassigned_from_user_id: string | null
           registration_id: string | null
+          registration_tier: string | null
           retention_sensitive_fields: string[]
           road_origin_address: string | null
           role_title: string | null
           schedule_registration_id: string | null
           schedule_run_id: string | null
           schedule_scope: string
+          seat_index: number | null
           seat_preference: string | null
           source_id: string
           source_type: string
@@ -2729,7 +2515,6 @@ export type Database = {
           canonical_person_id?: string | null
           check_in_source?: string | null
           checked_in_at?: string | null
-          conference_entitlement_id?: string | null
           conference_id: string
           conference_staff_id?: string | null
           contact_email?: string | null
@@ -2740,8 +2525,6 @@ export type Database = {
           display_name?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
-          entitlement_status?: string | null
-          entitlement_type?: string | null
           hotel_confirmation_code?: string | null
           hotel_name?: string | null
           id?: string
@@ -2752,12 +2535,14 @@ export type Database = {
           preferred_departure_airport?: string | null
           reassigned_from_user_id?: string | null
           registration_id?: string | null
+          registration_tier?: string | null
           retention_sensitive_fields?: string[]
           road_origin_address?: string | null
           role_title?: string | null
           schedule_registration_id?: string | null
           schedule_run_id?: string | null
           schedule_scope?: string
+          seat_index?: number | null
           seat_preference?: string | null
           source_id: string
           source_type: string
@@ -2782,7 +2567,6 @@ export type Database = {
           canonical_person_id?: string | null
           check_in_source?: string | null
           checked_in_at?: string | null
-          conference_entitlement_id?: string | null
           conference_id?: string
           conference_staff_id?: string | null
           contact_email?: string | null
@@ -2793,8 +2577,6 @@ export type Database = {
           display_name?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
-          entitlement_status?: string | null
-          entitlement_type?: string | null
           hotel_confirmation_code?: string | null
           hotel_name?: string | null
           id?: string
@@ -2805,12 +2587,14 @@ export type Database = {
           preferred_departure_airport?: string | null
           reassigned_from_user_id?: string | null
           registration_id?: string | null
+          registration_tier?: string | null
           retention_sensitive_fields?: string[]
           road_origin_address?: string | null
           role_title?: string | null
           schedule_registration_id?: string | null
           schedule_run_id?: string | null
           schedule_scope?: string
+          seat_index?: number | null
           seat_preference?: string | null
           source_id?: string
           source_type?: string
@@ -2841,13 +2625,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "person_activity_summary"
             referencedColumns: ["person_id"]
-          },
-          {
-            foreignKeyName: "conference_people_conference_entitlement_id_fkey"
-            columns: ["conference_entitlement_id"]
-            isOneToOne: false
-            referencedRelation: "conference_order_items"
-            referencedColumns: ["id"]
           },
           {
             foreignKeyName: "conference_people_conference_id_fkey"
@@ -2914,178 +2691,6 @@ export type Database = {
           },
         ]
       }
-      conference_product_rules: {
-        Row: {
-          display_order: number
-          error_message: string
-          id: string
-          product_id: string
-          rule_config: Json
-          rule_type: string
-        }
-        Insert: {
-          display_order?: number
-          error_message: string
-          id?: string
-          product_id: string
-          rule_config: Json
-          rule_type: string
-        }
-        Update: {
-          display_order?: number
-          error_message?: string
-          id?: string
-          product_id?: string
-          rule_config?: Json
-          rule_type?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conference_product_rules_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      conference_products: {
-        Row: {
-          capacity: number | null
-          conference_id: string
-          created_at: string
-          currency: string
-          current_sold: number
-          description: string | null
-          display_order: number
-          id: string
-          is_active: boolean
-          is_tax_exempt: boolean
-          is_taxable: boolean
-          max_per_account: number | null
-          metadata: Json | null
-          name: string
-          price_cents: number
-          qbo_item_id: string | null
-          slug: string
-        }
-        Insert: {
-          capacity?: number | null
-          conference_id: string
-          created_at?: string
-          currency?: string
-          current_sold?: number
-          description?: string | null
-          display_order?: number
-          id?: string
-          is_active?: boolean
-          is_tax_exempt?: boolean
-          is_taxable?: boolean
-          max_per_account?: number | null
-          metadata?: Json | null
-          name: string
-          price_cents: number
-          qbo_item_id?: string | null
-          slug: string
-        }
-        Update: {
-          capacity?: number | null
-          conference_id?: string
-          created_at?: string
-          currency?: string
-          current_sold?: number
-          description?: string | null
-          display_order?: number
-          id?: string
-          is_active?: boolean
-          is_tax_exempt?: boolean
-          is_taxable?: boolean
-          max_per_account?: number | null
-          metadata?: Json | null
-          name?: string
-          price_cents?: number
-          qbo_item_id?: string | null
-          slug?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conference_products_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: false
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      conference_program_items: {
-        Row: {
-          audience_mode: string
-          conference_id: string
-          created_at: string
-          created_by: string | null
-          description: string | null
-          display_order: number
-          ends_at: string
-          id: string
-          is_required: boolean
-          item_type: string
-          location_label: string | null
-          starts_at: string
-          target_roles: string[]
-          title: string
-          updated_at: string
-        }
-        Insert: {
-          audience_mode?: string
-          conference_id: string
-          created_at?: string
-          created_by?: string | null
-          description?: string | null
-          display_order?: number
-          ends_at: string
-          id?: string
-          is_required?: boolean
-          item_type: string
-          location_label?: string | null
-          starts_at: string
-          target_roles?: string[]
-          title: string
-          updated_at?: string
-        }
-        Update: {
-          audience_mode?: string
-          conference_id?: string
-          created_at?: string
-          created_by?: string | null
-          description?: string | null
-          display_order?: number
-          ends_at?: string
-          id?: string
-          is_required?: boolean
-          item_type?: string
-          location_label?: string | null
-          starts_at?: string
-          target_roles?: string[]
-          title?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "conference_program_items_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: false
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_program_items_created_by_fkey"
-            columns: ["created_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       conference_registrations: {
         Row: {
           accessibility_needs: string | null
@@ -3107,7 +2712,6 @@ export type Database = {
           category_responsibilities: string[] | null
           check_in_source: string | null
           checked_in_at: string | null
-          conference_entitlement_id: string | null
           conference_id: string
           created_at: string
           data_quality_flags: string[]
@@ -3121,8 +2725,6 @@ export type Database = {
           differentiator: string | null
           emergency_contact_name: string | null
           emergency_contact_phone: string | null
-          entitlement_status: string | null
-          entitlement_type: string | null
           functional_roles: string[] | null
           gender: string | null
           hotel_confirmation_code: string | null
@@ -3178,7 +2780,6 @@ export type Database = {
           category_responsibilities?: string[] | null
           check_in_source?: string | null
           checked_in_at?: string | null
-          conference_entitlement_id?: string | null
           conference_id: string
           created_at?: string
           data_quality_flags?: string[]
@@ -3192,8 +2793,6 @@ export type Database = {
           differentiator?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
-          entitlement_status?: string | null
-          entitlement_type?: string | null
           functional_roles?: string[] | null
           gender?: string | null
           hotel_confirmation_code?: string | null
@@ -3249,7 +2848,6 @@ export type Database = {
           category_responsibilities?: string[] | null
           check_in_source?: string | null
           checked_in_at?: string | null
-          conference_entitlement_id?: string | null
           conference_id?: string
           created_at?: string
           data_quality_flags?: string[]
@@ -3263,8 +2861,6 @@ export type Database = {
           differentiator?: string | null
           emergency_contact_name?: string | null
           emergency_contact_phone?: string | null
-          entitlement_status?: string | null
-          entitlement_type?: string | null
           functional_roles?: string[] | null
           gender?: string | null
           hotel_confirmation_code?: string | null
@@ -3320,13 +2916,6 @@ export type Database = {
             columns: ["badge_organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_registrations_conference_entitlement_id_fkey"
-            columns: ["conference_entitlement_id"]
-            isOneToOne: false
-            referencedRelation: "conference_order_items"
             referencedColumns: ["id"]
           },
           {
@@ -3520,6 +3109,7 @@ export type Database = {
         Row: {
           conference_id: string
           created_at: string
+          entity_id: string | null
           id: string
           is_active: boolean
           suite_number: number
@@ -3527,6 +3117,7 @@ export type Database = {
         Insert: {
           conference_id: string
           created_at?: string
+          entity_id?: string | null
           id?: string
           is_active?: boolean
           suite_number: number
@@ -3534,6 +3125,7 @@ export type Database = {
         Update: {
           conference_id?: string
           created_at?: string
+          entity_id?: string | null
           id?: string
           is_active?: boolean
           suite_number?: number
@@ -3544,6 +3136,13 @@ export type Database = {
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_suites_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
             referencedColumns: ["id"]
           },
         ]
@@ -3948,6 +3547,206 @@ export type Database = {
           },
         ]
       }
+      entity_balance_seats: {
+        Row: {
+          balance_id: string
+          conference_id: string
+          created_at: string
+          entity_id: string
+          holder_person_id: string | null
+          id: string
+          organization_id: string | null
+          seat_index: number
+        }
+        Insert: {
+          balance_id: string
+          conference_id: string
+          created_at?: string
+          entity_id: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id?: string | null
+          seat_index: number
+        }
+        Update: {
+          balance_id?: string
+          conference_id?: string
+          created_at?: string
+          entity_id?: string
+          holder_person_id?: string | null
+          id?: string
+          organization_id?: string | null
+          seat_index?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_balance_seats_balance_id_fkey"
+            columns: ["balance_id"]
+            isOneToOne: false
+            referencedRelation: "entity_balances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balance_seats_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balance_seats_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balance_seats_holder_person_id_fkey"
+            columns: ["holder_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balance_seats_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balance_seats_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_balances: {
+        Row: {
+          conference_id: string
+          created_at: string
+          entity_id: string
+          id: string
+          organization_id: string | null
+          purchase_id: string
+          quantity: number
+        }
+        Insert: {
+          conference_id: string
+          created_at?: string
+          entity_id: string
+          id?: string
+          organization_id?: string | null
+          purchase_id: string
+          quantity?: number
+        }
+        Update: {
+          conference_id?: string
+          created_at?: string
+          entity_id?: string
+          id?: string
+          organization_id?: string | null
+          purchase_id?: string
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_balances_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balances_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balances_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_balances_purchase_id_fkey"
+            columns: ["purchase_id"]
+            isOneToOne: false
+            referencedRelation: "entity_purchases"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      entity_purchases: {
+        Row: {
+          buyer: string | null
+          buyer_tier: string | null
+          conference_id: string
+          created_at: string
+          id: string
+          offer_entity_id: string
+          order_item_id: string | null
+          price_cents: number | null
+          quantity: number
+        }
+        Insert: {
+          buyer?: string | null
+          buyer_tier?: string | null
+          conference_id: string
+          created_at?: string
+          id?: string
+          offer_entity_id: string
+          order_item_id?: string | null
+          price_cents?: number | null
+          quantity?: number
+        }
+        Update: {
+          buyer?: string | null
+          buyer_tier?: string | null
+          conference_id?: string
+          created_at?: string
+          id?: string
+          offer_entity_id?: string
+          order_item_id?: string | null
+          price_cents?: number | null
+          quantity?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "entity_purchases_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_purchases_offer_entity_id_fkey"
+            columns: ["offer_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "entity_purchases_order_item_id_fkey"
+            columns: ["order_item_id"]
+            isOneToOne: false
+            referencedRelation: "conference_order_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       event_checkins: {
         Row: {
           checked_in_at: string
@@ -4143,6 +3942,7 @@ export type Database = {
           audience_mode: string
           body_html: string | null
           capacity: number | null
+          conference_entity_id: string | null
           created_at: string
           created_by: string | null
           description: string | null
@@ -4165,6 +3965,7 @@ export type Database = {
           audience_mode?: string
           body_html?: string | null
           capacity?: number | null
+          conference_entity_id?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -4187,6 +3988,7 @@ export type Database = {
           audience_mode?: string
           body_html?: string | null
           capacity?: number | null
+          conference_entity_id?: string | null
           created_at?: string
           created_by?: string | null
           description?: string | null
@@ -4206,6 +4008,13 @@ export type Database = {
           virtual_link?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "events_conference_entity_id_fkey"
+            columns: ["conference_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "events_created_by_fkey"
             columns: ["created_by"]
@@ -5321,6 +5130,7 @@ export type Database = {
           embedding_updated_at: string | null
           files: Json
           fte: number | null
+          fte_is_manual_override: boolean
           grace_period_started_at: string | null
           hero_image_url: string | null
           highlight_photo: string | null
@@ -5425,6 +5235,7 @@ export type Database = {
           embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
+          fte_is_manual_override?: boolean
           grace_period_started_at?: string | null
           hero_image_url?: string | null
           highlight_photo?: string | null
@@ -5529,6 +5340,7 @@ export type Database = {
           embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
+          fte_is_manual_override?: boolean
           grace_period_started_at?: string | null
           hero_image_url?: string | null
           highlight_photo?: string | null
@@ -6447,6 +6259,172 @@ export type Database = {
         }
         Relationships: []
       }
+      prospective_booth_payments: {
+        Row: {
+          amount_cents: number
+          booth_entity_id: string
+          company_name: string
+          conference_id: string
+          created_at: string
+          email: string
+          id: string
+          linked_application_id: string | null
+          paid_at: string | null
+          status: string
+          stripe_checkout_session_id: string
+        }
+        Insert: {
+          amount_cents: number
+          booth_entity_id: string
+          company_name: string
+          conference_id: string
+          created_at?: string
+          email: string
+          id?: string
+          linked_application_id?: string | null
+          paid_at?: string | null
+          status?: string
+          stripe_checkout_session_id: string
+        }
+        Update: {
+          amount_cents?: number
+          booth_entity_id?: string
+          company_name?: string
+          conference_id?: string
+          created_at?: string
+          email?: string
+          id?: string
+          linked_application_id?: string | null
+          paid_at?: string | null
+          status?: string
+          stripe_checkout_session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospective_booth_payments_booth_entity_id_fkey"
+            columns: ["booth_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_booth_payments_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_booth_payments_linked_application_id_fkey"
+            columns: ["linked_application_id"]
+            isOneToOne: false
+            referencedRelation: "signup_applications"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      prospective_registration_payments: {
+        Row: {
+          accepted_document_types: string[]
+          amount_cents: number
+          conference_id: string
+          conference_person_id: string | null
+          created_at: string
+          dietary_restrictions: string | null
+          email: string
+          first_name: string
+          id: string
+          job_title: string | null
+          last_name: string
+          minted_at: string | null
+          offer_entity_id: string
+          organization_id: string | null
+          organization_name: string
+          paid_at: string | null
+          phone: string | null
+          status: string
+          stripe_checkout_session_id: string
+        }
+        Insert: {
+          accepted_document_types?: string[]
+          amount_cents: number
+          conference_id: string
+          conference_person_id?: string | null
+          created_at?: string
+          dietary_restrictions?: string | null
+          email: string
+          first_name: string
+          id?: string
+          job_title?: string | null
+          last_name: string
+          minted_at?: string | null
+          offer_entity_id: string
+          organization_id?: string | null
+          organization_name: string
+          paid_at?: string | null
+          phone?: string | null
+          status?: string
+          stripe_checkout_session_id: string
+        }
+        Update: {
+          accepted_document_types?: string[]
+          amount_cents?: number
+          conference_id?: string
+          conference_person_id?: string | null
+          created_at?: string
+          dietary_restrictions?: string | null
+          email?: string
+          first_name?: string
+          id?: string
+          job_title?: string | null
+          last_name?: string
+          minted_at?: string | null
+          offer_entity_id?: string
+          organization_id?: string | null
+          organization_name?: string
+          paid_at?: string | null
+          phone?: string | null
+          status?: string
+          stripe_checkout_session_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "prospective_registration_payments_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_registration_payments_conference_person_id_fkey"
+            columns: ["conference_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_registration_payments_offer_entity_id_fkey"
+            columns: ["offer_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_registration_payments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "prospective_registration_payments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       qbo_export_queue: {
         Row: {
           created_at: string
@@ -6894,6 +6872,7 @@ export type Database = {
           delegate_registration_ids: string[]
           exhibitor_registration_id: string
           id: string
+          is_manual: boolean
           match_score_ids: string[] | null
           meeting_slot_id: string
           scheduler_run_id: string
@@ -6905,6 +6884,7 @@ export type Database = {
           delegate_registration_ids: string[]
           exhibitor_registration_id: string
           id?: string
+          is_manual?: boolean
           match_score_ids?: string[] | null
           meeting_slot_id: string
           scheduler_run_id: string
@@ -6916,6 +6896,7 @@ export type Database = {
           delegate_registration_ids?: string[]
           exhibitor_registration_id?: string
           id?: string
+          is_manual?: boolean
           match_score_ids?: string[] | null
           meeting_slot_id?: string
           scheduler_run_id?: string
@@ -7156,11 +7137,17 @@ export type Database = {
           created_at: string | null
           id: string
           organization_id: string | null
+          paid_amount_cents: number | null
+          paid_at: string | null
+          paid_booth_entity_id: string | null
+          paid_conference_id: string | null
+          paid_for: string | null
           rejection_reason: string | null
           review_notes: string | null
           reviewed_at: string | null
           reviewed_by: string | null
           status: string
+          stripe_checkout_session_id: string | null
           updated_at: string | null
           user_id: string | null
           verification_sent_at: string | null
@@ -7175,11 +7162,17 @@ export type Database = {
           created_at?: string | null
           id?: string
           organization_id?: string | null
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          paid_booth_entity_id?: string | null
+          paid_conference_id?: string | null
+          paid_for?: string | null
           rejection_reason?: string | null
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
           updated_at?: string | null
           user_id?: string | null
           verification_sent_at?: string | null
@@ -7194,11 +7187,17 @@ export type Database = {
           created_at?: string | null
           id?: string
           organization_id?: string | null
+          paid_amount_cents?: number | null
+          paid_at?: string | null
+          paid_booth_entity_id?: string | null
+          paid_conference_id?: string | null
+          paid_for?: string | null
           rejection_reason?: string | null
           review_notes?: string | null
           reviewed_at?: string | null
           reviewed_by?: string | null
           status?: string
+          stripe_checkout_session_id?: string | null
           updated_at?: string | null
           user_id?: string | null
           verification_sent_at?: string | null
@@ -7218,6 +7217,20 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signup_applications_paid_booth_entity_id_fkey"
+            columns: ["paid_booth_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signup_applications_paid_conference_id_fkey"
+            columns: ["paid_conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
             referencedColumns: ["id"]
           },
         ]
@@ -8511,208 +8524,6 @@ export type Database = {
           },
         ]
       }
-      wishlist_billing_attempts: {
-        Row: {
-          amount_cents: number
-          attempt_number: number
-          attempted_at: string
-          billing_run_id: string | null
-          completed_at: string | null
-          conference_id: string
-          currency: string
-          error_message: string | null
-          id: string
-          metadata: Json | null
-          organization_id: string
-          product_id: string
-          status: string
-          stripe_charge_id: string | null
-          stripe_decline_code: string | null
-          stripe_error_code: string | null
-          stripe_payment_intent_id: string | null
-          wishlist_intent_id: string
-        }
-        Insert: {
-          amount_cents?: number
-          attempt_number?: number
-          attempted_at?: string
-          billing_run_id?: string | null
-          completed_at?: string | null
-          conference_id: string
-          currency?: string
-          error_message?: string | null
-          id?: string
-          metadata?: Json | null
-          organization_id: string
-          product_id: string
-          status: string
-          stripe_charge_id?: string | null
-          stripe_decline_code?: string | null
-          stripe_error_code?: string | null
-          stripe_payment_intent_id?: string | null
-          wishlist_intent_id: string
-        }
-        Update: {
-          amount_cents?: number
-          attempt_number?: number
-          attempted_at?: string
-          billing_run_id?: string | null
-          completed_at?: string | null
-          conference_id?: string
-          currency?: string
-          error_message?: string | null
-          id?: string
-          metadata?: Json | null
-          organization_id?: string
-          product_id?: string
-          status?: string
-          stripe_charge_id?: string | null
-          stripe_decline_code?: string | null
-          stripe_error_code?: string | null
-          stripe_payment_intent_id?: string | null
-          wishlist_intent_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "wishlist_billing_attempts_billing_run_id_fkey"
-            columns: ["billing_run_id"]
-            isOneToOne: false
-            referencedRelation: "billing_runs"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_billing_attempts_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: false
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_billing_attempts_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "active_organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_billing_attempts_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_billing_attempts_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_billing_attempts_wishlist_intent_id_fkey"
-            columns: ["wishlist_intent_id"]
-            isOneToOne: false
-            referencedRelation: "wishlist_intents"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      wishlist_intents: {
-        Row: {
-          billing_attempted_at: string | null
-          billing_paid_at: string | null
-          board_decided_at: string | null
-          conference_id: string
-          created_at: string
-          expires_at: string | null
-          id: string
-          metadata: Json | null
-          organization_id: string
-          product_id: string
-          quantity: number
-          queue_position: number | null
-          status: string
-          stripe_payment_method_id: string | null
-          stripe_setup_intent_id: string | null
-          user_id: string
-          wishlisted_at: string
-        }
-        Insert: {
-          billing_attempted_at?: string | null
-          billing_paid_at?: string | null
-          board_decided_at?: string | null
-          conference_id: string
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          metadata?: Json | null
-          organization_id: string
-          product_id: string
-          quantity?: number
-          queue_position?: number | null
-          status?: string
-          stripe_payment_method_id?: string | null
-          stripe_setup_intent_id?: string | null
-          user_id: string
-          wishlisted_at?: string
-        }
-        Update: {
-          billing_attempted_at?: string | null
-          billing_paid_at?: string | null
-          board_decided_at?: string | null
-          conference_id?: string
-          created_at?: string
-          expires_at?: string | null
-          id?: string
-          metadata?: Json | null
-          organization_id?: string
-          product_id?: string
-          quantity?: number
-          queue_position?: number | null
-          status?: string
-          stripe_payment_method_id?: string | null
-          stripe_setup_intent_id?: string | null
-          user_id?: string
-          wishlisted_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "wishlist_intents_conference_id_fkey"
-            columns: ["conference_id"]
-            isOneToOne: false
-            referencedRelation: "conference_instances"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_intents_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "active_organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_intents_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_intents_product_id_fkey"
-            columns: ["product_id"]
-            isOneToOne: false
-            referencedRelation: "conference_products"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "wishlist_intents_user_id_fkey"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
     }
     Views: {
       active_contacts: {
@@ -9275,6 +9086,27 @@ export type Database = {
         Args: { p_approval_id: string; p_notes?: string }
         Returns: string
       }
+      assign_grant_seat: {
+        Args: {
+          p_actor_id: string
+          p_balance_id: string
+          p_canonical_person_id?: string
+          p_conference_id: string
+          p_email?: string
+          p_entitlement_type: string
+          p_intended_status: string
+          p_organization_id: string
+          p_person_kind: string
+          p_seat_index: number
+          p_user_id?: string
+        }
+        Returns: {
+          assignment_status: string
+          person_id: string
+          previous_status: string
+          previous_user_id: string
+        }[]
+      }
       commit_swap_request: {
         Args: {
           p_actor_id?: string
@@ -9312,78 +9144,44 @@ export type Database = {
         Args: { p_booth_id: string; p_order_id: string; p_org_id: string }
         Returns: string
       }
-      create_conference_order_from_cart:
-        | {
-            Args: {
-              p_checkout_idempotency_key: string
-              p_conference_id: string
-              p_currency?: string
-              p_organization_id: string
-              p_tax_rate_pct?: number
-              p_user_id: string
-            }
-            Returns: {
-              checkout_idempotency_key: string | null
-              conference_id: string
-              created_at: string
-              currency: string
-              id: string
-              invoice_id: string | null
-              organization_id: string
-              paid_at: string | null
-              refund_amount_cents: number | null
-              refunded_at: string | null
-              status: string
-              stripe_checkout_session_id: string | null
-              stripe_payment_intent_id: string | null
-              subtotal_cents: number
-              tax_cents: number
-              total_cents: number
-              user_id: string
-            }
-            SetofOptions: {
-              from: "*"
-              to: "conference_orders"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
-        | {
-            Args: {
-              p_checkout_idempotency_key: string
-              p_conference_id: string
-              p_currency?: string
-              p_organization_id: string
-              p_price_overrides?: Json
-              p_tax_rate_pct?: number
-              p_user_id: string
-            }
-            Returns: {
-              checkout_idempotency_key: string | null
-              conference_id: string
-              created_at: string
-              currency: string
-              id: string
-              invoice_id: string | null
-              organization_id: string
-              paid_at: string | null
-              refund_amount_cents: number | null
-              refunded_at: string | null
-              status: string
-              stripe_checkout_session_id: string | null
-              stripe_payment_intent_id: string | null
-              subtotal_cents: number
-              tax_cents: number
-              total_cents: number
-              user_id: string
-            }
-            SetofOptions: {
-              from: "*"
-              to: "conference_orders"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
+      create_conference_order_from_cart: {
+        Args: {
+          p_checkout_idempotency_key: string
+          p_conference_id: string
+          p_currency?: string
+          p_offer_prices?: Json
+          p_organization_id: string
+          p_price_overrides?: Json
+          p_tax_rate_pct?: number
+          p_user_id: string
+        }
+        Returns: {
+          checkout_idempotency_key: string | null
+          conference_id: string
+          created_at: string
+          currency: string
+          expires_at: string | null
+          id: string
+          invoice_id: string | null
+          organization_id: string
+          paid_at: string | null
+          refund_amount_cents: number | null
+          refunded_at: string | null
+          status: string
+          stripe_checkout_session_id: string | null
+          stripe_payment_intent_id: string | null
+          subtotal_cents: number
+          tax_cents: number
+          total_cents: number
+          user_id: string
+        }
+        SetofOptions: {
+          from: "*"
+          to: "conference_orders"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       ensure_conference_badge_token_for_person: {
         Args: {
           p_actor_id?: string
@@ -9429,6 +9227,7 @@ export type Database = {
           embedding_updated_at: string | null
           files: Json
           fte: number | null
+          fte_is_manual_override: boolean
           grace_period_started_at: string | null
           hero_image_url: string | null
           highlight_photo: string | null
@@ -9543,6 +9342,38 @@ export type Database = {
         Args: { link_id: string }
         Returns: undefined
       }
+      mint_entity_offer_purchase: {
+        Args: {
+          p_buyer: string
+          p_buyer_tier?: string
+          p_conference_id: string
+          p_offer_id: string
+          p_quantity: number
+          p_unit_price?: number
+        }
+        Returns: string
+      }
+      mint_prospective_booth_purchase: {
+        Args: {
+          p_booth_entity_id: string
+          p_buyer: string
+          p_conference_id: string
+          p_organization_id: string
+          p_price_cents: number
+        }
+        Returns: string
+      }
+      mint_prospective_registration_purchase: {
+        Args: {
+          p_buyer: string
+          p_conference_id: string
+          p_organization_id: string
+          p_price_cents: number
+          p_registration_entity_id: string
+        }
+        Returns: string
+      }
+      mint_v3_for_order: { Args: { p_order_id: string }; Returns: number }
       process_conference_order_paid: {
         Args: {
           p_checkout_session_id: string
@@ -9554,6 +9385,7 @@ export type Database = {
           conference_id: string
           created_at: string
           currency: string
+          expires_at: string | null
           id: string
           invoice_id: string | null
           organization_id: string
@@ -9582,6 +9414,7 @@ export type Database = {
           conference_id: string
           created_at: string
           currency: string
+          expires_at: string | null
           id: string
           invoice_id: string | null
           organization_id: string
@@ -9651,6 +9484,12 @@ export type Database = {
         Args: { p_booth_id: string; p_org_id: string }
         Returns: string
       }
+      resolve_person_access: {
+        Args: { p_conference_id: string; p_person_id: string }
+        Returns: {
+          entity_id: string
+        }[]
+      }
       rollback_policy_to_version: {
         Args: { p_reason?: string; p_target_set_id: string; p_user_id?: string }
         Returns: Json
@@ -9709,6 +9548,14 @@ export type Database = {
         Returns: Json
       }
       trigger_notion_sync: { Args: never; Returns: Json }
+      unassign_grant_seat: {
+        Args: { p_actor_id: string; p_balance_id: string; p_seat_index: number }
+        Returns: {
+          person_id: string
+          previous_status: string
+          previous_user_id: string
+        }[]
+      }
     }
     Enums: {
       automation_mode: "draft_only" | "auto_send"

@@ -3,6 +3,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
+import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import type { HomeMapOrg } from "@/lib/homepage";
 import { getPartnerOrgProfile, getMemberOrgProfile, type PartnerOrgProfile, type MemberOrgProfile } from "@/lib/actions/partner-context";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
@@ -223,7 +224,7 @@ export default function DirectoryTable({
   // Distinguish new visitor (no cookie) from returning user (has session cookie)
   const [isReturningVisitor, setIsReturningVisitor] = useState(false);
   useEffect(() => {
-    setIsReturningVisitor(document.cookie.includes("csc_had_session=1"));
+    setIsReturningVisitor(hadPriorSession());
   }, []);
   const gateModalRef = useRef<HTMLDivElement>(null);
   // Close on outside click
@@ -827,7 +828,7 @@ export default function DirectoryTable({
                   Sign In
                 </a>
                 <a
-                  href="/signup"
+                  href="/membership"
                   className="w-full inline-flex items-center justify-center rounded-xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
                 >
                   Join CSC
@@ -836,7 +837,7 @@ export default function DirectoryTable({
             ) : (
               <>
                 <a
-                  href="/signup"
+                  href="/membership"
                   className="w-full inline-flex items-center justify-center rounded-xl bg-[#EE2A2E] px-5 py-3 text-sm font-medium text-white hover:bg-[#D92327] transition-colors"
                 >
                   Join CSC

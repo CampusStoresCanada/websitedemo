@@ -322,8 +322,8 @@ export function MemberApplicationForm() {
 
       <p className="text-xs text-gray-500 text-center">
         Looking to become a vendor partner instead?{" "}
-        <Link href="/apply/partner" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
-          Apply as a partner
+        <Link href="/partnership" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
+          Learn about partnership
         </Link>
       </p>
     </form>

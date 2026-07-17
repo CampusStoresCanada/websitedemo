@@ -13,6 +13,9 @@ import { getPartnerMarketData, checkNudgeCooldown } from "@/lib/actions/partner-
 import type { MarketData } from "@/lib/actions/partner-market";
 import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
 import type { SupplierData } from "@/lib/actions/member-suppliers";
+import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/conference-entity-commerce";
+import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
+import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -30,8 +33,6 @@ type OrgConferenceAttendanceRow = {
   contactEmail: string | null;
   userId: string | null;
   assignmentStatus: string;
-  entitlementId: string | null;
-  entitlementType: string | null;
   badgeStatus: string;
   checkedInAt: string | null;
 };
@@ -47,8 +48,6 @@ type RawConferenceAttendanceRow = {
   contact_email: string | null;
   user_id: string | null;
   assignment_status: string;
-  conference_entitlement_id: string | null;
-  entitlement_type: string | null;
   badge_print_status: string;
   checked_in_at: string | null;
   conference_instances: {
@@ -67,6 +66,15 @@ type OrgAssignableUser = {
   role: string;
 };
 
+export type AssignableEntityColumn = {
+  entityId: string;
+  name: string;
+  kind: EntityKind;
+  seats: OrgEntitySeat[];
+  /** Set only when this entity can be bought individually beyond what's included — drives the overage-to-cart flow. */
+  overageOffer: { unitPriceCents: number; eligible: boolean; soldOut: boolean } | null;
+};
+
 // Viewer-dependent masking means different responses per viewer
 export const dynamic = "force-dynamic";
 
@@ -80,13 +88,19 @@ export default async function OrgProfilePage({ params }: PageProps) {
 
   // Quick org ID lookup so we can elevate viewer level before fetching masked data.
   // If the viewer is a member of this org, they see their own page unmasked.
+  // Only ever raises the floor to "org_admin" — never lowers it. A CSC global
+  // admin who also happens to belong to this org (e.g. as its real contact)
+  // must keep their higher "admin"/"super_admin" level, or this would silently
+  // downgrade them below what their actual role grants elsewhere on the page
+  // (e.g. draft-conference visibility, which checks for admin/super_admin).
   const { data: orgIdRow } = await createAdminClient()
     .from("organizations")
     .select("id")
     .eq("slug", slug)
     .maybeSingle();
 
-  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id)
+  const isAlreadyCscAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id) && !isAlreadyCscAdmin
     ? { ...viewer, viewerLevel: "org_admin" as const }
     : viewer;
 
@@ -121,7 +135,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
     const { data: rows } = (await adminClient
       .from("conference_people")
       .select(
-        "id, conference_id, organization_id, source_type, source_id, person_kind, display_name, contact_email, user_id, assignment_status, conference_entitlement_id, entitlement_type, badge_print_status, checked_in_at, conference_instances!inner(name, year, edition_code, start_date, status)"
+        "id, conference_id, organization_id, source_type, source_id, person_kind, display_name, contact_email, user_id, assignment_status, badge_print_status, checked_in_at, conference_instances!inner(name, year, edition_code, start_date, status)"
       )
       .eq("organization_id", organization.id)
       .neq("assignment_status", "canceled")
@@ -183,8 +197,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
         (row.user_id ? (emailById.get(row.user_id) ?? null) : null),
       userId: row.user_id,
       assignmentStatus: row.assignment_status,
-      entitlementId: row.conference_entitlement_id ?? null,
-      entitlementType: row.entitlement_type ?? null,
       badgeStatus: row.badge_print_status,
       checkedInAt: row.checked_in_at,
     }));
@@ -206,6 +218,126 @@ export default async function OrgProfilePage({ params }: PageProps) {
         const bName = (b.displayName ?? b.email ?? b.userId).toLowerCase();
         return aName.localeCompare(bName);
       });
+  }
+
+  // v3 conference presence — which entities (booth, registrations, optional
+  // extras) this org holds seats for, and what else it could buy. Resolved
+  // for the same "current conference" conferenceAttendance already implies
+  // (nearest upcoming, else latest past) so both stay in sync.
+  let assignableEntities: AssignableEntityColumn[] = [];
+  let buyableExtras: ConferenceOffer[] = [];
+  let currentConferenceId: string | null = null;
+  let currentConferenceIsPublic = false;
+  // An org can hold more than one booth (board decision), so this is a list.
+  let heldBooths: Array<{ name: string }> = [];
+  if (canViewConferenceAttendance) {
+    const startById = new Map<string, number>();
+    const statusById = new Map<string, string>();
+    for (const row of conferenceAttendance) {
+      statusById.set(row.conferenceId, row.conferenceStatus);
+      if (!row.conferenceStartDate) continue;
+      const start = new Date(row.conferenceStartDate).getTime();
+      if (Number.isFinite(start) && !startById.has(row.conferenceId)) startById.set(row.conferenceId, start);
+    }
+
+    // conferenceAttendance alone misses a conference the org holds seats in
+    // but hasn't assigned anyone to yet — every unit left "assign later," or
+    // a booth, which never gets its own conference_people row at all.
+    // Without this, a first-time buyer would never see anything to assign:
+    // the checkbox matrix below only exists for a conference this resolves.
+    const { data: heldBalanceRows } = await createAdminClient()
+      .from("entity_balances")
+      .select("conference_id")
+      .eq("organization_id", organization.id);
+    const heldConferenceIds = [...new Set((heldBalanceRows ?? []).map((r) => r.conference_id))];
+    const unseenHeldIds = heldConferenceIds.filter((id) => !startById.has(id));
+    if (unseenHeldIds.length > 0) {
+      const { data: heldConferences } = await createAdminClient()
+        .from("conference_instances")
+        .select("id, start_date, status")
+        .in("id", unseenHeldIds);
+      for (const conf of heldConferences ?? []) {
+        if (conf.status) statusById.set(conf.id, conf.status);
+        const start = conf.start_date ? new Date(conf.start_date).getTime() : NaN;
+        if (Number.isFinite(start)) startById.set(conf.id, start);
+      }
+    }
+
+    const ids = [...new Set([...conferenceAttendance.map((r) => r.conferenceId), ...heldConferenceIds])];
+    const now = new Date().getTime();
+    const upcoming = ids
+      .map((id) => ({ id, start: startById.get(id) }))
+      .filter((e): e is { id: string; start: number } => Number.isFinite(e.start))
+      .filter((e) => e.start >= now)
+      .sort((a, b) => a.start - b.start);
+    const latestPast = ids
+      .map((id) => ({ id, start: startById.get(id) }))
+      .filter((e): e is { id: string; start: number } => Number.isFinite(e.start))
+      .filter((e) => e.start < now)
+      .sort((a, b) => b.start - a.start);
+    currentConferenceId = upcoming[0]?.id ?? latestPast[0]?.id ?? ids[0] ?? null;
+    currentConferenceIsPublic = Boolean(
+      currentConferenceId &&
+        (PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(statusById.get(currentConferenceId) ?? "draft")
+    );
+
+    if (currentConferenceId) {
+      // Booths are an org-level holding (entity_balances) — they never mint
+      // a person-level seat row in entity_balance_seats, so booth ownership
+      // has to be read from entity_balances directly, not listEntitySeatsForOrg.
+      const [seatsResult, offersResult, boothBalanceResult] = await Promise.all([
+        listEntitySeatsForOrg(currentConferenceId, organization.id),
+        listConferenceOffers(currentConferenceId, organization.id),
+        createAdminClient()
+          .from("entity_balances")
+          .select("entity:conference_entities!entity_balances_entity_id_fkey(name, kind)")
+          .eq("conference_id", currentConferenceId)
+          .eq("organization_id", organization.id),
+      ]);
+      const offerById = new Map((offersResult.success ? offersResult.data : []).map((o) => [o.id, o]));
+
+      // The booth(s) are a place, not a person — surfaced as a plain headline
+      // (heldBooths below), never as an assignable checkbox column.
+      heldBooths = (boothBalanceResult.data ?? [])
+        .map((b) => (Array.isArray(b.entity) ? b.entity[0] : b.entity))
+        .filter((e): e is { name: string; kind: string } => e?.kind === "booth")
+        .map((e) => ({ name: e.name }));
+
+      const byEntity = new Map<string, AssignableEntityColumn>();
+      for (const seat of seatsResult.success ? seatsResult.data : []) {
+        // Org-level holdings (e.g. a membership renewal) and the booth
+        // itself aren't something a specific person is seated into — keep
+        // them out of the per-person assignment columns.
+        if (seat.kind === "membership_renewal" || seat.kind === "booth") continue;
+        const existing = byEntity.get(seat.entityId);
+        if (existing) {
+          existing.seats.push(seat);
+        } else {
+          const offer = offerById.get(seat.entityId);
+          byEntity.set(seat.entityId, {
+            entityId: seat.entityId,
+            name: seat.name,
+            kind: seat.kind,
+            seats: [seat],
+            overageOffer: offer
+              ? { unitPriceCents: offer.unitPriceCents, eligible: offer.eligible, soldOut: offer.soldOut }
+              : null,
+          });
+        }
+      }
+      assignableEntities = [...byEntity.values()].sort((a, b) => a.name.localeCompare(b.name));
+
+      // Anything the org already holds at least one seat of already has its
+      // own "buy 1 more" path via the assignableEntities checkbox column's
+      // overageOffer — showing it here too would duplicate that. Once a
+      // registration gated by requires_ownership_of becomes visible (the org
+      // now owns the prerequisite, per listConferenceOffers), it belongs
+      // here until the org's first purchase moves it into assignableEntities.
+      const heldEntityIds = new Set(assignableEntities.map((e) => e.entityId));
+      buyableExtras = (offersResult.success ? offersResult.data : []).filter(
+        (o) => o.eligible && !heldEntityIds.has(o.id) && !["booth", "membership_renewal"].includes(o.kind)
+      );
+    }
   }
 
   console.log(`[org/${slug}] viewer=${viewer.viewerLevel} contacts sample: ${JSON.stringify(contacts.slice(0,3).map(c => ({ id: c.id, name: c.name, circle_id: (c as Record<string,unknown>).circle_id })))}`);
@@ -285,6 +417,10 @@ export default async function OrgProfilePage({ params }: PageProps) {
         viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
+        assignableEntities={assignableEntities}
+        buyableExtras={buyableExtras}
+        currentConferenceId={currentConferenceId}
+        currentConferenceIsPublic={currentConferenceIsPublic}
         sponsorTier={sponsorTier}
         initialRFPs={orgRFPs}
         memberSuppliers={memberSuppliers}
@@ -304,6 +440,10 @@ export default async function OrgProfilePage({ params }: PageProps) {
       viewerLevel={viewer.viewerLevel}
       conferenceAttendance={conferenceAttendance}
       orgAssignableUsers={orgAssignableUsers}
+      assignableEntities={assignableEntities}
+      buyableExtras={buyableExtras}
+      currentConferenceId={currentConferenceId}
+      heldBooths={heldBooths}
       sponsorTier={sponsorTier}
       visibleLinks={visibleLinks}
       hasGatedLinks={hasGated}

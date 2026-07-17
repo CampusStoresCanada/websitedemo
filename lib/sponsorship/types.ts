@@ -24,6 +24,8 @@ export const BENEFIT_KEYS = [
   "conference_offsite_host",
   "conference_travel_host",
   "conference_speaking_slot",
+  "conference_hot_products_care_package",
+  "conference_hot_products_showcase",
   // Email
   "email_broadcast_slots",
 ] as const;
@@ -58,6 +60,8 @@ export const BENEFIT_REGISTRY: Record<BenefitKey, BenefitDefinition> = {
   conference_offsite_host:  { key: "conference_offsite_host",  label: "Conference — Offsite Event Host",   category: "conference", provisioning: "manual",    hasReferenceId: true },
   conference_travel_host:   { key: "conference_travel_host",   label: "Conference — Member Travel Host",   category: "conference", provisioning: "manual",    hasReferenceId: true },
   conference_speaking_slot: { key: "conference_speaking_slot", label: "Conference — Speaking Slot",        category: "conference", provisioning: "manual",    hasReferenceId: true },
+  conference_hot_products_care_package: { key: "conference_hot_products_care_package", label: "Conference — Hot Products Care Package", category: "conference", provisioning: "manual" },
+  conference_hot_products_showcase:      { key: "conference_hot_products_showcase",      label: "Conference — Hot Products Online Showcase", category: "conference", provisioning: "manual" },
   email_broadcast_slots:    { key: "email_broadcast_slots",    label: "Email — Broadcast Slots",           category: "email",      provisioning: "manual",    hasCount: true },
 };
 

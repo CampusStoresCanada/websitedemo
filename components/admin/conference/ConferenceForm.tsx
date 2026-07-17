@@ -39,6 +39,9 @@ export default function ConferenceForm({
   const [taxJurisdiction, setTaxJurisdiction] = useState(conference?.tax_jurisdiction ?? "");
   const [taxRatePct, setTaxRatePct] = useState(conference?.tax_rate_pct?.toString() ?? "");
   const [stripeTaxRateId, setStripeTaxRateId] = useState(conference?.stripe_tax_rate_id ?? "");
+  const [cartReservationMinutes, setCartReservationMinutes] = useState(
+    String(conference?.cart_reservation_minutes ?? 15)
+  );
   const [startDate, setStartDate] = useState(conference?.start_date ?? "");
   const [endDate, setEndDate] = useState(conference?.end_date ?? "");
   const [registrationOpenAt, setRegistrationOpenAt] = useState(conference?.registration_open_at ?? "");
@@ -129,6 +132,7 @@ export default function ConferenceForm({
       tax_jurisdiction: taxJurisdiction || null,
       tax_rate_pct: taxRatePct ? parseFloat(taxRatePct) : null,
       stripe_tax_rate_id: stripeTaxRateId || null,
+      cart_reservation_minutes: cartReservationMinutes ? Math.max(1, parseInt(cartReservationMinutes)) : 15,
       start_date: startDate || null,
       end_date: endDate || null,
       registration_open_at: registrationOpenAt || null,
@@ -279,6 +283,16 @@ export default function ConferenceForm({
             <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent" />
             <p className="mt-1 text-xs text-gray-400">
               From Stripe Dashboard &rarr; Tax Rates. Must match the jurisdiction rate above.
+            </p>
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Booth cart reservation (minutes)</label>
+            <input type="number" min={1} max={120} value={cartReservationMinutes}
+              onChange={(e) => setCartReservationMinutes(e.target.value)}
+              placeholder="15"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+            <p className="mt-1 text-xs text-gray-400">
+              How long a booth stays reserved in cart before releasing back to available. Default: 15 min.
             </p>
           </div>
         </div>

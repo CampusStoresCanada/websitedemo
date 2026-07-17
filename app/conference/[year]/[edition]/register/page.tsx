@@ -2,8 +2,10 @@ import { redirect } from "next/navigation";
 import Link from "next/link";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
+import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import { getMyRegistration } from "@/lib/actions/conference-registration";
-import { getActiveLegalDocuments, getMyLegalAcceptances } from "@/lib/actions/conference-legal";
+import { getRequiredLegalDocuments, getHeldEntityIds, getMyLegalAcceptances } from "@/lib/actions/conference-legal";
+import { audienceRolesForRegistrationType } from "@/lib/constants/conference";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getRetentionConsentConfig } from "@/lib/policy/engine";
 import PartnerRegistrationForm from "./PartnerRegistrationForm";
@@ -40,6 +42,11 @@ export default async function RegisterPage({
   if (conference.status !== "registration_open") {
     return (
       <div className="max-w-3xl mx-auto py-12 text-center">
+        {confResult.isDraftPreview && (
+          <div className="mb-4 text-left">
+            <DraftPreviewBanner status={conference.status} />
+          </div>
+        )}
         <h1 className="text-xl font-bold text-gray-900 mb-2">{conference.name}</h1>
         <p className="text-gray-500">Registration is not currently open for this conference.</p>
       </div>
@@ -130,8 +137,13 @@ export default async function RegisterPage({
   const regResult = await getMyRegistration(conference.id, registrationType as "delegate" | "exhibitor");
   const existingRegistration = regResult.success ? regResult.data : null;
 
-  // Load legal documents + acceptances
-  const legalResult = await getActiveLegalDocuments(conference.id);
+  // Load the legal documents this registrant must accept, derived from the
+  // catalog policy graph: universal docs + their audience + offers they hold.
+  const heldEntityIds = await getHeldEntityIds(conference.id, auth.ctx.userId);
+  const legalResult = await getRequiredLegalDocuments(conference.id, {
+    audienceSourceRoles: audienceRolesForRegistrationType(registrationType),
+    heldEntityIds,
+  });
   const legalDocs = legalResult.success ? legalResult.data ?? [] : [];
 
   const acceptancesResult = await getMyLegalAcceptances(conference.id);

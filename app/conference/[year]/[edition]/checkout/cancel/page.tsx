@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
+import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 
 export const metadata = { title: "Checkout Canceled" };
 
@@ -27,6 +28,12 @@ export default async function ConferenceCheckoutCancelPage({
 
   return (
     <main className="max-w-3xl mx-auto py-12 px-4 text-center">
+      {conferenceResult.isDraftPreview && conferenceResult.data && (
+        <div className="mb-4 text-left">
+          <DraftPreviewBanner status={conferenceResult.data.status} />
+        </div>
+      )}
+
       <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-amber-100">
         <svg className="h-7 w-7 text-amber-700" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
           <path strokeLinecap="round" strokeLinejoin="round" d="M12 9v3.75m9-.75a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" />

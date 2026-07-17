@@ -620,9 +620,10 @@ export default function DelegateRegistrationForm({
                     <span className="text-xs text-green-600 font-medium">Accepted</span>
                   )}
                 </div>
-                <div className="text-xs text-gray-600 max-h-32 overflow-y-auto mb-3 whitespace-pre-wrap">
-                  {doc.content}
-                </div>
+                <div
+                  className="text-xs text-gray-600 max-h-32 overflow-y-auto mb-3 prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: doc.content }}
+                />
                 {!acceptedLegalIds.has(doc.id) && (
                   <button
                     onClick={async () => {

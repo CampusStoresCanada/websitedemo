@@ -81,7 +81,7 @@ export default function PartnerDirectory({ partners }: PartnerDirectoryProps) {
         <JoinCTA
           message="Get a membership to access full partner details and contact information."
           ctaText="Join CSC"
-          ctaLink="/signup"
+          ctaLink="/membership"
         />
       </div>
 

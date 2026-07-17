@@ -60,29 +60,3 @@ export const DELEGATE_WIZARD_STEPS: WizardStep[] = [
   { key: "review", label: "Review & Submit" },
 ];
 
-// ---------------------------------------------------------------------------
-// Product rule config shapes (conference_product_rules.rule_config JSONB)
-// ---------------------------------------------------------------------------
-
-export interface RequiresProductRule {
-  product_slug: string;
-}
-
-export interface RequiresOrgTypeRule {
-  org_type: "member" | "vendor_partner";
-}
-
-export interface RequiresRegistrationRule {
-  registration_type: string;
-}
-
-export interface MaxQuantityRule {
-  max: number;
-}
-
-export type ProductRuleConfig =
-  | RequiresProductRule
-  | RequiresOrgTypeRule
-  | RequiresRegistrationRule
-  | MaxQuantityRule
-  | Record<string, unknown>;

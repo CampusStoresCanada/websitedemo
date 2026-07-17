@@ -12,94 +12,6 @@ import { syncConferencePeopleIndex } from "@/lib/actions/conference-people";
 type StaffRow = Database["public"]["Tables"]["conference_staff"]["Row"];
 type StaffInsert = Database["public"]["Tables"]["conference_staff"]["Insert"];
 
-async function checkAdditionalStaffEligibility(params: {
-  conferenceId: string;
-  organizationId: string;
-  registrationType: string;
-  accommodationType: string | null;
-}): Promise<{ ok: true } | { ok: false; error: string }> {
-  // First 2 staff are free; rules apply to additional staff add-ons only.
-  if (!params.accommodationType || params.accommodationType === "none") {
-    return { ok: true };
-  }
-
-  const productSlug =
-    params.accommodationType === "full"
-      ? "exhibitor_staff_accommodation"
-      : "exhibitor_staff_meals_only";
-
-  const adminClient = createAdminClient();
-  const { data: product, error: productError } = await adminClient
-    .from("conference_products")
-    .select("id")
-    .eq("conference_id", params.conferenceId)
-    .eq("slug", productSlug)
-    .maybeSingle();
-
-  if (productError) {
-    return { ok: false, error: productError.message };
-  }
-  if (!product) {
-    return {
-      ok: false,
-      error: `Required conference product "${productSlug}" is missing.`,
-    };
-  }
-
-  const { data: rules, error: rulesError } = await adminClient
-    .from("conference_product_rules")
-    .select("rule_type, rule_config, error_message")
-    .eq("product_id", product.id);
-
-  if (rulesError) {
-    return { ok: false, error: rulesError.message };
-  }
-
-  for (const rule of rules ?? []) {
-    if (rule.rule_type === "requires_org_type") {
-      const requiredType = (rule.rule_config as { org_type?: string } | null)?.org_type;
-      if (!requiredType) continue;
-
-      const { data: org, error } = await adminClient
-        .from("organizations")
-        .select("type")
-        .eq("id", params.organizationId)
-        .maybeSingle();
-
-      if (error) return { ok: false, error: error.message };
-      if (!org || org.type !== requiredType) {
-        return {
-          ok: false,
-          error: rule.error_message || "Organization type is not eligible for this add-on.",
-        };
-      }
-    }
-
-    if (rule.rule_type === "requires_registration") {
-      const requiredType = (rule.rule_config as { registration_type?: string } | null)
-        ?.registration_type;
-      if (!requiredType) continue;
-      if (params.registrationType !== requiredType) {
-        return {
-          ok: false,
-          error:
-            rule.error_message || "Required conference registration is missing for this add-on.",
-        };
-      }
-    }
-
-    if (rule.rule_type === "requires_product") {
-      return {
-        ok: false,
-        error:
-          "Product dependency checks require Chunk 12 commerce orders and are not available yet.",
-      };
-    }
-  }
-
-  return { ok: true };
-}
-
 // ─────────────────────────────────────────────────────────────────
 // Add staff member to an exhibitor registration
 // ─────────────────────────────────────────────────────────────────
@@ -131,27 +43,6 @@ export async function addStaffMember(
   }
   if (reg.registration_type !== "exhibitor") {
     return { success: false, error: "Staff can only be added to exhibitor registrations" };
-  }
-
-  const { count: existingStaffCount, error: countError } = await adminClient
-    .from("conference_staff")
-    .select("*", { count: "exact", head: true })
-    .eq("registration_id", registrationId);
-
-  if (countError) {
-    return { success: false, error: countError.message };
-  }
-
-  if ((existingStaffCount ?? 0) >= 2) {
-    const eligibility = await checkAdditionalStaffEligibility({
-      conferenceId: reg.conference_id,
-      organizationId: reg.organization_id,
-      registrationType: reg.registration_type,
-      accommodationType: data.accommodation_type ?? null,
-    });
-    if (!eligibility.ok) {
-      return { success: false, error: eligibility.error };
-    }
   }
 
   const { person_id: personId, ...staffData } = data;

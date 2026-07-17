@@ -21,6 +21,8 @@ export async function POST() {
   return NextResponse.json({
     finalized_count: result.data?.finalizedCount ?? 0,
     person_ids: result.data?.personIds ?? [],
+    // Documents each newly-activated assignee must still accept before participating.
+    outstanding_legal: result.data?.outstandingLegal ?? [],
   });
 }
 

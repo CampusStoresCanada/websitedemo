@@ -18,6 +18,13 @@ interface Application {
   reviewed_at: string | null;
   rejection_reason: string | null;
   created_at: string | null;
+  paid_at: string | null;
+  paid_amount_cents: number | null;
+  paid_for: string | null;
+}
+
+function formatCentsDisplay(cents: number): string {
+  return (cents / 100).toLocaleString("en-CA", { style: "currency", currency: "CAD" });
 }
 
 const STATUS_BADGES: Record<string, { label: string; className: string }> = {
@@ -247,6 +254,14 @@ export function ApplicationsReview({
                           >
                             {badge.label}
                           </span>
+                          {app.paid_at ? (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800"
+                              title={`Paid ${app.paid_amount_cents != null ? formatCentsDisplay(app.paid_amount_cents) : ""} for ${app.paid_for ?? "booth"} before applying`}
+                            >
+                              PAID{app.paid_amount_cents != null ? ` — ${formatCentsDisplay(app.paid_amount_cents)}` : ""}
+                            </span>
+                          ) : null}
                         </td>
                         <td className="px-4 py-3 text-gray-500 text-xs">
                           {app.created_at

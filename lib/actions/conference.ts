@@ -1,6 +1,6 @@
 "use server";
 
-import { isSuperAdmin, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { isGlobalAdmin, isSuperAdmin, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import {
@@ -8,16 +8,18 @@ import {
   PUBLIC_CONFERENCE_STATUSES,
   type ConferenceStatus,
 } from "@/lib/constants/conference";
+import { loadLaunchReadinessInput } from "@/lib/actions/conference-launch";
+import { computeLaunchReadiness, launchBlockers } from "@/lib/conference/launch-readiness";
+import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
 import type { Database } from "@/lib/database.types";
 
 type ConferenceRow = Database["public"]["Tables"]["conference_instances"]["Row"];
 type ConferenceInsert = Database["public"]["Tables"]["conference_instances"]["Insert"];
 type ConferenceUpdate = Database["public"]["Tables"]["conference_instances"]["Update"];
 
-type ConferenceWithRelations = ConferenceRow & {
-  conference_parameters: Database["public"]["Tables"]["conference_parameters"]["Row"][];
-  conference_products: Database["public"]["Tables"]["conference_products"]["Row"][];
-};
+// Conference rows no longer carry catalog/parameters relations — the v3 entity
+// graph is the catalog, and meeting setup lives on Suite/Day things.
+type ConferenceWithRelations = ConferenceRow;
 
 // ─────────────────────────────────────────────────────────────────
 // Admin: List all conferences
@@ -57,23 +59,12 @@ export async function getConference(id: string): Promise<{
   const adminClient = createAdminClient();
   const { data, error } = await adminClient
     .from("conference_instances")
-    .select("*, conference_parameters(*), conference_products(*)")
+    .select("*")
     .eq("id", id)
     .single();
 
   if (error) return { success: false, error: error.message };
-  const row = data as unknown as ConferenceWithRelations & {
-    conference_parameters?: ConferenceWithRelations["conference_parameters"] | null;
-    conference_products?: ConferenceWithRelations["conference_products"] | null;
-  };
-  return {
-    success: true,
-    data: {
-      ...row,
-      conference_parameters: row.conference_parameters ?? [],
-      conference_products: row.conference_products ?? [],
-    },
-  };
+  return { success: true, data: data as ConferenceWithRelations };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -87,20 +78,36 @@ export async function getPublicConference(
   success: boolean;
   error?: string;
   data?: ConferenceWithRelations;
+  isDraftPreview?: boolean;
 }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
 
-  const { data, error } = await auth.ctx.supabase
+  // Admins/super admins can preview a conference before it's publicly visible,
+  // as can the dedicated test orgs used for pre-launch QA.
+  const canPreviewUnpublished =
+    isGlobalAdmin(auth.ctx.globalRole) || hasDraftPreviewAccess(auth.ctx.activeOrgIds);
+
+  const adminClient = createAdminClient();
+  let query = adminClient
     .from("conference_instances")
-    .select("*, conference_parameters(*), conference_products(*)")
+    .select("*")
     .eq("year", year)
-    .eq("edition_code", edition)
-    .in("status", PUBLIC_CONFERENCE_STATUSES)
-    .single();
+    .eq("edition_code", edition);
+
+  if (!canPreviewUnpublished) {
+    query = query.in("status", PUBLIC_CONFERENCE_STATUSES);
+  }
+
+  const { data, error } = await query.single();
 
   if (error) return { success: false, error: error.message };
-  return { success: true, data: data as unknown as ConferenceWithRelations };
+  const conference = data as unknown as ConferenceWithRelations;
+  const isDraftPreview =
+    canPreviewUnpublished &&
+    !(PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(conference.status);
+
+  return { success: true, data: conference, isDraftPreview };
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -255,49 +262,17 @@ export async function transitionConferenceStatus(
   }
 
   if (currentStatus === "draft" && newStatus === "registration_open") {
-    const setupErrors: string[] = [];
-
-    const [{ data: params }, { data: products }, { data: legalDocs }, { data: confMeta }] =
-      await Promise.all([
-        adminClient
-          .from("conference_parameters")
-          .select("id")
-          .eq("conference_id", id)
-          .maybeSingle(),
-        adminClient
-          .from("conference_products")
-          .select("id")
-          .eq("conference_id", id)
-          .eq("is_active", true),
-        adminClient
-          .from("conference_legal_versions")
-          .select("id")
-          .eq("conference_id", id),
-        adminClient
-          .from("conference_instances")
-          .select("start_date, end_date, registration_open_at, registration_close_at")
-          .eq("id", id)
-          .single(),
-      ]);
-
-    if (!params) setupErrors.push("Conference parameters must be configured first.");
-    if (!products || products.length === 0) {
-      setupErrors.push("At least one active conference product is required.");
+    // Unified gate: the same launch-readiness model the Overview checklist
+    // renders. UI and gate can never disagree (the v1 failure mode).
+    const readinessInput = await loadLaunchReadinessInput(id);
+    if (!readinessInput.success) {
+      return { success: false, error: readinessInput.error };
     }
-    if (!legalDocs || legalDocs.length === 0) {
-      setupErrors.push("At least one legal document version is required.");
-    }
-    if (!confMeta?.start_date || !confMeta?.end_date) {
-      setupErrors.push("Conference start and end dates are required.");
-    }
-    if (!confMeta?.registration_open_at || !confMeta?.registration_close_at) {
-      setupErrors.push("Registration open/close timestamps are required.");
-    }
-
-    if (setupErrors.length > 0) {
+    const readiness = computeLaunchReadiness(readinessInput.data);
+    if (!readiness.canGoOnSale) {
       return {
         success: false,
-        error: `Cannot open registration: ${setupErrors.join(" ")}`,
+        error: `Cannot open registration: ${launchBlockers(readiness).join(" ")}`,
       };
     }
   }
@@ -366,91 +341,10 @@ export async function duplicateConference(
     return { success: false, error: confErr?.message ?? "Failed to create conference" };
   }
 
-  // 3. Copy parameters
-  const { data: params } = await adminClient
-    .from("conference_parameters")
-    .select("*")
-    .eq("conference_id", sourceConferenceId)
-    .maybeSingle();
+  // Meeting suites + cadence are v3 Suite/Day things now (not conference_parameters),
+  // and are rebuilt per conference in the Catalog — nothing to copy here.
 
-  if (params) {
-    await adminClient.from("conference_parameters").insert({
-      conference_id: newConf.id,
-      conference_days: params.conference_days,
-      meeting_slots_per_day: params.meeting_slots_per_day,
-      slot_duration_minutes: params.slot_duration_minutes,
-      slot_buffer_minutes: params.slot_buffer_minutes,
-      meeting_start_time: params.meeting_start_time,
-      meeting_end_time: params.meeting_end_time,
-      flex_time_start: params.flex_time_start,
-      flex_time_end: params.flex_time_end,
-      total_meeting_suites: params.total_meeting_suites,
-      delegate_target_meetings: params.delegate_target_meetings,
-    });
-  }
-
-  // 4. Copy products (reset current_sold to 0)
-  const { data: products } = await adminClient
-    .from("conference_products")
-    .select("*")
-    .eq("conference_id", sourceConferenceId);
-
-  const productIdMap = new Map<string, string>(); // old id → new id
-  if (products && products.length > 0) {
-    for (const p of products) {
-      const { data: newProduct } = await adminClient
-        .from("conference_products")
-        .insert({
-          conference_id: newConf.id,
-          slug: p.slug,
-          name: p.name,
-          description: p.description,
-          price_cents: p.price_cents,
-          currency: p.currency,
-          is_taxable: p.is_taxable,
-          is_tax_exempt: p.is_tax_exempt,
-          capacity: p.capacity,
-          current_sold: 0,
-          max_per_account: p.max_per_account,
-          display_order: p.display_order,
-          is_active: p.is_active,
-          metadata: p.metadata,
-        })
-        .select("id")
-        .single();
-
-      if (newProduct) {
-        productIdMap.set(p.id, newProduct.id);
-      }
-    }
-  }
-
-  // 5. Copy product rules (with updated product_id references)
-  if (products && products.length > 0) {
-    for (const p of products) {
-      const { data: rules } = await adminClient
-        .from("conference_product_rules")
-        .select("*")
-        .eq("product_id", p.id);
-
-      if (rules && rules.length > 0) {
-        const newProductId = productIdMap.get(p.id);
-        if (newProductId) {
-          await adminClient.from("conference_product_rules").insert(
-            rules.map((r) => ({
-              product_id: newProductId,
-              rule_type: r.rule_type,
-              rule_config: r.rule_config,
-              error_message: r.error_message,
-              display_order: r.display_order,
-            }))
-          );
-        }
-      }
-    }
-  }
-
-  // 6. Copy legal versions (new versions, not copies)
+  // 3. Copy legal versions (new versions, not copies)
   const { data: legalVersions } = await adminClient
     .from("conference_legal_versions")
     .select("*")
@@ -469,9 +363,9 @@ export async function duplicateConference(
     );
   }
 
-  // 7. Flag required edits
+  // 5. Flag required edits
   const flaggedEdits = [
-    "Review and update product prices",
+    "Build the v3 catalog (Catalog tab) — things, offers, and pricing",
     "Set new start_date and end_date",
     "Set registration_open_at and registration_close_at",
     "Verify tax_jurisdiction and tax_rate_pct",
@@ -517,47 +411,6 @@ export async function deleteConference(
   return { success: true };
 }
 
-// ─────────────────────────────────────────────────────────────────
-// Admin: Create or update conference parameters
-// ─────────────────────────────────────────────────────────────────
-
-type ParamsInsert = Database["public"]["Tables"]["conference_parameters"]["Insert"];
-type ParamsRow = Database["public"]["Tables"]["conference_parameters"]["Row"];
-
-export async function upsertConferenceParameters(
-  conferenceId: string,
-  input: Omit<ParamsInsert, "id" | "conference_id" | "created_at" | "updated_at">
-): Promise<{ success: boolean; error?: string; data?: ParamsRow }> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
-  const adminClient = createAdminClient();
-
-  // Check if params already exist
-  const { data: existing } = await adminClient
-    .from("conference_parameters")
-    .select("id")
-    .eq("conference_id", conferenceId)
-    .maybeSingle();
-
-  if (existing) {
-    const { data, error } = await adminClient
-      .from("conference_parameters")
-      .update({ ...input, updated_at: new Date().toISOString() })
-      .eq("conference_id", conferenceId)
-      .select()
-      .single();
-
-    if (error) return { success: false, error: error.message };
-    return { success: true, data };
-  }
-
-  const { data, error } = await adminClient
-    .from("conference_parameters")
-    .insert({ ...input, conference_id: conferenceId })
-    .select()
-    .single();
-
-  if (error) return { success: false, error: error.message };
-  return { success: true, data };
-}
+// conference_parameters was retired in the meetings→v3 migration (M0). Meeting
+// suites + per-day cadence now live on Suite/Day things; the scheduler reads the
+// graph. The table is dropped in M4.

@@ -11,8 +11,10 @@ import { clearPolicyCache } from "@/lib/policy/engine";
 import type { PolicySet, PolicyValue } from "@/lib/policy/types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import Ajv from "ajv";
+import addFormats from "ajv-formats";
 
 const ajv = new Ajv({ allErrors: true });
+addFormats(ajv);
 
 const REQUIRED_BILLING_POLICY_DEFAULTS = [
   {
@@ -192,6 +194,101 @@ const REQUIRED_RETENTION_CONSENT_POLICY_DEFAULTS = [
   },
 ] as const;
 
+const REQUIRED_RENEWAL_POLICY_DEFAULTS = [
+  {
+    key: "renewal.cycle_start_month_day",
+    category: "renewals",
+    type: "string",
+    label: "Fiscal Year Start (MM-DD)",
+    description:
+      "The month-day the membership/partnership renewal cycle resets (e.g. \"09-01\"). Every renewal date, reminder countdown, and late-joiner proration cutoff is computed relative to this single value.",
+    value: "09-01",
+    isHighRisk: true,
+    displayOrder: 0,
+  },
+  {
+    key: "renewal.reminder_days",
+    category: "renewals",
+    type: "integer_array",
+    label: "Reminder Schedule (days before cycle start)",
+    description: "How many days before the renewal cycle starts each reminder fires.",
+    value: [30, 14, 7, 0] as number[],
+    isHighRisk: false,
+    displayOrder: 1,
+  },
+  {
+    key: "renewal.dispatch_time",
+    category: "renewals",
+    type: "string",
+    label: "Reminder Send Time",
+    description: "Local time of day renewal reminders are dispatched.",
+    value: "07:00",
+    isHighRisk: false,
+    displayOrder: 2,
+  },
+  {
+    key: "renewal.dispatch_timezone",
+    category: "renewals",
+    type: "string",
+    label: "Reminder Timezone",
+    description: "Timezone used for reminder dispatch time and day-count calculations.",
+    value: "America/Toronto",
+    isHighRisk: false,
+    displayOrder: 3,
+  },
+  {
+    key: "renewal.grace_days",
+    category: "renewals",
+    type: "integer",
+    label: "Grace Period (days)",
+    description: "Days after the cycle starts an unpaid org keeps access before being locked.",
+    value: 30,
+    isHighRisk: true,
+    displayOrder: 4,
+  },
+  {
+    key: "renewal.reactivation_days",
+    category: "renewals",
+    type: "integer",
+    label: "Reactivation Window (days after lock)",
+    description: "Days after being locked an org can still self-reactivate.",
+    value: 330,
+    isHighRisk: true,
+    displayOrder: 5,
+  },
+  {
+    key: "renewal.refund_window_days",
+    category: "renewals",
+    type: "integer",
+    label: "Refund Window (days from charge)",
+    description: "Days from a renewal charge within which a refund can be requested.",
+    value: 30,
+    isHighRisk: false,
+    displayOrder: 6,
+  },
+  {
+    key: "renewal.access_lock_mode",
+    category: "renewals",
+    type: "string",
+    label: "Access Lock Mode",
+    description: "How access is restricted once an org is locked for non-payment.",
+    value: "full_lock",
+    isHighRisk: true,
+    displayOrder: 7,
+  },
+  {
+    key: "renewal.pre_renewal_skip_stub_days",
+    category: "renewals",
+    type: "integer",
+    label: "Pre-Renewal Stub Skip Window (days)",
+    description:
+      "Within this many days of the next cycle start, an org with no outstanding unpaid prior cycle isn't billed a prorated stub for the dying cycle's last few days — they're just signed up starting with the upcoming full cycle.",
+    value: 90,
+    isHighRisk: false,
+    displayOrder: 8,
+  },
+] as const;
+
 const REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS = [
   {
     key: "conference.travel_arrival_min_days_before_start",
@@ -260,6 +357,7 @@ type TravelWindowPolicySeed =
   (typeof REQUIRED_TRAVEL_WINDOW_POLICY_DEFAULTS)[number];
 type IntegrationPolicySeed =
   (typeof REQUIRED_INTEGRATION_POLICY_DEFAULTS)[number];
+type RenewalPolicySeed = (typeof REQUIRED_RENEWAL_POLICY_DEFAULTS)[number];
 
 async function ensureRequiredBillingPolicies(
   supabase: SupabaseClient<Database>,
@@ -365,6 +463,62 @@ async function ensureRequiredRetentionConsentPolicies(
     return {
       success: false,
       error: `Failed to seed retention/consent keys: ${insertError.message}`,
+    };
+  }
+
+  return { success: true, insertedCount: missing.length };
+}
+
+async function ensureRequiredRenewalPolicies(
+  supabase: SupabaseClient<Database>,
+  policySetId: string
+): Promise<{ success: boolean; error?: string; insertedCount?: number }> {
+  const keys = REQUIRED_RENEWAL_POLICY_DEFAULTS.map((item) => item.key);
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("policy_values")
+    .select("key")
+    .eq("policy_set_id", policySetId)
+    .in("key", keys);
+
+  if (existingRowsError) {
+    return {
+      success: false,
+      error: `Failed to inspect renewal keys for policy set ${policySetId}: ${existingRowsError.message}`,
+    };
+  }
+
+  const existingKeys = new Set((existingRows ?? []).map((row) => row.key));
+  const missing = REQUIRED_RENEWAL_POLICY_DEFAULTS.filter(
+    (item) => !existingKeys.has(item.key)
+  );
+
+  if (missing.length === 0) {
+    return { success: true, insertedCount: 0 };
+  }
+
+  const rowsToInsert: Database["public"]["Tables"]["policy_values"]["Insert"][] =
+    missing.map((item: RenewalPolicySeed) => ({
+      policy_set_id: policySetId,
+      key: item.key,
+      category: item.category,
+      label: item.label,
+      description: item.description,
+      type: item.type,
+      value_json:
+        item.value as Database["public"]["Tables"]["policy_values"]["Insert"]["value_json"],
+      validation_schema: null,
+      is_high_risk: item.isHighRisk,
+      display_order: item.displayOrder,
+    }));
+
+  const { error: insertError } = await supabase
+    .from("policy_values")
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    return {
+      success: false,
+      error: `Failed to seed renewal keys: ${insertError.message}`,
     };
   }
 
@@ -704,6 +858,19 @@ export async function createPolicyDraft(
       },
     });
     return { success: false, error: retentionSeedResult.error };
+  }
+
+  const renewalSeedResult = await ensureRequiredRenewalPolicies(supabase, newDraft.id);
+  if (!renewalSeedResult.success) {
+    await supabase.from("policy_sets").delete().eq("id", newDraft.id);
+    await logPolicyAudit({
+      action: "policy_draft_create",
+      actorId: auth.userId,
+      entityId: newDraft.id,
+      success: false,
+      details: { reason: "renewal_seed_failed", error: renewalSeedResult.error ?? null },
+    });
+    return { success: false, error: renewalSeedResult.error };
   }
 
   const integrationSeedResult = await ensureRequiredIntegrationPolicies(

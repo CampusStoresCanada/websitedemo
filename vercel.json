@@ -17,6 +17,10 @@
       "schedule": "0 * * * *"
     },
     {
+      "path": "/api/cron/expire-pending-conference-orders",
+      "schedule": "0 * * * *"
+    },
+    {
       "path": "/api/cron/circle-sync",
       "schedule": "*/5 * * * *"
     },

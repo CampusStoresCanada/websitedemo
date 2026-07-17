@@ -9,12 +9,13 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   REGISTRATION_STATUS_TRANSITIONS,
+  audienceRolesForRegistrationType,
   type RegistrationStatus,
   type RegistrationType,
 } from "@/lib/constants/conference";
 import { ensurePersonForUser, upsertConferenceContact } from "@/lib/identity/lifecycle";
 import { getEffectivePolicies } from "@/lib/policy/engine";
-import { checkLegalAcceptance } from "@/lib/actions/conference-legal";
+import { checkLegalAcceptance, getHeldEntityIds } from "@/lib/actions/conference-legal";
 import { syncConferencePeopleIndex } from "@/lib/actions/conference-people";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import {
@@ -433,19 +434,11 @@ async function evaluateTravelPolicyForRegistration(params: {
   ) {
     registrationProductIds.unshift(customAnswers.registration_primary_product_id);
   }
+  // The old product catalog was retired in the v3 cutover; registration no longer
+  // resolves product slugs (registration_product_ids is always empty now), so the
+  // product-keyed rule branches below are structurally inert.
   const uniqueRegistrationProductIds = Array.from(new Set(registrationProductIds));
   const productSlugById = new Map<string, string>();
-  if (uniqueRegistrationProductIds.length > 0) {
-    const { data: selectedProducts } = await adminClient
-      .from("conference_products")
-      .select("id, slug")
-      .in("id", uniqueRegistrationProductIds);
-    for (const row of selectedProducts ?? []) {
-      if (typeof row.id === "string" && typeof row.slug === "string") {
-        productSlugById.set(row.id, row.slug);
-      }
-    }
-  }
 
   const rawRuleEntries = Object.entries(rawRuleMap);
   const ruleEntries =
@@ -1146,7 +1139,11 @@ export async function submitRegistration(
     }
   }
 
-  const legalCheck = await checkLegalAcceptance(auth.ctx.userId, reg.conference_id);
+  const heldEntityIds = await getHeldEntityIds(reg.conference_id, reg.user_id);
+  const legalCheck = await checkLegalAcceptance(auth.ctx.userId, reg.conference_id, {
+    audienceSourceRoles: audienceRolesForRegistrationType(reg.registration_type as RegistrationType),
+    heldEntityIds,
+  });
   if (!legalCheck.success) {
     return { success: false, error: legalCheck.error ?? "Failed to verify legal acceptance" };
   }

@@ -842,9 +842,10 @@ export default function RegistrationOptionForm({
                 <p className="text-sm font-medium text-gray-900">{doc.document_type}</p>
                 {acceptedLegalIds.has(doc.id) ? <span className="text-xs font-medium text-green-700">Accepted</span> : null}
               </div>
-              <div className="max-h-24 overflow-y-auto text-xs text-gray-600 whitespace-pre-wrap">
-                {doc.content}
-              </div>
+              <div
+                className="max-h-24 overflow-y-auto text-xs text-gray-600 prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: doc.content }}
+              />
               {!acceptedLegalIds.has(doc.id) ? (
                 <button
                   type="button"

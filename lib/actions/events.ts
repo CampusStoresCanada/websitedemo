@@ -184,6 +184,7 @@ export async function createEvent(
       metadata: (payload.metadata ?? {}) as import("@/lib/database.types").Json,
       status: "draft",
       created_by: auth.ctx.userId,
+      conference_entity_id: payload.conference_entity_id ?? null,
     })
     .select()
     .single();

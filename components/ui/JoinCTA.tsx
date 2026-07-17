@@ -8,7 +8,7 @@ interface JoinCTAProps {
   message?: string;
   /** CTA button text. Defaults to "Join CSC" or "Sign In" based on auth. */
   ctaText?: string;
-  /** Link destination. Defaults to "/login" or "/signup" based on auth. */
+  /** Link destination. Defaults to "/login" or "/membership" based on auth. */
   ctaLink?: string;
   /** Compact mode for inline usage within tables/cards */
   compact?: boolean;
@@ -31,7 +31,7 @@ export default function JoinCTA({
     : "Sign in to view full details";
 
   const defaultCtaText = user ? "Join CSC" : "Sign In";
-  const defaultCtaLink = user ? "/signup" : "/login";
+  const defaultCtaLink = user ? "/membership" : "/login";
 
   const resolvedMessage = message ?? defaultMessage;
   const resolvedCtaText = ctaText ?? defaultCtaText;

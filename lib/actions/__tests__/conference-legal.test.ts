@@ -25,6 +25,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 import {
   checkLegalAcceptance,
   getLegalAcceptanceStats,
+  updateLegalVersion,
 } from "../conference-legal";
 
 function fakeClientForAcceptanceCheck() {
@@ -110,9 +111,95 @@ function fakeClientForStats() {
   };
 }
 
+function fakeClientForUpdate(status: string, updateSpy?: () => void) {
+  const updatedRow = {
+    id: "v1",
+    conference_id: "conf-1",
+    document_type: "privacy_notice",
+    version: 1,
+    content: "<p>updated</p>",
+    effective_at: "2027-01-01T00:00:00Z",
+  };
+  return {
+    from: (table: string) => {
+      if (table === "conference_legal_versions") {
+        return {
+          // read: .select("conference_id").eq("id", ...).maybeSingle()
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => ({ data: { conference_id: "conf-1" }, error: null }),
+            }),
+          }),
+          // write: .update({...}).eq("id", ...).select().single()
+          update: () => {
+            updateSpy?.();
+            return {
+              eq: () => ({
+                select: () => ({
+                  single: () => ({ data: updatedRow, error: null }),
+                }),
+              }),
+            };
+          },
+        };
+      }
+      if (table === "conference_instances") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: () => ({ data: { status }, error: null }),
+            }),
+          }),
+        };
+      }
+      throw new Error(`Unexpected table: ${table}`);
+    },
+  };
+}
+
 describe("conference legal actions", () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("updateLegalVersion blocks in-place edits once the conference is on sale", async () => {
+    requireAdminMock.mockResolvedValue({
+      ok: true,
+      ctx: { userId: "admin-1", globalRole: "admin" },
+    });
+    const updateSpy = vi.fn();
+    createAdminClientMock.mockReturnValue(fakeClientForUpdate("registration_open", updateSpy));
+
+    const result = await updateLegalVersion("v1", {
+      document_type: "privacy_notice",
+      version: 1,
+      content: "<p>updated</p>",
+      effective_at: "2027-01-01T00:00:00Z",
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/on sale/i);
+    expect(updateSpy).not.toHaveBeenCalled();
+  });
+
+  it("updateLegalVersion allows in-place edits while the conference is a draft", async () => {
+    requireAdminMock.mockResolvedValue({
+      ok: true,
+      ctx: { userId: "admin-1", globalRole: "admin" },
+    });
+    const updateSpy = vi.fn();
+    createAdminClientMock.mockReturnValue(fakeClientForUpdate("draft", updateSpy));
+
+    const result = await updateLegalVersion("v1", {
+      document_type: "privacy_notice",
+      version: 1,
+      content: "<p>updated</p>",
+      effective_at: "2027-01-01T00:00:00Z",
+    });
+
+    expect(result.success).toBe(true);
+    expect(updateSpy).toHaveBeenCalledTimes(1);
+    expect(result.data?.content).toBe("<p>updated</p>");
   });
 
   it("checkLegalAcceptance reports missing latest required document types", async () => {

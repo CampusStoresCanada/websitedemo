@@ -145,3 +145,87 @@ export function resolveMeetingGeometryFromModulesConfig(
     suiteOrgAssignmentsBySuiteNumber,
   };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// v3: meeting geometry from the entity graph — per-Day cadence + Suite things,
+// replacing the schedule_modules config. Same MeetingGeometryResolution shape so
+// every downstream consumer (scheduler, program) is unchanged.
+// ─────────────────────────────────────────────────────────────────
+
+export interface MeetingDayEntityInput {
+  /** The day's calendar date (YYYY-MM-DD). */
+  date: string;
+  /** The day entity's attributes (cadence lives here when it's a meeting day). */
+  attributes: Record<string, unknown>;
+}
+
+export interface MeetingSuiteEntityInput {
+  /** The suite entity's attributes (suite_number, organization_id). */
+  attributes: Record<string, unknown>;
+}
+
+/** A Day thing is a meeting day if flagged, or if it carries any meeting cadence. */
+function isMeetingDayAttributes(a: Record<string, unknown>): boolean {
+  if (a.is_meeting_day === true || a.is_meeting_day === "true") return true;
+  return (
+    a.meeting_start_time != null ||
+    a.meeting_end_time != null ||
+    a.meeting_count != null ||
+    a.meeting_slots_per_day != null
+  );
+}
+
+export function resolveMeetingGeometryFromEntities(
+  days: MeetingDayEntityInput[],
+  suites: MeetingSuiteEntityInput[]
+): MeetingGeometryResolution {
+  const flagged = days.filter(
+    (d) => typeof d.date === "string" && d.date.length > 0 && isMeetingDayAttributes(d.attributes)
+  );
+  const byDate = new Map(flagged.map((d) => [d.date, d.attributes]));
+  const sortedDates = [...new Set(flagged.map((d) => d.date))].sort();
+
+  const dayConfigs = sortedDates
+    .map((date, index) => {
+      const a = byDate.get(date) ?? {};
+      const slotDurationMinutes = normalizePositiveInt(a.slot_duration_minutes, 15);
+      const bufferMinutes = normalizeNonNegativeInt(a.meeting_buffer_minutes ?? a.buffer_minutes, 0);
+      const startTime = normalizeTimeValue(a.meeting_start_time, "09:00:00");
+      const endTime = normalizeTimeValue(a.meeting_end_time, "17:00:00");
+      const configuredCount = normalizePositiveInt(a.meeting_count ?? a.meeting_slots_per_day, 0);
+      const derivedCountFromWindow = deriveMeetingCountFromWindow(
+        startTime,
+        endTime,
+        slotDurationMinutes,
+        bufferMinutes
+      );
+      const meetingCount = Math.max(configuredCount, derivedCountFromWindow);
+      if (meetingCount <= 0) return null;
+      return {
+        date,
+        dayNumber: index + 1,
+        meetingCount,
+        slotDurationMinutes,
+        bufferMinutes,
+        startTime,
+        endTime,
+      } satisfies MeetingDayGeometry;
+    })
+    .filter(Boolean) as MeetingDayGeometry[];
+
+  const suiteOrgAssignmentsBySuiteNumber: Record<string, string> = {};
+  suites.forEach((s, index) => {
+    const rawNumber = s.attributes.suite_number;
+    const suiteNumber = normalizePositiveInt(rawNumber, index + 1);
+    const org =
+      typeof s.attributes.organization_id === "string" ? s.attributes.organization_id.trim() : "";
+    if (org) suiteOrgAssignmentsBySuiteNumber[String(suiteNumber)] = org;
+  });
+
+  return {
+    meetingDays: dayConfigs.map((d) => d.date),
+    dayConfigs,
+    suitesTarget: suites.length,
+    suiteOrgAssignmentsBySuiteNumber,
+  };
+}

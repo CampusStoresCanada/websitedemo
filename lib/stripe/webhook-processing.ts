@@ -1,6 +1,11 @@
 import Stripe from "stripe";
 import { parseUTC } from "@/lib/utils";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
+// Relative import: vitest has no @/ alias resolver for real (non-mocked)
+// runtime imports — see project notes on the test setup.
+import { activateMembershipRenewal, computeNewExpiresAt } from "../membership/renewal-activation";
+import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
+import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import { enqueueQBExport } from "@/lib/quickbooks/export";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -261,6 +266,107 @@ async function processEventTicketBulkPurchase(
   );
 }
 
+/**
+ * A non-member Day Pass buyer has no org or person record yet — mint one
+ * directly instead of routing through a review step (unlike a booth, a day
+ * pass doesn't make them a CSC member, so there's nothing for the board to
+ * approve). Errors are logged, not thrown: the payment already succeeded and
+ * the pending row stays "paid" so an admin can reconcile manually if minting
+ * fails partway.
+ */
+async function mintProspectiveRegistration(
+  db: AdminClient,
+  row: {
+    id: string;
+    email: string;
+    first_name: string;
+    last_name: string;
+    organization_name: string;
+    job_title: string | null;
+    phone: string | null;
+    dietary_restrictions: string | null;
+    conference_id: string;
+    offer_entity_id: string;
+    amount_cents: number;
+  }
+): Promise<void> {
+  const slugBase = row.organization_name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
+  const { data: existingSlug } = await db.from("organizations").select("id").eq("slug", slugBase).maybeSingle();
+  const slug = existingSlug ? `${slugBase}-${Date.now()}` : slugBase;
+
+  const orgId = crypto.randomUUID();
+  const { error: orgError } = await db.from("organizations").insert({
+    id: orgId,
+    name: row.organization_name,
+    slug,
+    type: "Non-Member",
+    email: row.email,
+    phone: row.phone,
+    tenant_id: "29300837-1d49-45b4-bd09-1c4525c409d1",
+    updated_at: new Date().toISOString(),
+  });
+  if (orgError) {
+    console.error(`mintProspectiveRegistration: failed to create org for payment ${row.id}: ${orgError.message}`);
+    return;
+  }
+
+  const { data: person, error: personError } = await db
+    .from("conference_people")
+    .insert({
+      conference_id: row.conference_id,
+      organization_id: orgId,
+      person_kind: "delegate",
+      source_type: "manual",
+      source_id: crypto.randomUUID(),
+      display_name: `${row.first_name} ${row.last_name}`.trim(),
+      contact_email: row.email,
+      mobile_phone: row.phone,
+      role_title: row.job_title,
+      dietary_restrictions: row.dietary_restrictions,
+      assignment_status: "assigned",
+      assigned_at: new Date().toISOString(),
+      admin_notes: "Self-registered via public non-member Day Pass checkout.",
+    })
+    .select("id")
+    .single();
+  if (personError || !person) {
+    console.error(`mintProspectiveRegistration: failed to create person for payment ${row.id}: ${personError?.message}`);
+    return;
+  }
+
+  const { data: purchaseId, error: mintError } = await db.rpc("mint_prospective_registration_purchase", {
+    p_conference_id: row.conference_id,
+    p_organization_id: orgId,
+    p_registration_entity_id: row.offer_entity_id,
+    p_price_cents: row.amount_cents,
+    p_buyer: row.email,
+  });
+  if (mintError || !purchaseId) {
+    console.error(`mintProspectiveRegistration: mint failed for payment ${row.id}: ${mintError?.message}`);
+    return;
+  }
+
+  // Solo registrant holds every seat their own purchase created.
+  const { data: balances } = await db.from("entity_balances").select("id").eq("purchase_id", purchaseId);
+  const balanceIds = (balances ?? []).map((b) => b.id);
+  if (balanceIds.length > 0) {
+    await db.from("entity_balance_seats").update({ holder_person_id: person.id }).in("balance_id", balanceIds);
+  }
+
+  await db
+    .from("prospective_registration_payments")
+    .update({
+      organization_id: orgId,
+      conference_person_id: person.id,
+      status: "minted",
+      minted_at: new Date().toISOString(),
+    })
+    .eq("id", row.id);
+}
+
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   raw: Record<string, unknown>,
@@ -296,6 +402,77 @@ async function handleCheckoutSessionCompleted(
     const conferenceId = session.metadata?.conference_id;
     const orgId = session.metadata?.organization_id;
     const userId = session.metadata?.user_id;
+
+    if (conferenceId && orgId) {
+      await mintRegistrationAttendeesFromOrder(db, conferenceOrderId, conferenceId, orgId);
+    }
+
+    // If this order bundled a membership-renewal line, advance the org's
+    // membership_expires_at through the same shared helper the invoice path
+    // uses. Recomputed from the org's CURRENT expiry at payment time (not
+    // whatever was true at checkout-session creation) since Stripe sessions
+    // can take time to complete. Logged, not thrown, on failure — the
+    // payment already succeeded and the order is already marked paid.
+    if (orgId) {
+      const { data: orderItems } = await db
+        .from("conference_order_items")
+        .select("offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
+        .eq("order_id", conferenceOrderId)
+        .not("offer_entity_id", "is", null);
+      const hasMembershipLine = (orderItems ?? []).some(
+        (item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer)?.kind === "membership_renewal"
+      );
+
+      if (hasMembershipLine) {
+        const [{ data: org }, { data: conference }] = await Promise.all([
+          db.from("organizations").select("membership_expires_at").eq("id", orgId).single(),
+          conferenceId
+            ? db.from("conference_instances").select("end_date").eq("id", conferenceId).maybeSingle()
+            : Promise.resolve({ data: null }),
+        ]);
+        // mustCoverThrough: a booth bought well ahead of a conference can
+        // need more than one fiscal-year extension to actually reach it —
+        // without this, the renewal wouldn't satisfy the gate that prompted it.
+        const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
+          org?.membership_expires_at ?? null,
+          conference?.end_date ?? null
+        );
+        const result = await activateMembershipRenewal({
+          organizationId: orgId,
+          newExpiresAt: billingPeriodEnd,
+          billingPeriodStart,
+          triggeredBy: "conference_checkout",
+          idempotencyKey: `conference_order:${conferenceOrderId}`,
+          invoiceId: null,
+          metadata: { conference_order_id: conferenceOrderId },
+        });
+        if (!result.success) {
+          console.error(
+            `checkout.session.completed: membership renewal activation failed for order ${conferenceOrderId}: ${result.error}`
+          );
+        }
+      }
+
+      // Each booth purchased at a sponsor tier's self-serve price (Bronze/
+      // Connected) gets a draft sponsor agreement auto-created so it lands in
+      // the admin sponsorship queue instead of relying on someone noticing
+      // the sale. An order can contain more than one booth (an org can hold
+      // multiple), so every booth line needs its own call, not just the first.
+      const boothItems = (orderItems ?? [])
+        .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
+        .filter((offer) => offer?.kind === "booth");
+      for (const boothItem of boothItems) {
+        if (boothItem?.id && boothItem.price_cents != null) {
+          await createSponsorAgreementFromBoothPurchase({
+            organizationId: orgId,
+            boothEntityId: boothItem.id,
+            boothEntityName: boothItem.name,
+            boothPriceCents: boothItem.price_cents,
+          });
+        }
+      }
+    }
+
     if (conferenceId && orgId && userId) {
       const { error: cartClearError } = await db
         .from("cart_items")
@@ -312,6 +489,41 @@ async function handleCheckoutSessionCompleted(
     }
 
     return { conferenceOrderId };
+  }
+
+  // Prospective booth payment — no org/user exists yet (that's the whole
+  // point of "pay first, apply second"). Just mark the holding record paid;
+  // the actual booth mints later, at approveApplication() time, once an org
+  // exists to own it (see lib/actions/applications.ts).
+  if (checkoutKind === "prospective_booth") {
+    const { error } = await db
+      .from("prospective_booth_payments")
+      .update({ status: "paid", paid_at: new Date().toISOString() })
+      .eq("stripe_checkout_session_id", session.id)
+      .eq("status", "pending");
+    if (error) {
+      console.error(`checkout.session.completed: failed to mark prospective booth payment paid (session ${session.id}): ${error.message}`);
+    }
+    return { conferenceOrderId: null };
+  }
+
+  // Prospective (non-member) Day Pass registration — no board approval
+  // needed, so mint access immediately rather than waiting on a review step.
+  if (checkoutKind === "prospective_registration") {
+    const { data: row, error: markPaidError } = await db
+      .from("prospective_registration_payments")
+      .update({ status: "paid", paid_at: new Date().toISOString() })
+      .eq("stripe_checkout_session_id", session.id)
+      .eq("status", "pending")
+      .select("*")
+      .maybeSingle();
+    if (markPaidError) {
+      console.error(`checkout.session.completed: failed to mark prospective registration paid (session ${session.id}): ${markPaidError.message}`);
+    }
+    if (row) {
+      await mintProspectiveRegistration(db, row);
+    }
+    return { conferenceOrderId: null };
   }
 
   const orgId = session.metadata?.org_id;
@@ -363,13 +575,20 @@ async function handleInvoicePaid(
   raw: Record<string, unknown>,
   db: AdminClient
 ) {
-  const orgId = stripeInvoice.metadata?.org_id;
+  const metadataOrgId = stripeInvoice.metadata?.org_id;
+
+  let updatedInvoice: {
+    id: string;
+    organization_id: string | null;
+    billing_period_start: string | null;
+    billing_period_end: string | null;
+  } | null = null;
 
   if (stripeInvoice.id) {
     const chargeId = extractStringField(raw, "charge");
     const paymentIntentId = extractStringField(raw, "payment_intent");
 
-    const { data: updatedInvoice } = await db
+    const { data } = await db
       .from("invoices")
       .update({
         status: "paid",
@@ -380,30 +599,66 @@ async function handleInvoicePaid(
         updated_at: new Date().toISOString(),
       })
       .eq("stripe_invoice_id", stripeInvoice.id)
-      .select("id")
+      .select("id, organization_id, billing_period_start, billing_period_end")
       .single();
+
+    updatedInvoice = data;
 
     if (updatedInvoice?.id) {
       await enqueueQBExport(updatedInvoice.id);
     }
   }
 
-  if (orgId) {
-    const { data: org } = await db
-      .from("organizations")
-      .select("membership_status")
-      .eq("id", orgId)
-      .single();
+  // Prefer the DB foreign key over Stripe metadata as the source of truth;
+  // fall back to metadata for invoices this webhook can't match locally.
+  const orgId = updatedInvoice?.organization_id ?? metadataOrgId ?? null;
+  if (
+    updatedInvoice?.organization_id &&
+    metadataOrgId &&
+    updatedInvoice.organization_id !== metadataOrgId
+  ) {
+    console.warn(
+      `invoice.paid: org mismatch for invoice ${stripeInvoice.id} — local invoice says ${updatedInvoice.organization_id}, Stripe metadata says ${metadataOrgId}`
+    );
+  }
 
-    if (org?.membership_status === "grace") {
-      await transitionMembershipState(
-        orgId,
-        "active",
-        "stripe_webhook",
-        null,
-        "Renewal payment received"
-      );
+  if (!orgId) return;
+
+  // Invoices created by createMembershipInvoice/createPartnershipInvoice
+  // always set billing_period_start/end — when present, advance the org's
+  // membership_expires_at through the shared activation helper (this is the
+  // actual fix: previously this webhook only flipped status, never expiry).
+  if (updatedInvoice?.billing_period_end) {
+    const result = await activateMembershipRenewal({
+      organizationId: orgId,
+      newExpiresAt: updatedInvoice.billing_period_end,
+      billingPeriodStart: updatedInvoice.billing_period_start ?? updatedInvoice.billing_period_end,
+      triggeredBy: "stripe_webhook",
+      idempotencyKey: stripeInvoice.id,
+      invoiceId: updatedInvoice.id,
+    });
+    if (!result.success) {
+      console.error(`invoice.paid: membership activation failed for org ${orgId}: ${result.error}`);
     }
+    return;
+  }
+
+  // No billing period on this invoice (created outside the normal renewal
+  // flow) — preserve exactly today's behavior rather than guessing a date.
+  const { data: org } = await db
+    .from("organizations")
+    .select("membership_status")
+    .eq("id", orgId)
+    .single();
+
+  if (org?.membership_status === "grace") {
+    await transitionMembershipState(
+      orgId,
+      "active",
+      "stripe_webhook",
+      null,
+      "Renewal payment received"
+    );
   }
 }
 

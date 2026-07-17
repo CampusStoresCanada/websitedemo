@@ -25,11 +25,14 @@ const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
   ];
 
 const TEST_ACCOUNTS = [
-  { email: "google@campusstores.ca", password: "Mkpspxw8BA!vb3T", label: "Super Admin (Steve)" },
+  { email: "google@campusstores.ca", password: "Bl00p!Bl00p!", label: "Super Admin (Steve)" },
   { email: "daviess@algonquincollege.com", password: "CSCBoard2026!", label: "Admin (Shawn)" },
   { email: "adam.hustwitt@nscc.ca", password: "CSCMember2026!", label: "Org Admin — Member" },
   { email: "maria.sucher@vitalsource.com", password: "CSCMember2026!", label: "Org Admin — Partner (VitalSource)" },
   { email: "acain01@uoguelph.ca", password: "CSCUser2026!", label: "Member User" },
+  { email: "test.public.tier@example.com", password: "CSCTestPublic2026!", label: "Test Org — Public Tier (Non-Member)" },
+  { email: "test.partner@example.com", password: "CSCTestPartner2026!", label: "Test Org — Partner" },
+  { email: "test.member@example.com", password: "CSCTestMember2026!", label: "Test Org — Member" },
 ];
 
 export default function DevPanel() {

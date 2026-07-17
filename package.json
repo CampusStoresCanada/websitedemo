@@ -10,7 +10,9 @@
     "test": "vitest run",
     "test:actions": "vitest run lib/actions/__tests__",
     "test:scheduler": "vitest run lib/scheduler/__tests__",
-    "test:commerce": "vitest run lib/conference-commerce/__tests__",
+    "check:entities-live": "node scripts/conference-entities-live-check.mjs",
+    "check:entity-commerce-live": "node scripts/conference-entity-commerce-live-check.mjs",
+    "check:checkout-v3-live": "node scripts/conference-checkout-v3-live-check.mjs",
     "check:swaps-live": "node scripts/swaps-live-check.mjs",
     "check:swaps-live:dev": "SWAPS_LIVE_ALLOW_TEMP_ACTIVE_FIXTURE=true node scripts/swaps-live-check.mjs",
     "sync:about-people": "node scripts/sync-about-people.mjs"
@@ -37,6 +39,7 @@
     "@zxing/browser": "^0.1.5",
     "@zxing/library": "^0.21.3",
     "ajv": "^8.18.0",
+    "ajv-formats": "^3.0.1",
     "clsx": "^2.1.1",
     "emoji-mart": "^5.6.0",
     "googleapis": "^171.4.0",

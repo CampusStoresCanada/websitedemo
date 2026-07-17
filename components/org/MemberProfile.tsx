@@ -23,19 +23,27 @@ import ContactEditModal from "./ContactEditModal";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToolkit } from "@/components/ui/Toolkit";
-import {
-  assignConferenceEntitlement,
-  unassignConferenceEntitlementWithDisposition,
-} from "@/lib/actions/conference-people";
+import { allocateSeat, deallocateSeat, addConferenceAttendee } from "@/lib/actions/conference-entity-commerce";
+import { addOfferToCart } from "@/lib/actions/conference-commerce";
+import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
+import { formatCents } from "@/lib/utils";
+import OfferCard from "@/components/conference/OfferCard";
+import type { AssignableEntityColumn } from "@/app/org/[slug]/page";
+import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { updateOrgProfileVisibilitySettings, setContactHidden } from "@/lib/actions/user-management";
 import { fieldProps } from "@/lib/editable-fields";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 
 interface SponsorTierInfo {
   name: string; slug: string; color: string; icon: TierIcon | null;
 }
+
+type OrgConferencePersonInfo = {
+  personId: string;
+  badgeStatus: string;
+  checkedInAt: string | null;
+};
 
 interface MemberProfileProps {
   organization: VisibleOrganization;
@@ -61,8 +69,6 @@ interface MemberProfileProps {
     contactEmail: string | null;
     userId: string | null;
     assignmentStatus: string;
-    entitlementId: string | null;
-    entitlementType: string | null;
     badgeStatus: string;
     checkedInAt: string | null;
   }>;
@@ -72,6 +78,13 @@ interface MemberProfileProps {
     email: string | null;
     role: string;
   }>;
+  assignableEntities: AssignableEntityColumn[];
+  buyableExtras: ConferenceOffer[];
+  currentConferenceId: string | null;
+  /** Whether currentConferenceId is actually public-facing (not a draft) — computed
+   *  server-side from the conference itself, not from conferenceAttendance (which can be
+   *  empty for an org that holds seats but hasn't assigned anyone yet). */
+  currentConferenceIsPublic: boolean;
   initialRFPs?: RFPWithContext[];
   memberSuppliers?: SupplierData | null;
 }
@@ -85,6 +98,10 @@ export default function MemberProfile({
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
+  assignableEntities,
+  buyableExtras,
+  currentConferenceId,
+  currentConferenceIsPublic,
   sponsorTier,
   initialRFPs = [],
   memberSuppliers = null,
@@ -284,141 +301,41 @@ export default function MemberProfile({
     );
   };
 
-  const currentConference = useMemo(() => {
-    const allRows = conferenceAttendance.map((row) => ({
-      conferenceId: row.conferenceId,
-      conferenceName: row.conferenceName,
-      conferenceYear: row.conferenceYear,
-      conferenceEditionCode: row.conferenceEditionCode,
-      conferenceStartDate: row.conferenceStartDate,
-      sourceType: row.sourceType,
-      assignmentStatus: row.assignmentStatus,
-      userId: row.userId,
-      entitlementId: row.entitlementId ?? row.sourceId,
-      entitlementType: row.entitlementType ?? "delegate",
-      contactEmail: row.contactEmail,
-      displayName: row.displayName,
-    }));
-
-    const startByConferenceId = new Map<string, number>();
-    for (const row of allRows) {
-      if (!row.conferenceStartDate) continue;
-      const start = new Date(row.conferenceStartDate).getTime();
-      if (!Number.isFinite(start)) continue;
-      if (!startByConferenceId.has(row.conferenceId)) {
-        startByConferenceId.set(row.conferenceId, start);
-      }
-    }
-
-    const conferenceIds = Array.from(new Set(allRows.map((row) => row.conferenceId)));
-    const now = Date.now();
-    const upcoming = conferenceIds
-      .map((id) => ({ id, start: startByConferenceId.get(id) }))
-      .filter((entry): entry is { id: string; start: number } => Number.isFinite(entry.start))
-      .filter((entry) => entry.start >= now)
-      .sort((a, b) => a.start - b.start);
-    const latestPast = conferenceIds
-      .map((id) => ({ id, start: startByConferenceId.get(id) }))
-      .filter((entry): entry is { id: string; start: number } => Number.isFinite(entry.start))
-      .filter((entry) => entry.start < now)
-      .sort((a, b) => b.start - a.start);
-    const conferenceId = upcoming[0]?.id ?? latestPast[0]?.id ?? conferenceIds[0] ?? "";
-    const conferenceRows = allRows.filter((row) => row.conferenceId === conferenceId);
-
-    const entitlementRows = conferenceRows
-      .filter((row) => row.sourceType === "entitlement")
-      .map((row) => ({
-        conferenceId: row.conferenceId,
-        conferenceName: row.conferenceName,
-        conferenceYear: row.conferenceYear,
-        conferenceEditionCode: row.conferenceEditionCode,
-        conferenceStartDate: row.conferenceStartDate,
-        entitlementId: row.entitlementId,
-        entitlementType: row.entitlementType ?? "delegate",
-        contactEmail: row.contactEmail,
-        displayName: row.displayName,
-        assignmentStatus: row.assignmentStatus,
-        userId: row.userId,
-      }))
-      .filter((row) => Boolean(row.entitlementId));
-
-    const registrationAssignedUserIds = new Set(
-      conferenceRows
-        .filter((row) => row.sourceType === "registration" && row.userId && row.assignmentStatus !== "canceled")
-        .map((row) => row.userId)
-    );
-    const registrationAssignedByEmail = new Set(
-      conferenceRows
-        .filter((row) => row.sourceType === "registration" && row.assignmentStatus !== "canceled")
-        .map((row) => normalize(row.contactEmail))
-        .filter((value) => Boolean(value))
-    );
-    const registrationAssignedByName = new Set(
-      conferenceRows
-        .filter((row) => row.sourceType === "registration" && row.assignmentStatus !== "canceled")
-        .map((row) => normalize(row.displayName))
-        .filter((value) => Boolean(value))
-    );
-
-    if (conferenceRows.length === 0) {
-      return {
-        conferenceId: "",
-        label: "No conference entitlements",
-        assignedByUserId: new Map<string, { entitlementId: string; entitlementType: string }>(),
-        assignedByEmail: new Map<string, { entitlementId: string; entitlementType: string }>(),
-        assignedByName: new Map<string, { entitlementId: string; entitlementType: string }>(),
-        registrationAssignedUserIds: new Set<string>(),
-        registrationAssignedByEmail: new Set<string>(),
-        registrationAssignedByName: new Set<string>(),
-        freeEntitlements: [] as Array<{ entitlementId: string; entitlementType: string }>,
-        totalSeats: 0,
-      };
-    }
-    const info = conferenceRows[0];
-
-    const assignedByUserId = new Map<string, { entitlementId: string; entitlementType: string }>();
-    const assignedByEmail = new Map<string, { entitlementId: string; entitlementType: string }>();
-    const assignedByName = new Map<string, { entitlementId: string; entitlementType: string }>();
-    const freeEntitlements: Array<{ entitlementId: string; entitlementType: string }> = [];
-    for (const row of entitlementRows) {
-      const entitlement = {
-        entitlementId: row.entitlementId as string,
-        entitlementType: row.entitlementType,
-      };
-      const hasAssignee = Boolean(row.userId || row.contactEmail || row.displayName) && row.assignmentStatus !== "unassigned";
-      if (hasAssignee) {
-        if (row.userId) assignedByUserId.set(row.userId, entitlement);
-        const email = normalize(row.contactEmail);
-        if (email && !assignedByEmail.has(email)) assignedByEmail.set(email, entitlement);
-        const name = normalize(row.displayName);
-        if (name && !assignedByName.has(name)) assignedByName.set(name, entitlement);
-      } else {
-        freeEntitlements.push(entitlement);
-      }
-    }
-
-    const label = info
-      ? `${info.conferenceName} (${info.conferenceYear}-${info.conferenceEditionCode})`
-      : "Current conference";
-    return {
-      conferenceId,
-      label,
-      assignedByUserId,
-      assignedByEmail,
-      assignedByName,
-      registrationAssignedUserIds,
-      registrationAssignedByEmail,
-      registrationAssignedByName,
-      freeEntitlements,
-      totalSeats: entitlementRows.length,
-    };
-  }, [conferenceAttendance]);
-
-  // Only show the "Attending Conference" column when there's a public-facing conference.
+  // Only show conference columns when there's a public-facing conference.
   // Draft conferences are internal-only and shouldn't surface to org admins.
-  const hasPublicConference = conferenceAttendance.some((row) =>
-    (PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(row.conferenceStatus)
-  );
+  // Computed server-side from currentConferenceId itself — deriving this from
+  // conferenceAttendance would stay false forever for an org that holds seats
+  // but hasn't assigned anyone yet (conferenceAttendance is empty until then).
+  // CSC admins/super_admins can still see it while in draft — they're the
+  // ones testing a conference before it goes public, and need to be able to
+  // assign seats bought against it (e.g. via dev-checkout) to verify the flow.
+  const isCscAdmin = viewerLevel === "admin" || viewerLevel === "super_admin";
+  const hasPublicConference = currentConferenceIsPublic || isCscAdmin;
+
+  // Which conference_people row (if any) represents each contact, scoped to
+  // the current conference — reused for both "are they seated" lookups and
+  // rendering their already-fetched badge/check-in status.
+  const personIndex = useMemo(() => {
+    const rows = conferenceAttendance.filter(
+      (row) => row.conferenceId === currentConferenceId && row.assignmentStatus !== "canceled"
+    );
+    const byUserId = new Map<string, OrgConferencePersonInfo>();
+    const byEmail = new Map<string, OrgConferencePersonInfo>();
+    const byName = new Map<string, OrgConferencePersonInfo>();
+    for (const row of rows) {
+      const entry: OrgConferencePersonInfo = {
+        personId: row.id,
+        badgeStatus: row.badgeStatus,
+        checkedInAt: row.checkedInAt,
+      };
+      if (row.userId) byUserId.set(row.userId, entry);
+      const email = normalize(row.contactEmail);
+      if (email && !byEmail.has(email)) byEmail.set(email, entry);
+      const name = normalize(row.displayName);
+      if (name && !byName.has(name)) byName.set(name, entry);
+    }
+    return { byUserId, byEmail, byName };
+  }, [conferenceAttendance, currentConferenceId]);
 
   const resolveOrgUserForContact = (contact: VisibleContact) => {
     const directUserId = ((contact as unknown as { user_id?: string | null }).user_id ?? "").trim();
@@ -440,77 +357,99 @@ export default function MemberProfile({
     return matchedByName ? { userId: matchedByName.userId } : null;
   };
 
-  const handleAttendanceToggle = async (contact: VisibleContact, checked: boolean) => {
-    if (!canEditConferenceAttendance || !currentConference.conferenceId) return;
+  /** Find this contact's conference_people row for the current conference, if one exists. */
+  const findPersonForContact = (contact: VisibleContact): OrgConferencePersonInfo | null => {
     const orgUser = resolveOrgUserForContact(contact);
     const contactEmail = normalize((contact.work_email ?? contact.email ?? "").toString());
     const contactName = normalize((contact.name ?? "").toString());
-    const assigned =
-      (orgUser ? currentConference.assignedByUserId.get(orgUser.userId) : undefined) ||
-      (contactEmail ? currentConference.assignedByEmail.get(contactEmail) : undefined) ||
-      (contactName ? currentConference.assignedByName.get(contactName) : undefined);
-    const registrationAssigned = Boolean(
-      (orgUser && currentConference.registrationAssignedUserIds.has(orgUser.userId)) ||
-      (contactEmail && currentConference.registrationAssignedByEmail.has(contactEmail)) ||
-      (contactName && currentConference.registrationAssignedByName.has(contactName))
+    return (
+      (orgUser ? personIndex.byUserId.get(orgUser.userId) : undefined) ||
+      (contactEmail ? personIndex.byEmail.get(contactEmail) : undefined) ||
+      (contactName ? personIndex.byName.get(contactName) : undefined) ||
+      null
     );
+  };
 
-    setSavingContactId(contact.id);
+  const handleEntityToggle = async (
+    contact: VisibleContact,
+    entity: AssignableEntityColumn,
+    checked: boolean
+  ) => {
+    if (!canEditConferenceAttendance || !currentConferenceId) return;
+    const busyKey = `${contact.id}:${entity.entityId}`;
+    setSavingContactId(busyKey);
     setAttendanceError(null);
     try {
+      const person = findPersonForContact(contact);
+      const existingSeat = person ? entity.seats.find((s) => s.holderPersonId === person.personId) : undefined;
+
       if (checked) {
-        if (assigned || registrationAssigned) {
-          return;
-        }
-        if (!orgUser) {
-          setAttendanceError("Unable to match this row to an org user for assignment.");
-          return;
-        }
-        const nextEntitlement = currentConference.freeEntitlements[0];
-        if (!nextEntitlement) {
-          setAttendanceError("All available conference seats are already assigned.");
-          return;
-        }
-        const result = await assignConferenceEntitlement(
-          currentConference.conferenceId,
-          organization.id,
-          nextEntitlement.entitlementId,
-          {
-            entitlementType: nextEntitlement.entitlementType,
-            targetUserId: orgUser.userId,
+        if (existingSeat) return;
+
+        const freeSeat = entity.seats.find((s) => !s.holderPersonId);
+        if (!freeSeat) {
+          if (!entity.overageOffer || entity.overageOffer.soldOut || !entity.overageOffer.eligible) {
+            setAttendanceError(`No additional ${entity.name} is available to purchase right now.`);
+            return;
           }
-        );
-        if (!result.success) {
-          setAttendanceError(result.error ?? "Failed to assign conference attendance.");
-          return;
-        }
-      } else {
-        if (registrationAssigned) return;
-        if (!assigned) return;
-        const dispositionInput = window.prompt(
-          "Unassign conference attendance:\n- Type HOLD to keep the seat for reassignment.\n- Type REFUND to release the seat and issue refund.",
-          "HOLD"
-        );
-        if (!dispositionInput) return;
-        const normalizedDisposition = dispositionInput.trim().toUpperCase();
-        if (normalizedDisposition !== "HOLD" && normalizedDisposition !== "REFUND") {
-          setAttendanceError("Cancelled. Use HOLD or REFUND when unassigning attendance.");
-          return;
-        }
-        const result = await unassignConferenceEntitlementWithDisposition(
-          currentConference.conferenceId,
-          organization.id,
-          assigned.entitlementId,
-          normalizedDisposition === "REFUND" ? "release_and_refund" : "hold_for_reassignment"
-        );
-        if (!result.success) {
-          setAttendanceError(result.error ?? "Failed to unassign conference attendance.");
-          return;
-        }
-        if (normalizedDisposition === "REFUND" && result.data?.refundAmountCents) {
-          window.alert(
-            `Seat released and refund submitted for ${(result.data.refundAmountCents / 100).toFixed(2)}.`
+          const confirmed = window.confirm(
+            `This will add 1 more ${entity.name} to your cart for ${formatCents(entity.overageOffer.unitPriceCents)} — continue?`
           );
+          if (!confirmed) return;
+          const attendeeName = (contact.name ?? "").toString().trim() || undefined;
+          const attendeeEmail =
+            ((contact.work_email ?? contact.email ?? "") as string).toString().trim() || null;
+          const cartResult = await addOfferToCart({
+            conferenceId: currentConferenceId,
+            organizationId: organization.id,
+            offerEntityId: entity.entityId,
+            quantity: 1,
+            attendees: attendeeName ? [{ name: attendeeName, email: attendeeEmail }] : undefined,
+          });
+          if (!cartResult.success) {
+            setAttendanceError(cartResult.error ?? "Failed to add to cart.");
+            return;
+          }
+          dispatchConferenceCartUpdated();
+          setAttendanceError(
+            attendeeName
+              ? `Added ${entity.name} to your cart for ${contact.name} — check out to finish assigning it.`
+              : `Added ${entity.name} to your cart — check out, then come back to assign it.`
+          );
+          return;
+        }
+
+        let personId = person?.personId ?? null;
+        if (!personId) {
+          const name = (contact.name ?? "").toString().trim();
+          if (!name) {
+            setAttendanceError("This contact needs a name before they can be assigned.");
+            return;
+          }
+          const email = ((contact.work_email ?? contact.email ?? "") as string).toString().trim() || null;
+          const added = await addConferenceAttendee(currentConferenceId, organization.id, {
+            displayName: name,
+            contactEmail: email,
+          });
+          if (!added.success) {
+            setAttendanceError(added.error ?? "Failed to add attendee.");
+            return;
+          }
+          personId = added.data.id;
+        }
+
+        const result = await allocateSeat(freeSeat.id, personId);
+        if (!result.success) {
+          setAttendanceError(result.error ?? "Failed to assign seat.");
+          return;
+        }
+        if (result.data.warning) setAttendanceError(result.data.warning);
+      } else {
+        if (!existingSeat) return;
+        const result = await deallocateSeat(existingSeat.id);
+        if (!result.success) {
+          setAttendanceError(result.error ?? "Failed to remove assignment.");
+          return;
         }
       }
       router.refresh();
@@ -519,31 +458,11 @@ export default function MemberProfile({
     }
   };
 
-  const getAttendanceCell = (contact: VisibleContact) => {
-    const matchedUser = resolveOrgUserForContact(contact);
-    const contactEmail = normalize((contact.work_email ?? contact.email ?? "").toString());
-    const contactName = normalize((contact.name ?? "").toString());
-    const assignedContext =
-      (matchedUser ? currentConference.assignedByUserId.get(matchedUser.userId) : undefined) ||
-      (contactEmail ? currentConference.assignedByEmail.get(contactEmail) : undefined) ||
-      (contactName ? currentConference.assignedByName.get(contactName) : undefined);
-    const registrationAssigned = Boolean(
-      (matchedUser && currentConference.registrationAssignedUserIds.has(matchedUser.userId)) ||
-      (contactEmail && currentConference.registrationAssignedByEmail.has(contactEmail)) ||
-      (contactName && currentConference.registrationAssignedByName.has(contactName))
-    );
-    const hasFreeSeats = currentConference.freeEntitlements.length > 0;
-    const checked = Boolean(assignedContext) || registrationAssigned;
-    const canToggle =
-      Boolean(currentConference.conferenceId) &&
-      (Boolean(assignedContext) || Boolean(matchedUser) || registrationAssigned);
-    const disabledForAssign = !checked && (!hasFreeSeats || !matchedUser);
-    const disabled =
-      !canEditConferenceAttendance ||
-      !canToggle ||
-      registrationAssigned ||
-      savingContactId === contact.id ||
-      disabledForAssign;
+  const getEntityAttendanceCell = (contact: VisibleContact, entity: AssignableEntityColumn) => {
+    const person = findPersonForContact(contact);
+    const checked = Boolean(person && entity.seats.some((s) => s.holderPersonId === person.personId));
+    const busyKey = `${contact.id}:${entity.entityId}`;
+    const disabled = !canEditConferenceAttendance || !currentConferenceId || savingContactId === busyKey;
     return { checked, disabled };
   };
 
@@ -670,7 +589,7 @@ export default function MemberProfile({
           }}
         >
           {/* Logo — 560x155px area, 62px gap to color swatches */}
-          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-onboarding="profile_logo" {...fieldProps("organizations", "logo_url", organization.id, organization.id)}>
+          <div style={{ width: '560px', height: '155px', marginBottom: '62px' }} data-onboarding="profile_logo" {...fieldProps("organizations", "logo_horizontal_url", organization.id, organization.id)}>
             {organization.logo_horizontal_url ? (
               <Image
                 src={organization.logo_horizontal_url}
@@ -695,6 +614,36 @@ export default function MemberProfile({
               </h1>
             )}
           </div>
+
+          {/* Directory Mark — separate SQUARE logo used on the map & directory cards.
+              Edit-mode only so the public profile stays focused on the horizontal logo above. */}
+          {editMode && canEditThisOrg && (
+            <div className="mb-10">
+              <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">Directory Mark</h3>
+              <div className="flex items-start gap-4">
+                <div
+                  className="w-20 h-20 rounded-full border border-gray-200 bg-white flex items-center justify-center overflow-hidden cursor-pointer flex-shrink-0"
+                  {...fieldProps("organizations", "logo_url", organization.id, organization.id)}
+                >
+                  {organization.logo_url ? (
+                    <Image
+                      src={organization.logo_url}
+                      alt={`${organization.name} directory mark`}
+                      width={80}
+                      height={80}
+                      className="w-full h-full object-contain"
+                      unoptimized
+                    />
+                  ) : (
+                    <span className="text-[11px] text-gray-400 text-center leading-tight px-1">Add mark</span>
+                  )}
+                </div>
+                <p className="text-xs text-gray-400 max-w-xs leading-relaxed">
+                  Square mark shown on the map and in directory cards. Your full horizontal logo at the top of this page is set separately.
+                </p>
+              </div>
+            </div>
+          )}
 
           {/* Sponsor tier badge */}
           {sponsorTier && (
@@ -902,7 +851,7 @@ export default function MemberProfile({
                   )}
                   {(organization.fte || (editMode && canEditThisOrg)) && (
                     <>
-                      <span className="text-gray-500">Full-Time Staff</span>
+                      <span className="text-gray-500">Student FTE</span>
                       <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "fte", organization.id, organization.id)}>
                         {organization.fte || "—"}
                       </span>
@@ -981,14 +930,19 @@ export default function MemberProfile({
                       <th className="pb-2 pr-4 font-semibold">Email</th>
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
-                      {hasPublicConference && <th className="pb-2 pl-3 font-semibold">Attending Conference</th>}
+                      {hasPublicConference && assignableEntities.map((entity) => (
+                        <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
+                      ))}
+                      {/* Badge/check-in status is a CSC staff concern, not something an org admin manages or needs to see. */}
+                      {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Badge</th>}
+                      {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Check-in</th>}
                       {editMode && canEditThisOrg ? <th className="pb-2 pl-4 font-semibold">Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
                     {contacts.map((contact) => (
                       (() => {
-                        const attendance = getAttendanceCell(contact);
+                        const person = findPersonForContact(contact);
                         return (
                       <tr
                         key={contact.id}
@@ -1017,18 +971,23 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        {hasPublicConference && (
-                          <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
-                            <input
-                              type="checkbox"
-                              aria-label={`Attending conference for ${contact.name ?? "contact"}`}
-                              checked={attendance.checked}
-                              disabled={attendance.disabled}
-                              onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
-                              className="h-4 w-4"
-                            />
-                          </td>
-                        )}
+                        {hasPublicConference && assignableEntities.map((entity) => {
+                          const cell = getEntityAttendanceCell(contact, entity);
+                          return (
+                            <td key={entity.entityId} className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
+                              <input
+                                type="checkbox"
+                                aria-label={`${entity.name} for ${contact.name ?? "contact"}`}
+                                checked={cell.checked}
+                                disabled={cell.disabled}
+                                onChange={(event) => void handleEntityToggle(contact, entity, event.target.checked)}
+                                className="h-4 w-4"
+                              />
+                            </td>
+                          );
+                        })}
+                        {isCscAdmin && <td className="py-2 pl-3 text-gray-400">{person?.badgeStatus ?? "—"}</td>}
+                        {isCscAdmin && <td className="py-2 pl-3 text-gray-400">{person?.checkedInAt ? "Checked in" : "—"}</td>}
                         {/* Actions — delete only in edit mode; eye moved to contact edit modal */}
                         {editMode && canEditThisOrg && (
                           <td className="py-2 pl-4 w-10">
@@ -1054,7 +1013,7 @@ export default function MemberProfile({
                         data-add-contact
                         data-organization-id={organization.id}
                       >
-                        <td colSpan={6} className="py-3 text-center text-emerald-600 font-medium">
+                        <td colSpan={4 + (hasPublicConference ? assignableEntities.length : 0) + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
                           <span className="flex items-center justify-center gap-2">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1068,6 +1027,19 @@ export default function MemberProfile({
                 </table>
                 {attendanceError ? (
                   <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
+                ) : null}
+                {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
+                {hasPublicConference && buyableExtras.length > 0 ? (
+                  <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                    {buyableExtras.map((offer) => (
+                      <OfferCard
+                        key={offer.id}
+                        offer={offer}
+                        conferenceId={currentConferenceId ?? ""}
+                        organizationId={organization.id}
+                      />
+                    ))}
+                  </div>
                 ) : null}
               </div>
             </ProtectedSection>
@@ -1204,9 +1176,9 @@ export default function MemberProfile({
 
         <div className="p-8">
           <div className="mb-6">
-            {organization.logo_url ? (
+            {(organization.logo_horizontal_url || organization.logo_url) ? (
               <Image
-                src={organization.logo_url}
+                src={(organization.logo_horizontal_url || organization.logo_url) as string}
                 alt={organization.name}
                 width={300}
                 height={80}
@@ -1422,7 +1394,7 @@ export default function MemberProfile({
                   )}
                   {(organization.fte || (editMode && canEditThisOrg)) && (
                     <>
-                      <span className="text-gray-500">Full-Time Staff</span>
+                      <span className="text-gray-500">Student FTE</span>
                       <span className="text-[#1A1A1A] font-medium" {...fieldProps("organizations", "fte", organization.id, organization.id)}>
                         {organization.fte || "—"}
                       </span>
@@ -1481,7 +1453,7 @@ export default function MemberProfile({
                 <div className="space-y-3">
                   {contacts.map((contact) => (
                     (() => {
-                      const attendance = getAttendanceCell(contact);
+                      const person = findPersonForContact(contact);
                       return (
                     <div
                       key={contact.id}
@@ -1504,21 +1476,29 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
-                        {hasPublicConference && (
-                          <div className="text-xs mt-1 font-medium">
-                            <label className="inline-flex items-center gap-2">
-                              <span>Attending Conference</span>
-                              <input
-                                type="checkbox"
-                                aria-label={`Attending conference for ${contact.name ?? "contact"}`}
-                                checked={attendance.checked}
-                                disabled={attendance.disabled}
-                                onChange={(event) => void handleAttendanceToggle(contact, event.target.checked)}
-                                className="h-4 w-4"
-                              />
-                            </label>
+                        {hasPublicConference && assignableEntities.map((entity) => {
+                          const cell = getEntityAttendanceCell(contact, entity);
+                          return (
+                            <div key={entity.entityId} className="text-xs mt-1 font-medium">
+                              <label className="inline-flex items-center gap-2">
+                                <span>{entity.name}</span>
+                                <input
+                                  type="checkbox"
+                                  aria-label={`${entity.name} for ${contact.name ?? "contact"}`}
+                                  checked={cell.checked}
+                                  disabled={cell.disabled}
+                                  onChange={(event) => void handleEntityToggle(contact, entity, event.target.checked)}
+                                  className="h-4 w-4"
+                                />
+                              </label>
+                            </div>
+                          );
+                        })}
+                        {isCscAdmin && person ? (
+                          <div className="text-[11px] text-gray-400 mt-1">
+                            Badge: {person.badgeStatus} · {person.checkedInAt ? "Checked in" : "Not checked in"}
                           </div>
-                        )}
+                        ) : null}
                       </div>
                       {/* Actions — eye toggle + delete, only in edit mode */}
                       {editMode && canEditThisOrg && (
@@ -1569,6 +1549,19 @@ export default function MemberProfile({
                 </div>
                 {attendanceError ? (
                   <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
+                ) : null}
+                {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
+                {hasPublicConference && buyableExtras.length > 0 ? (
+                  <div className="mt-4 space-y-3">
+                    {buyableExtras.map((offer) => (
+                      <OfferCard
+                        key={offer.id}
+                        offer={offer}
+                        conferenceId={currentConferenceId ?? ""}
+                        organizationId={organization.id}
+                      />
+                    ))}
+                  </div>
                 ) : null}
               </div>
             </ProtectedSection>

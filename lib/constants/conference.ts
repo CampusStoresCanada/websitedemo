@@ -32,6 +32,15 @@ export const CONFERENCE_STATUS_TRANSITIONS: Record<ConferenceStatus, ConferenceS
   archived: [],
 };
 
+/**
+ * A conference is "on sale" once registration has opened. `draft` is the only
+ * status that precedes sale, so before-sale edits (e.g. in-place legal document
+ * edits) are only safe while the conference is still a draft.
+ */
+export function isConferenceOnSale(status: ConferenceStatus): boolean {
+  return status !== "draft";
+}
+
 /** Human-readable labels for admin UI. */
 export const CONFERENCE_STATUS_LABELS: Record<ConferenceStatus, string> = {
   draft: "Draft",
@@ -176,18 +185,60 @@ export type AccommodationType = (typeof ACCOMMODATION_TYPE_OPTIONS)[number];
 
 export const LEGAL_DOCUMENT_TYPES = [
   "code_of_conduct",
+  "member_code_of_conduct",
   "terms_and_conditions",
   "refund_policy",
   "privacy_notice",
+  "exhibitor_agreement",
+  "speaker_agreement",
 ] as const;
 
 export type LegalDocumentType = (typeof LEGAL_DOCUMENT_TYPES)[number];
 
+/**
+ * Who accepts a policy, and when. Commercial/booth terms are accepted by the
+ * BUYER at purchase (once, in total); personal conduct/release docs are accepted
+ * by the ASSIGNEE when their seat is assigned and they activate. "both" means
+ * each role accepts it at their respective moment (e.g. participation T&C).
+ */
+export const POLICY_ACCEPT_BY = ["buyer", "assignee", "both"] as const;
+export type PolicyAcceptBy = (typeof POLICY_ACCEPT_BY)[number];
+export const POLICY_ACCEPT_BY_LABELS: Record<PolicyAcceptBy, string> = {
+  buyer: "Buyer (at purchase)",
+  assignee: "Assignee (when their seat is assigned)",
+  both: "Both",
+};
+
+const BUYER_DEFAULT_DOCS = new Set(["exhibitor_agreement", "refund_policy"]);
+const BOTH_DEFAULT_DOCS = new Set(["terms_and_conditions"]);
+/** Sensible default acceptance role for a new legal document type. */
+export function defaultAcceptByForDocument(documentType: string): PolicyAcceptBy {
+  if (BUYER_DEFAULT_DOCS.has(documentType)) return "buyer";
+  if (BOTH_DEFAULT_DOCS.has(documentType)) return "both";
+  return "assignee";
+}
+
+/**
+ * Bridge a registration type to the audience tier(s) the registrant belongs to.
+ * This is ONLY the registrant→audience link used to resolve which catalog
+ * `policy` entities (via their `who` edges) a person must accept — the actual
+ * targeting lives in the catalog graph (policy who/requires/applies_to_all),
+ * not here. Matches the seeded audience entities' `source_role`.
+ */
+export function audienceRolesForRegistrationType(
+  registrationType: RegistrationType
+): string[] {
+  return registrationType === "exhibitor" ? ["partner"] : ["member"];
+}
+
 export const LEGAL_DOCUMENT_LABELS: Record<LegalDocumentType, string> = {
-  code_of_conduct: "Code of Conduct",
+  code_of_conduct: "Vendor Code of Conduct",
+  member_code_of_conduct: "Member Code of Conduct",
   terms_and_conditions: "Terms & Conditions",
   refund_policy: "Refund Policy",
   privacy_notice: "Privacy Notice",
+  exhibitor_agreement: "Exhibitor & Booth Agreement",
+  speaker_agreement: "Speaker & Presenter Agreement",
 };
 
 // ---------------------------------------------------------------------------

@@ -10,13 +10,20 @@ import {
   toWebhookPayloadJson,
 } from "@/lib/stripe/webhook-processing";
 
-const WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET;
+// Mirrors the STRIPE_TEST_MODE switch in lib/stripe/client.ts — test-mode
+// checkout events are signed with the test endpoint's own secret, not the
+// live one, so verification must follow the same switch or it'll reject
+// every test event as an invalid signature.
+const isTestMode = process.env.STRIPE_TEST_MODE === "true";
+const WEBHOOK_SECRET = isTestMode
+  ? process.env.STRIPE_WEBHOOK_SECRET_TEST
+  : process.env.STRIPE_WEBHOOK_SECRET;
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: NextRequest) {
   if (!WEBHOOK_SECRET) {
-    console.error("STRIPE_WEBHOOK_SECRET is not set");
+    console.error(isTestMode ? "STRIPE_WEBHOOK_SECRET_TEST is not set" : "STRIPE_WEBHOOK_SECRET is not set");
     return NextResponse.json(
       { error: "Webhook secret not configured" },
       { status: 500 }

@@ -8,6 +8,7 @@ import {
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
+import { activateMembershipRenewal, computeNewExpiresAt } from "@/lib/membership/renewal-activation";
 import {
   createStripeCustomer,
   createMembershipInvoice,
@@ -71,7 +72,9 @@ export interface PartnerApplicationData {
 
 export async function submitApplication(
   type: "member" | "partner",
-  formData: MemberApplicationData | PartnerApplicationData
+  formData: MemberApplicationData | PartnerApplicationData,
+  /** Set when this application follows a pay-first booth purchase (see lib/actions/prospective-booth-checkout.ts). */
+  paymentId?: string
 ): Promise<{ success: boolean; applicationId?: string; error?: string }> {
   const db = createAdminClient();
 
@@ -106,6 +109,32 @@ export async function submitApplication(
   // Generate verification token
   const token = crypto.randomUUID();
 
+  // If this follows a pay-first booth purchase, carry the payment fields
+  // onto the application so admin review sees "already paid $X for booth Y"
+  // — accepting 'pending' as well as 'paid' since the webhook can lag a few
+  // seconds behind the Stripe redirect the applicant just followed.
+  let paymentFields: Record<string, unknown> = {};
+  let payment: { id: string; amount_cents: number; stripe_checkout_session_id: string; booth_entity_id: string; conference_id: string } | null = null;
+  if (paymentId) {
+    const { data: paymentRow } = await db
+      .from("prospective_booth_payments")
+      .select("id, amount_cents, stripe_checkout_session_id, booth_entity_id, conference_id, status")
+      .eq("id", paymentId)
+      .in("status", ["pending", "paid"])
+      .maybeSingle();
+    if (paymentRow) {
+      payment = paymentRow;
+      paymentFields = {
+        paid_at: new Date().toISOString(),
+        stripe_checkout_session_id: paymentRow.stripe_checkout_session_id,
+        paid_amount_cents: paymentRow.amount_cents,
+        paid_for: "booth",
+        paid_booth_entity_id: paymentRow.booth_entity_id,
+        paid_conference_id: paymentRow.conference_id,
+      };
+    }
+  }
+
   // Create application record
   const { data: app, error: insertError } = await db
     .from("signup_applications")
@@ -117,6 +146,7 @@ export async function submitApplication(
       application_data: JSON.parse(JSON.stringify(formData)),
       verification_token: token,
       verification_sent_at: new Date().toISOString(),
+      ...paymentFields,
     })
     .select("id")
     .single();
@@ -124,6 +154,13 @@ export async function submitApplication(
   if (insertError || !app) {
     console.error("Failed to create application:", insertError);
     return { success: false, error: "Failed to submit application. Please try again." };
+  }
+
+  if (payment) {
+    await db
+      .from("prospective_booth_payments")
+      .update({ status: "linked", linked_application_id: app.id })
+      .eq("id", payment.id);
   }
 
   // Send verification email
@@ -279,7 +316,7 @@ export async function approveApplication(
       postal_code: (appData.postal_code as string) || null,
       primary_category: (appData.primary_category as string) || null,
       company_description: (appData.company_description as string) || null,
-      tenant_id: "00000000-0000-0000-0000-000000000001", // default tenant
+      tenant_id: "29300837-1d49-45b4-bd09-1c4525c409d1", // the org default tenant
       updated_at: new Date().toISOString(),
     })
     .select("id")
@@ -305,7 +342,7 @@ export async function approveApplication(
   // 2. Create contact record for primary contact
   const knownPerson = await ensureKnownPerson({
     organizationId: org.id,
-    tenantId: "00000000-0000-0000-0000-000000000001",
+    tenantId: "29300837-1d49-45b4-bd09-1c4525c409d1",
     name: app.applicant_name ?? orgName,
     email: app.applicant_email ?? null,
     title: (appData.contact_title as string) || null,
@@ -339,24 +376,65 @@ export async function approveApplication(
     app.applicant_email ?? ""
   );
 
-  // 5. Generate invoice
+  // 5. Generate invoice — skipped entirely for a pay-first booth application:
+  // dues were already collected up front (see lib/actions/prospective-booth-checkout.ts),
+  // invoicing again here would double-charge them. Instead, mint the booth
+  // they already paid for (their org didn't exist yet at payment time) and
+  // advance membership_expires_at through the same shared helper the normal
+  // invoice-paid webhook uses.
   let stripeInvoiceUrl = "";
-  try {
-    const invoice =
-      applicationType === "member"
-        ? await createMembershipInvoice(org.id, {
-            applyProrationFromDate: new Date(),
-          })
-        : await createPartnershipInvoice(org.id, {
-            applyProrationFromDate: new Date(),
-          });
+  if (app.paid_at && app.paid_booth_entity_id && app.paid_conference_id) {
+    try {
+      const [{ data: booth }, { data: conference }] = await Promise.all([
+        db.from("conference_entities").select("price_cents").eq("id", app.paid_booth_entity_id).maybeSingle(),
+        db.from("conference_instances").select("end_date").eq("id", app.paid_conference_id).maybeSingle(),
+      ]);
+      await db.rpc("mint_prospective_booth_purchase", {
+        p_conference_id: app.paid_conference_id,
+        p_organization_id: org.id,
+        p_booth_entity_id: app.paid_booth_entity_id,
+        p_price_cents: booth?.price_cents ?? 0,
+        p_buyer: `application:${applicationId}`,
+      });
 
-    // Finalize and send via Stripe
-    await finalizeAndSendInvoice(invoice.id);
-    stripeInvoiceUrl = `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`;
-  } catch (err) {
-    console.error("Invoice creation failed:", err);
-    // Non-fatal — admin can manually create invoice
+      const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
+        null,
+        conference?.end_date ?? null
+      );
+      const activation = await activateMembershipRenewal({
+        organizationId: org.id,
+        newExpiresAt: billingPeriodEnd,
+        billingPeriodStart,
+        triggeredBy: "conference_checkout",
+        idempotencyKey: `prospective_booth_application:${applicationId}`,
+        invoiceId: null,
+        metadata: { application_id: applicationId, paid_amount_cents: app.paid_amount_cents },
+      });
+      if (!activation.success) {
+        console.error(`approveApplication: membership activation failed for prospect org ${org.id}: ${activation.error}`);
+      }
+    } catch (err) {
+      console.error("Booth minting / membership activation failed for pay-first application:", err);
+      // Non-fatal — admin can reconcile manually; the org and payment record still exist.
+    }
+  } else {
+    try {
+      const invoice =
+        applicationType === "member"
+          ? await createMembershipInvoice(org.id, {
+              applyProrationFromDate: new Date(),
+            })
+          : await createPartnershipInvoice(org.id, {
+              applyProrationFromDate: new Date(),
+            });
+
+      // Finalize and send via Stripe
+      await finalizeAndSendInvoice(invoice.id);
+      stripeInvoiceUrl = `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`;
+    } catch (err) {
+      console.error("Invoice creation failed:", err);
+      // Non-fatal — admin can manually create invoice
+    }
   }
 
   // 6. Create user account and send invite

@@ -2,6 +2,7 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
+import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import { getConferenceOrderDetails } from "@/lib/actions/conference-commerce";
 import { formatCents } from "@/lib/utils";
 import { Timestamp } from "@/components/ui/LocalDate";
@@ -47,6 +48,8 @@ export default async function ConferenceOrderDetailPage({
 
   return (
     <main className="max-w-4xl mx-auto py-8 px-4 space-y-6">
+      {conferenceResult.isDraftPreview && <DraftPreviewBanner status={conference.status} />}
+
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>

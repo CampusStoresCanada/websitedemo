@@ -6,7 +6,8 @@ export const metadata = { title: "Conference | Admin" };
 const TAB_REDIRECTS: Record<string, string> = {
   details: "details",
   overview: "overview",
-  setup: "setup",
+  setup: "describe",
+  describe: "describe",
   schedule: "schedule",
   products: "products",
   rules: "rules",

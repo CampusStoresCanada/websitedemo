@@ -2,6 +2,7 @@ import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig, getEffectivePolicy } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
+import { currentProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import type {
   Invoice,
   PaymentMethod,
@@ -96,37 +97,14 @@ export async function applyProration(
   const billing = await getBillingConfig();
   const rules = billing.proration_rules as ProrationRule[];
 
-  if (!rules || rules.length === 0) {
-    return { amountCents: baseAmountCents, discountPct: 0 };
-  }
-
-  // Determine the current fiscal year boundaries
-  // CSC fiscal year runs Sep 1 → Aug 31
-  const month = startDate.getMonth() + 1; // 1-based
-  const day = startDate.getDate();
-
-  // Find the highest applicable discount
-  let applicableDiscount = 0;
-
-  for (const rule of rules) {
-    const [ruleMonth, ruleDay] = rule.after_month_day.split("-").map(Number);
-
-    // Check if startDate is on or after the rule cutoff (month-day comparison)
-    if (month > ruleMonth || (month === ruleMonth && day >= ruleDay)) {
-      applicableDiscount = Math.max(applicableDiscount, rule.discount_pct);
-    }
-  }
+  const applicableDiscount = currentProrationDiscountPct(rules, startDate);
 
   if (applicableDiscount === 0) {
     return { amountCents: baseAmountCents, discountPct: 0 };
   }
 
-  const discountedAmount = Math.round(
-    baseAmountCents * (1 - applicableDiscount / 100)
-  );
-
   return {
-    amountCents: discountedAmount,
+    amountCents: applyDiscountPct(baseAmountCents, applicableDiscount),
     discountPct: applicableDiscount,
   };
 }
@@ -283,6 +261,16 @@ export async function createMembershipInvoice(
 }
 
 /**
+ * The flat Vendor Partner annual rate, in cents, from policy.
+ * Shared by the invoice path here and per-org cart pricing in
+ * lib/actions/conference-commerce.ts, so both quote the same number.
+ */
+export async function getPartnershipRateCents(): Promise<number> {
+  const billing = await getBillingConfig();
+  return Math.round(billing.partnership_rate * 100);
+}
+
+/**
  * Create a partnership invoice for a vendor partner org.
  */
 export async function createPartnershipInvoice(
@@ -292,7 +280,7 @@ export async function createPartnershipInvoice(
   const db = createAdminClient();
   const billing = await getBillingConfig();
 
-  const baseCents = Math.round(billing.partnership_rate * 100);
+  const baseCents = await getPartnershipRateCents();
 
   // Apply proration if requested
   let finalCents = baseCents;

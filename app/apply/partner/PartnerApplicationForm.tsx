@@ -11,13 +11,21 @@ import {
   type PartnerSecondaryCategory,
 } from "@/lib/constants/partner-categories";
 
-export function PartnerApplicationForm() {
+export function PartnerApplicationForm({
+  paymentId,
+  prefillCompanyName,
+  prefillEmail,
+}: {
+  paymentId?: string;
+  prefillCompanyName?: string;
+  prefillEmail?: string;
+} = {}) {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
 
   // Form state
-  const [companyName, setCompanyName] = useState("");
+  const [companyName, setCompanyName] = useState(prefillCompanyName ?? "");
   const [streetAddress, setStreetAddress] = useState("");
   const [city, setCity] = useState("");
   const [province, setProvince] = useState("");
@@ -27,7 +35,7 @@ export function PartnerApplicationForm() {
   const [website, setWebsite] = useState("");
   const [phone, setPhone] = useState("");
   const [contactName, setContactName] = useState("");
-  const [contactEmail, setContactEmail] = useState("");
+  const [contactEmail, setContactEmail] = useState(prefillEmail ?? "");
   const [brandInfo, setBrandInfo] = useState("");
   const [companyDescription, setCompanyDescription] = useState("");
 
@@ -76,7 +84,7 @@ export function PartnerApplicationForm() {
       company_description: companyDescription.trim() || undefined,
     };
 
-    const result = await submitApplication("partner", formData);
+    const result = await submitApplication("partner", formData, paymentId);
 
     setIsLoading(false);
 
@@ -411,8 +419,8 @@ export function PartnerApplicationForm() {
 
       <p className="text-xs text-gray-500 text-center">
         Looking to become a member institution instead?{" "}
-        <Link href="/apply/member" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
-          Apply as a member
+        <Link href="/membership" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
+          Learn about membership
         </Link>
       </p>
     </form>

@@ -4,10 +4,7 @@ import { revalidatePath } from "next/cache";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
-import {
-  computeConferenceReadiness,
-  type ConferenceReadinessSnapshot,
-} from "@/lib/conference/readiness";
+import { resolvePersonObligations } from "@/lib/actions/conference-access";
 import {
   buildAttendeeMeetingRows,
   getConferenceScheduleTimeline,
@@ -122,17 +119,13 @@ export default async function MyConferencePage({
     );
   }
 
-  const readiness: ConferenceReadinessSnapshot = computeConferenceReadiness({
-    personKind: person.person_kind,
-    displayName: person.display_name,
-    contactEmail: person.contact_email,
-    assignmentStatus: person.assignment_status,
-    travelMode: person.travel_mode,
-    roadOriginAddress: person.road_origin_address,
-    emergencyContactName: person.emergency_contact_name,
-    emergencyContactPhone: person.emergency_contact_phone,
-    dataQualityFlags: person.data_quality_flags,
-  });
+  // Grant-derived readiness: obligations follow from what this person holds.
+  const obligationsResult = await resolvePersonObligations(person.id, conferenceId);
+  const obligations = obligationsResult.success
+    ? obligationsResult.data
+    : { obligations: [], missing: [], isReady: true };
+  const readinessFlags = (person.data_quality_flags ?? []).filter((f) => f.trim().length > 0);
+  const readinessIsReady = obligations.isReady && readinessFlags.length === 0;
 
   const nextMeeting =
     person.registration_id
@@ -196,14 +189,14 @@ export default async function MyConferencePage({
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Readiness Checklist</h2>
-        {readiness.isReady ? (
+        {readinessIsReady ? (
           <p className="mt-2 text-sm text-emerald-700">Ready for conference operations.</p>
         ) : (
           <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-800">
-            {readiness.missing.map((item) => (
-              <li key={`missing:${item}`}>Missing: {item}</li>
+            {obligations.missing.map((item) => (
+              <li key={`missing:${item.key}`}>Missing: {item.label}</li>
             ))}
-            {readiness.blockers.map((item) => (
+            {readinessFlags.map((item) => (
               <li key={`blocker:${item}`}>Flag: {item}</li>
             ))}
           </ul>

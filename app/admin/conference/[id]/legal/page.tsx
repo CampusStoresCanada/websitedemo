@@ -49,7 +49,7 @@ export default async function ConferenceLegalPage({
         </Link>
       </div>
       <section className="rounded-xl border border-gray-200 bg-white p-4">
-        <LegalManager conferenceId={conference.id} />
+        <LegalManager conferenceId={conference.id} conferenceStatus={conference.status} />
       </section>
     </main>
   );

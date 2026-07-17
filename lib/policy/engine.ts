@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { TTLCache } from "../cache/ttl-cache";
 import type {
   PolicySet,
   PolicyValue,
@@ -17,12 +18,7 @@ import type {
 
 const CACHE_TTL_MS = 60_000 // 60 seconds
 
-interface CacheEntry<T> {
-  data: T
-  expiresAt: number
-}
-
-const cache = new Map<string, CacheEntry<unknown>>()
+const cache = new TTLCache<unknown>(CACHE_TTL_MS)
 
 function getPolicyClient() {
   // Policy resolution is server-side only in this codebase.
@@ -31,17 +27,11 @@ function getPolicyClient() {
 }
 
 function getCached<T>(key: string): T | null {
-  const entry = cache.get(key)
-  if (!entry) return null
-  if (Date.now() > entry.expiresAt) {
-    cache.delete(key)
-    return null
-  }
-  return entry.data as T
+  return cache.get(key) as T | null
 }
 
 function setCache<T>(key: string, data: T): void {
-  cache.set(key, { data, expiresAt: Date.now() + CACHE_TTL_MS })
+  cache.set(key, data)
 }
 
 /** Clear the entire policy cache (call on publish / rollback). */
@@ -248,6 +238,8 @@ export async function getRenewalConfig(): Promise<RenewalConfig> {
     'renewal.reactivation_days',
     'renewal.refund_window_days',
     'renewal.access_lock_mode',
+    'renewal.cycle_start_month_day',
+    'renewal.pre_renewal_skip_stub_days',
   ])
 
   return {
@@ -258,6 +250,11 @@ export async function getRenewalConfig(): Promise<RenewalConfig> {
     reactivation_days: policies['renewal.reactivation_days'] as number,
     refund_window_days: policies['renewal.refund_window_days'] as number,
     access_lock_mode: policies['renewal.access_lock_mode'] as string,
+    // Fall back to the historical Sep 1 assumption if the policy value is
+    // somehow missing (e.g. an environment that hasn't seeded renewal
+    // defaults yet) rather than producing an invalid date downstream.
+    cycle_start_month_day: (policies['renewal.cycle_start_month_day'] as string) ?? '09-01',
+    pre_renewal_skip_stub_days: (policies['renewal.pre_renewal_skip_stub_days'] as number) ?? 90,
   }
 }
 

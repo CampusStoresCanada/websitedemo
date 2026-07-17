@@ -41,6 +41,7 @@ export type ScheduleOpsAssignment = {
   delegateRegistrationIds: string[];
   delegateNames: string[];
   status: string;
+  isManual: boolean;
 };
 
 export type ScheduleOpsSummary = {
@@ -53,6 +54,8 @@ export type ScheduleOpsSummary = {
   slots: ScheduleOpsSlot[];
   activeAssignments: ScheduleOpsAssignment[];
   selectedAssignments: ScheduleOpsAssignment[];
+  /** How many of the active run's assignments were hand-edited (re-promote warning). */
+  activeRunManualCount: number;
 };
 
 type SchedulerRunRow = {
@@ -90,6 +93,7 @@ type ScheduleRow = {
   exhibitor_registration_id: string;
   delegate_registration_ids: string[] | null;
   status: string;
+  is_manual: boolean | null;
 };
 
 type RegistrationRow = {
@@ -174,7 +178,7 @@ export async function loadScheduleOpsSummary(
     const { data: schedulesData } = await adminClient
       .from("schedules")
       .select(
-        "id, scheduler_run_id, meeting_slot_id, exhibitor_registration_id, delegate_registration_ids, status"
+        "id, scheduler_run_id, meeting_slot_id, exhibitor_registration_id, delegate_registration_ids, status, is_manual"
       )
       .eq("conference_id", conferenceId)
       .in("scheduler_run_id", runIdsToLoad)
@@ -251,6 +255,7 @@ export async function loadScheduleOpsSummary(
       delegateRegistrationIds: delegateIds,
       delegateNames,
       status: row.status,
+      isManual: row.is_manual === true,
     };
   };
 
@@ -286,6 +291,7 @@ export async function loadScheduleOpsSummary(
     })),
     activeAssignments,
     selectedAssignments,
+    activeRunManualCount: activeAssignments.filter((a) => a.isManual).length,
   };
 }
 

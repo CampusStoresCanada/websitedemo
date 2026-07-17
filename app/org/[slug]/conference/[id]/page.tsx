@@ -6,7 +6,8 @@ import {
   requireOrgAdminOrSuperAdmin,
 } from "@/lib/auth/guards";
 import { resolveOrgSlug } from "@/lib/org/resolve";
-import { computeConferenceReadiness } from "@/lib/conference/readiness";
+import { resolveConferenceObligations } from "@/lib/actions/conference-access";
+import { resolveConferenceBadges } from "@/lib/actions/conference-entities";
 
 type OrgConferencePersonRow = {
   id: string;
@@ -17,8 +18,6 @@ type OrgConferencePersonRow = {
   display_name: string | null;
   contact_email: string | null;
   assignment_status: string;
-  entitlement_type: string | null;
-  conference_entitlement_id: string | null;
   assigned_email_snapshot: string | null;
   schedule_scope: string;
   travel_mode: string | null;
@@ -65,30 +64,29 @@ export default async function OrgConferencePage({
   const canSeeAdminNotes = isGlobalAdmin(auth.ctx.globalRole);
   const adminClient = createAdminClient();
 
-  const [conferenceResult, peopleResult, activeRunResult] =
-    await Promise.all([
-      adminClient
-        .from("conference_instances")
-        .select("id, name, year, edition_code")
-        .eq("id", conferenceId)
-        .maybeSingle(),
-      adminClient
-        .from("conference_people")
-        .select(
-          "id, user_id, source_type, source_id, person_kind, display_name, contact_email, assignment_status, entitlement_type, conference_entitlement_id, assigned_email_snapshot, schedule_scope, travel_mode, road_origin_address, emergency_contact_name, emergency_contact_phone, data_quality_flags, badge_print_status, checked_in_at, hotel_name, hotel_confirmation_code, admin_notes"
-        )
-        .eq("conference_id", conferenceId)
-        .eq("organization_id", orgId)
-        .order("person_kind", { ascending: true })
-        .order("display_name", { ascending: true }),
-      adminClient
-        .from("scheduler_runs")
-        .select("id")
-        .eq("conference_id", conferenceId)
-        .eq("run_mode", "active")
-        .eq("status", "completed")
-        .maybeSingle(),
-    ]);
+  const [conferenceResult, peopleResult, activeRunResult] = await Promise.all([
+    adminClient
+      .from("conference_instances")
+      .select("id, name, year, edition_code")
+      .eq("id", conferenceId)
+      .maybeSingle(),
+    adminClient
+      .from("conference_people")
+      .select(
+        "id, user_id, source_type, source_id, person_kind, display_name, contact_email, assignment_status, assigned_email_snapshot, schedule_scope, travel_mode, road_origin_address, emergency_contact_name, emergency_contact_phone, data_quality_flags, badge_print_status, checked_in_at, hotel_name, hotel_confirmation_code, admin_notes"
+      )
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", orgId)
+      .order("person_kind", { ascending: true })
+      .order("display_name", { ascending: true }),
+    adminClient
+      .from("scheduler_runs")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("run_mode", "active")
+      .eq("status", "completed")
+      .maybeSingle(),
+  ]);
 
   const conference = conferenceResult.data as ConferenceInstanceRow | null;
   if (!conference) {
@@ -120,24 +118,30 @@ export default async function OrgConferencePage({
     );
   }
 
+  // Grant-derived obligations: a person owes data because of what they hold,
+  // not their role. Data-quality flags (e.g. travel-import issues) still count
+  // against readiness on top of obligations.
+  const obligationsResult = await resolveConferenceObligations(conferenceId, orgId);
+  const obligationsByPerson = obligationsResult.success
+    ? obligationsResult.data
+    : new Map<string, { missing: { label: string }[]; isReady: boolean }>();
+
+  // Badge access is DERIVED from the seats a person holds (v3), not a stored label.
+  const badgesResult = await resolveConferenceBadges(conferenceId, orgId);
+  const badgeAccessByPerson = badgesResult.success
+    ? badgesResult.data
+    : new Map<string, { id: string; name: string; kind: string }[]>();
+
   const readinessRows = people
     .filter((row) => row.assignment_status !== "canceled")
-    .map((row) => ({
-      person: row,
-      readiness: computeConferenceReadiness({
-        personKind: row.person_kind,
-        displayName: row.display_name,
-        contactEmail: row.contact_email,
-        assignmentStatus: row.assignment_status,
-        travelMode: row.travel_mode,
-        roadOriginAddress: row.road_origin_address,
-        emergencyContactName: row.emergency_contact_name,
-        emergencyContactPhone: row.emergency_contact_phone,
-        dataQualityFlags: row.data_quality_flags,
-      }),
-    }));
+    .map((row) => {
+      const obligations = obligationsByPerson.get(row.id);
+      const flagCount = (row.data_quality_flags ?? []).filter((f) => f.trim().length > 0).length;
+      const missingCount = (obligations?.missing.length ?? 0) + flagCount;
+      return { person: row, missingCount, isReady: missingCount === 0 };
+    });
 
-  const notReadyCount = readinessRows.filter((row) => !row.readiness.isReady).length;
+  const notReadyCount = readinessRows.filter((row) => !row.isReady).length;
   const exhibitorRows = people.filter((row) => row.person_kind === "exhibitor");
 
   return (
@@ -190,9 +194,6 @@ export default async function OrgConferencePage({
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Conference People (Org Scope)</h2>
-        <p className="mt-2 text-xs text-gray-500">
-          Use Toolkit Edit mode and click an entitlement row assignment to manage conference attendance.
-        </p>
         <div className="mt-3 overflow-x-auto">
           <table className="min-w-full divide-y divide-gray-200 text-sm">
             <thead className="bg-gray-50">
@@ -201,6 +202,7 @@ export default async function OrgConferencePage({
                 <th className="px-3 py-2 text-left font-semibold text-gray-700">Kind</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-700">Assignment</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-700">Badge</th>
+                <th className="px-3 py-2 text-left font-semibold text-gray-700">Access (from seats)</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-700">Check-in</th>
                 <th className="px-3 py-2 text-left font-semibold text-gray-700">Readiness</th>
                 {canSeeAdminNotes ? (
@@ -209,7 +211,7 @@ export default async function OrgConferencePage({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
-              {readinessRows.map(({ person, readiness }) => (
+              {readinessRows.map(({ person, missingCount, isReady }) => (
                 <tr key={person.id}>
                   <td className="px-3 py-2 text-gray-900">
                     {person.display_name ??
@@ -219,35 +221,19 @@ export default async function OrgConferencePage({
                       person.id}
                   </td>
                   <td className="px-3 py-2 text-gray-700">{person.person_kind}</td>
-                  <td
-                    className={`px-3 py-2 text-gray-700 ${
-                      person.source_type === "entitlement"
-                        ? "cursor-pointer rounded hover:bg-emerald-50 hover:text-emerald-700"
-                        : ""
-                    }`}
-                    data-field={
-                      person.source_type === "entitlement"
-                        ? "conference_people.assignment_status"
-                        : undefined
-                    }
-                    data-entity-id={person.id}
-                    data-organization-id={orgId}
-                    data-conference-id={conferenceId}
-                    data-entitlement-id={person.conference_entitlement_id ?? person.source_id}
-                    data-entitlement-type={person.entitlement_type ?? "delegate"}
-                    data-source-type={person.source_type}
-                  >
-                    {person.assignment_status}
-                    {person.source_type === "entitlement" ? " (edit)" : ""}
-                  </td>
+                  <td className="px-3 py-2 text-gray-700">{person.assignment_status}</td>
                   <td className="px-3 py-2 text-gray-700">{person.badge_print_status}</td>
+                  <td className="px-3 py-2 text-gray-700">
+                    {(() => {
+                      const access = badgeAccessByPerson.get(person.id) ?? [];
+                      return access.length > 0 ? access.map((a) => a.name).join(", ") : "—";
+                    })()}
+                  </td>
                   <td className="px-3 py-2 text-gray-700">
                     {person.checked_in_at ? "Checked in" : "Not checked in"}
                   </td>
                   <td className="px-3 py-2 text-gray-700">
-                    {readiness.isReady
-                      ? "Ready"
-                      : `${readiness.missing.length + readiness.blockers.length} item(s)`}
+                    {isReady ? "Ready" : `${missingCount} item(s)`}
                   </td>
                   {canSeeAdminNotes ? (
                     <td className="px-3 py-2 text-gray-700">{person.admin_notes ?? "—"}</td>

@@ -1,22 +1,34 @@
 "use client";
 
 import { useMemo, useState, useTransition } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   clearCart,
   createConferenceCheckout,
+  devCompleteConferenceCheckout,
   getConferenceCart,
   removeCartItem,
+  setCartItemAttendee,
   updateCartItemQuantity,
 } from "@/lib/actions/conference-commerce";
+import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
+import PersonPickerModal, { type PickablePerson } from "@/components/people/PersonPickerModal";
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type CartRow = Record<string, any>;
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type ProductRow = Record<string, any>;
+type AttendeeRef = { name: string; email: string | null };
+type OfferItem = {
+  cartItemId: string;
+  offerEntityId: string;
+  name: string;
+  kind: string;
+  quantity: number;
+  unitPriceCents: number;
+  linkedToCartItemIds: string[];
+  attendees: (AttendeeRef | null)[];
+};
 type CartWithTotals = {
-  items: Array<CartRow & { product: ProductRow }>;
+  offerItems: OfferItem[];
   subtotalCents: number;
   taxCents: number;
   totalCents: number;
@@ -28,31 +40,42 @@ export default function CartClient({
   conferenceEdition,
   organizationId,
   organizationName,
+  orgSlug,
+  isDevAdmin,
   initialCart,
+  contacts,
 }: {
   conferenceId: string;
   conferenceYear: string;
   conferenceEdition: string;
   organizationId: string;
   organizationName: string;
+  orgSlug: string;
+  isDevAdmin: boolean;
   initialCart: CartWithTotals;
+  /** The org's existing Store Contacts — the picker's default list when assigning a registration line. */
+  contacts: PickablePerson[];
 }) {
   const router = useRouter();
   const [cart, setCart] = useState<CartWithTotals>(initialCart);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [warning, setWarning] = useState<string | null>(null);
+  const [completedOrderId, setCompletedOrderId] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const [assigningSlot, setAssigningSlot] = useState<{ cartItemId: string; index: number } | null>(null);
 
-  const isEmpty = cart.items.length === 0;
+  const isEmpty = cart.offerItems.length === 0;
   const checkoutDisabled = isPending || isEmpty;
+  const boothCount = cart.offerItems.filter((item) => item.kind === "booth").length;
 
   const lineTotals = useMemo(() => {
     const byItemId = new Map<string, number>();
-    for (const item of cart.items) {
-      byItemId.set(item.id, item.quantity * item.product.price_cents);
+    for (const item of cart.offerItems) {
+      byItemId.set(item.cartItemId, item.quantity * item.unitPriceCents);
     }
     return byItemId;
-  }, [cart.items]);
+  }, [cart.offerItems]);
 
   const refreshCart = async () => {
     const refreshed = await getConferenceCart(conferenceId, organizationId);
@@ -62,6 +85,23 @@ export default function CartClient({
     }
     setCart(refreshed.data);
     return true;
+  };
+
+  const handleSetAttendee = (attendee: AttendeeRef | null) => {
+    if (!assigningSlot) return;
+    const { cartItemId, index } = assigningSlot;
+    setAssigningSlot(null);
+    setError(null);
+    setWarning(null);
+    startTransition(async () => {
+      const result = await setCartItemAttendee({ cartItemId, index, attendee });
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      if (result.data.warning) setWarning(result.data.warning);
+      await refreshCart();
+    });
   };
 
   const handleRemove = (cartItemId: string) => {
@@ -75,6 +115,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
+      dispatchConferenceCartUpdated();
     });
   };
 
@@ -89,6 +130,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
+      dispatchConferenceCartUpdated();
     });
   };
 
@@ -103,6 +145,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
+      dispatchConferenceCartUpdated();
       setStatus("Cart cleared.");
     });
   };
@@ -132,6 +175,26 @@ export default function CartClient({
     });
   };
 
+  // Dev-only: complete the purchase without Stripe (global admins). Runs the same
+  // RPCs the live webhook does, so seats mint and the buy→allocate loop is testable.
+  const handleDevComplete = () => {
+    setError(null);
+    setStatus(null);
+    setCompletedOrderId(null);
+
+    startTransition(async () => {
+      const result = await devCompleteConferenceCheckout({ conferenceId, organizationId });
+      if (!result.success) {
+        setError(result.error);
+        return;
+      }
+      await refreshCart();
+      dispatchConferenceCartUpdated();
+      setCompletedOrderId(result.data.orderId);
+      setStatus("Purchase completed (dev). Seats minted.");
+    });
+  };
+
   return (
     <section className="space-y-4">
       <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-xs text-gray-600">
@@ -144,11 +207,29 @@ export default function CartClient({
       {status ? (
         <p className="rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-700">{status}</p>
       ) : null}
+      {warning ? (
+        <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{warning}</p>
+      ) : null}
+      {completedOrderId ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          Seats are ready to assign.{" "}
+          <Link href={`/org/${orgSlug}`} className="font-semibold underline">
+            Go to {organizationName}&apos;s profile to assign them →
+          </Link>
+        </div>
+      ) : null}
+
+      {boothCount >= 2 ? (
+        <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          You have {boothCount} booths in this cart. Extra booths add floor space — they don&apos;t add
+          meeting slots or extend meeting length; those come from your registration, not booth count.
+        </p>
+      ) : null}
 
       {isEmpty ? (
         <div className="rounded-lg border border-gray-200 p-8 text-center">
           <h2 className="text-lg font-semibold text-gray-900">Your cart is empty</h2>
-          <p className="mt-2 text-sm text-gray-600">Add products from the conference catalog.</p>
+          <p className="mt-2 text-sm text-gray-600">Add offers from the conference catalog.</p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-gray-200">
@@ -163,39 +244,87 @@ export default function CartClient({
               </tr>
             </thead>
             <tbody className="divide-y divide-gray-200 bg-white">
-              {cart.items.map((item) => (
-                <tr key={item.id}>
-                  <td className="px-4 py-3">
-                    <div className="text-sm font-medium text-gray-900">{item.product.name}</div>
-                    <div className="text-xs text-gray-500">{item.product.slug}</div>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{formatCents(item.product.price_cents)}</td>
-                  <td className="px-4 py-3">
-                    <input
-                      type="number"
-                      min={0}
-                      value={item.quantity}
-                      onChange={(event) =>
-                        handleUpdateQuantity(item.id, Math.max(0, Number(event.target.value) || 0))
-                      }
-                      className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
-                      disabled={isPending}
-                    />
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">
-                    {formatCents(lineTotals.get(item.id) ?? 0)}
-                  </td>
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => handleRemove(item.id)}
-                      disabled={isPending}
-                      className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
-                    >
-                      Remove
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {cart.offerItems.map((item) => {
+                const isMembershipRenewal = item.kind === "membership_renewal";
+                const isBooth = item.kind === "booth";
+                const isRegistration = item.kind === "registration";
+                const linkedFrom = isMembershipRenewal
+                  ? cart.offerItems.filter((i) => item.linkedToCartItemIds.includes(i.cartItemId))
+                  : [];
+
+                return (
+                  <tr key={item.cartItemId} className={isMembershipRenewal ? "bg-amber-50/50" : undefined}>
+                    <td className="px-4 py-3">
+                      <div className="text-sm font-medium text-gray-900">
+                        {isMembershipRenewal ? "Membership Renewal" : item.name}
+                      </div>
+                      {isMembershipRenewal ? (
+                        <p className="mt-0.5 text-xs text-amber-700">
+                          Required to purchase{" "}
+                          {linkedFrom.length > 0 ? linkedFrom.map((i) => i.name).join(", ") : "the linked item"} —
+                          extends your membership coverage through this conference&apos;s dates.
+                        </p>
+                      ) : null}
+                      {isRegistration ? (
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          {Array.from({ length: item.quantity }, (_, index) => {
+                            const attendee = item.attendees[index] ?? null;
+                            return (
+                              <button
+                                key={index}
+                                onClick={() => setAssigningSlot({ cartItemId: item.cartItemId, index })}
+                                disabled={isPending}
+                                className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                                  attendee
+                                    ? "border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-300"
+                                    : "border-dashed border-gray-300 text-gray-500 hover:border-gray-400"
+                                }`}
+                              >
+                                {attendee ? attendee.name : `Assign #${index + 1}`}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">{formatCents(item.unitPriceCents)}</td>
+                    <td className="px-4 py-3">
+                      {isMembershipRenewal || isBooth ? (
+                        <span className="text-sm text-gray-500">1</span>
+                      ) : (
+                        <input
+                          type="number"
+                          min={0}
+                          value={item.quantity}
+                          onChange={(event) =>
+                            handleUpdateQuantity(item.cartItemId, Math.max(0, Number(event.target.value) || 0))
+                          }
+                          className="w-20 rounded-md border border-gray-300 px-2 py-1 text-sm"
+                          disabled={isPending}
+                        />
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-sm text-gray-700">
+                      {formatCents(lineTotals.get(item.cartItemId) ?? 0)}
+                    </td>
+                    <td className="px-4 py-3">
+                      {isMembershipRenewal ? (
+                        <span className="text-xs text-gray-500">
+                          Remove {linkedFrom.length > 0 ? linkedFrom.map((i) => i.name).join(", ") : "the linked item"} to remove this
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => handleRemove(item.cartItemId)}
+                          disabled={isPending}
+                          className="rounded-md border border-gray-300 px-2 py-1 text-xs font-medium text-gray-700 hover:border-gray-400 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
@@ -240,7 +369,33 @@ export default function CartClient({
             Refresh
           </button>
         </div>
+
+        {isDevAdmin ? (
+          <div className="mt-3 border-t border-dashed border-amber-300 pt-3">
+            <button
+              onClick={handleDevComplete}
+              disabled={isPending || isEmpty}
+              className="rounded-md border border-amber-400 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-800 hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isPending ? "Completing…" : "Complete purchase (dev — skip Stripe)"}
+            </button>
+            <p className="mt-1 text-[11px] text-amber-700">
+              Admin/dev only: marks the order paid via the real mint RPCs so seats appear without Stripe.
+            </p>
+          </div>
+        ) : null}
       </div>
+
+      {assigningSlot ? (
+        <PersonPickerModal
+          title="Who is this seat for?"
+          people={contacts}
+          organizationId={organizationId}
+          onSelect={(person) => handleSetAttendee(person)}
+          onDeferLater={() => handleSetAttendee(null)}
+          onClose={() => setAssigningSlot(null)}
+        />
+      ) : null}
     </section>
   );
 }

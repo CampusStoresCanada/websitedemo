@@ -4,6 +4,11 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { createEvent, updateEvent, requestEventChanges } from "@/lib/actions/events";
 import { upsertBoardMeetingForEvent } from "@/lib/actions/board-meeting-event";
+import {
+  listConferencesForLinking,
+  listLinkableConferenceEntities,
+  getLinkedConferenceEntityInfo,
+} from "@/lib/actions/conference-event-link";
 import { loadGooglePlacesScript } from "@/lib/google/places";
 import type { Event, EventAudienceMode, CreateEventPayload, UpdateEventPayload } from "@/lib/events/types";
 import { AUDIENCE_MODE_LABELS, AUDIENCE_MODE_DESCRIPTIONS } from "@/lib/events/types";
@@ -63,6 +68,34 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
     event?.capacity != null ? String(event.capacity) : ""
   );
   const [slugOverride, setSlugOverride] = useState(event?.slug ?? "");
+
+  // Conference link — "Connect to Conference Thing" (see lib/actions/conference-event-link.ts)
+  const [conferenceEntityId, setConferenceEntityId] = useState<string | null>(event?.conference_entity_id ?? null);
+  const [linkedInfo, setLinkedInfo] = useState<{ conferenceName: string; entityName: string; entityKind: string } | null>(null);
+  const [conferences, setConferences] = useState<Array<{ id: string; name: string }>>([]);
+  const [selectedConferenceId, setSelectedConferenceId] = useState("");
+  const [linkableEntities, setLinkableEntities] = useState<Array<{ id: string; name: string; kind: string }>>([]);
+
+  useEffect(() => {
+    if (!conferenceEntityId) { setLinkedInfo(null); return; }
+    void getLinkedConferenceEntityInfo(conferenceEntityId).then((res) => {
+      if (res.success && res.data) setLinkedInfo(res.data);
+    });
+  }, [conferenceEntityId]);
+
+  useEffect(() => {
+    if (conferenceEntityId) return; // only need the picker once unlinked
+    void listConferencesForLinking().then((res) => {
+      if (res.success) setConferences(res.data);
+    });
+  }, [conferenceEntityId]);
+
+  useEffect(() => {
+    if (!selectedConferenceId) { setLinkableEntities([]); return; }
+    void listLinkableConferenceEntities(selectedConferenceId, event?.id).then((res) => {
+      if (res.success) setLinkableEntities(res.data);
+    });
+  }, [selectedConferenceId, event?.id]);
 
   // Tags — stored in metadata.tags
   const initialTags: string[] = (() => {
@@ -130,6 +163,7 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
       virtual_link: isVirtual ? virtualLink || undefined : undefined,
       audience_mode: audienceMode,
       capacity: capacity ? Number(capacity) : undefined,
+      conference_entity_id: conferenceEntityId,
       ...(isEdit && slugOverride ? { slug: slugOverride } : {}),
       metadata: {
         ...((typeof event?.metadata === "object" && event?.metadata) ? event.metadata as Record<string, unknown> : {}),
@@ -389,6 +423,63 @@ export default function EventForm({ event, isEdit = false, fromReview = false, g
             placeholder="e.g. 50"
           />
         </div>
+      </fieldset>
+
+      {/* Conference link */}
+      <fieldset className="space-y-4">
+        <legend className="text-sm font-semibold text-gray-700 border-b border-gray-200 pb-2 w-full">
+          Connect to Conference Thing <span className="font-normal text-gray-400">(optional)</span>
+        </legend>
+
+        {conferenceEntityId ? (
+          <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 text-sm text-gray-700">
+            {linkedInfo ? (
+              <>
+                Linked to <span className="font-medium text-gray-900">{linkedInfo.entityName}</span>{" "}
+                ({linkedInfo.entityKind}) in {linkedInfo.conferenceName}.
+              </>
+            ) : (
+              "Loading link…"
+            )}
+            <button
+              type="button"
+              onClick={() => { setConferenceEntityId(null); setLinkedInfo(null); }}
+              className="ml-2 text-xs font-medium text-red-600 hover:underline"
+            >
+              Unlink
+            </button>
+          </div>
+        ) : (
+          <div className="space-y-3">
+            <p className="text-xs text-gray-400">
+              Bind this event to a conference catalog item so RSVP eligibility follows that item&apos;s
+              actual registration gating (e.g. only orgs holding the right registration), not just the
+              Audience setting above.
+            </p>
+            <select
+              value={selectedConferenceId}
+              onChange={(e) => setSelectedConferenceId(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+            >
+              <option value="">Select a conference…</option>
+              {conferences.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            {selectedConferenceId && (
+              <select
+                value=""
+                onChange={(e) => e.target.value && setConferenceEntityId(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-1 focus:ring-accent focus:border-accent"
+              >
+                <option value="">Select an item…</option>
+                {linkableEntities.map((ent) => (
+                  <option key={ent.id} value={ent.id}>{ent.name} ({ent.kind})</option>
+                ))}
+              </select>
+            )}
+          </div>
+        )}
       </fieldset>
 
       {/* Tags — for "For you" matching */}

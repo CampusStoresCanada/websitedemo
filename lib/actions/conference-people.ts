@@ -17,6 +17,7 @@ import {
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
 import { ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
+import { getMyConferenceLegalGate, getPersonAssigneeLegalGate } from "@/lib/actions/conference-legal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { createHash } from "node:crypto";
@@ -29,16 +30,13 @@ type ConferencePersonRow = {
   canonical_person_id: string | null;
   registration_id: string | null;
   conference_staff_id: string | null;
-  source_type: "registration" | "staff" | "entitlement";
+  source_type: "registration" | "staff" | "manual";
   source_id: string;
   person_kind: "delegate" | "exhibitor" | "staff" | "observer" | "unassigned";
   display_name: string | null;
   legal_name: string | null;
   role_title: string | null;
   contact_email: string | null;
-  conference_entitlement_id: string | null;
-  entitlement_type: string | null;
-  entitlement_status: "active" | "refunded" | "voided" | null;
   assignment_status:
     | "unassigned"
     | "assigned"
@@ -223,11 +221,6 @@ export async function syncConferencePeopleIndex(
         legal_name: (row.legal_name as string | null) ?? null,
         role_title: roleTitle,
         contact_email: contactEmail,
-        conference_entitlement_id:
-          (row.conference_entitlement_id as string | null) ?? null,
-        entitlement_type: (row.entitlement_type as string | null) ?? null,
-        entitlement_status:
-          (row.entitlement_status as string | null) ?? null,
         assignment_status:
           (row.assignment_status as string | null) ?? "assigned",
         assigned_email_snapshot:
@@ -477,9 +470,6 @@ export async function updateConferencePersonSelf(
 
 const OPS_EDITABLE_FIELDS = new Set([
   "assignment_status",
-  "conference_entitlement_id",
-  "entitlement_type",
-  "entitlement_status",
   "assigned_email_snapshot",
   "assigned_at",
   "assigned_by",
@@ -509,37 +499,6 @@ function splitName(name: string): { firstName: string; lastName: string } {
   const parts = cleaned.split(/\s+/);
   if (parts.length === 1) return { firstName: parts[0], lastName: "" };
   return { firstName: parts[0], lastName: parts.slice(1).join(" ") };
-}
-
-async function insertAssignmentEvent(event: {
-  conferenceId: string;
-  organizationId: string;
-  personId: string | null;
-  conferenceEntitlementId: string;
-  previousUserId: string | null;
-  nextUserId: string | null;
-  previousStatus: string | null;
-  nextStatus: string;
-  actorId: string | null;
-  actorType: "user" | "system";
-  reason: string;
-  metadata?: Record<string, unknown>;
-}): Promise<void> {
-  const db = createAdminClient();
-  await db.from("conference_entitlement_assignment_events").insert({
-    conference_id: event.conferenceId,
-    organization_id: event.organizationId,
-    person_id: event.personId,
-    conference_entitlement_id: event.conferenceEntitlementId,
-    previous_user_id: event.previousUserId,
-    next_user_id: event.nextUserId,
-    previous_status: event.previousStatus,
-    next_status: event.nextStatus,
-    actor_id: event.actorId,
-    actor_type: event.actorType,
-    reason: event.reason,
-    metadata: (event.metadata ?? null) as unknown as import("@/lib/database.types").Json | null,
-  });
 }
 
 export async function updateConferencePersonOps(
@@ -1161,41 +1120,45 @@ export async function reprintConferenceBadge(
   };
 }
 
-export async function assignConferenceEntitlement(
-  conferenceId: string,
-  organizationId: string,
-  conferenceEntitlementId: string,
-  params: {
-    entitlementType: string;
-    targetUserId?: string | null;
-    targetEmail?: string | null;
-  }
-): Promise<{ success: boolean; error?: string; data?: { personId: string; assignmentStatus: string } }> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
+type ResolvedAssignee = {
+  targetUserId: string | null;
+  assignmentStatus: Extract<ConferencePersonRow["assignment_status"], "assigned" | "pending_user_activation">;
+  normalizedEmail: string | null;
+  canonicalPersonId: string | null;
+};
 
-  const db = conferencePeopleClient();
-  const adminDb = createAdminClient();
+/**
+ * Resolve who a seat should be assigned to, given an optional known userId
+ * and/or a target email. If an email is given with no known userId, invites
+ * them via inviteOrgUser() and parks the assignment as
+ * pending_user_activation — finalizePendingConferenceAssignmentsForCurrentUser()
+ * picks it up on that user's next login regardless of source_type. If a
+ * userId is already known, resolves their canonical person immediately and
+ * marks assigned.
+ */
+export async function resolveAssigneeForEmail(params: {
+  organizationId: string;
+  targetUserId?: string | null;
+  targetEmail?: string | null;
+}): Promise<{ success: true; data: ResolvedAssignee } | { success: false; error: string }> {
   let targetUserId = params.targetUserId ?? null;
-  let assignmentStatus: ConferencePersonRow["assignment_status"] = "assigned";
+  let assignmentStatus: ResolvedAssignee["assignmentStatus"] = "assigned";
   const normalizedEmail = params.targetEmail?.trim().toLowerCase() ?? null;
   let canonicalPersonId: string | null = null;
 
   if (!targetUserId && normalizedEmail) {
-    const invite = await inviteOrgUser(organizationId, normalizedEmail, "member");
-    if (!invite.success) return { success: false, error: invite.error };
+    const invite = await inviteOrgUser(params.organizationId, normalizedEmail, "member");
+    if (!invite.success) return { success: false, error: invite.error ?? "Failed to send invite." };
     // Invite flow does not guarantee immediate activated user mapping.
     // Keep assignment user null and track intended assignee by email.
     targetUserId = null;
     assignmentStatus = "pending_user_activation";
 
+    const adminDb = createAdminClient();
     const { data: contact } = await adminDb
       .from("contacts")
       .select("name, role_title")
-      .eq("organization_id", organizationId)
+      .eq("organization_id", params.organizationId)
       .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`)
       .limit(1)
       .maybeSingle();
@@ -1204,7 +1167,7 @@ export async function assignConferenceEntitlement(
       normalizedEmail.split("@")[0]?.replace(/[._-]+/g, " ") ??
       normalizedEmail;
     const known = await ensureKnownPerson({
-      organizationId,
+      organizationId: params.organizationId,
       name: fallbackName,
       email: normalizedEmail,
       title: (contact?.role_title as string | null) ?? null,
@@ -1213,479 +1176,42 @@ export async function assignConferenceEntitlement(
   } else if (targetUserId) {
     const person = await ensurePersonForUser({
       userId: targetUserId,
-      organizationId,
+      organizationId: params.organizationId,
       fallbackEmail: normalizedEmail,
     });
     canonicalPersonId = person.personId ?? null;
   }
 
-  const { data: existing } = await db
-    .from("conference_people")
-    .select("id,user_id,assignment_status")
-    .eq("conference_id", conferenceId)
-    .eq("source_type", "entitlement")
-    .eq("source_id", conferenceEntitlementId)
-    .maybeSingle();
-
-  if (
-    assignmentStatus !== "pending_user_activation" &&
-    targetUserId &&
-    (existing?.user_id as string | null) &&
-    (existing?.user_id as string | null) !== targetUserId
-  ) {
-    assignmentStatus = "reassigned";
-  }
-
-  const payload = {
-    conference_id: conferenceId,
-    organization_id: organizationId,
-    user_id: targetUserId,
-    canonical_person_id: canonicalPersonId,
-    registration_id: null,
-    conference_staff_id: null,
-    source_type: "entitlement",
-    source_id: conferenceEntitlementId,
-    person_kind: targetUserId ? "delegate" : "unassigned",
-    conference_entitlement_id: conferenceEntitlementId,
-    entitlement_type: params.entitlementType,
-    entitlement_status: "active",
-    assignment_status: assignmentStatus,
-    assigned_email_snapshot: normalizedEmail,
-    assigned_at: new Date().toISOString(),
-    assigned_by: auth.ctx.userId,
-    reassigned_from_user_id: (existing?.user_id as string | null) ?? null,
-    schedule_scope: targetUserId ? "person" : "organization",
-    updated_at: new Date().toISOString(),
-  };
-
-  const { error } = await db
-    .from("conference_people")
-    .upsert(payload, { onConflict: "conference_id,source_type,source_id" });
-
-  if (error) {
-    return { success: false, error: `Failed to assign entitlement: ${error.message}` };
-  }
-
-  const { data: personRow, error: rowError } = await db
-    .from("conference_people")
-    .select("id")
-    .eq("conference_id", conferenceId)
-    .eq("source_type", "entitlement")
-    .eq("source_id", conferenceEntitlementId)
-    .maybeSingle();
-
-  if (rowError || !personRow) {
-    return { success: false, error: "Assignment created but record lookup failed." };
-  }
-
-  await logAuditEventSafe({
-    action: "conference_entitlement_assignment",
-    entityType: "conference_people",
-    entityId: personRow.id as string,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId,
-      targetUserId,
-      targetEmail: normalizedEmail,
-      assignmentStatus,
-    },
-  });
-
-  await insertAssignmentEvent({
-    conferenceId,
-    organizationId,
-    personId: personRow.id as string,
-    conferenceEntitlementId,
-    previousUserId: (existing?.user_id as string | null) ?? null,
-    nextUserId: targetUserId,
-    previousStatus: (existing?.assignment_status as string | null) ?? null,
-    nextStatus: assignmentStatus,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    reason:
-      assignmentStatus === "pending_user_activation"
-        ? "invite_pending"
-        : assignmentStatus === "reassigned"
-          ? "reassigned"
-          : "assigned",
-    metadata: {
-      targetEmail: normalizedEmail,
-      entitlementType: params.entitlementType,
-    },
-  });
-  await logAuditEventSafe({
-    action: "conference_assignment_notification_hook",
-    entityType: "conference_people",
-    entityId: personRow.id as string,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      hook: "assignment_created",
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId,
-      assignmentStatus,
-      targetUserId,
-      targetEmail: normalizedEmail,
-    },
-  });
-
-  return {
-    success: true,
-    data: { personId: personRow.id as string, assignmentStatus },
-  };
+  return { success: true, data: { targetUserId, assignmentStatus, normalizedEmail, canonicalPersonId } };
 }
 
-export async function listOrganizationAssignableUsers(
-  organizationId: string
-): Promise<{
-  success: boolean;
-  error?: string;
-  data?: Array<{ userId: string; displayName: string | null; email: string | null; role: string }>;
-}> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
-
-  const adminDb = createAdminClient();
-  const { data: memberships, error: membershipError } = await adminDb
-    .from("user_organizations")
-    .select("user_id, role")
-    .eq("organization_id", organizationId)
-    .eq("status", "active");
-
-  if (membershipError) {
-    return { success: false, error: `Failed to load organization users: ${membershipError.message}` };
-  }
-
-  const memberRows = (memberships ?? []) as Array<{ user_id: string | null; role: string | null }>;
-  const userIds = memberRows
-    .map((row) => row.user_id)
-    .filter((value): value is string => Boolean(value));
-
-  if (userIds.length === 0) {
-    return { success: true, data: [] };
-  }
-
-  const [{ data: profileRows }, authUsersResult] = await Promise.all([
-    adminDb.from("profiles").select("id, display_name").in("id", userIds),
-    adminDb.auth.admin.listUsers(),
-  ]);
-
-  const profileNameById = new Map<string, string | null>(
-    ((profileRows ?? []) as Array<{ id: string; display_name: string | null }>).map((row) => [
-      row.id,
-      row.display_name ?? null,
-    ])
-  );
-  const emailById = new Map<string, string | null>(
-    (authUsersResult.data?.users ?? [])
-      .filter((user) => userIds.includes(user.id))
-      .map((user) => [user.id, user.email ?? null])
-  );
-
-  const data = memberRows
-    .filter((row): row is { user_id: string; role: string | null } => Boolean(row.user_id))
-    .map((row) => ({
-      userId: row.user_id,
-      displayName: profileNameById.get(row.user_id) ?? null,
-      email: emailById.get(row.user_id) ?? null,
-      role: row.role ?? "member",
-    }));
-
-  return { success: true, data };
-}
-
-export async function unassignConferenceEntitlement(
-  conferenceId: string,
-  organizationId: string,
-  conferenceEntitlementId: string
-): Promise<{ success: boolean; error?: string; data?: { personId: string } }> {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
-
-  const db = conferencePeopleClient();
-  const { data: existing, error: existingError } = await db
-    .from("conference_people")
-    .select("id,user_id,assignment_status,entitlement_type")
-    .eq("conference_id", conferenceId)
-    .eq("organization_id", organizationId)
-    .eq("source_type", "entitlement")
-    .eq("source_id", conferenceEntitlementId)
-    .maybeSingle();
-
-  if (existingError || !existing) {
-    return { success: false, error: existingError?.message ?? "Entitlement row not found." };
-  }
-
-  const previousUserId = (existing.user_id as string | null) ?? null;
-  const previousStatus = (existing.assignment_status as string | null) ?? null;
-
-  const { error: updateError } = await db
-    .from("conference_people")
-    .update({
-      user_id: null,
-      canonical_person_id: null,
-      person_kind: "unassigned",
-      assignment_status: "unassigned",
-      assigned_email_snapshot: null,
-      assigned_at: new Date().toISOString(),
-      assigned_by: auth.ctx.userId,
-      reassigned_from_user_id: previousUserId,
-      schedule_scope: "organization",
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", existing.id as string);
-
-  if (updateError) {
-    return { success: false, error: `Failed to unassign entitlement: ${updateError.message}` };
-  }
-
-  await logAuditEventSafe({
-    action: "conference_entitlement_assignment",
-    entityType: "conference_people",
-    entityId: existing.id as string,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId,
-      targetUserId: null,
-      targetEmail: null,
-      assignmentStatus: "unassigned",
-    },
-  });
-
-  await insertAssignmentEvent({
-    conferenceId,
-    organizationId,
-    personId: existing.id as string,
-    conferenceEntitlementId,
-    previousUserId,
-    nextUserId: null,
-    previousStatus,
-    nextStatus: "unassigned",
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    reason: "unassigned",
-    metadata: {
-      entitlementType: (existing.entitlement_type as string | null) ?? null,
-    },
-  });
-
-  await logAuditEventSafe({
-    action: "conference_assignment_notification_hook",
-    entityType: "conference_people",
-    entityId: existing.id as string,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      hook: "assignment_unassigned",
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId,
-    },
-  });
-
-  return { success: true, data: { personId: existing.id as string } };
-}
-
-export async function unassignConferenceEntitlementWithDisposition(
-  conferenceId: string,
-  organizationId: string,
-  conferenceEntitlementId: string,
-  disposition: "hold_for_reassignment" | "release_and_refund"
-): Promise<{
-  success: boolean;
-  error?: string;
-  data?: { personId: string; refunded: boolean; refundAmountCents?: number };
-}> {
-  if (disposition === "hold_for_reassignment") {
-    const holdResult = await unassignConferenceEntitlement(
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId
-    );
-    if (!holdResult.success || !holdResult.data) return { success: false, error: holdResult.error };
-    return {
-      success: true,
-      data: { personId: holdResult.data.personId, refunded: false },
-    };
-  }
-
-  const auth = await requireAuthenticated();
-  if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
-    return { success: false, error: "Not authorized for this organization." };
-  }
-
-  const db = conferencePeopleClient();
-  const adminDb = createAdminClient();
-  const { data: existing, error: existingError } = await db
-    .from("conference_people")
-    .select("id,user_id,assignment_status,entitlement_type")
-    .eq("conference_id", conferenceId)
-    .eq("organization_id", organizationId)
-    .eq("source_type", "entitlement")
-    .eq("source_id", conferenceEntitlementId)
-    .maybeSingle();
-
-  if (existingError || !existing) {
-    return { success: false, error: existingError?.message ?? "Entitlement row not found." };
-  }
-
-  const { data: entitlementItem, error: entitlementError } = await adminDb
-    .from("conference_order_items")
-    .select("id,order_id,quantity,total_cents")
-    .eq("id", conferenceEntitlementId)
-    .maybeSingle();
-  if (entitlementError || !entitlementItem) {
-    return {
-      success: false,
-      error: entitlementError?.message ?? "Failed to resolve entitlement order item.",
-    };
-  }
-
-  const quantity = Math.max(1, entitlementItem.quantity ?? 1);
-  const seatBaseCents = Math.round((entitlementItem.total_cents ?? 0) / quantity);
-  if (seatBaseCents <= 0) {
-    return { success: false, error: "Entitlement seat amount is not refundable." };
-  }
-
-  const refundQuote = await calculateConferenceRefund(entitlementItem.order_id);
-  if (!refundQuote.success) return { success: false, error: refundQuote.error };
-  if (!refundQuote.data.eligible && !isGlobalAdmin(auth.ctx.globalRole)) {
-    return {
-      success: false,
-      error: "Order is not eligible for a refund under current policy.",
-    };
-  }
-
-  const seatRefundCents = Math.round(
-    seatBaseCents * ((refundQuote.data.refundPct ?? 0) / 100)
-  );
-  if (seatRefundCents <= 0) {
-    return {
-      success: false,
-      error: "No refundable amount is available for this entitlement seat.",
-    };
-  }
-
-  const refundResult = await requestConferenceRefund(
-    entitlementItem.order_id,
-    seatRefundCents,
-    {
-      allowManagedOverride: true,
-      overrideReason: "entitlement_release_refund",
-    }
-  );
-  if (!refundResult.success) {
-    return { success: false, error: refundResult.error };
-  }
-
-  const previousUserId = (existing.user_id as string | null) ?? null;
-  const previousStatus = (existing.assignment_status as string | null) ?? null;
-  const nowIso = new Date().toISOString();
-  const { error: updateError } = await db
-    .from("conference_people")
-    .update({
-      user_id: null,
-      canonical_person_id: null,
-      person_kind: "unassigned",
-      assignment_status: "canceled",
-      entitlement_status: "refunded",
-      assigned_email_snapshot: null,
-      assigned_at: nowIso,
-      assigned_by: auth.ctx.userId,
-      reassigned_from_user_id: previousUserId,
-      schedule_scope: "organization",
-      updated_at: nowIso,
-    })
-    .eq("id", existing.id as string);
-
-  if (updateError) {
-    return { success: false, error: `Failed to release refunded entitlement: ${updateError.message}` };
-  }
-
-  await insertAssignmentEvent({
-    conferenceId,
-    organizationId,
-    personId: existing.id as string,
-    conferenceEntitlementId,
-    previousUserId,
-    nextUserId: null,
-    previousStatus,
-    nextStatus: "canceled",
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    reason: "released_refunded",
-    metadata: {
-      entitlementType: (existing.entitlement_type as string | null) ?? null,
-      refundAmountCents: refundResult.data.refundAmountCents,
-      refundPct: refundResult.data.refundPct,
-      conferenceOrderId: entitlementItem.order_id,
-      stripeRefundId: refundResult.data.stripeRefundId,
-    },
-  });
-
-  await logAuditEventSafe({
-    action: "conference_entitlement_released_refunded",
-    entityType: "conference_people",
-    entityId: existing.id as string,
-    actorId: auth.ctx.userId,
-    actorType: "user",
-    details: {
-      conferenceId,
-      organizationId,
-      conferenceEntitlementId,
-      conferenceOrderId: entitlementItem.order_id,
-      refundAmountCents: refundResult.data.refundAmountCents,
-      refundPct: refundResult.data.refundPct,
-      stripeRefundId: refundResult.data.stripeRefundId,
-    },
-  });
-
-  return {
-    success: true,
-    data: {
-      personId: existing.id as string,
-      refunded: true,
-      refundAmountCents: refundResult.data.refundAmountCents,
-    },
-  };
-}
 
 export async function finalizePendingConferenceAssignmentsForCurrentUser(): Promise<{
   success: boolean;
   error?: string;
-  data?: { finalizedCount: number; personIds: string[] };
+  data?: {
+    finalizedCount: number;
+    personIds: string[];
+    outstandingLegal: Array<{ conferenceId: string; missing: string[] }>;
+  };
 }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
   if (!auth.ctx.userEmail) {
-    return { success: true, data: { finalizedCount: 0, personIds: [] } };
+    return { success: true, data: { finalizedCount: 0, personIds: [], outstandingLegal: [] } };
   }
 
   const email = auth.ctx.userEmail.trim().toLowerCase();
   const activeOrgIds = auth.ctx.activeOrgIds;
   if (activeOrgIds.length === 0) {
-    return { success: true, data: { finalizedCount: 0, personIds: [] } };
+    return { success: true, data: { finalizedCount: 0, personIds: [], outstandingLegal: [] } };
   }
 
   const db = createAdminClient();
   const { data: pendingRows, error: pendingError } = await db
     .from("conference_people")
     .select(
-      "id,conference_id,organization_id,conference_entitlement_id,user_id,assignment_status,assigned_email_snapshot"
+      "id,conference_id,organization_id,user_id,assignment_status,assigned_email_snapshot"
     )
     .eq("assignment_status", "pending_user_activation")
     .eq("assigned_email_snapshot", email)
@@ -1700,13 +1226,13 @@ export async function finalizePendingConferenceAssignmentsForCurrentUser(): Prom
 
   const rows = (pendingRows ?? []) as Array<Record<string, unknown>>;
   const personIds: string[] = [];
+  const claimedConferenceIds = new Set<string>();
   for (const row of rows) {
     const personId = row.id as string;
     const conferenceId = row.conference_id as string;
+    claimedConferenceIds.add(conferenceId);
     const organizationId = row.organization_id as string;
-    const entitlementId = (row.conference_entitlement_id as string | null) ?? null;
     const previousUserId = (row.user_id as string | null) ?? null;
-    const previousStatus = (row.assignment_status as string | null) ?? null;
 
     const { error: updateError } = await db
       .from("conference_people")
@@ -1734,21 +1260,6 @@ export async function finalizePendingConferenceAssignmentsForCurrentUser(): Prom
     }
     personIds.push(personId);
 
-    if (entitlementId) {
-      await insertAssignmentEvent({
-        conferenceId,
-        organizationId,
-        personId,
-        conferenceEntitlementId: entitlementId,
-        previousUserId,
-        nextUserId: auth.ctx.userId,
-        previousStatus,
-        nextStatus: "assigned",
-        actorId: auth.ctx.userId,
-        actorType: "user",
-        reason: "invite_activation_finalize",
-      });
-    }
     await logAuditEventSafe({
       action: "conference_assignment_notification_hook",
       entityType: "conference_people",
@@ -1759,12 +1270,30 @@ export async function finalizePendingConferenceAssignmentsForCurrentUser(): Prom
         hook: "pending_assignment_finalized",
         conferenceId,
         organizationId,
-        conferenceEntitlementId: entitlementId,
       },
     });
   }
 
-  return { success: true, data: { finalizedCount: personIds.length, personIds } };
+  // After claiming the seats, surface the assignee legal gate for each conference
+  // the user just joined, so the activation surface can prompt them to accept
+  // their personal documents before participating. Best-effort — never fail the
+  // finalization itself over a gate computation.
+  const outstandingLegal: Array<{ conferenceId: string; missing: string[] }> = [];
+  for (const conferenceId of claimedConferenceIds) {
+    try {
+      const gate = await getMyConferenceLegalGate(conferenceId);
+      if (gate.success && gate.data && !gate.data.allAccepted) {
+        outstandingLegal.push({ conferenceId, missing: gate.data.missing });
+      }
+    } catch {
+      // ignore — gate is advisory here
+    }
+  }
+
+  return {
+    success: true,
+    data: { finalizedCount: personIds.length, personIds, outstandingLegal },
+  };
 }
 
 export type CheckInScanResultState =
@@ -1772,7 +1301,8 @@ export type CheckInScanResultState =
   | "already_checked_in"
   | "invalid_token"
   | "revoked_token"
-  | "not_found";
+  | "not_found"
+  | "legal_not_accepted";
 
 export async function scanConferenceCheckInToken(params: {
   conferenceId: string;
@@ -1903,7 +1433,7 @@ export async function scanConferenceCheckInToken(params: {
 
   const { data: personRow, error: personError } = await db
     .from("conference_people")
-    .select("id, checked_in_at, assignment_status, entitlement_status")
+    .select("id, checked_in_at, assignment_status")
     .eq("conference_id", conferenceId)
     .eq("id", resolvedTokenRow.person_id)
     .maybeSingle();
@@ -1912,11 +1442,7 @@ export async function scanConferenceCheckInToken(params: {
     return { success: false, error: `Failed to load conference person: ${personError.message}` };
   }
 
-  if (
-    !personRow ||
-    personRow.assignment_status === "canceled" ||
-    personRow.entitlement_status === "voided"
-  ) {
+  if (!personRow || personRow.assignment_status === "canceled") {
     await insertEvent("not_found", resolvedTokenRow.person_id, resolvedTokenRow.id);
     return {
       success: true,
@@ -1934,6 +1460,22 @@ export async function scanConferenceCheckInToken(params: {
         checkedInAt: personRow.checked_in_at,
       },
     };
+  }
+
+  // Gate: the attendee must have accepted their personal (assignee) documents
+  // before they can be checked in. Best-effort — a gate error never blocks
+  // check-in, but an explicit "not accepted" result does.
+  try {
+    const gate = await getPersonAssigneeLegalGate(conferenceId, personRow.id);
+    if (gate.success && gate.data && !gate.data.allAccepted) {
+      await insertEvent("legal_not_accepted", personRow.id, resolvedTokenRow.id);
+      return {
+        success: true,
+        data: { state: "legal_not_accepted", personId: personRow.id, checkedInAt: null },
+      };
+    }
+  } catch {
+    // ignore — don't let a gate failure block the desk
   }
 
   const checkedInAt = new Date().toISOString();

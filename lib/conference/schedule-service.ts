@@ -1,6 +1,8 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
+import { deriveAgenda } from "@/lib/conference/agenda";
 
 export type ConferenceScheduleViewerRole =
   | "admin"
@@ -8,16 +10,6 @@ export type ConferenceScheduleViewerRole =
   | "observer"
   | "exhibitor"
   | "staff";
-
-export type ConferenceScheduleItemType =
-  | "meeting"
-  | "meal"
-  | "education"
-  | "trade_show"
-  | "offsite"
-  | "move_in"
-  | "move_out"
-  | "custom";
 
 export interface ConferenceMeetingAssignment {
   scheduleId: string;
@@ -39,9 +31,18 @@ export interface ConferenceScheduleItem {
   id: string;
   conferenceId: string;
   source: "program" | "meeting_assignment";
-  itemType: ConferenceScheduleItemType;
+  /**
+   * The catalog `kind` for program items ("session", "meal", "event", …) or
+   * "meeting" for assignments. Drives the type label + colour. (Was the legacy
+   * `ConferenceScheduleItemType`; now carries the real kind.)
+   */
+  itemType: string;
+  /** Alias of itemType — the raw catalog kind. */
+  kind: string;
   title: string;
   description: string | null;
+  /** Short teaser text, for list views that expand to the full description on demand. */
+  summary: string | null;
   startsAt: string;
   endsAt: string;
   startsAtLocal: string;
@@ -55,6 +56,12 @@ export interface ConferenceScheduleItem {
   createdAt: string | null;
   updatedAt: string | null;
   meetingAssignment: ConferenceMeetingAssignment | null;
+  /** Agenda nesting: the row this nests under, or null at the top level. */
+  parentId: string | null;
+  /** 0 at the top level, +1 per nesting level. */
+  depth: number;
+  /** `who` audience names carried for admin lenses (not a visibility gate). */
+  audienceNames: string[];
 }
 
 export interface ConferenceScheduleTimeline {
@@ -92,12 +99,12 @@ function formatLocalDateTime(iso: string, timeZone: string): string {
   }).format(date);
 }
 
-function dayKeyFromIso(iso: string, timeZone: string): string {
-  return new Intl.DateTimeFormat("en-CA", {
+function formatDayOnly(iso: string, timeZone: string): string {
+  return new Intl.DateTimeFormat(undefined, {
     timeZone,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
+    weekday: "short",
+    month: "short",
+    day: "numeric",
   }).format(new Date(iso));
 }
 
@@ -116,20 +123,6 @@ function sortScheduleItems(a: ConferenceScheduleItem, b: ConferenceScheduleItem)
   const byDisplayOrder = a.displayOrder - b.displayOrder;
   if (byDisplayOrder !== 0) return byDisplayOrder;
   return a.title.localeCompare(b.title);
-}
-
-function isProgramItemVisibleForViewer(
-  item: {
-    audience_mode: "all_attendees" | "target_roles" | "manual_curated";
-    target_roles: string[] | null;
-  },
-  viewerRole: ConferenceScheduleViewerRole
-): boolean {
-  if (viewerRole === "admin") return true;
-  if (item.audience_mode === "all_attendees") return true;
-  if (item.audience_mode === "manual_curated") return true;
-  const roles = item.target_roles ?? [];
-  return roles.includes(viewerRole);
 }
 
 export async function getConferenceScheduleTimeline(
@@ -163,54 +156,67 @@ export async function getConferenceScheduleTimeline(
     .eq("status", "completed")
     .maybeSingle()) as { data: any };
 
-  const { data: meetingsModule } = (await ac
-    .from("conference_schedule_modules")
-    .select("enabled, config_json")
-    .eq("conference_id", conferenceId)
-    .eq("module_key", "meetings")
-    .maybeSingle()) as { data: { enabled?: boolean; config_json?: Record<string, unknown> } | null };
-  const meetingDays = Array.isArray(meetingsModule?.config_json?.meeting_days)
-    ? meetingsModule?.config_json?.meeting_days.filter((value): value is string => typeof value === "string")
-    : [];
+  // Program/agenda items are derived live from the v3 catalog (entity graph) —
+  // every "thing" that lands on a Day with a time. The legacy
+  // conference_program_items table is retired; the catalog is the single source.
+  const [{ data: entityRows }, { data: refRows }] = (await Promise.all([
+    ac.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
+    ac
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, role, quantity")
+      .eq("conference_id", conferenceId),
+  ])) as [{ data: any[] | null }, { data: any[] | null }];
 
-  const { data: programRows } = (await ac
-    .from("conference_program_items")
-    .select("*")
-    .eq("conference_id", conferenceId)
-    .order("starts_at", { ascending: true })
-    .order("display_order", { ascending: true })) as { data: any[] | null };
+  const entities = buildEntityGraph(entityRows ?? [], refRows ?? []);
 
-  const visibleProgramRows = (programRows ?? []).filter((row) =>
-    isProgramItemVisibleForViewer(
-      {
-        audience_mode: row.audience_mode,
-        target_roles: row.target_roles ?? [],
-      },
-      options.viewerRole
-    )
-  );
+  // Meeting days for assignment placement = Day things carrying a meeting
+  // cadence, ordered by date (mirrors loadConferenceMeetingGeometry's ordering).
+  const meetingDays = entities
+    .filter((e) => e.kind === "day")
+    .map((e) => ({
+      date: typeof e.attributes.date === "string" ? e.attributes.date : "",
+      hasCadence:
+        typeof e.attributes.meeting_start_time === "string" &&
+        e.attributes.meeting_start_time.trim().length > 0,
+    }))
+    .filter((d) => d.date && d.hasCadence)
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map((d) => d.date);
 
-  const programItems: ConferenceScheduleItem[] = visibleProgramRows.map((row) => ({
-    id: row.id,
-    conferenceId,
-    source: "program",
-    itemType: row.item_type,
-    title: row.title,
-    description: row.description ?? null,
-    startsAt: row.starts_at,
-    endsAt: row.ends_at,
-    startsAtLocal: formatLocalDateTime(row.starts_at, timeZone),
-    endsAtLocal: formatLocalDateTime(row.ends_at, timeZone),
-    dayKeyLocal: dayKeyFromIso(row.starts_at, timeZone),
-    locationLabel: row.location_label ?? null,
-    audienceMode: row.audience_mode,
-    targetRoles: Array.isArray(row.target_roles) ? row.target_roles : [],
-    isRequired: row.is_required === true,
-    displayOrder: Number(row.display_order ?? 0),
-    createdAt: row.created_at ?? null,
-    updatedAt: row.updated_at ?? null,
-    meetingAssignment: null,
-  }));
+  // The agenda is visible to everyone (admin sees all regardless). `who`
+  // audiences ride along as metadata for admin lenses, not as a row-level gate.
+  const agenda = deriveAgenda(entities, timeZone);
+  const programItems: ConferenceScheduleItem[] = agenda.map((a, idx) => {
+    const timed = a.startTime != null;
+    return {
+      id: a.id,
+      conferenceId,
+      source: "program" as const,
+      itemType: a.kind,
+      kind: a.kind,
+      title: a.title,
+      description: a.description,
+      summary: a.summary,
+      startsAt: a.startsAtUtc,
+      endsAt: a.endsAtUtc,
+      startsAtLocal: timed
+        ? formatLocalDateTime(a.startsAtUtc, timeZone)
+        : formatDayOnly(a.startsAtUtc, timeZone),
+      endsAtLocal: timed && a.endTime != null ? formatLocalDateTime(a.endsAtUtc, timeZone) : "",
+      dayKeyLocal: a.dayKey,
+      locationLabel: a.locationLabel,
+      audienceMode: "all_attendees" as const,
+      targetRoles: [],
+      isRequired: false,
+      displayOrder: idx,
+      createdAt: null,
+      updatedAt: null,
+      meetingAssignment: null,
+      parentId: a.parentId,
+      depth: a.depth,
+      audienceNames: a.audienceNames,
+    };
+  });
 
   const meetingAssignmentItems: ConferenceScheduleItem[] = [];
 
@@ -321,8 +327,10 @@ export async function getConferenceScheduleTimeline(
         conferenceId,
         source: "meeting_assignment",
         itemType: "meeting",
+        kind: "meeting",
         title: assignment.exhibitorName,
         description: null,
+        summary: null,
         startsAt,
         endsAt,
         startsAtLocal: `Day ${assignment.dayNumber}, Slot ${assignment.slotNumber} (${assignment.startTime})`,
@@ -336,6 +344,9 @@ export async function getConferenceScheduleTimeline(
         createdAt: null,
         updatedAt: null,
         meetingAssignment: assignment,
+        parentId: null,
+        depth: 0,
+        audienceNames: [],
       });
     }
   }

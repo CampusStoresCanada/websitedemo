@@ -70,6 +70,11 @@ const SCAN_STATUS_COPY: Record<
     description: "No active conference person found for this token.",
     className: "text-amber-700",
   },
+  legal_not_accepted: {
+    title: "Documents Not Accepted",
+    description: "Attendee must accept their required documents before check-in.",
+    className: "text-amber-700",
+  },
   queued_offline: {
     title: "Queued Offline",
     description: "Scan queued locally and will retry when network returns.",

@@ -10,37 +10,45 @@ interface ConferenceSubNavProps {
   editionCode: string;
 }
 
-/** Config/setup tabs — shown first, left side */
-const CONFIG_TABS = [
-  { segment: "overview", label: "Overview" },
-  { segment: "details", label: "Edit" },
-  { segment: "setup", label: "Schedule Design" },
-  { segment: "schedule", label: "Schedule" },
-  { segment: "products", label: "Products" },
-  { segment: "rules", label: "Rules" },
-  { segment: "legal", label: "Legal" },
-] as const;
-
-/** Registration & commerce management tabs */
-const MANAGEMENT_TABS = [
-  { segment: "registrations", label: "Registrations" },
-  { segment: "booths", label: "Booths" },
-  { segment: "wishlist", label: "Wishlist" },
-  { segment: "billing-runs", label: "Billing Runs" },
-  { segment: "swaps", label: "Swaps" },
-  { segment: "status", label: "Status" },
-] as const;
+type Tab = { segment: string; label: string };
 
 /**
- * Conference-day ops tabs.
- * These were previously buried as small header buttons — promoted to first-class tabs.
+ * Four-stage IA: Describe → Package → Sell → Fulfill. The existing tab pages
+ * survive as deep links, grouped under the stage they belong to so the admin
+ * sees one linear path. Overview is the home/launch-checklist.
+ * See docs/CONFERENCE_V2_BLUEPRINT.md.
  */
-const OPS_TABS = [
-  { segment: "war-room", label: "War Room" },
-  { segment: "badges", label: "Badge Ops" },
-  { segment: "schedule-ops", label: "Schedule Ops" },
-  { segment: "travel-import", label: "Travel Import" },
-] as const;
+const STAGES: Array<{ label: string; tabs: Tab[] }> = [
+  {
+    label: "Describe",
+    tabs: [
+      { segment: "details", label: "Edit" },
+      { segment: "describe", label: "Days & Setup" },
+      { segment: "build", label: "Catalog" },
+      { segment: "floor-plan", label: "Floor Plan" },
+      { segment: "schedule", label: "Schedule" },
+      { segment: "documents", label: "Documents" },
+    ],
+  },
+  {
+    label: "Sell",
+    tabs: [
+      { segment: "legal", label: "Legal" },
+      { segment: "status", label: "Status" },
+    ],
+  },
+  {
+    label: "Fulfill",
+    tabs: [
+      { segment: "registrations", label: "Registrations" },
+      { segment: "swaps", label: "Swaps" },
+      { segment: "war-room", label: "War Room" },
+      { segment: "badges", label: "Badge Ops" },
+      { segment: "schedule-ops", label: "Schedule Ops" },
+      { segment: "travel-import", label: "Travel Import" },
+    ],
+  },
+];
 
 export default function ConferenceSubNav({
   conferenceId,
@@ -54,7 +62,6 @@ export default function ConferenceSubNav({
   function isActive(segment: string): boolean {
     return (
       pathname === `${basePath}/${segment}` ||
-      // Overview is also active when at the bare base path (pre-redirect)
       (segment === "overview" && pathname === basePath)
     );
   }
@@ -77,7 +84,6 @@ export default function ConferenceSubNav({
             {year} &middot; Edition {editionCode}
           </p>
         </div>
-        {/* Check-in Desk stays as a standalone button — it opens a new window */}
         <Link
           href={`${basePath}/check-in`}
           target="_blank"
@@ -88,49 +94,47 @@ export default function ConferenceSubNav({
         </Link>
       </div>
 
-      {/* Unified tab bar */}
+      {/* Overview / launch checklist — the home */}
+      <div className="mb-3">
+        <Link
+          href={`${basePath}/overview`}
+          className={`inline-flex items-center rounded-md px-3 py-1.5 text-sm font-medium ${
+            isActive("overview")
+              ? "bg-accent text-white"
+              : "bg-gray-100 text-gray-700 hover:bg-gray-200"
+          }`}
+        >
+          Overview &amp; Launch Checklist
+        </Link>
+      </div>
+
+      {/* Four-stage tab bar */}
       <div className="border-b border-gray-200">
         <nav
-          className="-mb-px flex items-center gap-4 overflow-x-auto"
-          aria-label="Conference sections"
+          className="-mb-px flex items-end gap-5 overflow-x-auto pb-px"
+          aria-label="Conference stages"
         >
-          {/* Group 1: Config & setup */}
-          {CONFIG_TABS.map((item) => (
-            <Link
-              key={item.segment}
-              href={`${basePath}/${item.segment}`}
-              className={tabClass(item.segment)}
-            >
-              {item.label}
-            </Link>
-          ))}
-
-          {/* Visual separator */}
-          <span className="h-4 w-px shrink-0 bg-gray-300" aria-hidden="true" />
-
-          {/* Group 2: Registration & commerce management */}
-          {MANAGEMENT_TABS.map((item) => (
-            <Link
-              key={item.segment}
-              href={`${basePath}/${item.segment}`}
-              className={tabClass(item.segment)}
-            >
-              {item.label}
-            </Link>
-          ))}
-
-          {/* Visual separator */}
-          <span className="h-4 w-px shrink-0 bg-gray-300" aria-hidden="true" />
-
-          {/* Group 3: Conference-day operations */}
-          {OPS_TABS.map((item) => (
-            <Link
-              key={item.segment}
-              href={`${basePath}/${item.segment}`}
-              className={tabClass(item.segment)}
-            >
-              {item.label}
-            </Link>
+          {STAGES.map((stage, index) => (
+            <div key={stage.label} className="flex items-end gap-4">
+              <div className="flex flex-col">
+                <span className="mb-1 flex items-center gap-1 whitespace-nowrap text-[10px] font-semibold uppercase tracking-wide text-gray-400">
+                  <span className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-100 text-[9px] text-gray-500">
+                    {index + 1}
+                  </span>
+                  {stage.label}
+                </span>
+                <div className="flex items-center gap-4">
+                  {stage.tabs.map((tab) => (
+                    <Link key={tab.segment} href={`${basePath}/${tab.segment}`} className={tabClass(tab.segment)}>
+                      {tab.label}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+              {index < STAGES.length - 1 && (
+                <span className="mb-2 h-6 w-px shrink-0 bg-gray-200" aria-hidden="true" />
+              )}
+            </div>
           ))}
         </nav>
       </div>

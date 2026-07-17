@@ -14,7 +14,8 @@ const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const STALE_LEASE_THRESHOLD_MS = 10 * 60 * 1000; // reclaim after 10 minutes
 
 // Fallback item ID keys in app_settings — used for membership/partnership until
-// those setup flows are built. Conference invoices use conference_products.qbo_item_id.
+// those setup flows are built. Conference invoice → QB item mapping is parked
+// (not yet wired to the v3 catalog); conference invoices fall back to the default.
 const FALLBACK_ITEM_ID_KEYS: Record<string, string> = {
   membership: "qbo_item_id_membership",
   partnership: "qbo_item_id_partnership",
@@ -48,33 +49,15 @@ export async function enqueueQBExport(invoiceId: string): Promise<void> {
 
 /**
  * Resolve the QB item ID for an invoice.
- * - Conference invoices: reads qbo_item_id from conference_products via invoice metadata.
  * - Membership/partnership: reads from app_settings (set at setup time).
+ * - Conference invoices: not yet wired to the v3 catalog (parked) — falls back to
+ *   qbo_item_id_default like any other type.
  * - Unknown types: falls back to qbo_item_id_default in app_settings.
  */
 async function resolveQBItemId(
   db: ReturnType<typeof createAdminClient>,
-  invoiceType: string,
-  invoiceMetadata: Record<string, unknown> | null
+  invoiceType: string
 ): Promise<string> {
-  // Conference: look up item ID on the product record
-  if (invoiceType === "conference") {
-    const productId = invoiceMetadata?.conference_product_id as string | undefined;
-    if (productId) {
-      const { data: product } = await db
-        .from("conference_products")
-        .select("qbo_item_id, name")
-        .eq("id", productId)
-        .single();
-      if (product?.qbo_item_id) return product.qbo_item_id;
-      throw new Error(
-        `Conference product "${product?.name ?? productId}" has no QB item linked. ` +
-        `Open the product in the conference admin and select a QuickBooks item.`
-      );
-    }
-    // Conference invoice without product ID — fall through to default
-  }
-
   // Membership / partnership: app_settings
   const settingKey = FALLBACK_ITEM_ID_KEYS[invoiceType] ?? "qbo_item_id_default";
   const { data } = await db
@@ -209,7 +192,7 @@ async function processExportRow(
   }
 
   // Map and create QB invoice
-  const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.metadata as Record<string, unknown> | null);
+  const itemId = await resolveQBItemId(db, invoice.type ?? "default");
   const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId);
   const qbInvoice = await createQBInvoice(invoiceInput);
 

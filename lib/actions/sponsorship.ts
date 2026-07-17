@@ -608,9 +608,12 @@ export async function listBenefitReferenceOptions(): Promise<Result<BenefitRefer
       .select("id, title, starts_at")
       .in("status", ["published", "completed"])
       .order("starts_at", { ascending: false }),
-    db.from("conference_program_items")
-      .select("id, title, conference_id")
-      .order("title", { ascending: true }),
+    // Program items moved to the v3 catalog — offer scheduled things (sessions,
+    // events, meals, …) as benefit reference targets.
+    db.from("conference_entities")
+      .select("id, name")
+      .in("kind", ["session", "event", "networking", "meal", "meeting"])
+      .order("name", { ascending: true }),
   ]);
 
   return {
@@ -624,9 +627,9 @@ export async function listBenefitReferenceOptions(): Promise<Result<BenefitRefer
         id: e.id,
         label: `${e.title} — ${new Date(e.starts_at).toLocaleDateString("en-CA")}`,
       })),
-      programItems: (itemsRes.data ?? []).map((p: any) => ({
+      programItems: (itemsRes.data ?? []).map((p: { id: string; name: string }) => ({
         id: p.id,
-        label: p.title,
+        label: p.name,
       })),
     },
   };
