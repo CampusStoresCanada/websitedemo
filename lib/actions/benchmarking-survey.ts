@@ -548,7 +548,7 @@ export async function submitBenchmarkingSurvey(
     const supabase = await createClient();
     const userId = auth.userId;
 
-    const { error: updateError } = await supabase
+    const { data: submitted, error: updateError } = await supabase
       .from("benchmarking")
       .update({
         status: "submitted",
@@ -556,11 +556,30 @@ export async function submitBenchmarkingSurvey(
         respondent_user_id: userId,
         updated_at: new Date().toISOString(),
       })
-      .eq("id", benchmarkingId);
+      .eq("id", benchmarkingId)
+      .select("organization_id, enrollment_fte")
+      .single();
 
     if (updateError) {
       console.error("Error submitting survey:", updateError);
       return { success: false, error: "Failed to submit survey" };
+    }
+
+    // A confirmed submission is fresher than anything else on file — it
+    // always refreshes the org's public/priced FTE number, even overriding
+    // a prior admin manual edit (which only stands between submissions).
+    if (submitted?.enrollment_fte !== null && submitted?.enrollment_fte !== undefined) {
+      const { error: orgUpdateError } = await supabase
+        .from("organizations")
+        .update({
+          fte: submitted.enrollment_fte,
+          fte_is_manual_override: false,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", submitted.organization_id);
+      if (orgUpdateError) {
+        console.warn("[submitBenchmarkingSurvey] failed to sync organizations.fte:", orgUpdateError.message);
+      }
     }
 
     return { success: true };

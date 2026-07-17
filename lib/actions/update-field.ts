@@ -248,10 +248,18 @@ export async function updateField({
     }
 
     // 4. Perform the write (Tier 1, or Tier 2 on org page)
+    // Editing FTE directly is an explicit admin call — it should stick as
+    // the org's public/priced number until the org's next benchmarking
+    // submission naturally refreshes it (see submitBenchmarkingSurvey).
+    const isManualFteEdit = table === "organizations" && column === "fte";
     const adminClient = createAdminClient();
     const { error: updateError } = await adminClient
       .from(table)
-      .update({ [column]: newValue, updated_at: new Date().toISOString() })
+      .update({
+        [column]: newValue,
+        ...(isManualFteEdit ? { fte_is_manual_override: true } : {}),
+        updated_at: new Date().toISOString(),
+      })
       .eq("id", entityId);
 
     if (updateError) {
