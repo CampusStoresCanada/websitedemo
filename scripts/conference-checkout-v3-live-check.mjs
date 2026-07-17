@@ -136,8 +136,8 @@ async function main() {
     assert("The booth bundle's 4 registrations split into 4 allocatable seats", (regSeats ?? []).length === 4, { seats: (regSeats ?? []).length });
 
     // Two different staff get one registration seat each — the per-seat win.
-    const a1 = await insert("conference_people", { conference_id: conferenceId, organization_id: org.id, source_type: "entitlement", source_id: randomUUID(), person_kind: "exhibitor", display_name: "Staffer A" });
-    const a2 = await insert("conference_people", { conference_id: conferenceId, organization_id: org.id, source_type: "entitlement", source_id: randomUUID(), person_kind: "exhibitor", display_name: "Staffer B" });
+    const a1 = await insert("conference_people", { conference_id: conferenceId, organization_id: org.id, source_type: "manual", source_id: randomUUID(), person_kind: "exhibitor", display_name: "Staffer A" });
+    const a2 = await insert("conference_people", { conference_id: conferenceId, organization_id: org.id, source_type: "manual", source_id: randomUUID(), person_kind: "exhibitor", display_name: "Staffer B" });
     await db.from("entity_balance_seats").update({ holder_person_id: a1.id }).eq("id", regSeats[0].id);
     await db.from("entity_balance_seats").update({ holder_person_id: a2.id }).eq("id", regSeats[1].id);
 
@@ -148,7 +148,11 @@ async function main() {
       .eq("organization_id", org.id);
     const holders = new Set((orgSeats ?? []).map((s) => s.holder_person_id).filter(Boolean));
     assert("One bundle, two registrations allocated to two different attendees", holders.has(a1.id) && holders.has(a2.id), [...holders]);
-    assert("Org holds booth + 4 registration seats to allocate", (orgSeats ?? []).length >= 5, { count: (orgSeats ?? []).length });
+    // Booths are deliberately excluded from entity_balance_seats (mint RPC:
+    // `where ce.kind <> 'booth'`) — the org holds the booth as a whole via
+    // entity_balances, not as a per-seat allocation. Only the 4 registrations
+    // get seats here.
+    assert("Only the 4 registration seats exist to allocate (booth itself has no seat row)", (orgSeats ?? []).length === 4, { count: (orgSeats ?? []).length });
   } finally {
     if (conferenceId) await db.from("conference_instances").delete().eq("id", conferenceId);
   }

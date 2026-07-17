@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 import { randomUUID } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
+import { readFileSync } from "node:fs";
+
+try {
+  for (const line of readFileSync(new URL("../.env.local", import.meta.url), "utf8").split("\n")) {
+    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*)\s*$/);
+    if (m && !process.env[m[1]]) process.env[m[1]] = m[2].replace(/^["']|["']$/g, "");
+  }
+} catch {
+  /* env may already be set */
+}
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

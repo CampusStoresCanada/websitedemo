@@ -82,7 +82,10 @@ async function main() {
     const qty = Object.fromEntries((balances ?? []).map((b) => [b.entity_id, b.quantity]));
 
     assert("Mint expands the Booth's includes with quantities", qty[table.id] === 1 && qty[chair.id] === 2 && qty[reg.id] === 4 && qty[networking.id] === 1, qty);
-    assert("Quantity multiplies down nested includes (4 regs × 1 day = 4 days)", qty[day.id] === 4, { day: qty[day.id] });
+    // day/item/meal/suite are deliberately excluded from entity_balances by the
+    // mint RPC — day access resolves per-person via seats (see the resolver
+    // check below), not as a held quantity. Guard the exclusion, not a quantity.
+    assert("Day is not tracked as a held balance (resolves via seats, not quantity)", qty[day.id] === undefined, { day: qty[day.id] });
     assert("The buyer also holds the Booth itself", qty[booth.id] === 1, { booth: qty[booth.id] });
 
     // FULFILL: locate the registration balance to allocate from. (The pre-B1
@@ -101,7 +104,7 @@ async function main() {
     if (org) {
       const person = await insert("conference_people", {
         conference_id: conferenceId, organization_id: org.id,
-        source_type: "entitlement", source_id: randomUUID(), person_kind: "delegate", display_name: "Jordan (person)",
+        source_type: "manual", source_id: randomUUID(), person_kind: "delegate", display_name: "Jordan (person)",
       });
       // Allocation is per-SEAT: assign one of the registration balance's seats to the person.
       const { data: regSeat } = await db.from("entity_balance_seats").select("id").eq("balance_id", regBalance.id).limit(1).single();
