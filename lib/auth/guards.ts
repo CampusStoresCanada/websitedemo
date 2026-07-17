@@ -1,9 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { cache } from "react";
 import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { getIntegrationConfig } from "@/lib/policy/engine";
-import type { GlobalRole } from "./types";
+import type { GlobalRole, UserOrganization, UserProfile } from "./types";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -38,8 +39,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | null> {
-  const client = supabase ?? (await createClient());
+/**
+ * Raw identity data for the current request — claims + profile + org
+ * memberships, fetched at most once per request no matter how many
+ * Server Components/guards ask for it (memoized by React.cache()).
+ */
+export type IdentitySnapshot =
+  | { status: "anonymous" }
+  | {
+      status: "resolved";
+      userId: string;
+      userEmail: string | null;
+      profile: UserProfile | null;
+      profileError: unknown;
+      organizations: UserOrganization[] | null;
+      orgsError: unknown;
+    };
+
+export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => {
+  const client = await createClient();
 
   // Use getClaims() for local JWT validation — instant, never hangs.
   // NEVER use getUser() on server side — it makes a network request that can hang.
@@ -49,27 +67,34 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
   const userEmail = (claimsData?.claims?.email as string | undefined) ?? null;
 
   if (claimsError || !userId) {
-    return null;
+    return { status: "anonymous" };
   }
-  let profileResult: { data: { global_role: string | null; is_benchmarking_reviewer: boolean | null } | null; error: unknown } | null = null;
-  let orgsResult: { data: { organization_id: string; role: string }[] | null; error: unknown } | null = null;
+
+  let profileResult: { data: UserProfile | null; error: unknown } | null = null;
+  let orgsResult: { data: UserOrganization[] | null; error: unknown } | null = null;
 
   for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
     const [profileRes, orgsRes] = await Promise.all([
-      client
-        .from("profiles")
-        .select("global_role, is_benchmarking_reviewer")
-        .eq("id", userId)
-        .maybeSingle(),
+      client.from("profiles").select("*").eq("id", userId).maybeSingle(),
       client
         .from("user_organizations")
-        .select("organization_id, role")
+        .select(
+          `
+          id,
+          user_id,
+          organization_id,
+          role,
+          status,
+          created_at,
+          organization:organizations(id, name, type, slug, logo_url, is_cancoll_member)
+        `
+        )
         .eq("user_id", userId)
         .eq("status", "active"),
     ]);
 
-    profileResult = profileRes;
-    orgsResult = orgsRes;
+    profileResult = profileRes as unknown as { data: UserProfile | null; error: unknown };
+    orgsResult = orgsRes as unknown as { data: UserOrganization[] | null; error: unknown };
 
     if (!profileRes.error && !orgsRes.error) {
       break;
@@ -81,27 +106,46 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     }
   }
 
-  if (!profileResult || !orgsResult || profileResult.error || orgsResult.error) {
+  return {
+    status: "resolved",
+    userId,
+    userEmail,
+    profile: profileResult?.error ? null : (profileResult?.data ?? null),
+    profileError: profileResult?.error ?? null,
+    organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
+    orgsError: orgsResult?.error ?? null,
+  };
+});
+
+async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | null> {
+  const snapshot = await getIdentitySnapshot();
+
+  if (snapshot.status === "anonymous") {
+    return null;
+  }
+
+  if (snapshot.profileError || snapshot.orgsError) {
     console.error("[auth/guards] authorization context query failed", {
-      userId,
-      profileError: profileResult?.error ?? null,
-      orgsError: orgsResult?.error ?? null,
+      userId: snapshot.userId,
+      profileError: snapshot.profileError,
+      orgsError: snapshot.orgsError,
     });
     throw new Error("Authorization context unavailable");
   }
 
-  const globalRole = (profileResult.data?.global_role as GlobalRole | null) ?? "user";
-  const isBenchmarkingReviewer =
-    profileResult.data?.is_benchmarking_reviewer === true;
-  const activeOrgIds = (orgsResult.data ?? []).map((uo) => uo.organization_id);
-  const orgAdminOrgIds = (orgsResult.data ?? [])
+  const client = supabase ?? (await createClient());
+  const organizations = snapshot.organizations ?? [];
+  const globalRole = (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
+  const isBenchmarkingReviewer = snapshot.profile?.is_benchmarking_reviewer === true;
+  const activeOrgIds = organizations.map((uo) => uo.organization_id);
+  const orgAdminOrgIds = organizations
     .filter((uo) => uo.role === "org_admin")
     .map((uo) => uo.organization_id);
 
   return {
     supabase: client,
-    userId,
-    userEmail,
+    userId: snapshot.userId,
+    userEmail: snapshot.userEmail,
     globalRole,
     isBenchmarkingReviewer,
     orgAdminOrgIds,

@@ -1,17 +1,27 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { isCircleConfigured } from "@/lib/circle/config";
-import { mintMemberToken } from "@/lib/circle/headless-auth";
-import { CircleMemberClient } from "@/lib/circle/member-proxy";
-import { resolveUserCircleId } from "@/lib/circle/member-link";
+import { getCircleClientForUser } from "@/lib/circle/member-session";
+import { TTLCache } from "@/lib/cache/ttl-cache";
 
 export const dynamic = "force-dynamic";
 
-async function getClientForRequest(userId: string, userEmail: string | null): Promise<CircleMemberClient | null> {
-  const circleId = await resolveUserCircleId(userId, userEmail);
-  if (!circleId) return null;
-  const token = await mintMemberToken({ email: userEmail ?? undefined });
-  return new CircleMemberClient(token.access_token);
+// Header.tsx polls this route every ~90s (and it's cheap for other callers
+// to hit within that window too) — cache the summary payload briefly rather
+// than re-minting a Circle token and re-listing notifications/rooms each time.
+const SUMMARY_CACHE_TTL_MS = 30_000;
+type NotificationsSummaryPayload = {
+  notifications: unknown[];
+  replies: unknown[];
+  dms?: unknown[];
+  linked: boolean;
+  unreadCount?: number;
+  dmUnreadCount?: number;
+};
+const notificationsSummaryCache = new TTLCache<NotificationsSummaryPayload>(SUMMARY_CACHE_TTL_MS);
+
+function summaryCacheKey(userId: string): string {
+  return `notifications-summary:${userId}`;
 }
 
 export async function POST(request: NextRequest) {
@@ -21,7 +31,7 @@ export async function POST(request: NextRequest) {
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
 
   try {
-    const client = await getClientForRequest(auth.ctx.userId, auth.ctx.userEmail);
+    const client = await getCircleClientForUser(auth.ctx.userId, auth.ctx.userEmail);
     if (!client) return NextResponse.json({ ok: false }, { status: 200 });
 
     let body: { notificationId?: string } = {};
@@ -32,6 +42,10 @@ export async function POST(request: NextRequest) {
     } else {
       await client.markAllNotificationsRead();
     }
+
+    // The cached summary would otherwise still show this as unread until
+    // its TTL expires — invalidate so the next poll reflects the change.
+    notificationsSummaryCache.delete(summaryCacheKey(auth.ctx.userId));
 
     return NextResponse.json({ ok: true }, { status: 200 });
   } catch (err) {
@@ -50,10 +64,16 @@ export async function GET() {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
   }
 
+  const cacheKey = summaryCacheKey(auth.ctx.userId);
+  const cached = notificationsSummaryCache.get(cacheKey);
+  if (cached) return NextResponse.json(cached, { status: 200 });
+
   try {
-    const client = await getClientForRequest(auth.ctx.userId, auth.ctx.userEmail);
+    const client = await getCircleClientForUser(auth.ctx.userId, auth.ctx.userEmail);
     if (!client) {
-      return NextResponse.json({ notifications: [], replies: [], linked: false }, { status: 200 });
+      const payload: NotificationsSummaryPayload = { notifications: [], replies: [], linked: false };
+      notificationsSummaryCache.set(cacheKey, payload);
+      return NextResponse.json(payload, { status: 200 });
     }
 
     const [feed, rooms] = await Promise.all([
@@ -97,9 +117,13 @@ export async function GET() {
 
     const dmUnreadCount = rooms.reduce((sum, r) => sum + r.unread_messages_count, 0);
 
-    return NextResponse.json({ notifications, replies, dms, linked: true, unreadCount, dmUnreadCount }, { status: 200 });
+    const payload: NotificationsSummaryPayload = { notifications, replies, dms, linked: true, unreadCount, dmUnreadCount };
+    notificationsSummaryCache.set(cacheKey, payload);
+    return NextResponse.json(payload, { status: 200 });
   } catch (error) {
     console.error("[api/circle/notifications] fetch failed:", error instanceof Error ? error.message : error);
+    // Deliberately not cached — an error path shouldn't blank the badge for
+    // the full TTL once Circle recovers.
     return NextResponse.json({ notifications: [], replies: [], linked: true }, { status: 200 });
   }
 }

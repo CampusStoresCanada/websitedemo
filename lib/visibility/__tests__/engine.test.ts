@@ -43,9 +43,25 @@ describe("visibility engine", () => {
     expect(
       isFieldVisible("contacts.work_email", "member", config, "Member")
     ).toBe(true);
+  });
+
+  it("hides partner PII from other partners, but not from their own org", () => {
+    // isFieldVisible has no own-org context on its own, so a bare "partner"
+    // viewer conservatively gets no PII here — the bypass for a partner's own
+    // org lives in applyFieldMask's isOwnOrg check, tested below.
     expect(
       isFieldVisible("contacts.work_email", "partner", config, "Vendor Partner")
-    ).toBe(true);
+    ).toBe(false);
+
+    const ownOrgContact = applyFieldMask(
+      { work_email: "jane@vendor.com" },
+      "partner",
+      config,
+      "contacts",
+      true,
+      "Vendor Partner"
+    );
+    expect(ownOrgContact.work_email).toBe("jane@vendor.com");
   });
 
   it("keeps private fields hidden for public viewers", () => {

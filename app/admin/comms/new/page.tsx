@@ -20,6 +20,7 @@ async function handleCreateCampaign(formData: FormData) {
   const audienceType = formData.get("audience_type") as AudienceType;
   const conferenceId = formData.get("conference_id") as string | null;
   const customEmails = formData.get("custom_emails") as string | null;
+  const seatKind = (formData.get("seat_kind") as string | null)?.trim() || null;
   const sendTiming = (formData.get("send_timing") as string) || "draft";
   const scheduledAtRaw = formData.get("scheduled_at") as string | null;
   const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : undefined;
@@ -46,6 +47,10 @@ async function handleCreateCampaign(formData: FormData) {
       .split(/[\n,]/)
       .map((e) => e.trim())
       .filter(Boolean);
+  }
+
+  if (audienceType === "conference_holders" && seatKind) {
+    audience.filters!.seat_kind = seatKind;
   }
 
   const result = await createCampaign({

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { TTLCache } from "@/lib/cache/ttl-cache";
 
 type AlertKind =
   | "content_flag"
@@ -22,6 +23,20 @@ type AlertItem = {
 };
 
 const ALERT_MENU_LIMIT = 10;
+
+// Header.tsx polls this route every ~90s — cache the fully-assembled payload
+// briefly rather than re-running its 8-query fan-out on every poll.
+const CACHE_TTL_MS = 30_000;
+type AlertsPayload = {
+  items: AlertItem[];
+  counts: Record<string, number>;
+  total: number;
+  unreadCount: number;
+};
+const alertsCache = new TTLCache<AlertsPayload>(CACHE_TTL_MS);
+function alertsCacheKey(userId: string): string {
+  return `alerts:${userId}`;
+}
 
 function orgHrefFromSlug(slug: string | null | undefined): string {
   return slug ? `/org/${slug}` : "/me";
@@ -77,6 +92,11 @@ export async function GET() {
   }
 
   const { activeOrgIds, orgAdminOrgIds, globalRole, userEmail, userId } = auth.ctx;
+
+  const cacheKey = alertsCacheKey(userId);
+  const cached = alertsCache.get(cacheKey);
+  if (cached) return NextResponse.json(cached, { status: 200 });
+
   const adminClient = createAdminClient();
   const alertItems: AlertItem[] = [];
 
@@ -326,23 +346,22 @@ export async function GET() {
   const unreadCount = itemsWithReadState.filter((item) => !item.isRead).length;
   const limited = itemsWithReadState.slice(0, ALERT_MENU_LIMIT);
 
-  return NextResponse.json(
-    {
-      items: limited,
-      counts: {
-        update_requests: updateRequestsRes.data?.length ?? 0,
-        content_flags: contentFlagsRes.data?.length ?? 0,
-        pending_content_changes: pendingContentChangesRes.data?.length ?? 0,
-        applications_admin_pending: pendingAppsRes.data?.length ?? 0,
-        applications_my_status: myApplicationsRes.data?.length ?? 0,
-        invoices: invoiceAlertsRes.data?.length ?? 0,
-        renewals: renewalEventsRes.data?.length ?? 0,
-      },
-      total: totalCount,
-      unreadCount,
+  const payload: AlertsPayload = {
+    items: limited,
+    counts: {
+      update_requests: updateRequestsRes.data?.length ?? 0,
+      content_flags: contentFlagsRes.data?.length ?? 0,
+      pending_content_changes: pendingContentChangesRes.data?.length ?? 0,
+      applications_admin_pending: pendingAppsRes.data?.length ?? 0,
+      applications_my_status: myApplicationsRes.data?.length ?? 0,
+      invoices: invoiceAlertsRes.data?.length ?? 0,
+      renewals: renewalEventsRes.data?.length ?? 0,
     },
-    { status: 200 }
-  );
+    total: totalCount,
+    unreadCount,
+  };
+  alertsCache.set(cacheKey, payload);
+  return NextResponse.json(payload, { status: 200 });
 }
 
 export async function POST(request: Request) {
@@ -380,6 +399,10 @@ export async function POST(request: Request) {
   if (error) {
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
+
+  // The cached GET payload would otherwise still show these as unread until
+  // its TTL expires — invalidate so the next poll reflects the change.
+  alertsCache.delete(alertsCacheKey(userId));
 
   return NextResponse.json({ success: true });
 }

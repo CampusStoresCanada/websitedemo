@@ -1,4 +1,4 @@
-import { getOptionalAuthContext, type AuthContext } from "@/lib/auth/guards";
+import { getOptionalAuthContext, getIdentitySnapshot, type AuthContext } from "@/lib/auth/guards";
 import type { ViewerLevel } from "./defaults";
 
 /**
@@ -51,13 +51,16 @@ export async function getViewerContext(): Promise<ViewerContext> {
   let viewerLevel = deriveViewerLevel(ctx);
 
   if (viewerLevel === "authenticated" && ctx.activeOrgIds.length > 0) {
-    const { data: orgTypes } = await ctx.supabase
-      .from("organizations")
-      .select("id, type")
-      .in("id", ctx.activeOrgIds);
+    // Same-request memoized snapshot (already fetched by getOptionalAuthContext
+    // above) — reads org type off it instead of a third, separate query.
+    const snapshot = await getIdentitySnapshot();
+    const orgRows =
+      snapshot.status === "resolved" && !snapshot.orgsError
+        ? (snapshot.organizations ?? [])
+        : [];
 
     const typeByOrgId = new Map(
-      (orgTypes ?? []).map((row) => [row.id, row.type])
+      orgRows.map((uo) => [uo.organization_id, uo.organization?.type])
     );
 
     const hasMemberOrg = ctx.activeOrgIds.some(

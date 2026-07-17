@@ -408,6 +408,14 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       // True if any of the viewer's active orgs is a CANCOLL member
       const hasCANCOLL = userOrgs.some((uo) => uo.organization?.is_cancoll_member === true);
 
+      // Persistent, non-httpOnly cookie so logged-out visits can tell "known
+      // member/org admin/admin/partner, nudge log in" from "never seen them,
+      // nudge join" — refreshed every time we resolve identity, not just on
+      // sign-in, so it never goes stale while a session stays valid.
+      if (typeof document !== "undefined") {
+        document.cookie = `csc_had_session=${resolvedPermissionState}; max-age=31536000; path=/; SameSite=Lax`;
+      }
+
       setProfile(userProfile);
       setOrganizations(userOrgs);
       setGlobalRole(role);
@@ -443,12 +451,16 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
   useEffect(() => {
     let mounted = true;
+    let hasProcessedFirstLoadSession = false;
 
     const loadSession = async (
       session: { user: User } | null,
       source: string
     ) => {
       if (!mounted) return;
+
+      const isFirstLoadSessionCall = !hasProcessedFirstLoadSession;
+      hasProcessedFirstLoadSession = true;
 
       if (!session?.user) {
         clearAuthState();
@@ -476,6 +488,19 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       // Session identity is known at this point; do not block the entire app shell
       // while profile/permission hydration retries in the background.
       finishBootstrap();
+
+      // Server already resolved this exact user via initialAuth on this same
+      // request, and our state was seeded straight from it — skip the redundant
+      // client-side re-fetch on this first callback only. Anything after the
+      // first call (a later TOKEN_REFRESHED, etc.) still does a real fetch,
+      // since a mid-session role/org change should still be caught.
+      if (isFirstLoadSessionCall && previousSnapshotUserId === session.user.id) {
+        console.log(
+          "[AuthProvider] loadSession: skipping fetchUserData — SSR-seeded data already matches",
+          { userId: session.user.id, source }
+        );
+        return;
+      }
 
       let fetched = false;
       for (let attempt = 1; attempt <= MAX_PERMISSION_RETRIES; attempt++) {
@@ -575,11 +600,6 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       if (event === "SIGNED_OUT" || (event as string) === "USER_DELETED") {
         await loadSession(null, event);
         return;
-      }
-      // Set a persistent cookie so we can distinguish "signed out known user" from
-      // "never signed in" — used by PartnerLinksSection gated placeholder UX.
-      if (event === "SIGNED_IN" && typeof document !== "undefined") {
-        document.cookie = "csc_had_session=1; max-age=31536000; path=/; SameSite=Lax";
       }
       await loadSession(session, event);
     });

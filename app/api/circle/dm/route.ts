@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { isCircleConfigured } from "@/lib/circle/config";
-import { mintMemberToken } from "@/lib/circle/headless-auth";
-import { CircleMemberClient } from "@/lib/circle/member-proxy";
 import { getIntegrationConfig } from "@/lib/policy/engine";
-import { resolveUserCircleId } from "@/lib/circle/member-link";
+import { getCircleClientForUser } from "@/lib/circle/member-session";
+import { TTLCache } from "@/lib/cache/ttl-cache";
 
 export const dynamic = "force-dynamic";
+
+// Header.tsx (and CircleDMBadge.tsx) poll ?summary=true repeatedly for badge
+// counts — cache that response briefly rather than re-minting a Circle token
+// and re-listing chat rooms on every poll.
+const SUMMARY_CACHE_TTL_MS = 30_000;
+type DmSummaryPayload = { chatRooms: unknown[]; messages?: unknown[]; linked: boolean };
+const dmSummaryCache = new TTLCache<DmSummaryPayload>(SUMMARY_CACHE_TTL_MS);
 
 // ---------------------------------------------------------------------------
 // GET /api/circle/dm — list chat rooms + messages for the current user
@@ -35,39 +41,41 @@ export async function GET(request: NextRequest) {
     // Policy engine unavailable — allow
   }
 
+  const { searchParams } = new URL(request.url);
+  const roomUuid = searchParams.get("room");
+  const summary = searchParams.get("summary");
+  const summaryCacheKey = `dm-summary:${auth.ctx.userId}`;
+
+  if (summary === "true") {
+    const cached = dmSummaryCache.get(summaryCacheKey);
+    if (cached) return NextResponse.json(cached);
+  }
+
   try {
-    // Look up the user's Circle member ID from their contact record
-    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
-    if (!circleId) {
-      return NextResponse.json(
-        { chatRooms: [], messages: [], linked: false },
-        { status: 200 }
-      );
+    // Look up the user's Circle member ID and a (cached) member token
+    const client = await getCircleClientForUser(auth.ctx.userId, auth.ctx.userEmail);
+    if (!client) {
+      const payload: DmSummaryPayload = { chatRooms: [], messages: [], linked: false };
+      if (summary === "true") dmSummaryCache.set(summaryCacheKey, payload);
+      return NextResponse.json(payload, { status: 200 });
     }
-
-    // Mint a member token
-    const token = await mintMemberToken({ email: auth.ctx.userEmail ?? undefined });
-    const memberClient = new CircleMemberClient(token.access_token);
-
-    // Check if a specific room was requested
-    const { searchParams } = new URL(request.url);
-    const roomUuid = searchParams.get("room");
-    const summary = searchParams.get("summary");
 
     if (summary === "true") {
       // Summary mode: just return chat rooms for badge counting
-      const chatRooms = await memberClient.listChatRooms();
-      return NextResponse.json({ chatRooms, linked: true });
+      const chatRooms = await client.listChatRooms();
+      const payload: DmSummaryPayload = { chatRooms, linked: true };
+      dmSummaryCache.set(summaryCacheKey, payload);
+      return NextResponse.json(payload);
     }
 
     if (roomUuid) {
       // Fetch messages for a specific room
-      const messages = await memberClient.getChatMessages(roomUuid);
+      const messages = await client.getChatMessages(roomUuid);
       return NextResponse.json({ messages, linked: true });
     }
 
     // Default: return chat rooms
-    const chatRooms = await memberClient.listChatRooms();
+    const chatRooms = await client.listChatRooms();
     return NextResponse.json({ chatRooms, linked: true });
   } catch (err) {
     console.error(
@@ -122,18 +130,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Look up the user's Circle ID
-    const circleId = await resolveUserCircleId(auth.ctx.userId, auth.ctx.userEmail);
-    if (!circleId) {
+    // Look up the user's Circle ID and a (cached) member token
+    const memberClient = await getCircleClientForUser(auth.ctx.userId, auth.ctx.userEmail);
+    if (!memberClient) {
       return NextResponse.json(
         { error: "Your account is not linked to Circle" },
         { status: 400 }
       );
     }
 
-    // Mint token and send
-    const token = await mintMemberToken({ email: auth.ctx.userEmail ?? undefined });
-    const memberClient = new CircleMemberClient(token.access_token);
     const sent = await memberClient.sendMessage(chatRoomUuid, message);
 
     return NextResponse.json({ message: sent });

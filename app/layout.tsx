@@ -56,7 +56,7 @@ export default async function RootLayout({
       <body className="antialiased">
         <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
           <ToolkitProvider>
-            <Header />
+            <Suspense><Header /></Suspense>
             <OnboardingGate serverHasOnboarding={serverHasOnboarding}>
               <main className="min-h-screen">{children}</main>
               <Footer />

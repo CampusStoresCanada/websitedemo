@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 
 interface UploadOrganizationImageParams {
@@ -93,6 +94,10 @@ export async function uploadOrganizationImage({
     await supabase.storage.from("organization-images").remove([filePath]);
     return { success: false, error: updateError.message };
   }
+
+  // Bust the Next.js route cache so router.refresh() shows the new image
+  // immediately (and onboarding callouts re-evaluate against the new value).
+  revalidatePath("/", "layout");
 
   return { success: true, url: publicUrl };
 }

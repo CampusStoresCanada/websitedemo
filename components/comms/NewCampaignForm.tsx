@@ -25,6 +25,7 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_delegates", label: "Conference Delegates (members)" },
   { value: "conference_exhibitors", label: "Conference Exhibitors (partners)" },
   { value: "conference_all", label: "All Conference Attendees" },
+  { value: "conference_holders", label: "Conference seat-holders (v3)" },
   { value: "org_admins", label: "All Org Admins" },
   { value: "custom_emails", label: "Custom Email List" },
 ];
@@ -198,6 +199,20 @@ export default function NewCampaignForm({
             </select>
           </div>
         )}
+
+        {/* Seat kind (for the v3 seat-holders audience) */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Seat kind (optional)</label>
+          <p className="text-xs text-gray-500 mb-1">
+            Only used with &ldquo;Conference seat-holders&rdquo;. Blank = everyone holding any seat;
+            e.g. <code className="bg-gray-100 rounded px-1">booth</code> = everyone holding a booth.
+          </p>
+          <input
+            name="seat_kind"
+            placeholder="booth"
+            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+          />
+        </div>
 
         {/* Custom emails */}
         <div>

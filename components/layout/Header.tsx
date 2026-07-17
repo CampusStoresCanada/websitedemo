@@ -3,8 +3,10 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { CONFERENCE_CART_UPDATED_EVENT } from "@/lib/conference/cart-events";
+import { hadPriorSession, hasKnownAccountPersona } from "@/lib/auth/persona-cookie";
 
 const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   super_admin: { label: "Super Admin", color: "bg-purple-100 text-purple-700" },
@@ -13,6 +15,11 @@ const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   member: { label: "Member", color: "bg-green-100 text-green-700" },
   partner: { label: "Partner", color: "bg-cyan-100 text-cyan-700" },
 };
+
+// Server-side responses for these are cached ~30s (see the respective
+// app/api/circle/* and app/api/alerts route handlers) — 90s keeps client
+// call volume down without the badges feeling stale.
+const BADGE_POLL_INTERVAL_MS = 90_000;
 
 type ActiveConference = { year: string; edition: string } | null;
 type WebsiteAlert = {
@@ -60,9 +67,11 @@ export default function Header() {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [hadSession, setHadSession] = useState(false);
+  const [isKnownPersona, setIsKnownPersona] = useState(false);
   const [showAlertMenu, setShowAlertMenu] = useState(false);
   const [alertTab, setAlertTab] = useState<"notifications" | "dms">("notifications");
   const [cartCount, setCartCount] = useState(0);
+  const [cartJustUpdated, setCartJustUpdated] = useState(false);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const [websiteAlerts, setWebsiteAlerts] = useState<WebsiteAlert[]>([]);
   const [websiteAlertCount, setWebsiteAlertCount] = useState(0);
@@ -75,6 +84,7 @@ export default function Header() {
   const alertMenuRef = useRef<HTMLDivElement>(null);
 
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const {
     user,
     profile,
@@ -101,6 +111,14 @@ export default function Header() {
     uo => uo.organization?.type === "Member"
   );
 
+  // True whenever we're actually on a conference's pages — the cart button
+  // should reflect THIS conference regardless of whether some other
+  // conference elsewhere happens to be in "registration_open" status.
+  const onConferencePage = useMemo(() => {
+    const parts = pathname.split("/").filter(Boolean);
+    return parts[0] === "conference" && parts.length >= 3;
+  }, [pathname]);
+
   const conferenceContext = useMemo(() => {
     const parts = pathname.split("/").filter(Boolean);
     if (parts[0] === "conference" && parts.length >= 3) {
@@ -110,8 +128,14 @@ export default function Header() {
     return { year: String(new Date().getFullYear()), edition: "00" };
   }, [pathname, activeConference]);
 
+  const showCart = onConferencePage || Boolean(activeConference);
+  // The page itself lets a multi-org user pick which org they're buying for
+  // via ?org= — match that instead of always defaulting to their first org,
+  // otherwise the header polls the wrong org's (always-empty) cart.
+  const cartOrgId = searchParams.get("org") ?? primaryOrg?.organization_id ?? null;
+
   const conferenceBaseHref = `/conference/${conferenceContext.year}/${conferenceContext.edition}`;
-  const cartHref = `${conferenceBaseHref}/cart${primaryOrg?.organization_id ? `?org=${primaryOrg.organization_id}` : ""}`;
+  const cartHref = `${conferenceBaseHref}/cart${cartOrgId ? `?org=${cartOrgId}` : ""}`;
   const authAwareHref = (href: string) =>
     user ? href : `/login?next=${encodeURIComponent(href)}`;
   const memberSpaceHref = authAwareHref("/api/circle/member-space");
@@ -174,7 +198,8 @@ export default function Header() {
   }, []);
 
   useEffect(() => {
-    setHadSession(document.cookie.includes("csc_had_session=1"));
+    setHadSession(hadPriorSession());
+    setIsKnownPersona(hasKnownAccountPersona());
   }, []);
 
   useEffect(() => {
@@ -203,22 +228,29 @@ export default function Header() {
   }, []);
 
   useEffect(() => {
-    if (!user || !activeConference || !primaryOrg?.organization_id) return;
+    if (!user || !showCart || !cartOrgId) return;
 
     let cancelled = false;
 
     const loadCartCount = async () => {
       try {
         const response = await fetch(
-          `/api/conference/cart-count?year=${encodeURIComponent(activeConference.year)}&edition=${encodeURIComponent(
-            activeConference.edition
-          )}&org=${encodeURIComponent(primaryOrg.organization_id)}`,
+          `/api/conference/cart-count?year=${encodeURIComponent(conferenceContext.year)}&edition=${encodeURIComponent(
+            conferenceContext.edition
+          )}&org=${encodeURIComponent(cartOrgId)}`,
           { cache: "no-store" }
         );
         if (!response.ok) return;
         const data = (await response.json()) as { count?: number };
         if (!cancelled) {
-          setCartCount(typeof data.count === "number" ? data.count : 0);
+          setCartCount((prev) => {
+            const next = typeof data.count === "number" ? data.count : 0;
+            if (next > prev) {
+              setCartJustUpdated(true);
+              window.setTimeout(() => setCartJustUpdated(false), 600);
+            }
+            return next;
+          });
         }
       } catch {
         if (!cancelled) setCartCount(0);
@@ -226,10 +258,16 @@ export default function Header() {
     };
 
     void loadCartCount();
+
+    // Pages that add to the conference cart (floor plan, offers) dispatch this
+    // event so the header updates — and animates — immediately, without a
+    // full navigation or a separate toast/modal.
+    window.addEventListener(CONFERENCE_CART_UPDATED_EVENT, loadCartCount);
     return () => {
       cancelled = true;
+      window.removeEventListener(CONFERENCE_CART_UPDATED_EVENT, loadCartCount);
     };
-  }, [user, activeConference, primaryOrg?.organization_id]);
+  }, [user, showCart, cartOrgId, conferenceContext.year, conferenceContext.edition]);
 
   useEffect(() => {
     if (!user) return;
@@ -264,7 +302,7 @@ export default function Header() {
 
     const intervalId = window.setInterval(() => {
       void loadCircleSummary();
-    }, 30_000);
+    }, BADGE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -316,7 +354,7 @@ export default function Header() {
     void loadCircleAlertSummary();
     const intervalId = window.setInterval(() => {
       void loadCircleAlertSummary();
-    }, 30_000);
+    }, BADGE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -349,7 +387,7 @@ export default function Header() {
     void loadWebsiteAlerts();
     const intervalId = window.setInterval(() => {
       void loadWebsiteAlerts();
-    }, 30_000);
+    }, BADGE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;
@@ -445,10 +483,14 @@ export default function Header() {
           </nav>
 
           <div className="flex items-center gap-2 sm:gap-3">
-            {activeConference ? (
+            {showCart ? (
               <Link
                 href={authAwareHref(cartHref)}
-                className="relative inline-flex items-center justify-center rounded-md border border-gray-300 px-2.5 py-1.5 text-xs font-medium text-gray-700 hover:border-gray-400"
+                className={`relative inline-flex items-center justify-center rounded-md border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                  cartJustUpdated
+                    ? "border-[var(--brand-red)] text-[var(--brand-red)] animate-cart-attract"
+                    : "border-gray-300 text-gray-700 hover:border-gray-400"
+                }`}
                 aria-label="Conference cart"
               >
                 Cart
@@ -511,6 +553,8 @@ export default function Header() {
                           <a
                             key={alert.id}
                             href={alert.href}
+                            target="_blank"
+                            rel="noopener noreferrer"
                             onClick={() => {
                               if (alert.source === "Circle") {
                                 const id = alert.id.slice(7);
@@ -713,10 +757,15 @@ export default function Header() {
                   </div>
                 ) : null}
               </div>
+            ) : isKnownPersona ? (
+              // Known member/org admin/admin/partner, signed out — decisive nudge, no join upsell
+              <Link href="/login" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+                Sign In
+              </Link>
             ) : hadSession ? (
-              // Returning user — signed out but has a session cookie
+              // Returning visitor with an unrecognized/legacy cookie value — don't know enough to be decisive
               <>
-                <Link href="/signup" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
+                <Link href="/membership" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
                   Become a Member
                 </Link>
                 <Link href="/login" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
@@ -725,7 +774,7 @@ export default function Header() {
               </>
             ) : (
               // New visitor — no prior session
-              <Link href="/signup" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+              <Link href="/membership" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
                 Become a Member
               </Link>
             )}
@@ -773,7 +822,14 @@ export default function Header() {
               ) : (
                 // Unauthenticated — show appropriate CTA
                 <div className="pt-2 mt-1 border-t border-gray-100 flex flex-col gap-2">
-                  {hadSession ? (
+                  {isKnownPersona ? (
+                    <Link
+                      href="/login"
+                      className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
+                    >
+                      Sign In
+                    </Link>
+                  ) : hadSession ? (
                     <>
                       <Link
                         href="/login"
@@ -782,7 +838,7 @@ export default function Header() {
                         Sign In
                       </Link>
                       <Link
-                        href="/signup"
+                        href="/membership"
                         className="px-3 py-2 rounded-md text-sm font-medium text-[#6B6B6B] hover:bg-gray-50 text-center"
                       >
                         Become a Member
@@ -790,7 +846,7 @@ export default function Header() {
                     </>
                   ) : (
                     <Link
-                      href="/signup"
+                      href="/membership"
                       className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
                     >
                       Become a Member

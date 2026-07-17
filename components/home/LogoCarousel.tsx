@@ -12,19 +12,31 @@ function carouselDuration(count: number): string {
   return `${Math.round((count * CARD_PX) / PX_PER_SEC)}s`;
 }
 
+const LABEL_CLASS = "text-center text-sm font-medium text-[#9B9B9B] uppercase tracking-wider mb-8";
+const HIGHLIGHT_LABEL_CLASS = "text-center text-xl font-bold text-[#1A1A1A] mb-8";
+
 export default function LogoCarousel({
   members,
   partners,
+  show = "both",
+  highlight,
 }: {
   members: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl">>;
   partners: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "logoUrl" | "sponsorTier">>;
+  /** Which strip(s) to render — pitch pages show only their own audience, the homepage shows both. */
+  show?: "both" | "members" | "partners";
+  /** Visually promote one strip's label over the other's — used when a pitch page shows both audiences but wants one to read as the lead story (e.g. partnership highlighting the member institutions a partner would reach). */
+  highlight?: "members" | "partners";
 }) {
+  const showMembers = show === "both" || show === "members";
+  const showPartners = show === "both" || show === "partners";
 
   return (
     <div className="py-16 md:py-24 bg-white border-y border-[#E5E5E5]">
       {/* Members */}
-      <div className="mb-16">
-        <p className="text-center text-sm font-medium text-[#9B9B9B] uppercase tracking-wider mb-8">
+      {showMembers && (
+      <div className={showPartners ? "mb-16" : ""}>
+        <p className={highlight === "members" ? HIGHLIGHT_LABEL_CLASS : LABEL_CLASS}>
           Trusted by {members.length} Canadian institutions
         </p>
         <div className="relative overflow-hidden">
@@ -57,10 +69,12 @@ export default function LogoCarousel({
           </div>
         </div>
       </div>
+      )}
 
       {/* Partners */}
+      {showPartners && (
       <div>
-        <p className="text-center text-sm font-medium text-[#9B9B9B] uppercase tracking-wider mb-8">
+        <p className={highlight === "partners" ? HIGHLIGHT_LABEL_CLASS : LABEL_CLASS}>
           Powered by {partners.length}+ industry partners
         </p>
         <div className="relative overflow-hidden">
@@ -102,6 +116,7 @@ export default function LogoCarousel({
           </div>
         </div>
       </div>
+      )}
     </div>
   );
 }

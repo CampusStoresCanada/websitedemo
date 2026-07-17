@@ -51,7 +51,7 @@ const SLOT: Record<OrgImageType, SlotConfig> = {
     label: "Product Image",
     aspectRatio: 1,
     description: "Your featured product displayed as a cutout over the hero strip.",
-    tip: "Appears large on your profile page — use a high-resolution image.",
+    tip: "Shown as a cut-out over your hero strip — a PNG with no background looks best. Got a photo with a background? Upload it, then use Remove background.",
     allowBgRemoval: true,
     preferFormats: "PNG with transparent background",
     previewShape: "square",
@@ -587,6 +587,21 @@ export default function ImageUploadModal({
 
       if (result.success) {
         setStep("done");
+        // Notify onboarding callouts (and any other listeners) that the field
+        // was saved. The inline text-edit path dispatches this event; image
+        // uploads must too, or steps like "Add your store's logo" never
+        // register as complete and the prompt won't dismiss.
+        if (typeof window !== "undefined") {
+          const columnByImageType: Record<OrgImageType, string> = {
+            hero_image: "hero_image_url",
+            logo: "logo_url",
+            logo_horizontal: "logo_horizontal_url",
+            product_overlay: "product_overlay_url",
+          };
+          window.dispatchEvent(new CustomEvent("csc:field-updated", {
+            detail: { table: "organizations", column: columnByImageType[imageType], entityId: orgId },
+          }));
+        }
         setTimeout(onSuccess, 900);
       } else {
         setError(result.error ?? "Upload failed");

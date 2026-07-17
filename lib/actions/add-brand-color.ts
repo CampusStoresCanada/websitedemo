@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 
 interface AddBrandColorParams {
@@ -59,6 +60,9 @@ export async function addBrandColor({
     console.error("Error adding brand color:", insertError);
     return { success: false, error: insertError.message };
   }
+
+  // Bust the route cache so the new swatch appears without a manual refresh.
+  revalidatePath("/", "layout");
 
   return { success: true, colorId: newColor.id };
 }

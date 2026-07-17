@@ -235,7 +235,7 @@ export function applyFieldMask<T extends Record<string, unknown>>(
   if (
     viewerLevel === "admin" ||
     viewerLevel === "super_admin" ||
-    (viewerLevel === "org_admin" && isOwnOrg)
+    (isOwnOrg && (viewerLevel === "org_admin" || viewerLevel === "partner"))
   ) {
     return { ...data };
   }

@@ -661,7 +661,7 @@ export function OrgDetailPanel({ org, isMember, canViewCancoll = false, contacts
             Become a member to see full operational and benchmarking data.
           </p>
           <Link
-            href="/apply/member"
+            href="/membership"
             className="inline-flex items-center gap-1.5 px-4 py-2 bg-[#EE2A2E] text-white text-xs font-medium rounded-full hover:bg-[#D92327] transition-colors"
           >
             Join CSC

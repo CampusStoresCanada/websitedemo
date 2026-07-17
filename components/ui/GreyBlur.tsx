@@ -4,6 +4,7 @@ import { useState, useEffect, createContext, useContext } from "react";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
+import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import { decryptPayload } from "@/lib/auth/crypto";
 import type { PermissionState, EncryptedField } from "@/lib/auth/types";
 
@@ -37,7 +38,7 @@ function useViewerGateState(user: ReturnType<typeof useAuth>["user"]): ViewerGat
   const [hadSession, setHadSession] = useState(false);
 
   useEffect(() => {
-    setHadSession(document.cookie.includes("csc_had_session=1"));
+    setHadSession(hadPriorSession());
   }, []);
 
   if (!user) {
@@ -63,7 +64,7 @@ function getGatedContent(state: ViewerGateState): {
       return {
         message: "This content is available to CSC member stores.",
         cta: "Become a Member",
-        link: "/signup",
+        link: "/membership",
       };
     case "returning":
       return {
@@ -81,7 +82,7 @@ function getGatedContent(state: ViewerGateState): {
       return {
         message: "This content is available to CSC member stores.",
         cta: "Become a Member",
-        link: "/signup",
+        link: "/membership",
       };
   }
 }

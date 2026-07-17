@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { requireAuthenticated, requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { ProcurementInfo } from "@/lib/types/procurement";
@@ -45,6 +46,10 @@ export async function updateProcurementInfo(
       console.error("Error updating procurement info:", error);
       return { success: false, error: error.message };
     }
+
+    // Bust the route cache so the saved category selections render without
+    // a manual refresh.
+    revalidatePath("/", "layout");
 
     return { success: true };
   } catch (err) {

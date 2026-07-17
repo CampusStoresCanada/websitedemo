@@ -155,6 +155,7 @@ export type AudienceType =
   | "conference_delegates"
   | "conference_exhibitors"
   | "conference_all"
+  | "conference_holders"
   | "global_admins"
   | "org_admins"
   | "event_registrants"
@@ -167,6 +168,8 @@ export interface AudienceDefinition {
     event_id?: string;
     org_ids?: string[];
     emails?: string[];
+    /** For conference_holders: limit to people holding a seat of this kind (e.g. "booth"). */
+    seat_kind?: string;
   };
 }
 

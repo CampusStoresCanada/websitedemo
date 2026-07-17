@@ -9,8 +9,6 @@ const DEFAULT_TABLES = [
   "conference_registrations",
   "conference_orders",
   "cart_items",
-  "wishlist_intents",
-  "wishlist_billing_attempts",
   "conference_entitlement_assignment_events",
   "membership_assessments",
   "benchmarking_promotions",

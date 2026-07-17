@@ -25,6 +25,9 @@ export async function resolveAudience(
     case "conference_all":
       return resolveConferenceAll(supabase, audience.filters ?? {});
 
+    case "conference_holders":
+      return resolveConferenceHolders(supabase, audience.filters ?? {});
+
     case "global_admins":
       return resolveGlobalAdmins(supabase);
 
@@ -130,6 +133,61 @@ async function resolveConferenceAll(
     email: row.contact_email ?? "",
     name: row.display_name ?? null,
   })).filter((r) => r.email !== "");
+}
+
+// ── Conference Seat-Holders (v3) ──────────────────────────────────
+// People targeted by what they HOLD in the v3 graph — not a registration_type
+// label. Optional seat_kind narrows to e.g. everyone holding a "booth". Reads
+// entity_balance_seats → conference_people, so manually added attendees count too.
+
+async function resolveConferenceHolders(
+  supabase: AdminClient,
+  filters: AudienceDefinition["filters"]
+): Promise<ResolvedRecipient[]> {
+  const conferenceId = filters?.conference_instance_id;
+  if (!conferenceId) {
+    console.warn("[comms/audience] resolveConferenceHolders: missing conference_instance_id filter");
+    return [];
+  }
+  const seatKind = filters?.seat_kind?.trim() || null;
+
+  const { data: seats, error } = await supabase
+    .from("entity_balance_seats")
+    .select("holder_person_id, entity:conference_entities!entity_balance_seats_entity_id_fkey(kind)")
+    .eq("conference_id", conferenceId)
+    .not("holder_person_id", "is", null);
+  if (error) {
+    console.error("[comms/audience] resolveConferenceHolders error:", error);
+    return [];
+  }
+
+  const personIds = new Set<string>();
+  for (const s of seats ?? []) {
+    if (!s.holder_person_id) continue;
+    if (seatKind) {
+      const entity = Array.isArray(s.entity) ? s.entity[0] : s.entity;
+      if (entity?.kind !== seatKind) continue;
+    }
+    personIds.add(s.holder_person_id);
+  }
+  if (personIds.size === 0) return [];
+
+  const { data: people, error: peopleError } = await supabase
+    .from("conference_people")
+    .select("user_id, contact_email, display_name")
+    .in("id", [...personIds]);
+  if (peopleError) {
+    console.error("[comms/audience] resolveConferenceHolders people error:", peopleError);
+    return [];
+  }
+
+  return (people ?? [])
+    .map((row) => ({
+      userId: row.user_id ?? null,
+      email: row.contact_email ?? "",
+      name: row.display_name ?? null,
+    }))
+    .filter((r) => r.email !== "");
 }
 
 // ── Global Admins (admin + super_admin) ───────────────────────────

@@ -243,12 +243,19 @@ export default function LoginForm() {
 
       <div className="mt-6 pt-6 border-t border-gray-200 text-center">
         <p className="text-sm text-gray-600">
-          Not a member yet?{" "}
+          New to CSC?{" "}
           <Link
-            href="/signup"
+            href="/membership"
             className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
           >
-            Join CSC
+            Apply for membership
+          </Link>
+          {" "}or{" "}
+          <Link
+            href="/partnership"
+            className="text-[#EE2A2E] hover:text-[#D92327] font-medium"
+          >
+            partner with us
           </Link>
         </p>
       </div>

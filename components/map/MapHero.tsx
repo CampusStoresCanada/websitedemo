@@ -80,7 +80,7 @@ function orgHasSubcategory(org: HomeMapOrg, sub: string): boolean {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const STORY_CYCLE_MS = 9000;
-const HOVER_DWELL_MS = 2000;
+const HOVER_DWELL_MS = 4000;
 
 const CANADIAN_PROVINCES = new Set([
   "AB","BC","MB","NB","NL","NS","NT","NU","ON","PE","QC","SK","YT",

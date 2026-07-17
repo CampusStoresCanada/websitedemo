@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 
@@ -43,6 +44,9 @@ export async function deleteBrandColor({
     console.error("Error deleting brand color:", deleteError);
     return { success: false, error: deleteError.message };
   }
+
+  // Bust the route cache so the removed swatch disappears without a manual refresh.
+  revalidatePath("/", "layout");
 
   return { success: true };
 }

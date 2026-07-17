@@ -8,7 +8,7 @@
 //   conference_instances, policy_sets, message_campaigns,
 //   renewal_job_runs, scheduler_runs, retention_jobs, ops_alerts,
 //   benchmarking_surveys, billing_runs, conference_legal_versions,
-//   conference_program_items, signup_applications
+//   conference_entities, signup_applications
 //
 // ALWAYS called from a server context (API route or server page).
 // ─────────────────────────────────────────────────────────────────
@@ -273,16 +273,9 @@ export async function syncAndFetchCalendar(
     projected.push(makeProjected(`Legal: ${conf?.name ?? "Conference"} — ${doc} v${lv.version}`, `${doc} v${lv.version} becomes effective for ${conf?.name ?? "this conference"}.`, "legal_retention", "admin_ops", new Date(lv.effective_at), null, "conference_legal_version", lv.id, "effective", now, { document_type: lv.document_type, version: lv.version, conference_id: lv.conference_id, conference_name: conf?.name }));
   }
 
-  // ── 11. Conference program items (required only) ─────────────────
-  const { data: programItems } = await supabase
-    .from("conference_program_items")
-    .select("id, conference_id, title, item_type, starts_at, ends_at, conference:conference_instances!inner(name, year)")
-    .eq("is_required", true);
-
-  for (const item of programItems ?? []) {
-    const conf = item.conference as { name: string; year: number } | null;
-    projected.push(makeProjected(`${conf?.name ?? "Conference"}: ${item.title}`, `Required program item — ${titleCase(item.item_type)}.`, "conference", "people", new Date(item.starts_at), new Date(item.ends_at), "conference_program_item", item.id, "event", now, { item_type: item.item_type, conference_id: item.conference_id, conference_name: conf?.name }));
-  }
+  // ── 11. Conference program items: retired. The conference agenda now lives
+  // in the v3 catalog (lib/conference/agenda.ts) and is surfaced on the
+  // conference schedule, not projected onto the global ops calendar.
 
   // ── 12. Signup applications (pending review) ─────────────────────
   const { data: applications } = await supabase
@@ -457,7 +450,7 @@ export async function getSourceWatermark(): Promise<string | null> {
     supabase.from("benchmarking_surveys")    .select("updated_at").order("updated_at",  { ascending: false }).limit(1).maybeSingle(),
     supabase.from("billing_runs")            .select("started_at").order("started_at",  { ascending: false }).limit(1).maybeSingle(),
     supabase.from("conference_legal_versions").select("created_at").order("created_at", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("conference_program_items") .select("updated_at").order("updated_at",  { ascending: false }).limit(1).maybeSingle(),
+    supabase.from("conference_entities")     .select("updated_at").order("updated_at",  { ascending: false }).limit(1).maybeSingle(),
     supabase.from("signup_applications")     .select("updated_at").order("updated_at",  { ascending: false }).limit(1).maybeSingle(),
   ]);
 

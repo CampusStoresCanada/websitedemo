@@ -56,3 +56,16 @@ export function formatCents(value: number): string {
     minimumFractionDigits: 2,
   }).format(value / 100);
 }
+
+/** "February 1–4, 2027" (same month) or "January 30 – February 4, 2027" (spanning months), from YYYY-MM-DD strings. */
+export function formatDateRange(startIso: string, endIso: string): string {
+  const start = new Date(`${startIso}T00:00:00Z`);
+  const end = new Date(`${endIso}T00:00:00Z`);
+  const sameMonth = start.getUTCMonth() === end.getUTCMonth() && start.getUTCFullYear() === end.getUTCFullYear();
+  if (sameMonth) {
+    const month = start.toLocaleDateString("en-CA", { month: "long", timeZone: "UTC" });
+    return `${month} ${start.getUTCDate()}–${end.getUTCDate()}, ${end.getUTCFullYear()}`;
+  }
+  const full = (d: Date) => d.toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" });
+  return `${full(start)} – ${full(end)}`;
+}
