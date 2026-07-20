@@ -49,7 +49,12 @@ async function handleCreateCampaign(formData: FormData) {
       .filter(Boolean);
   }
 
-  if (audienceType === "conference_holders" && seatKind) {
+  const seatKindAudiences = new Set<AudienceType>([
+    "conference_holders",
+    "conference_orgs_with_open_seats",
+    "conference_orgs_fully_assigned",
+  ]);
+  if (seatKindAudiences.has(audienceType) && seatKind) {
     audience.filters!.seat_kind = seatKind;
   }
 
@@ -76,9 +81,14 @@ async function handleCreateCampaign(formData: FormData) {
   redirect(`/admin/comms/${result.campaignId}`);
 }
 
-export default async function NewCampaignPage() {
+export default async function NewCampaignPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ conference_id?: string }>;
+}) {
   const db = createAdminClient();
   const templates = await listTemplates();
+  const { conference_id: defaultConferenceId } = await searchParams;
 
   const { data: conferences } = await db
     .from("conference_instances")
@@ -100,6 +110,7 @@ export default async function NewCampaignPage() {
         action={handleCreateCampaign}
         templates={templates}
         conferences={conferences ?? []}
+        defaultConferenceId={defaultConferenceId}
       />
     </main>
   );

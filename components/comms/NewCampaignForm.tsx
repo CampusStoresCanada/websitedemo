@@ -26,20 +26,30 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_exhibitors", label: "Conference Exhibitors (partners)" },
   { value: "conference_all", label: "All Conference Attendees" },
   { value: "conference_holders", label: "Conference seat-holders (v3)" },
+  { value: "conference_orgs_with_open_seats", label: "Orgs with unassigned seats" },
+  { value: "conference_orgs_fully_assigned", label: "Orgs — all seats assigned" },
   { value: "org_admins", label: "All Org Admins" },
   { value: "custom_emails", label: "Custom Email List" },
 ];
+
+const SEAT_KIND_AUDIENCES = new Set<AudienceType>([
+  "conference_holders",
+  "conference_orgs_with_open_seats",
+  "conference_orgs_fully_assigned",
+]);
 
 interface NewCampaignFormProps {
   action: (formData: FormData) => Promise<void>;
   templates: MessageTemplate[];
   conferences: ConferenceOption[];
+  defaultConferenceId?: string;
 }
 
 export default function NewCampaignForm({
   action,
   templates,
   conferences,
+  defaultConferenceId,
 }: NewCampaignFormProps) {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
@@ -188,6 +198,7 @@ export default function NewCampaignForm({
             </label>
             <select
               name="conference_id"
+              defaultValue={defaultConferenceId ?? ""}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
             >
               <option value="">— All conferences —</option>
@@ -200,12 +211,15 @@ export default function NewCampaignForm({
           </div>
         )}
 
-        {/* Seat kind (for the v3 seat-holders audience) */}
+        {/* Seat kind (for the v3 seat-based audiences) */}
         <div>
           <label className="block text-sm font-medium text-gray-700">Seat kind (optional)</label>
           <p className="text-xs text-gray-500 mb-1">
-            Only used with &ldquo;Conference seat-holders&rdquo;. Blank = everyone holding any seat;
-            e.g. <code className="bg-gray-100 rounded px-1">booth</code> = everyone holding a booth.
+            Only used with{" "}
+            {AUDIENCE_OPTIONS.filter((o) => SEAT_KIND_AUDIENCES.has(o.value))
+              .map((o) => `"${o.label}"`)
+              .join(", ")}
+            . Blank = any seat kind; e.g. <code className="bg-gray-100 rounded px-1">booth</code> = booths only.
           </p>
           <input
             name="seat_kind"

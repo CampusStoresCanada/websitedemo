@@ -156,6 +156,8 @@ export type AudienceType =
   | "conference_exhibitors"
   | "conference_all"
   | "conference_holders"
+  | "conference_orgs_with_open_seats"
+  | "conference_orgs_fully_assigned"
   | "global_admins"
   | "org_admins"
   | "event_registrants"

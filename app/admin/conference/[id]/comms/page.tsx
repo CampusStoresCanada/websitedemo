@@ -58,7 +58,7 @@ export default async function ConferenceCommsPage({
           </p>
         </div>
         <Link
-          href="/admin/comms/new"
+          href={`/admin/comms/new?conference_id=${id}`}
           className="rounded-md bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover transition-colors"
         >
           New Campaign

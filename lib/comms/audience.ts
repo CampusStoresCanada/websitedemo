@@ -28,6 +28,12 @@ export async function resolveAudience(
     case "conference_holders":
       return resolveConferenceHolders(supabase, audience.filters ?? {});
 
+    case "conference_orgs_with_open_seats":
+      return resolveConferenceOrgsBySeatStatus(supabase, audience.filters ?? {}, true);
+
+    case "conference_orgs_fully_assigned":
+      return resolveConferenceOrgsBySeatStatus(supabase, audience.filters ?? {}, false);
+
     case "global_admins":
       return resolveGlobalAdmins(supabase);
 
@@ -188,6 +194,63 @@ async function resolveConferenceHolders(
       name: row.display_name ?? null,
     }))
     .filter((r) => r.email !== "");
+}
+
+// ── Conference Orgs by Seat-Assignment Status (v3) ────────────────
+// Targets the ORG's admin contacts, not seat-holders — for nudging orgs to
+// go assign remaining seats vs. following up once they have. Optional
+// seat_kind narrows to one entity kind (e.g. "registration"); unset = any.
+// "Open seats" and "fully assigned" are the two halves of the same
+// per-org tally, not independent queries.
+
+async function resolveConferenceOrgsBySeatStatus(
+  supabase: AdminClient,
+  filters: AudienceDefinition["filters"],
+  wantOpenSeats: boolean
+): Promise<ResolvedRecipient[]> {
+  const conferenceId = filters?.conference_instance_id;
+  if (!conferenceId) {
+    console.warn("[comms/audience] resolveConferenceOrgsBySeatStatus: missing conference_instance_id filter");
+    return [];
+  }
+  const seatKind = filters?.seat_kind?.trim() || null;
+
+  const { data: seats, error } = await supabase
+    .from("entity_balance_seats")
+    .select(
+      `holder_person_id,
+       balance:entity_balances!entity_balance_seats_balance_id_fkey(
+         organization_id,
+         entity:conference_entities!entity_balances_entity_id_fkey(kind)
+       )`
+    )
+    .eq("conference_id", conferenceId);
+  if (error) {
+    console.error("[comms/audience] resolveConferenceOrgsBySeatStatus error:", error);
+    return [];
+  }
+
+  const orgSeatCounts = new Map<string, { total: number; open: number }>();
+  for (const s of seats ?? []) {
+    const balance = Array.isArray(s.balance) ? s.balance[0] : s.balance;
+    const orgId = balance?.organization_id;
+    if (!orgId) continue;
+    if (seatKind) {
+      const entity = Array.isArray(balance?.entity) ? balance.entity[0] : balance?.entity;
+      if (entity?.kind !== seatKind) continue;
+    }
+    const counts = orgSeatCounts.get(orgId) ?? { total: 0, open: 0 };
+    counts.total += 1;
+    if (!s.holder_person_id) counts.open += 1;
+    orgSeatCounts.set(orgId, counts);
+  }
+
+  const matchingOrgIds = [...orgSeatCounts.entries()]
+    .filter(([, c]) => (wantOpenSeats ? c.open > 0 : c.total > 0 && c.open === 0))
+    .map(([orgId]) => orgId);
+  if (matchingOrgIds.length === 0) return [];
+
+  return resolveOrgAdmins(supabase, { org_ids: matchingOrgIds });
 }
 
 // ── Global Admins (admin + super_admin) ───────────────────────────
