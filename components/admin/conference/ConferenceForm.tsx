@@ -156,7 +156,11 @@ export default function ConferenceForm({
     if (isEdit) {
       router.refresh();
     } else if (result.data) {
-      router.push(`/admin/conference/${result.data.id}`);
+      // Hard nav, not router.push: see note on the "Manage" link in
+      // app/admin/conference/page.tsx — soft-navigating into
+      // [id]/layout.tsx from outside that tree triggers a Next.js App
+      // Router hooks-mismatch bug.
+      window.location.href = `/admin/conference/${result.data.id}`;
     }
   };
 

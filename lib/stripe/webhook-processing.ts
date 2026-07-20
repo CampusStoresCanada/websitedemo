@@ -6,6 +6,10 @@ import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { activateMembershipRenewal, computeNewExpiresAt } from "../membership/renewal-activation";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
+import {
+  triggerConferenceRegistrationConfirmation,
+  triggerConferencePaymentConfirmation,
+} from "../comms/conference-triggers";
 import { enqueueQBExport } from "@/lib/quickbooks/export";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -365,6 +369,22 @@ async function mintProspectiveRegistration(
       minted_at: new Date().toISOString(),
     })
     .eq("id", row.id);
+
+  const { data: offer } = await db
+    .from("conference_entities")
+    .select("name")
+    .eq("id", row.offer_entity_id)
+    .maybeSingle();
+
+  await triggerConferenceRegistrationConfirmation({
+    db,
+    conferenceId: row.conference_id,
+    personId: person.id,
+    attendeeName: `${row.first_name} ${row.last_name}`.trim(),
+    attendeeEmail: row.email,
+    orgName: row.organization_name,
+    registrationRole: offer?.name ?? "Delegate",
+  });
 }
 
 async function handleCheckoutSessionCompleted(
@@ -486,6 +506,16 @@ async function handleCheckoutSessionCompleted(
           `Failed to clear cart after conference payment (order ${conferenceOrderId}): ${cartClearError.message}`
         );
       }
+    }
+
+    if (conferenceId && orgId && userId) {
+      await triggerConferencePaymentConfirmation({
+        db,
+        conferenceId,
+        orderId: conferenceOrderId,
+        organizationId: orgId,
+        userId,
+      });
     }
 
     return { conferenceOrderId };

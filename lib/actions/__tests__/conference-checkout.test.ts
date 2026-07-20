@@ -84,6 +84,12 @@ vi.mock("@/lib/actions/conference-people", () => ({
 vi.mock("@/lib/actions/conference-entity-commerce", () => ({
   findExistingUserByEmail: findExistingUserByEmailMock,
 }));
+// registration-mint.ts (pulled in via dev-checkout's mint path) imports the
+// real comms send chain — stub it rather than exercising real email sending.
+vi.mock("../../comms/conference-triggers", () => ({
+  triggerConferenceRegistrationConfirmation: vi.fn(),
+  triggerConferencePaymentConfirmation: vi.fn(),
+}));
 
 import { createConferenceCheckout } from "../conference-commerce";
 import { makeFakeDb, type QueryResult } from "../../test/fake-supabase";

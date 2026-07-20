@@ -64,6 +64,17 @@ vi.mock("@/lib/actions/conference-people", () => ({
 vi.mock("@/lib/actions/conference-entity-commerce", () => ({
   findExistingUserByEmail: findExistingUserByEmailMock,
 }));
+// lib/comms/conference-triggers.ts pulls in the real comms send chain
+// (@/lib/email/send etc.) — stub the one entry point these webhook tests
+// exercise rather than exercising real email sending. Mocked by relative
+// path (not "@/...") since only relative specifiers reliably resolve to
+// the same module identity as the "../comms/conference-triggers" imports
+// used from lib/conference/registration-mint.ts and this file's own
+// webhook-processing.ts — see note above on the @/ alias resolver.
+vi.mock("../../comms/conference-triggers", () => ({
+  triggerConferenceRegistrationConfirmation: vi.fn(),
+  triggerConferencePaymentConfirmation: vi.fn(),
+}));
 
 import {
   extractConferenceOrderIdFromStripeEvent,

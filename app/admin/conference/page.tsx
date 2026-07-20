@@ -106,12 +106,25 @@ export default async function ConferenceListPage() {
                       : "Not set"}
                   </td>
                   <td className="px-4 py-3 text-right">
-                    <Link
+                    {/*
+                      Plain <a>, not next/link: a client-side transition into
+                      [id]/layout.tsx (newly introducing that layout segment,
+                      which does a real async DB read) reliably triggers a
+                      Next.js App Router bug — "Rendered more hooks than
+                      during the previous render" — confirmed via extensive
+                      bisection (not Turbopack-specific, not app-code:
+                      reproduces on plain webpack too, and with every other
+                      variable removed except genuine async I/O latency in
+                      the newly-added layout). A full page load never
+                      triggers it. Forcing a hard navigation here is the
+                      reliable workaround.
+                    */}
+                    <a
                       href={`/admin/conference/${conf.id}`}
                       className="text-sm text-accent hover:underline"
                     >
                       Manage
-                    </Link>
+                    </a>
                   </td>
                 </tr>
               ))}

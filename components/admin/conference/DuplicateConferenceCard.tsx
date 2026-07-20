@@ -1,7 +1,6 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { duplicateConference } from "@/lib/actions/conference";
 import type { Database } from "@/lib/database.types";
 
@@ -12,7 +11,6 @@ interface DuplicateConferenceCardProps {
 }
 
 export default function DuplicateConferenceCard({ conferences }: DuplicateConferenceCardProps) {
-  const router = useRouter();
   const [sourceId, setSourceId] = useState(conferences[0]?.id ?? "");
   const [newYear, setNewYear] = useState(new Date().getFullYear() + 1);
   const [isLoading, setIsLoading] = useState(false);
@@ -72,7 +70,11 @@ export default function DuplicateConferenceCard({ conferences }: DuplicateConfer
             const result = await duplicateConference(selectedConference.id, newYear);
             setIsLoading(false);
             if (result.success && result.data) {
-              router.push(`/admin/conference/${result.data.id}`);
+              // Hard nav, not router.push: see note on the "Manage" link in
+              // app/admin/conference/page.tsx — soft-navigating into
+              // [id]/layout.tsx from outside that tree triggers a Next.js
+              // App Router hooks-mismatch bug.
+              window.location.href = `/admin/conference/${result.data.id}`;
             } else {
               setError(result.error ?? "Failed to duplicate conference");
             }

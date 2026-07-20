@@ -1,3 +1,4 @@
+import { notFound } from "next/navigation";
 import { getConference } from "@/lib/actions/conference";
 import ConferenceSubNav from "@/components/admin/conference/ConferenceSubNav";
 
@@ -12,11 +13,7 @@ export default async function ConferenceDetailLayout({
   const result = await getConference(id);
 
   if (!result.success || !result.data) {
-    return (
-      <div className="text-center py-12 text-gray-500">
-        Conference not found. {result.error}
-      </div>
-    );
+    notFound();
   }
 
   const conference = result.data;

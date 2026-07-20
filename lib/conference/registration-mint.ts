@@ -1,6 +1,7 @@
 import { resolveAssigneeForEmail } from "@/lib/actions/conference-people";
 import { findExistingUserByEmail } from "@/lib/actions/conference-entity-commerce";
 import { deriveRegistrationTier } from "./registration-tier";
+import { triggerConferenceRegistrationConfirmation } from "../comms/conference-triggers";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 /**
@@ -23,6 +24,7 @@ async function mintOneRegistrationAttendee(
   db: AdminClient,
   conferenceId: string,
   organizationId: string,
+  orgName: string,
   tier: { personKind: "delegate" | "exhibitor"; tierLabel: string },
   attendee: { name: string; email: string | null },
   seatId: string,
@@ -87,6 +89,18 @@ async function mintOneRegistrationAttendee(
       `mintRegistrationAttendeesFromOrder: failed to allocate seat for order item ${itemId}: ${seatUpdateError.message}`
     );
   }
+
+  if (attendee.email) {
+    await triggerConferenceRegistrationConfirmation({
+      db,
+      conferenceId,
+      personId: person.id,
+      attendeeName: attendee.name,
+      attendeeEmail: attendee.email,
+      orgName,
+      registrationRole: tier.tierLabel,
+    });
+  }
 }
 
 /**
@@ -107,6 +121,9 @@ export async function mintRegistrationAttendeesFromOrder(
   conferenceId: string,
   organizationId: string
 ): Promise<void> {
+  const { data: org } = await db.from("organizations").select("name").eq("id", organizationId).single();
+  const orgName = org?.name ?? "";
+
   const { data: items, error } = await db
     .from("conference_order_items")
     .select(
@@ -160,7 +177,7 @@ export async function mintRegistrationAttendeesFromOrder(
     for (let i = 0; i < seats.length && i < attendees.length; i++) {
       const attendee = attendees[i];
       if (!attendee) continue;
-      await mintOneRegistrationAttendee(db, conferenceId, organizationId, tier, attendee, seats[i].id, item.id);
+      await mintOneRegistrationAttendee(db, conferenceId, organizationId, orgName, tier, attendee, seats[i].id, item.id);
     }
   }
 }
