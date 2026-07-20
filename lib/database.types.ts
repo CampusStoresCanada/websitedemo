@@ -1985,6 +1985,193 @@ export type Database = {
           },
         ]
       }
+      conference_checklist_checkpoints: {
+        Row: {
+          checklist_id: string
+          created_at: string
+          days_before_deadline: number
+          id: string
+        }
+        Insert: {
+          checklist_id: string
+          created_at?: string
+          days_before_deadline: number
+          id?: string
+        }
+        Update: {
+          checklist_id?: string
+          created_at?: string
+          days_before_deadline?: number
+          id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_checklist_checkpoints_checklist_id_fkey"
+            columns: ["checklist_id"]
+            isOneToOne: false
+            referencedRelation: "conference_checklists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_checklist_reminder_log: {
+        Row: {
+          checklist_id: string
+          checkpoint_id: string
+          id: string
+          organization_id: string
+          sent_at: string
+        }
+        Insert: {
+          checklist_id: string
+          checkpoint_id: string
+          id?: string
+          organization_id: string
+          sent_at?: string
+        }
+        Update: {
+          checklist_id?: string
+          checkpoint_id?: string
+          id?: string
+          organization_id?: string
+          sent_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_checklist_reminder_log_checklist_id_fkey"
+            columns: ["checklist_id"]
+            isOneToOne: false
+            referencedRelation: "conference_checklists"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklist_reminder_log_checkpoint_id_fkey"
+            columns: ["checkpoint_id"]
+            isOneToOne: false
+            referencedRelation: "conference_checklist_checkpoints"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklist_reminder_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklist_reminder_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_checklist_tasks: {
+        Row: {
+          active: boolean
+          check_entity_id: string | null
+          check_type: string
+          checklist_id: string
+          created_at: string
+          description: string
+          id: string
+          name: string
+          sort_order: number
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          check_entity_id?: string | null
+          check_type: string
+          checklist_id: string
+          created_at?: string
+          description: string
+          id?: string
+          name: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          check_entity_id?: string | null
+          check_type?: string
+          checklist_id?: string
+          created_at?: string
+          description?: string
+          id?: string
+          name?: string
+          sort_order?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_checklist_tasks_check_entity_id_fkey"
+            columns: ["check_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklist_tasks_checklist_id_fkey"
+            columns: ["checklist_id"]
+            isOneToOne: false
+            referencedRelation: "conference_checklists"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_checklists: {
+        Row: {
+          active: boolean
+          conference_id: string
+          created_at: string
+          deadline_at: string
+          description: string | null
+          id: string
+          name: string
+          scope_entity_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          active?: boolean
+          conference_id: string
+          created_at?: string
+          deadline_at: string
+          description?: string | null
+          id?: string
+          name: string
+          scope_entity_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          active?: boolean
+          conference_id?: string
+          created_at?: string
+          deadline_at?: string
+          description?: string | null
+          id?: string
+          name?: string
+          scope_entity_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_checklists_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklists_scope_entity_id_fkey"
+            columns: ["scope_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conference_days: {
         Row: {
           conference_id: string

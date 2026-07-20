@@ -8,6 +8,28 @@ import type { AudienceDefinition, ResolvedRecipient } from "./types";
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 /**
+ * supabase.auth.admin.listUsers() defaults to a 50-user page — silently
+ * returning only a subset on any project with more auth users than that
+ * (751 here). Paginates until a short page confirms the end, so email
+ * lookups don't quietly drop real recipients depending on where their user
+ * row happens to land in Supabase's ordering.
+ */
+async function lookupUserEmails(supabase: AdminClient, userIds: string[]): Promise<Record<string, string>> {
+  const wanted = new Set(userIds);
+  const emailMap: Record<string, string> = {};
+  const perPage = 200;
+  for (let page = 1; wanted.size > Object.keys(emailMap).length; page++) {
+    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
+    if (error || !data?.users?.length) break;
+    for (const u of data.users) {
+      if (wanted.has(u.id) && u.email) emailMap[u.id] = u.email;
+    }
+    if (data.users.length < perPage) break; // last page
+  }
+  return emailMap;
+}
+
+/**
  * Resolve an audience definition to a list of concrete recipients.
  */
 export async function resolveAudience(
@@ -45,6 +67,9 @@ export async function resolveAudience(
 
     case "custom_emails":
       return resolveCustomEmails(audience.filters?.emails ?? []);
+
+    case "custom_recipient_list":
+      return resolveCustomRecipientList(audience.filters?.recipients ?? []);
 
     default:
       console.warn("[comms/audience] Unknown audience type:", audience.type);
@@ -284,12 +309,7 @@ async function resolveGlobalAdmins(
   if (!profiles?.length) return [];
 
   const ids = profiles.map((p) => p.id);
-  const { data: authUsers } = await supabase.auth.admin.listUsers();
-  const emailMap = Object.fromEntries(
-    (authUsers?.users ?? [])
-      .filter((u) => ids.includes(u.id))
-      .map((u) => [u.id, u.email ?? ""])
-  );
+  const emailMap = await lookupUserEmails(supabase, ids);
 
   return profiles
     .map((p) => ({
@@ -306,18 +326,15 @@ async function resolveOrgAdmins(
   supabase: AdminClient,
   filters: AudienceDefinition["filters"]
 ): Promise<ResolvedRecipient[]> {
-  let q = supabase
-    .from("user_organizations")
-    .select(
-      `user_id, role,
-       profiles(id, display_name),
-       organizations(id)`
-    )
-    .eq("role", "org_admin")
-    .eq("active", true);
+  // No embedded profiles(...) join here on purpose: user_organizations.user_id
+  // and profiles.id both reference auth.users.id independently, with no direct
+  // FK between the two tables, so PostgREST can't auto-detect the relationship
+  // for an embedded select (confirmed via PGRST200 at runtime). Two plain
+  // queries instead, same pattern as resolveEventRegistrants below.
+  let q = supabase.from("user_organizations").select("user_id").eq("role", "org_admin").eq("status", "active");
 
   if (filters?.org_ids?.length) {
-    q = q.in("org_id", filters.org_ids);
+    q = q.in("organization_id", filters.org_ids);
   }
 
   const { data, error } = await q;
@@ -326,26 +343,22 @@ async function resolveOrgAdmins(
     return [];
   }
 
-  // Resolve emails via auth.users admin lookup (profiles table has no email column)
-  const userIds = (data ?? []).map((row) => row.user_id).filter(Boolean);
-  const { data: authUsers } = await supabase.auth.admin.listUsers();
-  const emailMap = Object.fromEntries(
-    (authUsers?.users ?? [])
-      .filter((u) => userIds.includes(u.id))
-      .map((u) => [u.id, u.email ?? ""])
-  );
+  const userIds = [...new Set((data ?? []).map((row) => row.user_id).filter(Boolean))];
+  if (userIds.length === 0) return [];
 
-  const results: ResolvedRecipient[] = [];
-  for (const row of data ?? []) {
-    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
-    if (!profile) continue;
-    results.push({
-      userId: row.user_id,
-      email: emailMap[row.user_id] ?? "",
-      name: (profile as { display_name?: string }).display_name ?? null,
-    });
-  }
-  return results.filter((r) => r.email);
+  const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("id", userIds);
+  const nameMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.display_name]));
+
+  // Resolve emails via auth.users admin lookup (profiles table has no email column)
+  const emailMap = await lookupUserEmails(supabase, userIds);
+
+  return userIds
+    .map((uid) => ({
+      userId: uid,
+      email: emailMap[uid] ?? "",
+      name: nameMap[uid] ?? null,
+    }))
+    .filter((r) => r.email);
 }
 
 // ── Event Registrants ─────────────────────────────────────────────
@@ -384,12 +397,7 @@ async function resolveEventRegistrants(
   );
 
   // Resolve emails from auth.users
-  const { data: authUsers } = await supabase.auth.admin.listUsers();
-  const emailMap = Object.fromEntries(
-    (authUsers?.users ?? [])
-      .filter((u) => userIds.includes(u.id))
-      .map((u) => [u.id, u.email ?? ""])
-  );
+  const emailMap = await lookupUserEmails(supabase, userIds);
 
   return userIds
     .map((uid) => ({
@@ -407,6 +415,17 @@ function resolveCustomEmails(emails: string[]): ResolvedRecipient[] {
     userId: null,
     email,
     name: null,
+  }));
+}
+
+function resolveCustomRecipientList(
+  recipients: NonNullable<AudienceDefinition["filters"]>["recipients"]
+): ResolvedRecipient[] {
+  return (recipients ?? []).map((r) => ({
+    userId: null,
+    email: r.email,
+    name: r.name ?? null,
+    variableOverrides: r.variableOverrides,
   }));
 }
 

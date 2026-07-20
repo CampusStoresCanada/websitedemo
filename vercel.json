@@ -75,6 +75,10 @@
     {
       "path": "/api/cron/rfp-notifications",
       "schedule": "0 8 * * *"
+    },
+    {
+      "path": "/api/cron/checklist-reminders",
+      "schedule": "10 9 * * *"
     }
   ]
 }

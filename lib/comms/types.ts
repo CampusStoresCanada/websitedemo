@@ -69,6 +69,7 @@ export type TemplateKey =
   | "conference_missing_travel_data"
   | "conference_reminder"
   | "conference_waitlist_approved"
+  | "conference_checklist_reminder"
   // Events
   | "event_submitted"
   | "event_approved"
@@ -161,7 +162,15 @@ export type AudienceType =
   | "global_admins"
   | "org_admins"
   | "event_registrants"
-  | "custom_emails";
+  | "custom_emails"
+  /**
+   * Internal-only — not exposed in the campaign-builder UI. Used by
+   * orchestration code (e.g. the checklist reminder engine) that has
+   * already resolved exactly who to email and with what per-recipient
+   * variables, and just needs createCampaign/executeCampaignSend to do
+   * the sending + delivery tracking.
+   */
+  | "custom_recipient_list";
 
 export interface AudienceDefinition {
   type: AudienceType;
@@ -179,6 +188,8 @@ export interface AudienceDefinition {
      * seat_kind when both are set.
      */
     entity_id?: string;
+    /** For custom_recipient_list: exactly who to send to, with per-recipient variables already resolved. */
+    recipients?: { email: string; name?: string | null; variableOverrides?: Record<string, string> }[];
   };
 }
 

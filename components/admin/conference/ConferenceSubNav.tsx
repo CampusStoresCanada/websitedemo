@@ -42,6 +42,7 @@ const STAGES: Array<{ label: string; tabs: Tab[] }> = [
     tabs: [
       { segment: "registrations", label: "Registrations" },
       { segment: "comms", label: "Comms" },
+      { segment: "checklists", label: "Checklists" },
       { segment: "swaps", label: "Swaps" },
       { segment: "war-room", label: "War Room" },
       { segment: "badges", label: "Badge Ops" },
