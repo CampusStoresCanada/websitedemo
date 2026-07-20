@@ -20,7 +20,7 @@ async function handleCreateCampaign(formData: FormData) {
   const audienceType = formData.get("audience_type") as AudienceType;
   const conferenceId = formData.get("conference_id") as string | null;
   const customEmails = formData.get("custom_emails") as string | null;
-  const seatKind = (formData.get("seat_kind") as string | null)?.trim() || null;
+  const entityId = (formData.get("entity_id") as string | null)?.trim() || null;
   const sendTiming = (formData.get("send_timing") as string) || "draft";
   const scheduledAtRaw = formData.get("scheduled_at") as string | null;
   const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : undefined;
@@ -49,13 +49,13 @@ async function handleCreateCampaign(formData: FormData) {
       .filter(Boolean);
   }
 
-  const seatKindAudiences = new Set<AudienceType>([
+  const entityScopedAudiences = new Set<AudienceType>([
     "conference_holders",
     "conference_orgs_with_open_seats",
     "conference_orgs_fully_assigned",
   ]);
-  if (seatKindAudiences.has(audienceType) && seatKind) {
-    audience.filters!.seat_kind = seatKind;
+  if (entityScopedAudiences.has(audienceType) && entityId) {
+    audience.filters!.entity_id = entityId;
   }
 
   const result = await createCampaign({
@@ -96,6 +96,26 @@ export default async function NewCampaignPage({
     .order("created_at", { ascending: false })
     .limit(10);
 
+  const conferenceIds = (conferences ?? []).map((c) => c.id);
+  // is_for_sale scopes this to actual purchasable/holdable catalog items —
+  // excludes logistics entities (days, rooms, sessions, policies) that
+  // nobody holds a seat in via entity_balance_seats, so the admin picks
+  // from a short, relevant list instead of everything in the catalog.
+  const { data: entities } = conferenceIds.length
+    ? await db
+        .from("conference_entities")
+        .select("id, conference_id, name, kind")
+        .in("conference_id", conferenceIds)
+        .eq("is_for_sale", true)
+        .order("kind")
+        .order("name")
+    : { data: [] };
+
+  const entitiesByConference: Record<string, { id: string; name: string; kind: string }[]> = {};
+  for (const e of entities ?? []) {
+    (entitiesByConference[e.conference_id] ??= []).push({ id: e.id, name: e.name, kind: e.kind });
+  }
+
   return (
     <main>
       <Link href="/admin/comms" className="text-sm text-gray-500 hover:text-gray-700">
@@ -110,6 +130,7 @@ export default async function NewCampaignPage({
         action={handleCreateCampaign}
         templates={templates}
         conferences={conferences ?? []}
+        entitiesByConference={entitiesByConference}
         defaultConferenceId={defaultConferenceId}
       />
     </main>

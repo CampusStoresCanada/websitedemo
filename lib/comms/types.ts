@@ -170,8 +170,15 @@ export interface AudienceDefinition {
     event_id?: string;
     org_ids?: string[];
     emails?: string[];
-    /** For conference_holders: limit to people holding a seat of this kind (e.g. "booth"). */
+    /** For conference_holders / conference_orgs_*: limit to people holding a seat of this kind (e.g. "booth"). */
     seat_kind?: string;
+    /**
+     * For conference_holders / conference_orgs_*: limit to holders of one specific
+     * conference_entities row (a named, admin-authored catalog item — e.g. one
+     * particular booth tier or add-on), not just its kind. Takes priority over
+     * seat_kind when both are set.
+     */
+    entity_id?: string;
   };
 }
 

@@ -21,6 +21,12 @@ interface ConferenceOption {
   status: string;
 }
 
+interface ConferenceEntityOption {
+  id: string;
+  name: string;
+  kind: string;
+}
+
 const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_delegates", label: "Conference Delegates (members)" },
   { value: "conference_exhibitors", label: "Conference Exhibitors (partners)" },
@@ -32,7 +38,7 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "custom_emails", label: "Custom Email List" },
 ];
 
-const SEAT_KIND_AUDIENCES = new Set<AudienceType>([
+const ENTITY_SCOPED_AUDIENCES = new Set<AudienceType>([
   "conference_holders",
   "conference_orgs_with_open_seats",
   "conference_orgs_fully_assigned",
@@ -42,6 +48,7 @@ interface NewCampaignFormProps {
   action: (formData: FormData) => Promise<void>;
   templates: MessageTemplate[];
   conferences: ConferenceOption[];
+  entitiesByConference: Record<string, ConferenceEntityOption[]>;
   defaultConferenceId?: string;
 }
 
@@ -49,13 +56,24 @@ export default function NewCampaignForm({
   action,
   templates,
   conferences,
+  entitiesByConference,
   defaultConferenceId,
 }: NewCampaignFormProps) {
   const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendTiming, setSendTiming] = useState<SendTiming>("draft");
+  const [selectedConferenceId, setSelectedConferenceId] = useState(defaultConferenceId ?? "");
   const subjectRef = useRef<HTMLInputElement>(null);
+
+  const conferenceEntities = entitiesByConference[selectedConferenceId] ?? [];
+  const entitiesByKind = conferenceEntities.reduce<Record<string, ConferenceEntityOption[]>>(
+    (acc, e) => {
+      (acc[e.kind] ??= []).push(e);
+      return acc;
+    },
+    {}
+  );
 
   const selectedTemplate = templates.find((t) => t.key === selectedTemplateKey) ?? null;
 
@@ -198,7 +216,8 @@ export default function NewCampaignForm({
             </label>
             <select
               name="conference_id"
-              defaultValue={defaultConferenceId ?? ""}
+              value={selectedConferenceId}
+              onChange={(e) => setSelectedConferenceId(e.target.value)}
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
             >
               <option value="">— All conferences —</option>
@@ -211,21 +230,37 @@ export default function NewCampaignForm({
           </div>
         )}
 
-        {/* Seat kind (for the v3 seat-based audiences) */}
+        {/* Target item — pulled live from the selected conference's own catalog,
+            not a fixed list. Admins pick from what that conference actually
+            contains instead of remembering category names. */}
         <div>
-          <label className="block text-sm font-medium text-gray-700">Seat kind (optional)</label>
+          <label className="block text-sm font-medium text-gray-700">Target item (optional)</label>
           <p className="text-xs text-gray-500 mb-1">
             Only used with{" "}
-            {AUDIENCE_OPTIONS.filter((o) => SEAT_KIND_AUDIENCES.has(o.value))
+            {AUDIENCE_OPTIONS.filter((o) => ENTITY_SCOPED_AUDIENCES.has(o.value))
               .map((o) => `"${o.label}"`)
               .join(", ")}
-            . Blank = any seat kind; e.g. <code className="bg-gray-100 rounded px-1">booth</code> = booths only.
+            . Narrows to people/orgs holding this specific catalog item. Blank = any item.
+            {!selectedConferenceId && " Pick a conference above to see its items."}
           </p>
-          <input
-            name="seat_kind"
-            placeholder="booth"
-            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
-          />
+          <select
+            key={selectedConferenceId}
+            name="entity_id"
+            defaultValue=""
+            disabled={conferenceEntities.length === 0}
+            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D] disabled:bg-gray-50 disabled:text-gray-400"
+          >
+            <option value="">— Any item —</option>
+            {Object.entries(entitiesByKind).map(([kind, items]) => (
+              <optgroup key={kind} label={kind}>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>
+                    {item.name}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
         </div>
 
         {/* Custom emails */}

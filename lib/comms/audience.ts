@@ -155,13 +155,19 @@ async function resolveConferenceHolders(
     console.warn("[comms/audience] resolveConferenceHolders: missing conference_instance_id filter");
     return [];
   }
-  const seatKind = filters?.seat_kind?.trim() || null;
+  const entityId = filters?.entity_id?.trim() || null;
+  const seatKind = entityId ? null : filters?.seat_kind?.trim() || null;
 
-  const { data: seats, error } = await supabase
+  let q = supabase
     .from("entity_balance_seats")
     .select("holder_person_id, entity:conference_entities!entity_balance_seats_entity_id_fkey(kind)")
     .eq("conference_id", conferenceId)
     .not("holder_person_id", "is", null);
+  if (entityId) {
+    q = q.eq("entity_id", entityId);
+  }
+
+  const { data: seats, error } = await q;
   if (error) {
     console.error("[comms/audience] resolveConferenceHolders error:", error);
     return [];
@@ -198,8 +204,9 @@ async function resolveConferenceHolders(
 
 // ── Conference Orgs by Seat-Assignment Status (v3) ────────────────
 // Targets the ORG's admin contacts, not seat-holders — for nudging orgs to
-// go assign remaining seats vs. following up once they have. Optional
-// seat_kind narrows to one entity kind (e.g. "registration"); unset = any.
+// go assign remaining seats vs. following up once they have. entity_id
+// narrows to one specific catalog item (e.g. one named booth tier);
+// seat_kind narrows to a whole kind (e.g. "booth") when entity_id is unset.
 // "Open seats" and "fully assigned" are the two halves of the same
 // per-org tally, not independent queries.
 
@@ -213,9 +220,10 @@ async function resolveConferenceOrgsBySeatStatus(
     console.warn("[comms/audience] resolveConferenceOrgsBySeatStatus: missing conference_instance_id filter");
     return [];
   }
-  const seatKind = filters?.seat_kind?.trim() || null;
+  const entityId = filters?.entity_id?.trim() || null;
+  const seatKind = entityId ? null : filters?.seat_kind?.trim() || null;
 
-  const { data: seats, error } = await supabase
+  let q = supabase
     .from("entity_balance_seats")
     .select(
       `holder_person_id,
@@ -225,6 +233,11 @@ async function resolveConferenceOrgsBySeatStatus(
        )`
     )
     .eq("conference_id", conferenceId);
+  if (entityId) {
+    q = q.eq("entity_id", entityId);
+  }
+
+  const { data: seats, error } = await q;
   if (error) {
     console.error("[comms/audience] resolveConferenceOrgsBySeatStatus error:", error);
     return [];
