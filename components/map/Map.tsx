@@ -9,7 +9,7 @@ import {
 } from "react";
 import mapboxgl from "mapbox-gl";
 import "mapbox-gl/dist/mapbox-gl.css";
-import type { HomeMapOrg } from "@/lib/homepage";
+import type { HomeMapOrg, HomeConferencePin } from "@/lib/homepage";
 import { sponsorMarkerSvg } from "@/lib/sponsorship/markerSvg";
 
 // Set access token
@@ -22,6 +22,8 @@ interface MapProps {
   highlightedOrgIds?: string[];
   /** When true, scroll zoom works without Ctrl/Cmd (for full-screen explore mode) */
   freeScrollZoom?: boolean;
+  /** The upcoming conference venue, if any — a distinct pin shape, not an org dot. */
+  conferencePin?: HomeConferencePin | null;
 }
 
 // Expose these methods to parent components
@@ -38,12 +40,13 @@ const CANADA_ZOOM = 3.2;
 const FOCUSED_ZOOM = 8;
 
 const Map = forwardRef<MapRef, MapProps>(function Map(
-  { organizations, onOrganizationClick, onOrganizationHover, highlightedOrgIds = [], freeScrollZoom = false },
+  { organizations, onOrganizationClick, onOrganizationHover, highlightedOrgIds = [], freeScrollZoom = false, conferencePin = null },
   ref
 ) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
   const markersRef = useRef<globalThis.Map<string, mapboxgl.Marker>>(new globalThis.Map());
+  const conferenceMarkerRef = useRef<mapboxgl.Marker | null>(null);
   const [mapLoaded, setMapLoaded] = useState(false);
 
   // Expose map controls to parent
@@ -265,6 +268,50 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     };
   }, [organizations, mapLoaded, onOrganizationClick, onOrganizationHover]);
 
+  // Conference venue pin — separate from the org-marker effect above (its own
+  // ref, own lifecycle) so it isn't wiped and rebuilt every time the org list
+  // changes, and reads immediately as "not another org dot": a teardrop pin
+  // shape instead of a circle, in a colour neither Member (red) nor Partner
+  // (blue) uses.
+  useEffect(() => {
+    if (!map.current || !mapLoaded) return;
+
+    conferenceMarkerRef.current?.remove();
+    conferenceMarkerRef.current = null;
+    if (!conferencePin) return;
+
+    const el = document.createElement("div");
+    el.className = "conference-marker";
+    el.style.cursor = "pointer";
+    el.innerHTML = `
+      <svg width="36" height="48" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
+        <path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.06 27.94 0 18 0z" fill="#1A1A1A"/>
+        <circle cx="18" cy="18" r="9" fill="white"/>
+        <path d="M13 16.5h10M13 19.5h10M15 13v-1.5M21 13v-1.5" stroke="#1A1A1A" stroke-width="1.5" stroke-linecap="round"/>
+      </svg>
+    `;
+    const popup = new mapboxgl.Popup({ offset: [0, -48], closeButton: false }).setHTML(
+      `<div style="font-size:13px;line-height:1.4">
+        <strong>${escapeHtml(conferencePin.name)}</strong><br/>
+        ${escapeHtml(conferencePin.venue)}${conferencePin.city ? `<br/>${escapeHtml(conferencePin.city)}${conferencePin.province ? `, ${escapeHtml(conferencePin.province)}` : ""}` : ""}
+      </div>`
+    );
+
+    conferenceMarkerRef.current = new mapboxgl.Marker({ element: el, anchor: "bottom" })
+      .setLngLat([conferencePin.lng, conferencePin.lat])
+      .setPopup(popup)
+      .addTo(map.current);
+
+    el.addEventListener("click", () => {
+      window.location.href = conferencePin.href;
+    });
+
+    return () => {
+      conferenceMarkerRef.current?.remove();
+      conferenceMarkerRef.current = null;
+    };
+  }, [conferencePin, mapLoaded]);
+
   // Update marker highlighting/dimming when highlightedOrgIds changes
   useEffect(() => {
     const hasHighlights = highlightedOrgIds.length > 0;
@@ -344,6 +391,14 @@ function sponsorMarkerSizeForZoom(zoom: number): number {
 }
 
 // Helper to get initials from org name
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 function getInitials(name: string): string {
   return name
     .split(" ")

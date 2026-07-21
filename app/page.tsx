@@ -30,7 +30,7 @@ export default async function Home() {
   return (
     <div>
       {/* Hero Section with Map — takes over viewport on hover explore */}
-      <MapHero organizations={data.mapOrgs} stories={data.stories} />
+      <MapHero organizations={data.mapOrgs} stories={data.stories} conferencePin={data.conferencePin} />
 
       {/* Everything below fades out when map enters explore mode */}
       <HomeContent>

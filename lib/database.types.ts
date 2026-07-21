@@ -2370,6 +2370,8 @@ export type Database = {
           floor_plan_url: string | null
           id: string
           location_city: string | null
+          location_latitude: number | null
+          location_longitude: number | null
           location_province: string | null
           location_venue: string | null
           name: string
@@ -2400,6 +2402,8 @@ export type Database = {
           floor_plan_url?: string | null
           id?: string
           location_city?: string | null
+          location_latitude?: number | null
+          location_longitude?: number | null
           location_province?: string | null
           location_venue?: string | null
           name: string
@@ -2430,6 +2434,8 @@ export type Database = {
           floor_plan_url?: string | null
           id?: string
           location_city?: string | null
+          location_latitude?: number | null
+          location_longitude?: number | null
           location_province?: string | null
           location_venue?: string | null
           name?: string

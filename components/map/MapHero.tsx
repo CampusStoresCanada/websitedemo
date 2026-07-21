@@ -6,7 +6,7 @@ import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
 import { createClient } from "@/lib/supabase/client";
-import type { HomeMapOrg, MapStory } from "@/lib/homepage";
+import type { HomeMapOrg, MapStory, HomeConferencePin } from "@/lib/homepage";
 import type { MapRef } from "./Map";
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
 import { SCALE_RANGES } from "@/lib/explore/types";
@@ -122,12 +122,14 @@ interface MapHeroProps {
     lens: ExploreLens;
     focus?: "members" | "partners";
   };
+  conferencePin?: HomeConferencePin | null;
 }
 
 export default function MapHero({
   organizations,
   stories,
   initialState,
+  conferencePin = null,
 }: MapHeroProps) {
   const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
@@ -1060,6 +1062,7 @@ export default function MapHero({
           organizations={organizations}
           highlightedOrgIds={mapHighlightedIds}
           onOrganizationClick={handleMarkerClick}
+          conferencePin={conferencePin}
           freeScrollZoom={explore}
         />
       </div>
