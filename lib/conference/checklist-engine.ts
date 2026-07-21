@@ -3,6 +3,7 @@ import { resolveAudience } from "@/lib/comms/audience";
 import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
 import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
+import { computeOrgLegalCompleteness } from "./legal-acceptance";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -58,6 +59,10 @@ const CHECKS: Record<
       .not("paid_at", "is", null);
     return (count ?? 0) > 0;
   },
+
+  async legal_document_accepted(db, organizationId, conferenceId) {
+    return computeOrgLegalCompleteness(db, conferenceId, organizationId);
+  },
 };
 
 /**
@@ -82,6 +87,8 @@ function getTaskCta(
       return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
     case "payment_complete":
       return { label: "View your account", url: `${appUrl}/org/${ctx.orgSlug}` };
+    case "legal_document_accepted":
+      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
   }
 }
 

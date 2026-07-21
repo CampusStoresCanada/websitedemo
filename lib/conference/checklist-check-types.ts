@@ -4,5 +4,11 @@
 // client components (the task-authoring form), not just the server-side
 // evaluation engine. The DB's check_type CHECK constraint (see migration)
 // and this list must be kept in sync.
-export const CHECK_TYPES = ["seat_assigned", "entity_purchased", "travel_info_submitted", "payment_complete"] as const;
+export const CHECK_TYPES = [
+  "seat_assigned",
+  "entity_purchased",
+  "travel_info_submitted",
+  "payment_complete",
+  "legal_document_accepted",
+] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
