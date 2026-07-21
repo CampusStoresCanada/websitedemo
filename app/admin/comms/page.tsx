@@ -1,8 +1,10 @@
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseUTC } from "@/lib/utils";
+import { listTemplates } from "@/lib/comms/templates";
 import type { CampaignStatus } from "@/lib/comms/types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import AutomationRulesPanel from "@/components/comms/AutomationRulesPanel";
 
 export const metadata = {
   title: "Communications | Admin | Campus Stores Canada",
@@ -41,6 +43,11 @@ export default async function CommsPage() {
   const delivered = stats?.filter((d) => d.status === "delivered").length ?? 0;
   const bounced = stats?.filter((d) => ["bounced", "failed"].includes(d.status)).length ?? 0;
   const total = stats?.length ?? 0;
+
+  const [{ data: rules }, templates] = await Promise.all([
+    db.from("automation_rules").select("id, rule_key, label, template_key, automation_mode, enabled").order("label"),
+    listTemplates(),
+  ]);
 
   return (
     <main>
@@ -81,26 +88,7 @@ export default async function CommsPage() {
         </div>
       </div>
 
-      {/* v1.4 stub — Automation Rules */}
-      <div className="mt-6 rounded-xl border border-dashed border-gray-300 bg-gray-50 p-5">
-        <div className="flex items-start justify-between">
-          <div>
-            <div className="flex items-center gap-2">
-              <h2 className="text-sm font-semibold text-gray-700">Automation Rules</h2>
-              <span className="inline-flex items-center rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-700">
-                v1.4
-              </span>
-            </div>
-            <p className="mt-1 text-xs text-gray-500 max-w-xl">
-              Configure which templates fire automatically on system events (membership renewals,
-              conference registrations, admin transfers, etc.), and switch individual automations
-              between <code className="bg-white rounded px-1">auto_send</code> and{" "}
-              <code className="bg-white rounded px-1">draft_only</code> mode.
-              Currently all automation rules are hardcoded — this panel will make them configurable.
-            </p>
-          </div>
-        </div>
-      </div>
+      <AutomationRulesPanel rules={rules ?? []} templates={templates} />
 
       {/* Campaign list */}
       <div className="mt-6 rounded-xl border border-gray-200 bg-white overflow-hidden">

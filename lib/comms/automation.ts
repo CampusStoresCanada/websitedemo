@@ -5,7 +5,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { createCampaign, executeCampaignSend } from "./send";
-import type { TriggerAutomationOptions } from "./types";
+import type { TemplateKey, AutomationMode, TriggerAutomationOptions } from "./types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -13,6 +13,10 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * Trigger an automated campaign from a system event.
  *
  * - If triggerEventKey already exists in automation_runs → skip (idempotent)
+ * - If an enabled automation_rules row exists for this trigger → its template
+ *   + mode override the caller's code defaults; if the row is disabled, the
+ *   trigger is skipped entirely (admin turned it off — no send, no draft)
+ * - Otherwise the caller's templateKey/automationMode are used as-is
  * - If automationMode = 'draft_only' → creates campaign as draft, no send
  * - If automationMode = 'auto_send' → creates campaign and sends immediately
  */
@@ -36,14 +40,31 @@ export async function triggerAutomation(
     return { status: "skipped", campaignId: existing.campaign_id ?? undefined };
   }
 
+  // Admin-configurable override (see automation_rules migration). Unconfigured
+  // triggers (no row) fall through to the caller's code defaults unchanged.
+  const ruleKey = options.ruleKey ?? options.templateKey;
+  const { data: rule } = await supabase
+    .from("automation_rules")
+    .select("template_key, automation_mode, enabled")
+    .eq("rule_key", ruleKey)
+    .maybeSingle();
+
+  if (rule && !rule.enabled) {
+    await recordRun(supabase, options, null, "skipped", "Disabled via automation rule");
+    return { status: "skipped" };
+  }
+
+  const templateKey = (rule?.template_key ?? options.templateKey) as TemplateKey;
+  const automationMode = (rule?.automation_mode ?? options.automationMode) as AutomationMode;
+
   // Create campaign
   const createResult = await createCampaign({
     name: options.campaignName,
-    templateKey: options.templateKey,
+    templateKey,
     audience: options.audience,
     variableValues: options.variableValues,
     triggerSource: options.triggerSource,
-    automationMode: options.automationMode,
+    automationMode,
     triggerEventKey: options.triggerEventKey,
   });
 
@@ -54,7 +75,7 @@ export async function triggerAutomation(
 
   const campaignId = createResult.campaignId;
 
-  if (options.automationMode === "draft_only") {
+  if (automationMode === "draft_only") {
     await recordRun(supabase, options, campaignId, "created_draft", null);
     return { status: "created_draft", campaignId };
   }

@@ -270,6 +270,39 @@ export type Database = {
           },
         ]
       }
+      automation_rules: {
+        Row: {
+          automation_mode: string
+          created_at: string
+          enabled: boolean
+          id: string
+          label: string
+          rule_key: string
+          template_key: string
+          updated_at: string
+        }
+        Insert: {
+          automation_mode: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          label: string
+          rule_key: string
+          template_key: string
+          updated_at?: string
+        }
+        Update: {
+          automation_mode?: string
+          created_at?: string
+          enabled?: boolean
+          id?: string
+          label?: string
+          rule_key?: string
+          template_key?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       badge_print_events: {
         Row: {
           actor_id: string | null

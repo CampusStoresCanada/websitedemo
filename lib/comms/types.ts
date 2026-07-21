@@ -214,7 +214,9 @@ export interface TriggerAutomationOptions {
   triggerSource: TriggerSource;
   /** Unique key for idempotency — same key = same run, no duplicate send */
   triggerEventKey: string;
+  /** Code default — used as-is unless an automation_rules row overrides it. */
   templateKey: TemplateKey;
+  /** Code default — used as-is unless an automation_rules row overrides it. */
   automationMode: AutomationMode;
   /** Campaign name for display in admin UI */
   campaignName: string;
@@ -223,4 +225,12 @@ export interface TriggerAutomationOptions {
   variableValues: Record<string, string>;
   /** Per-recipient overrides (indexed by email) */
   recipientOverrides?: Record<string, Record<string, string>>;
+  /**
+   * Identity for the admin-configurable rule override (automation_rules.rule_key)
+   * — distinct from triggerEventKey, which is per-instance (one per person/event).
+   * Defaults to templateKey, which is a stable, sensible identity for most
+   * triggers. Pass explicitly only when a trigger's template can legitimately
+   * change per-call, so the rule identity needs to stay fixed regardless.
+   */
+  ruleKey?: string;
 }
