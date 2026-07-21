@@ -290,8 +290,11 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     const el = document.createElement("div");
     el.className = "conference-marker";
     el.style.cursor = "pointer";
+    // Permanent stacking property — always above sponsor markers ("5") and
+    // regular org markers, regardless of which attract slide is active.
+    el.style.zIndex = "10";
     el.innerHTML = `
-      <svg width="36" height="48" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
+      <svg width="44" height="59" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
         <path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.06 27.94 0 18 0z" fill="${pinColor}"/>
         <circle cx="18" cy="18" r="9" fill="white"/>
         <path d="M13 16.5h10M13 19.5h10M15 13v-1.5M21 13v-1.5" stroke="${pinColor}" stroke-width="1.5" stroke-linecap="round"/>
