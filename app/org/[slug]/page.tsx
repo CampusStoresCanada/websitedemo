@@ -16,6 +16,7 @@ import type { SupplierData } from "@/lib/actions/member-suppliers";
 import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/conference-entity-commerce";
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { getRenewalConfig } from "@/lib/policy/engine";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -403,6 +404,31 @@ export default async function OrgProfilePage({ params }: PageProps) {
     viewer.viewerOrgAdminIds.includes(organization.id);
   const editorRawLinks = canEditLinks ? rawPartnerLinks : undefined;
 
+  // Self-serve renewal ("Renew Now") is CSC-staff-only for now, and only
+  // surfaced once the org is within the same admin-configured reminder
+  // window (renewal.reminder_days, in Policy Settings → Renewals) the
+  // automated reminder cron uses — so "how many days before renewal this
+  // becomes relevant" stays one shared, admin-editable setting instead of a
+  // second one drifting out of sync with it. Skipped entirely for viewers
+  // who couldn't see the card anyway, to avoid the extra policy lookup on
+  // every ordinary org-page view.
+  const isCscAdminViewer = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+  let renewalWindowOpen = false;
+  if (isCscAdminViewer) {
+    const renewalConfig = await getRenewalConfig();
+    const maxReminderDay = Math.max(...renewalConfig.reminder_days);
+    if (organization.membership_expires_at) {
+      const daysUntilExpiry = Math.ceil(
+        (new Date(organization.membership_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+      );
+      renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
+    } else {
+      // Never had a renewal cycle at all (e.g. a new org) — no future date to
+      // count down to, so there's nothing to gate; always eligible.
+      renewalWindowOpen = true;
+    }
+  }
+
   // Render different layouts based on organization type
   if (organization.type === "Member") {
     return (
@@ -424,6 +450,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         sponsorTier={sponsorTier}
         initialRFPs={orgRFPs}
         memberSuppliers={memberSuppliers}
+        renewalWindowOpen={renewalWindowOpen}
       />
       </>
     );
@@ -453,6 +480,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       partnerMarket={partnerMarket}
       canNudge={canNudge}
       nudgeAvailableAt={nudgeAvailableAt}
+      renewalWindowOpen={renewalWindowOpen}
     />
     </>
   );

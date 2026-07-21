@@ -88,6 +88,8 @@ interface MemberProfileProps {
   currentConferenceIsPublic: boolean;
   initialRFPs?: RFPWithContext[];
   memberSuppliers?: SupplierData | null;
+  /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
+  renewalWindowOpen?: boolean;
 }
 
 export default function MemberProfile({
@@ -106,6 +108,7 @@ export default function MemberProfile({
   sponsorTier,
   initialRFPs = [],
   memberSuppliers = null,
+  renewalWindowOpen = false,
 }: MemberProfileProps) {
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
@@ -646,7 +649,7 @@ export default function MemberProfile({
             </div>
           )}
 
-          {isPrivilegedViewer && (
+          {isCscAdmin && renewalWindowOpen && (
             <RenewMembershipCard
               organizationId={organization.id}
               membershipStatus={organization.membership_status ?? null}
@@ -1200,6 +1203,14 @@ export default function MemberProfile({
               </h1>
             )}
           </div>
+
+          {isCscAdmin && renewalWindowOpen && (
+            <RenewMembershipCard
+              organizationId={organization.id}
+              membershipStatus={organization.membership_status ?? null}
+              membershipExpiresAt={organization.membership_expires_at ?? null}
+            />
+          )}
 
           {/* Sponsor tier badge (mobile) */}
           {sponsorTier && (

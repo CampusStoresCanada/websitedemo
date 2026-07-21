@@ -124,6 +124,8 @@ interface PartnerProfileProps {
   buyableExtras: ConferenceOffer[];
   currentConferenceId: string | null;
   heldBooths: Array<{ name: string }>;
+  /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
+  renewalWindowOpen?: boolean;
 }
 
 export default function PartnerProfile({
@@ -146,6 +148,7 @@ export default function PartnerProfile({
   partnerMarket = null,
   canNudge = false,
   nudgeAvailableAt = null,
+  renewalWindowOpen = false,
 }: PartnerProfileProps) {
   // An org can hold more than one booth — list all of them in the staffing heading.
   const staffingHeading =
@@ -686,7 +689,7 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {(isOrgAdminForThisOrg || isAdmin) && (
+          {isCscAdmin && renewalWindowOpen && (
             <RenewMembershipCard
               organizationId={organization.id}
               membershipStatus={organization.membership_status ?? null}
@@ -1093,6 +1096,14 @@ export default function PartnerProfile({
               </h1>
             )}
           </div>
+
+          {isCscAdmin && renewalWindowOpen && (
+            <RenewMembershipCard
+              organizationId={organization.id}
+              membershipStatus={organization.membership_status ?? null}
+              membershipExpiresAt={organization.membership_expires_at ?? null}
+            />
+          )}
 
           {/* Categories — grouped with subcategories */}
           {(categories.length > 0 || (editMode && canEditThisOrg)) && (
