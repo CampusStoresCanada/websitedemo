@@ -10,6 +10,41 @@ export const metadata = {
   title: "New Campaign | Communications | Admin | Campus Stores Canada",
 };
 
+/**
+ * "email,name,var1,var2" header row, then one row per recipient. Each
+ * non-email/name column becomes that recipient's own {{var}} value,
+ * distinct from every other recipient in the same campaign — a real
+ * mail merge, not a shared body with a personalized greeting. No quoted-
+ * comma support; a plain split is enough for the lists this is for.
+ */
+function parseMailMergeCsv(
+  csv: string
+): { email: string; name: string | null; variableOverrides?: Record<string, string> }[] {
+  const lines = csv
+    .split("\n")
+    .map((l) => l.trim())
+    .filter(Boolean);
+  if (lines.length < 2) return [];
+
+  const headers = lines[0].split(",").map((h) => h.trim());
+  const emailIdx = headers.findIndex((h) => h.toLowerCase() === "email");
+  const nameIdx = headers.findIndex((h) => h.toLowerCase() === "name");
+  if (emailIdx === -1) return [];
+
+  return lines.slice(1).flatMap((line) => {
+    const cols = line.split(",").map((c) => c.trim());
+    const email = cols[emailIdx];
+    if (!email) return [];
+    const name = nameIdx >= 0 ? cols[nameIdx] || null : null;
+    const variableOverrides: Record<string, string> = {};
+    headers.forEach((h, i) => {
+      if (i === emailIdx || i === nameIdx) return;
+      if (cols[i]) variableOverrides[h] = cols[i];
+    });
+    return [{ email, name, variableOverrides: Object.keys(variableOverrides).length ? variableOverrides : undefined }];
+  });
+}
+
 async function handleCreateCampaign(formData: FormData) {
   "use server";
 
@@ -20,6 +55,7 @@ async function handleCreateCampaign(formData: FormData) {
   const audienceType = formData.get("audience_type") as AudienceType;
   const conferenceId = formData.get("conference_id") as string | null;
   const customEmails = formData.get("custom_emails") as string | null;
+  const mailMergeCsv = formData.get("mail_merge_csv") as string | null;
   const entityId = (formData.get("entity_id") as string | null)?.trim() || null;
   const sendTiming = (formData.get("send_timing") as string) || "draft";
   const scheduledAtRaw = formData.get("scheduled_at") as string | null;
@@ -47,6 +83,10 @@ async function handleCreateCampaign(formData: FormData) {
       .split(/[\n,]/)
       .map((e) => e.trim())
       .filter(Boolean);
+  }
+
+  if (audienceType === "custom_recipient_list" && mailMergeCsv) {
+    audience.filters!.recipients = parseMailMergeCsv(mailMergeCsv);
   }
 
   const entityScopedAudiences = new Set<AudienceType>([

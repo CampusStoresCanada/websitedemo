@@ -36,6 +36,7 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_orgs_fully_assigned", label: "Orgs — all seats assigned" },
   { value: "org_admins", label: "All Org Admins" },
   { value: "custom_emails", label: "Custom Email List" },
+  { value: "custom_recipient_list", label: "Individual / Mail Merge (paste a list)" },
 ];
 
 const ENTITY_SCOPED_AUDIENCES = new Set<AudienceType>([
@@ -276,6 +277,26 @@ export default function NewCampaignForm({
             rows={4}
             placeholder={"user@example.com\nanother@example.com"}
             className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+          />
+        </div>
+
+        {/* Mail merge — each row gets its own personalized email, not one
+            shared body. Header row's extra columns become {{variables}}
+            for that recipient only, overriding the shared values above. */}
+        <div>
+          <label className="block text-sm font-medium text-gray-700">Mail Merge Recipients (CSV)</label>
+          <p className="text-xs text-gray-500 mb-1">
+            Only used when Audience is set to &ldquo;Individual / Mail Merge&rdquo;. First row is headers:{" "}
+            <code className="bg-gray-100 rounded px-1">email</code>,{" "}
+            <code className="bg-gray-100 rounded px-1">name</code>, then any{" "}
+            <code className="bg-gray-100 rounded px-1">{`{{variable}}`}</code> column names — each becomes that one
+            recipient&apos;s personal value, overriding the shared Template Variables above just for them.
+          </p>
+          <textarea
+            name="mail_merge_csv"
+            rows={6}
+            placeholder={`email,name${selectedTemplate?.variable_keys.length ? "," + selectedTemplate.variable_keys.join(",") : ""}\njane@example.com,Jane Doe${selectedTemplate?.variable_keys.map(() => ",...").join("") ?? ""}`}
+            className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
           />
         </div>
 

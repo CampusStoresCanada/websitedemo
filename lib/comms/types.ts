@@ -164,11 +164,11 @@ export type AudienceType =
   | "event_registrants"
   | "custom_emails"
   /**
-   * Internal-only — not exposed in the campaign-builder UI. Used by
-   * orchestration code (e.g. the checklist reminder engine) that has
-   * already resolved exactly who to email and with what per-recipient
-   * variables, and just needs createCampaign/executeCampaignSend to do
-   * the sending + delivery tracking.
+   * Exact recipients with per-recipient variable overrides already
+   * resolved — a real mail merge, each person gets their own values. Used
+   * both by the admin-facing CSV paste in NewCampaignForm and by
+   * orchestration code (e.g. the checklist reminder engine) that resolves
+   * recipients programmatically.
    */
   | "custom_recipient_list";
 
