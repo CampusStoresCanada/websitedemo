@@ -110,6 +110,7 @@ export default function Header() {
   const memberOrg = organizations.find(
     uo => uo.organization?.type === "Member"
   );
+  const orgAdminOrg = organizations.find(uo => uo.role === "org_admin");
 
   // True whenever we're actually on a conference's pages — the cart button
   // should reflect THIS conference regardless of whether some other
@@ -717,6 +718,16 @@ export default function Header() {
                       </Link>
                     ) : null}
 
+                    {orgAdminOrg ? (
+                      <Link
+                        href="/org/billing"
+                        onClick={() => setShowUserMenu(false)}
+                        className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+                      >
+                        Billing
+                      </Link>
+                    ) : null}
+
                     <a
                       href={memberSpaceHref}
                       onClick={() => setShowUserMenu(false)}
@@ -815,6 +826,11 @@ export default function Header() {
                   {primaryOrg?.organization?.slug ? (
                     <Link href={`/org/${primaryOrg.organization.slug}`} className="px-2 py-2 rounded-md hover:bg-gray-50">
                       My Organization
+                    </Link>
+                  ) : null}
+                  {orgAdminOrg ? (
+                    <Link href="/org/billing" className="px-2 py-2 rounded-md hover:bg-gray-50">
+                      Billing
                     </Link>
                   ) : null}
                   {isAdmin ? (
