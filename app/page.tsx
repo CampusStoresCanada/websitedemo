@@ -10,13 +10,20 @@ import { getHomePageData } from "@/lib/homepage";
 import { getSiteContent } from "@/lib/data";
 import { fieldProps } from "@/lib/editable-fields";
 import { getActiveSponsors } from "@/lib/actions/sponsorship";
+import { getViewerContext } from "@/lib/visibility/viewer";
 
 // Revalidate every 60 seconds to pick up data changes
 export const revalidate = 60;
 
 export default async function Home() {
+  // Resolved first (not in the Promise.all below) since getHomePageData needs
+  // it to decide whether a draft conference's pin is visible — same
+  // draft-preview convention already used on the conference offers/cart pages.
+  const viewer = await getViewerContext();
+  const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+
   const [data, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
-    getHomePageData(),
+    getHomePageData(viewerIsAdmin),
     getSiteContent("home_value_props_header"),
     getSiteContent("home_value_props"),
     getSiteContent("home_community_voices"),

@@ -280,20 +280,28 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     conferenceMarkerRef.current = null;
     if (!conferencePin) return;
 
+    // Draft conferences are only ever visible here because the viewer is an
+    // admin (fetchConferencePin gates this server-side) — amber instead of
+    // the site's usual near-black pin, matching DraftPreviewBanner's palette,
+    // so it reads as "not live yet" rather than looking like a real, public
+    // pin nobody else can see.
+    const pinColor = conferencePin.isDraftPreview ? "#B45309" : "#1A1A1A";
+
     const el = document.createElement("div");
     el.className = "conference-marker";
     el.style.cursor = "pointer";
     el.innerHTML = `
       <svg width="36" height="48" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
-        <path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.06 27.94 0 18 0z" fill="#1A1A1A"/>
+        <path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.06 27.94 0 18 0z" fill="${pinColor}"/>
         <circle cx="18" cy="18" r="9" fill="white"/>
-        <path d="M13 16.5h10M13 19.5h10M15 13v-1.5M21 13v-1.5" stroke="#1A1A1A" stroke-width="1.5" stroke-linecap="round"/>
+        <path d="M13 16.5h10M13 19.5h10M15 13v-1.5M21 13v-1.5" stroke="${pinColor}" stroke-width="1.5" stroke-linecap="round"/>
       </svg>
     `;
     const popup = new mapboxgl.Popup({ offset: [0, -48], closeButton: false }).setHTML(
       `<div style="font-size:13px;line-height:1.4">
         <strong>${escapeHtml(conferencePin.name)}</strong><br/>
         ${escapeHtml(conferencePin.venue)}${conferencePin.city ? `<br/>${escapeHtml(conferencePin.city)}${conferencePin.province ? `, ${escapeHtml(conferencePin.province)}` : ""}` : ""}
+        ${conferencePin.isDraftPreview ? `<br/><span style="color:#B45309;font-weight:600">Draft — not visible to the public</span>` : ""}
       </div>`
     );
 

@@ -143,8 +143,9 @@ export interface HomePageStats {
  * (that's the member/partner org model, with dozens of benchmarking fields
  * that make no sense for a venue) or a MapStory (built around highlighting
  * existing orgs). Sourced from conference_instances directly; only ever set
- * once a conference has real coordinates AND is in a public-facing status —
- * a draft conference's venue isn't public information yet.
+ * once a conference has real coordinates AND is either in a public-facing
+ * status, or in draft and the viewer is an admin/super_admin — same
+ * draft-preview convention already used on the conference offers/cart pages.
  */
 export interface HomeConferencePin {
   id: string;
@@ -155,6 +156,8 @@ export interface HomeConferencePin {
   lat: number;
   lng: number;
   href: string;
+  /** True when this pin is only visible because the viewer is an admin — the conference itself is still draft. */
+  isDraftPreview: boolean;
 }
 
 export interface HomePageData {
@@ -623,17 +626,21 @@ const EMPTY_DATA: HomePageData = {
 };
 
 /**
- * The nearest public-facing conference with coordinates set — draft
- * conferences aren't shown (their venue isn't public yet), and one without
- * location_latitude/location_longitude simply doesn't get a pin rather than
- * falling back to a city-level guess (a venue pin should be exact or absent).
+ * The nearest conference with coordinates set. Public-facing statuses are
+ * visible to everyone; draft is visible only to admin/super_admin viewers
+ * (same draft-preview convention the conference offers/cart pages already
+ * use). One without location_latitude/location_longitude simply doesn't get
+ * a pin rather than falling back to a city-level guess — a venue pin should
+ * be exact or absent.
  */
-async function fetchConferencePin(): Promise<HomeConferencePin | null> {
+async function fetchConferencePin(viewerIsAdmin: boolean): Promise<HomeConferencePin | null> {
+  const visibleStatuses = viewerIsAdmin ? [...PUBLIC_CONFERENCE_STATUSES, "draft"] : PUBLIC_CONFERENCE_STATUSES;
+
   const db = createAdminClient();
   const { data } = await db
     .from("conference_instances")
     .select("id, name, year, edition_code, location_venue, location_city, location_province, location_latitude, location_longitude, status, start_date")
-    .in("status", PUBLIC_CONFERENCE_STATUSES)
+    .in("status", visibleStatuses)
     .not("location_latitude", "is", null)
     .not("location_longitude", "is", null)
     .order("start_date", { ascending: true })
@@ -652,13 +659,17 @@ async function fetchConferencePin(): Promise<HomeConferencePin | null> {
     province: data.location_province,
     lat: data.location_latitude,
     lng: data.location_longitude,
+    isDraftPreview: data.status === "draft",
     href: `/conference/${data.year}/${data.edition_code}`,
   };
 }
 
-export async function getHomePageData(): Promise<HomePageData> {
+export async function getHomePageData(viewerIsAdmin = false): Promise<HomePageData> {
   // 1. Fetch active orgs + latest benchmarking in parallel
-  const [result, conferencePin] = await Promise.all([fetchMapOrgsWithBenchmarking(), fetchConferencePin()]);
+  const [result, conferencePin] = await Promise.all([
+    fetchMapOrgsWithBenchmarking(),
+    fetchConferencePin(viewerIsAdmin),
+  ]);
   if (!result) return { ...EMPTY_DATA, conferencePin };
 
   const { orgRecords, benchByOrg } = result;
