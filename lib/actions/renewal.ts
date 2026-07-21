@@ -3,8 +3,10 @@
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
-import { processRefund } from "@/lib/stripe/billing";
+import { createMembershipInvoice, createPartnershipInvoice, finalizeAndSendInvoice, processRefund } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
+import { computeNewExpiresAt } from "@/lib/membership/renewal-activation";
+import { getActivePolicySet } from "@/lib/policy/engine";
 import { sendTransactional } from "@/lib/comms/send";
 import type { Json } from "@/lib/database.types";
 
@@ -201,4 +203,117 @@ export async function optOutOfRenewal(
   }
 
   return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Renew Now (self-serve, on demand)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Lets an org admin (or global admin) trigger their own renewal invoice
+ * immediately, instead of waiting for the reminder cron's 30-day mark or
+ * getting swept into it as a side effect of an unrelated purchase (e.g. the
+ * conference-commerce membership-gate bundle). Reuses the exact same
+ * invoice-generation path the cron uses (createMembershipInvoice /
+ * createPartnershipInvoice + computeNewExpiresAt's cycle-anchored billing
+ * period), so the amount and coverage dates are identical whichever path
+ * triggers it — only the timing differs.
+ *
+ * Idempotent: if an unpaid invoice already exists for this org, returns its
+ * existing Stripe hosted URL instead of generating a duplicate.
+ */
+export async function renewMembershipNow(
+  orgId: string
+): Promise<{ success: boolean; error?: string; invoiceUrl?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const { ctx } = auth;
+  if (!isGlobalAdmin(ctx.globalRole) && !canManageOrganization(ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const db = createAdminClient();
+
+  const { data: org, error: orgErr } = await db
+    .from("organizations")
+    .select("id, name, type, membership_status, membership_expires_at")
+    .eq("id", orgId)
+    .single();
+
+  if (orgErr || !org) {
+    return { success: false, error: "Organization not found" };
+  }
+
+  // Matches the cron's own eligibility set — locked/canceled orgs need
+  // reactivation handling, not a renewal invoice.
+  const renewableStatuses = ["active", "reactivated"];
+  if (!renewableStatuses.includes(org.membership_status ?? "")) {
+    return {
+      success: false,
+      error: `Cannot renew from status "${org.membership_status}". Contact an administrator.`,
+    };
+  }
+
+  // Reuse an existing unpaid invoice rather than generating a duplicate —
+  // an org that clicks "Renew Now" twice, or that already has a
+  // cron-generated invoice waiting, should land on the same invoice both
+  // times.
+  const { data: existingInvoice } = await db
+    .from("invoices")
+    .select("id, stripe_invoice_id, status")
+    .eq("organization_id", orgId)
+    .in("status", ["draft", "invoiced", "pending_settlement"])
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let stripeInvoiceId: string | null;
+
+  if (existingInvoice) {
+    stripeInvoiceId = existingInvoice.stripe_invoice_id;
+    if (existingInvoice.status === "draft" && stripeInvoiceId) {
+      await finalizeAndSendInvoice(existingInvoice.id);
+    }
+  } else {
+    const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
+      org.membership_expires_at ?? null
+    );
+
+    const invoice =
+      org.type === "Vendor Partner"
+        ? await createPartnershipInvoice(orgId, { billingPeriodStart, billingPeriodEnd })
+        : await createMembershipInvoice(orgId, {
+            billingPeriodStart,
+            billingPeriodEnd,
+            policySetId: (await getActivePolicySet())?.id,
+          });
+
+    await finalizeAndSendInvoice(invoice.id);
+    stripeInvoiceId = invoice.stripe_invoice_id;
+
+    await db.from("renewal_events").insert({
+      organization_id: orgId,
+      renewal_year: new Date(billingPeriodEnd).getFullYear(),
+      event_type: "invoice_generated" as const,
+      invoice_id: invoice.id,
+      metadata: JSON.parse(
+        JSON.stringify({
+          billing_period_start: billingPeriodStart,
+          billing_period_end: billingPeriodEnd,
+          triggered_by: "org_admin_self_serve",
+          actor_id: ctx.userId,
+        })
+      ) as Json,
+    });
+  }
+
+  if (!stripeInvoiceId) {
+    return { success: false, error: "Invoice created but not linked to Stripe — contact an administrator." };
+  }
+
+  const stripeInvoice = await stripe.invoices.retrieve(stripeInvoiceId);
+  return { success: true, invoiceUrl: stripeInvoice.hosted_invoice_url ?? undefined };
 }

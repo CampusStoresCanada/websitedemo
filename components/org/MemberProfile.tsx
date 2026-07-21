@@ -34,6 +34,7 @@ import { updateOrgProfileVisibilitySettings, setContactHidden } from "@/lib/acti
 import { fieldProps } from "@/lib/editable-fields";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
+import RenewMembershipCard from "@/components/org/RenewMembershipCard";
 
 interface SponsorTierInfo {
   name: string; slug: string; color: string; icon: TierIcon | null;
@@ -643,6 +644,14 @@ export default function MemberProfile({
                 </p>
               </div>
             </div>
+          )}
+
+          {isPrivilegedViewer && (
+            <RenewMembershipCard
+              organizationId={organization.id}
+              membershipStatus={organization.membership_status ?? null}
+              membershipExpiresAt={organization.membership_expires_at ?? null}
+            />
           )}
 
           {/* Sponsor tier badge */}

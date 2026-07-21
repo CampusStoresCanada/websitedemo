@@ -21,6 +21,7 @@ import type { AssignableEntityColumn } from "@/app/org/[slug]/page";
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
+import RenewMembershipCard from "@/components/org/RenewMembershipCard";
 import CategoryEditor from "@/components/org/CategoryEditor";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import PartnerLinksSection from "@/components/org/PartnerLinksSection";
@@ -683,6 +684,14 @@ export default function PartnerProfile({
                 </button>
               )}
             </div>
+          )}
+
+          {(isOrgAdminForThisOrg || isAdmin) && (
+            <RenewMembershipCard
+              organizationId={organization.id}
+              membershipStatus={organization.membership_status ?? null}
+              membershipExpiresAt={organization.membership_expires_at ?? null}
+            />
           )}
 
           {/* Sponsor tier badge */}
