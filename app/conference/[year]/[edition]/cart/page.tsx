@@ -3,8 +3,9 @@ import { redirect } from "next/navigation";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { getConferenceCart } from "@/lib/actions/conference-commerce";
-import { getContactsForOrganization } from "@/lib/data";
+import { getContactsForOrganization, getOrganizations } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CartClient from "./cart-client";
 
@@ -41,6 +42,8 @@ export default async function ConferenceCartPage({
 
   const conference = conferenceResult.data;
   const adminClient = createAdminClient();
+  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+
   const { data: userOrgs } = await adminClient
     .from("user_organizations")
     .select("organization_id, organizations(id, name, slug)")
@@ -51,7 +54,12 @@ export default async function ConferenceCartPage({
     (row) => (row as unknown as { organizations: OrganizationMembership }).organizations
   );
 
-  if (memberships.length === 0) {
+  const allOrgs = isAdmin ? await getOrganizations() : [];
+  const orgOptions: OrganizationMembership[] = isAdmin
+    ? allOrgs.map((o) => ({ id: o.id, name: o.name, slug: o.slug }))
+    : memberships;
+
+  if (orgOptions.length === 0) {
     return (
       <main className="max-w-5xl mx-auto py-12 px-4">
         <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>
@@ -62,7 +70,18 @@ export default async function ConferenceCartPage({
     );
   }
 
-  const selectedOrg = memberships.find((org) => org.id === query.org) ?? memberships[0];
+  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (isAdmin ? null : orgOptions[0]);
+
+  if (!selectedOrg) {
+    return (
+      <main className="max-w-5xl mx-auto py-8 px-4 space-y-6">
+        <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>
+        <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={null} basePath={`/conference/${year}/${edition}/cart`} />
+        <p className="text-sm text-gray-600">Pick an organization above to view their cart.</p>
+      </main>
+    );
+  }
+
   const [cartResult, orgContacts] = await Promise.all([
     getConferenceCart(conference.id, selectedOrg.id),
     getContactsForOrganization(selectedOrg.id),
@@ -93,7 +112,9 @@ export default async function ConferenceCartPage({
         </Link>
       </div>
 
-      {memberships.length > 1 ? (
+      {isAdmin ? (
+        <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={selectedOrg.id} basePath={`/conference/${year}/${edition}/cart`} />
+      ) : memberships.length > 1 ? (
         <div className="flex flex-wrap gap-2">
           {memberships.map((org) => (
             <Link
@@ -118,7 +139,7 @@ export default async function ConferenceCartPage({
         organizationId={selectedOrg.id}
         organizationName={selectedOrg.name}
         orgSlug={selectedOrg.slug}
-        isDevAdmin={isGlobalAdmin(auth.ctx.globalRole)}
+        isDevAdmin={isAdmin}
         initialCart={cartResult.data}
         contacts={orgContacts.map((c) => ({ id: c.id, name: c.name ?? "", email: c.work_email ?? c.email ?? null }))}
       />

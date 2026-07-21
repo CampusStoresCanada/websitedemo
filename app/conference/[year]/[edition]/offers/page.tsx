@@ -8,7 +8,9 @@ import {
   type ConferenceFloorPlan,
 } from "@/lib/actions/conference-entities";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getOrganizations } from "@/lib/data";
 import OffersClient from "./offers-client";
 
 interface OrganizationMembership {
@@ -45,6 +47,11 @@ export default async function ConferenceOffersPage({
 
   const conference = conferenceResult.data;
   const db = createAdminClient();
+  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
+
+  // Global admins can shop on behalf of ANY org, not just ones they belong to —
+  // the commerce actions already permit this (isGlobalAdmin bypass), this is
+  // the UI to reach it, e.g. for manually seeding a real registration to test.
   const { data: userOrgs } = await db
     .from("user_organizations")
     .select("organization_id, organizations(id, name, type)")
@@ -55,7 +62,12 @@ export default async function ConferenceOffersPage({
     (row) => (row as unknown as { organizations: OrganizationMembership }).organizations
   );
 
-  if (memberships.length === 0) {
+  const allOrgs = isAdmin ? await getOrganizations() : [];
+  const orgOptions: OrganizationMembership[] = isAdmin
+    ? allOrgs.map((o) => ({ id: o.id, name: o.name, type: o.type }))
+    : memberships;
+
+  if (orgOptions.length === 0) {
     return (
       <main className="max-w-5xl mx-auto py-12 px-4">
         <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>
@@ -72,11 +84,20 @@ export default async function ConferenceOffersPage({
     );
   }
 
-  const selectedOrg = memberships.find((org) => org.id === query.org) ?? memberships[0];
+  const selectedOrg = orgOptions.find((org) => org.id === query.org) ?? (isAdmin ? null : orgOptions[0]);
+
+  if (!selectedOrg) {
+    return (
+      <main className="max-w-5xl mx-auto py-8 px-4 space-y-6">
+        <h1 className="text-2xl font-semibold text-gray-900">{conference.name}</h1>
+        <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={null} basePath={`/conference/${year}/${edition}/offers`} />
+        <p className="text-sm text-gray-600">Pick an organization above to shop on their behalf.</p>
+      </main>
+    );
+  }
 
   // Global admins (admin/super_admin) and partner-org buyers see the floor plan
   // inline — they're the ones buying booths. Everyone else gets the click-through.
-  const isAdmin = isGlobalAdmin(auth.ctx.globalRole);
   const isPartnerOrg = selectedOrg.type === "Vendor Partner";
   const canSeeMap = isAdmin || isPartnerOrg;
 
@@ -121,7 +142,9 @@ export default async function ConferenceOffersPage({
         <p className="text-sm text-gray-600">Exhibit &amp; register — buy for {selectedOrg.name}</p>
       </div>
 
-      {memberships.length > 1 ? (
+      {isAdmin ? (
+        <AdminOrgSwitcher orgs={orgOptions} selectedOrgId={selectedOrg.id} basePath={`/conference/${year}/${edition}/offers`} />
+      ) : memberships.length > 1 ? (
         <div className="flex flex-wrap gap-2">
           {memberships.map((org) => (
             <Link
