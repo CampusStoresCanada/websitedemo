@@ -257,6 +257,30 @@ export async function renewMembershipNow(
     };
   }
 
+  // A membership-renewal cart line added by the conference-commerce
+  // bundle (lib/actions/conference-commerce.ts's membership gate) is a
+  // completely separate billing artifact from `invoices` — it only becomes
+  // a charge at conference checkout, via conference_orders, not this table.
+  // Generating a fresh invoice here while one of those is still sitting in
+  // an active cart would double-bill the same coverage period, so check for
+  // that first.
+  const { data: pendingCartRenewal } = await db
+    .from("cart_items")
+    .select("id, offer:conference_entities!cart_items_offer_entity_id_fkey(kind)")
+    .eq("organization_id", orgId)
+    .or(`expires_at.is.null,expires_at.gt.${new Date().toISOString()}`);
+  const hasPendingCartRenewal = (pendingCartRenewal ?? []).some((item) => {
+    const offer = Array.isArray(item.offer) ? item.offer[0] : item.offer;
+    return offer?.kind === "membership_renewal";
+  });
+  if (hasPendingCartRenewal) {
+    return {
+      success: false,
+      error:
+        "This organization already has a membership renewal in an active conference cart — complete that checkout instead of starting a second one.",
+    };
+  }
+
   // Reuse an existing unpaid invoice rather than generating a duplicate —
   // an org that clicks "Renew Now" twice, or that already has a
   // cron-generated invoice waiting, should land on the same invoice both

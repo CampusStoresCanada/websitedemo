@@ -5,13 +5,21 @@ import { parseUTC } from "@/lib/utils";
 import { renewMembershipNow } from "@/lib/actions/renewal";
 
 /**
- * Self-serve "Renew Now" for a Member/Partner org admin — generates (or
- * reuses) the org's renewal invoice on demand instead of only ever getting
- * one automatically at the 30-day reminder mark, or as a side effect of an
- * unrelated conference purchase. Only shown to privileged viewers (org_admin
- * for this org, or a CSC admin) since membership status/billing is not
- * public information.
+ * Self-serve "Renew Now" for CSC staff — generates (or reuses) an org's
+ * renewal invoice on demand instead of only ever getting one automatically
+ * at the reminder-window mark, or as a side effect of an unrelated
+ * conference purchase. Status-color scheme matches RenewalStatusCard
+ * (components/renewal/RenewalStatusCard.tsx) — same underlying concept,
+ * kept visually consistent even though that card isn't mounted anywhere yet.
  */
+const STATUS_CONFIG: Record<string, { label: string; color: string; bgColor: string; borderColor: string }> = {
+  active: { label: "Active", color: "text-green-800", bgColor: "bg-green-50", borderColor: "border-green-200" },
+  reactivated: { label: "Reactivated", color: "text-green-800", bgColor: "bg-green-50", borderColor: "border-green-200" },
+  grace: { label: "Grace Period", color: "text-yellow-800", bgColor: "bg-yellow-50", borderColor: "border-yellow-200" },
+  locked: { label: "Locked", color: "text-red-800", bgColor: "bg-red-50", borderColor: "border-red-200" },
+  canceled: { label: "Canceled", color: "text-gray-700", bgColor: "bg-gray-50", borderColor: "border-gray-200" },
+};
+
 export default function RenewMembershipCard({
   organizationId,
   membershipStatus,
@@ -24,8 +32,14 @@ export default function RenewMembershipCard({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const canRenew = membershipStatus === "active" || membershipStatus === "reactivated";
   if (!membershipStatus) return null;
+  const config = STATUS_CONFIG[membershipStatus] ?? {
+    label: membershipStatus,
+    color: "text-gray-700",
+    bgColor: "bg-gray-50",
+    borderColor: "border-gray-200",
+  };
+  const canRenew = membershipStatus === "active" || membershipStatus === "reactivated";
 
   async function handleRenew() {
     setLoading(true);
@@ -42,25 +56,32 @@ export default function RenewMembershipCard({
   }
 
   return (
-    <div className="mb-8 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-      <div className="text-sm text-gray-700">
-        <span className="font-medium text-gray-900">Membership: {membershipStatus}</span>
-        {membershipExpiresAt && (
-          <span className="ml-2 text-gray-500">
-            renews {parseUTC(membershipExpiresAt).toLocaleDateString("en-CA")}
+    <div className={`mb-8 rounded-xl border ${config.borderColor} ${config.bgColor} p-5`}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold text-gray-900 uppercase tracking-wide">Renewal Status</h3>
+          <span
+            className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${config.color} ${config.bgColor} border ${config.borderColor}`}
+          >
+            {config.label}
           </span>
+        </div>
+        {canRenew && (
+          <button
+            onClick={handleRenew}
+            disabled={loading}
+            className="px-4 py-1.5 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
+          >
+            {loading ? "Preparing invoice…" : "Renew Now"}
+          </button>
         )}
       </div>
-      {canRenew && (
-        <button
-          onClick={handleRenew}
-          disabled={loading}
-          className="rounded-md bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white hover:bg-[#0f2c50] disabled:opacity-50"
-        >
-          {loading ? "Preparing invoice…" : "Renew Now"}
-        </button>
+      {membershipExpiresAt && (
+        <p className="mt-2 text-sm text-gray-600">
+          Renews {parseUTC(membershipExpiresAt).toLocaleDateString("en-CA")}
+        </p>
       )}
-      {error && <p className="w-full text-sm text-red-600">{error}</p>}
+      {error && <p className="mt-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{error}</p>}
     </div>
   );
 }

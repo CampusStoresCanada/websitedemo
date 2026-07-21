@@ -861,6 +861,29 @@ export async function addOfferToCart(params: {
         .single();
 
       if (!membershipCoversConference(orgRow?.membership_expires_at ?? null, confRow.end_date)) {
+        // Don't stack a second renewal charge on top of one already
+        // outstanding (e.g. self-serve "Renew Now" — lib/actions/renewal.ts —
+        // already generated and sent a real Stripe invoice for this org that
+        // just hasn't been paid yet). membership_expires_at only advances on
+        // invoice.paid, so membershipCoversConference above can't see it —
+        // this is the other half of that idempotency check.
+        const { data: existingUnpaidInvoice } = await adminClient
+          .from("invoices")
+          .select("id")
+          .eq("organization_id", params.organizationId)
+          .eq("type", buyerTier === "partner" ? "partnership" : "membership")
+          .in("status", ["draft", "invoiced", "pending_settlement"])
+          .limit(1)
+          .maybeSingle();
+
+        if (existingUnpaidInvoice) {
+          return {
+            success: false,
+            code: "RENEWAL_PENDING",
+            error: "This organization already has an outstanding renewal invoice. Pay or void it before purchasing something that requires current membership coverage.",
+          };
+        }
+
         const priceCents = await priceMembershipRenewalForOrg(params.organizationId, confRow.end_date, {
           persist: false,
           assumePartnership: offerRow.kind === "booth",
