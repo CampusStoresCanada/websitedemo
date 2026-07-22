@@ -42,12 +42,18 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ count: 0 }, { status: 200 });
   }
 
+  // Same expiry rule getOfferCartRows() uses for the actual cart contents
+  // (lib/actions/conference-commerce.ts) — without it, a lapsed reservation
+  // still inflates this count even though the cart itself already treats it
+  // as gone, so the header badge shows items the cart page doesn't.
+  const now = new Date().toISOString();
   const { data: rows } = await ac
     .from("cart_items")
     .select("quantity")
     .eq("conference_id", conference.id)
     .eq("organization_id", orgId)
-    .eq("user_id", userId);
+    .eq("user_id", userId)
+    .or(`expires_at.is.null,expires_at.gt.${now}`);
 
   const count = (rows ?? []).reduce((sum: number, row: any) => sum + row.quantity, 0);
   return NextResponse.json({ count }, { status: 200 });
