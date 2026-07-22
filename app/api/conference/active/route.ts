@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { getActiveConferenceInstance } from "@/lib/actions/conference-availability";
+import { getViewerContext } from "@/lib/visibility/viewer";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
   try {
-    const active = await getActiveConferenceInstance();
+    const viewer = await getViewerContext();
+    const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+    const active = await getActiveConferenceInstance(viewerIsAdmin);
 
     if (!active) {
       return NextResponse.json({ found: false }, { status: 200 });

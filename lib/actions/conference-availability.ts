@@ -20,13 +20,22 @@ export type ActiveConferenceSummary = { id: string; year: number; edition_code: 
  * app/api/conference/active/route.ts already uses (that route now just calls
  * this), so there's one source of truth for "what counts as active" instead
  * of two copies of the same query drifting apart.
+ *
+ * `viewerIsAdmin` additionally matches a `draft` conference — same
+ * draft-preview convention used elsewhere (the homepage's conference pin,
+ * the conference offers/cart pages) so an admin testing a not-yet-public
+ * conference sees the header's Cart button and can actually use it, while a
+ * real visitor still sees nothing until the conference is genuinely public.
+ * Defaults to false so existing public-facing callers (app/partnership)
+ * don't start leaking draft-conference visibility.
  */
-export async function getActiveConferenceInstance(): Promise<ActiveConferenceSummary | null> {
+export async function getActiveConferenceInstance(viewerIsAdmin = false): Promise<ActiveConferenceSummary | null> {
   const db = createAdminClient();
+  const statuses = viewerIsAdmin ? ["registration_open", "draft"] : ["registration_open"];
   const { data } = await db
     .from("conference_instances")
     .select("id, year, edition_code")
-    .eq("status", "registration_open")
+    .in("status", statuses)
     .order("registration_open_at", { ascending: false })
     .limit(1)
     .maybeSingle();
