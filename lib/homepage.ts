@@ -157,14 +157,26 @@ export interface HomeConferencePin {
   href: string;
   /** True when this pin is only visible because the viewer is an admin — the conference itself is still draft. */
   isDraftPreview: boolean;
-  /** Admin-editable content blocks (site_content) — title/subtitle shown on the homepage's conference slide. */
+  /** Admin-editable marketing headline (site_content) shown as the hero H1 on the homepage's conference slide. */
   slideTitle: string;
+  /** Live dates + venue/city — e.g. "Feb 1–4, 2027 · Hilton Toronto Airport Hotel and Suites, Toronto". Computed every request, not stored, so it can't go stale season to season. */
   slideSubtitle: string;
-  /** The site_content.id backing slideTitle/slideSubtitle, for inline-edit wiring (fieldProps). Null if no content block exists yet (fallback copy is being shown). */
+  /** The site_content.id backing slideTitle, for inline-edit wiring (fieldProps). Null if no content block exists yet (fallback copy is being shown). */
   slideContentId: string | null;
   /** Per-viewer-role CTA — label already has any {price} placeholder interpolated with a real, live price. */
   ctaLabel: string;
   ctaHref: string;
+  /** Real, live exhibitor-booth capacity for the "By the Numbers" card — not a registration count (this conference has 0 real registrations pre-launch), so a capacity figure is the honest number to show. */
+  boothCount: number;
+  /** Admin-curated stat (e.g. "8" / "Expert Sessions") — not computed, since the real session catalog mixes attendee-facing sessions with logistics entries (move-in, breaks) with no clean flag to separate them. */
+  statValue: string | null;
+  statLabel: string | null;
+  /** The site_content.id backing statValue/statLabel, for inline-edit wiring. */
+  statContentId: string | null;
+  /** Admin-curated "what's included" bullet list (site_content.body, newline-separated). */
+  includedItems: string[];
+  /** The site_content.id backing includedItems, for inline-edit wiring. */
+  includedContentId: string | null;
 }
 
 export interface HomePageData {

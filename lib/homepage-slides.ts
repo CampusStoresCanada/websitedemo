@@ -17,6 +17,29 @@ function formatCtaPrice(cents: number): string {
 }
 
 /**
+ * "Feb 1–4, 2027" (same month), "Jan 30 – Feb 2, 2027" (different months), or
+ * "Dec 30, 2026 – Jan 2, 2027" (different years) from two `date`-typed
+ * columns. Parsed/formatted in UTC since these are date-only values with no
+ * time-of-day or timezone component — treating them as local time would risk
+ * shifting the displayed day.
+ */
+function formatDateRange(startDate: string, endDate: string): string {
+  const start = new Date(`${startDate}T00:00:00Z`);
+  const end = new Date(`${endDate}T00:00:00Z`);
+  const opts: Intl.DateTimeFormatOptions = { month: "short", day: "numeric", timeZone: "UTC" };
+  const startYear = start.getUTCFullYear();
+  const endYear = end.getUTCFullYear();
+
+  if (startYear !== endYear) {
+    return `${start.toLocaleDateString("en-CA", { ...opts, year: "numeric" })} – ${end.toLocaleDateString("en-CA", { ...opts, year: "numeric" })}`;
+  }
+  if (start.getUTCMonth() !== end.getUTCMonth()) {
+    return `${start.toLocaleDateString("en-CA", opts)} – ${end.toLocaleDateString("en-CA", opts)}, ${endYear}`;
+  }
+  return `${start.toLocaleDateString("en-CA", { month: "short", timeZone: "UTC" })} ${start.getUTCDate()}–${end.getUTCDate()}, ${endYear}`;
+}
+
+/**
  * Cheapest real, currently-for-sale booth (partner price) and cheapest
  * real, currently-for-sale MEMBER-audience registration excluding $0 items
  * like the Manager & Director Summit (member price) for one conference.
@@ -65,6 +88,22 @@ async function fetchConferenceStartingPrices(
 }
 
 /**
+ * Real, live exhibitor-booth capacity for one conference — a catalog-size
+ * figure, not a sales/registration count. This conference has 0 real
+ * registrations pre-launch, so "booths sold" would misleadingly show 0;
+ * "booths available" is the honest, always-populated number.
+ */
+async function fetchBoothCount(db: ReturnType<typeof createAdminClient>, conferenceId: string): Promise<number> {
+  const { count } = await db
+    .from("conference_entities")
+    .select("id", { count: "exact", head: true })
+    .eq("conference_id", conferenceId)
+    .eq("kind", "booth")
+    .eq("is_for_sale", true);
+  return count ?? 0;
+}
+
+/**
  * The nearest conference with coordinates set. Public-facing statuses are
  * visible to everyone; draft is visible only to admin/super_admin viewers
  * (same draft-preview convention the conference offers/cart pages already
@@ -72,10 +111,16 @@ async function fetchConferenceStartingPrices(
  * a pin rather than falling back to a city-level guess — a venue pin should
  * be exact or absent.
  *
- * Title/subtitle/CTA wording are admin-editable content blocks
- * (site_content, sections "conference_slide"/"conference_slide_cta_{role}")
- * rather than hardcoded strings — CTA price is always computed live from
- * the real catalog, never stored, so it can't go stale season to season.
+ * The hero title is an admin-editable content block (site_content, section
+ * "conference_slide"); the hero subtitle is NOT — it's the real dates and
+ * venue/city, computed live every request, so it can never go stale.
+ * The "By the Numbers" card mixes one real computed figure (booth capacity —
+ * "number of partners" was deliberately scoped to capacity, not a live
+ * registration count, since this conference has zero real registrations
+ * pre-launch) with two admin-curated blocks (a stat number/label, since the
+ * real session catalog mixes attendee-facing sessions with logistics entries
+ * like move-in/breaks with no clean flag to separate them; and a freeform
+ * "what's included" bullet list, which isn't computable from any table at all).
  */
 async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConferencePin | null> {
   const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
@@ -84,7 +129,7 @@ async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConference
   const db = createAdminClient();
   const { data } = await db
     .from("conference_instances")
-    .select("id, name, year, edition_code, location_venue, location_city, location_province, location_latitude, location_longitude, status, start_date")
+    .select("id, name, year, edition_code, location_venue, location_city, location_province, location_latitude, location_longitude, status, start_date, end_date")
     .in("status", visibleStatuses)
     .not("location_latitude", "is", null)
     .not("location_longitude", "is", null)
@@ -106,17 +151,25 @@ async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConference
   const isPartnerViewer = viewer.viewerLevel === "partner";
   const ctaRole = viewerIsAdmin ? "admin" : isPartnerViewer ? "partner" : "member";
 
-  const [contentRows, prices] = await Promise.all([
+  const [contentRows, prices, boothCount] = await Promise.all([
     db
       .from("site_content")
       .select("id, section, title, subtitle, body")
-      .in("section", ["conference_slide", `conference_slide_cta_${ctaRole}`])
+      .in("section", [
+        "conference_slide",
+        `conference_slide_cta_${ctaRole}`,
+        "conference_slide_stats",
+        "conference_slide_included",
+      ])
       .eq("is_active", true),
     fetchConferenceStartingPrices(db, data.id),
+    fetchBoothCount(db, data.id),
   ]);
 
   const slideBlock = contentRows.data?.find((r) => r.section === "conference_slide");
   const ctaBlock = contentRows.data?.find((r) => r.section === `conference_slide_cta_${ctaRole}`);
+  const statsBlock = contentRows.data?.find((r) => r.section === "conference_slide_stats");
+  const includedBlock = contentRows.data?.find((r) => r.section === "conference_slide_included");
 
   const priceCents = ctaRole === "partner" ? prices.boothCents : prices.memberRegistrationCents;
   const ctaTemplate = ctaBlock?.body ?? (ctaRole === "admin" ? "Manage" : "Learn More");
@@ -135,16 +188,28 @@ async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConference
     isDraftPreview: data.status === "draft",
     href,
     slideTitle: slideBlock?.title ?? data.name,
-    slideSubtitle: slideBlock?.subtitle ?? "The national association for campus stores and the partners who support them.",
-    // Only title/subtitle are wired for inline editing (fieldProps) on the
-    // homepage — the CTA's underlying content-block "body" holds the raw
-    // {price} template, and this `ctaLabel` is the already-interpolated,
-    // real-price string. Wiring inline-edit to the interpolated text would
-    // let an admin overwrite the {price} placeholder with a literal dollar
-    // figure, breaking the template for the next viewer/season.
+    slideSubtitle: [
+      data.start_date && data.end_date ? formatDateRange(data.start_date, data.end_date) : null,
+      [data.location_venue, data.location_city].filter(Boolean).join(", "),
+    ].filter(Boolean).join(" · "),
+    // Only the title is wired for inline editing (fieldProps) on the
+    // homepage — the subtitle is computed, not stored, so there's nothing to
+    // edit; the CTA's underlying content-block "body" holds the raw {price}
+    // template, and `ctaLabel` is the already-interpolated, real-price
+    // string, so wiring inline-edit to it would let an admin overwrite the
+    // {price} placeholder with a literal dollar figure.
     slideContentId: slideBlock?.id ?? null,
     ctaLabel,
     ctaHref: ctaRole === "admin" ? `/admin/conference/${data.id}` : href,
+    boothCount,
+    statValue: statsBlock?.title ?? null,
+    statLabel: statsBlock?.subtitle ?? null,
+    statContentId: statsBlock?.id ?? null,
+    includedItems: (includedBlock?.body ?? "")
+      .split("\n")
+      .map((s) => s.trim())
+      .filter(Boolean),
+    includedContentId: includedBlock?.id ?? null,
   };
 }
 

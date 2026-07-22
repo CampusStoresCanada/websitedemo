@@ -285,12 +285,41 @@ export default function MapAttract({
               <p className="mt-1.5 text-sm text-gray-600">
                 {[activeSpecial.venue, activeSpecial.city].filter(Boolean).join(", ")}
               </p>
-              <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1">
-                <p className="text-sm text-gray-700">{activeSpecial.venue}</p>
-                <p className="text-sm text-gray-700">
-                  {[activeSpecial.city, activeSpecial.province].filter(Boolean).join(", ")}
-                </p>
+              <div className="mt-3 grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                  <p className="text-xl font-bold text-gray-900">{activeSpecial.boothCount}</p>
+                  <p className="text-xs text-gray-500">Exhibitor Booths</p>
+                </div>
+                {activeSpecial.statValue && (
+                  <div className="rounded-xl border border-gray-200 bg-gray-50 p-3">
+                    <p
+                      className="text-xl font-bold text-gray-900"
+                      {...(activeSpecial.statContentId ? fieldProps("site_content", "title", activeSpecial.statContentId) : {})}
+                    >
+                      {activeSpecial.statValue}
+                    </p>
+                    <p
+                      className="text-xs text-gray-500"
+                      {...(activeSpecial.statContentId ? fieldProps("site_content", "subtitle", activeSpecial.statContentId) : {})}
+                    >
+                      {activeSpecial.statLabel}
+                    </p>
+                  </div>
+                )}
               </div>
+              {activeSpecial.includedItems.length > 0 && (
+                <ul
+                  className="mt-3 space-y-1"
+                  {...(activeSpecial.includedContentId ? fieldProps("site_content", "body", activeSpecial.includedContentId) : {})}
+                >
+                  {activeSpecial.includedItems.map((item) => (
+                    <li key={item} className="text-sm text-gray-700 flex items-start gap-1.5">
+                      <span className="text-green-600 mt-0.5">✓</span>
+                      <span>{item}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </>
           )}
 
@@ -447,12 +476,7 @@ export default function MapAttract({
                 >
                   {specialH1}
                 </h1>
-                <p
-                  className="text-xl md:text-2xl text-[#6B6B6B] leading-relaxed mb-8 max-w-xl"
-                  {...(activeSpecial.kind === "conference" && activeSpecial.slideContentId
-                    ? fieldProps("site_content", "subtitle", activeSpecial.slideContentId)
-                    : {})}
-                >
+                <p className="text-xl md:text-2xl text-[#6B6B6B] leading-relaxed mb-8 max-w-xl">
                   {specialSubtitle}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4">
