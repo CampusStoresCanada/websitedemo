@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import Link from "next/link";
 import type { HomeMapOrg, MapStory, HomeConferencePin } from "@/lib/homepage";
 import type {
@@ -12,8 +12,7 @@ import type {
 import type { MapRef } from "./Map";
 import { orgSubtitle } from "@/lib/explore/filters";
 import { fieldProps } from "@/lib/editable-fields";
-
-const STORY_CYCLE_MS = 9000;
+import { HERO_KINDS, type HeroKind, type HeroAreaSettings } from "@/lib/hero-kinds";
 
 const STORY_LABELS: Record<string, string> = {
   city_cluster: "Local Community",
@@ -51,10 +50,45 @@ const SPECIAL_LABELS: Record<SpecialSlide["kind"], string> = {
   sponsor: "Our Sponsors",
 };
 
+/**
+ * Smooth Weighted Round-Robin (nginx-style "highest current weight"
+ * scheduler): each active kind accumulates its own weight every call;
+ * whichever kind has the highest running total is picked, then has the
+ * pool's total weight subtracted back off. This spreads picks evenly in
+ * proportion to weight and — unlike re-rolling a fresh weighted-random draw
+ * each tick — bounds how long a low-weight kind can go unseen, and only
+ * repeats the same kind back-to-back when it's the sole active one or
+ * heavily dominant. `currentWeights` is mutated in place (a ref's
+ * `.current` object) so the schedule's state persists across ticks.
+ */
+function pickNextHeroKind(
+  pool: { kind: HeroKind; weight: number }[],
+  currentWeights: Record<HeroKind, number>
+): HeroKind | null {
+  if (pool.length === 0) return null;
+  const totalWeight = pool.reduce((sum, p) => sum + p.weight, 0);
+  if (totalWeight <= 0) return null;
+
+  let best: { kind: HeroKind; weight: number } | null = null;
+  for (const p of pool) {
+    currentWeights[p.kind] = (currentWeights[p.kind] ?? 0) + p.weight;
+    if (!best || currentWeights[p.kind] > currentWeights[best.kind]) best = p;
+  }
+  // Reset any kind outside this tick's pool so a kind that returns later
+  // (real data reappears, or an admin re-enables it) doesn't unfairly jump
+  // the queue from a stale accumulated value.
+  for (const kind of HERO_KINDS) {
+    if (!pool.some((p) => p.kind === kind)) currentWeights[kind] = 0;
+  }
+  currentWeights[best!.kind] -= totalWeight;
+  return best!.kind;
+}
+
 interface MapAttractProps {
   organizations: HomeMapOrg[];
   stories: MapStory[];
   slides: HomeSlides;
+  heroSettings: HeroAreaSettings;
   explore: boolean;
   paused: boolean;
   storyIndex: number;
@@ -89,6 +123,7 @@ export default function MapAttract({
   organizations,
   stories,
   slides,
+  heroSettings,
   explore,
   paused,
   storyIndex,
@@ -114,21 +149,40 @@ export default function MapAttract({
 
   const orgById = useMemo(() => new globalThis.Map(organizations.map((o) => [o.id, o])), [organizations]);
 
-  // Independent counters driving the special-slide interleave — NOT
-  // storyIndex itself. Every other advance (odd slotCounter), when at least
-  // one special slide is active, shows a special slide instead of pulling
-  // the next story; storyIndex only advances on the "story" slots so the
-  // normal story sequence isn't skipped or disturbed. specialSlotIndex
-  // round-robins through activeSpecials across consecutive special-slot
-  // showings — it advances once per special showing (never reset), so
-  // repeated cycles work through conference → personalized → newest-org →
-  // sponsor (whichever combination is active) rather than always repeating
-  // the first one.
-  const [slotCounter, setSlotCounter] = useState(0);
-  const [specialSlotIndex, setSpecialSlotIndex] = useState(0);
+  // Which kind is currently on screen — "story" or one of activeSpecials'
+  // kinds. Driven by the smooth-weighted-round-robin scheduler below, per
+  // admin-configured weights (Hero Area admin page). Kept as real component
+  // state (not derived) since the scheduler's pick is stateful across ticks.
+  const [currentKind, setCurrentKind] = useState<HeroKind>("story");
 
-  const isSpecialSlot = activeSpecials.length > 0 && slotCounter % 2 === 1;
-  const activeSpecial = isSpecialSlot ? activeSpecials[specialSlotIndex % activeSpecials.length] : null;
+  // Accumulator for pickNextHeroKind's running per-kind totals — persists
+  // across ticks without itself triggering re-renders.
+  const currentWeightsRef = useRef<Record<HeroKind, number>>({
+    story: 0, conference: 0, personalized: 0, newest_org: 0, sponsor: 0,
+  });
+
+  // Every kind eligible to be picked this tick: "story" if there's more
+  // than one real story and it's admin-enabled, plus whichever specials
+  // have real data AND are admin-enabled. Defensive fallback to a
+  // story-only pool if everything is disabled/zero-weight (e.g. an admin
+  // accidentally zeroes every kind) — the homepage must never render
+  // nothing because of a bad config.
+  const activeKindPool = useMemo(() => {
+    const pool: { kind: HeroKind; weight: number }[] = [];
+    if (stories.length > 0 && heroSettings.kinds.story.enabled) {
+      pool.push({ kind: "story", weight: heroSettings.kinds.story.weight });
+    }
+    for (const special of activeSpecials) {
+      const cfg = heroSettings.kinds[special.kind];
+      if (cfg.enabled) pool.push({ kind: special.kind, weight: cfg.weight });
+    }
+    if (pool.length === 0 || pool.every((p) => p.weight <= 0)) {
+      return [{ kind: "story" as HeroKind, weight: 1 }];
+    }
+    return pool;
+  }, [stories.length, activeSpecials, heroSettings]);
+
+  const activeSpecial = currentKind !== "story" ? activeSpecials.find((s) => s.kind === currentKind) ?? null : null;
 
   // Story orgs for the attract-mode card
   const storyHighlighted = useMemo(() => {
@@ -174,39 +228,37 @@ export default function MapAttract({
     }
   }, [story, explore, activeSpecial, orgById, mapRef]);
 
+  // Purely a re-scheduling trigger — incremented every tick regardless of
+  // whether the picked kind actually changed, so the effect below always
+  // re-runs and queues the next timeout. Without this, a tick that picks
+  // the same special kind twice in a row (currentKind unchanged) or lands
+  // on "story" repeatedly without storyIndex in the dependency array would
+  // leave nothing in the deps array different from the previous run, so
+  // the effect wouldn't re-fire and the whole rotation would silently stop
+  // advancing — confirmed live: the homepage froze on one story indefinitely.
+  const [tick, setTick] = useState(0);
+
   useEffect(() => {
     if (explore || paused || stories.length <= 1) return;
     const id = setTimeout(() => {
-      // Each setState call below is independent and top-level — not nested
-      // inside another component's updater callback. Nesting setStoryIndex
-      // (MapHero's setter) inside setSlotCounter's functional updater was
-      // triggering React's "Cannot update a component while rendering a
-      // different component" warning and dropping/misordering updates
-      // (confirmed live: it silently skipped the newest-org special some
-      // cycles). The effect already lists `slotCounter` as a dependency, so
-      // the closed-over value here is always current — no functional
-      // updater needed for it.
-      const next = slotCounter + 1;
-      const wasSpecial = activeSpecials.length > 0 && slotCounter % 2 === 1;
-      const landsOnSpecial = activeSpecials.length > 0 && next % 2 === 1;
-
-      setSlotCounter(next);
-      // Odd slots show a special slide (when any are available) instead of
-      // pulling the next story — storyIndex is left untouched so the same
-      // upcoming story is shown once the interleave returns to it.
-      if (!landsOnSpecial) {
+      // setStoryIndex (MapHero's setter), setCurrentKind, and setTick are
+      // each called independently and top-level here — not nested inside
+      // one another's functional updater. Nesting one setState inside
+      // another's updater previously triggered React's "Cannot update a
+      // component while rendering a different component" warning and
+      // dropped/misordered updates (confirmed live: it silently skipped the
+      // newest-org special some cycles).
+      const picked = pickNextHeroKind(activeKindPool, currentWeightsRef.current);
+      if (!picked || picked === "story") {
         setStoryIndex((si) => (si + 1) % stories.length);
+        setCurrentKind("story");
+      } else {
+        setCurrentKind(picked);
       }
-      // Leaving a special slot (not landing on one) is when we advance the
-      // round-robin — so the special slot we just showed uses
-      // specialSlotIndex as-is, and the *next* special showing picks the
-      // following one in activeSpecials.
-      if (wasSpecial) {
-        setSpecialSlotIndex((i) => i + 1);
-      }
-    }, STORY_CYCLE_MS);
+      setTick((t) => t + 1);
+    }, heroSettings.cycleIntervalMs);
     return () => clearTimeout(id);
-  }, [stories.length, storyIndex, slotCounter, paused, explore, activeSpecials.length, setStoryIndex]);
+  }, [stories.length, paused, explore, activeKindPool, heroSettings.cycleIntervalMs, setStoryIndex, tick]);
 
   const goToStory = (next: number) => {
     if (stories.length === 0) return;
@@ -308,14 +360,25 @@ export default function MapAttract({
                 )}
               </div>
               {activeSpecial.includedItems.length > 0 && (
+                // The checkmark is a ::before pseudo-element (not a real text
+                // node) and each item's own text node leads with "\n" (except
+                // the first) — the Toolkit's edit popover reads this
+                // container's raw `textContent` as the field's editable
+                // value, which concatenates child text nodes with no
+                // separator of its own. A decorative icon rendered as a real
+                // text node, or missing explicit "\n"s, would get swept into
+                // the saved value and corrupt the newline-delimited body on
+                // the next edit.
                 <ul
-                  className="mt-3 space-y-1"
+                  className="mt-3 space-y-1 list-none"
                   {...(activeSpecial.includedContentId ? fieldProps("site_content", "body", activeSpecial.includedContentId) : {})}
                 >
-                  {activeSpecial.includedItems.map((item) => (
-                    <li key={item} className="text-sm text-gray-700 flex items-start gap-1.5">
-                      <span className="text-green-600 mt-0.5">✓</span>
-                      <span>{item}</span>
+                  {activeSpecial.includedItems.map((item, i) => (
+                    <li
+                      key={item}
+                      className="text-sm text-gray-700 pl-4 relative before:content-['✓'] before:absolute before:left-0 before:text-green-600"
+                    >
+                      {i > 0 ? "\n" : ""}{item}
                     </li>
                   ))}
                 </ul>

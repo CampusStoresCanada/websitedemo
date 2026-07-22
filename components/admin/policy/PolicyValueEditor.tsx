@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PolicyValue } from "@/lib/policy/types";
 import { updateDraftValue } from "@/lib/actions/policy";
+import StringArrayEditor from "@/components/admin/shared/StringArrayEditor";
 
 interface Props {
   value: PolicyValue;
@@ -195,9 +196,9 @@ export default function PolicyValueEditor({
       case "string_array":
         return (
           <StringArrayEditor
-            value={localValue as string[]}
-            onSave={handleSave}
-            saving={saving}
+            items={localValue as string[]}
+            onChange={handleSave}
+            disabled={saving}
           />
         );
       case "integer_array":
@@ -457,72 +458,6 @@ function BooleanEditor({
         }`}
       />
     </button>
-  );
-}
-
-function StringArrayEditor({
-  value,
-  onSave,
-  saving,
-}: {
-  value: string[];
-  onSave: (v: string[]) => void;
-  saving: boolean;
-}) {
-  const [items, setItems] = useState(value);
-  const [newItem, setNewItem] = useState("");
-
-  function addItem() {
-    if (!newItem.trim()) return;
-    const updated = [...items, newItem.trim()];
-    setItems(updated);
-    setNewItem("");
-    onSave(updated);
-  }
-
-  function removeItem(index: number) {
-    const updated = items.filter((_, i) => i !== index);
-    setItems(updated);
-    onSave(updated);
-  }
-
-  return (
-    <div className="space-y-2">
-      <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto">
-        {items.map((item, i) => (
-          <span
-            key={i}
-            className="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 rounded text-xs text-[var(--text-secondary)]"
-          >
-            {item}
-            <button
-              onClick={() => removeItem(i)}
-              disabled={saving}
-              className="text-gray-400 hover:text-red-500 ml-0.5"
-            >
-              &times;
-            </button>
-          </span>
-        ))}
-      </div>
-      <div className="flex items-center gap-1">
-        <input
-          type="text"
-          value={newItem}
-          onChange={(e) => setNewItem(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && addItem()}
-          placeholder="Add item..."
-          className="flex-1 border border-[var(--border-default)] rounded px-2 py-1 text-xs"
-        />
-        <button
-          onClick={addItem}
-          disabled={saving || !newItem.trim()}
-          className="px-2 py-1 text-xs bg-gray-100 rounded hover:bg-gray-200 disabled:opacity-50"
-        >
-          +
-        </button>
-      </div>
-    </div>
   );
 }
 

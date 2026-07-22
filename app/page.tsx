@@ -8,6 +8,7 @@ import SponsorStrip from "@/components/sponsorship/SponsorStrip";
 import Link from "next/link";
 import { getHomePageData } from "@/lib/homepage";
 import { getHomeSlides } from "@/lib/homepage-slides";
+import { getHeroAreaSettings } from "@/lib/hero-settings";
 import { getSiteContent } from "@/lib/data";
 import { fieldProps } from "@/lib/editable-fields";
 import { getActiveSponsors } from "@/lib/actions/sponsorship";
@@ -23,9 +24,10 @@ export default async function Home() {
   const viewer = await getViewerContext();
   const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
 
-  const [data, slides, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
+  const [data, slides, heroSettings, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
     getHomePageData(viewerIsAdmin),
     getHomeSlides(viewer),
+    getHeroAreaSettings(),
     getSiteContent("home_value_props_header"),
     getSiteContent("home_value_props"),
     getSiteContent("home_community_voices"),
@@ -39,7 +41,7 @@ export default async function Home() {
   return (
     <div>
       {/* Hero Section with Map — takes over viewport on hover explore */}
-      <MapHero organizations={data.mapOrgs} stories={data.stories} conferencePin={slides.conferencePin} slides={slides} />
+      <MapHero organizations={data.mapOrgs} stories={data.stories} conferencePin={slides.conferencePin} slides={slides} heroSettings={heroSettings} />
 
       {/* Everything below fades out when map enters explore mode */}
       <HomeContent>

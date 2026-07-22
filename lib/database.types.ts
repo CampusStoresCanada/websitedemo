@@ -4380,6 +4380,70 @@ export type Database = {
           },
         ]
       }
+      hero_area_config: {
+        Row: {
+          cycle_interval_ms: number
+          id: string
+          updated_at: string
+          updated_by: string | null
+        }
+        Insert: {
+          cycle_interval_ms?: number
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Update: {
+          cycle_interval_ms?: number
+          id?: string
+          updated_at?: string
+          updated_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hero_area_config_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      hero_slide_settings: {
+        Row: {
+          enabled: boolean
+          id: string
+          kind: string
+          updated_at: string
+          updated_by: string | null
+          weight: number
+        }
+        Insert: {
+          enabled?: boolean
+          id?: string
+          kind: string
+          updated_at?: string
+          updated_by?: string | null
+          weight?: number
+        }
+        Update: {
+          enabled?: boolean
+          id?: string
+          kind?: string
+          updated_at?: string
+          updated_by?: string | null
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "hero_slide_settings_updated_by_fkey"
+            columns: ["updated_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       internal_shares: {
         Row: {
           created_at: string

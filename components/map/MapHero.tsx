@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { HomeMapOrg, MapStory, HomeConferencePin } from "@/lib/homepage";
 import type { HomeSlides } from "@/lib/homepage-slides";
+import type { HeroAreaSettings } from "@/lib/hero-kinds";
 import type { MapRef } from "./Map";
 import type { ExploreLens } from "@/lib/explore/types";
 import MapAttract from "./MapAttract";
@@ -40,6 +41,8 @@ interface MapHeroProps {
   conferencePin?: HomeConferencePin | null;
   /** Generalized attract-mode slide data (conference/personalized/newest-org/sponsor). Omitted on persistent-mode pages (/members, /partners), which never render attract mode anyway. */
   slides?: HomeSlides | null;
+  /** Admin-configured rotation settings (Hero Area admin page). Omitted on persistent-mode pages — falls back to DEFAULT_HERO_SETTINGS, which is never actually exercised there since attract mode's interleave effect never runs when explore starts true. */
+  heroSettings?: HeroAreaSettings | null;
 }
 
 const EMPTY_SLIDES: HomeSlides = {
@@ -47,6 +50,18 @@ const EMPTY_SLIDES: HomeSlides = {
   newestOrgSlide: null,
   sponsorSlide: null,
   personalizedSlide: null,
+};
+
+/** Matches the DB defaults seeded in the hero_area_settings migration. */
+const DEFAULT_HERO_SETTINGS: HeroAreaSettings = {
+  cycleIntervalMs: 9000,
+  kinds: {
+    story: { enabled: true, weight: 4 },
+    conference: { enabled: true, weight: 1 },
+    personalized: { enabled: true, weight: 1 },
+    newest_org: { enabled: true, weight: 1 },
+    sponsor: { enabled: true, weight: 1 },
+  },
 };
 
 /**
@@ -65,6 +80,7 @@ export default function MapHero({
   initialState,
   conferencePin = null,
   slides = null,
+  heroSettings = null,
 }: MapHeroProps) {
   const mapRef = useRef<MapRef>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -327,6 +343,7 @@ export default function MapHero({
         organizations={organizations}
         stories={stories}
         slides={slides ?? EMPTY_SLIDES}
+        heroSettings={heroSettings ?? DEFAULT_HERO_SETTINGS}
         explore={explore}
         paused={paused}
         storyIndex={storyIndex}

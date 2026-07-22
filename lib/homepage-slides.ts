@@ -12,7 +12,7 @@ import { getActiveSponsors } from "@/lib/actions/sponsorship";
 // ---------------------------------------------------------------------------
 
 /** Format cents as a whole-dollar CAD price for CTA copy — "$4,000", "$199". */
-function formatCtaPrice(cents: number): string {
+export function formatCtaPrice(cents: number): string {
   return `$${Math.round(cents / 100).toLocaleString("en-CA")}`;
 }
 
@@ -48,7 +48,7 @@ function formatDateRange(startDate: string, endDate: string): string {
  * "Exhibitor Staff Registration" is real member-priced data but the wrong
  * audience, and matching on the word "Exhibitor" would be fragile.
  */
-async function fetchConferenceStartingPrices(
+export async function fetchConferenceStartingPrices(
   db: ReturnType<typeof createAdminClient>,
   conferenceId: string
 ): Promise<{ boothCents: number | null; memberRegistrationCents: number | null }> {
@@ -93,7 +93,7 @@ async function fetchConferenceStartingPrices(
  * registrations pre-launch, so "booths sold" would misleadingly show 0;
  * "booths available" is the honest, always-populated number.
  */
-async function fetchBoothCount(db: ReturnType<typeof createAdminClient>, conferenceId: string): Promise<number> {
+export async function fetchBoothCount(db: ReturnType<typeof createAdminClient>, conferenceId: string): Promise<number> {
   const { count } = await db
     .from("conference_entities")
     .select("id", { count: "exact", head: true })
