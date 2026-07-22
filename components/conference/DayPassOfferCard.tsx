@@ -96,7 +96,7 @@ export default function DayPassOfferCard({
         offerEntityId: selected.id,
         quantity: 1,
       });
-      if (res.success) dispatchConferenceCartUpdated();
+      if (res.success) dispatchConferenceCartUpdated(organizationId);
       setFeedback(
         res.success
           ? { text: "Added to cart — assign who it's for in the cart.", ok: true }

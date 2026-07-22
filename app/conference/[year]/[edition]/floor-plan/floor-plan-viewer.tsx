@@ -165,7 +165,7 @@ function BoothCard({
     setAdding(false);
     if (res.success) {
       setDone(true);
-      dispatchConferenceCartUpdated();
+      dispatchConferenceCartUpdated(organizationId);
     } else {
       setError(res.error ?? "Failed to add to cart.");
     }

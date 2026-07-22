@@ -115,7 +115,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
-      dispatchConferenceCartUpdated();
+      dispatchConferenceCartUpdated(organizationId);
     });
   };
 
@@ -130,7 +130,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
-      dispatchConferenceCartUpdated();
+      dispatchConferenceCartUpdated(organizationId);
     });
   };
 
@@ -145,7 +145,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
-      dispatchConferenceCartUpdated();
+      dispatchConferenceCartUpdated(organizationId);
       setStatus("Cart cleared.");
     });
   };
@@ -189,7 +189,7 @@ export default function CartClient({
         return;
       }
       await refreshCart();
-      dispatchConferenceCartUpdated();
+      dispatchConferenceCartUpdated(organizationId);
       setCompletedOrderId(result.data.orderId);
       setStatus("Purchase completed (dev). Seats minted.");
     });

@@ -28,7 +28,7 @@ export default function OfferCard({
         offerEntityId: offer.id,
         quantity: 1,
       });
-      if (res.success) dispatchConferenceCartUpdated();
+      if (res.success) dispatchConferenceCartUpdated(organizationId);
       setFeedback(
         res.success
           ? {

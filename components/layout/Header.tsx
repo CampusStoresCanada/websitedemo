@@ -5,7 +5,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
-import { CONFERENCE_CART_UPDATED_EVENT } from "@/lib/conference/cart-events";
+import { CONFERENCE_CART_UPDATED_EVENT, type ConferenceCartUpdatedDetail } from "@/lib/conference/cart-events";
 import { hadPriorSession, hasKnownAccountPersona } from "@/lib/auth/persona-cookie";
 
 const ROLE_BADGES: Record<string, { label: string; color: string }> = {
@@ -72,6 +72,7 @@ export default function Header() {
   const [alertTab, setAlertTab] = useState<"notifications" | "dms">("notifications");
   const [cartCount, setCartCount] = useState(0);
   const [cartJustUpdated, setCartJustUpdated] = useState(false);
+  const [lastCartOrgId, setLastCartOrgId] = useState<string | null>(null);
   const [dmUnreadCount, setDmUnreadCount] = useState(0);
   const [websiteAlerts, setWebsiteAlerts] = useState<WebsiteAlert[]>([]);
   const [websiteAlertCount, setWebsiteAlertCount] = useState(0);
@@ -132,8 +133,13 @@ export default function Header() {
   const showCart = onConferencePage || Boolean(activeConference);
   // The page itself lets a multi-org user pick which org they're buying for
   // via ?org= — match that instead of always defaulting to their first org,
-  // otherwise the header polls the wrong org's (always-empty) cart.
-  const cartOrgId = searchParams.get("org") ?? primaryOrg?.organization_id ?? null;
+  // otherwise the header polls the wrong org's (always-empty) cart. Pages
+  // that don't carry ?org= at all (e.g. /org/[slug], which has no reason to)
+  // still need this to work, so lastCartOrgId — set from the org id carried
+  // on the most recent CONFERENCE_CART_UPDATED_EVENT — is the next fallback
+  // before the viewer's primary org, which may not be the org they're
+  // actually buying for.
+  const cartOrgId = searchParams.get("org") ?? lastCartOrgId ?? primaryOrg?.organization_id ?? null;
 
   const conferenceBaseHref = `/conference/${conferenceContext.year}/${conferenceContext.edition}`;
   const cartHref = `${conferenceBaseHref}/cart${cartOrgId ? `?org=${cartOrgId}` : ""}`;
@@ -233,12 +239,19 @@ export default function Header() {
 
     let cancelled = false;
 
-    const loadCartCount = async () => {
+    // Accepts an org id override so the cart-updated event (below) can poll
+    // the org it actually just added to immediately, rather than the stale
+    // cartOrgId this effect closed over — which matters on pages like
+    // /org/[slug] where cartOrgId only catches up once lastCartOrgId state
+    // updates and this effect re-runs.
+    const loadCartCount = async (orgIdOverride?: string) => {
+      const orgId = orgIdOverride ?? cartOrgId;
+      if (!orgId) return;
       try {
         const response = await fetch(
           `/api/conference/cart-count?year=${encodeURIComponent(conferenceContext.year)}&edition=${encodeURIComponent(
             conferenceContext.edition
-          )}&org=${encodeURIComponent(cartOrgId)}`,
+          )}&org=${encodeURIComponent(orgId)}`,
           { cache: "no-store" }
         );
         if (!response.ok) return;
@@ -260,13 +273,21 @@ export default function Header() {
 
     void loadCartCount();
 
-    // Pages that add to the conference cart (floor plan, offers) dispatch this
-    // event so the header updates — and animates — immediately, without a
-    // full navigation or a separate toast/modal.
-    window.addEventListener(CONFERENCE_CART_UPDATED_EVENT, loadCartCount);
+    // Pages that add to the conference cart (floor plan, offers, org
+    // profiles) dispatch this event so the header updates — and animates —
+    // immediately, without a full navigation or a separate toast/modal. The
+    // event carries the org id the add was for; remember it (lastCartOrgId)
+    // so cartOrgId — and the Cart link's href — stay correct even on pages
+    // that never set ?org= in the URL.
+    const handleCartUpdated = (event: Event) => {
+      const orgId = (event as CustomEvent<ConferenceCartUpdatedDetail>).detail?.organizationId;
+      if (orgId && orgId !== cartOrgId) setLastCartOrgId(orgId);
+      void loadCartCount(orgId);
+    };
+    window.addEventListener(CONFERENCE_CART_UPDATED_EVENT, handleCartUpdated);
     return () => {
       cancelled = true;
-      window.removeEventListener(CONFERENCE_CART_UPDATED_EVENT, loadCartCount);
+      window.removeEventListener(CONFERENCE_CART_UPDATED_EVENT, handleCartUpdated);
     };
   }, [user, showCart, cartOrgId, conferenceContext.year, conferenceContext.edition]);
 

@@ -378,7 +378,7 @@ export default function PartnerProfile({
             setAttendanceError(cartResult.error ?? "Failed to add to cart.");
             return;
           }
-          dispatchConferenceCartUpdated();
+          dispatchConferenceCartUpdated(organization.id);
           setAttendanceError(
             attendeeName
               ? `Added ${entity.name} to your cart for ${contact.name} — check out to finish assigning it.`
