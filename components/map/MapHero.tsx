@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import type { HomeMapOrg, MapStory, HomeConferencePin } from "@/lib/homepage";
+import type { HomeSlides } from "@/lib/homepage-slides";
 import type { MapRef } from "./Map";
 import type { ExploreLens } from "@/lib/explore/types";
 import MapAttract from "./MapAttract";
@@ -37,7 +38,16 @@ interface MapHeroProps {
     focus?: "members" | "partners";
   };
   conferencePin?: HomeConferencePin | null;
+  /** Generalized attract-mode slide data (conference/personalized/newest-org/sponsor). Omitted on persistent-mode pages (/members, /partners), which never render attract mode anyway. */
+  slides?: HomeSlides | null;
 }
+
+const EMPTY_SLIDES: HomeSlides = {
+  conferencePin: null,
+  newestOrgSlide: null,
+  sponsorSlide: null,
+  personalizedSlide: null,
+};
 
 /**
  * MapHero is a thin coordinator between two structurally different modes:
@@ -54,6 +64,7 @@ export default function MapHero({
   stories,
   initialState,
   conferencePin = null,
+  slides = null,
 }: MapHeroProps) {
   const mapRef = useRef<MapRef>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -315,7 +326,7 @@ export default function MapHero({
       <MapAttract
         organizations={organizations}
         stories={stories}
-        conferencePin={conferencePin}
+        slides={slides ?? EMPTY_SLIDES}
         explore={explore}
         paused={paused}
         storyIndex={storyIndex}

@@ -7,6 +7,7 @@ import MapHero from "@/components/map/MapHero";
 import SponsorStrip from "@/components/sponsorship/SponsorStrip";
 import Link from "next/link";
 import { getHomePageData } from "@/lib/homepage";
+import { getHomeSlides } from "@/lib/homepage-slides";
 import { getSiteContent } from "@/lib/data";
 import { fieldProps } from "@/lib/editable-fields";
 import { getActiveSponsors } from "@/lib/actions/sponsorship";
@@ -22,8 +23,9 @@ export default async function Home() {
   const viewer = await getViewerContext();
   const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
 
-  const [data, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
+  const [data, slides, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
     getHomePageData(viewerIsAdmin),
+    getHomeSlides(viewer, viewerIsAdmin),
     getSiteContent("home_value_props_header"),
     getSiteContent("home_value_props"),
     getSiteContent("home_community_voices"),
@@ -37,7 +39,7 @@ export default async function Home() {
   return (
     <div>
       {/* Hero Section with Map — takes over viewport on hover explore */}
-      <MapHero organizations={data.mapOrgs} stories={data.stories} conferencePin={data.conferencePin} />
+      <MapHero organizations={data.mapOrgs} stories={data.stories} conferencePin={slides.conferencePin} slides={slides} />
 
       {/* Everything below fades out when map enters explore mode */}
       <HomeContent>

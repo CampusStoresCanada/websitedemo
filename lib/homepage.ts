@@ -2,7 +2,6 @@ import { supabase } from "@/lib/supabase";
 import { applyFieldMask, loadVisibilityConfig } from "@/lib/visibility/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TierIcon } from "@/lib/sponsorship/types";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -166,7 +165,6 @@ export interface HomePageData {
   stats: HomePageStats;
   memberOrgs: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "province" | "organizationType" | "logoUrl">>;
   partnerOrgs: Array<Pick<HomeMapOrg, "id" | "slug" | "name" | "province" | "primaryCategory" | "logoUrl" | "sponsorTier">>;
-  conferencePin: HomeConferencePin | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -622,55 +620,17 @@ const EMPTY_DATA: HomePageData = {
   stats: { activeMembers: 0, activePartners: 0, provincesRepresented: 0, totalFteServed: 0, fteIsEstimate: false },
   memberOrgs: [],
   partnerOrgs: [],
-  conferencePin: null,
 };
 
-/**
- * The nearest conference with coordinates set. Public-facing statuses are
- * visible to everyone; draft is visible only to admin/super_admin viewers
- * (same draft-preview convention the conference offers/cart pages already
- * use). One without location_latitude/location_longitude simply doesn't get
- * a pin rather than falling back to a city-level guess — a venue pin should
- * be exact or absent.
- */
-async function fetchConferencePin(viewerIsAdmin: boolean): Promise<HomeConferencePin | null> {
-  const visibleStatuses = viewerIsAdmin ? [...PUBLIC_CONFERENCE_STATUSES, "draft"] : PUBLIC_CONFERENCE_STATUSES;
-
-  const db = createAdminClient();
-  const { data } = await db
-    .from("conference_instances")
-    .select("id, name, year, edition_code, location_venue, location_city, location_province, location_latitude, location_longitude, status, start_date")
-    .in("status", visibleStatuses)
-    .not("location_latitude", "is", null)
-    .not("location_longitude", "is", null)
-    .order("start_date", { ascending: true })
-    .limit(1)
-    .maybeSingle();
-
-  if (!data || data.location_latitude == null || data.location_longitude == null || !data.location_venue) {
-    return null;
-  }
-
-  return {
-    id: data.id,
-    name: data.name,
-    venue: data.location_venue,
-    city: data.location_city,
-    province: data.location_province,
-    lat: data.location_latitude,
-    lng: data.location_longitude,
-    isDraftPreview: data.status === "draft",
-    href: `/conference/${data.year}/${data.edition_code}`,
-  };
-}
-
+// `viewerIsAdmin` is no longer used inside this function (the conference pin
+// it used to gate moved to lib/homepage-slides.ts's getHomeSlides()), but
+// the parameter is kept so the existing app/page.tsx call site
+// (`getHomePageData(viewerIsAdmin)`) doesn't need to change.
 export async function getHomePageData(viewerIsAdmin = false): Promise<HomePageData> {
-  // 1. Fetch active orgs + latest benchmarking in parallel
-  const [result, conferencePin] = await Promise.all([
-    fetchMapOrgsWithBenchmarking(),
-    fetchConferencePin(viewerIsAdmin),
-  ]);
-  if (!result) return { ...EMPTY_DATA, conferencePin };
+  void viewerIsAdmin;
+  // 1. Fetch active orgs + latest benchmarking
+  const result = await fetchMapOrgsWithBenchmarking();
+  if (!result) return EMPTY_DATA;
 
   const { orgRecords, benchByOrg } = result;
   const members = orgRecords.filter((org) => org.type === "Member");
@@ -953,6 +913,5 @@ export async function getHomePageData(viewerIsAdmin = false): Promise<HomePageDa
       logoUrl: org.logoUrl,
       sponsorTier: org.sponsorTier ?? null,
     })),
-    conferencePin,
   };
 }
