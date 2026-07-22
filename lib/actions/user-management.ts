@@ -55,17 +55,35 @@ export async function inviteOrgUser(
       return { success: false, error: "Organization not found" };
     }
 
+    // Prefer an already-known real name over the raw email. A contact for
+    // this email/org often already exists — e.g. an admin registering a
+    // known person (by name) for a conference, which invites them under the
+    // hood via resolveAssigneeForEmail() below. Passing the email as `name`
+    // unconditionally used to overwrite that person's real contact name
+    // with their email address on every invite, a confirmed real bug —
+    // ensureKnownPerson's own existing-person match doesn't touch the name
+    // field, but upsertPersonContact's existing-contact match does, and a
+    // non-empty `name` here always wins over the record's real one.
+    const { data: existingContact } = await adminClient
+      .from("contacts")
+      .select("name")
+      .eq("organization_id", orgId)
+      .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`)
+      .limit(1)
+      .maybeSingle();
+    const knownName = existingContact?.name?.trim() || normalizedEmail;
+
     const knownPerson = await ensureKnownPerson({
       organizationId: orgId,
       tenantId: orgRow.tenant_id,
-      name: normalizedEmail,
+      name: knownName,
       email: normalizedEmail,
     });
     if (knownPerson.personId) {
       await upsertPersonContact({
         organizationId: orgId,
         personId: knownPerson.personId,
-        name: normalizedEmail,
+        name: knownName,
         email: normalizedEmail,
         contactType: ["directory"],
       });
