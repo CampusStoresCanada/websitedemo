@@ -54,35 +54,62 @@ async function mintOneRegistrationAttendee(
     }
   }
 
-  const { data: person, error: personError } = await db
-    .from("conference_people")
-    .insert({
-      conference_id: conferenceId,
-      organization_id: organizationId,
-      user_id: userId,
-      canonical_person_id: canonicalPersonId,
-      source_type: "manual",
-      source_id: crypto.randomUUID(),
-      person_kind: tier.personKind,
-      registration_tier: tier.tierLabel,
-      display_name: attendee.name,
-      contact_email: attendee.email,
-      assignment_status: assignmentStatus,
-      assigned_email_snapshot: assignedEmailSnapshot,
-      assigned_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (personError || !person) {
-    console.error(
-      `mintRegistrationAttendeesFromOrder: failed to create person for order item ${itemId}: ${personError?.message}`
-    );
-    return;
+  // Reuse an existing conference_people identity for this same person at
+  // this conference/org if one already exists — e.g. they're already
+  // seated in a different registration line in this same order, or an
+  // earlier one. Minting a fresh row every single time was a real,
+  // confirmed bug: the org roster resolves ONE conference_people row per
+  // contact (by email), so a second registration for the same person
+  // under a second, unlinked row became invisible in the roster's
+  // checkbox matrix — its seat was real and correctly allocated, but
+  // nothing on screen showed it as checked, because the roster's lookup
+  // had already resolved that contact to the *other* row.
+  let personId: string | null = null;
+  if (attendee.email) {
+    const normalizedEmail = attendee.email.trim().toLowerCase();
+    const { data: existingPerson } = await db
+      .from("conference_people")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId)
+      .ilike("contact_email", normalizedEmail)
+      .limit(1)
+      .maybeSingle();
+    personId = existingPerson?.id ?? null;
+  }
+
+  if (!personId) {
+    const { data: person, error: personError } = await db
+      .from("conference_people")
+      .insert({
+        conference_id: conferenceId,
+        organization_id: organizationId,
+        user_id: userId,
+        canonical_person_id: canonicalPersonId,
+        source_type: "manual",
+        source_id: crypto.randomUUID(),
+        person_kind: tier.personKind,
+        registration_tier: tier.tierLabel,
+        display_name: attendee.name,
+        contact_email: attendee.email,
+        assignment_status: assignmentStatus,
+        assigned_email_snapshot: assignedEmailSnapshot,
+        assigned_at: new Date().toISOString(),
+      })
+      .select("id")
+      .single();
+    if (personError || !person) {
+      console.error(
+        `mintRegistrationAttendeesFromOrder: failed to create person for order item ${itemId}: ${personError?.message}`
+      );
+      return;
+    }
+    personId = person.id;
   }
 
   const { error: seatUpdateError } = await db
     .from("entity_balance_seats")
-    .update({ holder_person_id: person.id })
+    .update({ holder_person_id: personId })
     .eq("id", seatId);
   if (seatUpdateError) {
     console.error(
@@ -94,7 +121,7 @@ async function mintOneRegistrationAttendee(
     await triggerConferenceRegistrationConfirmation({
       db,
       conferenceId,
-      personId: person.id,
+      personId,
       attendeeName: attendee.name,
       attendeeEmail: attendee.email,
       orgName,
