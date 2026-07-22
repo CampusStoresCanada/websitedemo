@@ -157,6 +157,14 @@ export interface HomeConferencePin {
   href: string;
   /** True when this pin is only visible because the viewer is an admin — the conference itself is still draft. */
   isDraftPreview: boolean;
+  /** Admin-editable content blocks (site_content) — title/subtitle shown on the homepage's conference slide. */
+  slideTitle: string;
+  slideSubtitle: string;
+  /** The site_content.id backing slideTitle/slideSubtitle, for inline-edit wiring (fieldProps). Null if no content block exists yet (fallback copy is being shown). */
+  slideContentId: string | null;
+  /** Per-viewer-role CTA — label already has any {price} placeholder interpolated with a real, live price. */
+  ctaLabel: string;
+  ctaHref: string;
 }
 
 export interface HomePageData {

@@ -25,7 +25,7 @@ export default async function Home() {
 
   const [data, slides, valuePropsHeader, valuePropsCards, communityVoices, homeCta, sponsorsResult] = await Promise.all([
     getHomePageData(viewerIsAdmin),
-    getHomeSlides(viewer, viewerIsAdmin),
+    getHomeSlides(viewer),
     getSiteContent("home_value_props_header"),
     getSiteContent("home_value_props"),
     getSiteContent("home_community_voices"),

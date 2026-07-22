@@ -11,6 +11,7 @@ import type {
 } from "@/lib/homepage-slides";
 import type { MapRef } from "./Map";
 import { orgSubtitle } from "@/lib/explore/filters";
+import { fieldProps } from "@/lib/editable-fields";
 
 const STORY_CYCLE_MS = 9000;
 
@@ -221,7 +222,7 @@ export default function MapAttract({
     if (!activeSpecial) return null;
     switch (activeSpecial.kind) {
       case "conference":
-        return { href: activeSpecial.href, label: "View Conference" };
+        return { href: activeSpecial.ctaHref, label: activeSpecial.ctaLabel };
       case "personalized":
         return { href: `/org/${activeSpecial.matchOrgSlug}`, label: "View Match" };
       case "newest_org":
@@ -235,7 +236,7 @@ export default function MapAttract({
     if (!activeSpecial) return null;
     switch (activeSpecial.kind) {
       case "conference":
-        return "Canada Campus Store Conference";
+        return activeSpecial.slideTitle;
       case "personalized":
         return activeSpecial.viewerOrgType === "member"
           ? "Suppliers Matched to You"
@@ -245,6 +246,15 @@ export default function MapAttract({
       case "sponsor":
         return "Thank You to Our Sponsors";
     }
+  }, [activeSpecial]);
+
+  // Conference is the one special kind backed by admin-editable site_content
+  // (title/subtitle) — the rest keep the shared generic subtitle since no
+  // per-kind content block exists for them yet.
+  const specialSubtitle = useMemo(() => {
+    if (!activeSpecial) return null;
+    if (activeSpecial.kind === "conference") return activeSpecial.slideSubtitle;
+    return "The national association for campus stores and the partners who support them.";
   }, [activeSpecial]);
 
   return (
@@ -429,11 +439,21 @@ export default function MapAttract({
           <div className="max-w-3xl">
             {activeSpecial && specialCta ? (
               <>
-                <h1 className="text-5xl md:text-7xl font-bold text-[#1A1A1A] tracking-tight leading-[1.1] mb-6">
+                <h1
+                  className="text-5xl md:text-7xl font-bold text-[#1A1A1A] tracking-tight leading-[1.1] mb-6"
+                  {...(activeSpecial.kind === "conference" && activeSpecial.slideContentId
+                    ? fieldProps("site_content", "title", activeSpecial.slideContentId)
+                    : {})}
+                >
                   {specialH1}
                 </h1>
-                <p className="text-xl md:text-2xl text-[#6B6B6B] leading-relaxed mb-8 max-w-xl">
-                  The national association for campus stores and the partners who support them.
+                <p
+                  className="text-xl md:text-2xl text-[#6B6B6B] leading-relaxed mb-8 max-w-xl"
+                  {...(activeSpecial.kind === "conference" && activeSpecial.slideContentId
+                    ? fieldProps("site_content", "subtitle", activeSpecial.slideContentId)
+                    : {})}
+                >
+                  {specialSubtitle}
                 </p>
                 <div className="flex flex-col sm:flex-row gap-4">
                   <Link

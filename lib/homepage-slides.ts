@@ -11,6 +11,59 @@ import { getActiveSponsors } from "@/lib/actions/sponsorship";
 // only used internally by getHomeSlides().
 // ---------------------------------------------------------------------------
 
+/** Format cents as a whole-dollar CAD price for CTA copy — "$4,000", "$199". */
+function formatCtaPrice(cents: number): string {
+  return `$${Math.round(cents / 100).toLocaleString("en-CA")}`;
+}
+
+/**
+ * Cheapest real, currently-for-sale booth (partner price) and cheapest
+ * real, currently-for-sale MEMBER-audience registration excluding $0 items
+ * like the Manager & Director Summit (member price) for one conference.
+ * Registration audience is resolved via the real `who` entity-ref graph
+ * (conference_entity_refs), not name-matching on the offer's title — an
+ * "Exhibitor Staff Registration" is real member-priced data but the wrong
+ * audience, and matching on the word "Exhibitor" would be fragile.
+ */
+async function fetchConferenceStartingPrices(
+  db: ReturnType<typeof createAdminClient>,
+  conferenceId: string
+): Promise<{ boothCents: number | null; memberRegistrationCents: number | null }> {
+  const [{ data: boothRows }, { data: memberRegRows }] = await Promise.all([
+    db
+      .from("conference_entities")
+      .select("price_cents")
+      .eq("conference_id", conferenceId)
+      .eq("kind", "booth")
+      .eq("is_for_sale", true)
+      .not("price_cents", "is", null)
+      .order("price_cents", { ascending: true })
+      .limit(1),
+    db
+      .from("conference_entity_refs")
+      .select("from_entity:conference_entities!conference_entity_refs_from_entity_id_fkey(price_cents, is_for_sale), to_entity:conference_entities!conference_entity_refs_to_entity_id_fkey(attributes)")
+      .eq("conference_id", conferenceId)
+      .eq("role", "who"),
+  ]);
+
+  const boothCents = boothRows?.[0]?.price_cents ?? null;
+
+  const memberPrices = (memberRegRows ?? [])
+    .map((r) => {
+      const from = Array.isArray(r.from_entity) ? r.from_entity[0] : r.from_entity;
+      const to = Array.isArray(r.to_entity) ? r.to_entity[0] : r.to_entity;
+      const audienceRole = (to?.attributes as Record<string, unknown> | null)?.["source_role"];
+      if (audienceRole !== "member" || !from?.is_for_sale) return null;
+      return from.price_cents;
+    })
+    .filter((c): c is number => typeof c === "number" && c > 0);
+
+  return {
+    boothCents,
+    memberRegistrationCents: memberPrices.length > 0 ? Math.min(...memberPrices) : null,
+  };
+}
+
 /**
  * The nearest conference with coordinates set. Public-facing statuses are
  * visible to everyone; draft is visible only to admin/super_admin viewers
@@ -18,8 +71,14 @@ import { getActiveSponsors } from "@/lib/actions/sponsorship";
  * use). One without location_latitude/location_longitude simply doesn't get
  * a pin rather than falling back to a city-level guess — a venue pin should
  * be exact or absent.
+ *
+ * Title/subtitle/CTA wording are admin-editable content blocks
+ * (site_content, sections "conference_slide"/"conference_slide_cta_{role}")
+ * rather than hardcoded strings — CTA price is always computed live from
+ * the real catalog, never stored, so it can't go stale season to season.
  */
-async function fetchConferencePin(viewerIsAdmin: boolean): Promise<HomeConferencePin | null> {
+async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConferencePin | null> {
+  const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
   const visibleStatuses = viewerIsAdmin ? [...PUBLIC_CONFERENCE_STATUSES, "draft"] : PUBLIC_CONFERENCE_STATUSES;
 
   const db = createAdminClient();
@@ -37,6 +96,34 @@ async function fetchConferencePin(viewerIsAdmin: boolean): Promise<HomeConferenc
     return null;
   }
 
+  const href = `/conference/${data.year}/${data.edition_code}`;
+
+  // Role → which CTA content block + which live price. Partner org
+  // admins/members get the booth pitch, Member org admins/members get the
+  // registration pitch, everyone else (public, authenticated-no-org) falls
+  // back to the registration pitch too — it's the broadly-applicable one;
+  // booths are a narrower B2B ask most visitors aren't the audience for.
+  const isPartnerViewer = viewer.viewerLevel === "partner";
+  const ctaRole = viewerIsAdmin ? "admin" : isPartnerViewer ? "partner" : "member";
+
+  const [contentRows, prices] = await Promise.all([
+    db
+      .from("site_content")
+      .select("id, section, title, subtitle, body")
+      .in("section", ["conference_slide", `conference_slide_cta_${ctaRole}`])
+      .eq("is_active", true),
+    fetchConferenceStartingPrices(db, data.id),
+  ]);
+
+  const slideBlock = contentRows.data?.find((r) => r.section === "conference_slide");
+  const ctaBlock = contentRows.data?.find((r) => r.section === `conference_slide_cta_${ctaRole}`);
+
+  const priceCents = ctaRole === "partner" ? prices.boothCents : prices.memberRegistrationCents;
+  const ctaTemplate = ctaBlock?.body ?? (ctaRole === "admin" ? "Manage" : "Learn More");
+  const ctaLabel = priceCents != null
+    ? ctaTemplate.replace("{price}", formatCtaPrice(priceCents))
+    : ctaTemplate.replace(" starting at {price}", "").replace(" starting from {price}", "");
+
   return {
     id: data.id,
     name: data.name,
@@ -46,7 +133,18 @@ async function fetchConferencePin(viewerIsAdmin: boolean): Promise<HomeConferenc
     lat: data.location_latitude,
     lng: data.location_longitude,
     isDraftPreview: data.status === "draft",
-    href: `/conference/${data.year}/${data.edition_code}`,
+    href,
+    slideTitle: slideBlock?.title ?? data.name,
+    slideSubtitle: slideBlock?.subtitle ?? "The national association for campus stores and the partners who support them.",
+    // Only title/subtitle are wired for inline editing (fieldProps) on the
+    // homepage — the CTA's underlying content-block "body" holds the raw
+    // {price} template, and this `ctaLabel` is the already-interpolated,
+    // real-price string. Wiring inline-edit to the interpolated text would
+    // let an admin overwrite the {price} placeholder with a literal dollar
+    // figure, breaking the template for the next viewer/season.
+    slideContentId: slideBlock?.id ?? null,
+    ctaLabel,
+    ctaHref: ctaRole === "admin" ? `/admin/conference/${data.id}` : href,
   };
 }
 
@@ -227,9 +325,9 @@ export interface HomeSlides {
   personalizedSlide: HomePersonalizedSlide | null;
 }
 
-export async function getHomeSlides(viewer: ViewerContext, viewerIsAdmin: boolean): Promise<HomeSlides> {
+export async function getHomeSlides(viewer: ViewerContext): Promise<HomeSlides> {
   const [conferencePin, newestOrgSlide, sponsorSlide, personalizedSlide] = await Promise.all([
-    fetchConferencePin(viewerIsAdmin),
+    fetchConferencePin(viewer),
     fetchNewestOrgSlide(),
     fetchSponsorSlide(),
     fetchPersonalizedSlide(viewer),
