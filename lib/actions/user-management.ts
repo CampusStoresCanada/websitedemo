@@ -14,6 +14,7 @@ import {
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
 import { sendTransactional } from "@/lib/comms/send";
+import { findUserByEmail } from "../supabase/find-user-by-email";
 
 // ─────────────────────────────────────────────────────────────────
 // Invite a new user to an organization
@@ -90,11 +91,7 @@ export async function inviteOrgUser(
     }
 
     // Check if a user with this email already exists in auth
-    const { data: existingUsers } =
-      await adminClient.auth.admin.listUsers();
-    const existingUser = existingUsers?.users?.find(
-      (u) => u.email?.toLowerCase() === normalizedEmail
-    );
+    const existingUser = await findUserByEmail(adminClient, normalizedEmail);
 
     let userId: string;
 

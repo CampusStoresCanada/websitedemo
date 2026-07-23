@@ -328,15 +328,16 @@ export default async function OrgProfilePage({ params }: PageProps) {
       }
       assignableEntities = [...byEntity.values()].sort((a, b) => a.name.localeCompare(b.name));
 
-      // Anything the org already holds at least one seat of already has its
-      // own "buy 1 more" path via the assignableEntities checkbox column's
-      // overageOffer — showing it here too would duplicate that. Once a
-      // registration gated by requires_ownership_of becomes visible (the org
-      // now owns the prerequisite, per listConferenceOffers), it belongs
-      // here until the org's first purchase moves it into assignableEntities.
-      const heldEntityIds = new Set(assignableEntities.map((e) => e.entityId));
+      // Held entities stay in buyableExtras too now — MemberProfile/
+      // PartnerProfile render those as HeldOfferCard instead of plain
+      // OfferCard, showing current holdings and reusing a free seat via the
+      // same allocateSeat() path the roster's overage flow already uses,
+      // rather than disappearing from the storefront the moment the org
+      // owns one. Once a registration gated by requires_ownership_of
+      // becomes visible (the org now owns the prerequisite, per
+      // listConferenceOffers), it belongs here regardless.
       buyableExtras = (offersResult.success ? offersResult.data : []).filter(
-        (o) => o.eligible && !heldEntityIds.has(o.id) && !["booth", "membership_renewal"].includes(o.kind)
+        (o) => o.eligible && !["booth", "membership_renewal"].includes(o.kind)
       );
     }
   }

@@ -10,6 +10,7 @@ import { deriveRegistrationTier } from "../conference/registration-tier";
 import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
+import { findUserByEmail } from "../supabase/find-user-by-email";
 
 /**
  * v3 fulfill — the read/allocate side. The buy-side (cart → checkout → mint)
@@ -191,11 +192,19 @@ export async function allocateSeat(
     }
   }
 
-  const { error: seatUpdateError } = await db
+  // Guard against two concurrent assigns racing for the same seat — without
+  // the .is() filter, whichever update lands second would silently bump the
+  // first assignee with no error to either caller.
+  const { data: updatedSeat, error: seatUpdateError } = await db
     .from("entity_balance_seats")
     .update({ holder_person_id: personId })
-    .eq("id", seatId);
+    .eq("id", seatId)
+    .is("holder_person_id", null)
+    .select("id");
   if (seatUpdateError) return { success: false, error: seatUpdateError.message };
+  if (!updatedSeat || updatedSeat.length === 0) {
+    return { success: false, error: "This seat was just assigned to someone else — refresh and try again." };
+  }
 
   const { error: personUpdateError } = await db
     .from("conference_people")
@@ -245,8 +254,7 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
 /** Does this email already belong to a platform user? Same lookup inviteOrgUser() does internally. */
 export async function findExistingUserByEmail(email: string): Promise<string | null> {
   const adminDb = createAdminClient();
-  const { data } = await adminDb.auth.admin.listUsers();
-  const match = data?.users?.find((u) => u.email?.toLowerCase() === email.toLowerCase());
+  const match = await findUserByEmail(adminDb, email);
   return match?.id ?? null;
 }
 
@@ -295,6 +303,38 @@ export async function addConferenceAttendee(
   }
 
   const db = createAdminClient();
+
+  // Reuse an existing conference_people row for this same person at this
+  // conference/org, if one already exists — e.g. they're already seated in
+  // a different registration line. Inserting unconditionally every call was
+  // a real, confirmed bug (same flaw already fixed in
+  // mintOneRegistrationAttendee, lib/conference/registration-mint.ts): the
+  // org roster resolves one conference_people row per contact by email, so
+  // a second, unlinked duplicate row's seat became invisible in the
+  // checkbox matrix even though it was really allocated. Only possible when
+  // there's an email to match on — a name-only walk-in still always inserts
+  // fresh, matching the shipped fix's same limitation.
+  if (trimmedEmail) {
+    const { data: existing } = await db
+      .from("conference_people")
+      .select("id, assignment_status")
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId)
+      .ilike("contact_email", trimmedEmail)
+      .limit(1)
+      .maybeSingle();
+    if (existing) {
+      return {
+        success: true,
+        data: {
+          id: existing.id,
+          assignmentStatus: existing.assignment_status as "assigned" | "pending_user_activation",
+          invited: false,
+        },
+      };
+    }
+  }
+
   const { data, error } = await db
     .from("conference_people")
     .insert({

@@ -39,10 +39,19 @@ import { addConferenceAttendee, removeConferenceAttendee } from "../conference-e
 
 const AUTH_OK = { ok: true, ctx: { userId: "admin-1", globalRole: "org_admin", activeOrgIds: ["org-1"] } };
 
-function fakeClientForAdd(opts: { insertedId?: string; insertError?: string; existingUsers?: Array<{ id: string; email: string }> } = {}) {
+function fakeClientForAdd(
+  opts: {
+    insertedId?: string;
+    insertError?: string;
+    existingUsers?: Array<{ id: string; email: string }>;
+    /** Set to simulate a conference_people row already existing for this email — the dedup lookup should find and reuse it instead of inserting. Undefined = "nothing found", matching every pre-existing test's expectations. */
+    existingPerson?: { id: string; assignmentStatus: "assigned" | "pending_user_activation" } | null;
+  } = {}
+) {
   const insertSpy = vi.fn();
+  const dedupSelectSpy = vi.fn();
   return {
-    spy: { insertSpy },
+    spy: { insertSpy, dedupSelectSpy },
     client: {
       auth: {
         admin: {
@@ -52,6 +61,25 @@ function fakeClientForAdd(opts: { insertedId?: string; insertError?: string; exi
       from: (table: string) => {
         if (table === "conference_people") {
           return {
+            select: (cols: string) => {
+              dedupSelectSpy(cols);
+              return {
+                eq: () => ({
+                  eq: () => ({
+                    ilike: () => ({
+                      limit: () => ({
+                        maybeSingle: async () => ({
+                          data: opts.existingPerson
+                            ? { id: opts.existingPerson.id, assignment_status: opts.existingPerson.assignmentStatus }
+                            : null,
+                          error: null,
+                        }),
+                      }),
+                    }),
+                  }),
+                }),
+              };
+            },
             insert: (row: Record<string, unknown>) => {
               insertSpy(row);
               return {
@@ -204,6 +232,28 @@ describe("conference-entity-commerce attendees", () => {
         assigned_email_snapshot: "new@store.com",
       })
     );
+  });
+
+  it("reuses an existing conference_people row for the same email instead of inserting a duplicate", async () => {
+    const fake = fakeClientForAdd({
+      existingUsers: [],
+      existingPerson: { id: "person-existing", assignmentStatus: "assigned" },
+    });
+    createAdminClientMock.mockReturnValue(fake.client);
+    resolveAssigneeForEmailMock.mockResolvedValue({
+      success: true,
+      data: { targetUserId: null, assignmentStatus: "assigned", normalizedEmail: "jane@store.com", canonicalPersonId: null },
+    });
+
+    const result = await addConferenceAttendee("conf-1", "org-1", {
+      displayName: "Jane Smith",
+      contactEmail: "jane@store.com",
+    });
+
+    expect(result.success).toBe(true);
+    if (!result.success) throw new Error("expected success");
+    expect(result.data).toEqual({ id: "person-existing", assignmentStatus: "assigned", invited: false });
+    expect(fake.spy.insertSpy).not.toHaveBeenCalled();
   });
 
   it("propagates a resolveAssigneeForEmail failure without inserting a row", async () => {

@@ -17,6 +17,7 @@ import { addOfferToCart } from "@/lib/actions/conference-commerce";
 import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
 import OfferCard from "@/components/conference/OfferCard";
+import HeldOfferCard from "@/components/conference/HeldOfferCard";
 import type { AssignableEntityColumn } from "@/app/org/[slug]/page";
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
@@ -150,6 +151,11 @@ export default function PartnerProfile({
   nudgeAvailableAt = null,
   renewalWindowOpen = false,
 }: PartnerProfileProps) {
+  // buyableExtras now includes offers the org already holds seats of (see
+  // app/org/[slug]/page.tsx) — this looks up which ones, so those render as
+  // HeldOfferCard (holdings-aware) instead of the plain buy-only OfferCard.
+  // Offer id and entity id are the same id, confirmed against real data.
+  const heldEntityById = new Map(assignableEntities.map((e) => [e.entityId, e]));
   // An org can hold more than one booth — list all of them in the staffing heading.
   const staffingHeading =
     heldBooths.length > 0
@@ -1030,14 +1036,26 @@ export default function PartnerProfile({
                 {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
                 {buyableExtras.length > 0 ? (
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                    {buyableExtras.map((offer) => (
-                      <OfferCard
-                        key={offer.id}
-                        offer={offer}
-                        conferenceId={currentConferenceId ?? ""}
-                        organizationId={organization.id}
-                      />
-                    ))}
+                    {buyableExtras.map((offer) => {
+                      const heldEntity = heldEntityById.get(offer.id);
+                      return heldEntity ? (
+                        <HeldOfferCard
+                          key={offer.id}
+                          offer={offer}
+                          entity={heldEntity}
+                          conferenceId={currentConferenceId ?? ""}
+                          organizationId={organization.id}
+                          contacts={contacts}
+                        />
+                      ) : (
+                        <OfferCard
+                          key={offer.id}
+                          offer={offer}
+                          conferenceId={currentConferenceId ?? ""}
+                          organizationId={organization.id}
+                        />
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
@@ -1344,14 +1362,26 @@ export default function PartnerProfile({
                 {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
                 {buyableExtras.length > 0 ? (
                   <div className="mt-4 space-y-3">
-                    {buyableExtras.map((offer) => (
-                      <OfferCard
-                        key={offer.id}
-                        offer={offer}
-                        conferenceId={currentConferenceId ?? ""}
-                        organizationId={organization.id}
-                      />
-                    ))}
+                    {buyableExtras.map((offer) => {
+                      const heldEntity = heldEntityById.get(offer.id);
+                      return heldEntity ? (
+                        <HeldOfferCard
+                          key={offer.id}
+                          offer={offer}
+                          entity={heldEntity}
+                          conferenceId={currentConferenceId ?? ""}
+                          organizationId={organization.id}
+                          contacts={contacts}
+                        />
+                      ) : (
+                        <OfferCard
+                          key={offer.id}
+                          offer={offer}
+                          conferenceId={currentConferenceId ?? ""}
+                          organizationId={organization.id}
+                        />
+                      );
+                    })}
                   </div>
                 ) : null}
               </div>
