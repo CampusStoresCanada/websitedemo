@@ -20,19 +20,12 @@ export interface OrgUserRow {
   membershipId: string;
 }
 
-interface MembershipProfile {
-  id: string;
-  display_name: string | null;
-  avatar_url: string | null;
-}
-
 interface MembershipRow {
   id: string;
   user_id: string;
   role: string;
   status: string;
   hidden: boolean;
-  profiles: MembershipProfile | MembershipProfile[] | null;
 }
 
 export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
@@ -42,23 +35,17 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
 
   const adminClient = createAdminClient();
 
-  // Fetch all user_organizations for this org, joined with profiles
+  // Fetch all user_organizations for this org. Deliberately NOT a
+  // profiles!inner(...) embed — there's no foreign key between
+  // user_organizations and profiles (both reference auth.users
+  // independently), so PostgREST can't resolve that embed; it silently
+  // errors and every org showed "no users found" regardless of real
+  // membership count. Two-step fetch + in-memory merge instead, matching
+  // the pattern already used elsewhere for this same gap (e.g.
+  // app/admin/people/page.tsx).
   const { data: membershipsRaw, error } = await adminClient
     .from("user_organizations")
-    .select(
-      `
-      id,
-      user_id,
-      role,
-      status,
-      hidden,
-      profiles!inner(
-        id,
-        display_name,
-        avatar_url
-      )
-    `
-    )
+    .select("id, user_id, role, status, hidden")
     .eq("organization_id", org.id)
     .order("role", { ascending: true })
     .order("status", { ascending: true });
@@ -67,19 +54,20 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
     console.error("[OrgUsersPage] Failed to fetch memberships:", error);
   }
 
-  const memberships: MembershipRow[] = (membershipsRaw ?? []) as unknown as MembershipRow[];
-
-  // Also fetch auth emails for each user (profiles don't always have emails)
+  const memberships: MembershipRow[] = membershipsRaw ?? [];
   const userIds = memberships.map((m) => m.user_id);
-  let emailMap: Record<string, string> = {};
 
-  if (userIds.length > 0) {
-    emailMap = await lookupUserEmailsByIds(adminClient, userIds);
-  }
+  const [{ data: profileRows }, emailMap] = await Promise.all([
+    userIds.length > 0
+      ? adminClient.from("profiles").select("id, display_name, avatar_url").in("id", userIds)
+      : Promise.resolve({ data: [] as { id: string; display_name: string | null; avatar_url: string | null }[] }),
+    userIds.length > 0 ? lookupUserEmailsByIds(adminClient, userIds) : Promise.resolve({} as Record<string, string>),
+  ]);
+  const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
 
   // Map to flat array for the client component
   const users: OrgUserRow[] = memberships.map((m) => {
-    const profile = Array.isArray(m.profiles) ? m.profiles[0] : m.profiles;
+    const profile = profileById.get(m.user_id);
 
     return {
       userId: m.user_id,

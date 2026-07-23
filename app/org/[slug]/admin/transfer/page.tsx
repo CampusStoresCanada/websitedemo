@@ -40,37 +40,34 @@ export default async function OrgTransferPage({
     .eq("status", "pending")
     .maybeSingle()) as { data: any };
 
-  // Fetch eligible successors: active org members (excluding current user)
+  // Fetch eligible successors: active org members (excluding current user).
+  // Deliberately NOT a profiles!inner(...) embed — there's no foreign key
+  // between user_organizations and profiles (both reference auth.users
+  // independently), so PostgREST can't resolve that embed; it silently
+  // errored and every org showed zero eligible successors regardless of
+  // real membership. Two-step fetch + in-memory merge instead.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: members } = (await ac
     .from("user_organizations")
-    .select(
-      `
-      user_id,
-      role,
-      profiles!inner(
-        id,
-        display_name
-      )
-    `
-    )
+    .select("user_id, role")
     .eq("organization_id", org.id)
     .eq("status", "active")
     .neq("user_id", auth.ctx.userId)) as { data: any[] | null };
 
-  // Get emails for candidates
   const candidateUserIds = (members ?? []).map((m) => m.user_id);
-  let emailMap: Record<string, string> = {};
 
-  if (candidateUserIds.length > 0) {
-    emailMap = await lookupUserEmailsByIds(adminClient, candidateUserIds);
-  }
+  const [{ data: profileRows }, emailMap] = await Promise.all([
+    candidateUserIds.length > 0
+      ? adminClient.from("profiles").select("id, display_name").in("id", candidateUserIds)
+      : Promise.resolve({ data: [] as { id: string; display_name: string | null }[] }),
+    candidateUserIds.length > 0
+      ? lookupUserEmailsByIds(adminClient, candidateUserIds)
+      : Promise.resolve({} as Record<string, string>),
+  ]);
+  const profileById = new Map((profileRows ?? []).map((p) => [p.id, p]));
 
   const candidates: TransferCandidate[] = (members ?? []).map((m) => {
-    const profile = m.profiles as unknown as {
-      id: string;
-      display_name: string | null;
-    };
+    const profile = profileById.get(m.user_id);
 
     return {
       userId: m.user_id,
