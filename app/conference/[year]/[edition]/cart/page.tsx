@@ -5,6 +5,7 @@ import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { getConferenceCart } from "@/lib/actions/conference-commerce";
+import { listEntitySeatsForOrg } from "@/lib/actions/conference-entity-commerce";
 import { getContactsForOrganization, getOrganizations } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CartClient from "./cart-client";
@@ -82,9 +83,13 @@ export default async function ConferenceCartPage({
     );
   }
 
-  const [cartResult, orgContacts] = await Promise.all([
+  const [cartResult, orgContacts, orgSeatsResult] = await Promise.all([
     getConferenceCart(conference.id, selectedOrg.id),
     getContactsForOrganization(selectedOrg.id),
+    // Org-admin+ only (listEntitySeatsForOrg's own guard) — a plain member's
+    // cart just won't get the "you already have an open seat" nudge below,
+    // rather than erroring the whole page.
+    listEntitySeatsForOrg(conference.id, selectedOrg.id),
   ]);
   if (!cartResult.success) {
     return (
@@ -142,6 +147,7 @@ export default async function ConferenceCartPage({
         isDevAdmin={isAdmin}
         initialCart={cartResult.data}
         contacts={orgContacts.map((c) => ({ id: c.id, name: c.name ?? "", email: c.work_email ?? c.email ?? null }))}
+        orgSeats={orgSeatsResult.success ? orgSeatsResult.data : []}
       />
     </main>
   );

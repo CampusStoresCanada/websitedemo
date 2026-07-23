@@ -33,6 +33,8 @@ type CartWithTotals = {
   taxCents: number;
   totalCents: number;
 };
+/** Narrowed OrgEntitySeat (lib/actions/conference-entity-commerce.ts) — only the fields the open-seat nudge needs. */
+type OrgSeat = { entityId: string; holderPersonId: string | null };
 
 export default function CartClient({
   conferenceId,
@@ -44,6 +46,7 @@ export default function CartClient({
   isDevAdmin,
   initialCart,
   contacts,
+  orgSeats,
 }: {
   conferenceId: string;
   conferenceYear: string;
@@ -55,6 +58,8 @@ export default function CartClient({
   initialCart: CartWithTotals;
   /** The org's existing Store Contacts — the picker's default list when assigning a registration line. */
   contacts: PickablePerson[];
+  /** The org's already-purchased seats across all entities — empty for viewers below org_admin (listEntitySeatsForOrg's own guard), which just means the open-seat nudge below stays silent for them. */
+  orgSeats: OrgSeat[];
 }) {
   const router = useRouter();
   const [cart, setCart] = useState<CartWithTotals>(initialCart);
@@ -68,6 +73,22 @@ export default function CartClient({
   const isEmpty = cart.offerItems.length === 0;
   const checkoutDisabled = isPending || isEmpty;
   const boothCount = cart.offerItems.filter((item) => item.kind === "booth").length;
+
+  // Registration items in the cart that the org already holds an unassigned
+  // (purchased-but-open) seat of — a nudge to assign what's already paid
+  // for instead of buying another unit, mirroring the org page's
+  // HeldOfferCard logic but surfaced at the point of checkout, since a cart
+  // line added from the public (non-holdings-aware) storefront wouldn't
+  // otherwise show this.
+  const openSeatOfferNames = useMemo(() => {
+    const names = new Set<string>();
+    for (const item of cart.offerItems) {
+      if (item.kind !== "registration") continue;
+      const hasOpenSeat = orgSeats.some((seat) => seat.entityId === item.offerEntityId && !seat.holderPersonId);
+      if (hasOpenSeat) names.add(item.name);
+    }
+    return Array.from(names);
+  }, [cart.offerItems, orgSeats]);
 
   const lineTotals = useMemo(() => {
     const byItemId = new Map<string, number>();
@@ -223,6 +244,16 @@ export default function CartClient({
         <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
           You have {boothCount} booths in this cart. Extra booths add floor space — they don&apos;t add
           meeting slots or extend meeting length; those come from your registration, not booth count.
+        </p>
+      ) : null}
+
+      {openSeatOfferNames.length > 0 ? (
+        <p className="rounded-md border border-blue-100 bg-blue-50 px-3 py-2 text-sm text-blue-700">
+          Looks like your org already has an open, unassigned {openSeatOfferNames.join(", ")} seat — you
+          may want to check with your org admin and assign it before buying another.{" "}
+          <Link href={`/org/${orgSlug}`} className="font-semibold underline">
+            Go to {organizationName}&apos;s profile →
+          </Link>
         </p>
       ) : null}
 
