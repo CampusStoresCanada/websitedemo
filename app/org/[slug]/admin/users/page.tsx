@@ -1,6 +1,7 @@
 import { resolveOrgSlug } from "@/lib/org/resolve";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { OrgUserTable } from "@/components/org/admin/OrgUserTable";
 import { InviteUserDialog } from "@/components/org/admin/InviteUserDialog";
 
@@ -73,14 +74,7 @@ export default async function OrgUsersPage({ params }: OrgUsersPageProps) {
   let emailMap: Record<string, string> = {};
 
   if (userIds.length > 0) {
-    const { data: authUsers } = await adminClient.auth.admin.listUsers();
-    if (authUsers?.users) {
-      emailMap = Object.fromEntries(
-        authUsers.users
-          .filter((u) => userIds.includes(u.id))
-          .map((u) => [u.id, u.email ?? ""])
-      );
-    }
+    emailMap = await lookupUserEmailsByIds(adminClient, userIds);
   }
 
   // Map to flat array for the client component

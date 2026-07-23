@@ -6,6 +6,7 @@
 
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import type { AttendeeRow } from "@/lib/events/types";
 
@@ -41,12 +42,7 @@ export async function getCheckinList(eventId: string): Promise<
   let emailMap: Record<string, string> = {};
 
   if (userIds.length > 0) {
-    const { data: authUsers } = await adminClient.auth.admin.listUsers();
-    emailMap = Object.fromEntries(
-      (authUsers?.users ?? [])
-        .filter((u) => userIds.includes(u.id))
-        .map((u) => [u.id, u.email ?? ""])
-    );
+    emailMap = await lookupUserEmailsByIds(adminClient, userIds);
   }
 
   const rows: AttendeeRow[] = (regs ?? []).map((row: any) => ({

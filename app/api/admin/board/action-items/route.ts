@@ -5,6 +5,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { notifyActionItemAssignees } from "@/lib/board/action-notify";
 
 export async function POST(req: NextRequest) {
@@ -54,12 +55,9 @@ export async function POST(req: NextRequest) {
   let notifyDebug: Record<string, unknown> = { skipped: "no assignees" };
 
   if (assigneeUuids.length > 0) {
-    const emailMap: Record<string, string> = {};
+    let emailMap: Record<string, string> = {};
     try {
-      const { data: { users } } = await db.auth.admin.listUsers({ perPage: 1000 });
-      for (const u of users ?? []) {
-        if (assigneeUuids.includes(u.id)) emailMap[u.id] = u.email ?? "";
-      }
+      emailMap = await lookupUserEmailsByIds(db, assigneeUuids);
     } catch (e) {
       console.error("[action-items] Failed to resolve assignee emails:", e);
     }

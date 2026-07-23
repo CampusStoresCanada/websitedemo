@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import {
   isGlobalAdmin,
   requireOrgAdminOrSuperAdmin,
@@ -110,12 +111,7 @@ export default async function OrgConferencePage({
       (profileRows ?? []).map((row) => [row.id as string, (row.display_name as string | null) ?? null])
     );
 
-    const { data: authUsers } = await adminClient.auth.admin.listUsers();
-    emailByUserId = Object.fromEntries(
-      (authUsers?.users ?? [])
-        .filter((user) => memberUserIds.includes(user.id))
-        .map((user) => [user.id, user.email ?? ""])
-    );
+    emailByUserId = await lookupUserEmailsByIds(adminClient, memberUserIds);
   }
 
   // Grant-derived obligations: a person owes data because of what they hold,

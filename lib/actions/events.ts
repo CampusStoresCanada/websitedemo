@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAuthenticated, requireAdmin, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { findUserByEmail } from "@/lib/supabase/user-lookup";
 import { parseUTC } from "@/lib/utils";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { createCalendarEventWithMeet, deleteCalendarEvent } from "@/lib/google/calendar";
@@ -778,10 +779,11 @@ async function notifyCreatorEventApproved(
   creatorEmail: string
 ): Promise<void> {
   const supabase = createAdminClient();
+  const creatorUser = await findUserByEmail(supabase, creatorEmail);
   const profileRes = await supabase
     .from("profiles")
     .select("display_name")
-    .eq("id", (await supabase.auth.admin.listUsers()).data.users.find((u) => u.email === creatorEmail)?.id ?? "")
+    .eq("id", creatorUser?.id ?? "")
     .maybeSingle();
 
   const creatorName = profileRes.data?.display_name ?? "there";

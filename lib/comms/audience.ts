@@ -3,31 +3,10 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds as lookupUserEmails } from "@/lib/supabase/user-lookup";
 import type { AudienceDefinition, ResolvedRecipient } from "./types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
-
-/**
- * supabase.auth.admin.listUsers() defaults to a 50-user page — silently
- * returning only a subset on any project with more auth users than that
- * (751 here). Paginates until a short page confirms the end, so email
- * lookups don't quietly drop real recipients depending on where their user
- * row happens to land in Supabase's ordering.
- */
-async function lookupUserEmails(supabase: AdminClient, userIds: string[]): Promise<Record<string, string>> {
-  const wanted = new Set(userIds);
-  const emailMap: Record<string, string> = {};
-  const perPage = 200;
-  for (let page = 1; wanted.size > Object.keys(emailMap).length; page++) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error || !data?.users?.length) break;
-    for (const u of data.users) {
-      if (wanted.has(u.id) && u.email) emailMap[u.id] = u.email;
-    }
-    if (data.users.length < perPage) break; // last page
-  }
-  return emailMap;
-}
 
 /**
  * Resolve an audience definition to a list of concrete recipients.

@@ -6,6 +6,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { getCircleGhostClient } from "@/lib/circle/client";
 import { isCircleConfigured } from "@/lib/circle/config";
 
@@ -44,11 +45,8 @@ export async function GET(
       const ghost    = getCircleGhostClient();
       const assignees = (item.assignees ?? []) as string[];
       if (ghost && assignees.length > 0) {
-        const { data: { users } } = await db.auth.admin.listUsers({ perPage: 1000 });
-        const emails = users
-          .filter((u) => assignees.includes(u.id))
-          .map((u) => u.email)
-          .filter(Boolean) as string[];
+        const emailMap = await lookupUserEmailsByIds(db, assignees);
+        const emails = Object.values(emailMap);
 
         await Promise.allSettled(
           emails.map((email) => ghost.sendDirectMessage(email, `Thanks 👻`))

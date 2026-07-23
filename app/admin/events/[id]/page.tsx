@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { getEvent, approveEvent, transitionEventStatus } from "@/lib/actions/events";
 import { getCheckinList } from "@/lib/actions/event-checkin";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import EventStatusBadge from "@/components/admin/events/EventStatusBadge";
 import AttendeeList from "@/components/admin/events/AttendeeList";
 import WaitlistTable from "@/components/admin/events/WaitlistTable";
@@ -61,12 +62,7 @@ export default async function AdminEventDetailPage({
   const waitlistUserIds = (waitlistRaw ?? []).map((w: any) => w.user_id);
   let waitlistEmailMap: Record<string, string> = {};
   if (waitlistUserIds.length > 0) {
-    const { data: authUsers } = await adminClient.auth.admin.listUsers();
-    waitlistEmailMap = Object.fromEntries(
-      (authUsers?.users ?? [])
-        .filter((u) => waitlistUserIds.includes(u.id))
-        .map((u) => [u.id, u.email ?? ""])
-    );
+    waitlistEmailMap = await lookupUserEmailsByIds(adminClient, waitlistUserIds);
   }
 
   const waitlist: WaitlistRow[] = (waitlistRaw ?? []).map((w: any) => ({

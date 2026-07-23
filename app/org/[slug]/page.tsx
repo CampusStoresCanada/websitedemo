@@ -2,6 +2,7 @@ import { notFound } from "next/navigation";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
@@ -171,10 +172,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
         profileNameById.set(profile.id as string, (profile.display_name as string | null) ?? null);
       }
 
-      const authUsersResult = await adminClient.auth.admin.listUsers();
-      for (const user of authUsersResult.data?.users ?? []) {
-        if (!userIds.includes(user.id)) continue;
-        emailById.set(user.id, user.email ?? null);
+      const emailMap = await lookupUserEmailsByIds(adminClient, userIds);
+      for (const id of userIds) {
+        if (emailMap[id]) emailById.set(id, emailMap[id]);
       }
     }
 

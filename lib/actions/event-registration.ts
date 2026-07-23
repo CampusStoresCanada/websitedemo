@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { sendTransactional } from "@/lib/comms/send";
 import {
@@ -514,8 +515,7 @@ export async function orgAdminRegisterMembers(
   const existingMap = new Map((existingRegs ?? []).map((r: any) => [r.user_id, r]));
 
   // Fetch emails + names for post-registration hooks
-  const { data: authUsers } = await adminClient.auth.admin.listUsers();
-  const emailMap = new Map((authUsers?.users ?? []).map((u) => [u.id, u.email ?? null]));
+  const emailMap = new Map(Object.entries(await lookupUserEmailsByIds(adminClient, targetUserIds)));
   const { data: profileRows } = await adminClient.from("profiles").select("id, display_name").in("id", targetUserIds);
   const nameMap = new Map((profileRows ?? []).map((p: any) => [p.id, p.display_name ?? null]));
 
@@ -736,8 +736,9 @@ export async function getEligibleMembersForEvent(
   }
 
   // Fetch emails for everyone
-  const { data: authUsers } = await adminClient.auth.admin.listUsers();
-  const emailMap = new Map((authUsers?.users ?? []).map((u) => [u.id, u.email ?? null]));
+  const emailMap = new Map(
+    Object.entries(await lookupUserEmailsByIds(adminClient, allRows.map((r) => r.user_id)))
+  );
 
   // Filter out already-registered
   const result = allRows

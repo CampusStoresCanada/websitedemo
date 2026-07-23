@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { requiresSuperAdminApproval, type EditableTable } from "@/lib/editable-fields";
@@ -536,10 +537,8 @@ async function getApprovers(superAdminOnly: boolean): Promise<{ id: string; emai
   if (!profiles?.length) return [];
 
   const userIds = profiles.map((p) => p.id);
-  const { data: authUsers } = await adminClient.auth.admin.listUsers();
-  return (authUsers?.users ?? [])
-    .filter((u) => userIds.includes(u.id) && u.email)
-    .map((u) => ({ id: u.id, email: u.email! }));
+  const emailMap = await lookupUserEmailsByIds(adminClient, userIds);
+  return userIds.filter((id) => emailMap[id]).map((id) => ({ id, email: emailMap[id] }));
 }
 
 async function getRequesterEmail(userId: string): Promise<string | null> {

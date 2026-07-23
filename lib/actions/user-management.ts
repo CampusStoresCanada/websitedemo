@@ -14,7 +14,7 @@ import {
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
 import { sendTransactional } from "@/lib/comms/send";
-import { findUserByEmail } from "../supabase/find-user-by-email";
+import { findUserByEmail } from "../supabase/user-lookup";
 
 // ─────────────────────────────────────────────────────────────────
 // Invite a new user to an organization

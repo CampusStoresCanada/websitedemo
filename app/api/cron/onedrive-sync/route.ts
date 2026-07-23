@@ -15,6 +15,7 @@ import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 export const dynamic = "force-dynamic";
 
@@ -30,12 +31,9 @@ async function getSuperAdminEmails(): Promise<string[]> {
 
   if (!profiles?.length) return [];
 
-  const { data: authUsers } = await db.auth.admin.listUsers();
-  const ids = new Set(profiles.map((p: { id: string }) => p.id));
-
-  return (authUsers?.users ?? [])
-    .filter((u: { id: string; email?: string }) => ids.has(u.id) && u.email)
-    .map((u: { email?: string }) => u.email!);
+  const ids = profiles.map((p: { id: string }) => p.id);
+  const emailMap = await lookupUserEmailsByIds(db, ids);
+  return Object.values(emailMap);
 }
 
 export async function GET(request: NextRequest) {

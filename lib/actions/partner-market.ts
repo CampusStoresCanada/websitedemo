@@ -1,6 +1,7 @@
 "use server";
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { sendCircleNotification } from "@/lib/circle/notifications";
@@ -348,17 +349,14 @@ export async function notifyMembersWithoutProcurement(
     .eq("role", "org_admin")
     .eq("status", "active");
 
-  const userIds = [...new Set((adminRows ?? []).map((r: any) => r.user_id as string))];
+  const userIds = [...new Set<string>((adminRows ?? []).map((r: any) => r.user_id as string))];
   if (userIds.length === 0) return { success: true, sentCount: 0 };
 
   // Get emails
-  const userEmails: { id: string; email: string }[] = [];
-  const { data: authUsers } = await db.auth.admin.listUsers();
-  for (const u of (authUsers?.users ?? [])) {
-    if (userIds.includes(u.id) && u.email) {
-      userEmails.push({ id: u.id, email: u.email });
-    }
-  }
+  const emailMap = await lookupUserEmailsByIds(db, userIds);
+  const userEmails: { id: string; email: string }[] = userIds
+    .filter((id) => emailMap[id])
+    .map((id) => ({ id, email: emailMap[id] }));
 
   const categoryList = partnerParents.slice(0, 3).join(", ");
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://websitedemo-khaki.vercel.app";

@@ -9,6 +9,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -527,11 +528,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   const userIds = Array.from(byUser.keys());
 
   // Auth emails
-  const authResult = await createAdminClient().auth.admin.listUsers({ perPage: 1000 });
-  const emailById = new Map<string, string>();
-  for (const u of authResult.data?.users ?? []) {
-    if (u.email) emailById.set(u.id, u.email);
-  }
+  const emailById = new Map(Object.entries(await lookupUserEmailsByIds(createAdminClient(), userIds)));
 
   // Profiles (display_name)
   const { data: profiles } = await createAdminClient()

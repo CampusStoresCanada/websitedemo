@@ -1,6 +1,7 @@
 import { resolveOrgSlug } from "@/lib/org/resolve";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { AdminTransferFlow } from "@/components/org/admin/AdminTransferFlow";
 
@@ -62,14 +63,7 @@ export default async function OrgTransferPage({
   let emailMap: Record<string, string> = {};
 
   if (candidateUserIds.length > 0) {
-    const { data: authUsers } = await adminClient.auth.admin.listUsers();
-    if (authUsers?.users) {
-      emailMap = Object.fromEntries(
-        authUsers.users
-          .filter((u) => candidateUserIds.includes(u.id))
-          .map((u) => [u.id, u.email ?? ""])
-      );
-    }
+    emailMap = await lookupUserEmailsByIds(adminClient, candidateUserIds);
   }
 
   const candidates: TransferCandidate[] = (members ?? []).map((m) => {

@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePersonForUser, ensureKnownPerson, linkUserToPerson } from "@/lib/identity/lifecycle";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { findUserByEmail } from "@/lib/supabase/user-lookup";
 
 type RecoveryOutcome =
   | { outcome: "code_sent" }
@@ -31,11 +32,7 @@ export async function initiateAccountRecovery(rawEmail: string): Promise<Recover
 
   const adminClient = createAdminClient();
 
-  const { data: existingUsers, error: listError } = await adminClient.auth.admin.listUsers();
-  if (listError) {
-    return { outcome: "error", error: "Something went wrong. Please try again." };
-  }
-  const hasAccount = existingUsers?.users?.some((u) => u.email?.toLowerCase() === email);
+  const hasAccount = Boolean(await findUserByEmail(adminClient, email));
 
   if (!hasAccount) {
     const [{ data: byEmail }, { data: byWorkEmail }] = await Promise.all([

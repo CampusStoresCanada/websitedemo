@@ -378,10 +378,9 @@ export async function sendContentChangeFyi(opts: ContentChangeFyiOptions): Promi
   if (!profiles?.length) return;
 
   const userIds = profiles.map((p: { id: string }) => p.id);
-  const { data: authUsers } = await adminClient.auth.admin.listUsers();
-  const superAdminEmails = (authUsers?.users ?? [])
-    .filter((u: { id: string; email?: string }) => userIds.includes(u.id) && u.email)
-    .map((u: { email?: string }) => u.email!);
+  const { lookupUserEmailsByIds } = await import("@/lib/supabase/user-lookup");
+  const emailMap = await lookupUserEmailsByIds(adminClient, userIds);
+  const superAdminEmails = userIds.filter((id) => emailMap[id]).map((id) => emailMap[id]);
 
   const pageLink = opts.pageHref
     ? `<a href="${opts.pageHref}" style="color:#163D6D;">${opts.pageHref}</a>` : opts.pageHref ?? "";

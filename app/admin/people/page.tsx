@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { isSuperAdmin, requireAdmin } from "@/lib/auth/guards";
 import PeopleDirectory from "@/components/admin/PeopleDirectory";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
@@ -56,13 +57,7 @@ export default async function PeopleAdminPage() {
   }
 
   // Load auth emails
-  const { data: authUsers } = await adminClient.auth.admin.listUsers();
-  const emailMap: Record<string, string> = {};
-  if (authUsers?.users) {
-    for (const u of authUsers.users) {
-      if (u.email) emailMap[u.id] = u.email;
-    }
-  }
+  const emailMap = await lookupUserEmailsByIds(adminClient, profiles.map((p) => p.id));
 
   // Merge into flat rows
   const people = profiles.map((p) => ({

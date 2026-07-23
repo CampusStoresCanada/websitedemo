@@ -14,6 +14,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { notifyActionItemAssignees } from "@/lib/board/action-notify";
 
 export const dynamic = "force-dynamic";
@@ -85,14 +86,7 @@ export async function GET(req: NextRequest) {
   // ── 4. Load all profile emails we'll need ────────────────────────────────
   const allItems   = [...(dueItems ?? []), ...(preMeetingItems ?? [])];
   const allUuids   = [...new Set(allItems.flatMap((i) => i.assignees as string[]))];
-  const emailMap: Record<string, string> = {};
-
-  if (allUuids.length > 0) {
-    const { data: { users } } = await db.auth.admin.listUsers({ perPage: 1000 });
-    for (const u of users ?? []) {
-      if (allUuids.includes(u.id)) emailMap[u.id] = u.email ?? "";
-    }
-  }
+  const emailMap = await lookupUserEmailsByIds(db, allUuids);
 
   // ── 5. Load meeting dates for context ────────────────────────────────────
   const meetingIds = [...new Set(allItems.map((i) => i.meeting_id))];

@@ -5,6 +5,7 @@
 import { NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 
 export async function GET() {
   const auth = await requireAdmin();
@@ -23,14 +24,7 @@ export async function GET() {
 
   // Fetch emails from auth.users for each profile
   const ids = (profiles ?? []).map((p) => p.id);
-  const emailMap: Record<string, string> = {};
-
-  if (ids.length > 0) {
-    const { data: { users } } = await db.auth.admin.listUsers({ perPage: 1000 });
-    for (const u of users ?? []) {
-      if (ids.includes(u.id)) emailMap[u.id] = u.email ?? "";
-    }
-  }
+  const emailMap = await lookupUserEmailsByIds(db, ids);
 
   const members = (profiles ?? []).map((p) => ({
     id:           p.id,

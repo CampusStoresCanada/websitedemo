@@ -10,7 +10,7 @@ import { deriveRegistrationTier } from "../conference/registration-tier";
 import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
-import { findUserByEmail } from "../supabase/find-user-by-email";
+import { findUserByEmail } from "../supabase/user-lookup";
 
 /**
  * v3 fulfill — the read/allocate side. The buy-side (cart → checkout → mint)
