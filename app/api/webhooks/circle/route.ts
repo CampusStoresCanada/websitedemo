@@ -121,7 +121,6 @@ async function handleMemberUpdated(data: Record<string, unknown>): Promise<void>
 
   if (!email || !circleId) return;
 
-  // Update circle_properties on the contact with latest non-canonical data
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const db = createAdminClient();
 
@@ -130,14 +129,50 @@ async function handleMemberUpdated(data: Record<string, unknown>): Promise<void>
   if (data.bio) nonCanonical.bio = data.bio;
   if (data.avatar_url) nonCanonical.avatar_url = data.avatar_url;
 
-  if (Object.keys(nonCanonical).length === 0) return;
+  // Circle's "name" is a core member attribute (not a custom profile field,
+  // so community_member_profile_field_updated never carries it) — apply it
+  // with last-write-wins: only take Circle's name if it changed more
+  // recently than this contact was last edited on our side. No per-field
+  // timestamp exists, so we use the whole-row contacts.updated_at as a
+  // deliberately simple heuristic (see plan notes) against Circle's event
+  // time if present, falling back to webhook-receipt time otherwise.
+  const incomingName = typeof data.name === "string" ? data.name : null;
+  let nameUpdate: { name: string } | null = null;
+
+  if (incomingName) {
+    const circleEventAt =
+      typeof data.updated_at === "string" ? new Date(data.updated_at) : new Date();
+
+    const { data: contact } = await db
+      .from("contacts")
+      .select("id, name, updated_at")
+      .eq("email", email)
+      .not("circle_id", "is", null)
+      .maybeSingle();
+
+    if (contact && contact.name !== incomingName) {
+      const oursUpdatedAt = contact.updated_at ? new Date(contact.updated_at) : new Date(0);
+      if (circleEventAt > oursUpdatedAt) {
+        nameUpdate = { name: incomingName };
+      } else {
+        console.log(
+          `[circle/webhook] name change for ${email} ignored — our record (updated ${contact.updated_at}) is newer than Circle's event`
+        );
+      }
+    }
+  }
+
+  if (Object.keys(nonCanonical).length === 0 && !nameUpdate) return;
 
   // Intentional exception to identity lifecycle helper usage:
   // circle_properties is external-system engagement metadata, not identity data.
   await db
     .from("contacts")
     .update({
-      circle_properties: JSON.parse(JSON.stringify(nonCanonical)),
+      ...(Object.keys(nonCanonical).length > 0
+        ? { circle_properties: JSON.parse(JSON.stringify(nonCanonical)) }
+        : {}),
+      ...nameUpdate,
       synced_from_circle_at: new Date().toISOString(),
     })
     .eq("email", email)
@@ -192,6 +227,55 @@ async function handleProfileFieldUpdated(data: Record<string, unknown>): Promise
       })
       .eq("id", contact.id);
   }
+}
+
+async function handleMemberDestroyed(data: Record<string, unknown>): Promise<void> {
+  const circleId = Number(data.id);
+  if (!circleId) return;
+
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const { findUserByEmail } = await import("@/lib/supabase/user-lookup");
+  const db = createAdminClient();
+
+  // Supabase is the identity source of truth — the contacts row (name,
+  // email, org association, CRM history) is never touched or deleted here.
+  // What CAN change: if this person has a linked authenticated account,
+  // their org membership is demoted so they lose member/partner access,
+  // since they're no longer reachable in Circle.
+  const { data: contact } = await db
+    .from("contacts")
+    .select("id, email")
+    .eq("circle_id", String(circleId))
+    .maybeSingle();
+
+  if (!contact?.email) {
+    console.log(`[circle/webhook] community_member.destroyed: no contact for circle_id ${circleId}`);
+    return;
+  }
+
+  const user = await findUserByEmail(db, contact.email);
+  if (!user) {
+    console.log(`[circle/webhook] community_member.destroyed: contact ${contact.id} has no linked auth account — nothing to demote`);
+    return;
+  }
+
+  // user_organizations.status is constrained to active/pending/rejected —
+  // "rejected" is the closest fit for "no longer valid" among those three.
+  // derivePermissionState() only counts status === "active", so this drops
+  // every org membership for this user to public-tier access.
+  const { error, data: demoted } = await db
+    .from("user_organizations")
+    .update({ status: "rejected" })
+    .eq("user_id", user.id)
+    .eq("status", "active")
+    .select("id");
+
+  if (error) {
+    console.error(`[circle/webhook] community_member.destroyed: failed to demote user ${user.id}:`, error.message);
+    return;
+  }
+
+  console.log(`[circle/webhook] community_member.destroyed: demoted ${demoted?.length ?? 0} active org membership(s) for user ${user.id} (contact ${contact.id}) — contacts row untouched`);
 }
 
 async function handlePostPublished(data: Record<string, unknown>): Promise<void> {
@@ -259,9 +343,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         break;
 
       case "community_member.destroyed":
-        // Supabase is the identity source of truth — we do not delete contacts
-        // on Circle member removal. Log and ignore.
-        console.log("[circle/webhook] community_member.destroyed — no action (Supabase is CanonicalID source)");
+        // Supabase is still the identity source of truth — the contacts row
+        // is never touched or deleted. But their linked auth account (if
+        // any) does get demoted to public-tier access, since they're no
+        // longer reachable in Circle. See handleMemberDestroyed.
+        await handleMemberDestroyed(data);
         break;
 
       default:

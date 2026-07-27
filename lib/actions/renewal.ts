@@ -247,9 +247,13 @@ export async function renewMembershipNow(
     return { success: false, error: "Organization not found" };
   }
 
-  // Matches the cron's own eligibility set — locked/canceled orgs need
-  // reactivation handling, not a renewal invoice.
-  const renewableStatuses = ["active", "reactivated"];
+  // "locked" is now self-serve reactivation too — computeNewExpiresAt's
+  // isLateJoin path already prices a lapsed org's catch-up correctly (see
+  // lib/membership/renewal-activation.ts), and the Stripe webhook already
+  // flips locked → reactivated on payment. "canceled" stays excluded — it's
+  // a deliberate opt-out (optOutOfRenewal voids/refunds invoices) with no
+  // reversal path in the state machine (ALLOWED_TRANSITIONS.canceled = []).
+  const renewableStatuses = ["active", "reactivated", "grace", "locked"];
   if (!renewableStatuses.includes(org.membership_status ?? "")) {
     return {
       success: false,

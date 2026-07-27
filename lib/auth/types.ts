@@ -1,4 +1,5 @@
 import type { User } from "@supabase/supabase-js";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 // Global roles stored on the profiles table
 export type GlobalRole = "super_admin" | "admin" | "user";
@@ -56,6 +57,11 @@ export interface UserOrganization {
     slug: string;
     logo_url: string | null;
     is_cancoll_member: boolean;
+    /** Org-level lifecycle status (active/grace/locked/...) — distinct from
+     *  this row's own `status` (the user's membership record status). Used
+     *  to gate elevated permission tiers on the org's own access being
+     *  active, not just the user's link to it. */
+    membership_status: OrgMembershipStatus | null;
   };
 }
 

@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef, createContext, useContext, ReactNode } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
+import { isOrgAccessActive } from "@/lib/membership/status";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import CreateEventModal from "@/components/toolkit/CreateEventModal";
 import { submitFlag } from "@/lib/actions/submit-flag";
@@ -59,7 +60,9 @@ export function ToolkitProvider({ children }: { children: ReactNode }) {
   const orgAdminOrgIds = useMemo(
     () =>
       organizations
-        ?.filter((uo) => uo.role === "org_admin")
+        // A lapsed org's own admin loses edit-mode (logo, brand colors,
+        // contacts) on their own page — same rule as the masking layer.
+        ?.filter((uo) => uo.role === "org_admin" && isOrgAccessActive(uo.organization.membership_status ?? null))
         ?.map((uo) => uo.organization.id) ?? [],
     [organizations]
   );

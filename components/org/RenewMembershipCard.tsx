@@ -39,7 +39,10 @@ export default function RenewMembershipCard({
     bgColor: "bg-gray-50",
     borderColor: "border-gray-200",
   };
-  const canRenew = membershipStatus === "active" || membershipStatus === "reactivated";
+  // "canceled" is a deliberate opt-out (voids/refunds invoices) with no
+  // reversal path today — no self-serve button, just a pointer to staff.
+  const canRenew = ["active", "reactivated", "grace", "locked"].includes(membershipStatus);
+  const isLapsed = membershipStatus === "grace" || membershipStatus === "locked";
 
   async function handleRenew() {
     setLoading(true);
@@ -72,13 +75,18 @@ export default function RenewMembershipCard({
             disabled={loading}
             className="px-4 py-1.5 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-medium rounded-lg disabled:opacity-50 transition-colors"
           >
-            {loading ? "Preparing invoice…" : "Renew Now"}
+            {loading ? "Preparing invoice…" : isLapsed ? "Reactivate Membership" : "Renew Now"}
           </button>
         )}
       </div>
       {membershipExpiresAt && (
         <p className="mt-2 text-sm text-gray-600">
           Renews {parseUTC(membershipExpiresAt).toLocaleDateString("en-CA")}
+        </p>
+      )}
+      {membershipStatus === "canceled" && (
+        <p className="mt-2 text-sm text-gray-600">
+          This organization opted out of renewal. Contact CSC staff to re-apply.
         </p>
       )}
       {error && <p className="mt-3 p-2.5 rounded-lg bg-red-50 border border-red-200 text-sm text-red-700">{error}</p>}

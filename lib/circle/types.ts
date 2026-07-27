@@ -12,6 +12,8 @@ export interface CircleMember {
   headline: string | null;
   bio: string | null;
   created_at: string;
+  /** Present on the raw API response; used for last-write-wins name sync. */
+  updated_at?: string;
   space_ids: number[];
   tag_ids: number[];
   admin: boolean;

@@ -1,4 +1,5 @@
 import { PERMISSION_LEVELS, type PermissionState, type UserOrganization, type GlobalRole } from "./types";
+import { isOrgAccessActive } from "@/lib/membership/status";
 
 /**
  * Check if a permission level meets or exceeds the required level.
@@ -89,7 +90,13 @@ export function derivePermissionState(
   if (globalRole === "super_admin") return "super_admin";
   if (globalRole === "admin") return "admin";
 
-  const activeOrgs = organizations.filter((uo) => uo.status === "active");
+  // A lapsed org (locked/canceled) shouldn't confer member/partner/org_admin
+  // tier just because the user's own link to it is still "active" — the
+  // ORG's own access has to be active too, or this only ever narrows
+  // (never expands) what the user already had.
+  const activeOrgs = organizations.filter(
+    (uo) => uo.status === "active" && isOrgAccessActive(uo.organization?.membership_status ?? null)
+  );
   const orgTypes = activeOrgs.map((uo) => uo.organization?.type).filter(Boolean);
 
   // Check if user is org_admin of a MEMBER organization

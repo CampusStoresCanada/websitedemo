@@ -3,6 +3,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import type { RFP, RFPWithContext, RFPVisibility } from "@/lib/types/rfp";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Post a new RFP
@@ -36,13 +38,16 @@ export async function createRFP(input: CreateRFPInput): Promise<{
   if (!isAdmin) {
     const { data: membership } = await db
       .from('user_organizations')
-      .select('role')
+      .select('role, organization:organizations(membership_status)')
       .eq('user_id', auth.ctx.userId)
       .eq('organization_id', input.organizationId)
       .eq('status', 'active')
       .maybeSingle();
 
-    if (membership?.role !== 'org_admin') {
+    const orgStatus = (membership?.organization as { membership_status: OrgMembershipStatus | null } | null)
+      ?.membership_status ?? null;
+
+    if (membership?.role !== 'org_admin' || !isOrgAccessActive(orgStatus)) {
       return { success: false, error: 'Not authorized to post RFPs for this organization' };
     }
   }

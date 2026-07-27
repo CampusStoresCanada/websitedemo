@@ -339,7 +339,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             role,
             status,
             created_at,
-            organization:organizations(id, name, type, slug, logo_url, is_cancoll_member)
+            organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status)
           `
           )
           .eq("user_id", userId)

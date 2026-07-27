@@ -18,6 +18,8 @@ import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/confere
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -97,12 +99,19 @@ export default async function OrgProfilePage({ params }: PageProps) {
   // (e.g. draft-conference visibility, which checks for admin/super_admin).
   const { data: orgIdRow } = await createAdminClient()
     .from("organizations")
-    .select("id")
+    .select("id, membership_status")
     .eq("slug", slug)
     .maybeSingle();
 
   const isAlreadyCscAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
-  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id) && !isAlreadyCscAdmin
+  // Don't elevate a viewer for a lapsed org's own page — they see exactly
+  // what a public visitor sees (getOrganizationForViewer enforces the same
+  // rule independently), so there's no "their own page" special case while
+  // the org isn't access-active.
+  const orgAccessActive = isOrgAccessActive(
+    (orgIdRow?.membership_status as OrgMembershipStatus | null) ?? null
+  );
+  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id) && !isAlreadyCscAdmin && orgAccessActive
     ? { ...viewer, viewerLevel: "org_admin" as const }
     : viewer;
 
@@ -356,8 +365,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
     const rfpResult = await listRFPsForOrg(organization.id);
     orgRFPs = rfpResult.rfps ?? [];
 
-    // Fetch supplier data for any member of this org
-    if (viewer.viewerOrgIds.includes(organization.id)) {
+    // Fetch supplier data for any member of this org — a member-tier perk,
+    // withheld while the org's own access isn't active.
+    if (viewer.viewerOrgIds.includes(organization.id) && orgAccessActive) {
       const supplierResult = await getMemberSupplierData(viewer.userEmail, organization.id);
       memberSuppliers = supplierResult.data ?? { matches: [], topMatches: [], totalMatches: 0, hasAssignments: false };
     }
@@ -372,8 +382,10 @@ export default async function OrgProfilePage({ params }: PageProps) {
       partnerRFPs = rfpResult.rfps ?? [];
     }
 
-    // Fetch market data for any member of this partner org (or global admins)
-    const isOrgMember = viewer.viewerOrgIds.includes(organization.id);
+    // Fetch market data for any member of this partner org (or global
+    // admins) — a partner-tier perk, withheld while the org's own access
+    // isn't active.
+    const isOrgMember = viewer.viewerOrgIds.includes(organization.id) && orgAccessActive;
     const isGlobalAdminViewer =
       viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
 
@@ -398,25 +410,31 @@ export default async function OrgProfilePage({ params }: PageProps) {
   const { visible: visibleLinks, hasGated, gatedVisibility } =
     await resolvePartnerLinksForViewer(rawPartnerLinks, effectiveViewerLevel);
 
-  // Org admins and super/admins can edit links — raw links needed for the editor
+  // Org admins and super/admins can edit links — raw links needed for the
+  // editor. A lapsed org's own admin loses this too (same rule as the
+  // Toolkit edit-mode gate) — CSC staff can still edit regardless.
   const canEditLinks =
     viewer.viewerLevel === "super_admin" ||
     viewer.viewerLevel === "admin" ||
-    viewer.viewerOrgAdminIds.includes(organization.id);
+    (viewer.viewerOrgAdminIds.includes(organization.id) && orgAccessActive);
   const editorRawLinks = canEditLinks ? rawPartnerLinks : undefined;
 
-  // Self-serve renewal ("Renew Now") is CSC-staff-only for now, and only
-  // surfaced once the org is within the same admin-configured reminder
-  // window (renewal.reminder_days, in Policy Settings → Renewals) the
-  // automated reminder cron uses — so "how many days before renewal this
-  // becomes relevant" stays one shared, admin-editable setting instead of a
-  // second one drifting out of sync with it. Skipped entirely for viewers
-  // who couldn't see the card anyway, to avoid the extra policy lookup on
-  // every ordinary org-page view.
+  // Self-serve renewal ("Renew Now") is surfaced to CSC staff and the org's
+  // own admin, within the same admin-configured reminder window
+  // (renewal.reminder_days, in Policy Settings → Renewals) the automated
+  // reminder cron uses — so "how many days before renewal this becomes
+  // relevant" stays one shared, admin-editable setting instead of a second
+  // one drifting out of sync with it. Skipped entirely for viewers who
+  // couldn't see the card anyway, to avoid the extra policy lookup on every
+  // ordinary org-page view. A lapsed org's own admin also needs graceDays
+  // for an accurate GracePeriodBanner countdown, so both are captured here.
   const isCscAdminViewer = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+  const isOwnOrgAdmin = viewer.viewerOrgAdminIds.includes(organization.id);
   let renewalWindowOpen = false;
-  if (isCscAdminViewer) {
+  let graceDays = 30;
+  if (isCscAdminViewer || isOwnOrgAdmin) {
     const renewalConfig = await getRenewalConfig();
+    graceDays = renewalConfig.grace_days;
     const maxReminderDay = Math.max(...renewalConfig.reminder_days);
     if (organization.membership_expires_at) {
       const daysUntilExpiry = Math.ceil(
@@ -452,6 +470,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         initialRFPs={orgRFPs}
         memberSuppliers={memberSuppliers}
         renewalWindowOpen={renewalWindowOpen}
+        graceDays={graceDays}
       />
       </>
     );
@@ -482,6 +501,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       canNudge={canNudge}
       nudgeAvailableAt={nudgeAvailableAt}
       renewalWindowOpen={renewalWindowOpen}
+      graceDays={graceDays}
     />
     </>
   );

@@ -36,6 +36,8 @@ import { fieldProps } from "@/lib/editable-fields";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import RenewMembershipCard from "@/components/org/RenewMembershipCard";
+import GracePeriodBanner from "@/components/membership/GracePeriodBanner";
+import { isOrgAccessActive, isOrgInGrace } from "@/lib/membership/status";
 
 interface SponsorTierInfo {
   name: string; slug: string; color: string; icon: TierIcon | null;
@@ -91,6 +93,8 @@ interface MemberProfileProps {
   memberSuppliers?: SupplierData | null;
   /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
   renewalWindowOpen?: boolean;
+  /** renewal.grace_days policy value — feeds the GracePeriodBanner countdown. */
+  graceDays?: number;
 }
 
 export default function MemberProfile({
@@ -110,6 +114,7 @@ export default function MemberProfile({
   initialRFPs = [],
   memberSuppliers = null,
   renewalWindowOpen = false,
+  graceDays = 30,
 }: MemberProfileProps) {
   // buyableExtras now includes offers the org already holds seats of (see
   // app/org/[slug]/page.tsx) — this looks up which ones, so those render as
@@ -655,13 +660,24 @@ export default function MemberProfile({
             </div>
           )}
 
-          {isCscAdmin && renewalWindowOpen && (
-            <RenewMembershipCard
-              organizationId={organization.id}
-              membershipStatus={organization.membership_status ?? null}
-              membershipExpiresAt={organization.membership_expires_at ?? null}
-            />
-          )}
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            isOrgInGrace(organization.membership_status ?? null) && (
+              <GracePeriodBanner
+                status={organization.membership_status ?? null}
+                gracePeriodStartedAt={organization.grace_period_started_at ?? null}
+                graceDays={graceDays}
+                renewalHref={`/org/${organization.slug}`}
+              />
+            )}
+
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            (renewalWindowOpen || !isOrgAccessActive(organization.membership_status ?? null)) && (
+              <RenewMembershipCard
+                organizationId={organization.id}
+                membershipStatus={organization.membership_status ?? null}
+                membershipExpiresAt={organization.membership_expires_at ?? null}
+              />
+            )}
 
           {/* Sponsor tier badge */}
           {sponsorTier && (
@@ -1222,13 +1238,24 @@ export default function MemberProfile({
             )}
           </div>
 
-          {isCscAdmin && renewalWindowOpen && (
-            <RenewMembershipCard
-              organizationId={organization.id}
-              membershipStatus={organization.membership_status ?? null}
-              membershipExpiresAt={organization.membership_expires_at ?? null}
-            />
-          )}
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            isOrgInGrace(organization.membership_status ?? null) && (
+              <GracePeriodBanner
+                status={organization.membership_status ?? null}
+                gracePeriodStartedAt={organization.grace_period_started_at ?? null}
+                graceDays={graceDays}
+                renewalHref={`/org/${organization.slug}`}
+              />
+            )}
+
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            (renewalWindowOpen || !isOrgAccessActive(organization.membership_status ?? null)) && (
+              <RenewMembershipCard
+                organizationId={organization.id}
+                membershipStatus={organization.membership_status ?? null}
+                membershipExpiresAt={organization.membership_expires_at ?? null}
+              />
+            )}
 
           {/* Sponsor tier badge (mobile) */}
           {sponsorTier && (

@@ -2,6 +2,7 @@ import { supabase } from "@/lib/supabase";
 import { applyFieldMask, loadVisibilityConfig } from "@/lib/visibility/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TierIcon } from "@/lib/sponsorship/types";
+import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -497,7 +498,7 @@ async function fetchMapOrgsWithBenchmarking(
     .select(
       "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, website, primary_category, organization_type, fte, company_description, highlight_product_name, catalogue_url, certifications, is_cancoll_member, procurement_info"
     )
-    .eq("membership_status", "active")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
     .is("archived_at", null)
     .order("name", { ascending: true });
 

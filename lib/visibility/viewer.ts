@@ -1,5 +1,6 @@
 import { getOptionalAuthContext, getIdentitySnapshot, type AuthContext } from "@/lib/auth/guards";
 import type { ViewerLevel } from "./defaults";
+import { isOrgAccessActive } from "@/lib/membership/status";
 
 /**
  * Context about who is viewing a page, used for visibility decisions.
@@ -62,15 +63,21 @@ export async function getViewerContext(): Promise<ViewerContext> {
     const typeByOrgId = new Map(
       orgRows.map((uo) => [uo.organization_id, uo.organization?.type])
     );
+    const statusByOrgId = new Map(
+      orgRows.map((uo) => [uo.organization_id, uo.organization?.membership_status ?? null])
+    );
 
+    // A lapsed org (locked/canceled) shouldn't elevate the viewer's masking
+    // level on OTHER orgs' pages either — only an org whose own access is
+    // active counts here.
     const hasMemberOrg = ctx.activeOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Member"
+      (orgId) => typeByOrgId.get(orgId) === "Member" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
     );
     const hasPartnerOrg = ctx.activeOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Vendor Partner"
+      (orgId) => typeByOrgId.get(orgId) === "Vendor Partner" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
     );
     const isMemberOrgAdmin = ctx.orgAdminOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Member"
+      (orgId) => typeByOrgId.get(orgId) === "Member" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
     );
 
     if (isMemberOrgAdmin) {

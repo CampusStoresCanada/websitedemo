@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   OrgMembershipStatus,
   TransitionTrigger,
@@ -7,10 +7,19 @@ import { ALLOWED_TRANSITIONS } from "./types";
 import { getEffectivePolicy } from "@/lib/policy/engine";
 import { enqueueOrgCircleAccessSync } from "@/lib/circle/sync";
 
-export const PUBLIC_LISTABLE_ORG_STATUSES: OrgMembershipStatus[] = [
-  "active",
-  "reactivated",
-];
+// Pure status predicates live in ./status (zero imports beyond ./types) so
+// client components can import them without pulling in createAdminClient,
+// which is explicitly server-only. Re-exported here so existing server-side
+// importers of state-machine.ts don't need to change.
+export {
+  PUBLIC_LISTABLE_ORG_STATUSES,
+  ORG_PROFILE_RESOLVABLE_STATUSES,
+  isOrgAccessActive,
+  isOrgPubliclyListable,
+  isOrgInGrace,
+  canReactivate,
+  graceDaysRemaining,
+} from "./status";
 
 // ─────────────────────────────────────────────────────────────────
 // Core transition function
@@ -30,7 +39,13 @@ export async function transitionMembershipState(
   reason: string,
   metadata?: Record<string, unknown>
 ): Promise<{ success: boolean; error?: string; fromStatus?: string; toStatus?: string }> {
-  const supabase = await createClient();
+  // Every caller already authorizes the transition before invoking this
+  // (see optOutOfRenewal/approveApplication/completeOnboarding's own
+  // requireAuthenticated/requireAdmin + org-membership checks; the
+  // renewal_job/stripe_webhook triggers run with no user session at all).
+  // Use the service-role client so the RPC never needs anon/authenticated
+  // grants — matches execute_admin_transfer/publish_policy_draft.
+  const supabase = createAdminClient();
 
   // For locked → reactivated, validate reactivation window using policy
   if (newStatus === "reactivated") {
@@ -89,7 +104,7 @@ export async function transitionMembershipState(
   // Fetches org.type internally to pick the right access group.
   void (async () => {
     try {
-      const adminSb = await createClient();
+      const adminSb = createAdminClient();
       const { data: org } = await adminSb
         .from("organizations")
         .select("type")
@@ -112,33 +127,6 @@ export async function transitionMembershipState(
 // Status check utilities (pure functions — no DB calls)
 // ─────────────────────────────────────────────────────────────────
 
-/** Can this org access member/partner features? */
-export function isOrgAccessActive(status: OrgMembershipStatus | null): boolean {
-  return status !== null && ["active", "grace", "reactivated"].includes(status);
-}
-
-/** Should this org appear in public directories / map? */
-export function isOrgPubliclyListable(status: OrgMembershipStatus | null): boolean {
-  return status !== null && PUBLIC_LISTABLE_ORG_STATUSES.includes(status);
-}
-
-/** Is this org currently in a grace period? */
-export function isOrgInGrace(status: OrgMembershipStatus | null): boolean {
-  return status === "grace";
-}
-
-/** Can this org be reactivated (locked + within window)? */
-export function canReactivate(
-  status: OrgMembershipStatus | null,
-  lockedAt: Date | null,
-  reactivationDays: number
-): boolean {
-  if (status !== "locked" || !lockedAt) return false;
-  const daysSinceLock =
-    (Date.now() - lockedAt.getTime()) / (1000 * 60 * 60 * 24);
-  return daysSinceLock <= reactivationDays;
-}
-
 /** Is the given transition valid from a given status? */
 export function isTransitionAllowed(
   fromStatus: OrgMembershipStatus | null,
@@ -146,19 +134,4 @@ export function isTransitionAllowed(
 ): boolean {
   if (fromStatus === null) return toStatus === "applied";
   return ALLOWED_TRANSITIONS[fromStatus].includes(toStatus);
-}
-
-/**
- * Compute days remaining in grace period.
- * Returns null if not in grace or missing data.
- */
-export function graceDaysRemaining(
-  status: OrgMembershipStatus | null,
-  gracePeriodStartedAt: Date | null,
-  graceDays: number
-): number | null {
-  if (status !== "grace" || !gracePeriodStartedAt) return null;
-  const elapsed =
-    (Date.now() - gracePeriodStartedAt.getTime()) / (1000 * 60 * 60 * 24);
-  return Math.max(0, Math.ceil(graceDays - elapsed));
 }

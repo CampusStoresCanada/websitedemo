@@ -23,6 +23,8 @@ import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import RenewMembershipCard from "@/components/org/RenewMembershipCard";
+import GracePeriodBanner from "@/components/membership/GracePeriodBanner";
+import { isOrgAccessActive, isOrgInGrace } from "@/lib/membership/status";
 import CategoryEditor from "@/components/org/CategoryEditor";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import PartnerLinksSection from "@/components/org/PartnerLinksSection";
@@ -127,6 +129,8 @@ interface PartnerProfileProps {
   heldBooths: Array<{ name: string }>;
   /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
   renewalWindowOpen?: boolean;
+  /** renewal.grace_days policy value — feeds the GracePeriodBanner countdown. */
+  graceDays?: number;
 }
 
 export default function PartnerProfile({
@@ -150,6 +154,7 @@ export default function PartnerProfile({
   canNudge = false,
   nudgeAvailableAt = null,
   renewalWindowOpen = false,
+  graceDays = 30,
 }: PartnerProfileProps) {
   // buyableExtras now includes offers the org already holds seats of (see
   // app/org/[slug]/page.tsx) — this looks up which ones, so those render as
@@ -695,13 +700,24 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {isCscAdmin && renewalWindowOpen && (
-            <RenewMembershipCard
-              organizationId={organization.id}
-              membershipStatus={organization.membership_status ?? null}
-              membershipExpiresAt={organization.membership_expires_at ?? null}
-            />
-          )}
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            isOrgInGrace(organization.membership_status ?? null) && (
+              <GracePeriodBanner
+                status={organization.membership_status ?? null}
+                gracePeriodStartedAt={organization.grace_period_started_at ?? null}
+                graceDays={graceDays}
+                renewalHref={`/org/${organization.slug}`}
+              />
+            )}
+
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            (renewalWindowOpen || !isOrgAccessActive(organization.membership_status ?? null)) && (
+              <RenewMembershipCard
+                organizationId={organization.id}
+                membershipStatus={organization.membership_status ?? null}
+                membershipExpiresAt={organization.membership_expires_at ?? null}
+              />
+            )}
 
           {/* Sponsor tier badge */}
           {sponsorTier && (
@@ -1115,13 +1131,24 @@ export default function PartnerProfile({
             )}
           </div>
 
-          {isCscAdmin && renewalWindowOpen && (
-            <RenewMembershipCard
-              organizationId={organization.id}
-              membershipStatus={organization.membership_status ?? null}
-              membershipExpiresAt={organization.membership_expires_at ?? null}
-            />
-          )}
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            isOrgInGrace(organization.membership_status ?? null) && (
+              <GracePeriodBanner
+                status={organization.membership_status ?? null}
+                gracePeriodStartedAt={organization.grace_period_started_at ?? null}
+                graceDays={graceDays}
+                renewalHref={`/org/${organization.slug}`}
+              />
+            )}
+
+          {(isCscAdmin || isOrgAdminForThisOrg) &&
+            (renewalWindowOpen || !isOrgAccessActive(organization.membership_status ?? null)) && (
+              <RenewMembershipCard
+                organizationId={organization.id}
+                membershipStatus={organization.membership_status ?? null}
+                membershipExpiresAt={organization.membership_expires_at ?? null}
+              />
+            )}
 
           {/* Categories — grouped with subcategories */}
           {(categories.length > 0 || (editMode && canEditThisOrg)) && (

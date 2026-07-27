@@ -18,6 +18,8 @@ import type {
 import { loadVisibilityConfig, applyFieldMask } from "./engine";
 import type { ViewerContext } from "./viewer";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 // ---------------------------------------------------------------------------
 // Return types with potentially-masked fields
@@ -78,33 +80,61 @@ export async function getOrganizationForViewer(
   const targetOrgId = raw.organization.id;
   const targetOrgType = raw.organization.type;
 
-  // org_admin viewing their own org sees everything
-  const isOwnOrg = viewer.viewerOrgAdminIds.includes(targetOrgId);
+  // Whether the TARGET org's own membership/partnership is currently active
+  // (active/grace/reactivated). A lapsed org (locked/canceled) shows exactly
+  // what a public visitor sees — including to its own admin — until it
+  // reactivates; the reminder card/banner is the explicit path to fix that,
+  // not a silent unmasking bypass here.
+  const orgAccessActive = isOrgAccessActive(
+    (raw.organization.membership_status as OrgMembershipStatus | null) ?? null
+  );
+  const isStaffViewer = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+
+  // org_admin viewing their own org sees everything — but only while that
+  // org's own access is active.
+  const isOwnOrg = viewer.viewerOrgAdminIds.includes(targetOrgId) && orgAccessActive;
+
+  // CSC staff still see the real (unmasked-by-status) view regardless, so
+  // they can act on a lapsed org (billing, support). Everyone else — public
+  // visitors and the lapsed org's own people alike — sees public-tier
+  // masking once the org's access isn't active.
+  const maskingViewerLevel =
+    !orgAccessActive && !isStaffViewer ? "public" : viewer.viewerLevel;
 
   // Mask organization fields
   const maskedOrg = applyFieldMask(
     raw.organization as unknown as Record<string, unknown>,
-    viewer.viewerLevel,
+    maskingViewerLevel,
     config,
     "organizations",
     isOwnOrg,
     targetOrgType
   );
 
-  // Always ensure essential fields are present (they're in public_allowlist)
+  // Always ensure essential fields are present. id/slug/name/type are
+  // "in public_allowlist" by convention but forced through regardless in
+  // case that admin-editable policy value ever drifts. membership_status/
+  // membership_expires_at/grace_period_started_at are forced through for a
+  // different reason: they're structural status fields the renewal UI
+  // (banner, reactivation card, isOrgAccessActive checks) depends on to
+  // function at all — not sensitive content, so they shouldn't be at the
+  // mercy of the same content-visibility policy that masks contact PII.
   const visibleOrg: VisibleOrganization = {
     ...(maskedOrg as Partial<Organization>),
     id: raw.organization.id,
     slug: raw.organization.slug,
     name: raw.organization.name,
     type: raw.organization.type,
+    membership_status: raw.organization.membership_status,
+    membership_expires_at: raw.organization.membership_expires_at,
+    grace_period_started_at: raw.organization.grace_period_started_at,
   };
 
   // Mask each contact
   const maskedContacts: VisibleContact[] = raw.contacts.map((contact) => {
     const masked = applyFieldMask(
       contact as unknown as Record<string, unknown>,
-      viewer.viewerLevel,
+      maskingViewerLevel,
       config,
       "contacts",
       isOwnOrg,

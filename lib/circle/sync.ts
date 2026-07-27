@@ -286,7 +286,7 @@ export async function sweepInboundFromCircle(): Promise<{
   // All contacts with a linked circle_id
   const { data: contacts, error } = await adminClient
     .from("contacts")
-    .select("id, email, circle_properties")
+    .select("id, email, name, updated_at, circle_properties")
     .not("circle_id", "is", null)
     .not("email", "is", null);
 
@@ -325,7 +325,20 @@ export async function sweepInboundFromCircle(): Promise<{
     if (member.bio != null) incoming.bio = member.bio;
     if (member.avatar_url != null) incoming.avatar_url = member.avatar_url;
 
-    if (Object.keys(incoming).length === 0) continue;
+    // Last-write-wins name catch-up — same rule as the webhook handler in
+    // app/api/webhooks/circle/route.ts: only take Circle's name if its event
+    // time is newer than this contact's own updated_at (whole-row heuristic,
+    // see plan notes). Catches anything a webhook missed.
+    let nameUpdate: { name: string } | null = null;
+    if (member.name && member.name !== contact.name) {
+      const circleEventAt = member.updated_at ? new Date(member.updated_at) : null;
+      const oursUpdatedAt = contact.updated_at ? new Date(contact.updated_at) : new Date(0);
+      if (circleEventAt && circleEventAt > oursUpdatedAt) {
+        nameUpdate = { name: member.name };
+      }
+    }
+
+    if (Object.keys(incoming).length === 0 && !nameUpdate) continue;
 
     // Skip write if nothing actually changed
     const existing =
@@ -337,7 +350,7 @@ export async function sweepInboundFromCircle(): Promise<{
     const hasChanges = Object.keys(incoming).some(
       (k) => existing[k] !== incoming[k]
     );
-    if (!hasChanges) continue;
+    if (!hasChanges && !nameUpdate) continue;
 
     const merged = { ...existing, ...incoming };
     const photoUpdate: Record<string, unknown> = {};
@@ -350,6 +363,7 @@ export async function sweepInboundFromCircle(): Promise<{
           circle_properties: merged as Json,
           synced_from_circle_at: new Date().toISOString(),
           ...photoUpdate,
+          ...nameUpdate,
         })
         .eq("id", contact.id);
 
@@ -421,6 +435,10 @@ export async function enqueueOrgCircleAccessSync(
       // applied, approved, etc. — no Circle action needed
       return;
     }
+
+    // Shared downgrade group for this org's type — where a lapsed org's
+    // contacts land instead of being deleted from Circle entirely.
+    const lapsedGroupId = isPartner ? groupIds.nonPartner : groupIds.nonMember;
 
     // ── Resolve the access group ID for this org ──────────────────────────────
     let activeGroupId: number | null = null;
@@ -547,6 +565,20 @@ export async function enqueueOrgCircleAccessSync(
             idempotencyKey: `org-tag-add-${contact.id}-${org.circle_tag_id}-${newStatus}`,
           });
         }
+        // Clear the lapsed-org downgrade group, in case this contact was
+        // previously locked/canceled and is now reactivating — otherwise
+        // they'd stay labeled "Non-Member"/"Non-Partner" forever. Harmless
+        // (no-op in Circle) if they were never in it.
+        if (lapsedGroupId) {
+          await enqueueCircleSync({
+            operation: "remove_from_access_group",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { groupId: lapsedGroupId, email: contact.email },
+            orgId,
+            idempotencyKey: `lapsed-remove-${contact.id}-${lapsedGroupId}-${newStatus}`,
+          });
+        }
       } else if (isDeactivated) {
         // Remove org tag
         if (org.circle_tag_id) {
@@ -570,15 +602,19 @@ export async function enqueueOrgCircleAccessSync(
             idempotencyKey: `access-remove-${contact.id}-${activeGroupId}-${now}`,
           });
         }
-        // Delete from Circle community (removes posting/DM access)
-        await enqueueCircleSync({
-          operation: "delete_member",
-          entityType: "contact",
-          entityId: contact.id,
-          payload: { email: contact.email },
-          orgId,
-          idempotencyKey: `delete-member-${contact.id}-${now}`,
-        });
+        // Downgrade into the shared "Non-Member"/"Non-Partner" group instead
+        // of deleting the Circle account — they keep community access, just
+        // lose the org-tier perks (removed above) until they reactivate.
+        if (lapsedGroupId) {
+          await enqueueCircleSync({
+            operation: "add_to_access_group",
+            entityType: "contact",
+            entityId: contact.id,
+            payload: { groupId: lapsedGroupId, email: contact.email },
+            orgId,
+            idempotencyKey: `lapsed-add-${contact.id}-${lapsedGroupId}-${now}`,
+          });
+        }
       }
     }
 

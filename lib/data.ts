@@ -1,6 +1,7 @@
 import { supabase } from "./supabase";
 import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./types/db";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_PROFILE_RESOLVABLE_STATUSES } from "@/lib/membership/status";
 
 /** Org data embedded in a board card contact join. */
 export type OrgForCard = Pick<Organization, "id" | "slug" | "logo_url" | "type" | "membership_status" | "archived_at"> & {
@@ -36,7 +37,7 @@ export async function getOrganizations(): Promise<Organization[]> {
   const query = supabase
     .from("organizations")
     .select("*")
-    .eq("membership_status", "active")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
     .is("archived_at", null)
     .order("name");
 
@@ -62,7 +63,7 @@ export async function getOrganizationsByType(
     .from("organizations")
     .select("*")
     .eq("type", type)
-    .eq("membership_status", "active")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
     .is("archived_at", null)
     .order("name");
 
@@ -87,7 +88,7 @@ export async function getMembers(): Promise<Organization[]> {
       .from("organizations")
       .select("*")
       .eq("type", "Member")
-      .eq("membership_status", "active")
+      .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
@@ -109,7 +110,7 @@ export async function getPartners(): Promise<Organization[]> {
       .from("organizations")
       .select("*")
       .eq("type", "Vendor Partner")
-      .eq("membership_status", "active")
+      .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
@@ -133,7 +134,7 @@ export async function getOrganizationBySlug(
       .from("organizations")
       .select("*")
       .eq("slug", slug)
-      .eq("membership_status", "active")
+      .in("membership_status", ORG_PROFILE_RESOLVABLE_STATUSES)
       .is("archived_at", null)
       .single(),
     DB_TIMEOUT,
@@ -320,7 +321,7 @@ async function computeFteStats(): Promise<{ total: number; hasEstimates: boolean
       .from("organizations")
       .select("id")
       .eq("type", "Member")
-      .eq("membership_status", "active")
+      .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
@@ -430,7 +431,7 @@ export async function getStats(): Promise<{
         .from("organizations")
         .select("*", { count: "exact", head: true })
         .eq("type", "Member")
-        .eq("membership_status", "active")
+        .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
         .is("archived_at", null),
       DB_TIMEOUT,
       { count: 0, error: null }
@@ -440,7 +441,7 @@ export async function getStats(): Promise<{
         .from("organizations")
         .select("*", { count: "exact", head: true })
         .eq("type", "Vendor Partner")
-        .eq("membership_status", "active")
+        .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
         .is("archived_at", null),
       DB_TIMEOUT,
       { count: 0, error: null }
@@ -450,7 +451,7 @@ export async function getStats(): Promise<{
         .from("organizations")
         .select("province")
         .eq("type", "Member")
-        .eq("membership_status", "active")
+        .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
         .is("archived_at", null)
         .not("province", "is", null),
       DB_TIMEOUT,
@@ -487,7 +488,7 @@ export async function getDirectoryMembers(): Promise<Partial<Organization>[]> {
       .from("organizations")
       .select(DIRECTORY_SELECT)
       .eq("type", "Member")
-      .eq("membership_status", "active")
+      .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,
@@ -509,7 +510,7 @@ export async function getDirectoryPartners(): Promise<Partial<Organization>[]> {
       .from("organizations")
       .select(DIRECTORY_SELECT)
       .eq("type", "Vendor Partner")
-      .eq("membership_status", "active")
+      .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
       .order("name"),
     DB_TIMEOUT,

@@ -16,6 +16,7 @@ import {
 } from "@/lib/editable-fields";
 import { queueTier2Change } from "@/lib/actions/pending-content-changes";
 import { sendContentChangeFyi } from "@/lib/email/send";
+import { enqueueCircleSync } from "@/lib/circle/sync";
 
 interface UpdateFieldParams {
   table: EditableTable;
@@ -279,6 +280,20 @@ export async function updateField({
         console.warn("[update-field] unable to load contact after update:", updatedContactError.message);
       } else if (updatedContact) {
         await syncContactIdentity(updatedContact as ContactIdentityRow);
+      }
+
+      // Push name changes to Circle. handleUpdateProfile already supports
+      // this — the gap was that nothing enqueued it. enqueueCircleSync
+      // no-ops silently if Circle isn't configured or cutover is off.
+      if (column === "name" && typeof newValue === "string" && newValue) {
+        void enqueueCircleSync({
+          operation: "update_profile",
+          entityType: "contact",
+          entityId,
+          payload: { name: newValue },
+          orgId: resolvedOrgId ?? undefined,
+          idempotencyKey: `update-profile-name-${entityId}-${newValue}`,
+        });
       }
     }
 

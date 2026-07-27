@@ -74,11 +74,17 @@ export function getAccessGroupIds(): {
   member: number | null;
   partner: number | null;
   alumni: number | null;
+  /** Shared downgrade group for a lapsed Member org (grace/active elsewhere; locked/canceled lands here). */
+  nonMember: number | null;
+  /** Shared downgrade group for a lapsed Vendor Partner org. */
+  nonPartner: number | null;
 } {
   return {
     member: Number(process.env.CIRCLE_MEMBER_ACCESS_GROUP_ID) || null,
     partner: Number(process.env.CIRCLE_PARTNER_ACCESS_GROUP_ID) || null,
     alumni: Number(process.env.CIRCLE_ALUMNI_ACCESS_GROUP_ID) || null,
+    nonMember: Number(process.env.CIRCLE_NON_MEMBER_ACCESS_GROUP_ID) || null,
+    nonPartner: Number(process.env.CIRCLE_NON_PARTNER_ACCESS_GROUP_ID) || null,
   };
 }
 
