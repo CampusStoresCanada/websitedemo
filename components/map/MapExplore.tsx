@@ -5,7 +5,7 @@ import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
-import { createClient } from "@/lib/supabase/client";
+import { getPrimaryContactsForMap } from "@/lib/actions/map-contacts";
 import type { HomeMapOrg } from "@/lib/homepage";
 import type { MapRef } from "./Map";
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
@@ -277,26 +277,10 @@ export default function MapExplore({
       setContactsForOrg([]);
       return () => { cancelled = true; };
     }
-    const supabase = createClient();
-    supabase
-      .from("contacts")
-      .select("name, role_title, work_email, email, work_phone_number, phone, profile_picture_url")
-      .eq("organization_id", selectedOrg.id)
-      .is("archived_at", null)
-      .eq("is_primary", true)
-      .order("name")
-      .then(({ data }) => {
-        if (cancelled) return;
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const rows = (data as any[]) ?? [];
-        setContactsForOrg(rows.map((row) => ({
-          name: row.name ?? "Unknown",
-          roleTitle: row.role_title ?? null,
-          email: row.work_email || row.email || null,
-          phone: row.work_phone_number || row.phone || null,
-          avatarUrl: row.profile_picture_url ?? null,
-        })));
-      });
+    getPrimaryContactsForMap(selectedOrg.id, selectedOrg.type ?? null).then((rows) => {
+      if (cancelled) return;
+      setContactsForOrg(rows);
+    });
     return () => { cancelled = true; };
   }, [selectedOrg?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 

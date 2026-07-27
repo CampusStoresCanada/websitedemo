@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerAuthState } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { CERTIFICATION_NAMES } from "@/lib/certifications";
@@ -41,7 +41,7 @@ export async function updateCertifications(
     return { success: false, error: `Unknown certifications: ${invalid.join(", ")}` };
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
   const { error } = await supabase
     .from("organizations")
     .update({ certifications })
@@ -74,7 +74,7 @@ export async function updateCancollStatus(
     return { success: false, error: "Admin access required" };
   }
 
-  const supabase = await createClient();
+  const supabase = createAdminClient();
 
   // Fetch current certifications so we can add/remove CANCOLL without touching others
   const { data: org } = await supabase

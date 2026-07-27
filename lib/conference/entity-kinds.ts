@@ -109,6 +109,16 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
     suggestedRoles: ["when", "where", "who"], requiredRoles: ["when"], sellable: true,
   },
   {
+    kind: "presentation_slot", label: "Presentation Slot",
+    hint: "A paid, first-come speaking slot for a vendor — e.g. a service provider showcasing a new feature or model. Gate purchase to specific vendor categories with direct_purchase_only / direct_purchase_category.",
+    fields: [
+      SUMMARY_FIELD,
+      { key: "presenter_org", label: "Presenter org (optional)", type: "text", hint: "Fill in once a vendor claims the slot." },
+      ...TIME_FIELDS,
+    ],
+    suggestedRoles: ["when", "where", "who"], requiredRoles: ["when"], sellable: true,
+  },
+  {
     kind: "event", label: "Event",
     hint: "An off-agenda happening — reception, tour, gala.",
     fields: [

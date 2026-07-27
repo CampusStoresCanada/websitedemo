@@ -6,8 +6,11 @@
  * and returns a typed snapshot object ready to store in page_snapshots.
  */
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
+import { getViewerContext } from "@/lib/visibility/viewer";
+import { loadVisibilityConfig, applyFieldMask } from "@/lib/visibility/engine";
+import type { Contact } from "@/lib/types/db";
 import type {
   OrgProfileSnapshot,
   EventSnapshot,
@@ -26,7 +29,7 @@ export async function captureOrgProfileSnapshot(
   const auth = await requireAuthenticated();
   if (!auth.ok) return null;
 
-  const { supabase } = auth.ctx;
+  const supabase = createAdminClient();
 
   const { data: org, error: orgError } = await supabase
     .from("organizations")
@@ -45,12 +48,30 @@ export async function captureOrgProfileSnapshot(
     .is("archived_at", null)
     .order("name");
 
-  const contacts = (contactRows ?? []).map((c) => ({
-    name: c.name ?? "",
-    role_title: c.role_title ?? null,
-    email: c.email ?? null,
-    phone: c.phone ?? null,
-  }));
+  // Mask per the CURRENT authenticated viewer's level, same rules as the
+  // org profile page itself — a snapshot should never reveal more than the
+  // capturing user could already see by visiting the page.
+  const viewer = await getViewerContext();
+  const visibilityConfig = await loadVisibilityConfig();
+  const isOwnOrg = viewer.viewerOrgAdminIds.includes(org.id);
+
+  const contacts = (contactRows ?? []).map((c) => {
+    const masked = applyFieldMask(
+      c as unknown as Record<string, unknown>,
+      viewer.viewerLevel,
+      visibilityConfig,
+      "contacts",
+      isOwnOrg,
+      org.type
+    ) as Partial<Contact>;
+
+    return {
+      name: (masked.name as string) ?? "",
+      role_title: (masked.role_title as string) ?? null,
+      email: (masked.email as string) ?? null,
+      phone: (masked.phone as string) ?? null,
+    };
+  });
 
   return {
     type: "org_profile",

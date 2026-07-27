@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface UploadOrganizationImageParams {
   organizationId: string;
@@ -26,7 +27,7 @@ export async function uploadOrganizationImage({
 }: UploadOrganizationImageParams): Promise<UploadOrganizationImageResult> {
   const auth = await requireOrgAdminOrSuperAdmin(organizationId);
   if (!auth.ok) return { success: false, error: auth.error };
-  const supabase = auth.ctx.supabase;
+  const supabase = createAdminClient();
 
   // Validate content type
   const allowedTypes = ["image/jpeg", "image/png", "image/webp", "image/gif", "image/svg+xml"];

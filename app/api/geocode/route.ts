@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@supabase/supabase-js";
+import { getServerAuthState } from "@/lib/auth/server";
 import { geocodeAddress } from "@/lib/geocode";
 
-// Create an untyped client for this API route since we're dealing with lat/lng columns
-// that may not be in the simplified types
+// Untyped client for this API route since we're dealing with lat/lng columns
+// that may not be in the simplified types. Service-role: this is an
+// admin-only bulk operation across every organization, not scoped to a
+// caller's own org, so it never needs anon/authenticated DB access.
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
 interface OrgForGeocoding {
@@ -18,8 +21,14 @@ interface OrgForGeocoding {
   postal_code: string | null;
 }
 
-// POST /api/geocode - Geocode all organizations missing coordinates
+// POST /api/geocode - Geocode all organizations missing coordinates.
+// Manually-triggered admin backfill utility — not on a cron schedule.
 export async function POST() {
+  const auth = await getServerAuthState();
+  if (!auth.user || (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   // Fetch organizations without coordinates
   const { data, error } = await supabase
     .from("organizations")
@@ -99,6 +108,11 @@ export async function POST() {
 
 // GET /api/geocode - Check geocoding status
 export async function GET() {
+  const auth = await getServerAuthState();
+  if (!auth.user || (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
   const { count: total } = await supabase
     .from("organizations")
     .select("*", { count: "exact", head: true })

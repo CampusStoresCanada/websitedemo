@@ -1,0 +1,35 @@
+-- Closes the contacts PII exposure confirmed live: an unauthenticated
+-- request using only the public anon key returned real names and emails
+-- directly from this table (curl to /rest/v1/contacts, no login, no
+-- special access — verified against production).
+--
+-- Fixed in code first (this migration has a deploy-order dependency, same
+-- as 20260723203000 and 20260723210000):
+--   - components/map/MapExplore.tsx (rendered via MapHero on the homepage,
+--     /partners, and /members — reachable by anonymous visitors) now calls
+--     the new lib/actions/map-contacts.ts::getPrimaryContactsForMap()
+--     server action instead of querying Supabase directly from the
+--     browser. That action fetches via createAdminClient() and applies
+--     lib/visibility/engine.ts's applyFieldMask() before returning
+--     anything — verified live: an anonymous visitor selecting Algonquin
+--     College now sees "S. D." / "@algonquincollege.com" /
+--     "(613) 727-••••••••" instead of the raw name/email/phone.
+--   - lib/snapshots/capture.ts (captureOrgProfileSnapshot) now fetches via
+--     createAdminClient() and applies the same masking based on the
+--     capturing user's actual viewer level, instead of relying on the
+--     session client + this policy to approximate "as the current viewer."
+--   - lib/actions/delete-contact.ts's ownership-check SELECT (auth.ctx.
+--     supabase, the session client) now uses createAdminClient() — the
+--     actual authorization (canManageOrganization) is unaffected, it
+--     just no longer depends on this policy to read the row at all.
+--   - Every other read of "contacts" already used createAdminClient()
+--     (lib/data.ts, lib/identity/lifecycle.ts, lib/homepage.ts, and the
+--     rest of the 27 files that touch this table).
+--
+-- The "Users can read their organization's contacts" policy (authenticated,
+-- scoped to auth.jwt()->>'organization_id') is left in place — harmless,
+-- and becomes meaningful now that the public policy no longer makes it
+-- redundant. It only covers a JWT-embedded org_id claim this app doesn't
+-- currently set, so it grants nothing today; revisit if that changes.
+
+DROP POLICY IF EXISTS "Allow public read access on contacts" ON public.contacts;

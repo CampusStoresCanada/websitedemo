@@ -6,6 +6,7 @@ import {
 } from "@/lib/auth/guards";
 import { archivePersonContact } from "@/lib/identity/lifecycle";
 import { enqueueContactCircleDeprovisioning } from "@/lib/circle/sync";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface DeleteContactParams {
   contactId: string;
@@ -35,7 +36,8 @@ export async function deleteContact({
     if (!auth.ok) {
       return { success: false, error: "You must be logged in to delete contacts" };
     }
-    const { supabase, userEmail } = auth.ctx;
+    const { userEmail } = auth.ctx;
+    const supabase = createAdminClient();
 
     // 3. Get the contact to verify ownership
     const { data: contact } = await supabase

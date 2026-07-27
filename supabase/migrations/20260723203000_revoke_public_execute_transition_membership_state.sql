@@ -1,0 +1,25 @@
+-- Third and final piece of the SECURITY DEFINER cleanup started in
+-- 20260723193000 / 20260723200000. transition_membership_state was
+-- deliberately excluded from those because — unlike everything else —
+-- lib/membership/state-machine.ts called it via the session-scoped client
+-- (createClient), not the service-role client, for BOTH real user-triggered
+-- transitions and system-triggered ones (renewal cron, Stripe webhooks,
+-- which run with p_actor_id=null and no user session at all). Revoking
+-- PUBLIC without fixing that first would have broken renewals, application
+-- approval, onboarding, and Stripe-driven status changes — all real,
+-- load-bearing flows.
+--
+-- Root cause fixed in code (not here): lib/membership/state-machine.ts now
+-- uses createAdminClient() for both the RPC call and its Circle-sync
+-- lookup. Every real caller already authorizes the transition BEFORE
+-- calling transitionMembershipState() — optOutOfRenewal() requires
+-- isGlobalAdmin() or canManageOrganization(orgId), approveApplication() and
+-- rejectApplication() require requireAdmin(), completeOnboarding() checks
+-- isAdmin/isOrgAdmin — and the system triggers (renewal_job,
+-- stripe_webhook) are trusted contexts (cron, Stripe signature
+-- verification) that never needed a user session to begin with. Once the
+-- wrapper uses the service-role client, nothing legitimate needs
+-- anon/authenticated access to the RPC anymore — same pattern as
+-- execute_admin_transfer and publish_policy_draft.
+
+REVOKE EXECUTE ON FUNCTION public.transition_membership_state(uuid, org_membership_status, text, uuid, text, jsonb) FROM PUBLIC, anon, authenticated;
