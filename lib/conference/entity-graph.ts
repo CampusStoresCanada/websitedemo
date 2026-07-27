@@ -72,23 +72,37 @@ export function effectiveAttributes(
 export function openQuestions(entity: BuildEntity, byId: Map<string, BuildEntity>): string[] {
   const reasons: string[] = [];
   if (entity.needsDefinition) reasons.push("Coined on the fly — define what it is");
-  if (entity.isForSale && entity.priceCents == null) reasons.push("Marked for sale but has no price");
 
   const sug = SUGGESTION_BY_KIND[entity.kind];
+
+  // computedPricing kinds (e.g. membership_renewal) are deliberately stored
+  // with no price — it's computed live per-org at checkout — so "marked for
+  // sale but has no price" would never be satisfiable and shouldn't nag.
+  if (entity.isForSale && entity.priceCents == null && !sug?.computedPricing) {
+    reasons.push("Marked for sale but has no price");
+  }
 
   const roles = new Set(effectiveRefs(entity, byId).map((r) => r.role));
   for (const role of sug?.requiredRoles ?? []) {
     if (!roles.has(role)) reasons.push(`Missing ${RELATIONSHIP_BY_ROLE[role]?.label ?? role}`);
   }
 
+  // Use effective (type-inherited) attributes so an instance whose value was
+  // saved onto its type via "apply to all instances" isn't nagged forever —
+  // and match keys case-insensitively so a required field saved under a
+  // differently-cased key (e.g. "Capacity" typed to match the on-screen
+  // label, vs. the canonical "capacity") is still recognized.
+  const effAttrs = effectiveAttributes(entity, byId);
+  const lowerAttrs = new Map(Object.entries(effAttrs).map(([k, v]) => [k.toLowerCase(), v]));
+
   // A policy backed by a legal document keeps its (versioned) text in the legal
   // system (conference_legal_versions), not in a `body` attribute — so it's
   // "defined" by its linked document and shouldn't be flagged as missing text.
   const legalBackedPolicy =
-    entity.kind === "policy" && entity.attributes["legal_document_type"] != null;
+    entity.kind === "policy" && lowerAttrs.get("legal_document_type") != null;
   for (const key of sug?.requiredFields ?? []) {
     if (legalBackedPolicy && key === "body") continue;
-    const v = entity.attributes[key];
+    const v = lowerAttrs.get(key.toLowerCase());
     if (v === undefined || v === null || v === "") {
       reasons.push(`Missing ${sug?.fields.find((f) => f.key === key)?.label ?? key}`);
     }

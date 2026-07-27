@@ -33,6 +33,10 @@ export type KindSuggestion = {
   requiredFields?: string[];
   sellable?: boolean;
   seeded?: boolean;
+  /** True when price is computed live per-org at checkout rather than stored
+   *  on the entity — hides the price/tier inputs in Build and exempts the
+   *  entity from the "marked for sale but has no price" open question. */
+  computedPricing?: boolean;
 };
 
 /**
@@ -217,7 +221,7 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
   {
     kind: "membership_renewal", label: "Membership Renewal",
     hint: "Auto-provisioned, one per conference. Attach as Requires on an offer (e.g. a booth) to require an active membership through the conference's dates — price is computed per-org at checkout, not set here.",
-    fields: [], sellable: true, seeded: true,
+    fields: [], sellable: true, seeded: true, computedPricing: true,
   },
 ];
 

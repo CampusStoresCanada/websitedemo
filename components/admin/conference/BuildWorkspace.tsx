@@ -364,6 +364,7 @@ function ThingRow({
   onDelete: (id: string) => void;
 }) {
   const instanceOf = entity.refs.find((r) => r.role === "instance_of");
+  const sug = SUGGESTION_BY_KIND[entity.kind];
   const color = colorForKind(entity.kind);
   const eff = effectiveRefs(entity, byId);
   const summary = summarize(entity, byId);
@@ -397,7 +398,9 @@ function ThingRow({
             <span className="h-2 w-2 shrink-0 rounded-full" style={{ backgroundColor: color.accent }} />
             <span className="text-sm font-medium text-gray-900">{entity.name}</span>
             {entity.isForSale && (
-              <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">Offer · {money(entity.priceCents)}</span>
+              <span className="rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                Offer · {sug?.computedPricing ? "priced per-org at checkout" : money(entity.priceCents)}
+              </span>
             )}
             {instanceOf && (
               <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[10px] text-gray-500">instance of {instanceOf.toName}</span>
@@ -718,6 +721,7 @@ function ThingForm({
 
   const suggestion = SUGGESTION_BY_KIND[kind.trim().toLowerCase()];
   const sellable = suggestion?.sellable ?? true;
+  const computedPricing = suggestion?.computedPricing ?? false;
 
   function applyKind(k: string) {
     setKind(k);
@@ -933,8 +937,25 @@ function ThingForm({
               <div className="flex items-center gap-2">
                 <input
                   value={p.label || p.key}
-                  onChange={(e) => setProps((prev) => prev.map((x, j) => (j === i ? { ...x, key: e.target.value, label: e.target.value } : x)))}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    // Selecting a suggested field (by its canonical key, via the
+                    // datalist) fills in the correct key even though the admin
+                    // sees the friendly label — prevents e.g. typing "Capacity"
+                    // (matching the on-screen label) when the required key is
+                    // actually "capacity".
+                    const matched = suggestion?.fields.find((f) => f.key === val);
+                    setProps((prev) => prev.map((x, j) => (j === i ? {
+                      ...x,
+                      key: matched?.key ?? val,
+                      label: matched?.label ?? val,
+                      type: matched?.type ?? x.type,
+                      placeholder: matched?.placeholder ?? x.placeholder,
+                      hint: matched?.hint ?? x.hint,
+                    } : x)));
+                  }}
                   placeholder="property name"
+                  list="property-key-suggestions"
                   className={`${inputClass} w-40`}
                 />
                 <input
@@ -952,6 +973,11 @@ function ThingForm({
           <button onClick={() => setProps((prev) => [...prev, { key: "", label: "", value: "", type: "text" }])} className="text-[11px] font-medium text-accent hover:underline">
             + property
           </button>
+          <datalist id="property-key-suggestions">
+            {(suggestion?.fields ?? [])
+              .filter((f) => !props.some((p) => p.key === f.key))
+              .map((f) => <option key={f.key} value={f.key}>{f.label}</option>)}
+          </datalist>
         </div>
       </div>
 
@@ -983,7 +1009,13 @@ function ThingForm({
             <input type="checkbox" checked={isForSale} onChange={(e) => setIsForSale(e.target.checked)} />
             For sale (an Offer)
           </label>
-          {isForSale && (
+          {isForSale && computedPricing && (
+            <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600">
+              Priced per-org at checkout (grace/lock status, FTE tier, proration) — there's nothing to set here.
+              {suggestion?.hint && <span className="block mt-1 text-[11px] text-gray-500">{suggestion.hint}</span>}
+            </div>
+          )}
+          {isForSale && !computedPricing && (
             <div className="mt-2 space-y-2 rounded-md border border-emerald-100 bg-emerald-50/50 p-2">
               <div className="flex flex-wrap items-center gap-4">
                 <label className="flex items-center gap-1.5 text-xs text-gray-600">
