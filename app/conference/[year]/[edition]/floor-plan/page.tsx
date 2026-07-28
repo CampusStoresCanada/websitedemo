@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { getFloorPlanForVisitor } from "@/lib/actions/conference-entities";
 import { getConferenceMembershipGateInfo } from "@/lib/actions/conference-commerce";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -44,7 +44,7 @@ export default async function ConferenceFloorPlanPage({
     .maybeSingle();
 
   const isPublicStatus =
-    !!conference && PUBLIC_CONFERENCE_STATUSES.includes(conference.status as (typeof PUBLIC_CONFERENCE_STATUSES)[number]);
+    !!conference && VISIBLE_CONFERENCE_STATUSES.includes(conference.status as (typeof VISIBLE_CONFERENCE_STATUSES)[number]);
 
   if (!conference || (!isPublicStatus && !canPreviewUnpublished)) {
     return (

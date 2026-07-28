@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import type { HomeConferencePin } from "@/lib/homepage";
 import type { ViewerContext } from "@/lib/visibility/viewer";
 import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
@@ -124,7 +124,7 @@ export async function fetchBoothCount(db: ReturnType<typeof createAdminClient>, 
  */
 async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConferencePin | null> {
   const viewerIsAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
-  const visibleStatuses = viewerIsAdmin ? [...PUBLIC_CONFERENCE_STATUSES, "draft"] : PUBLIC_CONFERENCE_STATUSES;
+  const visibleStatuses = viewerIsAdmin ? [...VISIBLE_CONFERENCE_STATUSES, "draft"] : VISIBLE_CONFERENCE_STATUSES;
 
   const db = createAdminClient();
   const { data } = await db

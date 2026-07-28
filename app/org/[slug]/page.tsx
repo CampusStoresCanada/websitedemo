@@ -16,7 +16,7 @@ import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
 import type { SupplierData } from "@/lib/actions/member-suppliers";
 import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/conference-entity-commerce";
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
@@ -288,7 +288,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
     currentConferenceId = upcoming[0]?.id ?? latestPast[0]?.id ?? ids[0] ?? null;
     currentConferenceIsPublic = Boolean(
       currentConferenceId &&
-        (PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(statusById.get(currentConferenceId) ?? "draft")
+        (SALES_OPEN_STATUSES as readonly string[]).includes(statusById.get(currentConferenceId) ?? "draft")
     );
 
     if (currentConferenceId) {

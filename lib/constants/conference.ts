@@ -11,6 +11,7 @@
 
 export const CONFERENCE_STATUSES = [
   "draft",
+  "announced",
   "registration_open",
   "registration_closed",
   "scheduling",
@@ -21,9 +22,16 @@ export const CONFERENCE_STATUSES = [
 
 export type ConferenceStatus = (typeof CONFERENCE_STATUSES)[number];
 
-/** Allowed forward transitions — only admin/super_admin can execute. */
+/**
+ * Allowed forward transitions — only admin/super_admin can execute.
+ * `announced` sits between `draft` and `registration_open`: it's the only
+ * exit from `draft`, so a conference can't reach sales without first going
+ * through the publicly-informational stage. See VISIBLE_CONFERENCE_STATUSES
+ * vs SALES_OPEN_STATUSES below for what each stage actually unlocks.
+ */
 export const CONFERENCE_STATUS_TRANSITIONS: Record<ConferenceStatus, ConferenceStatus[]> = {
-  draft: ["registration_open"],
+  draft: ["announced"],
+  announced: ["registration_open"],
   registration_open: ["registration_closed"],
   registration_closed: ["scheduling"],
   scheduling: ["active"],
@@ -33,17 +41,19 @@ export const CONFERENCE_STATUS_TRANSITIONS: Record<ConferenceStatus, ConferenceS
 };
 
 /**
- * A conference is "on sale" once registration has opened. `draft` is the only
- * status that precedes sale, so before-sale edits (e.g. in-place legal document
- * edits) are only safe while the conference is still a draft.
+ * A conference is "on sale" once registration has actually opened —
+ * `announced` is public and informational but nothing is purchasable yet, so
+ * before-sale edits (e.g. in-place legal document edits) stay safe through
+ * both `draft` and `announced`, only locking once real sales begin.
  */
 export function isConferenceOnSale(status: ConferenceStatus): boolean {
-  return status !== "draft";
+  return (SALES_OPEN_STATUSES as ConferenceStatus[]).includes(status);
 }
 
 /** Human-readable labels for admin UI. */
 export const CONFERENCE_STATUS_LABELS: Record<ConferenceStatus, string> = {
   draft: "Draft",
+  announced: "Announced",
   registration_open: "Registration Open",
   registration_closed: "Registration Closed",
   scheduling: "Scheduling",
@@ -242,12 +252,28 @@ export const LEGAL_DOCUMENT_LABELS: Record<LegalDocumentType, string> = {
 };
 
 // ---------------------------------------------------------------------------
-// Visible conference statuses (public-facing)
+// Visible vs on-sale conference statuses — two different questions.
 // ---------------------------------------------------------------------------
 
-export const PUBLIC_CONFERENCE_STATUSES: ConferenceStatus[] = [
+/**
+ * Commerce is live: registration/buying UI, seat management, everything
+ * purchase-related. Renamed from the old PUBLIC_CONFERENCE_STATUSES, whose
+ * name conflated "on sale" with "visible at all" — those are now separate.
+ */
+export const SALES_OPEN_STATUSES: ConferenceStatus[] = [
   "registration_open",
   "registration_closed",
   "active",
   "completed",
+];
+
+/**
+ * Safe to show informational content: the public conference hub page,
+ * homepage presence, the public conference list. Broader than
+ * SALES_OPEN_STATUSES — includes `announced`, where the conference is public
+ * but nothing is purchasable yet.
+ */
+export const VISIBLE_CONFERENCE_STATUSES: ConferenceStatus[] = [
+  "announced",
+  ...SALES_OPEN_STATUSES,
 ];

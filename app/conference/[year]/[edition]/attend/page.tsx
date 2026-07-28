@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
 import { getConfirmedExhibitors, getNonMemberDayPasses } from "@/lib/actions/conference-entities";
@@ -46,7 +46,7 @@ export default async function AttendPage({
     .maybeSingle();
 
   const isPublicStatus =
-    !!conference && PUBLIC_CONFERENCE_STATUSES.includes(conference.status as (typeof PUBLIC_CONFERENCE_STATUSES)[number]);
+    !!conference && VISIBLE_CONFERENCE_STATUSES.includes(conference.status as (typeof VISIBLE_CONFERENCE_STATUSES)[number]);
 
   if (!conference || (!isPublicStatus && !canPreviewUnpublished)) {
     notFound();

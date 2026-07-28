@@ -265,3 +265,30 @@ export function launchBlockers(readiness: LaunchReadiness): string[] {
     .filter((c) => c.status === "blocked")
     .map((c) => `${c.label}: ${c.detail}`);
 }
+
+export type AnnounceReadiness = {
+  canAnnounce: boolean;
+  blockers: string[];
+};
+
+/**
+ * The light gate for draft → announced: just "do we know when this is."
+ * Deliberately does NOT check registration window, the Build catalog, things
+ * for sale, or legal docs — those are sell-readiness, not
+ * tell-people-it-exists readiness, and shouldn't block getting the word out.
+ */
+export function computeAnnounceReadiness(
+  input: Pick<LaunchReadinessInput, "startDate" | "endDate">
+): AnnounceReadiness {
+  const blockers: string[] = [];
+  const start = input.startDate ? new Date(`${input.startDate}T00:00:00Z`) : null;
+  const end = input.endDate ? new Date(`${input.endDate}T00:00:00Z`) : null;
+
+  if (!input.startDate || !input.endDate) {
+    blockers.push("Conference dates: set start and end dates.");
+  } else if (start && end && end < start) {
+    blockers.push("Conference dates: end date is before the start date.");
+  }
+
+  return { canAnnounce: blockers.length === 0, blockers };
+}

@@ -2,14 +2,14 @@
 
 import { isGlobalAdmin, isSuperAdmin, requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { logAuditEventSafe } from "@/lib/ops/audit";
+import { logAuditEventSafe, type AuditActorType } from "@/lib/ops/audit";
 import {
   CONFERENCE_STATUS_TRANSITIONS,
-  PUBLIC_CONFERENCE_STATUSES,
+  VISIBLE_CONFERENCE_STATUSES,
   type ConferenceStatus,
 } from "@/lib/constants/conference";
 import { loadLaunchReadinessInput } from "@/lib/actions/conference-launch";
-import { computeLaunchReadiness, launchBlockers } from "@/lib/conference/launch-readiness";
+import { computeLaunchReadiness, launchBlockers, computeAnnounceReadiness } from "@/lib/conference/launch-readiness";
 import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
 import type { Database } from "@/lib/database.types";
 
@@ -96,7 +96,7 @@ export async function getPublicConference(
     .eq("edition_code", edition);
 
   if (!canPreviewUnpublished) {
-    query = query.in("status", PUBLIC_CONFERENCE_STATUSES);
+    query = query.in("status", VISIBLE_CONFERENCE_STATUSES);
   }
 
   const { data, error } = await query.single();
@@ -105,7 +105,7 @@ export async function getPublicConference(
   const conference = data as unknown as ConferenceWithRelations;
   const isDraftPreview =
     canPreviewUnpublished &&
-    !(PUBLIC_CONFERENCE_STATUSES as readonly string[]).includes(conference.status);
+    !(VISIBLE_CONFERENCE_STATUSES as readonly string[]).includes(conference.status);
 
   return { success: true, data: conference, isDraftPreview };
 }
@@ -232,13 +232,20 @@ export async function updateConference(
 // Admin: Transition conference status
 // ─────────────────────────────────────────────────────────────────
 
-export async function transitionConferenceStatus(
+/**
+ * Core transition logic, no auth check — callable from a real admin's click
+ * (transitionConferenceStatus below) or from the scheduled-transitions cron,
+ * which has no live user session but was already authorized when a
+ * super_admin approved the schedule. Re-validates legality against current
+ * status every time it runs, so a manual change made in the meantime always
+ * wins over a stale scheduled one — same guarantee transitionMembershipState
+ * gives the renewal cron.
+ */
+export async function performConferenceStatusTransition(
   id: string,
-  newStatus: ConferenceStatus
+  newStatus: ConferenceStatus,
+  actor: { actorId: string | null; actorType: AuditActorType }
 ): Promise<{ success: boolean; error?: string; data?: ConferenceRow }> {
-  const auth = await requireAdmin();
-  if (!auth.ok) return { success: false, error: auth.error };
-
   const adminClient = createAdminClient();
 
   // Fetch current status
@@ -261,7 +268,23 @@ export async function transitionConferenceStatus(
     };
   }
 
-  if (currentStatus === "draft" && newStatus === "registration_open") {
+  if (currentStatus === "draft" && newStatus === "announced") {
+    // Light gate: just "do we know when this is" — not the full sell-readiness
+    // bar. See computeAnnounceReadiness's doc comment for why.
+    const readinessInput = await loadLaunchReadinessInput(id);
+    if (!readinessInput.success) {
+      return { success: false, error: readinessInput.error };
+    }
+    const announceReadiness = computeAnnounceReadiness(readinessInput.data);
+    if (!announceReadiness.canAnnounce) {
+      return {
+        success: false,
+        error: `Cannot announce: ${announceReadiness.blockers.join(" ")}`,
+      };
+    }
+  }
+
+  if (currentStatus === "announced" && newStatus === "registration_open") {
     // Unified gate: the same launch-readiness model the Overview checklist
     // renders. UI and gate can never disagree (the v1 failure mode).
     const readinessInput = await loadLaunchReadinessInput(id);
@@ -285,7 +308,30 @@ export async function transitionConferenceStatus(
     .single();
 
   if (error) return { success: false, error: error.message };
+
+  await logAuditEventSafe({
+    action: "conference_status_transition",
+    entityType: "conference",
+    entityId: id,
+    actorId: actor.actorId,
+    actorType: actor.actorType,
+    details: { fromStatus: currentStatus, toStatus: newStatus },
+  });
+
   return { success: true, data };
+}
+
+export async function transitionConferenceStatus(
+  id: string,
+  newStatus: ConferenceStatus
+): Promise<{ success: boolean; error?: string; data?: ConferenceRow }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  return performConferenceStatusTransition(id, newStatus, {
+    actorId: auth.ctx.userId,
+    actorType: "user",
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────

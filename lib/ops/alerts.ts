@@ -28,6 +28,36 @@ function hoursBetween(aIso: string, bIso: string): number {
   return (b - a) / (1000 * 60 * 60);
 }
 
+// Rule keys (or prefixes) that evaluateCandidates() can emit. The resolve
+// sweep in evaluateOpsAlerts() only auto-closes alerts in this set — every
+// candidate check re-runs on each pass, so "not in activeRuleKeys anymore"
+// reliably means "condition cleared." Event-driven alerts raised elsewhere
+// via raiseAlertIfNotOpen() (QBO, OneDrive, board export, scheduled
+// conference transitions, ...) are never re-evaluated here, so they must be
+// excluded or every one of them would be wrongly auto-resolved on the very
+// next periodic run regardless of whether the underlying failure was fixed.
+const PERIODIC_RULE_KEYS = new Set([
+  "scheduler_infeasible",
+  "payment_failure_rate",
+  "sync_backlog",
+  "webhook_backlog",
+  "swap_stale_conflicts",
+  "auth_guard_deny_spike",
+  "login_redirect_loop",
+  "auth_bootstrap_recovery_failure",
+  "legal_acceptance_gap",
+  "retention_overdue",
+  "qbo_export_backlog",
+]);
+const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:"];
+
+function isPeriodicRuleKey(ruleKey: string): boolean {
+  return (
+    PERIODIC_RULE_KEYS.has(ruleKey) ||
+    PERIODIC_RULE_KEY_PREFIXES.some((prefix) => ruleKey.startsWith(prefix))
+  );
+}
+
 async function insertAlert(candidate: CandidateAlert): Promise<void> {
   const db = createAdminClient() as unknown as {
     from: (table: string) => {
@@ -805,6 +835,7 @@ export async function evaluateOpsAlerts(): Promise<{
     let resolvedCount = 0;
     for (const [ruleKey, rows] of existingByRule.entries()) {
       if (activeRuleKeys.has(ruleKey)) continue;
+      if (!isPeriodicRuleKey(ruleKey)) continue;
       for (const row of rows) {
         await resolveAlert(row.id, ruleKey);
         resolvedCount += 1;

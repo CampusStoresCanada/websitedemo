@@ -3236,6 +3236,73 @@ export type Database = {
           },
         ]
       }
+      conference_scheduled_transitions: {
+        Row: {
+          canceled_at: string | null
+          canceled_by: string | null
+          conference_id: string
+          created_at: string
+          created_by: string | null
+          error: string | null
+          executed_at: string | null
+          id: string
+          run_at: string
+          status: string
+          target_status: string
+          updated_at: string
+        }
+        Insert: {
+          canceled_at?: string | null
+          canceled_by?: string | null
+          conference_id: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          executed_at?: string | null
+          id?: string
+          run_at: string
+          status?: string
+          target_status: string
+          updated_at?: string
+        }
+        Update: {
+          canceled_at?: string | null
+          canceled_by?: string | null
+          conference_id?: string
+          created_at?: string
+          created_by?: string | null
+          error?: string | null
+          executed_at?: string | null
+          id?: string
+          run_at?: string
+          status?: string
+          target_status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_scheduled_transitions_canceled_by_fkey"
+            columns: ["canceled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_scheduled_transitions_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_scheduled_transitions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conference_staff: {
         Row: {
           accommodation_type: string | null
@@ -9807,8 +9874,6 @@ export type Database = {
           score: number
         }[]
       }
-      show_limit: { Args: never; Returns: number }
-      show_trgm: { Args: { "": string }; Returns: string[] }
       submit_booth_approval_request: {
         Args: {
           p_booth_id: string

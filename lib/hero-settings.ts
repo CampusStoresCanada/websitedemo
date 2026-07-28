@@ -1,5 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PUBLIC_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { fetchConferenceStartingPrices, fetchBoothCount } from "@/lib/homepage-slides";
 import { HERO_KINDS, type HeroKind, type HeroKindSetting, type HeroAreaSettings } from "@/lib/hero-kinds";
 
@@ -60,7 +60,7 @@ export async function getConferencePricingPreview(): Promise<ConferencePricingPr
   const { data } = await db
     .from("conference_instances")
     .select("id, name")
-    .in("status", [...PUBLIC_CONFERENCE_STATUSES, "draft"])
+    .in("status", [...VISIBLE_CONFERENCE_STATUSES, "draft"])
     .not("location_latitude", "is", null)
     .not("location_longitude", "is", null)
     .order("start_date", { ascending: true })
