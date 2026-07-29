@@ -351,8 +351,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
     }
   }
 
-  console.log(`[org/${slug}] viewer=${viewer.viewerLevel} contacts sample: ${JSON.stringify(contacts.slice(0,3).map(c => ({ id: c.id, name: c.name, circle_id: (c as Record<string,unknown>).circle_id })))}`);
-
   // Fetch RFPs — for member orgs fetch their own; for partner orgs fetch matching
   let orgRFPs: RFPWithContext[] = [];
   let partnerRFPs: RFPWithContext[] = [];
