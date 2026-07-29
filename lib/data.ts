@@ -153,8 +153,14 @@ export async function getOrganizationBySlug(
 export async function getContactsForOrganization(
   organizationId: string
 ): Promise<Contact[]> {
+  // Uses the admin client because "contacts" has no public/anon SELECT
+  // policy (removed in 20260723220000_scope_contacts_select_to_service_role.sql
+  // — the PII exposure fix). Callers (getOrganizationForViewer via
+  // getOrganizationProfile) already apply viewer-based field masking
+  // downstream, so this is safe.
+  const adminClient = createAdminClient();
   const result = await withTimeout(
-    supabase
+    adminClient
       .from("contacts")
       .select("*")
       .eq("organization_id", organizationId)
