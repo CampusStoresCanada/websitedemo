@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { quickbooksExportRun, quickbooksExportRefundRun } from "@/lib/quickbooks/export";
+import {
+  quickbooksConferenceReceiptExportRun,
+  quickbooksConferenceRefundExportRun,
+  quickbooksMiscReceiptExportRun,
+} from "@/lib/quickbooks/conference-export";
 
 export const dynamic = "force-dynamic";
 
@@ -12,13 +16,14 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const [result, refunds] = await Promise.all([
-      quickbooksExportRun(),
-      quickbooksExportRefundRun(),
+    const [receipts, refunds, miscReceipts] = await Promise.all([
+      quickbooksConferenceReceiptExportRun(),
+      quickbooksConferenceRefundExportRun(),
+      quickbooksMiscReceiptExportRun(),
     ]);
-    return NextResponse.json({ ...result, refunds });
+    return NextResponse.json({ receipts, refunds, miscReceipts });
   } catch (error) {
-    console.error("[cron/qbo-export] Unhandled error:", error);
+    console.error("[cron/qbo-conference-export] Unhandled error:", error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : "Unknown error" },
       { status: 500 }

@@ -49,6 +49,9 @@ export type BuildEntity = {
   needsDefinition: boolean;
   inventory: number | null;
   tierPrices: Record<string, number>;
+  /** QuickBooks item this entity's sales post to — usually set on the type
+   * and inherited by instances (see effectiveQboItemId in entity-graph.ts). */
+  qboItemId: string | null;
   refs: EntityRefView[];
 };
 
@@ -99,6 +102,7 @@ export async function createEntity(
     needsDefinition?: boolean;
     inventory?: number | null;
     tierPrices?: Record<string, number>;
+    qboItemId?: string | null;
   }
 ): Promise<Result<{ id: string }>> {
   const auth = await requireAdmin();
@@ -120,6 +124,7 @@ export async function createEntity(
       needs_definition: input.needsDefinition ?? false,
       inventory: input.inventory ?? null,
       tier_prices: input.tierPrices ?? {},
+      qbo_item_id: input.qboItemId ?? null,
     })
     .select("id")
     .single();
@@ -138,6 +143,7 @@ export async function updateEntity(
     needsDefinition?: boolean;
     inventory?: number | null;
     tierPrices?: Record<string, number>;
+    qboItemId?: string | null;
   }
 ): Promise<Result<null>> {
   const auth = await requireAdmin();
@@ -153,6 +159,7 @@ export async function updateEntity(
   if (input.needsDefinition !== undefined) patch.needs_definition = input.needsDefinition;
   if (input.inventory !== undefined) patch.inventory = input.inventory;
   if (input.tierPrices !== undefined) patch.tier_prices = input.tierPrices;
+  if (input.qboItemId !== undefined) patch.qbo_item_id = input.qboItemId;
 
   const { error } = await db.from("conference_entities").update(patch).eq("id", entityId);
   if (error) return { success: false, error: error.message };
@@ -837,7 +844,7 @@ export async function getBuildWorkspace(conferenceId: string): Promise<Result<Bu
   const [entitiesRes, refsRes, purchasesRes, linkedEventsRes] = await Promise.all([
     db
       .from("conference_entities")
-      .select("id, kind, name, is_for_sale, price_cents, currency, attributes, needs_definition, inventory, tier_prices")
+      .select("id, kind, name, is_for_sale, price_cents, currency, attributes, needs_definition, inventory, tier_prices, qbo_item_id")
       .eq("conference_id", conferenceId)
       .order("name"),
     db

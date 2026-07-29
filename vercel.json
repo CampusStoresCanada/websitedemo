@@ -45,6 +45,10 @@
       "schedule": "*/15 * * * *"
     },
     {
+      "path": "/api/cron/qbo-conference-export",
+      "schedule": "*/15 * * * *"
+    },
+    {
       "path": "/api/cron/qbo-reconcile",
       "schedule": "0 */4 * * *"
     },

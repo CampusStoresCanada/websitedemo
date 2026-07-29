@@ -2,61 +2,58 @@
 
 import { useEffect, useState } from "react";
 
-interface QBItem {
+interface QBTaxCode {
   Id: string;
   Name: string;
-  Type: string;
-  UnitPrice?: number;
+  Description?: string;
 }
 
-interface QBItemPickerProps {
+interface QBTaxCodePickerProps {
   value: string | null;
-  onChange: (itemId: string | null, itemName: string | null) => void;
+  onChange: (taxCodeId: string | null, taxCodeName: string | null) => void;
   label?: string;
   required?: boolean;
 }
 
-export default function QBItemPicker({
+export default function QBTaxCodePicker({
   value,
   onChange,
-  label = "QuickBooks Item",
+  label = "QuickBooks Tax Code",
   required = false,
-}: QBItemPickerProps) {
-  const [items, setItems] = useState<QBItem[]>([]);
+}: QBTaxCodePickerProps) {
+  const [codes, setCodes] = useState<QBTaxCode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
 
-  const loadItems = async () => {
+  const loadCodes = async () => {
     if (loaded) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/admin/qbo/items");
+      const res = await fetch("/api/admin/qbo/tax-codes");
       if (!res.ok) {
         const body = await res.json();
-        throw new Error(body.error ?? "Failed to load QB items");
+        throw new Error(body.error ?? "Failed to load QB tax codes");
       }
-      const data: QBItem[] = await res.json();
-      setItems(data);
+      const data: QBTaxCode[] = await res.json();
+      setCodes(data);
       setLoaded(true);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to load QB items");
+      setError(err instanceof Error ? err.message : "Failed to load QB tax codes");
     } finally {
       setLoading(false);
     }
   };
 
-  // A picker that already has a saved value needs the item list up front —
-  // otherwise the <select> has no matching <option> yet and silently renders
-  // as unlinked until the user happens to focus it, even though the value is
-  // saved correctly.
+  // Same eager-load-when-a-value-exists fix as QBItemPicker — otherwise a
+  // saved value renders as unlinked until the select is focused once.
   useEffect(() => {
-    if (value) loadItems();
+    if (value) loadCodes();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const selectedItem = items.find((item) => item.Id === value);
+  const selectedCode = codes.find((c) => c.Id === value);
 
   return (
     <div>
@@ -67,20 +64,19 @@ export default function QBItemPicker({
 
       <select
         value={value ?? ""}
-        onFocus={loadItems}
+        onFocus={loadCodes}
         onChange={(e) => {
           const selectedId = e.target.value || null;
-          const selectedName = items.find((item) => item.Id === selectedId)?.Name ?? null;
+          const selectedName = codes.find((c) => c.Id === selectedId)?.Name ?? null;
           onChange(selectedId, selectedName);
         }}
         className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm bg-white"
         required={required}
       >
-        <option value="">{loading ? "Loading QB items…" : "— No QB item linked —"}</option>
-        {items.map((item) => (
-          <option key={item.Id} value={item.Id}>
-            {item.Name}
-            {item.UnitPrice != null ? ` ($${item.UnitPrice.toFixed(2)})` : ""}
+        <option value="">{loading ? "Loading QB tax codes…" : "— No tax code linked —"}</option>
+        {codes.map((code) => (
+          <option key={code.Id} value={code.Id}>
+            {code.Name}
           </option>
         ))}
       </select>
@@ -93,19 +89,19 @@ export default function QBItemPicker({
 
       {!value && !required && (
         <p className="mt-1 text-[11px] text-amber-600">
-          No QB item linked. Exports for this product will fail until one is selected.
+          No tax code linked. QBO requires one on every sale — exports will fail until set.
         </p>
       )}
 
-      {value && selectedItem && (
+      {value && selectedCode && (
         <p className="mt-1 text-[11px] text-gray-500">
-          Linked: {selectedItem.Name} (ID: {value})
+          Linked: {selectedCode.Name} (ID: {value})
         </p>
       )}
 
-      {value && !selectedItem && loaded && (
+      {value && !selectedCode && loaded && (
         <p className="mt-1 text-[11px] text-amber-600">
-          Previously linked item (ID: {value}) not found in QB — may have been deleted.
+          Previously linked tax code (ID: {value}) not found in QB — may have been deleted.
         </p>
       )}
     </div>

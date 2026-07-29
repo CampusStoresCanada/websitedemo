@@ -16,6 +16,7 @@ export interface EventTicketType {
   available_from: string | null;
   available_until: string | null;
   stripe_price_id: string | null;
+  qbo_item_id: string | null;
   is_hidden: boolean;
   created_at: string;
   updated_at: string;

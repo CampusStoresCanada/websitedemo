@@ -22,6 +22,7 @@ export interface QBLineItem {
     ItemRef: { value: string; name?: string };
     UnitPrice?: number;
     Qty?: number;
+    TaxCodeRef?: { value: string };
   };
 }
 
@@ -59,6 +60,42 @@ export interface QBPayment {
   TotalAmt: number;
 }
 
+// Conference commerce is already-paid (Stripe collected the money), so it
+// posts as a Sales Receipt/Refund Receipt — no AR, no Invoice object — rather
+// than the Invoice+Payment pattern membership/partnership uses. Same Line/
+// CustomerRef/TxnDate/CurrencyRef conventions as Invoice, just no DueDate.
+export interface QBSalesReceiptInput {
+  CustomerRef: { value: string };
+  Line: QBLineItem[];
+  TxnDate?: string;               // YYYY-MM-DD
+  DocNumber?: string;             // our conference order ID as reference
+  PrivateNote?: string;
+  CurrencyRef?: { value: string };
+  DepositToAccountRef: { value: string }; // same account its later refund (if any) must use — see qbo_refund_deposit_account_id
+}
+
+export interface QBSalesReceipt extends QBSalesReceiptInput {
+  Id: string;
+  SyncToken: string;
+  TotalAmt: number;
+}
+
+export interface QBRefundReceiptInput {
+  CustomerRef: { value: string };
+  Line: QBLineItem[];
+  TxnDate?: string;               // YYYY-MM-DD
+  DocNumber?: string;
+  PrivateNote?: string;
+  CurrencyRef?: { value: string };
+  DepositToAccountRef: { value: string }; // same account the original sale used — see qbo_refund_deposit_account_id
+}
+
+export interface QBRefundReceipt extends QBRefundReceiptInput {
+  Id: string;
+  SyncToken: string;
+  TotalAmt: number;
+}
+
 export interface QBTokenResponse {
   access_token: string;
   refresh_token?: string;
@@ -73,6 +110,69 @@ export interface QBExportQueueRow {
   invoice_id: string;
   qbo_invoice_id: string | null;
   qbo_payment_id: string | null;
+  status: QBExportStatus;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+  lease_expires_at: string | null;
+}
+
+export interface QBConferenceReceiptQueueRow {
+  id: string;
+  conference_order_id: string;
+  qbo_sales_receipt_id: string | null;
+  status: QBExportStatus;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+  lease_expires_at: string | null;
+}
+
+export interface QBConferenceRefundQueueRow {
+  id: string;
+  conference_order_id: string;
+  stripe_refund_id: string;
+  refund_amount_cents: number;
+  qbo_refund_receipt_id: string | null;
+  status: QBExportStatus;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+  lease_expires_at: string | null;
+}
+
+export type QBMiscReceiptKind = "prospective_booth" | "prospective_registration" | "event_ticket";
+
+export interface QBMiscReceiptQueueRow {
+  id: string;
+  payment_kind: QBMiscReceiptKind;
+  payment_id: string;
+  qbo_sales_receipt_id: string | null;
+  status: QBExportStatus;
+  retry_count: number;
+  max_retries: number;
+  next_retry_at: string | null;
+  error_message: string | null;
+  created_at: string;
+  processed_at: string | null;
+  lease_expires_at: string | null;
+}
+
+export interface QBMembershipRefundQueueRow {
+  id: string;
+  invoice_id: string;
+  stripe_refund_id: string;
+  refund_amount_cents: number;
+  qbo_refund_receipt_id: string | null;
   status: QBExportStatus;
   retry_count: number;
   max_retries: number;

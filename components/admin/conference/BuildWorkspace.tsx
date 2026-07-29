@@ -26,6 +26,7 @@ import { effectiveAttributes, effectiveRefs, instanceTypeId, openQuestions } fro
 import { accessibleThings, offerGrants } from "@/lib/conference/entity-commerce";
 import { availability, priceTable } from "@/lib/conference/entity-pricing";
 import { colorForKind } from "@/lib/conference/schedule-colors";
+import QBItemPicker from "@/components/admin/qbo/QBItemPicker";
 
 type Picked = { id: string; name: string; kind: string };
 type PropRow = { key: string; label: string; value: string; type: SuggestedField["type"]; placeholder?: string; hint?: string };
@@ -139,7 +140,8 @@ export default function BuildWorkspace({
     if (!res.success) return null;
     upsertLocal({
       id: res.data.id, kind, name: name.trim(), isForSale: false, priceCents: null,
-      currency: "CAD", attributes: attributes ?? {}, needsDefinition: true, inventory: null, tierPrices: {}, refs: [],
+      currency: "CAD", attributes: attributes ?? {}, needsDefinition: true, inventory: null, tierPrices: {},
+      qboItemId: null, refs: [],
     });
     return { id: res.data.id, name: name.trim(), kind };
   }
@@ -152,6 +154,7 @@ export default function BuildWorkspace({
       upsertLocal({
         id, kind: type?.kind ?? "thing", name, isForSale: false, priceCents: null,
         currency: "CAD", attributes: {}, needsDefinition: false, inventory: null, tierPrices: {},
+        qboItemId: null,
         refs: [{ toEntityId: typeId, toName: type?.name ?? "", toKind: type?.kind ?? "", role: "instance_of", quantity: null }],
       });
     }
@@ -698,6 +701,7 @@ function ThingForm({
     return [];
   });
   const [isForSale, setIsForSale] = useState(editing?.isForSale ?? false);
+  const [qboItemId, setQboItemId] = useState<string | null>(editing?.qboItemId ?? null);
   const [price, setPrice] = useState(editing?.priceCents != null ? (editing.priceCents / 100).toString() : "");
   const [inventory, setInventory] = useState(editing?.inventory != null ? String(editing.inventory) : "");
   const [tierPriceRows, setTierPriceRows] = useState<Array<{ tier: string; price: string }>>(() =>
@@ -844,12 +848,13 @@ function ThingForm({
       const res = await updateEntity(editing.id, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
         attributes, needsDefinition: false, inventory: finalInventory, tierPrices: finalTierPrices,
+        qboItemId: finalSale ? qboItemId : null,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
     } else {
       const res = await createEntity(conferenceId, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice, attributes,
-        inventory: finalInventory, tierPrices: finalTierPrices,
+        inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
       id = res.data.id;
@@ -882,7 +887,8 @@ function ThingForm({
     onSaved({
       id, kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
       currency: editing?.currency ?? "CAD", attributes, needsDefinition: false,
-      inventory: finalInventory, tierPrices: finalTierPrices, refs: viewRefs,
+      inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
+      refs: viewRefs,
     });
   }
 
@@ -1009,6 +1015,20 @@ function ThingForm({
             <input type="checkbox" checked={isForSale} onChange={(e) => setIsForSale(e.target.checked)} />
             For sale (an Offer)
           </label>
+          {isForSale && (
+            <div className="mt-2 space-y-2 rounded-md border border-gray-100 bg-gray-50 p-2">
+              <QBItemPicker
+                value={qboItemId}
+                onChange={(id) => setQboItemId(id)}
+                label={isInstance ? "QuickBooks item (usually set on the type, not per instance)" : "QuickBooks item"}
+              />
+              {isInstance && !qboItemId && proliferateType?.qboItemId && (
+                <p className="text-[11px] text-gray-500">
+                  Currently inherits “{proliferateType.name}”&apos;s item — leave blank to keep inheriting it.
+                </p>
+              )}
+            </div>
+          )}
           {isForSale && computedPricing && (
             <div className="mt-2 rounded-md border border-gray-200 bg-gray-50 p-2 text-xs text-gray-600">
               Priced per-org at checkout (grace/lock status, FTE tier, proration) — there's nothing to set here.

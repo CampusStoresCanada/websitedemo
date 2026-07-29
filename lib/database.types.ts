@@ -2259,6 +2259,7 @@ export type Database = {
           name: string
           needs_definition: boolean
           price_cents: number | null
+          qbo_item_id: string | null
           tier_prices: Json
           updated_at: string
         }
@@ -2274,6 +2275,7 @@ export type Database = {
           name: string
           needs_definition?: boolean
           price_cents?: number | null
+          qbo_item_id?: string | null
           tier_prices?: Json
           updated_at?: string
         }
@@ -2289,6 +2291,7 @@ export type Database = {
           name?: string
           needs_definition?: boolean
           price_cents?: number | null
+          qbo_item_id?: string | null
           tier_prices?: Json
           updated_at?: string
         }
@@ -2376,6 +2379,7 @@ export type Database = {
           location_venue: string | null
           name: string
           on_sale_at: string | null
+          qbo_tax_code_ref: string | null
           registration_close_at: string | null
           registration_open_at: string | null
           start_date: string | null
@@ -2408,6 +2412,7 @@ export type Database = {
           location_venue?: string | null
           name: string
           on_sale_at?: string | null
+          qbo_tax_code_ref?: string | null
           registration_close_at?: string | null
           registration_open_at?: string | null
           start_date?: string | null
@@ -2440,6 +2445,7 @@ export type Database = {
           location_venue?: string | null
           name?: string
           on_sale_at?: string | null
+          qbo_tax_code_ref?: string | null
           registration_close_at?: string | null
           registration_open_at?: string | null
           start_date?: string | null
@@ -4149,6 +4155,7 @@ export type Database = {
           is_hidden: boolean
           name: string
           price_cents: number
+          qbo_item_id: string | null
           sort_order: number
           stripe_price_id: string | null
           updated_at: string
@@ -4165,6 +4172,7 @@ export type Database = {
           is_hidden?: boolean
           name: string
           price_cents?: number
+          qbo_item_id?: string | null
           sort_order?: number
           stripe_price_id?: string | null
           updated_at?: string
@@ -4181,6 +4189,7 @@ export type Database = {
           is_hidden?: boolean
           name?: string
           price_cents?: number
+          qbo_item_id?: string | null
           sort_order?: number
           stripe_price_id?: string | null
           updated_at?: string
@@ -6782,6 +6791,112 @@ export type Database = {
           },
         ]
       }
+      qbo_conference_receipt_queue: {
+        Row: {
+          conference_order_id: string
+          created_at: string
+          error_message: string | null
+          id: string
+          lease_expires_at: string | null
+          max_retries: number
+          next_retry_at: string | null
+          processed_at: string | null
+          qbo_sales_receipt_id: string | null
+          retry_count: number
+          status: string
+        }
+        Insert: {
+          conference_order_id: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_sales_receipt_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Update: {
+          conference_order_id?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_sales_receipt_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_conference_receipt_queue_conference_order_id_fkey"
+            columns: ["conference_order_id"]
+            isOneToOne: true
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qbo_conference_refund_queue: {
+        Row: {
+          conference_order_id: string
+          created_at: string
+          error_message: string | null
+          id: string
+          lease_expires_at: string | null
+          max_retries: number
+          next_retry_at: string | null
+          processed_at: string | null
+          qbo_refund_receipt_id: string | null
+          refund_amount_cents: number
+          retry_count: number
+          status: string
+          stripe_refund_id: string
+        }
+        Insert: {
+          conference_order_id: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_refund_receipt_id?: string | null
+          refund_amount_cents: number
+          retry_count?: number
+          status?: string
+          stripe_refund_id: string
+        }
+        Update: {
+          conference_order_id?: string
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_refund_receipt_id?: string | null
+          refund_amount_cents?: number
+          retry_count?: number
+          status?: string
+          stripe_refund_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_conference_refund_queue_conference_order_id_fkey"
+            columns: ["conference_order_id"]
+            isOneToOne: false
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       qbo_export_queue: {
         Row: {
           created_at: string
@@ -6834,6 +6949,107 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      qbo_membership_refund_queue: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          invoice_id: string
+          lease_expires_at: string | null
+          max_retries: number
+          next_retry_at: string | null
+          processed_at: string | null
+          qbo_refund_receipt_id: string | null
+          refund_amount_cents: number
+          retry_count: number
+          status: string
+          stripe_refund_id: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          invoice_id: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_refund_receipt_id?: string | null
+          refund_amount_cents: number
+          retry_count?: number
+          status?: string
+          stripe_refund_id: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          invoice_id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          processed_at?: string | null
+          qbo_refund_receipt_id?: string | null
+          refund_amount_cents?: number
+          retry_count?: number
+          status?: string
+          stripe_refund_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "qbo_membership_refund_queue_invoice_id_fkey"
+            columns: ["invoice_id"]
+            isOneToOne: false
+            referencedRelation: "invoices"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      qbo_misc_receipt_queue: {
+        Row: {
+          created_at: string
+          error_message: string | null
+          id: string
+          lease_expires_at: string | null
+          max_retries: number
+          next_retry_at: string | null
+          payment_id: string
+          payment_kind: string
+          processed_at: string | null
+          qbo_sales_receipt_id: string | null
+          retry_count: number
+          status: string
+        }
+        Insert: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          payment_id: string
+          payment_kind: string
+          processed_at?: string | null
+          qbo_sales_receipt_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Update: {
+          created_at?: string
+          error_message?: string | null
+          id?: string
+          lease_expires_at?: string | null
+          max_retries?: number
+          next_retry_at?: string | null
+          payment_id?: string
+          payment_kind?: string
+          processed_at?: string | null
+          qbo_sales_receipt_id?: string | null
+          retry_count?: number
+          status?: string
+        }
+        Relationships: []
       }
       qbo_reconciliation_queue: {
         Row: {

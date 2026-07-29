@@ -5,7 +5,7 @@ import type { BuildEntity, EntityRefView } from "../../actions/conference-entiti
 function thing(partial: Partial<BuildEntity> & { id: string; kind: string; name: string }): BuildEntity {
   return {
     isForSale: false, priceCents: null, currency: "CAD", attributes: {}, needsDefinition: false,
-    inventory: null, tierPrices: {}, refs: [],
+    inventory: null, tierPrices: {}, qboItemId: null, refs: [],
     ...partial,
   };
 }

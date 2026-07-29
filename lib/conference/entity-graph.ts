@@ -65,6 +65,19 @@ export function effectiveAttributes(
 }
 
 /**
+ * A thing's effective QuickBooks item = its own qboItemId if set, else its
+ * type's — same "instance wins, type is the default" rule as effectiveAttributes,
+ * for the one field that's a real column rather than an attributes-bag key.
+ * Set once on a type (e.g. "Booth") and every instance inherits it.
+ */
+export function effectiveQboItemId(entity: BuildEntity, byId: Map<string, BuildEntity>): string | null {
+  if (entity.qboItemId) return entity.qboItemId;
+  const typeId = instanceTypeId(entity);
+  const type = typeId ? byId.get(typeId) : undefined;
+  return type?.qboItemId ?? null;
+}
+
+/**
  * The open questions a thing still raises — the "now define what that means"
  * loop, made kind-aware. Uses EFFECTIVE refs so an instance isn't nagged for
  * something it inherits.

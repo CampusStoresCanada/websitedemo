@@ -77,6 +77,7 @@ const NAV_GROUPS: NavGroup[] = [
       { href: "/admin/content", label: "Site Content" },
       { href: "/admin/pages", label: "Pages & Permissions" },
       { href: "/admin/hero-area", label: "Hero Area" },
+      { href: "/admin/settings/quickbooks", label: "QuickBooks" },
     ],
   },
 ];

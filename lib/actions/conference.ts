@@ -146,6 +146,7 @@ const CONFERENCE_UPDATE_FIELDS = [
   "tax_jurisdiction",
   "tax_rate_pct",
   "stripe_tax_rate_id",
+  "qbo_tax_code_ref",
   "start_date",
   "end_date",
   "registration_open_at",
@@ -377,6 +378,7 @@ export async function duplicateConference(
       timezone: source.timezone,
       tax_jurisdiction: source.tax_jurisdiction,
       tax_rate_pct: source.tax_rate_pct,
+      qbo_tax_code_ref: source.qbo_tax_code_ref,
       duplicated_from_id: source.id,
       created_by: auth.ctx.userId,
     })
@@ -414,7 +416,7 @@ export async function duplicateConference(
     "Build the v3 catalog (Catalog tab) — things, offers, and pricing",
     "Set new start_date and end_date",
     "Set registration_open_at and registration_close_at",
-    "Verify tax_jurisdiction and tax_rate_pct",
+    "Verify tax_jurisdiction, tax_rate_pct, and the QuickBooks tax code (often a different venue)",
     "Review legal document content for updates",
   ];
 

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createConference, updateConference } from "@/lib/actions/conference";
 import { loadGooglePlacesScript } from "@/lib/google/places";
+import QBTaxCodePicker from "@/components/admin/qbo/QBTaxCodePicker";
 import type { Database } from "@/lib/database.types";
 
 function utcToLocalInput(utcIso: string): string {
@@ -39,6 +40,7 @@ export default function ConferenceForm({
   const [taxJurisdiction, setTaxJurisdiction] = useState(conference?.tax_jurisdiction ?? "");
   const [taxRatePct, setTaxRatePct] = useState(conference?.tax_rate_pct?.toString() ?? "");
   const [stripeTaxRateId, setStripeTaxRateId] = useState(conference?.stripe_tax_rate_id ?? "");
+  const [qboTaxCodeRef, setQboTaxCodeRef] = useState<string | null>(conference?.qbo_tax_code_ref ?? null);
   const [cartReservationMinutes, setCartReservationMinutes] = useState(
     String(conference?.cart_reservation_minutes ?? 15)
   );
@@ -132,6 +134,7 @@ export default function ConferenceForm({
       tax_jurisdiction: taxJurisdiction || null,
       tax_rate_pct: taxRatePct ? parseFloat(taxRatePct) : null,
       stripe_tax_rate_id: stripeTaxRateId || null,
+      qbo_tax_code_ref: qboTaxCodeRef,
       cart_reservation_minutes: cartReservationMinutes ? Math.max(1, parseInt(cartReservationMinutes)) : 15,
       start_date: startDate || null,
       end_date: endDate || null,
@@ -287,6 +290,18 @@ export default function ConferenceForm({
             <input type="text" value={stripeTaxRateId} onChange={(e) => setStripeTaxRateId(e.target.value)} placeholder="txr_..." className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm font-mono focus:outline-none focus:ring-1 focus:ring-accent" />
             <p className="mt-1 text-xs text-gray-400">
               From Stripe Dashboard &rarr; Tax Rates. Must match the jurisdiction rate above.
+            </p>
+          </div>
+          <div className="col-span-3">
+            <QBTaxCodePicker
+              value={qboTaxCodeRef}
+              onChange={(id) => setQboTaxCodeRef(id)}
+              label="QuickBooks Tax Code"
+              required
+            />
+            <p className="mt-1 text-xs text-gray-400">
+              Applied to every booth/registration/sponsorship sale for this conference — all one
+              rate, based on where the conference is held, regardless of the buyer&apos;s own location.
             </p>
           </div>
           <div>

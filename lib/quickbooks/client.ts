@@ -10,6 +10,10 @@ import type {
   QBInvoiceInput,
   QBPayment,
   QBPaymentInput,
+  QBSalesReceipt,
+  QBSalesReceiptInput,
+  QBRefundReceipt,
+  QBRefundReceiptInput,
   QBTokenResponse,
   QBReport,
   QBAccount,
@@ -21,6 +25,13 @@ const TOKEN_URL = "https://oauth.platform.intuit.com/oauth2/v1/tokens/bearer";
 const API_BASE_SANDBOX = "https://sandbox-quickbooks.api.intuit.com";
 const API_BASE_PRODUCTION = "https://quickbooks.api.intuit.com";
 const APP_SETTINGS_KEY = "qbo_refresh_token";
+
+// QBO's DocNumber field caps at 21 characters — a full UUID (36 chars) is
+// rejected outright. Truncated to a prefix here; callers that need exact
+// lookup should also carry the full id in PrivateNote.
+export function qboDocNumber(id: string): string {
+  return id.slice(0, 21);
+}
 
 // Module-level access token cache — valid for the lifetime of this process.
 // In serverless, this resets per cold start, which is fine.
@@ -226,6 +237,21 @@ export async function createQBPayment(input: QBPaymentInput): Promise<QBPayment>
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Sales Receipt / Refund Receipt — already-paid conference commerce
+// (no AR, no Invoice — Stripe already collected the money)
+// ─────────────────────────────────────────────────────────────────
+
+export async function createQBSalesReceipt(input: QBSalesReceiptInput): Promise<QBSalesReceipt> {
+  const res = await qbRequest<{ SalesReceipt: QBSalesReceipt }>("POST", "/salesreceipt", input);
+  return res.SalesReceipt;
+}
+
+export async function createQBRefundReceipt(input: QBRefundReceiptInput): Promise<QBRefundReceipt> {
+  const res = await qbRequest<{ RefundReceipt: QBRefundReceipt }>("POST", "/refundreceipt", input);
+  return res.RefundReceipt;
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Payment query (inbound reconciliation)
 // ─────────────────────────────────────────────────────────────────
 
@@ -256,6 +282,22 @@ export async function fetchQBItems(): Promise<QBItem[]> {
     `/query?query=${encodeURIComponent(query)}`
   );
   return res.QueryResponse.Item ?? [];
+}
+
+export interface QBTaxCode {
+  Id: string;
+  Name: string;
+  Description?: string;
+  Active: boolean;
+}
+
+export async function fetchQBTaxCodes(): Promise<QBTaxCode[]> {
+  const query = `SELECT * FROM TaxCode WHERE Active = true MAXRESULTS 100`;
+  const res = await qbRequest<{ QueryResponse: { TaxCode?: QBTaxCode[] } }>(
+    "GET",
+    `/query?query=${encodeURIComponent(query)}`
+  );
+  return res.QueryResponse.TaxCode ?? [];
 }
 
 /**

@@ -23,6 +23,7 @@
 # misc
 .DS_Store
 *.pem
+/People to demo the website to..txt
 
 # debug
 npm-debug.log*

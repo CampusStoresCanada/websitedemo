@@ -1,5 +1,6 @@
 import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import { getBillingConfig, getEffectivePolicy } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { currentProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
@@ -430,13 +431,15 @@ export async function processRefund(
   }
 
   // 3. Process Stripe refund
+  let stripeRefundId: string | null = null;
   if (invoice.stripe_payment_intent_id) {
     try {
-      await stripe.refunds.create({
+      const refund = await stripe.refunds.create({
         payment_intent: invoice.stripe_payment_intent_id,
         reason: "requested_by_customer",
         metadata: { invoice_id: invoiceId, reason },
       });
+      stripeRefundId = refund.id;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Stripe refund failed";
       return { success: false, error: msg };
@@ -453,6 +456,13 @@ export async function processRefund(
       updated_at: new Date().toISOString(),
     })
     .eq("id", invoiceId);
+
+  // stripe_refund_id is the idempotency key on qbo_membership_refund_queue —
+  // if the charge.refunded webhook also fires for this same refund, that
+  // enqueue is a no-op.
+  if (stripeRefundId) {
+    await enqueueQBExportRefund(invoiceId, stripeRefundId, invoice.total_cents);
+  }
 
   return { success: true };
 }

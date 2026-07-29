@@ -10,7 +10,12 @@ import {
   triggerConferenceRegistrationConfirmation,
   triggerConferencePaymentConfirmation,
 } from "../comms/conference-triggers";
-import { enqueueQBExport } from "@/lib/quickbooks/export";
+import { enqueueQBExport, enqueueQBExportRefund } from "@/lib/quickbooks/export";
+import {
+  enqueueQBConferenceReceipt,
+  enqueueQBConferenceRefund,
+  enqueueQBMiscReceipt,
+} from "@/lib/quickbooks/conference-export";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -129,17 +134,23 @@ async function processEventTicketPurchase(
   }
 
   // Mark registration as paid
-  const { error } = await db
+  const { data: updatedReg, error } = await db
     .from("event_registrations")
     .update({
       payment_status: "paid",
       stripe_session_id: session.id,
     })
     .eq("event_id", event_id)
-    .eq("user_id", user_id);
+    .eq("user_id", user_id)
+    .select("id")
+    .single();
 
   if (error) {
     throw new Error(`[event-ticket webhook] failed to mark registration paid: ${error.message}`);
+  }
+
+  if (updatedReg?.id) {
+    await enqueueQBMiscReceipt("event_ticket", updatedReg.id);
   }
 
   // Send confirmation email + calendar invite — best effort
@@ -200,7 +211,7 @@ async function processEventTicketBulkPurchase(
   // Find all pending registrations pre-created for this session
   const { data: regs, error } = await db
     .from("event_registrations")
-    .select("user_id, event_id")
+    .select("id, user_id, event_id")
     .eq("stripe_session_id", session.id)
     .eq("payment_status", "pending");
 
@@ -215,6 +226,8 @@ async function processEventTicketBulkPurchase(
     .update({ payment_status: "paid" })
     .eq("stripe_session_id", session.id)
     .eq("payment_status", "pending");
+
+  await Promise.all(regs.map((reg) => enqueueQBMiscReceipt("event_ticket", reg.id)));
 
   const eventId = regs[0].event_id;
   const { data: event } = await db
@@ -419,6 +432,8 @@ async function handleCheckoutSessionCompleted(
       );
     }
 
+    await enqueueQBConferenceReceipt(conferenceOrderId);
+
     const conferenceId = session.metadata?.conference_id;
     const orgId = session.metadata?.organization_id;
     const userId = session.metadata?.user_id;
@@ -526,13 +541,18 @@ async function handleCheckoutSessionCompleted(
   // the actual booth mints later, at approveApplication() time, once an org
   // exists to own it (see lib/actions/applications.ts).
   if (checkoutKind === "prospective_booth") {
-    const { error } = await db
+    const { data: boothPayment, error } = await db
       .from("prospective_booth_payments")
       .update({ status: "paid", paid_at: new Date().toISOString() })
       .eq("stripe_checkout_session_id", session.id)
-      .eq("status", "pending");
+      .eq("status", "pending")
+      .select("id")
+      .maybeSingle();
     if (error) {
       console.error(`checkout.session.completed: failed to mark prospective booth payment paid (session ${session.id}): ${error.message}`);
+    }
+    if (boothPayment?.id) {
+      await enqueueQBMiscReceipt("prospective_booth", boothPayment.id);
     }
     return { conferenceOrderId: null };
   }
@@ -551,6 +571,7 @@ async function handleCheckoutSessionCompleted(
       console.error(`checkout.session.completed: failed to mark prospective registration paid (session ${session.id}): ${markPaidError.message}`);
     }
     if (row) {
+      await enqueueQBMiscReceipt("prospective_registration", row.id);
       await mintProspectiveRegistration(db, row);
     }
     return { conferenceOrderId: null };
@@ -763,6 +784,23 @@ async function handleChargeRefunded(
       );
     }
 
+    // Each Stripe Refund object carries its own incremental amount (unlike
+    // charge.amount_refunded, which is the running cumulative total) — take
+    // the most recent one as the refund this event is about. stripe_refund_id
+    // is the idempotency key on qbo_conference_refund_queue, so a duplicate
+    // delivery (or the admin action having already enqueued the same refund)
+    // is naturally a no-op.
+    const latestRefund = charge.refunds?.data?.[0];
+    if (latestRefund) {
+      await enqueueQBConferenceRefund(chargeMetadataOrderId, latestRefund.id, latestRefund.amount);
+    } else {
+      await enqueueQBConferenceRefund(
+        chargeMetadataOrderId,
+        `${charge.id}_${charge.amount_refunded}`,
+        charge.amount_refunded
+      );
+    }
+
     return { conferenceOrderId: chargeMetadataOrderId };
   }
 
@@ -816,6 +854,17 @@ async function processRefundUpdate(
       updated_at: new Date().toISOString(),
     })
     .eq("id", localInvoice.id);
+
+  // Same "latest refund object, fall back to a synthesized id" pattern as
+  // handleChargeRefunded's conference path above — stripe_refund_id is the
+  // idempotency key, so this is a no-op if processRefund (billing.ts) already
+  // enqueued the same refund.
+  const latestRefund = charge.refunds?.data?.[0];
+  if (latestRefund) {
+    await enqueueQBExportRefund(localInvoice.id, latestRefund.id, refundedAmount);
+  } else {
+    await enqueueQBExportRefund(localInvoice.id, `${charge.id}_${refundedAmount}`, refundedAmount);
+  }
 }
 
 export function toWebhookPayloadJson(event: Stripe.Event): Json {

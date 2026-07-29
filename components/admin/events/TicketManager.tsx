@@ -9,6 +9,7 @@ function utcToLocalInput(utcIso: string): string {
 }
 import type { EventTicketType, AudienceFilter } from "@/lib/events/tickets";
 import { formatPrice } from "@/lib/events/tickets";
+import QBItemPicker from "@/components/admin/qbo/QBItemPicker";
 
 // ── Server actions (imported inline to keep file self-contained) ──
 import {
@@ -54,6 +55,7 @@ function blankForm() {
     available_from: "",
     available_until: "",
     is_hidden: false,
+    qbo_item_id: null as string | null,
   };
 }
 
@@ -70,6 +72,7 @@ function formFromTicket(t: EventTicketType): FormState {
     available_from: t.available_from ? utcToLocalInput(t.available_from) : "",
     available_until: t.available_until ? utcToLocalInput(t.available_until) : "",
     is_hidden: t.is_hidden,
+    qbo_item_id: t.qbo_item_id,
   };
 }
 
@@ -99,7 +102,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
     setError(null);
   }
 
-  function patch(field: keyof FormState, value: string | boolean) {
+  function patch(field: keyof FormState, value: string | boolean | null) {
     setForm((f) => ({ ...f, [field]: value }));
   }
 
@@ -131,6 +134,7 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
       available_from: form.available_from || null,
       available_until: form.available_until || null,
       is_hidden: form.is_hidden,
+      qbo_item_id: priceCents > 0 ? form.qbo_item_id : null,
     };
 
     if (!payload.name) { setError("Name is required"); return; }
@@ -273,6 +277,17 @@ export default function TicketManager({ eventId, tickets: initial }: TicketManag
                 className="w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
               />
             </div>
+
+            {parseFloat(form.price_dollars || "0") > 0 && (
+              <div className="sm:col-span-2">
+                <QBItemPicker
+                  value={form.qbo_item_id}
+                  onChange={(id) => patch("qbo_item_id", id)}
+                  label="QuickBooks Item"
+                  required
+                />
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Who can buy</label>

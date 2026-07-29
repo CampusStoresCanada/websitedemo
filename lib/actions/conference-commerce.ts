@@ -38,6 +38,7 @@ import { buildEntityGraph, ENTITY_SELECT } from "../conference/entity-rows";
 import { indexById } from "../conference/entity-graph";
 import { findOverlappingRegistration } from "../conference/registration-overlap";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
+import { enqueueQBConferenceRefund } from "../quickbooks/conference-export";
 import type { BuildEntity, EntityRefView } from "./conference-entities";
 
 /**
@@ -302,7 +303,8 @@ function minimalOfferEntity(input: {
   return {
     id: input.id, kind: input.kind, name: input.name, isForSale: true,
     priceCents: input.priceCents, currency: input.currency, attributes: {},
-    needsDefinition: false, inventory: input.inventory, tierPrices: input.tierPrices, refs: input.refs,
+    needsDefinition: false, inventory: input.inventory, tierPrices: input.tierPrices,
+    qboItemId: null, refs: input.refs,
   };
 }
 
@@ -1707,6 +1709,11 @@ export async function requestConferenceRefund(
       });
       return { success: false, error: refundUpdateError.message };
     }
+
+    // Idempotency key is stripeRefund.id — the same refund's charge.refunded
+    // webhook will also fire and try to enqueue, but the unique constraint on
+    // qbo_conference_refund_queue.stripe_refund_id makes the second insert a no-op.
+    await enqueueQBConferenceRefund(orderId, stripeRefund.id, requestedRefundAmount);
 
     await logAuditEventSafe({
       action: "conference_refund_request",

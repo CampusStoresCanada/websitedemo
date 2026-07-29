@@ -15,6 +15,7 @@ interface TicketTypePayload {
   available_from: string | null;
   available_until: string | null;
   is_hidden: boolean;
+  qbo_item_id?: string | null;
 }
 
 export async function createTicketType(

@@ -39,9 +39,13 @@ export async function GET() {
     checks.api_connection = `FAILED: ${err instanceof Error ? err.message : String(err)}`;
   }
 
-  const allOk = Object.values(checks).every(
-    (v) => v === "ok" || v === "set" || v.includes("seed")
-  );
+  // refresh_token_env is expected to read MISSING once the token has rotated
+  // into app_settings (the DB copy takes precedence — see getStoredRefreshToken) —
+  // only flag it if the DB doesn't have one either.
+  const allOk = Object.entries(checks).every(([key, v]) => {
+    if (key === "refresh_token_env") return true;
+    return v === "ok" || v === "set" || v.includes("seed");
+  });
 
   return NextResponse.json({ ok: allOk, checks });
 }
