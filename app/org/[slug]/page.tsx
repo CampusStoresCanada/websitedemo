@@ -18,6 +18,7 @@ import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/confere
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
+import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
 
@@ -434,16 +435,16 @@ export default async function OrgProfilePage({ params }: PageProps) {
     const renewalConfig = await getRenewalConfig();
     graceDays = renewalConfig.grace_days;
     const maxReminderDay = Math.max(...renewalConfig.reminder_days);
-    if (organization.membership_expires_at) {
-      const daysUntilExpiry = Math.ceil(
-        (new Date(organization.membership_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-      );
-      renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
-    } else {
-      // Never had a renewal cycle at all (e.g. a new org) — no future date to
-      // count down to, so there's nothing to gate; always eligible.
-      renewalWindowOpen = true;
-    }
+    // No per-org expiry yet (never completed a renewal cycle) — count down to
+    // the same shared cycle-start date the reminder cron falls back to
+    // (lib/renewal/jobs.ts), instead of treating "no date" as "always open."
+    const targetExpiry =
+      organization.membership_expires_at ??
+      nextCycleStartOnOrAfter(new Date(), renewalConfig.cycle_start_month_day);
+    const daysUntilExpiry = Math.ceil(
+      (new Date(targetExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    );
+    renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
   }
 
   // Render different layouts based on organization type
