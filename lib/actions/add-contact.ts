@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidateTag } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
@@ -105,6 +106,8 @@ export async function addContact({
 
     // Queue Circle provisioning for the new contact (fire-and-forget)
     void enqueueNewContactCircleProvisioning(contact.contactId, organizationId);
+
+    revalidateTag("org-profile", "max");
 
     return { success: true, contactId: contact.contactId };
   } catch (err) {

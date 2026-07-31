@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidateTag } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
@@ -81,6 +82,8 @@ export async function deleteContact({
 
     // Queue Circle de-provisioning (fire-and-forget)
     void enqueueContactCircleDeprovisioning(contactId);
+
+    revalidateTag("org-profile", "max");
 
     return { success: true, deletedName: contact.name };
   } catch (err) {

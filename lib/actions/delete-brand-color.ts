@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
 
@@ -47,6 +47,8 @@ export async function deleteBrandColor({
 
   // Bust the route cache so the removed swatch disappears without a manual refresh.
   revalidatePath("/", "layout");
+  // revalidatePath doesn't reach the unstable_cache-tagged org profile data cache
+  revalidateTag("org-profile", "max");
 
   return { success: true };
 }
