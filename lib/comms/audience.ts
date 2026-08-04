@@ -4,18 +4,149 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds as lookupUserEmails } from "@/lib/supabase/user-lookup";
-import type { AudienceDefinition, ResolvedRecipient } from "./types";
+import { deriveRecipientNameVariables, formatConferenceDates } from "./format";
+import { getConditionsByKeys } from "./conditions/store";
+import { evaluateCondition } from "./conditions/evaluate";
+import { deriveSubjectVariables } from "./variables/deriveSubjectVariables";
+import { filterSuppressedRecipients } from "./suppressions";
+import type { SystemVariableKey } from "./variables/registry";
+import type { AudienceDefinition, ResolvedRecipient, TemplateCategory } from "./types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+type ConferenceVariables = Partial<
+  Pick<Record<SystemVariableKey, string>, "conference_year" | "conference_dates" | "conference_location">
+>;
+type OrgVariables = Partial<Pick<Record<SystemVariableKey, string>, "org_name">>;
+type EventVariables = Partial<Pick<Record<SystemVariableKey, string>, "event_name" | "event_date">>;
+
 /**
- * Resolve an audience definition to a list of concrete recipients.
+ * {{conference_year}}/{{conference_dates}}/{{conference_location}} for
+ * every recipient of a conference-scoped audience — fetched once per
+ * resolve call, not once per recipient, since it's the same conference
+ * for the whole batch.
+ */
+async function loadConferenceVariables(
+  supabase: AdminClient,
+  conferenceId: string | undefined
+): Promise<ConferenceVariables> {
+  if (!conferenceId) return {};
+  const { data: conference } = await supabase
+    .from("conference_instances")
+    .select("year, start_date, end_date, location_city, location_province, location_venue")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  if (!conference) return {};
+
+  return {
+    conference_year: String(conference.year),
+    conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
+    conference_location: [conference.location_venue, conference.location_city, conference.location_province]
+      .filter(Boolean)
+      .join(", "),
+  };
+}
+
+/**
+ * organization_* variables (every field CONDITION_SUBJECTS knows about an
+ * org — logo, membership status, payment status, website, ...), fetched
+ * once for every distinct org id in the batch rather than once per
+ * recipient.
+ */
+async function batchLoadOrganizationVariables(
+  supabase: AdminClient,
+  orgIds: (string | null | undefined)[]
+): Promise<Map<string, Record<string, string>>> {
+  const ids = [...new Set(orgIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return new Map();
+  const { data: orgs } = await supabase.from("organizations").select("*").in("id", ids);
+  return new Map((orgs ?? []).map((org) => [org.id, deriveSubjectVariables("organization", org)]));
+}
+
+/**
+ * person_* variables (display_name, avatar_url, global_role), batched the
+ * same way as organization variables above.
+ */
+async function batchLoadPersonVariables(
+  supabase: AdminClient,
+  userIds: (string | null | undefined)[]
+): Promise<Map<string, Record<string, string>>> {
+  const ids = [...new Set(userIds.filter((id): id is string => !!id))];
+  if (ids.length === 0) return new Map();
+  const { data: profiles } = await supabase.from("profiles").select("*").in("id", ids);
+  return new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
+}
+
+/**
+ * Narrow a resolved recipient list by a group of saved conditions, combined
+ * either as ALL (every condition must hold) or ANY (at least one must
+ * hold). Shared by both segmentation gates in resolveAudience below.
+ */
+async function applyConditionGate(
+  supabase: AdminClient,
+  recipients: ResolvedRecipient[],
+  keys: string[] | undefined,
+  matchMode: "all" | "any"
+): Promise<ResolvedRecipient[]> {
+  const conditionKeys = keys ?? [];
+  if (conditionKeys.length === 0) return recipients;
+
+  const conditions = await getConditionsByKeys(conditionKeys);
+  if (conditions.length === 0) return recipients;
+
+  const results = await Promise.all(
+    recipients.map(async (r) => {
+      // No resolvable identity (custom_emails/custom_recipient_list) —
+      // can't check a condition, so it passes through rather than being
+      // silently dropped.
+      if (!r.userId) return { recipient: r, keep: true };
+      const satisfactions = await Promise.all(
+        conditions.map((c) => evaluateCondition(supabase, c, { userId: r.userId!, email: r.email }))
+      );
+      const keep = matchMode === "any" ? satisfactions.some(Boolean) : satisfactions.every(Boolean);
+      return { recipient: r, keep };
+    })
+  );
+
+  return results.filter((r) => r.keep).map((r) => r.recipient);
+}
+
+/**
+ * Resolve an audience definition to a list of concrete recipients, then
+ * narrow by two independent condition gates (segmentation — see
+ * lib/comms/conditions/): the audience's own filters.condition_keys, and
+ * the parent campaign's filters.campaign_condition_keys (set by
+ * resolveEffectiveAudience). Each gate can independently be ALL or ANY;
+ * the two gates themselves are always AND'd together — "in this segment"
+ * and "still relevant to the campaign" are different concerns, not
+ * something an admin would want to OR.
  */
 export async function resolveAudience(
   audience: AudienceDefinition
 ): Promise<ResolvedRecipient[]> {
   const supabase = createAdminClient();
+  let recipients = await resolveAudienceByType(supabase, audience);
 
+  recipients = await applyConditionGate(
+    supabase,
+    recipients,
+    audience.filters?.condition_keys,
+    audience.filters?.condition_match ?? "all"
+  );
+  recipients = await applyConditionGate(
+    supabase,
+    recipients,
+    audience.filters?.campaign_condition_keys,
+    audience.filters?.campaign_condition_match ?? "all"
+  );
+
+  return recipients;
+}
+
+async function resolveAudienceByType(
+  supabase: AdminClient,
+  audience: AudienceDefinition
+): Promise<ResolvedRecipient[]> {
   switch (audience.type) {
     case "conference_delegates":
       return resolveConferenceDelegates(supabase, audience.filters ?? {});
@@ -65,7 +196,7 @@ async function resolveConferenceDelegates(
   let q = supabase
     .from("conference_people")
     .select(
-      `id, user_id, contact_email, display_name, conference_id,
+      `id, user_id, contact_email, display_name, conference_id, organization_id,
        conference_registrations!inner(registration_type)`
     )
     .eq("conference_registrations.registration_type", "member");
@@ -80,10 +211,20 @@ async function resolveConferenceDelegates(
     return [];
   }
 
+  const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
+  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
+  const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
+
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
     email: row.contact_email ?? "",
     name: row.display_name ?? null,
+    variableOverrides: {
+      ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
+      ...conferenceVars,
+      ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
+      ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+    },
   })).filter((r) => r.email !== "");
 }
 
@@ -96,7 +237,7 @@ async function resolveConferenceExhibitors(
   let q = supabase
     .from("conference_people")
     .select(
-      `id, user_id, contact_email, display_name, conference_id,
+      `id, user_id, contact_email, display_name, conference_id, organization_id,
        conference_registrations!inner(registration_type)`
     )
     .eq("conference_registrations.registration_type", "partner");
@@ -111,10 +252,20 @@ async function resolveConferenceExhibitors(
     return [];
   }
 
+  const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
+  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
+  const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
+
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
     email: row.contact_email ?? "",
     name: row.display_name ?? null,
+    variableOverrides: {
+      ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
+      ...conferenceVars,
+      ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
+      ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+    },
   })).filter((r) => r.email !== "");
 }
 
@@ -126,7 +277,7 @@ async function resolveConferenceAll(
 ): Promise<ResolvedRecipient[]> {
   let q = supabase
     .from("conference_people")
-    .select("id, user_id, contact_email, display_name, conference_id");
+    .select("id, user_id, contact_email, display_name, conference_id, organization_id");
 
   if (filters?.conference_instance_id) {
     q = q.eq("conference_id", filters.conference_instance_id);
@@ -138,10 +289,20 @@ async function resolveConferenceAll(
     return [];
   }
 
+  const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
+  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
+  const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
+
   return (data ?? []).map((row) => ({
     userId: row.user_id ?? null,
     email: row.contact_email ?? "",
     name: row.display_name ?? null,
+    variableOverrides: {
+      ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
+      ...conferenceVars,
+      ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
+      ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+    },
   })).filter((r) => r.email !== "");
 }
 
@@ -190,18 +351,28 @@ async function resolveConferenceHolders(
 
   const { data: people, error: peopleError } = await supabase
     .from("conference_people")
-    .select("user_id, contact_email, display_name")
+    .select("user_id, contact_email, display_name, organization_id")
     .in("id", [...personIds]);
   if (peopleError) {
     console.error("[comms/audience] resolveConferenceHolders people error:", peopleError);
     return [];
   }
 
+  const conferenceVars = await loadConferenceVariables(supabase, conferenceId);
+  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (people ?? []).map((r) => r.organization_id));
+  const personVarsByUserId = await batchLoadPersonVariables(supabase, (people ?? []).map((r) => r.user_id));
+
   return (people ?? [])
     .map((row) => ({
       userId: row.user_id ?? null,
       email: row.contact_email ?? "",
       name: row.display_name ?? null,
+      variableOverrides: {
+        ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
+        ...conferenceVars,
+        ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
+        ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
+      },
     }))
     .filter((r) => r.email !== "");
 }
@@ -267,7 +438,14 @@ async function resolveConferenceOrgsBySeatStatus(
     .map(([orgId]) => orgId);
   if (matchingOrgIds.length === 0) return [];
 
-  return resolveOrgAdmins(supabase, { org_ids: matchingOrgIds });
+  const orgAdmins = await resolveOrgAdmins(supabase, { org_ids: matchingOrgIds });
+  const conferenceVars = await loadConferenceVariables(supabase, conferenceId);
+  if (Object.keys(conferenceVars).length === 0) return orgAdmins;
+
+  return orgAdmins.map((r) => ({
+    ...r,
+    variableOverrides: { ...r.variableOverrides, ...conferenceVars },
+  }));
 }
 
 // ── Global Admins (admin + super_admin) ───────────────────────────
@@ -277,7 +455,7 @@ async function resolveGlobalAdmins(
 ): Promise<ResolvedRecipient[]> {
   const { data: profiles, error } = await supabase
     .from("profiles")
-    .select("id, display_name, global_role")
+    .select("*")
     .in("global_role", ["admin", "super_admin"]);
 
   if (error) {
@@ -295,6 +473,10 @@ async function resolveGlobalAdmins(
       userId: p.id,
       email: emailMap[p.id] ?? "",
       name: p.display_name ?? null,
+      variableOverrides: {
+        ...deriveRecipientNameVariables(p.display_name, emailMap[p.id] ?? ""),
+        ...deriveSubjectVariables("person", p),
+      },
     }))
     .filter((r) => r.email);
 }
@@ -310,7 +492,7 @@ async function resolveOrgAdmins(
   // FK between the two tables, so PostgREST can't auto-detect the relationship
   // for an embedded select (confirmed via PGRST200 at runtime). Two plain
   // queries instead, same pattern as resolveEventRegistrants below.
-  let q = supabase.from("user_organizations").select("user_id").eq("role", "org_admin").eq("status", "active");
+  let q = supabase.from("user_organizations").select("user_id, organization_id").eq("role", "org_admin").eq("status", "active");
 
   if (filters?.org_ids?.length) {
     q = q.in("organization_id", filters.org_ids);
@@ -325,18 +507,43 @@ async function resolveOrgAdmins(
   const userIds = [...new Set((data ?? []).map((row) => row.user_id).filter(Boolean))];
   if (userIds.length === 0) return [];
 
-  const { data: profiles } = await supabase.from("profiles").select("id, display_name").in("id", userIds);
+  // A user can admin more than one org; first match is good enough for a
+  // personalization convenience, not a strict guarantee.
+  const orgIdByUserId = new Map<string, string>();
+  for (const row of data ?? []) {
+    if (row.user_id && row.organization_id && !orgIdByUserId.has(row.user_id)) {
+      orgIdByUserId.set(row.user_id, row.organization_id);
+    }
+  }
+  const { data: orgs } = await supabase
+    .from("organizations")
+    .select("*")
+    .in("id", [...new Set(orgIdByUserId.values())]);
+  const orgNameById = new Map((orgs ?? []).map((o) => [o.id, o.name]));
+  const orgVarsById = new Map((orgs ?? []).map((o) => [o.id, deriveSubjectVariables("organization", o)]));
+
+  const { data: profiles } = await supabase.from("profiles").select("*").in("id", userIds);
   const nameMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.display_name]));
+  const personVarsById = new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
 
   // Resolve emails via auth.users admin lookup (profiles table has no email column)
   const emailMap = await lookupUserEmails(supabase, userIds);
 
   return userIds
-    .map((uid) => ({
-      userId: uid,
-      email: emailMap[uid] ?? "",
-      name: nameMap[uid] ?? null,
-    }))
+    .map((uid) => {
+      const orgId = orgIdByUserId.get(uid);
+      return {
+        userId: uid,
+        email: emailMap[uid] ?? "",
+        name: nameMap[uid] ?? null,
+        variableOverrides: {
+          ...deriveRecipientNameVariables(nameMap[uid] ?? null, emailMap[uid] ?? ""),
+          ...((orgId && orgNameById.get(orgId) ? { org_name: orgNameById.get(orgId)! } : {}) satisfies OrgVariables),
+          ...(orgId ? orgVarsById.get(orgId) : {}),
+          ...personVarsById.get(uid),
+        },
+      };
+    })
     .filter((r) => r.email);
 }
 
@@ -353,7 +560,7 @@ async function resolveEventRegistrants(
 
   const { data: regs, error } = await supabase
     .from("event_registrations")
-    .select("user_id")
+    .select("user_id, status, payment_status")
     .eq("event_id", filters.event_id)
     .in("status", ["registered", "promoted"]);
 
@@ -362,27 +569,50 @@ async function resolveEventRegistrants(
     return [];
   }
 
-  const userIds = (regs ?? []).map((r: { user_id: string }) => r.user_id);
+  const userIds = (regs ?? []).map((r) => r.user_id);
   if (!userIds.length) return [];
+
+  const registrationByUserId = new Map((regs ?? []).map((r) => [r.user_id, r]));
 
   // Resolve names from profiles
   const { data: profiles } = await supabase
     .from("profiles")
-    .select("id, display_name")
+    .select("*")
     .in("id", userIds);
 
   const nameMap = Object.fromEntries(
     (profiles ?? []).map((p: { id: string; display_name: string | null }) => [p.id, p.display_name])
   );
+  const personVarsById = new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
 
   // Resolve emails from auth.users
   const emailMap = await lookupUserEmails(supabase, userIds);
+
+  const { data: event } = await supabase
+    .from("events")
+    .select("title, starts_at")
+    .eq("id", filters.event_id)
+    .maybeSingle();
+  const eventVars: EventVariables = event
+    ? {
+        event_name: event.title,
+        event_date: event.starts_at
+          ? new Date(event.starts_at).toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric" })
+          : "",
+      }
+    : {};
 
   return userIds
     .map((uid) => ({
       userId: uid,
       email: emailMap[uid] ?? "",
       name: nameMap[uid] ?? null,
+      variableOverrides: {
+        ...deriveRecipientNameVariables(nameMap[uid] ?? null, emailMap[uid] ?? ""),
+        ...eventVars,
+        ...personVarsById.get(uid),
+        ...deriveSubjectVariables("event_registration", registrationByUserId.get(uid) ?? null),
+      },
     }))
     .filter((r) => r.email);
 }
@@ -394,6 +624,7 @@ function resolveCustomEmails(emails: string[]): ResolvedRecipient[] {
     userId: null,
     email,
     name: null,
+    variableOverrides: deriveRecipientNameVariables(null, email),
   }));
 }
 
@@ -404,18 +635,34 @@ function resolveCustomRecipientList(
     userId: null,
     email: r.email,
     name: r.name ?? null,
-    variableOverrides: r.variableOverrides,
+    // Explicit CSV values win — auto-derived name vars are only a fallback
+    // for whatever the admin's own columns didn't cover.
+    variableOverrides: { ...deriveRecipientNameVariables(r.name ?? null, r.email), ...r.variableOverrides },
   }));
 }
 
 /**
  * Preview an audience without persisting — returns count + sample.
  */
-export async function previewAudience(audience: AudienceDefinition): Promise<{
+/**
+ * @param suppressionCategory Omit to skip suppression filtering entirely
+ * (e.g. a transactional template). Pass null to check only the global
+ * unsubscribe, or a category to also check that category's suppressions —
+ * mirrors executeCampaignSend's own filtering so the preview count matches
+ * what will actually send.
+ */
+export async function previewAudience(
+  audience: AudienceDefinition,
+  suppressionCategory?: TemplateCategory | null
+): Promise<{
   count: number;
   sample: ResolvedRecipient[];
 }> {
-  const resolved = await resolveAudience(audience);
+  let resolved = await resolveAudience(audience);
+  if (suppressionCategory !== undefined) {
+    const supabase = createAdminClient();
+    resolved = await filterSuppressedRecipients(supabase, resolved, suppressionCategory);
+  }
   return {
     count: resolved.length,
     sample: resolved.slice(0, 5),

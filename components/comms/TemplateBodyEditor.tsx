@@ -6,8 +6,10 @@ import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
 import TextAlign from "@tiptap/extension-text-align";
 import Placeholder from "@tiptap/extension-placeholder";
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSlashCommands } from "@/components/ui/SlashCommands";
+import ConditionalInserterModal, { type SavedCondition } from "./ConditionalInserterModal";
+import VariableInserterButton from "./VariableInserterButton";
 import {
   Bold,
   Italic,
@@ -25,11 +27,13 @@ import {
   Minus,
   Undo2,
   Redo2,
+  GitBranch,
 } from "lucide-react";
 
 interface TemplateBodyEditorProps {
   initialHtml: string;
   fieldName?: string;
+  customVariableKeys?: string[];
 }
 
 // ── Toolbar primitives ────────────────────────────────────────────
@@ -76,6 +80,7 @@ function ToolbarButton({
 export default function TemplateBodyEditor({
   initialHtml,
   fieldName = "body_html",
+  customVariableKeys = [],
 }: TemplateBodyEditorProps) {
   const hiddenRef = useRef<HTMLTextAreaElement>(null);
   const editorRef = useRef<ReturnType<typeof useEditor>>(null);
@@ -127,6 +132,24 @@ export default function TemplateBodyEditor({
       editor.chain().focus().extendMarkRange("link").setLink({ href: url }).run();
     }
   }, [editor]);
+
+  const [showConditionalModal, setShowConditionalModal] = useState(false);
+
+  const insertConditional = useCallback(
+    (condition: SavedCondition) => {
+      if (!editor) return;
+      const { from, to } = editor.state.selection;
+      if (from === to) {
+        editor.chain().focus().insertContentAt(from, `{{#if ${condition.key}}}Your conditional content here.{{/if}}`).run();
+      } else {
+        // Insert the closing marker first so `from` isn't shifted by the
+        // opening marker's insertion within the same transaction.
+        editor.chain().focus().insertContentAt(to, `{{/if}}`).insertContentAt(from, `{{#if ${condition.key}}}`).run();
+      }
+      setShowConditionalModal(false);
+    },
+    [editor]
+  );
 
   if (!editor) return null;
 
@@ -205,6 +228,13 @@ export default function TemplateBodyEditor({
         <ToolbarButton onClick={() => editor.chain().focus().setHorizontalRule().run()} title="Horizontal rule">
           <Minus size={14} />
         </ToolbarButton>
+        <ToolbarButton onClick={() => setShowConditionalModal(true)} title="Insert conditional block — show content only for recipients matching a condition">
+          <GitBranch size={14} />
+        </ToolbarButton>
+        <VariableInserterButton
+          customKeys={customVariableKeys}
+          onInsert={(key) => editor.chain().focus().insertContent(`{{${key}}}`).run()}
+        />
 
         <Divider />
 
@@ -249,6 +279,10 @@ export default function TemplateBodyEditor({
 
       {/* Hidden field submitted with the form */}
       <textarea ref={hiddenRef} name={fieldName} defaultValue={initialHtml} className="hidden" readOnly />
+
+      {showConditionalModal && (
+        <ConditionalInserterModal onInsert={insertConditional} onClose={() => setShowConditionalModal(false)} />
+      )}
     </div>
   );
 }

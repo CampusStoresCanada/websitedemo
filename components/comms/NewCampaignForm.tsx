@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 
 function localInputNow(offsetMs = 0): string {
   const d = new Date(Date.now() + offsetMs);
@@ -11,6 +11,7 @@ import Link from "next/link";
 import type { MessageTemplate, AudienceType } from "@/lib/comms/types";
 import TemplateBodyEditor from "./TemplateBodyEditor";
 import EmailPreviewModal from "./EmailPreviewModal";
+import { SYSTEM_VARIABLE_KEYS } from "@/lib/comms/variables/registry";
 import { Eye, Calendar, Send, FileText } from "lucide-react";
 
 type SendTiming = "draft" | "immediate" | "scheduled";
@@ -39,11 +40,24 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "custom_recipient_list", label: "Individual / Mail Merge (paste a list)" },
 ];
 
+// Auto-filled per recipient from real data during audience resolution
+// (see lib/comms/audience.ts) — typing a value here overrides that
+// per-recipient value with the same one for everyone, so leave these
+// blank unless that's actually what's wanted. Sourced from the same
+// registry lib/comms/audience.ts is typed against, so this list can't
+// silently drift from what's actually computed.
+const AUTO_FILLED_VARIABLE_KEYS = new Set<string>(SYSTEM_VARIABLE_KEYS);
+
 const ENTITY_SCOPED_AUDIENCES = new Set<AudienceType>([
   "conference_holders",
   "conference_orgs_with_open_seats",
   "conference_orgs_fully_assigned",
 ]);
+
+interface ConditionOption {
+  key: string;
+  label: string;
+}
 
 interface NewCampaignFormProps {
   action: (formData: FormData) => Promise<void>;
@@ -51,6 +65,11 @@ interface NewCampaignFormProps {
   conferences: ConferenceOption[];
   entitiesByConference: Record<string, ConferenceEntityOption[]>;
   defaultConferenceId?: string;
+  /** When set, this send is tied to a campaign initiative and `templates` is that campaign's own roster, not the shared library. */
+  campaignId?: string;
+  campaignName?: string;
+  defaultTemplateId?: string;
+  conditions: ConditionOption[];
 }
 
 export default function NewCampaignForm({
@@ -59,8 +78,12 @@ export default function NewCampaignForm({
   conferences,
   entitiesByConference,
   defaultConferenceId,
+  campaignId,
+  campaignName,
+  defaultTemplateId,
+  conditions,
 }: NewCampaignFormProps) {
-  const [selectedTemplateKey, setSelectedTemplateKey] = useState("");
+  const [selectedTemplateId, setSelectedTemplateId] = useState(defaultTemplateId ?? "");
   const [variableValues, setVariableValues] = useState<Record<string, string>>({});
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendTiming, setSendTiming] = useState<SendTiming>("draft");
@@ -76,11 +99,11 @@ export default function NewCampaignForm({
     {}
   );
 
-  const selectedTemplate = templates.find((t) => t.key === selectedTemplateKey) ?? null;
+  const selectedTemplate = templates.find((t) => t.id === selectedTemplateId) ?? null;
 
-  const handleTemplateChange = (key: string) => {
-    setSelectedTemplateKey(key);
-    const tmpl = templates.find((t) => t.key === key);
+  const handleTemplateChange = (id: string) => {
+    setSelectedTemplateId(id);
+    const tmpl = templates.find((t) => t.id === id);
     setVariableValues(
       tmpl ? Object.fromEntries(tmpl.variable_keys.map((k) => [k, ""])) : {}
     );
@@ -90,6 +113,13 @@ export default function NewCampaignForm({
     }
   };
 
+  // Pre-fill subject/variables when arriving with a template already chosen
+  // (e.g. from a campaign's roster "Send" link).
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (defaultTemplateId) handleTemplateChange(defaultTemplateId);
+  }, []);
+
   const getCurrentBody = () =>
     (document.querySelector('textarea[name="body_html"]') as HTMLTextAreaElement)?.value ?? "";
 
@@ -98,6 +128,15 @@ export default function NewCampaignForm({
   return (
     <>
       <form action={action} className="mt-6 max-w-3xl space-y-5">
+
+        {campaignId && (
+          <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-2.5">
+            <p className="text-xs text-blue-800">
+              Part of campaign: <span className="font-medium">{campaignName}</span>
+            </p>
+            <input type="hidden" name="campaign_id" value={campaignId} />
+          </div>
+        )}
 
         {/* Campaign name */}
         <div>
@@ -119,14 +158,14 @@ export default function NewCampaignForm({
             Optional. Selecting a template pre-fills subject and body — you can edit both below.
           </p>
           <select
-            name="template_key"
-            value={selectedTemplateKey}
+            name="template_id"
+            value={selectedTemplateId}
             onChange={(e) => handleTemplateChange(e.target.value)}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
           >
             <option value="">— No template (write custom) —</option>
             {templates.map((t) => (
-              <option key={t.key} value={t.key}>
+              <option key={t.id} value={t.id}>
                 [{t.category}] {t.name}
               </option>
             ))}
@@ -139,25 +178,33 @@ export default function NewCampaignForm({
             <p className="text-xs font-medium text-blue-800">
               Template Variables{" "}
               <span className="font-normal text-[#EE2A2E]">
-                — merged into every email sent by this campaign
+                — fallback value used for any recipient without their own real per-recipient value
               </span>
             </p>
-            {selectedTemplate.variable_keys.map((key) => (
-              <div key={key}>
-                <label className="block text-xs font-medium text-gray-700 mb-1">
-                  <code className="bg-white rounded px-1 text-[#D92327]">{`{{${key}}}`}</code>
-                </label>
-                <input
-                  name={`var_${key}`}
-                  value={variableValues[key] ?? ""}
-                  onChange={(e) =>
-                    setVariableValues((v) => ({ ...v, [key]: e.target.value }))
-                  }
-                  placeholder={`Value for ${key}`}
-                  className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D] bg-white"
-                />
-              </div>
-            ))}
+            {selectedTemplate.variable_keys.map((key) => {
+              const isAutoFilled = AUTO_FILLED_VARIABLE_KEYS.has(key);
+              return (
+                <div key={key}>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    <code className="bg-white rounded px-1 text-[#D92327]">{`{{${key}}}`}</code>
+                    {isAutoFilled && (
+                      <span className="ml-2 text-[10px] font-normal text-green-700">
+                        auto-filled per recipient — this box is ignored whenever that's available
+                      </span>
+                    )}
+                  </label>
+                  <input
+                    name={`var_${key}`}
+                    value={variableValues[key] ?? ""}
+                    onChange={(e) =>
+                      setVariableValues((v) => ({ ...v, [key]: e.target.value }))
+                    }
+                    placeholder={isAutoFilled ? "Only used if a recipient has no real value for this" : `Value for ${key}`}
+                    className="block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D] bg-white"
+                  />
+                </div>
+              );
+            })}
           </div>
         )}
 
@@ -185,7 +232,7 @@ export default function NewCampaignForm({
             tokens — replaced when the email is sent.
           </p>
           <TemplateBodyEditor
-            key={selectedTemplateKey}
+            key={selectedTemplateId}
             initialHtml={selectedTemplate?.body_html ?? ""}
             fieldName="body_html"
           />
@@ -263,6 +310,43 @@ export default function NewCampaignForm({
             ))}
           </select>
         </div>
+
+        {/* Segment by condition */}
+        {conditions.length > 0 && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Refine Audience (optional)</label>
+            <p className="text-xs text-gray-500 mb-1">
+              Only send to recipients who also satisfy these. Doesn&apos;t apply to Custom Email List / mail merge,
+              since there&apos;s no linked profile to check.
+            </p>
+            <div className="rounded-lg border border-gray-200 p-3 space-y-2.5">
+              <div className="flex items-center gap-3 text-xs text-gray-600 pb-1.5 border-b border-gray-100">
+                <span className="font-medium">Match:</span>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" name="condition_match" value="all" defaultChecked className="text-accent focus:ring-accent" />
+                  All of these
+                </label>
+                <label className="flex items-center gap-1.5">
+                  <input type="radio" name="condition_match" value="any" className="text-accent focus:ring-accent" />
+                  Any of these
+                </label>
+              </div>
+              <div className="space-y-1.5">
+                {conditions.map((c) => (
+                  <label key={c.key} className="flex items-center gap-2 text-sm text-gray-700">
+                    <input
+                      type="checkbox"
+                      name="condition_keys"
+                      value={c.key}
+                      className="rounded border-gray-300 text-accent focus:ring-accent"
+                    />
+                    {c.label}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Custom emails */}
         <div>

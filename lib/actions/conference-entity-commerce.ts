@@ -244,6 +244,71 @@ export async function deallocateSeat(seatId: string): Promise<Result<null>> {
   return { success: true, data: null };
 }
 
+/**
+ * Declare how many of this entity's purchased seats the org actually plans
+ * to use — distinct from how many they bought. Without this, "seat
+ * assigned" checklist reminders (see lib/conference/checklist-engine.ts)
+ * can't tell "hasn't gotten to it yet" apart from "bought 4, only sending
+ * 1 on purpose," and nag an org that's already done. Clamped to the real
+ * seat count so this can never claim more seats than actually exist.
+ */
+export async function setEntityUsageIntent(
+  organizationId: string,
+  entityId: string,
+  conferenceId: string,
+  intendedQuantity: number
+): Promise<Result<null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+  if (!Number.isInteger(intendedQuantity) || intendedQuantity < 0) {
+    return { success: false, error: "Quantity must be a non-negative whole number." };
+  }
+
+  const db = createAdminClient();
+  const { count: seatCount } = await db
+    .from("entity_balance_seats")
+    .select("id", { count: "exact", head: true })
+    .eq("organization_id", organizationId)
+    .eq("entity_id", entityId);
+  const totalSeats = seatCount ?? intendedQuantity;
+  const clamped = Math.min(intendedQuantity, totalSeats);
+
+  const { error } = await db
+    .from("conference_entity_usage_intents")
+    .upsert(
+      {
+        organization_id: organizationId,
+        entity_id: entityId,
+        conference_id: conferenceId,
+        intended_quantity: clamped,
+        // Snapshot the total seats purchased right now — if the org later
+        // buys more (raising the real total past this), the check knows
+        // this declaration was made against a smaller purchase and treats
+        // it as stale rather than trusting a number that predates the
+        // additional seats. See CHECKS.seat_assigned.
+        declared_against_total: totalSeats,
+        declared_by: auth.ctx.userId,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "organization_id,entity_id,conference_id" }
+    );
+  if (error) return { success: false, error: error.message };
+
+  await logAuditEventSafe({
+    action: "conference_entity_usage_intent_set",
+    entityType: "conference_entity_usage_intents",
+    entityId: `${organizationId}:${entityId}:${conferenceId}`,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: { organizationId, entityId, conferenceId, intendedQuantity: clamped },
+  });
+
+  return { success: true, data: null };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Attendees — the people an org can seat. conference_people is a projection;
 // registration/staff rows are synced into it, but an org can also add a person

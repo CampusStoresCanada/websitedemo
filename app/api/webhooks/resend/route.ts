@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { unsubscribeEmail, GLOBAL_SUPPRESSION_CATEGORY } from "@/lib/comms/suppressions";
 
 // ─────────────────────────────────────────────────────────────────
 // Resend / Svix webhook signature verification
@@ -66,6 +67,9 @@ interface ResendWebhookPayload {
     subject?: string;
     created_at: string;
     bounced_at?: string;
+    click?: { link: string; timestamp: string; ipAddress?: string; userAgent?: string };
+    /** Present on email.bounced — classifies the bounce. Only "Permanent" (hard bounce, address doesn't exist) warrants auto-suppression; "Transient"/"Undetermined" bounces can resolve on their own. */
+    bounce?: { type: "Permanent" | "Transient" | "Undetermined"; subType?: string; message?: string };
   };
 }
 
@@ -103,11 +107,12 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: true, skipped: "no email_id" });
   }
 
-  // Only handle delivery-outcome events
   const actionableTypes = new Set([
     "email.delivered",
     "email.bounced",
     "email.complained",
+    "email.opened",
+    "email.clicked",
   ]);
 
   if (!actionableTypes.has(type)) {
@@ -116,6 +121,43 @@ export async function POST(request: NextRequest) {
 
   const adminClient = createAdminClient();
   const now = new Date().toISOString();
+
+  // Opens and clicks are engagement events, not delivery-lifecycle states —
+  // they can arrive after "delivered" and don't replace it. Handled via RPC
+  // (atomic counter bump) rather than the plain column update below.
+  if (type === "email.opened" || type === "email.clicked") {
+    const { data: delivery, error: lookupErr } = await adminClient
+      .from("message_deliveries")
+      .select("id, campaign_id")
+      .eq("provider_message_id", emailId)
+      .maybeSingle();
+
+    if (lookupErr) {
+      console.error("[webhooks/resend] delivery lookup failed:", lookupErr.message);
+      return NextResponse.json({ error: lookupErr.message }, { status: 500 });
+    }
+    if (!delivery) {
+      return NextResponse.json({ ok: true, skipped: "no matching delivery" });
+    }
+
+    const rpcErr =
+      type === "email.opened"
+        ? (await adminClient.rpc("record_delivery_open", { p_delivery_id: delivery.id })).error
+        : (
+            await adminClient.rpc("record_delivery_click", {
+              p_delivery_id: delivery.id,
+              p_campaign_id: delivery.campaign_id,
+              p_url: data.click?.link ?? "(unknown link)",
+            })
+          ).error;
+
+    if (rpcErr) {
+      console.error("[webhooks/resend] engagement RPC failed:", rpcErr.message);
+      return NextResponse.json({ error: rpcErr.message }, { status: 500 });
+    }
+
+    return NextResponse.json({ ok: true, type, emailId });
+  }
 
   let updatePayload: Record<string, string>;
   switch (type) {
@@ -146,6 +188,29 @@ export async function POST(request: NextRequest) {
     console.error("[webhooks/resend] DB update failed:", error.message);
     // Return 500 so Resend retries
     return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+
+  // Deliverability auto-suppression: a hard bounce means the address itself
+  // is bad (not a category preference), and a spam complaint means the
+  // recipient doesn't want commercial email from us at all — both warrant a
+  // global suppression, not a per-category one. Soft/undetermined bounces
+  // are transient and can resolve on their own, so they're logged on the
+  // delivery above but don't suppress. Recipients of transactional email
+  // are unaffected either way, since transactional sends bypass suppression
+  // checks entirely (see executeCampaignSend).
+  const isHardBounce = type === "email.bounced" && data.bounce?.type === "Permanent";
+  const isComplaint = type === "email.complained";
+  if (isHardBounce || isComplaint) {
+    const recipientEmail = data.to?.[0];
+    if (recipientEmail) {
+      const reason = isComplaint
+        ? "resend webhook: spam complaint"
+        : `resend webhook: hard bounce${data.bounce?.subType ? ` (${data.bounce.subType})` : ""}`;
+      const { error: suppressErr } = await unsubscribeEmail(recipientEmail, GLOBAL_SUPPRESSION_CATEGORY, reason);
+      if (suppressErr) {
+        console.error("[webhooks/resend] auto-suppression failed:", suppressErr);
+      }
+    }
   }
 
   return NextResponse.json({ ok: true, type, emailId });

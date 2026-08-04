@@ -12,15 +12,16 @@
 // The background is purely decorative — email is fully functional without it.
 // ─────────────────────────────────────────────────────────────────
 
-const BRAND_NAVY = "#163D6D";
-const BRAND_RED  = "#EE2A2E";
-const FONT = "Calibri,'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif";
+export const BRAND_NAVY = "#163D6D";
+export const BRAND_RED  = "#EE2A2E";
+export const FONT = "Calibri,'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif";
 const TEXT_PRIMARY = "#1A1A1A";
 const TEXT_MUTED   = "#6B7280";
 const HEADER_BG    = "#F5F4F1"; // fallback when bg image doesn't load
 const FOOTER_BG    = "#F5F4F1";
 const BODY_BG      = "#EEEDE9";
 const MAILING_ADDRESS = "P.O. Box 71157 Silver Springs, Calgary, Alberta, Canada";
+const CONTACT_EMAIL = "info@campusstores.ca";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
 
@@ -28,10 +29,16 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
  * Wraps a raw HTML content block in the branded CSC email layout.
  * Applied at send time — templates store only their content body.
  *
- * @param baseUrl  Override the base URL for asset paths (e.g. from request
- *                 headers). Falls back to NEXT_PUBLIC_APP_URL env var.
+ * @param baseUrl   Override the base URL for asset paths (e.g. from request
+ *                  headers). Falls back to NEXT_PUBLIC_APP_URL env var.
+ * @param manageUrl Per-recipient link to /email-preferences/[deliveryId].
+ *                  Omit for transactional app emails outside the comms
+ *                  system (password reset, etc.) — there's no delivery/
+ *                  category to manage preferences for. CASL requires this
+ *                  on commercial messages; comms campaign sends always
+ *                  pass it (see executeCampaignSend).
  */
-export function wrapEmailBody(contentHtml: string, baseUrl?: string): string {
+export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?: string): string {
   const base        = baseUrl ?? APP_URL;
   const bgUrl       = base ? `${base}/email/background.png`    : "";
   const wordmarkUrl = base ? `${base}/email/logo-wordmark.png` : "";
@@ -114,9 +121,15 @@ export function wrapEmailBody(contentHtml: string, baseUrl?: string): string {
               <p style="margin:0 0 3px;font-family:${FONT};font-size:12px;font-weight:700;color:${BRAND_NAVY};letter-spacing:0.1px;">
                 Campus Stores Canada
               </p>
-              <p style="margin:0;font-family:${FONT};font-size:11px;color:${TEXT_MUTED};line-height:1.5;">
-                ${MAILING_ADDRESS}
+              <p style="margin:0 0 ${manageUrl ? "8px" : "0"};font-family:${FONT};font-size:11px;color:${TEXT_MUTED};line-height:1.5;">
+                ${MAILING_ADDRESS}<br />
+                <a href="mailto:${CONTACT_EMAIL}" style="color:${TEXT_MUTED};text-decoration:underline;">${CONTACT_EMAIL}</a>
               </p>
+              ${manageUrl
+                ? `<p style="margin:0;font-family:${FONT};font-size:11px;color:${TEXT_MUTED};line-height:1.5;">
+                     <a href="${manageUrl}" style="color:${TEXT_MUTED};text-decoration:underline;">Manage email preferences or unsubscribe</a>
+                   </p>`
+                : ""}
             </td>
           </tr>
 

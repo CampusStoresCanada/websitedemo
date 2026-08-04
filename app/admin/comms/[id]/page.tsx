@@ -1,8 +1,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { executeCampaignSend } from "@/lib/comms/send";
+import { executeCampaignSend, cancelScheduledCampaign } from "@/lib/comms/send";
 import { previewAudience } from "@/lib/comms/audience";
+import { resolveEffectiveAudience } from "@/lib/comms/campaigns";
 import type {
   AudienceDefinition,
   CampaignStatus,
@@ -10,6 +11,7 @@ import type {
   MessageTemplate,
 } from "@/lib/comms/types";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
+import CampaignClickMapButton from "@/components/comms/CampaignClickMapButton";
 import { parseUTC } from "@/lib/utils";
 
 export const metadata = {
@@ -18,6 +20,7 @@ export const metadata = {
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
+export const maxDuration = 60; // "Send Now" server action can push a few hundred recipients through sendEmailBatch
 
 const STATUS_COLORS: Record<DeliveryStatus, string> = {
   queued: "bg-gray-100 text-gray-600",
@@ -33,6 +36,11 @@ async function sendCampaignAction(campaignId: string) {
   await executeCampaignSend(campaignId);
 }
 
+async function cancelCampaignAction(campaignId: string) {
+  "use server";
+  await cancelScheduledCampaign(campaignId);
+}
+
 export default async function CampaignDetailPage({
   params,
 }: {
@@ -43,7 +51,7 @@ export default async function CampaignDetailPage({
 
   const { data: campaign, error } = await db
     .from("message_campaigns")
-    .select(`*, message_templates(key, name, subject, body_html, variable_keys)`)
+    .select(`*, message_templates(key, name, subject, body_html, variable_keys, category, is_transactional)`)
     .eq("id", id)
     .single();
 
@@ -53,27 +61,52 @@ export default async function CampaignDetailPage({
     .from("message_deliveries")
     .select(`
       id, status, error, queued_at, sent_at, delivered_at, bounced_at, failed_at,
+      opened_at, open_count, first_clicked_at, click_count,
       message_recipients(contact_email, display_name)
     `)
     .eq("campaign_id", id)
     .order("queued_at", { ascending: false })
     .limit(200);
 
-  // Audience preview (for drafts)
-  const isDraft = (campaign.status as CampaignStatus) === "draft";
+  const { data: linkClickRows } = await db
+    .from("message_link_clicks")
+    .select("url")
+    .eq("campaign_id", id)
+    .limit(5000);
+
+  const clicksByUrl: Record<string, number> = {};
+  for (const row of linkClickRows ?? []) {
+    clicksByUrl[row.url] = (clicksByUrl[row.url] ?? 0) + 1;
+  }
+  const totalClicks = linkClickRows?.length ?? 0;
+
+  // Audience preview (for drafts and not-yet-sent scheduled campaigns)
+  const status = campaign.status as CampaignStatus;
+  const isDraft = status === "draft";
+  const isScheduled = status === "scheduled";
+  const canSendNow = isDraft || isScheduled;
 
   // Template data for email preview
   const tmpl = campaign.message_templates as Pick<
     MessageTemplate,
-    "name" | "subject" | "body_html" | "variable_keys"
+    "name" | "subject" | "body_html" | "variable_keys" | "category" | "is_transactional"
   > | null;
   const previewBodyHtml = tmpl?.body_html ?? campaign.body_override ?? "";
   const previewSubject = tmpl?.subject ?? campaign.subject_override ?? "";
   const previewVariableKeys = tmpl?.variable_keys ?? [];
   const previewVariableValues = (campaign.variable_values ?? {}) as Record<string, string>;
   const canPreview = !!(previewBodyHtml || previewSubject);
-  const audiencePreview = isDraft
-    ? await previewAudience(campaign.audience_definition as unknown as AudienceDefinition)
+  const effectiveAudienceForPreview = canSendNow
+    ? await resolveEffectiveAudience(
+        campaign.audience_definition as unknown as AudienceDefinition,
+        campaign.campaign_id
+      )
+    : null;
+  const audiencePreview = effectiveAudienceForPreview
+    ? await previewAudience(
+        effectiveAudienceForPreview,
+        tmpl?.is_transactional ? undefined : (tmpl?.category ?? null)
+      )
     : null;
 
   const deliveryStats = {
@@ -81,7 +114,10 @@ export default async function CampaignDetailPage({
     sent: deliveries?.filter((d) => ["sent", "delivered"].includes(d.status)).length ?? 0,
     delivered: deliveries?.filter((d) => d.status === "delivered").length ?? 0,
     failed: deliveries?.filter((d) => ["bounced", "failed"].includes(d.status)).length ?? 0,
+    opened: deliveries?.filter((d) => d.open_count > 0).length ?? 0,
+    clicked: deliveries?.filter((d) => d.click_count > 0).length ?? 0,
   };
+  const canClickMap = canPreview && deliveryStats.total > 0;
 
   return (
     <main>
@@ -110,7 +146,32 @@ export default async function CampaignDetailPage({
               variableValues={previewVariableValues}
             />
           )}
-          {isDraft && (
+          {canClickMap && (
+            <CampaignClickMapButton
+              bodyHtml={previewBodyHtml}
+              subject={previewSubject}
+              variableKeys={previewVariableKeys}
+              variableValues={previewVariableValues}
+              clicksByUrl={clicksByUrl}
+              totalClicks={totalClicks}
+            />
+          )}
+          {isScheduled && (
+            <form
+              action={async () => {
+                "use server";
+                await cancelCampaignAction(id);
+              }}
+            >
+              <button
+                type="submit"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Cancel Schedule
+              </button>
+            </form>
+          )}
+          {canSendNow && (
             <form
               action={async () => {
                 "use server";
@@ -147,17 +208,21 @@ export default async function CampaignDetailPage({
           </p>
         </div>
         <div className="rounded-xl border border-gray-200 bg-white p-3">
-          <p className="text-xs text-gray-500">Completed</p>
+          <p className="text-xs text-gray-500">{isScheduled ? "Scheduled For" : "Completed"}</p>
           <p className="mt-1 font-semibold text-gray-900 text-sm">
-            {campaign.completed_at
-              ? parseUTC(campaign.completed_at).toLocaleString("en-CA")
-              : "—"}
+            {isScheduled
+              ? campaign.scheduled_at
+                ? parseUTC(campaign.scheduled_at).toLocaleString("en-CA")
+                : "—"
+              : campaign.completed_at
+                ? parseUTC(campaign.completed_at).toLocaleString("en-CA")
+                : "—"}
           </p>
         </div>
       </div>
 
-      {/* Audience preview (draft only) */}
-      {isDraft && audiencePreview && (
+      {/* Audience preview (draft or scheduled, not yet sent) */}
+      {canSendNow && audiencePreview && (
         <div className="mt-4 rounded-xl border border-blue-200 bg-blue-50 p-4">
           <p className="text-sm font-medium text-blue-800">
             Audience preview: {audiencePreview.count} recipient{audiencePreview.count !== 1 ? "s" : ""}
@@ -181,11 +246,13 @@ export default async function CampaignDetailPage({
 
       {/* Delivery stats */}
       {deliveryStats.total > 0 && (
-        <div className="mt-4 grid grid-cols-4 gap-4">
+        <div className="mt-4 grid grid-cols-3 gap-4 sm:grid-cols-6">
           {[
             { label: "Total", value: deliveryStats.total, color: "text-gray-900" },
             { label: "Sent", value: deliveryStats.sent, color: "text-accent" },
             { label: "Delivered", value: deliveryStats.delivered, color: "text-green-700" },
+            { label: "Opened", value: deliveryStats.opened, color: "text-blue-700" },
+            { label: "Clicked", value: deliveryStats.clicked, color: "text-orange-600" },
             { label: "Failed", value: deliveryStats.failed, color: "text-red-600" },
           ].map(({ label, value, color }) => (
             <div key={label} className="rounded-xl border border-gray-200 bg-white p-3">
@@ -207,6 +274,8 @@ export default async function CampaignDetailPage({
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Recipient</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Opens</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Clicks</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Sent At</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Error</th>
               </tr>
@@ -231,6 +300,12 @@ export default async function CampaignDetailPage({
                       >
                         {d.status}
                       </span>
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {d.open_count > 0 ? d.open_count : "—"}
+                    </td>
+                    <td className="px-4 py-3 text-gray-500">
+                      {d.click_count > 0 ? d.click_count : "—"}
                     </td>
                     <td className="px-4 py-3 text-gray-500">
                       {d.sent_at

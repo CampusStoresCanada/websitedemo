@@ -87,6 +87,10 @@
     {
       "path": "/api/cron/conference-scheduled-transitions",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/comms-scheduled-send",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
