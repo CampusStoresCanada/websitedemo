@@ -212,10 +212,94 @@ export async function createQBCustomer(input: QBCustomerInput): Promise<QBCustom
   return res.Customer;
 }
 
-export async function findOrCreateQBCustomer(input: QBCustomerInput): Promise<QBCustomer> {
-  const existing = await findQBCustomer(input.DisplayName);
-  if (existing) return existing;
-  return createQBCustomer(input);
+/**
+ * List every customer in the QBO company, active and inactive. QBO's query
+ * API caps a single response at 1000 rows and doesn't return a total count
+ * up front, so this pages with STARTPOSITION/MAXRESULTS until a short page
+ * confirms the end — for a one-time reconciliation pass against Supabase
+ * orgs, not a hot path.
+ */
+export async function listQBCustomers(): Promise<QBCustomer[]> {
+  const pageSize = 1000;
+  const all: QBCustomer[] = [];
+  for (let startPosition = 1; ; startPosition += pageSize) {
+    const query = `SELECT * FROM Customer ORDERBY Id STARTPOSITION ${startPosition} MAXRESULTS ${pageSize}`;
+    const res = await qbRequest<{ QueryResponse: { Customer?: QBCustomer[] } }>(
+      "GET",
+      `/query?query=${encodeURIComponent(query)}`
+    );
+    const page = res.QueryResponse.Customer ?? [];
+    all.push(...page);
+    if (page.length < pageSize) break;
+  }
+  return all;
+}
+
+/** Look up a QBO customer by its own ID. Returns null if deleted/inaccessible. */
+export async function getQBCustomerById(id: string): Promise<QBCustomer | null> {
+  try {
+    const res = await qbRequest<{ Customer: QBCustomer }>("GET", `/customer/${id}`);
+    return res.Customer;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Sparse-update a QBO customer. QBO requires the current SyncToken on every
+ * write (optimistic concurrency) — always fetch/pass the one from the
+ * customer object you just read, never a cached one.
+ */
+export async function updateQBCustomer(
+  id: string,
+  syncToken: string,
+  fields: Partial<QBCustomerInput>
+): Promise<QBCustomer> {
+  const res = await qbRequest<{ Customer: QBCustomer }>("POST", "/customer", {
+    Id: id,
+    SyncToken: syncToken,
+    sparse: true,
+    ...fields,
+  });
+  return res.Customer;
+}
+
+/**
+ * Resolve the QBO customer for an org and keep its contact info current.
+ *
+ * Prefers the stored `knownId` (organizations.quickbooks_customer_id) over
+ * a DisplayName search — matching by name alone means an org rename
+ * silently spawns a second, unlinked QBO customer instead of finding the
+ * existing one. Falls back to name search only when no ID is on file yet
+ * (first export, or the ID was never persisted).
+ *
+ * Unlike the old findOrCreateQBCustomer, this doesn't just return whatever
+ * it finds — if the resolved customer's PrimaryEmailAddr differs from
+ * `input.PrimaryEmailAddr`, it pushes an update. QBO customer contact info
+ * was previously write-once at creation time (frequently with organizations
+ * .email, which is often null) and never touched again, unlike the Stripe
+ * customer this mirrors (see ensureStripeCustomer in lib/stripe/billing.ts).
+ */
+export async function resolveQBCustomer(
+  input: QBCustomerInput,
+  knownId?: string | null
+): Promise<QBCustomer> {
+  const existing = (knownId ? await getQBCustomerById(knownId) : null) ??
+    (await findQBCustomer(input.DisplayName));
+
+  if (!existing) {
+    return createQBCustomer(input);
+  }
+
+  const currentEmail = existing.PrimaryEmailAddr?.Address ?? null;
+  const desiredEmail = input.PrimaryEmailAddr?.Address ?? null;
+  if (desiredEmail && desiredEmail !== currentEmail) {
+    return updateQBCustomer(existing.Id, existing.SyncToken, {
+      PrimaryEmailAddr: input.PrimaryEmailAddr,
+    });
+  }
+
+  return existing;
 }
 
 // ─────────────────────────────────────────────────────────────────

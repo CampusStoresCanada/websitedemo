@@ -3,15 +3,35 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
-  findOrCreateQBCustomer,
+  resolveQBCustomer,
   createQBInvoice,
   createQBPayment,
   createQBRefundReceipt,
   qboDocNumber,
 } from "./client";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import type { QBExportQueueRow, QBMembershipRefundQueueRow } from "./types";
 import type { Invoice } from "@/lib/stripe/types";
+
+/**
+ * Same fallback chain as ensureStripeCustomer (lib/stripe/billing.ts):
+ * org_admin's login email, then a real contacts-table person, then
+ * organizations.email as a last resort. QBO customer creation isn't even
+ * gated on having an email at all (unlike Stripe, which errors loudly) —
+ * it'll silently create a customer with a blank PrimaryEmailAddr, which is
+ * how the org_admin bug went unnoticed there longer than it did in Stripe.
+ */
+async function resolveQBBillingEmail(
+  db: ReturnType<typeof createAdminClient>,
+  orgId: string,
+  fallbackEmail: string | null
+): Promise<string | null> {
+  const adminEmails = await resolveOrgAdminEmails(db, orgId);
+  if (adminEmails.length) return adminEmails[0];
+  if (fallbackEmail) return fallbackEmail;
+  return resolveOrgPrimaryContactEmail(db, orgId);
+}
 
 const LEASE_DURATION_MS = 5 * 60 * 1000; // 5 minutes
 const STALE_LEASE_THRESHOLD_MS = 10 * 60 * 1000; // reclaim after 10 minutes
@@ -306,10 +326,14 @@ async function processExportRow(
   if (!org) throw new Error(`Organization not found for invoice ${row.invoice_id}`);
 
   // Find or create QB customer
-  const customer = await findOrCreateQBCustomer({
-    DisplayName: org.name,
-    ...(org.email ? { PrimaryEmailAddr: { Address: org.email } } : {}),
-  });
+  const billingEmail = await resolveQBBillingEmail(db, org.id, org.email);
+  const customer = await resolveQBCustomer(
+    {
+      DisplayName: org.name,
+      ...(billingEmail ? { PrimaryEmailAddr: { Address: billingEmail } } : {}),
+    },
+    org.quickbooks_customer_id
+  );
 
   // Update org with QB customer ID if we just created it
   if (!org.quickbooks_customer_id) {
@@ -541,10 +565,14 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       const org = Array.isArray(invoice.organization) ? invoice.organization[0] : invoice.organization;
       if (!org) throw new Error(`Organization not found for invoice ${row.invoice_id}`);
 
-      const customer = await findOrCreateQBCustomer({
-        DisplayName: org.name,
-        ...(org.email ? { PrimaryEmailAddr: { Address: org.email } } : {}),
-      });
+      const billingEmail = await resolveQBBillingEmail(db, org.id, org.email);
+      const customer = await resolveQBCustomer(
+        {
+          DisplayName: org.name,
+          ...(billingEmail ? { PrimaryEmailAddr: { Address: billingEmail } } : {}),
+        },
+        org.quickbooks_customer_id
+      );
 
       // Refund reuses the item the ORIGINAL invoice was posted under — tier
       // resolution runs against invoice.amount_cents (the invoice's own

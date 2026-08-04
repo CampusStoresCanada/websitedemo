@@ -9,8 +9,9 @@
 // refund posts a matching Refund Receipt.
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { findOrCreateQBCustomer, createQBSalesReceipt, createQBRefundReceipt, qboDocNumber } from "./client";
+import { resolveQBCustomer, createQBSalesReceipt, createQBRefundReceipt, qboDocNumber } from "./client";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { resolveMembershipTaxCode } from "./export";
 import type {
   QBLineItem,
@@ -127,10 +128,22 @@ async function resolveQBCustomerId(db: Db, organizationId: string): Promise<stri
 
   if (error || !org) throw new Error(`Organization not found: ${organizationId}`);
 
-  const customer = await findOrCreateQBCustomer({
-    DisplayName: org.name,
-    ...(org.email ? { PrimaryEmailAddr: { Address: org.email } } : {}),
-  });
+  // Same fallback chain as ensureStripeCustomer (lib/stripe/billing.ts):
+  // org_admin's login email, then a contacts-table person, then
+  // organizations.email as a last resort. QBO doesn't gate customer
+  // creation on having an email at all, unlike Stripe — it silently
+  // creates one with a blank PrimaryEmailAddr.
+  const adminEmails = await resolveOrgAdminEmails(db, org.id);
+  const billingEmail =
+    adminEmails[0] ?? org.email ?? (await resolveOrgPrimaryContactEmail(db, org.id));
+
+  const customer = await resolveQBCustomer(
+    {
+      DisplayName: org.name,
+      ...(billingEmail ? { PrimaryEmailAddr: { Address: billingEmail } } : {}),
+    },
+    org.quickbooks_customer_id
+  );
 
   if (!org.quickbooks_customer_id) {
     await db
@@ -557,7 +570,10 @@ export async function enqueueQBMiscReceipt(kind: QBMiscReceiptKind, paymentId: s
  * column needed: findQBCustomer already dedupes by exact DisplayName in QBO.
  */
 async function resolveOneOffQBCustomerId(displayName: string, email: string): Promise<string> {
-  const customer = await findOrCreateQBCustomer({
+  // No org_id here (that's the whole point of "pay first, apply second"),
+  // so no org_admin fallback chain applies — email always comes straight
+  // from the payment itself.
+  const customer = await resolveQBCustomer({
     DisplayName: displayName,
     PrimaryEmailAddr: { Address: email },
   });

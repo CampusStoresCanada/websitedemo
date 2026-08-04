@@ -48,6 +48,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "legal_acceptance_gap",
   "retention_overdue",
   "qbo_export_backlog",
+  "orgs_missing_admin",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:"];
 
@@ -731,6 +732,74 @@ async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
 }
 
 /**
+ * Every active org needs an org_admin — otherwise billing/renewal notices
+ * (see lib/renewal/jobs.ts's resolveRenewalRecipients, lib/stripe/billing.ts's
+ * ensureStripeCustomer) fall back to organizations.email, then a contacts-
+ * table person, and can end up with nowhere to send at all. 2026-08-02: 26
+ * active orgs had neither an org_admin nor organizations.email; 8 of those
+ * had a real person in `contacts` the whole time, un-promoted, un-flagged.
+ * Distinguishes "has a contact, just needs promoting" (actionable in one
+ * click) from "needs actual outreach" (nobody on file at all) since a
+ * super_admin should triage those very differently.
+ */
+async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data: orgs, error: orgsError } = await db
+    .from("organizations")
+    .select("id, name, type")
+    .in("membership_status", ["active", "reactivated"]);
+
+  if (orgsError) {
+    throw new Error(`Failed to evaluate orgs missing admin: ${orgsError.message}`);
+  }
+  const orgRows = orgs ?? [];
+  if (orgRows.length === 0) return null;
+
+  const { data: admins, error: adminError } = await db
+    .from("user_organizations")
+    .select("organization_id")
+    .eq("role", "org_admin")
+    .eq("status", "active")
+    .in("organization_id", orgRows.map((o) => o.id));
+
+  if (adminError) {
+    throw new Error(`Failed to evaluate org_admin coverage: ${adminError.message}`);
+  }
+
+  const orgsWithAdmin = new Set((admins ?? []).map((a) => a.organization_id));
+  const missingAdmin = orgRows.filter((o) => !orgsWithAdmin.has(o.id));
+  if (missingAdmin.length === 0) return null;
+
+  const { data: contacts, error: contactError } = await db
+    .from("contacts")
+    .select("organization_id")
+    .in("organization_id", missingAdmin.map((o) => o.id))
+    .is("archived_at", null);
+
+  if (contactError) {
+    throw new Error(`Failed to evaluate contact coverage: ${contactError.message}`);
+  }
+
+  const orgsWithContact = new Set((contacts ?? []).map((c) => c.organization_id));
+  const readyToPromote = missingAdmin.filter((o) => orgsWithContact.has(o.id));
+  const needsOutreach = missingAdmin.filter((o) => !orgsWithContact.has(o.id));
+
+  return {
+    ruleKey: "orgs_missing_admin",
+    severity: readyToPromote.length > 0 ? "warning" : "info",
+    message: `${missingAdmin.length} active org(s) have no org_admin — ${readyToPromote.length} already have a contact on file ready to promote, ${needsOutreach.length} need outreach first.`,
+    details: {
+      totalMissingAdmin: missingAdmin.length,
+      readyToPromoteCount: readyToPromote.length,
+      needsOutreachCount: needsOutreach.length,
+      readyToPromote: readyToPromote.map((o) => ({ id: o.id, name: o.name, type: o.type })),
+      needsOutreach: needsOutreach.map((o) => ({ id: o.id, name: o.name, type: o.type })),
+    },
+  };
+}
+
+/**
  * Idempotent immediate alert: raises a critical ops alert for the given candidate
  * only if no open/acknowledged alert with the same rule_key already exists.
  * Wrapped to never throw — alert infrastructure failure must not mask the caller's error.
@@ -780,6 +849,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateLegalAcceptanceGap(),
     evaluateRetentionOverdue(),
     evaluateQBExportBacklog(),
+    evaluateOrgsMissingAdmin(),
   ]);
 
   return checks.filter((item): item is CandidateAlert => Boolean(item));

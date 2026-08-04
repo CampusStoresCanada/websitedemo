@@ -1,5 +1,6 @@
 import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import { getBillingConfig, getEffectivePolicy } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
@@ -56,6 +57,13 @@ export async function createStripeCustomer(
 
 /**
  * Ensure an org has a Stripe customer ID, creating one if needed.
+ *
+ * Billing correspondence (Stripe invoice emails, hosted invoice page) must
+ * reach the org_admin's own login email, not organizations.email — that
+ * column is the public "Store Contact" address shown on the org page
+ * (see components/org/MemberProfile.tsx), a different audience. Falls back
+ * to organizations.email, then to a real contact on file, only if the org
+ * has no active org_admin yet.
  */
 export async function ensureStripeCustomer(
   orgId: string
@@ -70,11 +78,20 @@ export async function ensureStripeCustomer(
 
   if (!org) throw new Error(`Organization ${orgId} not found`);
 
+  const adminEmails = await resolveOrgAdminEmails(db, orgId);
+  const billingEmail =
+    adminEmails[0] ?? org.email ?? (await resolveOrgPrimaryContactEmail(db, orgId)) ?? "";
+
   if (org.stripe_customer_id) {
+    // Keep the Stripe customer's email current — it may have been created
+    // before the org had an org_admin, or with the old public-email source.
+    if (billingEmail) {
+      await stripe.customers.update(org.stripe_customer_id, { email: billingEmail });
+    }
     return org.stripe_customer_id;
   }
 
-  return createStripeCustomer(orgId, org.name, org.email ?? "");
+  return createStripeCustomer(orgId, org.name, billingEmail);
 }
 
 // ─────────────────────────────────────────────────────────────────
