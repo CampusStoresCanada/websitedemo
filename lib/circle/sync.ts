@@ -515,7 +515,7 @@ export async function enqueueOrgCircleAccessSync(
     // ── Fetch all org contacts with emails ────────────────────────────────────
     const { data: contacts, error } = await adminClient
       .from("contacts")
-      .select("id, email")
+      .select("id, email, name")
       .eq("organization_id", orgId)
       .not("email", "is", null);
 
@@ -539,7 +539,7 @@ export async function enqueueOrgCircleAccessSync(
             operation: "link_member",
             entityType: "contact",
             entityId: contact.id,
-            payload: { email: contact.email },
+            payload: { email: contact.email, name: contact.name ?? contact.email },
             orgId,
             idempotencyKey: `reactivate-link-${contact.id}-${now}`,
           });
@@ -650,7 +650,7 @@ export async function enqueueNewContactCircleProvisioning(
     // Fetch contact email
     const { data: contact } = await adminClient
       .from("contacts")
-      .select("email, contact_type")
+      .select("email, contact_type, name")
       .eq("id", contactId)
       .single();
 
@@ -681,7 +681,7 @@ export async function enqueueNewContactCircleProvisioning(
       operation: "link_member",
       entityType: "contact",
       entityId: contactId,
-      payload: { email: contact.email },
+      payload: { email: contact.email, name: contact.name ?? contact.email },
       orgId,
       idempotencyKey: `new-contact-link-${contactId}-${now}`,
     });
