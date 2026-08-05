@@ -15,6 +15,7 @@ import { nonMemberDayPassToOffer } from "@/lib/conference/entity-commerce";
 import { getRequiredLegalDocumentsPublic } from "@/lib/actions/conference-legal";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "@/lib/constants/conference";
 import { getBursaryProgress } from "@/lib/actions/conference-bursary";
+import { getBoothTierAvailability } from "@/lib/actions/conference-availability";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
@@ -176,15 +177,22 @@ export default async function ConferenceEditionHubPage({
       .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
   }
 
-  const bursaryResult = await getBursaryProgress(conference.id);
+  const CONNECTED_BOOTH_PRICE_CENTS = 600000;
+  const [bursaryResult, boothAvailability] = await Promise.all([
+    getBursaryProgress(conference.id),
+    getBoothTierAvailability(conference.id),
+  ]);
   const bursary = bursaryResult.success ? bursaryResult.data : null;
+  const connectedAvailability = boothAvailability.find((a) => a.priceCents === CONNECTED_BOOTH_PRICE_CENTS);
+  const boothsTotal = connectedAvailability?.total ?? 0;
+  const boothsSold = connectedAvailability ? connectedAvailability.total - connectedAvailability.remaining : 0;
   const bursarySideContent =
-    bursary && (bursary.goalCents ?? 0) > 0 && memberCount > 0 ? (
+    bursary && (bursary.goalCents ?? 0) > 0 && boothsTotal > 0 && memberCount > 0 ? (
       <>
         <p className="mb-3 text-sm font-medium uppercase tracking-wide text-white/60">
           Help send every member institution
         </p>
-        <BursaryImpactStat delegatesFunded={bursary.sponsorCount} memberCount={memberCount} />
+        <BursaryImpactStat boothsSold={boothsSold} boothsTotal={boothsTotal} memberCount={memberCount} />
       </>
     ) : undefined;
 
