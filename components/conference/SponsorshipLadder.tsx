@@ -88,7 +88,30 @@ function TierCard({ tier }: { tier: Tier }) {
   );
 }
 
-export default async function SponsorshipLadder({ conferenceId }: { conferenceId?: string }) {
+function RenewedPartnerCard() {
+  return (
+    <div
+      className="flex flex-col justify-center rounded-2xl border-t-4 border-x border-b border-x-[#0F766E]/20 border-b-[#0F766E]/20 bg-[#f0fdfa] p-5 shadow-sm"
+      style={{ borderTopColor: "#0F766E" }}
+    >
+      <h3 className="text-lg font-bold text-[#0F766E]">Thanks for renewing your partnership!</h3>
+      <p className="mt-2 text-sm text-[#1A1A1A]/80">
+        Your Vendor partnership already covers this conference — no need to renew again here.
+      </p>
+    </div>
+  );
+}
+
+export default async function SponsorshipLadder({
+  conferenceId,
+  partnerAlreadyRenewed = false,
+}: {
+  conferenceId?: string;
+  /** True when the viewer's own Vendor Partner org is already renewed
+   *  through this conference's dates — swaps the Vendor tier pitch for a
+   *  thank-you instead of re-selling something they've already bought. */
+  partnerAlreadyRenewed?: boolean;
+}) {
   const billing = await getBillingConfig();
   const vendorRate = billing.partnership_rate;
 
@@ -145,7 +168,7 @@ export default async function SponsorshipLadder({ conferenceId }: { conferenceId
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <TierCard tier={vendorTier} />
+        {partnerAlreadyRenewed ? <RenewedPartnerCard /> : <TierCard tier={vendorTier} />}
         {conferenceTiers.map((tier) => (
           <TierCard key={tier.name} tier={tier} />
         ))}

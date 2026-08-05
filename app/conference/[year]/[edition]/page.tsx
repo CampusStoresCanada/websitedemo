@@ -16,6 +16,7 @@ import { getRequiredLegalDocumentsPublic } from "@/lib/actions/conference-legal"
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "@/lib/constants/conference";
 import { getBursaryProgress } from "@/lib/actions/conference-bursary";
 import { getBoothTierAvailability } from "@/lib/actions/conference-availability";
+import { membershipCoversConference } from "@/lib/conference/membership-gate";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
@@ -76,7 +77,7 @@ export default async function ConferenceEditionHubPage({
   const isDraftPreview = canPreviewUnpublished && !isPublicStatus;
 
   let memberOrg: { id: string; name: string } | null = null;
-  let partnerOrg: { id: string; name: string } | null = null;
+  let partnerOrg: { id: string; name: string; membership_expires_at: string | null } | null = null;
   let needsLegal = false;
   // An org can hold more than one booth (board decision — buying a second
   // Connected booth doesn't multiply meeting time, but it's still a second
@@ -84,10 +85,19 @@ export default async function ConferenceEditionHubPage({
   let heldBooths: Array<{ name: string; track: "exhibitor" | "bronze" }> = [];
 
   if (viewer.viewerLevel !== "public" && viewer.viewerOrgIds.length > 0) {
-    const { data: orgRows } = await db.from("organizations").select("id, name, type").in("id", viewer.viewerOrgIds);
+    const { data: orgRows } = await db
+      .from("organizations")
+      .select("id, name, type, membership_expires_at")
+      .in("id", viewer.viewerOrgIds);
     memberOrg = (orgRows ?? []).find((o) => o.type === "Member") ?? null;
     if (!memberOrg) partnerOrg = (orgRows ?? []).find((o) => o.type === "Vendor Partner") ?? null;
   }
+
+  // Already renewed through this conference's dates — the Vendor Partnership
+  // pitch in the tier ladder doesn't apply to them, so it gets swapped for a
+  // thank-you instead of re-selling something they've already bought.
+  const partnerAlreadyRenewed =
+    !!partnerOrg && membershipCoversConference(partnerOrg.membership_expires_at, conference.end_date ?? "");
 
   const knownOrg = memberOrg ?? partnerOrg;
 
@@ -296,7 +306,7 @@ export default async function ConferenceEditionHubPage({
               )}
               {partnerOrg && (
                 <div className="pt-4">
-                  <SponsorshipLadder conferenceId={conference.id} />
+                  <SponsorshipLadder conferenceId={conference.id} partnerAlreadyRenewed={partnerAlreadyRenewed} />
                 </div>
               )}
               {memberOrg && (
