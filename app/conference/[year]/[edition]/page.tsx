@@ -18,7 +18,7 @@ import { getBursaryProgress } from "@/lib/actions/conference-bursary";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
-import BursaryThermometer from "@/components/conference/BursaryThermometer";
+import BursaryImpactStat from "@/components/conference/BursaryImpactStat";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
 import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
@@ -179,12 +179,12 @@ export default async function ConferenceEditionHubPage({
   const bursaryResult = await getBursaryProgress(conference.id);
   const bursary = bursaryResult.success ? bursaryResult.data : null;
   const bursarySideContent =
-    bursary && (bursary.goalCents ?? 0) > 0 ? (
+    bursary && (bursary.goalCents ?? 0) > 0 && memberCount > 0 ? (
       <>
         <p className="mb-3 text-sm font-medium uppercase tracking-wide text-white/60">
           Help send every member institution
         </p>
-        <BursaryThermometer raisedCents={bursary.raisedCents} goalCents={bursary.goalCents ?? 0} />
+        <BursaryImpactStat delegatesFunded={bursary.sponsorCount} memberCount={memberCount} />
       </>
     ) : undefined;
 

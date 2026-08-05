@@ -61,7 +61,6 @@ const CONFERENCE_TIERS: ConferenceTierDef[] = [
       "A full extra day on-site (Tuesday), on top of Wednesday & Thursday on the floor",
       "Hot Products Care Package — your item goes out to every member school, not just the ones attending",
       "Hot Products Online Showcase — present to members ahead of the show (December–January)",
-      "$500 of your fee goes directly to a member's travel bursary",
     ],
   },
   {
