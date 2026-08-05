@@ -17,18 +17,24 @@ export type ScheduleBlockItem = {
   dayKeyLocal: string;
 };
 
-// Trade Show Tuesday is the curated-meetings day, not open floor time like
-// Wed/Thu — give it its own label rather than folding it into "trade show"
-// generically.
-const MEETING_DAY_ID = "1f1553a4-0b30-4db3-9f36-28af622cf54c";
+// Tuesday's five pre-arranged meeting blocks are the curated-meetings day,
+// not open floor time like Wed/Thu — give them their own label rather than
+// folding them into "trade show" generically.
+const MEETING_BLOCK_IDS = new Set([
+  "1f1553a4-0b30-4db3-9f36-28af622cf54c", // Meeting Block 1
+  "3be76d6c-9b4c-4a25-9cb9-ba3ba8ff056d", // Meeting Block 2
+  "21457520-9871-44a8-b569-48ea952f3c37", // Meeting Block 3
+  "c0688bbc-4184-4317-b6f0-6b78efb4eb8a", // Meeting Block 4
+  "4790cf6c-c592-4fac-b43b-905fca448ebb", // Meeting Block 5
+]);
 // Shares Thursday with Trade Show Thursday (also kind: session) — needs its
-// own label so the two don't both render as "Trade show floor".
-const COURSE_MATERIALS_UNCONFERENCE_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
-// Tuesday-morning warm-up blocks — also kind: session (for schedule-geometry
+// own label so the two don't both render as "Trade show floor". Formerly the
+// Course Materials Unconference, now branded as the Big Shiny Ideas track.
+const BIG_SHINY_IDEAS_TRACK_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
+// Tuesday-morning warm-up block — also kind: session (for schedule-geometry
 // reasons), but not trade-show-floor content at all.
 const SESSION_LABEL_OVERRIDES: Record<string, string> = {
-  "460536bc-1eb8-4af5-85ea-3572dc34f988": "Opening session", // Opening Session
-  "2a9f1490-fba4-4074-9b8b-118f3790b7d9": "Before speed pitches", // Meetings Intro
+  "2a9f1490-fba4-4074-9b8b-118f3790b7d9": "Get organized", // Get Organized
 };
 const KIND_LABEL: Record<string, string> = {
   session: "Trade show floor",
@@ -37,8 +43,8 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 export function kindLabelFor(item: { id: string; kind: string }): string {
-  if (item.id === MEETING_DAY_ID) return "Curated partner meetings";
-  if (item.id === COURSE_MATERIALS_UNCONFERENCE_ID) return "Course Materials Unconference";
+  if (MEETING_BLOCK_IDS.has(item.id)) return "Curated partner meetings";
+  if (item.id === BIG_SHINY_IDEAS_TRACK_ID) return "Big Shiny Ideas track";
   if (SESSION_LABEL_OVERRIDES[item.id]) return SESSION_LABEL_OVERRIDES[item.id];
   return KIND_LABEL[item.kind] ?? item.kind;
 }
@@ -52,9 +58,17 @@ export function formatDayHeading(dayKey: string): string {
   });
 }
 
-export function groupByDay(items: ScheduleBlockItem[]): { dayKeys: string[]; byDay: Map<string, ScheduleBlockItem[]> } {
+export function groupByDay(items: ScheduleBlockItem[]): {
+  dayKeys: string[];
+  byDay: Map<string, ScheduleBlockItem[]>;
+} {
   const dayKeys = [...new Set(items.map((item) => item.dayKeyLocal))].sort();
-  const byDay = new Map(dayKeys.map((key) => [key, items.filter((item) => item.dayKeyLocal === key)]));
+  const byDay = new Map(
+    dayKeys.map((key) => [
+      key,
+      items.filter((item) => item.dayKeyLocal === key),
+    ]),
+  );
   return { dayKeys, byDay };
 }
 
@@ -73,8 +87,10 @@ export default function ScheduleDayCards({
   dayKeys: string[];
   byDay: Map<string, ScheduleBlockItem[]>;
   rsvpSlugByEntityId?: Map<string, string>;
-  /** Colour-tags an item by which tier unlocks it (used by the undecided-partner "which level?" view). */
-  tierTagFor?: (itemId: string) => { label: string; color: string } | null;
+  /** Colour-tags an item by which tier(s) unlock it (used by the undecided-partner
+   *  "which level?" view) — one tag if it's exclusive to a track, two if both tracks
+   *  include it (rendered as a red stripe + a blue stripe side by side). */
+  tierTagFor?: (itemId: string) => { label: string; color: string }[];
   legend?: React.ReactNode;
 }) {
   if (dayKeys.length === 0) return null;
@@ -84,8 +100,16 @@ export default function ScheduleDayCards({
       {(heading || subheading || legend) && (
         <div className="flex flex-wrap items-end justify-between gap-3">
           <div>
-            {heading && <h2 className="text-xl font-bold tracking-tight text-[#1A1A1A]">{heading}</h2>}
-            {subheading && <p className="mt-1 max-w-2xl text-sm text-[#6B6B6B]">{subheading}</p>}
+            {heading && (
+              <h2 className="text-xl font-bold tracking-tight text-[#1A1A1A]">
+                {heading}
+              </h2>
+            )}
+            {subheading && (
+              <p className="mt-1 max-w-2xl text-sm text-[#6B6B6B]">
+                {subheading}
+              </p>
+            )}
           </div>
           {legend}
         </div>
@@ -97,35 +121,71 @@ export default function ScheduleDayCards({
           container still got sized as "1 of 4 columns" and rendered as a
           sliver. A fixed width sizes each card the same regardless of how
           many days exist or how wide the surrounding container is. */}
-      <div className={`flex flex-wrap gap-4 ${heading || subheading || legend ? "mt-6" : ""}`}>
+      <div
+        className={`flex flex-wrap gap-4 ${heading || subheading || legend ? "mt-6" : ""}`}
+      >
         {dayKeys.map((dayKey) => (
-          <div key={dayKey} className="flex w-full flex-col rounded-2xl border border-[#E5E5E5] bg-white p-5 shadow-sm sm:w-64">
-            <h3 className="text-sm font-bold text-[#1A1A1A]">{formatDayHeading(dayKey)}</h3>
+          <div
+            key={dayKey}
+            className="flex w-full flex-col rounded-2xl border border-[#E5E5E5] bg-white p-5 shadow-sm sm:w-64"
+          >
+            <h3 className="text-sm font-bold text-[#1A1A1A]">
+              {formatDayHeading(dayKey)}
+            </h3>
             <ul className="mt-3 space-y-3">
               {(byDay.get(dayKey) ?? []).map((item) => {
-                const tag = tierTagFor?.(item.id) ?? null;
+                const tags = tierTagFor?.(item.id) ?? [];
                 const rsvpSlug = rsvpSlugByEntityId?.get(item.id);
                 return (
-                  <li key={item.id} className={tag ? "border-l-4 pl-3" : ""} style={tag ? { borderColor: tag.color } : undefined}>
-                    <p className="text-xs font-medium uppercase tracking-wide text-[#6B6B6B]">
-                      {kindLabelFor(item)}
-                      {tag && (
-                        <span className="ml-1.5 font-semibold" style={{ color: tag.color }}>
-                          · {tag.label}
-                        </span>
-                      )}
-                    </p>
-                    <p className="text-sm font-semibold text-[#1A1A1A]">{item.title}</p>
-                    <p className="text-xs text-[#6B6B6B]">
-                      {item.startsAtLocal}
-                      {item.endsAtLocal ? ` – ${item.endsAtLocal}` : ""}
-                      {item.locationLabel ? ` · ${item.locationLabel}` : ""}
-                    </p>
-                    {rsvpSlug && (
-                      <Link href={`/events/${rsvpSlug}`} className="mt-1 inline-block text-xs font-medium text-[#EE2A2E] hover:underline">
-                        RSVP →
-                      </Link>
+                  <li
+                    key={item.id}
+                    className={tags.length > 0 ? "flex gap-2" : ""}
+                  >
+                    {tags.length > 0 && (
+                      <span className="flex shrink-0 gap-0.5 self-stretch">
+                        {tags.map((t) => (
+                          <span
+                            key={t.color}
+                            className="w-1 rounded-full"
+                            style={{ backgroundColor: t.color }}
+                          />
+                        ))}
+                      </span>
                     )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium uppercase tracking-wide text-[#6B6B6B]">
+                        {kindLabelFor(item)}
+                        {tags.length > 0 && (
+                          <span className="ml-1.5 font-semibold">
+                            {" · "}
+                            {tags.map((t, i) => (
+                              <span key={t.color}>
+                                {i > 0 && " + "}
+                                <span style={{ color: t.color }}>
+                                  {t.label}
+                                </span>
+                              </span>
+                            ))}
+                          </span>
+                        )}
+                      </p>
+                      <p className="text-sm font-semibold text-[#1A1A1A]">
+                        {item.title}
+                      </p>
+                      <p className="text-xs text-[#6B6B6B]">
+                        {item.startsAtLocal}
+                        {item.endsAtLocal ? ` – ${item.endsAtLocal}` : ""}
+                        {item.locationLabel ? ` · ${item.locationLabel}` : ""}
+                      </p>
+                      {rsvpSlug && (
+                        <Link
+                          href={`/events/${rsvpSlug}`}
+                          className="mt-1 inline-block text-xs font-medium text-[#EE2A2E] hover:underline"
+                        >
+                          RSVP →
+                        </Link>
+                      )}
+                    </div>
                   </li>
                 );
               })}

@@ -13,7 +13,12 @@ export type ScheduleTrack = "exhibitor" | "bronze" | "delegate" | "non_member";
 // conference_entity_refs.
 const BRONZE_ONLY_IDS = new Set([
   "a5794b99-d18b-4a8d-9c3d-471d101b8326", // Move-in - Monday
-  "1f1553a4-0b30-4db3-9f36-28af622cf54c", // Trade Show Tuesday (the meetings day)
+  "1f1553a4-0b30-4db3-9f36-28af622cf54c", // Meeting Block 1 (Tuesday's curated-meetings day)
+  "3be76d6c-9b4c-4a25-9cb9-ba3ba8ff056d", // Meeting Block 2
+  "21457520-9871-44a8-b569-48ea952f3c37", // Meeting Block 3
+  "c0688bbc-4184-4317-b6f0-6b78efb4eb8a", // Meeting Block 4
+  "4790cf6c-c592-4fac-b43b-905fca448ebb", // Meeting Block 5
+  "9afe4b79-4501-46ab-821e-b07aaf7f2d9c", // Downtime - Tuesday
 ]);
 const EXHIBITOR_ONLY_IDS = new Set([
   "7a70d835-6dfe-42a4-9a74-b75b6164b351", // Move-in - Tuesday
@@ -30,10 +35,21 @@ const TRACK_LABEL: Record<"exhibitor" | "bronze", string> = {
   bronze: "Connected+",
 };
 
-function tierTagOf(itemId: string): { label: string; color: string } | null {
-  if (BRONZE_ONLY_IDS.has(itemId)) return { label: TRACK_LABEL.bronze, color: TRACK_COLOR.bronze };
-  if (EXHIBITOR_ONLY_IDS.has(itemId)) return { label: TRACK_LABEL.exhibitor, color: TRACK_COLOR.exhibitor };
-  return null;
+// Every item visible in this combined view already reaches the Partner
+// audience one way or another — the question is just whether it's
+// restricted to one track or open to both. Anything not specifically
+// Connected+-only or plain-Exhibitor-only is available on both, so it gets
+// both tags (rendered as a red stripe + a blue stripe) instead of no tag at
+// all — "no colour" used to silently mean "both," which read as unlabeled.
+function tierTagsOf(itemId: string): { label: string; color: string }[] {
+  if (BRONZE_ONLY_IDS.has(itemId))
+    return [{ label: TRACK_LABEL.bronze, color: TRACK_COLOR.bronze }];
+  if (EXHIBITOR_ONLY_IDS.has(itemId))
+    return [{ label: TRACK_LABEL.exhibitor, color: TRACK_COLOR.exhibitor }];
+  return [
+    { label: TRACK_LABEL.exhibitor, color: TRACK_COLOR.exhibitor },
+    { label: TRACK_LABEL.bronze, color: TRACK_COLOR.bronze },
+  ];
 }
 
 /**
@@ -64,13 +80,17 @@ export default async function ScheduleAtAGlance({
   conferenceStartDate: string;
   track: ScheduleTrack | null;
 }) {
-  const timeline = await getConferenceScheduleTimeline(conferenceId, { viewerRole: "observer" });
+  const timeline = await getConferenceScheduleTimeline(conferenceId, {
+    viewerRole: "observer",
+  });
 
   // Meals are real rows but too granular for a summary. Filtering by kind
   // (rather than nesting depth) also guarantees a meaningful block like
   // Trade Show Tuesday always surfaces as its own row even when agenda.ts's
   // time-containment nesting tucks it a level under the wider Move-in window.
-  const blocks = timeline.programItems.filter((item) => item.kind !== "meal" && item.dayKeyLocal >= conferenceStartDate);
+  const blocks = timeline.programItems.filter(
+    (item) => item.kind !== "meal" && item.dayKeyLocal >= conferenceStartDate,
+  );
 
   let visible: typeof blocks;
   if (track === "non_member") {
@@ -86,8 +106,10 @@ export default async function ScheduleAtAGlance({
   } else {
     const audience = track === "delegate" ? "Member" : "Partner";
     visible = blocks.filter((item) => item.audienceNames.includes(audience));
-    if (track === "exhibitor") visible = visible.filter((item) => !BRONZE_ONLY_IDS.has(item.id));
-    if (track === "bronze") visible = visible.filter((item) => !EXHIBITOR_ONLY_IDS.has(item.id));
+    if (track === "exhibitor")
+      visible = visible.filter((item) => !BRONZE_ONLY_IDS.has(item.id));
+    if (track === "bronze")
+      visible = visible.filter((item) => !EXHIBITOR_ONLY_IDS.has(item.id));
   }
 
   if (visible.length === 0) return null;
@@ -97,17 +119,28 @@ export default async function ScheduleAtAGlance({
   const { data: linkedEvents } = await createAdminClient()
     .from("events")
     .select("slug, conference_entity_id")
-    .in("conference_entity_id", visible.map((item) => item.id))
+    .in(
+      "conference_entity_id",
+      visible.map((item) => item.id),
+    )
     .eq("status", "published");
   const rsvpSlugByEntityId = new Map(
     (linkedEvents ?? [])
-      .filter((e): e is { slug: string; conference_entity_id: string } => !!e.slug && !!e.conference_entity_id)
-      .map((e) => [e.conference_entity_id, e.slug])
+      .filter(
+        (e): e is { slug: string; conference_entity_id: string } =>
+          !!e.slug && !!e.conference_entity_id,
+      )
+      .map((e) => [e.conference_entity_id, e.slug]),
   );
 
   const { dayKeys, byDay } = groupByDay(visible);
 
-  const heading = track === "delegate" || track === "non_member" ? "Your schedule" : track ? "Your on-site schedule" : "Schedule at a glance";
+  const heading =
+    track === "delegate" || track === "non_member"
+      ? "Your schedule"
+      : track
+        ? "Your on-site schedule"
+        : "Schedule at a glance";
   const subheading =
     track === "delegate"
       ? "Pulled from your registration."
@@ -121,11 +154,17 @@ export default async function ScheduleAtAGlance({
     track === null ? (
       <div className="flex gap-4 text-xs font-medium text-[#6B6B6B]">
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TRACK_COLOR.exhibitor }} />
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: TRACK_COLOR.exhibitor }}
+          />
           Exhibitor
         </span>
         <span className="flex items-center gap-1.5">
-          <span className="h-2 w-2 rounded-full" style={{ backgroundColor: TRACK_COLOR.bronze }} />
+          <span
+            className="h-2 w-2 rounded-full"
+            style={{ backgroundColor: TRACK_COLOR.bronze }}
+          />
           Connected+
         </span>
       </div>
@@ -138,7 +177,7 @@ export default async function ScheduleAtAGlance({
       dayKeys={dayKeys}
       byDay={byDay}
       rsvpSlugByEntityId={rsvpSlugByEntityId}
-      tierTagFor={track === null ? tierTagOf : undefined}
+      tierTagFor={track === null ? tierTagsOf : undefined}
       legend={legend}
     />
   );
