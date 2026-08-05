@@ -12,6 +12,7 @@ import type { MessageTemplate, AudienceType } from "@/lib/comms/types";
 import TemplateBodyEditor from "./TemplateBodyEditor";
 import EmailPreviewModal from "./EmailPreviewModal";
 import { SYSTEM_VARIABLE_KEYS } from "@/lib/comms/variables/registry";
+import { CONTACT_TAGS } from "@/lib/contacts/tags";
 import { Eye, Calendar, Send, FileText } from "lucide-react";
 
 type SendTiming = "draft" | "immediate" | "scheduled";
@@ -36,6 +37,7 @@ const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
   { value: "conference_orgs_with_open_seats", label: "Orgs with unassigned seats" },
   { value: "conference_orgs_fully_assigned", label: "Orgs — all seats assigned" },
   { value: "org_admins", label: "All Org Admins" },
+  { value: "contact_tags", label: "Tagged Contacts (lapsed, prospects, board, etc.)" },
   { value: "custom_emails", label: "Custom Email List" },
   { value: "custom_recipient_list", label: "Individual / Mail Merge (paste a list)" },
 ];
@@ -88,6 +90,10 @@ export default function NewCampaignForm({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [sendTiming, setSendTiming] = useState<SendTiming>("draft");
   const [selectedConferenceId, setSelectedConferenceId] = useState(defaultConferenceId ?? "");
+  const [selectedAudienceType, setSelectedAudienceType] = useState<AudienceType>(
+    AUDIENCE_OPTIONS[0].value
+  );
+  const [selectedContactTags, setSelectedContactTags] = useState<Set<string>>(new Set());
   const subjectRef = useRef<HTMLInputElement>(null);
 
   const conferenceEntities = entitiesByConference[selectedConferenceId] ?? [];
@@ -246,6 +252,8 @@ export default function NewCampaignForm({
           <select
             name="audience_type"
             required
+            value={selectedAudienceType}
+            onChange={(e) => setSelectedAudienceType(e.target.value as AudienceType)}
             className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
           >
             {AUDIENCE_OPTIONS.map((o) => (
@@ -255,6 +263,47 @@ export default function NewCampaignForm({
             ))}
           </select>
         </div>
+
+        {/* Contact tags filter — only relevant for the Tagged Contacts audience */}
+        {selectedAudienceType === "contact_tags" && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Tags (any match)</label>
+            <p className="text-xs text-gray-500 mb-1">
+              Sends to contacts carrying any of the checked tags — never includes anyone with a portal login.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {CONTACT_TAGS.map((tag) => {
+                const checked = selectedContactTags.has(tag.value);
+                return (
+                  <label
+                    key={tag.value}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                      checked
+                        ? "bg-[#163D6D] text-white"
+                        : "bg-white border border-gray-300 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="contact_tags"
+                      value={tag.value}
+                      checked={checked}
+                      onChange={() => {
+                        setSelectedContactTags((prev) => {
+                          const next = new Set(prev);
+                          checked ? next.delete(tag.value) : next.add(tag.value);
+                          return next;
+                        });
+                      }}
+                      className="sr-only"
+                    />
+                    {tag.label}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        )}
 
         {/* Conference filter */}
         {conferences.length > 0 && (

@@ -94,6 +94,11 @@ async function handleCreateCampaign(formData: FormData) {
     audience.filters!.recipients = parseMailMergeCsv(mailMergeCsv);
   }
 
+  if (audienceType === "contact_tags") {
+    const tags = formData.getAll("contact_tags") as string[];
+    if (tags.length > 0) audience.filters!.tags = tags;
+  }
+
   const entityScopedAudiences = new Set<AudienceType>([
     "conference_holders",
     "conference_orgs_with_open_seats",

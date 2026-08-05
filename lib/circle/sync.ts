@@ -9,6 +9,7 @@ import { getCircleClient } from "./client";
 import { executeCircleSyncOperation } from "./operations";
 import type { CircleMember, CircleSyncOperation, CircleSyncQueueItem } from "./types";
 import type { Json } from "@/lib/database.types";
+import { hasNonMemberTag } from "@/lib/contacts/tags";
 
 // ---------------------------------------------------------------------------
 // Enqueue — called from server actions, non-throwing
@@ -649,11 +650,15 @@ export async function enqueueNewContactCircleProvisioning(
     // Fetch contact email
     const { data: contact } = await adminClient
       .from("contacts")
-      .select("email")
+      .select("email, contact_type")
       .eq("id", contactId)
       .single();
 
     if (!contact?.email) return;
+    // Non-member contacts (lapsed/prospect/conference-only/board/external
+    // vendor) never get a Circle account, regardless of the org's own
+    // membership status below.
+    if (hasNonMemberTag(contact.contact_type)) return;
 
     // Fetch org details + active membership status
     const { data: org } = await adminClient

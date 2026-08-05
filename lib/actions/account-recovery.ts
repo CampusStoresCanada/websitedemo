@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { ensurePersonForUser, ensureKnownPerson, linkUserToPerson } from "@/lib/identity/lifecycle";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findUserByEmail } from "@/lib/supabase/user-lookup";
+import { hasNonMemberTag } from "@/lib/contacts/tags";
 
 type RecoveryOutcome =
   | { outcome: "code_sent" }
@@ -38,7 +39,7 @@ export async function initiateAccountRecovery(rawEmail: string): Promise<Recover
     const [{ data: byEmail }, { data: byWorkEmail }] = await Promise.all([
       adminClient
         .from("contacts")
-        .select("id, name, organization_id, organizations!inner(archived_at)")
+        .select("id, name, organization_id, contact_type, organizations!inner(archived_at)")
         .eq("email", email)
         .is("archived_at", null)
         .is("organizations.archived_at", null)
@@ -46,7 +47,7 @@ export async function initiateAccountRecovery(rawEmail: string): Promise<Recover
         .maybeSingle(),
       adminClient
         .from("contacts")
-        .select("id, name, organization_id, organizations!inner(archived_at)")
+        .select("id, name, organization_id, contact_type, organizations!inner(archived_at)")
         .eq("work_email", email)
         .is("archived_at", null)
         .is("organizations.archived_at", null)
@@ -55,7 +56,10 @@ export async function initiateAccountRecovery(rawEmail: string): Promise<Recover
     ]);
     const contact = byEmail ?? byWorkEmail;
 
-    if (!contact || !contact.organization_id) {
+    // Non-member contacts (lapsed/prospect/conference-only/board/external
+    // vendor) are tracked like any other contact but must never be able to
+    // self-provision a real login this way.
+    if (!contact || !contact.organization_id || hasNonMemberTag(contact.contact_type)) {
       return { outcome: "not_recognized" };
     }
 

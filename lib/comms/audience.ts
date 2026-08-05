@@ -175,6 +175,9 @@ async function resolveAudienceByType(
     case "event_registrants":
       return resolveEventRegistrants(supabase, audience.filters ?? {});
 
+    case "contact_tags":
+      return resolveContactTags(supabase, audience.filters ?? {});
+
     case "custom_emails":
       return resolveCustomEmails(audience.filters?.emails ?? []);
 
@@ -541,6 +544,58 @@ async function resolveOrgAdmins(
           ...((orgId && orgNameById.get(orgId) ? { org_name: orgNameById.get(orgId)! } : {}) satisfies OrgVariables),
           ...(orgId ? orgVarsById.get(orgId) : {}),
           ...personVarsById.get(uid),
+        },
+      };
+    })
+    .filter((r) => r.email);
+}
+
+// ── Contact tags (non-member segmentation) ─────────────────────────
+
+/**
+ * Contacts tagged with any of the given lib/contacts/tags.ts values —
+ * lapsed members/partners, prospects, conference-only attendees, board/
+ * committee, external vendors. These contacts never have a user_id (they
+ * never get a portal login by design), so userId is always null here.
+ */
+async function resolveContactTags(
+  supabase: AdminClient,
+  filters: AudienceDefinition["filters"]
+): Promise<ResolvedRecipient[]> {
+  const tags = filters?.tags ?? [];
+  if (tags.length === 0) {
+    console.warn("[comms/audience] resolveContactTags: missing tags filter");
+    return [];
+  }
+
+  let q = supabase
+    .from("contacts")
+    .select("id, name, email, work_email, organization_id")
+    .overlaps("contact_type", tags)
+    .is("archived_at", null);
+
+  if (filters?.org_ids?.length) {
+    q = q.in("organization_id", filters.org_ids);
+  }
+
+  const { data, error } = await q;
+  if (error) {
+    console.error("[comms/audience] resolveContactTags error:", error);
+    return [];
+  }
+
+  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((c) => c.organization_id));
+
+  return (data ?? [])
+    .map((c) => {
+      const email = c.work_email ?? c.email ?? "";
+      return {
+        userId: null,
+        email,
+        name: c.name,
+        variableOverrides: {
+          ...deriveRecipientNameVariables(c.name, email),
+          ...(c.organization_id ? orgVarsByOrgId.get(c.organization_id) : {}),
         },
       };
     })

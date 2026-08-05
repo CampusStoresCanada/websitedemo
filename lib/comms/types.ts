@@ -230,6 +230,7 @@ export type AudienceType =
   | "global_admins"
   | "org_admins"
   | "event_registrants"
+  | "contact_tags"
   | "custom_emails"
   /**
    * Exact recipients with per-recipient variable overrides already
@@ -258,6 +259,8 @@ export interface AudienceDefinition {
     entity_id?: string;
     /** For custom_recipient_list: exactly who to send to, with per-recipient variables already resolved. */
     recipients?: { email: string; name?: string | null; variableOverrides?: Record<string, string> }[];
+    /** For contact_tags: contacts.contact_type values to match (see lib/contacts/tags.ts). Any-of match. */
+    tags?: string[];
     /**
      * Saved condition keys (see lib/comms/conditions/) further narrowing
      * whichever audience type resolved above — a recipient must satisfy
