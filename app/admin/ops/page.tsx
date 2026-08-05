@@ -1165,6 +1165,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
             { key: "retention_purge", label: "Run Retention Purge" },
             { key: "qbo_export", label: "Run QB Export" },
             { key: "qbo_reconcile", label: "Run QB Reconcile" },
+            { key: "stripe_reconcile", label: "Run Stripe Invoice Reconcile" },
           ].map((job) => (
             <form
               key={job.key}
@@ -1180,7 +1181,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     | "ops_alert_eval"
                     | "retention_purge"
                     | "qbo_export"
-                    | "qbo_reconcile",
+                    | "qbo_reconcile"
+                    | "stripe_reconcile",
                   reason
                 );
               }}

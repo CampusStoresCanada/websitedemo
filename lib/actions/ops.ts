@@ -14,6 +14,7 @@ import { processCircleSyncQueue } from "@/lib/circle/sync";
 import { retentionPurgeRun } from "@/lib/retention/jobs";
 import { quickbooksExportRun } from "@/lib/quickbooks/export";
 import { quickbooksInboundReconcileRun } from "@/lib/quickbooks/reconcile";
+import { stripeInboundReconcileRun } from "@/lib/stripe/reconcile";
 import { stripe } from "@/lib/stripe/client";
 import {
   extractConferenceOrderIdFromStripeEvent,
@@ -182,7 +183,8 @@ export type OpsManualJobKey =
   | "ops_alert_eval"
   | "retention_purge"
   | "qbo_export"
-  | "qbo_reconcile";
+  | "qbo_reconcile"
+  | "stripe_reconcile";
 
 export async function runOpsJobNowAction(
   job: OpsManualJobKey,
@@ -214,6 +216,8 @@ export async function runOpsJobNowAction(
       result = (await quickbooksExportRun()) as unknown as Record<string, unknown>;
     } else if (job === "qbo_reconcile") {
       result = (await quickbooksInboundReconcileRun()) as unknown as Record<string, unknown>;
+    } else if (job === "stripe_reconcile") {
+      result = (await stripeInboundReconcileRun()) as unknown as Record<string, unknown>;
     } else {
       result = (await evaluateOpsAlerts()) as unknown as Record<string, unknown>;
     }
