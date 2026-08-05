@@ -110,19 +110,18 @@ export default async function ScheduleAtAGlance({
     // `includes` graph, same computation the /attend storefront uses. Union
     // across every non-member offer, since before buying, this is "what can
     // a non-member attend at all," not one specific purchased day.
-    // Meals aren't part of this flow yet — same as the delegate track below,
-    // to be revisited when the member/non-member schedule gets its own pass.
+    // Meals stay excluded here for now — a Day Pass's `includes` graph isn't
+    // necessarily meal-accurate the way audience-tagged meals are elsewhere,
+    // revisit if/when non-member meal inclusion needs the same treatment.
     const passes = await getNonMemberDayPasses(conferenceId);
     const idSet = new Set(passes.flatMap((p) => p.entityIds));
     visible = blocks.filter(
       (item) => item.kind !== "meal" && idSet.has(item.id),
     );
   } else if (track === "delegate") {
-    // Member schedule cleanup is a separate pass — meals stay excluded here
-    // for now, matching the prior behavior, so as not to touch that view.
-    visible = blocks.filter(
-      (item) => item.kind !== "meal" && item.audienceNames.includes("Member"),
-    );
+    // Meals are part of what's actually included in registration, same
+    // reasoning as the Partner-side views below.
+    visible = blocks.filter((item) => item.audienceNames.includes("Member"));
   } else {
     // Exhibitor / Connected+ / undecided-partner views: meals are part of
     // what's actually included at each tier ("meals included during the
