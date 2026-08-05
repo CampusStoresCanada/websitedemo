@@ -13,12 +13,26 @@ export type ScheduleTrack = "exhibitor" | "bronze" | "delegate" | "non_member";
 // conference_entity_refs.
 const BRONZE_ONLY_IDS = new Set([
   "a5794b99-d18b-4a8d-9c3d-471d101b8326", // Move-in - Monday
+  "e0737930-cfa1-4525-974d-22079f78b7e1", // Meet & Greet Reception (Monday)
+  "5506f592-7608-4437-86eb-0d86b3673feb", // Dinner Monday
+  "4d593760-095b-4b0f-b9a1-54728f9adeb8", // Lunch - Monday
+  "89a8acae-604b-4c26-8e42-6adb0cd44ebb", // Afternoon Break - Monday
+  "ef1198b7-fc9e-4de1-b3e9-4192305d32a6", // Welcome & Recognition (Tuesday morning warm-up)
+  "40ed10c6-c326-4100-ac32-5318bd0db0d5", // Icebreaker
+  "2a9f1490-fba4-4074-9b8b-118f3790b7d9", // Get Organized
+  "b0aa593c-d6c1-476d-ac32-b5733d2da39c", // Breakfast - Tuesday
   "1f1553a4-0b30-4db3-9f36-28af622cf54c", // Meeting Block 1 (Tuesday's curated-meetings day)
   "3be76d6c-9b4c-4a25-9cb9-ba3ba8ff056d", // Meeting Block 2
+  "293f3b02-c030-4752-918e-97df95cad612", // Morning Break - Tuesday
   "21457520-9871-44a8-b569-48ea952f3c37", // Meeting Block 3
+  "a04f0c36-00f2-497e-ad66-bd4a9edc34d6", // Lunch - Tuesday
   "c0688bbc-4184-4317-b6f0-6b78efb4eb8a", // Meeting Block 4
+  "3f4de848-4ac4-4587-9a6b-523d9579e506", // Afternoon Break - Tuesday
+  "47331a7b-ef0b-4d30-872c-c8199e26c9a6", // Late Break - Tuesday
   "4790cf6c-c592-4fac-b43b-905fca448ebb", // Meeting Block 5
   "9afe4b79-4501-46ab-821e-b07aaf7f2d9c", // Downtime - Tuesday
+  "63cdffd4-8400-466a-a2a0-3ab08a154467", // Tuesday Evening Trade Show
+  "68b73fa0-f96f-4a8a-a12a-bab4606895cb", // Dinner - Tuesday
 ]);
 const EXHIBITOR_ONLY_IDS = new Set([
   "7a70d835-6dfe-42a4-9a74-b75b6164b351", // Move-in - Tuesday
@@ -84,12 +98,8 @@ export default async function ScheduleAtAGlance({
     viewerRole: "observer",
   });
 
-  // Meals are real rows but too granular for a summary. Filtering by kind
-  // (rather than nesting depth) also guarantees a meaningful block like
-  // Trade Show Tuesday always surfaces as its own row even when agenda.ts's
-  // time-containment nesting tucks it a level under the wider Move-in window.
   const blocks = timeline.programItems.filter(
-    (item) => item.kind !== "meal" && item.dayKeyLocal >= conferenceStartDate,
+    (item) => item.dayKeyLocal >= conferenceStartDate,
   );
 
   let visible: typeof blocks;
@@ -100,12 +110,25 @@ export default async function ScheduleAtAGlance({
     // `includes` graph, same computation the /attend storefront uses. Union
     // across every non-member offer, since before buying, this is "what can
     // a non-member attend at all," not one specific purchased day.
+    // Meals aren't part of this flow yet — same as the delegate track below,
+    // to be revisited when the member/non-member schedule gets its own pass.
     const passes = await getNonMemberDayPasses(conferenceId);
     const idSet = new Set(passes.flatMap((p) => p.entityIds));
-    visible = blocks.filter((item) => idSet.has(item.id));
+    visible = blocks.filter(
+      (item) => item.kind !== "meal" && idSet.has(item.id),
+    );
+  } else if (track === "delegate") {
+    // Member schedule cleanup is a separate pass — meals stay excluded here
+    // for now, matching the prior behavior, so as not to touch that view.
+    visible = blocks.filter(
+      (item) => item.kind !== "meal" && item.audienceNames.includes("Member"),
+    );
   } else {
-    const audience = track === "delegate" ? "Member" : "Partner";
-    visible = blocks.filter((item) => item.audienceNames.includes(audience));
+    // Exhibitor / Connected+ / undecided-partner views: meals are part of
+    // what's actually included at each tier ("meals included during the
+    // trade show" on Exhibitor, plus Tuesday for Connected+), so they're
+    // shown here rather than filtered out as "too granular."
+    visible = blocks.filter((item) => item.audienceNames.includes("Partner"));
     if (track === "exhibitor")
       visible = visible.filter((item) => !BRONZE_ONLY_IDS.has(item.id));
     if (track === "bronze")

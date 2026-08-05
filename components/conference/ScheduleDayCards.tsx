@@ -40,6 +40,7 @@ const KIND_LABEL: Record<string, string> = {
   session: "Trade show floor",
   event: "Event",
   meeting: "Meeting",
+  meal: "Meal",
 };
 
 export function kindLabelFor(item: { id: string; kind: string }): string {
