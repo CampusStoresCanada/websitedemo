@@ -7,6 +7,7 @@ import RenewalTerms from "@/components/pricing/RenewalTerms";
 import { getSiteContent } from "@/lib/data";
 import { getBillingConfig, getRenewalConfig } from "@/lib/policy/engine";
 import { getMembersPageData } from "@/lib/homepage";
+import { effectiveProrationDiscountPct } from "@/lib/policy/proration";
 
 export const revalidate = 60;
 
@@ -24,6 +25,12 @@ export default async function MembershipPage() {
     getRenewalConfig(),
     getMembersPageData(),
   ]);
+
+  const discountPct = effectiveProrationDiscountPct(
+    billing.proration_rules,
+    renewal.cycle_start_month_day,
+    renewal.pre_renewal_skip_stub_days
+  );
 
   return (
     <div>
@@ -62,7 +69,7 @@ export default async function MembershipPage() {
                 pricingMode={billing.pricing_mode}
                 membershipTiers={billing.membership_tiers}
                 formulaConfig={billing.formula_config}
-                prorationRules={billing.proration_rules}
+                discountPct={discountPct}
               />
               <RenewalTerms cycleStartMonthDay={renewal.cycle_start_month_day} />
             </div>

@@ -8,7 +8,13 @@ import {
   requireAuthenticated,
 } from "@/lib/auth/guards";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
-import { activateMembershipRenewal, computeNewExpiresAt } from "@/lib/membership/renewal-activation";
+import {
+  activateMembershipRenewal,
+  computeNewExpiresAt,
+  nextCycleStartOnOrAfter,
+  isWithinPreRenewalSkipWindow,
+} from "@/lib/membership/renewal-activation";
+import { getRenewalConfig } from "@/lib/policy/engine";
 import {
   createStripeCustomer,
   createMembershipInvoice,
@@ -419,14 +425,28 @@ export async function approveApplication(
     }
   } else {
     try {
+      // A brand-new org joining within the pre-renewal skip-stub window
+      // isn't worth billing a small prorated stub for the dying cycle's
+      // last few days — sign them up starting with the upcoming full cycle
+      // at full price instead (mirrors the same case in
+      // priceMembershipRenewalForOrg / priceProspectiveMembershipCents).
+      const { cycle_start_month_day: cycleStartMonthDay, pre_renewal_skip_stub_days: skipStubDays } =
+        await getRenewalConfig();
+      const now = new Date();
+      const withinSkipWindow = isWithinPreRenewalSkipWindow(now, cycleStartMonthDay, skipStubDays);
+
+      const { billingPeriodStart, billingPeriodEnd } = withinSkipWindow
+        ? await computeNewExpiresAt(nextCycleStartOnOrAfter(now, cycleStartMonthDay))
+        : await computeNewExpiresAt(null);
+
+      const invoiceOptions = withinSkipWindow
+        ? { billingPeriodStart, billingPeriodEnd }
+        : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now };
+
       const invoice =
         applicationType === "member"
-          ? await createMembershipInvoice(org.id, {
-              applyProrationFromDate: new Date(),
-            })
-          : await createPartnershipInvoice(org.id, {
-              applyProrationFromDate: new Date(),
-            });
+          ? await createMembershipInvoice(org.id, invoiceOptions)
+          : await createPartnershipInvoice(org.id, invoiceOptions);
 
       // Finalize and send via Stripe
       await finalizeAndSendInvoice(invoice.id);

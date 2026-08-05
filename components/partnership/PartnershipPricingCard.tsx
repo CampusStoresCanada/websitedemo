@@ -1,13 +1,12 @@
-import { currentProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
-import type { ProrationRule } from "@/lib/stripe/types";
+import { applyDiscountPct } from "@/lib/policy/proration";
 
 interface Props {
   vendorRate: number;
-  prorationRules: ProrationRule[];
+  /** Resolved via effectiveProrationDiscountPct — 0 within the pre-renewal skip-stub window. */
+  discountPct: number;
 }
 
-export default function PartnershipPricingCard({ vendorRate, prorationRules }: Props) {
-  const discountPct = currentProrationDiscountPct(prorationRules);
+export default function PartnershipPricingCard({ vendorRate, discountPct }: Props) {
   const livePrice = applyDiscountPct(vendorRate, discountPct);
 
   return (

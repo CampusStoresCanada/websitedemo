@@ -1,5 +1,4 @@
-import { currentProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
-import type { ProrationRule } from "@/lib/stripe/types";
+import { applyDiscountPct } from "@/lib/policy/proration";
 
 interface FormulaConfig {
   base: number;
@@ -13,7 +12,8 @@ interface Props {
   pricingMode: string;
   membershipTiers: Array<{ max_fte: number | null; price: number }>;
   formulaConfig: FormulaConfig | null;
-  prorationRules: ProrationRule[];
+  /** Resolved via effectiveProrationDiscountPct — 0 within the pre-renewal skip-stub window. */
+  discountPct: number;
 }
 
 function formatDollars(cents: number): string {
@@ -28,10 +28,9 @@ export default function MembershipPricingTable({
   pricingMode,
   membershipTiers,
   formulaConfig,
-  prorationRules,
+  discountPct,
 }: Props) {
   const isFormula = pricingMode === "LINEAR_FORMULA";
-  const discountPct = currentProrationDiscountPct(prorationRules);
 
   if (isFormula && formulaConfig) {
     return (

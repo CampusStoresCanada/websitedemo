@@ -2,9 +2,9 @@ import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
-import { getBillingConfig, getEffectivePolicy } from "@/lib/policy/engine";
+import { getBillingConfig, getEffectivePolicy, getRenewalConfig } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
-import { currentProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
+import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import type {
   Invoice,
   PaymentMethod,
@@ -112,10 +112,15 @@ export async function applyProration(
   baseAmountCents: number,
   startDate: Date
 ): Promise<ProrationResult> {
-  const billing = await getBillingConfig();
+  const [billing, renewal] = await Promise.all([getBillingConfig(), getRenewalConfig()]);
   const rules = billing.proration_rules as ProrationRule[];
 
-  const applicableDiscount = currentProrationDiscountPct(rules, startDate);
+  const applicableDiscount = effectiveProrationDiscountPct(
+    rules,
+    renewal.cycle_start_month_day,
+    renewal.pre_renewal_skip_stub_days,
+    startDate
+  );
 
   if (applicableDiscount === 0) {
     return { amountCents: baseAmountCents, discountPct: 0 };
