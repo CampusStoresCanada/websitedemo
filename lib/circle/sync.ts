@@ -442,46 +442,15 @@ export async function enqueueOrgCircleAccessSync(
     const lapsedGroupId = isPartner ? groupIds.nonPartner : groupIds.nonMember;
 
     // ── Resolve the access group ID for this org ──────────────────────────────
-    let activeGroupId: number | null = null;
-
-    if (isPartner) {
-      if (isActive) {
-        // Ensure partner has a Circle access group — create one if missing
-        if (org.circle_access_group_id) {
-          activeGroupId = Number(org.circle_access_group_id);
-        } else {
-          const circleClient = getCircleClient();
-          if (circleClient) {
-            try {
-              const group = await circleClient.createAccessGroup(org.name);
-              activeGroupId = group.id;
-              // Persist the new group ID on the org row
-              await adminClient
-                .from("organizations")
-                .update({ circle_access_group_id: String(group.id) })
-                .eq("id", orgId);
-              console.log(
-                `[circle/sync] Created access group "${org.name}" (id=${group.id}) for org ${orgId}`
-              );
-            } catch (err) {
-              console.error(
-                `[circle/sync] Failed to create access group for org ${orgId}:`,
-                err instanceof Error ? err.message : err
-              );
-              return; // Can't proceed without a group ID
-            }
-          }
-        }
-      } else {
-        // Deactivated — use whatever group they had (for removal)
-        activeGroupId = org.circle_access_group_id
-          ? Number(org.circle_access_group_id)
-          : null;
-      }
-    } else {
-      // Member org — use the global Members group
-      activeGroupId = groupIds.member ?? null;
-    }
+    // Dedicated per-org partner groups are rolled back (2026-08-05) — no
+    // longer marketed, no longer auto-created. Every active partner lands in
+    // the shared "Partners" group, exactly like members land in the shared
+    // "Members" group; org.circle_access_group_id is no longer read here.
+    // One-off dedicated groups a partner specifically asks for are handled
+    // manually outside this pipeline (see /api/admin/circle/access-groups).
+    const activeGroupId: number | null = isPartner
+      ? (groupIds.partner ?? null)
+      : (groupIds.member ?? null);
 
     // ── Ensure partner has a Circle tag — create one if missing ──────────────
     if (isPartner && isActive && !org.circle_tag_id) {
@@ -520,10 +489,6 @@ export async function enqueueOrgCircleAccessSync(
       .not("email", "is", null);
 
     if (error || !contacts || contacts.length === 0) {
-      // Still need to handle partner group deletion on cancel even with no contacts
-      if (isCanceled && isPartner && activeGroupId) {
-        await deletePartnerAccessGroup(adminClient, orgId, activeGroupId);
-      }
       return;
     }
 
@@ -618,11 +583,6 @@ export async function enqueueOrgCircleAccessSync(
         }
       }
     }
-
-    // ── On cancel: delete the partner's access group ──────────────────────────
-    if (isCanceled && isPartner && activeGroupId) {
-      await deletePartnerAccessGroup(adminClient, orgId, activeGroupId);
-    }
   } catch (err) {
     console.error(
       "[circle/sync] enqueueOrgCircleAccessSync failed:",
@@ -670,9 +630,9 @@ export async function enqueueNewContactCircleProvisioning(
     if (!org || !ACCESS_ACTIVE_STATUSES.has(org.membership_status ?? "")) return;
 
     const isPartner = org.type?.toLowerCase().includes("partner") ?? false;
-    const groupId = isPartner
-      ? (org.circle_access_group_id ? Number(org.circle_access_group_id) : null)
-      : (groupIds.member ?? null);
+    // Shared tier groups only — see enqueueOrgCircleAccessSync for why
+    // org.circle_access_group_id is no longer used here.
+    const groupId = isPartner ? (groupIds.partner ?? null) : (groupIds.member ?? null);
 
     const now = new Date().toISOString();
 
@@ -748,9 +708,9 @@ export async function enqueueContactCircleDeprovisioning(
 
     const orgId = contact.organization_id ?? undefined;
     const isPartner = org?.type?.toLowerCase().includes("partner") ?? false;
-    const groupId = isPartner
-      ? (org?.circle_access_group_id ? Number(org.circle_access_group_id) : null)
-      : (groupIds.member ?? null);
+    // Shared tier groups only — see enqueueOrgCircleAccessSync for why
+    // org.circle_access_group_id is no longer used here.
+    const groupId = isPartner ? (groupIds.partner ?? null) : (groupIds.member ?? null);
 
     // 1. Remove from access group
     if (groupId) {
@@ -792,29 +752,6 @@ export async function enqueueContactCircleDeprovisioning(
   } catch (err) {
     console.error(
       "[circle/sync] enqueueContactCircleDeprovisioning failed:",
-      err instanceof Error ? err.message : err
-    );
-  }
-}
-
-/** Delete a partner's Circle access group and clear it from the org row. */
-async function deletePartnerAccessGroup(
-  adminClient: ReturnType<typeof createAdminClient>,
-  orgId: string,
-  groupId: number
-): Promise<void> {
-  const circleClient = getCircleClient();
-  if (!circleClient) return;
-  try {
-    await circleClient.deleteAccessGroup(groupId);
-    await adminClient
-      .from("organizations")
-      .update({ circle_access_group_id: null })
-      .eq("id", orgId);
-    console.log(`[circle/sync] Deleted access group ${groupId} for org ${orgId}`);
-  } catch (err) {
-    console.error(
-      `[circle/sync] Failed to delete access group ${groupId}:`,
       err instanceof Error ? err.message : err
     );
   }
