@@ -37,6 +37,12 @@ export type KindSuggestion = {
    *  on the entity — hides the price/tier inputs in Build and exempts the
    *  entity from the "marked for sale but has no price" open question. */
   computedPricing?: boolean;
+  /** True when eligibility is enforced entirely in code (by kind and buyer
+   *  tier/status), not by a `who` ref — because the entity is never directly
+   *  purchasable (e.g. auto-attached only when another offer requires it).
+   *  Exempts it from the "no audience" open question, which it could never
+   *  satisfy meaningfully. */
+  audienceGatedByCode?: boolean;
 };
 
 /**
@@ -221,7 +227,7 @@ export const KIND_SUGGESTIONS: KindSuggestion[] = [
   {
     kind: "membership_renewal", label: "Membership Renewal",
     hint: "Auto-provisioned, one per conference. Attach as Requires on an offer (e.g. a booth) to require an active membership through the conference's dates — price is computed per-org at checkout, not set here.",
-    fields: [], sellable: true, seeded: true, computedPricing: true,
+    fields: [], sellable: true, seeded: true, computedPricing: true, audienceGatedByCode: true,
   },
 ];
 

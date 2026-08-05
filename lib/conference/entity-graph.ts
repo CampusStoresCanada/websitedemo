@@ -121,7 +121,13 @@ export function openQuestions(entity: BuildEntity, byId: Map<string, BuildEntity
     }
   }
 
-  if (entity.isForSale && !roles.has("who")) reasons.push("An Offer with no audience — who can buy it?");
+  // audienceGatedByCode kinds (e.g. membership_renewal) are never directly
+  // purchasable — eligibility is enforced by kind + buyer tier/status in code,
+  // not by a `who` ref — so "no audience" would never be satisfiable and
+  // shouldn't nag.
+  if (entity.isForSale && !roles.has("who") && !sug?.audienceGatedByCode) {
+    reasons.push("An Offer with no audience — who can buy it?");
+  }
 
   return reasons;
 }
