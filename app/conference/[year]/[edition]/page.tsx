@@ -21,6 +21,9 @@ import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
 import BursaryImpactStat from "@/components/conference/BursaryImpactStat";
+import RegisterBursaryInterestCTA from "@/components/conference/RegisterBursaryInterestCTA";
+import TuesdayAudienceNote from "@/components/conference/TuesdayAudienceNote";
+import HotelInfo from "@/components/conference/HotelInfo";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
 import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
@@ -100,6 +103,14 @@ export default async function ConferenceEditionHubPage({
     !!partnerOrg && membershipCoversConference(partnerOrg.membership_expires_at, conference.end_date ?? "");
 
   const knownOrg = memberOrg ?? partnerOrg;
+
+  // Prefills the "Register your interest" bursary CTA so a member can submit
+  // in one click without retyping their own name.
+  let viewerDisplayName = "";
+  if (memberOrg && viewer.userId) {
+    const { data: profile } = await db.from("profiles").select("display_name").eq("id", viewer.userId).maybeSingle();
+    viewerDisplayName = profile?.display_name ?? "";
+  }
 
   // Booths are an org-level holding (entity_balances) — they never mint a
   // person-level seat row in entity_balance_seats, so booth ownership has to
@@ -263,13 +274,25 @@ export default async function ConferenceEditionHubPage({
             copy={
               partnerOrg
                 ? exhibitorHeroCopy
-                : "One conference, all of CSC. This year we've lowered costs and are subsidizing travel so every " +
-                  "member institution can send someone — the connections only work when everyone's in the room."
+                : "Campus Stores Canada is committed to making sure your institution has a buyer represented at " +
+                  "this year's conference."
             }
             sideContent={bursarySideContent}
+            ctaContent={
+              memberOrg ? (
+                <RegisterBursaryInterestCTA
+                  conferenceId={conference.id}
+                  organizationId={memberOrg.id}
+                  defaultName={viewerDisplayName}
+                  defaultEmail={viewer.userEmail ?? ""}
+                />
+              ) : undefined
+            }
           />
           <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
             {needsLegalBanner}
+            {memberOrg && <TuesdayAudienceNote />}
+            <HotelInfo venue={venue} />
             <section className="space-y-4">
               {partnerOrg && heldBooths.length > 0 ? (
                 <p className="text-sm text-[#6B6B6B]">
