@@ -159,11 +159,10 @@ export default function OffersClient({
 
       {addOnOffers.length > 0 ? (
         <div>
-          <h2 className="text-base font-semibold text-gray-900">Add-ons</h2>
-          <p className="text-sm text-gray-500">Optional extras — purchased separately from your registration.</p>
-          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+          <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Extra tickets</h3>
+          <div className="mt-2 space-y-2">
             {addOnOffers.map((offer) => (
-              <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} />
+              <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} compact />
             ))}
           </div>
         </div>
