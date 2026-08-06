@@ -22,7 +22,7 @@ const DAYS = [
     name: "Thursday",
     color: "#64748B",
     tagline: "The floor, plus Big Ideas Day.",
-    detail: "A half day on the trade show floor with every exhibitor, alongside our Big Ideas Day track — which keeps going after the floor closes.",
+    detail: "A half day on the trade show floor with every exhibitor, alongside Big Ideas Day — starting with the 8:30 AM Keynote, a combined track for Course Materials, Operations, and their related vendors to present, discuss, and come together around the big ideas shaping our industry now and in the future.",
   },
 ];
 

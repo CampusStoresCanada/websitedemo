@@ -53,6 +53,12 @@ export default function OffersClient({
   const dayPasses = initialOffers.filter((o) => o.kind === "registration" && /Day Pass/i.test(o.name));
   const dayPassIds = new Set(dayPasses.map((o) => o.id));
   const otherOffers = initialOffers.filter((o) => o.kind !== "booth" && !dayPassIds.has(o.id));
+  // Registrations (what gets you in the door) and add-ons (optional extras
+  // like Meet & Greet Reception / Wednesday Offsite) are different kinds of
+  // decision — kept in their own section rather than one undifferentiated
+  // grid, so an add-on doesn't read as if it were another registration tier.
+  const registrationOffers = otherOffers.filter((o) => o.kind === "registration");
+  const addOnOffers = otherOffers.filter((o) => o.kind !== "registration");
   const boothsEligible = booths.some((b) => b.eligible);
   const boothsAvailable = booths.filter((b) => !b.soldOut && b.eligible).length;
   const boothIneligibleReason = booths.find((b) => !b.eligible)?.ineligibleReason ?? null;
@@ -140,14 +146,26 @@ export default function OffersClient({
         )
       ) : null}
 
-      {otherOffers.length > 0 || dayPasses.length > 0 ? (
+      {registrationOffers.length > 0 || dayPasses.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {dayPasses.length > 0 ? (
             <DayPassOfferCard offers={dayPasses} conferenceId={conferenceId} organizationId={organizationId} />
           ) : null}
-          {otherOffers.map((offer) => (
+          {registrationOffers.map((offer) => (
             <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} />
           ))}
+        </div>
+      ) : null}
+
+      {addOnOffers.length > 0 ? (
+        <div>
+          <h2 className="text-base font-semibold text-gray-900">Add-ons</h2>
+          <p className="text-sm text-gray-500">Optional extras — purchased separately from your registration.</p>
+          <div className="mt-3 grid gap-4 sm:grid-cols-2">
+            {addOnOffers.map((offer) => (
+              <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} />
+            ))}
+          </div>
         </div>
       ) : null}
     </section>
