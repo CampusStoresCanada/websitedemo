@@ -5856,6 +5856,7 @@ export type Database = {
           highlight_the_deal: string | null
           id: string
           is_cancoll_member: boolean
+          is_test: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null
@@ -5961,6 +5962,7 @@ export type Database = {
           highlight_the_deal?: string | null
           id: string
           is_cancoll_member?: boolean
+          is_test?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -6066,6 +6068,7 @@ export type Database = {
           highlight_the_deal?: string | null
           id?: string
           is_cancoll_member?: boolean
+          is_test?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -10193,6 +10196,7 @@ export type Database = {
           highlight_the_deal: string | null
           id: string
           is_cancoll_member: boolean
+          is_test: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null

@@ -132,7 +132,7 @@ export default async function ConferenceEditionHubPage({
       : Promise.resolve(null),
     !knownOrg ? getNonMemberDayPasses(conference.id) : Promise.resolve([]),
     !knownOrg ? getRequiredLegalDocumentsPublic(conference.id, ["non_member"]) : Promise.resolve(null),
-    db.from("organizations").select("id", { count: "exact", head: true }).eq("type", "Member").eq("membership_status", "active"),
+    db.from("organizations").select("id", { count: "exact", head: true }).eq("type", "Member").eq("membership_status", "active").eq("is_test", false),
   ]);
   const nonMemberLegalDocs = (nonMemberLegalResult?.success ? nonMemberLegalResult.data ?? [] : []).map((d) => ({
     documentType: d.document_type,

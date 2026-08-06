@@ -1,10 +1,29 @@
 #!/usr/bin/env node
+// Supabase is authoritative. This script reconciles the 25/26 Partner/Member
+// tag between Notion and Supabase per-org, keyed on the stable
+// organizations.notion_id (never by slug/name — that broke the moment an org
+// got renamed or merged, and silently re-inserted duplicate rows every time
+// this ran afterward; see the 2026-08-05 incident).
+//
+// Direction per org is decided by timestamp, not by which side ran last:
+//   - If the Notion page's last_edited_time is strictly newer than the
+//     Supabase row's updated_at, Notion wins for that org: pull its tag
+//     state into Supabase (type + membership_status), matched by notion_id.
+//   - Otherwise (Supabase same-age-or-newer, including the common case of an
+//     admin fixing something directly in Supabase), Supabase wins: push the
+//     org's current type/membership_status onto the Notion page's Tag
+//     relation, adding or removing only the 25/26 Partner/Member tag and
+//     leaving every other tag on that page untouched.
+//
+// Never inserts a new Supabase row. A Notion page tagged 25/26 with no
+// matching notion_id in Supabase is reported for manual linking, not synced.
 import { createClient } from "@supabase/supabase-js";
-import crypto from "node:crypto";
 
 const MEMBER_TAG_ID = "218a69bf-0cfd-802f-9f1d-dcdfec0d716f";
 const PARTNER_TAG_ID = "20da69bf-0cfd-80c7-89fd-e9739c95976b";
 const NOTION_VERSION = "2022-06-28";
+const TAG_PROPERTY_NAME = "Tag";
+const ORG_TITLE_PROPERTY_NAME = "Organization";
 
 const args = new Set(process.argv.slice(2));
 const APPLY = args.has("--apply");
@@ -30,64 +49,46 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-const RENAME_RULES = [
-  {
-    notionName: "Cesium",
-    preferredExistingSlug: "cesium-telecom",
-  },
-  {
-    notionName: "Cesium Telecom",
-    preferredExistingSlug: "cesium-telecom",
-  },
-];
-
-function normalizeText(value) {
-  return String(value ?? "")
-    .toLowerCase()
-    .replace(/\s+/g, " ")
-    .trim();
+function normalizeId(id) {
+  return String(id ?? "").replace(/-/g, "");
 }
 
-function slugify(input) {
-  const base = String(input ?? "")
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[^a-z0-9\s-]/g, "")
-    .trim()
-    .replace(/\s+/g, "-")
-    .replace(/-+/g, "-");
-  return base || `org-${crypto.randomUUID().slice(0, 8)}`;
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function getTitle(props, key) {
-  const field = props?.[key];
-  if (!field || field.type !== "title") return "";
-  return (field.title ?? []).map((t) => t.plain_text ?? "").join("").trim();
+async function notionFetch(path, options = {}) {
+  const res = await fetch(`https://api.notion.com${path}`, {
+    ...options,
+    headers: {
+      Authorization: `Bearer ${notionApiKey}`,
+      "Notion-Version": NOTION_VERSION,
+      "Content-Type": "application/json",
+      ...(options.headers ?? {}),
+    },
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Notion API ${options.method ?? "GET"} ${path} failed (${res.status}): ${text}`);
+  }
+  return res.json();
 }
 
-function getRichText(props, key) {
-  const field = props?.[key];
-  if (!field || field.type !== "rich_text") return null;
-  const value = (field.rich_text ?? []).map((t) => t.plain_text ?? "").join("").trim();
-  return value || null;
+async function notionGetPage(pageId) {
+  return notionFetch(`/v1/pages/${pageId}`);
 }
 
-function getSelect(props, key) {
-  const field = props?.[key];
-  if (!field || field.type !== "select") return null;
-  return field.select?.name ?? null;
-}
-
-function getUrl(props, key) {
-  const field = props?.[key];
-  if (!field || field.type !== "url") return null;
-  return field.url ?? null;
-}
-
-function getRelationIds(props, key) {
-  const field = props?.[key];
-  if (!field || field.type !== "relation") return [];
-  return (field.relation ?? []).map((r) => r.id).filter(Boolean);
+async function notionUpdatePageTagRelation(pageId, relationIds) {
+  return notionFetch(`/v1/pages/${pageId}`, {
+    method: "PATCH",
+    body: JSON.stringify({
+      properties: {
+        [TAG_PROPERTY_NAME]: {
+          relation: relationIds.map((id) => ({ id })),
+        },
+      },
+    }),
+  });
 }
 
 async function notionQueryTaggedOrgPages() {
@@ -98,39 +99,20 @@ async function notionQueryTaggedOrgPages() {
     const body = {
       filter: {
         or: [
-          {
-            property: "Tag",
-            relation: { contains: MEMBER_TAG_ID.replace(/-/g, "") },
-          },
-          {
-            property: "Tag",
-            relation: { contains: PARTNER_TAG_ID.replace(/-/g, "") },
-          },
+          { property: TAG_PROPERTY_NAME, relation: { contains: normalizeId(MEMBER_TAG_ID) } },
+          { property: TAG_PROPERTY_NAME, relation: { contains: normalizeId(PARTNER_TAG_ID) } },
         ],
       },
       page_size: 100,
+      ...(startCursor ? { start_cursor: startCursor } : {}),
     };
 
-    if (startCursor) body.start_cursor = startCursor;
-
-    const res = await fetch(`https://api.notion.com/v1/databases/${notionDbId}/query`, {
+    const json = await notionFetch(`/v1/databases/${notionDbId}/query`, {
       method: "POST",
-      headers: {
-        Authorization: `Bearer ${notionApiKey}`,
-        "Notion-Version": NOTION_VERSION,
-        "Content-Type": "application/json",
-      },
       body: JSON.stringify(body),
     });
 
-    if (!res.ok) {
-      const text = await res.text();
-      throw new Error(`Notion query failed (${res.status}): ${text}`);
-    }
-
-    const json = await res.json();
     results.push(...(json.results ?? []));
-
     if (!json.has_more || !json.next_cursor) break;
     startCursor = json.next_cursor;
   }
@@ -138,186 +120,172 @@ async function notionQueryTaggedOrgPages() {
   return results;
 }
 
-function resolveTargetType(hasMemberTag, hasPartnerTag, notionOrgType) {
+function getTitle(props, key) {
+  const field = props?.[key];
+  if (!field || field.type !== "title") return "";
+  return (field.title ?? []).map((t) => t.plain_text ?? "").join("").trim();
+}
+
+function getRelationIds(props, key) {
+  const field = props?.[key];
+  if (!field || field.type !== "relation") return [];
+  return (field.relation ?? []).map((r) => r.id).filter(Boolean);
+}
+
+function hasTag(relationIds, tagId) {
+  const target = normalizeId(tagId);
+  return relationIds.some((id) => normalizeId(id) === target);
+}
+
+/** Member/Vendor Partner, from whichever tag(s) are present. Mirrors the
+ * original resolveTargetType: if both tags are somehow present, keep the
+ * org's existing type rather than guessing. */
+function resolveTargetTypeFromTags(hasMemberTag, hasPartnerTag, existingType) {
   if (hasMemberTag && !hasPartnerTag) return "Member";
   if (hasPartnerTag && !hasMemberTag) return "Vendor Partner";
-  if (hasMemberTag && hasPartnerTag) {
-    if (notionOrgType === "Member" || notionOrgType === "Vendor Partner") return notionOrgType;
-  }
+  if (hasMemberTag && hasPartnerTag) return existingType ?? null;
+  return null;
+}
+
+/** Does this org's current Supabase state mean it should carry a 25/26 tag,
+ * and if so which one? */
+function desiredTagForOrg(org) {
+  const isCurrentMember = org.membership_status === "active" || org.membership_status === "reactivated";
+  if (!isCurrentMember) return null;
+  if (org.type === "Member") return MEMBER_TAG_ID;
+  if (org.type === "Vendor Partner") return PARTNER_TAG_ID;
   return null;
 }
 
 async function main() {
   console.log(`Mode: ${APPLY ? "APPLY" : "DRY RUN"}`);
 
-  const notionPages = await notionQueryTaggedOrgPages();
-  console.log(`Notion tagged org pages fetched: ${notionPages.length}`);
-
-  const tagged = notionPages
-    .map((page) => {
-      const props = page.properties ?? {};
-      const name = getTitle(props, "Organization");
-      const tagIds = getRelationIds(props, "Tag");
-      const hasMemberTag = tagIds.some((id) => id.replace(/-/g, "") === MEMBER_TAG_ID.replace(/-/g, ""));
-      const hasPartnerTag = tagIds.some((id) => id.replace(/-/g, "") === PARTNER_TAG_ID.replace(/-/g, ""));
-      const notionOrgType = getSelect(props, "Organization Type");
-      const targetType = resolveTargetType(hasMemberTag, hasPartnerTag, notionOrgType);
-
-      return {
-        notionPageId: page.id,
-        name,
-        slug: slugify(name),
-        city: getRichText(props, "City"),
-        province: getSelect(props, "Province"),
-        website: getUrl(props, "Website"),
-        primaryCategory: getSelect(props, "Primary Category"),
-        hasMemberTag,
-        hasPartnerTag,
-        notionOrgType,
-        targetType,
-      };
-    })
-    .filter((row) => row.name && row.targetType);
-
-  const { data: existingRows, error: existingError } = await supabase
+  const { data: orgs, error: orgsError } = await supabase
     .from("organizations")
-    .select("id,name,slug,type,membership_status,archived_at,tenant_id,city,province,website,primary_category")
-    .is("archived_at", null);
+    .select("id,name,type,membership_status,notion_id,updated_at,archived_at")
+    .is("archived_at", null)
+    .not("notion_id", "is", null);
 
-  if (existingError) {
-    throw new Error(`Failed to load existing organizations: ${existingError.message}`);
-  }
+  if (orgsError) throw new Error(`Failed to load organizations: ${orgsError.message}`);
 
-  if (!existingRows || existingRows.length === 0) {
-    throw new Error("No existing organizations found; cannot infer tenant_id for inserts.");
-  }
+  console.log(`Supabase orgs linked to a Notion page: ${orgs.length}`);
 
-  const tenantId = existingRows[0].tenant_id;
-  const bySlug = new Map();
-  const byName = new Map();
-  const usedSlugs = new Set();
+  const pullUpdates = []; // Notion newer -> patch Supabase
+  const pushUpdates = []; // Supabase same-or-newer -> patch Notion
+  const errors = [];
 
-  for (const row of existingRows) {
-    if (row.slug) {
-      const key = normalizeText(row.slug);
-      bySlug.set(key, row);
-      usedSlugs.add(key);
-    }
-    if (row.name) {
-      const key = normalizeText(row.name);
-      if (!byName.has(key)) byName.set(key, row);
-    }
-  }
-
-  const updates = [];
-  const inserts = [];
-  const skipped = [];
-
-  for (const item of tagged) {
-    const slugKey = normalizeText(item.slug);
-    const nameKey = normalizeText(item.name);
-    const renameRule = RENAME_RULES.find(
-      (rule) => normalizeText(rule.notionName) === nameKey
-    );
-    const existing =
-      (renameRule
-        ? bySlug.get(normalizeText(renameRule.preferredExistingSlug)) ?? null
-        : null) ??
-      bySlug.get(slugKey) ??
-      byName.get(nameKey) ??
-      null;
-
-    if (existing) {
-      const patch = {};
-      if (existing.type !== item.targetType) patch.type = item.targetType;
-      if (existing.membership_status !== "active") patch.membership_status = "active";
-      if (existing.archived_at !== null) patch.archived_at = null;
-
-      if (!existing.city && item.city) patch.city = item.city;
-      if (!existing.province && item.province) patch.province = item.province;
-      if (!existing.website && item.website) patch.website = item.website;
-      if (item.targetType === "Vendor Partner" && !existing.primary_category && item.primaryCategory) {
-        patch.primary_category = item.primaryCategory;
-      }
-
-      if (Object.keys(patch).length > 0) {
-        patch.updated_at = new Date().toISOString();
-        updates.push({ id: existing.id, name: existing.name, patch, source: item });
-      }
+  for (const org of orgs) {
+    let page;
+    try {
+      page = await notionGetPage(org.notion_id);
+    } catch (err) {
+      errors.push(`${org.name} (${org.id}): failed to fetch Notion page ${org.notion_id}: ${err.message}`);
       continue;
     }
 
-    let insertSlug = item.slug;
-    let counter = 2;
-    while (usedSlugs.has(normalizeText(insertSlug))) {
-      insertSlug = `${item.slug}-${counter}`;
-      counter += 1;
+    const props = page.properties ?? {};
+    const relationIds = getRelationIds(props, TAG_PROPERTY_NAME);
+    const notionHasMemberTag = hasTag(relationIds, MEMBER_TAG_ID);
+    const notionHasPartnerTag = hasTag(relationIds, PARTNER_TAG_ID);
+
+    const notionEditedAt = new Date(page.last_edited_time).getTime();
+    const supabaseUpdatedAt = new Date(org.updated_at).getTime();
+    const notionIsNewer = notionEditedAt > supabaseUpdatedAt;
+
+    if (notionIsNewer) {
+      const targetType = resolveTargetTypeFromTags(notionHasMemberTag, notionHasPartnerTag, org.type);
+      const notionSaysActive = notionHasMemberTag || notionHasPartnerTag;
+      const patch = {};
+      if (targetType && org.type !== targetType) patch.type = targetType;
+      if (notionSaysActive && org.membership_status !== "active") patch.membership_status = "active";
+      // Notion no longer tags this org for 25/26, and Supabase still thinks
+      // it's active — only act on this if Notion's own edit is what dropped
+      // the tag (notionIsNewer already established that).
+      if (!notionSaysActive && (org.membership_status === "active" || org.membership_status === "reactivated")) {
+        patch.membership_status = "canceled";
+      }
+
+      if (Object.keys(patch).length > 0) {
+        pullUpdates.push({ org, patch });
+      }
+    } else {
+      const desiredTag = desiredTagForOrg(org);
+      const wantsMemberTag = desiredTag === MEMBER_TAG_ID;
+      const wantsPartnerTag = desiredTag === PARTNER_TAG_ID;
+
+      if (wantsMemberTag === notionHasMemberTag && wantsPartnerTag === notionHasPartnerTag) {
+        continue; // Notion already reflects Supabase's state
+      }
+
+      const nextRelationIds = relationIds.filter(
+        (id) => normalizeId(id) !== normalizeId(MEMBER_TAG_ID) && normalizeId(id) !== normalizeId(PARTNER_TAG_ID)
+      );
+      if (desiredTag) nextRelationIds.push(desiredTag);
+
+      pushUpdates.push({ org, page, nextRelationIds, wantsMemberTag, wantsPartnerTag });
     }
-    usedSlugs.add(normalizeText(insertSlug));
 
-    inserts.push({
-      id: crypto.randomUUID(),
-      tenant_id: tenantId,
-      name: item.name,
-      slug: insertSlug,
-      type: item.targetType,
-      membership_status: "active",
-      archived_at: null,
-      city: item.city,
-      province: item.province,
-      country: "Canada",
-      website: item.website,
-      primary_category: item.targetType === "Vendor Partner" ? item.primaryCategory : null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    });
+    await sleep(120); // stay well under Notion's ~3 req/s rate limit
   }
 
-  for (const item of notionPages) {
-    const name = getTitle(item.properties ?? {}, "Organization");
-    if (!name) skipped.push(item.id);
+  // Notion pages tagged 25/26 with no matching Supabase notion_id — report
+  // only, never insert.
+  const taggedPages = await notionQueryTaggedOrgPages();
+  const linkedNotionIds = new Set(orgs.map((o) => normalizeId(o.notion_id)));
+  const unmatched = taggedPages
+    .filter((page) => !linkedNotionIds.has(normalizeId(page.id)))
+    .map((page) => getTitle(page.properties ?? {}, ORG_TITLE_PROPERTY_NAME) || page.id);
+
+  console.log(`\nPull (Notion newer -> update Supabase): ${pullUpdates.length}`);
+  for (const u of pullUpdates.slice(0, 20)) {
+    console.log(`- ${u.org.name}: ${JSON.stringify(u.patch)}`);
   }
 
-  console.log(`Tagged rows considered: ${tagged.length}`);
-  console.log(`Will update: ${updates.length}`);
-  console.log(`Will insert: ${inserts.length}`);
-  console.log(`Skipped (missing title/target type): ${skipped.length}`);
+  console.log(`\nPush (Supabase authoritative -> update Notion tag): ${pushUpdates.length}`);
+  for (const u of pushUpdates.slice(0, 20)) {
+    console.log(`- ${u.org.name}: member=${u.wantsMemberTag} partner=${u.wantsPartnerTag}`);
+  }
 
-  const previewNames = [
-    ...updates.slice(0, 15).map((u) => `UPDATE ${u.name} -> ${u.patch.type ?? "(keep type)"}/${u.patch.membership_status ?? "(keep status)"}`),
-    ...inserts.slice(0, 15).map((i) => `INSERT ${i.name} -> ${i.type}/active`),
-  ];
+  if (unmatched.length > 0) {
+    console.log(`\nNotion pages tagged 25/26 with no linked Supabase org (needs manual review, NOT auto-created): ${unmatched.length}`);
+    for (const name of unmatched.slice(0, 30)) console.log(`- ${name}`);
+  }
 
-  if (previewNames.length > 0) {
-    console.log("Preview:");
-    for (const line of previewNames) console.log(`- ${line}`);
+  if (errors.length > 0) {
+    console.log(`\nErrors: ${errors.length}`);
+    for (const e of errors) console.log(`- ${e}`);
   }
 
   if (!APPLY) {
-    console.log("Dry run complete. Re-run with --apply to write changes.");
+    console.log("\nDry run complete. Re-run with --apply to write changes.");
     return;
   }
 
-  for (const update of updates) {
+  for (const { org, patch } of pullUpdates) {
     const { error } = await supabase
       .from("organizations")
-      .update(update.patch)
-      .eq("id", update.id);
-    if (error) {
-      throw new Error(`Update failed for ${update.name}: ${error.message}`);
-    }
+      .update({ ...patch, updated_at: new Date().toISOString() })
+      .eq("id", org.id);
+    if (error) throw new Error(`Supabase update failed for ${org.name}: ${error.message}`);
   }
 
-  if (inserts.length > 0) {
-    const { error } = await supabase.from("organizations").insert(inserts);
-    if (error) {
-      throw new Error(`Insert failed: ${error.message}`);
+  for (const { org, nextRelationIds } of pushUpdates) {
+    try {
+      await notionUpdatePageTagRelation(org.notion_id, nextRelationIds);
+    } catch (err) {
+      errors.push(`${org.name}: Notion push failed: ${err.message}`);
     }
+    await sleep(120);
   }
 
-  console.log("Apply complete.");
-  console.log(`Updated rows: ${updates.length}`);
-  console.log(`Inserted rows: ${inserts.length}`);
+  console.log("\nApply complete.");
+  console.log(`Supabase rows updated: ${pullUpdates.length}`);
+  console.log(`Notion pages updated: ${pushUpdates.length - errors.length}`);
+  if (errors.length > 0) {
+    console.log(`Errors during apply: ${errors.length}`);
+    for (const e of errors) console.log(`- ${e}`);
+    process.exitCode = 1;
+  }
 }
 
 main().catch((error) => {

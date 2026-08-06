@@ -208,6 +208,17 @@ async function priceMembershipRenewalForOrg(
     .eq("id", organizationId)
     .single();
 
+  // Re-check coverage against the CURRENT membership_expires_at, not just
+  // whatever was true when this line was added to the cart. A renewal line
+  // can sit in a cart while someone else at the org pays the outstanding
+  // invoice directly via its hosted Stripe link — that already advances
+  // membership_expires_at (lib/membership/renewal-activation.ts), so by the
+  // time checkout runs this line may no longer be owed. Charging it anyway
+  // would double-bill the same coverage period.
+  if (conferenceEndDate && membershipCoversConference(org?.membership_expires_at ?? null, conferenceEndDate)) {
+    return 0;
+  }
+
   const priceForCycle = async (cycleBillingPeriodStart: string): Promise<number> => {
     // A booth is a Partner-track purchase — the renewal it drags along is
     // always priced as partnership dues, regardless of the buying org's
@@ -871,29 +882,15 @@ export async function addOfferToCart(params: {
         .single();
 
       if (!membershipCoversConference(orgRow?.membership_expires_at ?? null, confRow.end_date)) {
-        // Don't stack a second renewal charge on top of one already
-        // outstanding (e.g. self-serve "Renew Now" — lib/actions/renewal.ts —
-        // already generated and sent a real Stripe invoice for this org that
-        // just hasn't been paid yet). membership_expires_at only advances on
-        // invoice.paid, so membershipCoversConference above can't see it —
-        // this is the other half of that idempotency check.
-        const { data: existingUnpaidInvoice } = await adminClient
-          .from("invoices")
-          .select("id")
-          .eq("organization_id", params.organizationId)
-          .eq("type", buyerTier === "partner" ? "partnership" : "membership")
-          .in("status", ["draft", "invoiced", "pending_settlement"])
-          .limit(1)
-          .maybeSingle();
-
-        if (existingUnpaidInvoice) {
-          return {
-            success: false,
-            code: "RENEWAL_PENDING",
-            error: "This organization already has an outstanding renewal invoice. Pay or void it before purchasing something that requires current membership coverage.",
-          };
-        }
-
+        // A self-serve "Renew Now" (lib/actions/renewal.ts) or the renewal
+        // cron may have already generated and sent a real Stripe invoice for
+        // this org that just hasn't been paid yet — membership_expires_at
+        // only advances on invoice.paid, so membershipCoversConference above
+        // can't see that it exists. Rather than blocking the purchase on it,
+        // fold the same renewal into this cart/checkout: activateMembershipRenewal
+        // (lib/membership/renewal-activation.ts) voids any other outstanding
+        // renewal invoice for the org the moment this payment succeeds, so
+        // there's no double-billing risk from letting both exist momentarily.
         const priceCents = await priceMembershipRenewalForOrg(params.organizationId, confRow.end_date, {
           persist: false,
           assumePartnership: offerRow.kind === "booth",

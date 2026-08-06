@@ -3,7 +3,7 @@
  * existing global-admin override. Dedicated test orgs only — see
  * components/dev/DevPanel.tsx for the matching login credentials.
  */
-const DRAFT_PREVIEW_ORG_IDS: readonly string[] = [
+export const DRAFT_PREVIEW_ORG_IDS: readonly string[] = [
   "032862cf-1b39-4911-93cc-e1fdc13df741", // Test Org (Public Tier)
   "1a5e240b-bf97-4534-93d5-b9b4cfe15bb3", // Test Org (Partner)
   "f7b3fee0-339f-404a-b77d-ec95f40e8f89", // Test Org (Member)

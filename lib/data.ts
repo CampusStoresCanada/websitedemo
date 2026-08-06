@@ -90,6 +90,7 @@ export async function getMembers(): Promise<Organization[]> {
       .eq("type", "Member")
       .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
+      .eq("is_test", false)
       .order("name"),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
@@ -112,6 +113,7 @@ export async function getPartners(): Promise<Organization[]> {
       .eq("type", "Vendor Partner")
       .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
+      .eq("is_test", false)
       .order("name"),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
@@ -260,7 +262,8 @@ export async function getAllBenchmarking(): Promise<BenchmarkingWithOrg[]> {
         organization:organizations!benchmarking_organization_id_fkey (
           id,
           name,
-          slug
+          slug,
+          is_test
         )
       `)
       .order("fiscal_year", { ascending: false }),
@@ -273,7 +276,13 @@ export async function getAllBenchmarking(): Promise<BenchmarkingWithOrg[]> {
     return [];
   }
 
-  return (result.data || []) as BenchmarkingWithOrg[];
+  // organization can be null if the FK target was deleted; is_test is
+  // filtered here (rather than via the query) because supabase-js can't
+  // filter on embedded-relation columns without an inner join, and we still
+  // want rows whose organization join failed to be dropped safely too.
+  return ((result.data || []) as BenchmarkingWithOrg[]).filter(
+    (row) => row.organization && !(row.organization as { is_test?: boolean }).is_test
+  );
 }
 
 // Fetch organization with all related data for profile page
@@ -328,7 +337,8 @@ async function computeFteStats(): Promise<{ total: number; hasEstimates: boolean
       .select("id")
       .eq("type", "Member")
       .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
-      .is("archived_at", null),
+      .is("archived_at", null)
+      .eq("is_test", false),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
   );
@@ -438,7 +448,8 @@ export async function getStats(): Promise<{
         .select("*", { count: "exact", head: true })
         .eq("type", "Member")
         .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
-        .is("archived_at", null),
+        .is("archived_at", null)
+        .eq("is_test", false),
       DB_TIMEOUT,
       { count: 0, error: null }
     ),
@@ -448,7 +459,8 @@ export async function getStats(): Promise<{
         .select("*", { count: "exact", head: true })
         .eq("type", "Vendor Partner")
         .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
-        .is("archived_at", null),
+        .is("archived_at", null)
+        .eq("is_test", false),
       DB_TIMEOUT,
       { count: 0, error: null }
     ),
@@ -459,6 +471,7 @@ export async function getStats(): Promise<{
         .eq("type", "Member")
         .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
         .is("archived_at", null)
+        .eq("is_test", false)
         .not("province", "is", null),
       DB_TIMEOUT,
       { data: null, error: null }
@@ -496,6 +509,7 @@ export async function getDirectoryMembers(): Promise<Partial<Organization>[]> {
       .eq("type", "Member")
       .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
+      .eq("is_test", false)
       .order("name"),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
@@ -518,6 +532,7 @@ export async function getDirectoryPartners(): Promise<Partial<Organization>[]> {
       .eq("type", "Vendor Partner")
       .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
       .is("archived_at", null)
+      .eq("is_test", false)
       .order("name"),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }

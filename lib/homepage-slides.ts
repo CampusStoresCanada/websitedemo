@@ -250,6 +250,7 @@ export async function fetchNewestOrgSlide(): Promise<HomeNewestOrgSlide | null> 
     .select("id, slug, name, type, city, province, latitude, longitude, membership_started_at")
     .eq("membership_status", "active")
     .is("archived_at", null)
+    .eq("is_test", false)
     .gte("membership_started_at", cutoff)
     .order("membership_started_at", { ascending: false })
     .limit(1)

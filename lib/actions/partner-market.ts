@@ -106,7 +106,8 @@ export async function getPartnerMarketData(
     .select("id, name, slug, province, email, procurement_info")
     .eq("type", "Member")
     .eq("membership_status", "active")
-    .is("archived_at", null);
+    .is("archived_at", null)
+    .eq("is_test", false);
 
   if (orgsError) return { success: false, error: "Failed to load members" };
 

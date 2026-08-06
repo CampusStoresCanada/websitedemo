@@ -11,6 +11,7 @@ import {
 import { stripe } from "@/lib/stripe/client";
 import { sendTransactional } from "@/lib/comms/send";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
+import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import type { Json } from "@/lib/database.types";
 import {
   hasRenewalEventForOrgYear,
@@ -251,12 +252,18 @@ export async function renewalReminderRun(): Promise<JobResult> {
     const renewalYear = Number(cycleStartDate.split("-")[0]) + 1;
 
     // Find all orgs eligible for renewal reminders — active or reactivated.
+    // Dedicated test orgs (see draft-preview.ts) are excluded so they never
+    // get a live Stripe invoice or reminder email from a production run —
+    // 2026-08-05: Test Org (Member)/(Partner) both got real finalized
+    // invoices from this job because nothing filtered them out.
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
         "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
       )
-      .in("membership_status", ["active", "reactivated"]);
+      .in("membership_status", ["active", "reactivated"])
+      .is("archived_at", null)
+      .not("id", "in", `(${DRAFT_PREVIEW_ORG_IDS.join(",")})`);
 
     if (queryError) {
       throw new Error(`Failed to query orgs: ${queryError.message}`);
@@ -286,6 +293,18 @@ export async function renewalReminderRun(): Promise<JobResult> {
     // same for every org, so this check happens once, not per org.
     if (daysUntilCycleStart <= maxReminderDay && daysUntilCycleStart >= 0) {
       const worker = async (org: (typeof orgs)[number]) => {
+        // An org that already paid through this renewal year or beyond
+        // (e.g. bridged multiple cycles at once via `bridgeFrom` in
+        // renewal-activation.ts, covering a future conference) shouldn't
+        // get a new invoice or a "your membership expires soon" reminder
+        // for a cycle its own membership_expires_at already covers.
+        if (
+          org.membership_expires_at &&
+          getRenewalYear(org.membership_expires_at) >= renewalYear
+        ) {
+          return;
+        }
+
         // Invoice generation is a catch-up check ("has this org gotten its
         // cycle invoice yet?"), not an exact-day match on maxReminderDay.
         // 2026-08-02: the old exact-match gate meant any org missed on the
@@ -471,7 +490,9 @@ export async function renewalChargeRun(): Promise<JobResult> {
         "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
       )
       .in("membership_status", ["active", "reactivated"])
-      .not("membership_expires_at", "is", null);
+      .is("archived_at", null)
+      .not("membership_expires_at", "is", null)
+      .not("id", "in", `(${DRAFT_PREVIEW_ORG_IDS.join(",")})`);
 
     if (queryError) {
       throw new Error(`Failed to query orgs: ${queryError.message}`);

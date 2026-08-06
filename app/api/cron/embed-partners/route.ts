@@ -39,7 +39,8 @@ export async function GET(request: NextRequest) {
   const query = supabase
     .from("organizations")
     .select("id, name")
-    .eq("type", "Vendor Partner");
+    .eq("type", "Vendor Partner")
+    .eq("is_test", false);
 
   const { data: stale, error } = forceRescrape
     ? await query
