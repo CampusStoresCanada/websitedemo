@@ -659,8 +659,8 @@ export async function addOfferToCart(params: {
         .eq("id", params.organizationId)
         .single();
       // direct_purchase_category may be a single category (string) or a list
-      // of eligible categories (string[]) — e.g. Big Shiny Ideas Thursday
-      // presentation slots are open to both "Store Operations" and "Books".
+      // of eligible categories (string[]) — e.g. Big Ideas Presentations
+      // slots are open to both "Store Operations" and "Books".
       const categoryOk =
         requiredCategory == null ||
         (typeof requiredCategory === "string" && buyerOrg?.primary_category === requiredCategory) ||

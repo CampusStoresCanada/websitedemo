@@ -21,8 +21,8 @@ const DAYS = [
   {
     name: "Thursday",
     color: "#64748B",
-    tagline: "The floor, plus the Unconference all day.",
-    detail: "A half day on the trade show floor with every exhibitor, alongside our Course Materials Unconference — which keeps going after the floor closes.",
+    tagline: "The floor, plus Big Ideas Day.",
+    detail: "A half day on the trade show floor with every exhibitor, alongside our Big Ideas Day track — which keeps going after the floor closes.",
   },
 ];
 

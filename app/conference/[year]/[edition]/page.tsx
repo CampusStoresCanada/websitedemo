@@ -292,7 +292,6 @@ export default async function ConferenceEditionHubPage({
           <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
             {needsLegalBanner}
             {memberOrg && <TuesdayAudienceNote />}
-            <HotelInfo venue={venue} />
             <section className="space-y-4">
               {partnerOrg && heldBooths.length > 0 ? (
                 <p className="text-sm text-[#6B6B6B]">
@@ -327,6 +326,9 @@ export default async function ConferenceEditionHubPage({
               ) : (
                 <p className="text-sm text-red-600">{offers.error}</p>
               )}
+              <div className="pt-4">
+                <HotelInfo venue={venue} />
+              </div>
               {partnerOrg && (
                 <div className="pt-4">
                   <SponsorshipLadder conferenceId={conference.id} partnerAlreadyRenewed={partnerAlreadyRenewed} />

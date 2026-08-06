@@ -29,8 +29,9 @@ const MEETING_BLOCK_IDS = new Set([
 ]);
 // Shares Thursday with Trade Show Thursday (also kind: session) — needs its
 // own label so the two don't both render as "Trade show floor". Formerly the
-// Course Materials Unconference, now branded as the Big Shiny Ideas track.
-const BIG_SHINY_IDEAS_TRACK_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
+// Course Materials Unconference — canonical name throughout the conference
+// is "Big Ideas Day," not "Big Shiny Ideas" or "Course Materials Unconference."
+const BIG_IDEAS_DAY_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
 // Tuesday-morning warm-up block — also kind: session (for schedule-geometry
 // reasons), but not trade-show-floor content at all.
 const SESSION_LABEL_OVERRIDES: Record<string, string> = {
@@ -45,7 +46,7 @@ const KIND_LABEL: Record<string, string> = {
 
 export function kindLabelFor(item: { id: string; kind: string }): string {
   if (MEETING_BLOCK_IDS.has(item.id)) return "Curated partner meetings";
-  if (item.id === BIG_SHINY_IDEAS_TRACK_ID) return "Big Shiny Ideas track";
+  if (item.id === BIG_IDEAS_DAY_ID) return "Big Ideas track";
   if (SESSION_LABEL_OVERRIDES[item.id]) return SESSION_LABEL_OVERRIDES[item.id];
   return KIND_LABEL[item.kind] ?? item.kind;
 }

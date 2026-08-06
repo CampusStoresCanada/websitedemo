@@ -1,3 +1,5 @@
+import HotelMap from "./HotelMap";
+
 /** Shared by the Member and Partner conference-hub views — same venue, same rate, same "not bookable yet" note. */
 export default function HotelInfo({ venue }: { venue: string }) {
   if (!venue) return null;
@@ -8,15 +10,7 @@ export default function HotelInfo({ venue }: { venue: string }) {
         Where you&apos;ll be staying
       </h2>
       <div className="mt-4 grid gap-6 md:grid-cols-2">
-        <div className="overflow-hidden rounded-xl border border-[#E5E5E5]">
-          <iframe
-            title="Conference hotel location"
-            src={`https://www.google.com/maps?q=${encodeURIComponent(venue)}&output=embed`}
-            className="h-64 w-full"
-            loading="lazy"
-            referrerPolicy="no-referrer-when-downgrade"
-          />
-        </div>
+        <HotelMap address={venue} />
         <div className="flex flex-col justify-center">
           <p className="text-sm font-medium text-[#1A1A1A]">{venue}</p>
           <p className="mt-3 text-sm text-[#6B6B6B]">
