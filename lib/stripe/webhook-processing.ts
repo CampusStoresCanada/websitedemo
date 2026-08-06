@@ -451,12 +451,18 @@ async function handleCheckoutSessionCompleted(
     if (orgId) {
       const { data: orderItems } = await db
         .from("conference_order_items")
-        .select("offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
+        .select("unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
         .eq("order_id", conferenceOrderId)
         .not("offer_entity_id", "is", null);
-      const hasMembershipLine = (orderItems ?? []).some(
-        (item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer)?.kind === "membership_renewal"
-      );
+      // unit_price_cents (not the catalog price_cents) is what was actually
+      // charged — priceMembershipRenewalForOrg prices a renewal line at 0
+      // when coverage was already satisfied by checkout time (e.g. someone
+      // else at the org paid the outstanding invoice directly in the
+      // meantime), so a $0 line here means there's nothing to activate.
+      const hasMembershipLine = (orderItems ?? []).some((item) => {
+        const offer = Array.isArray(item.offer) ? item.offer[0] : item.offer;
+        return offer?.kind === "membership_renewal" && item.unit_price_cents > 0;
+      });
 
       if (hasMembershipLine) {
         const [{ data: org }, { data: conference }] = await Promise.all([
