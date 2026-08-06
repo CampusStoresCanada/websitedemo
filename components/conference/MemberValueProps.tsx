@@ -9,14 +9,14 @@ const DAYS = [
   {
     name: "Tuesday",
     color: "#EE2A2E",
-    tagline: "Speed-pitch meetings, matched to you.",
-    detail: "A day of curated meetings with the partners who most closely match your institution's needs.",
+    tagline: "Curated meetings, matched to you.",
+    detail: "A day of pre-arranged meetings — CSC matches you with the partners most relevant to your institution, using what we already know about you. Built primarily around general merchandise (accessories, apparel, campus living, gifts & promotion, graduation & regalia, school & lab supplies, technology), closing with an evening trade show session.",
   },
   {
     name: "Wednesday",
     color: "#163D6D",
     tagline: "A full day on the trade show floor.",
-    detail: "Browse, connect, and meet with exhibitors and sponsors across the whole show.",
+    detail: "The full floor, every exhibitor — browse, connect, and write orders across the whole show, breakfast through dinner. The day wraps with the Wednesday Offsite, included with your registration.",
   },
   {
     name: "Thursday",
