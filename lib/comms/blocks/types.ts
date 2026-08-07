@@ -21,6 +21,8 @@ export type BlockAlign = "left" | "center" | "right";
 interface BlockBase {
   id: string;
   conditionKey?: string | null;
+  /** Top-level blocks only (see renderBlock) — wraps the block in a colored table cell. Null/unset = no background. */
+  backgroundColor?: string | null;
 }
 
 export interface TextBlock extends BlockBase {

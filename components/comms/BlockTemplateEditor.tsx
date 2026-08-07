@@ -24,6 +24,7 @@ import {
   GripVertical,
   GitBranch,
   X,
+  Palette,
 } from "lucide-react";
 import { renderBlocksToHtml } from "@/lib/comms/blocks/render";
 import { uploadCommsImage } from "@/lib/actions/upload-comms-image";
@@ -163,6 +164,42 @@ function BlockConditionControl({
         />
       )}
     </>
+  );
+}
+
+/** Block-level background color — a colored table-cell wrap around the whole block (see render.ts). Unset = no wrap, so most blocks pay nothing for this. */
+function BlockBackgroundControl({
+  color,
+  onChange,
+}: {
+  color: string | null | undefined;
+  onChange: (color: string | null) => void;
+}) {
+  return (
+    <span className="relative inline-flex items-center" title="Block background color">
+      <label
+        className="flex items-center justify-center w-[22px] h-[22px] rounded cursor-pointer hover:bg-gray-100"
+        style={color ? { backgroundColor: color } : undefined}
+      >
+        {!color && <Palette size={13} className="text-gray-400" />}
+        <input
+          type="color"
+          value={color ?? "#ffffff"}
+          onChange={(e) => onChange(e.target.value)}
+          className="sr-only"
+        />
+      </label>
+      {color && (
+        <button
+          type="button"
+          onClick={() => onChange(null)}
+          className="ml-0.5 p-0.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100"
+          title="Remove background color"
+        >
+          <X size={10} />
+        </button>
+      )}
+    </span>
   );
 }
 
@@ -566,6 +603,10 @@ export default function BlockTemplateEditor({
                     updateBlock(index, { ...block, conditionKey: condition.key });
                   }}
                   onClear={() => updateBlock(index, { ...block, conditionKey: null })}
+                />
+                <BlockBackgroundControl
+                  color={block.backgroundColor}
+                  onChange={(backgroundColor) => updateBlock(index, { ...block, backgroundColor })}
                 />
                 <div className="w-px h-4 bg-gray-200 mx-0.5" />
                 <button type="button" onClick={() => moveBlock(index, -1)} disabled={index === 0} className="p-1 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-30">

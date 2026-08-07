@@ -108,9 +108,18 @@ function renderBlockContent(block: ContentBlock): string {
  * {{#if conditionKey}}...{{/if}} visibility wrap — only ever called for
  * blocks in the top-level array (see renderBlocksToHtml and renderColumns
  * above), which is what keeps conditional wrapping to exactly one level.
+ * backgroundColor gets the same top-level-only treatment, wrapped inside
+ * the {{#if}} (not outside) so a hidden block doesn't leave a colored
+ * empty cell behind.
  */
 function renderBlock(block: ContentBlock): string {
-  const content = renderBlockContent(block);
+  let content = renderBlockContent(block);
+  if (block.backgroundColor) {
+    content = `
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;">
+  <tr><td style="background-color:${escAttr(block.backgroundColor)};padding:16px;">${content}</td></tr>
+</table>`.trim();
+  }
   return block.conditionKey ? `{{#if ${block.conditionKey}}}\n${content}\n{{/if}}` : content;
 }
 
