@@ -523,9 +523,22 @@ export default function BlockTemplateEditor({
 
   const compiledHtml = useMemo(() => renderBlocksToHtml(blocks), [blocks]);
 
+  // Skip the first run (initial mount, loading whatever was already saved) —
+  // only real edits after that should count as "dirty" for UnsavedChangesGuard.
+  const didMountRef = useRef(false);
   useEffect(() => {
     if (bodyHtmlRef.current) bodyHtmlRef.current.value = compiledHtml;
-    if (blocksJsonRef.current) blocksJsonRef.current.value = JSON.stringify(blocks);
+    if (blocksJsonRef.current) {
+      blocksJsonRef.current.value = JSON.stringify(blocks);
+      // Programmatic .value assignment above doesn't fire a native "input"
+      // event, so a change that never touches a real <input> (e.g. an image
+      // upload, which just calls onChange with the new URL) would otherwise
+      // go completely unnoticed by the guard's event-delegation listener.
+      if (didMountRef.current) {
+        blocksJsonRef.current.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+    }
+    didMountRef.current = true;
   }, [compiledHtml, blocks]);
 
   function updateBlock(index: number, updated: ContentBlock) {

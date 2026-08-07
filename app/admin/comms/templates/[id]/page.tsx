@@ -6,6 +6,7 @@ import type { MessageTemplate } from "@/lib/comms/types";
 import type { ContentBlock } from "@/lib/comms/blocks/types";
 import TemplateVariablesAndBody from "@/components/comms/TemplateVariablesAndBody";
 import PreviewEmailButton from "@/components/comms/PreviewEmailButton";
+import UnsavedChangesGuard from "@/components/comms/UnsavedChangesGuard";
 
 export const metadata = {
   title: "Edit Template | Communications | Admin | Campus Stores Canada",
@@ -57,6 +58,7 @@ export default async function TemplateEditPage({
 
   return (
     <main>
+      <UnsavedChangesGuard>
       <Link href={backHref} className="text-sm text-gray-500 hover:text-gray-700">
         {t.campaign_id ? "← Campaign" : "← Templates"}
       </Link>
@@ -148,6 +150,7 @@ export default async function TemplateEditPage({
           </Link>
         </div>
       </form>
+      </UnsavedChangesGuard>
     </main>
   );
 }

@@ -5,6 +5,7 @@ import type { TemplateCategory } from "@/lib/comms/types";
 import type { ContentBlock } from "@/lib/comms/blocks/types";
 import TemplateVariablesAndBody from "@/components/comms/TemplateVariablesAndBody";
 import PreviewEmailButton from "@/components/comms/PreviewEmailButton";
+import UnsavedChangesGuard from "@/components/comms/UnsavedChangesGuard";
 
 export const metadata = {
   title: "New Template | Communications | Admin | Campus Stores Canada",
@@ -51,6 +52,7 @@ export default async function NewTemplatePage({
 
   return (
     <main>
+      <UnsavedChangesGuard>
       <Link href={backHref} className="text-sm text-gray-500 hover:text-gray-700">
         {campaignId ? "← Campaign" : "← Templates"}
       </Link>
@@ -147,6 +149,7 @@ export default async function NewTemplatePage({
           </Link>
         </div>
       </form>
+      </UnsavedChangesGuard>
     </main>
   );
 }
