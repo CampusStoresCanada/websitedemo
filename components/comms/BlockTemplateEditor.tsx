@@ -348,6 +348,16 @@ function SimpleBlockFields({
             <input className={inputClass} value={block.src} placeholder="https://… or upload" onChange={(e) => onChange({ ...block, src: e.target.value })} />
             <ImageUploadButton onUploaded={(url) => onChange({ ...block, src: url })} />
           </div>
+          <div className="mt-2 flex items-center justify-center rounded-lg border border-dashed border-gray-200 bg-gray-50 p-2 min-h-[80px]">
+            {block.src ? (
+              // eslint-disable-next-line @next/next/no-img-element -- arbitrary/uploaded remote URL, not a local static asset next/image can optimize
+              <img src={block.src} alt={block.alt || "Preview"} className="max-h-40 max-w-full rounded object-contain" />
+            ) : (
+              <span className="flex items-center gap-1.5 text-xs text-gray-400">
+                <ImageIcon size={14} /> No image yet
+              </span>
+            )}
+          </div>
         </div>
         <div>
           <FieldLabel
