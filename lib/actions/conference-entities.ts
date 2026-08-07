@@ -407,7 +407,10 @@ export async function listConferenceOffers(
 ): Promise<Result<ConferenceOffer[]>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+  if (
+    !isGlobalAdmin(auth.ctx.globalRole) &&
+    !auth.ctx.activeOrgIds.includes(organizationId)
+  ) {
     return { success: false, error: "Not authorized for this organization." };
   }
 

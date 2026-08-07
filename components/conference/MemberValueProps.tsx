@@ -30,7 +30,7 @@ const BULLETS = [
   "More networking sessions and offsite opportunities than ever.",
   "Continuous 5-minute shuttles to and from Toronto Pearson Airport.",
   "Trade-show-only pricing and specials that can help offset the cost of attending.",
-  "Registering qualifies your institution for a share of the delegate travel bursary.*",
+  "Full Conference registration for your institution's general merchandise buyer qualifies you for a share of the delegate travel bursary.*",
 ];
 
 /** The pitch for why a member institution should send a delegate — the counterpart to SponsorshipLadder on the partner side. */

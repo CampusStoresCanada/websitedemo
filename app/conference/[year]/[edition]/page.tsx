@@ -217,6 +217,24 @@ export default async function ConferenceEditionHubPage({
       </>
     ) : undefined;
 
+  // Members get the bursary ask itself in the side slot — the "is your
+  // institution represented" pitch + Register your interest button — instead
+  // of the funding thermometer, which is the Partner-facing framing.
+  const memberSideContent = memberOrg ? (
+    <div className="max-w-sm">
+      <p className="text-lg text-white/80 leading-relaxed">
+        Campus Stores Canada is committed to making sure your institution has a buyer represented at this
+        year&apos;s conference.
+      </p>
+      <RegisterBursaryInterestCTA
+        conferenceId={conference.id}
+        organizationId={memberOrg.id}
+        defaultName={viewerDisplayName}
+        defaultEmail={viewer.userEmail ?? ""}
+      />
+    </div>
+  ) : undefined;
+
   const venue = [conference.location_venue?.trim(), conference.location_city?.trim(), conference.location_province?.trim()]
     .filter(Boolean)
     .join(", ");
@@ -274,20 +292,10 @@ export default async function ConferenceEditionHubPage({
             copy={
               partnerOrg
                 ? exhibitorHeroCopy
-                : "Campus Stores Canada is committed to making sure your institution has a buyer represented at " +
-                  "this year's conference."
+                : "Meet the partners who matter to your store, see the full trade show floor, and connect " +
+                  "with campus stores from across Canada — all in one trip."
             }
-            sideContent={bursarySideContent}
-            ctaContent={
-              memberOrg ? (
-                <RegisterBursaryInterestCTA
-                  conferenceId={conference.id}
-                  organizationId={memberOrg.id}
-                  defaultName={viewerDisplayName}
-                  defaultEmail={viewer.userEmail ?? ""}
-                />
-              ) : undefined
-            }
+            sideContent={memberOrg ? memberSideContent : bursarySideContent}
           />
           <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
             {needsLegalBanner}

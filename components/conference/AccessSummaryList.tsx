@@ -16,7 +16,10 @@ export default function AccessSummaryList({ access }: { access: AccessSummary })
   if (access.days.length === 1) {
     lines.push(`${access.days[0]} on-site`);
   } else if (access.days.length > 1) {
-    lines.push(`${access.days.length} days on-site — ${access.days[0]} to ${access.days[access.days.length - 1]}`);
+    // Deliberately no day count — for Full Conference this spans Mon–Thu, but
+    // the trade show itself is only Tue/Wed/Thu, so "4 days" reads as a
+    // mismatch against the Day Pass's Tue/Wed/Thu choices right above it.
+    lines.push(`On-site ${access.days[0]} to ${access.days[access.days.length - 1]}`);
   }
   if (access.meetingDay) lines.push(`${access.meetingDay} — curated partner meetings, matched to you`);
 
