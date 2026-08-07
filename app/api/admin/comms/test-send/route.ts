@@ -27,9 +27,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Enter a valid email address to send the test to." }, { status: 400 });
   }
 
-  const proto = request.headers.get("x-forwarded-proto") ?? "http";
-  const host = request.headers.get("host") ?? "localhost:3000";
-  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
+  // Unlike the preview route, this email leaves the dev environment and
+  // lands in a real inbox — a request-derived localhost baseUrl would make
+  // every {{app_url}} link dead the moment it's opened anywhere else. Uses
+  // the same production-safe fallback as real sends (see lib/email/layout.ts)
+  // instead, so a delivered test email's links always actually work.
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
+  const effectiveVariables: Record<string, string> = { app_url: baseUrl, ...variables };
 
   // Same as the preview route: no real recipient to evaluate {{#if}}
   // conditions against, so conditional blocks render unwrapped (as if true).
@@ -38,7 +42,7 @@ export async function POST(request: NextRequest) {
 
   const substitute = (template: string): string =>
     unwrapConditionals(template).replace(/\{\{(\w+)\}\}/g, (_, key) =>
-      key in variables && variables[key] ? variables[key] : `[${key}]`
+      key in effectiveVariables && effectiveVariables[key] ? effectiveVariables[key] : `[${key}]`
     );
 
   const manageUrl = is_transactional ? undefined : `${baseUrl}/email-preferences/preview`;
