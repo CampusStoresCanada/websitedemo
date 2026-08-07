@@ -2,7 +2,8 @@ import { createTemplate } from "@/lib/comms/templates";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import type { TemplateCategory } from "@/lib/comms/types";
-import TemplateBodyEditor from "@/components/comms/TemplateBodyEditor";
+import type { ContentBlock } from "@/lib/comms/blocks/types";
+import TemplateVariablesAndBody from "@/components/comms/TemplateVariablesAndBody";
 import PreviewEmailButton from "@/components/comms/PreviewEmailButton";
 
 export const metadata = {
@@ -20,18 +21,17 @@ const CATEGORY_LABELS: { value: TemplateCategory; label: string }[] = [
 async function handleCreate(formData: FormData) {
   "use server";
 
-  const key         = (formData.get("key") as string).trim().toLowerCase().replace(/\s+/g, "_");
   const name        = formData.get("name") as string;
   const description = (formData.get("description") as string) || undefined;
   const category    = formData.get("category") as TemplateCategory;
   const subject     = formData.get("subject") as string;
   const body_html   = formData.get("body_html") as string;
-  const rawVars     = formData.get("variable_keys") as string;
-  const variable_keys = rawVars
-    ? rawVars.split(",").map((v) => v.trim()).filter(Boolean)
-    : [];
+  const campaignId  = (formData.get("campaign_id") as string) || undefined;
+  const blocksJson  = formData.get("body_blocks_json") as string | null;
+  const bodyBlocks  = blocksJson ? (JSON.parse(blocksJson) as ContentBlock[]) : undefined;
+  const isTransactional = formData.get("is_transactional") === "on";
 
-  const result = await createTemplate({ key, name, description, category, subject, body_html, variable_keys });
+  const result = await createTemplate({ name, description, category, subject, body_html, campaignId, bodyBlocks, isTransactional });
 
   if (!result.success || !result.id) {
     // TODO: surface error properly
@@ -41,44 +41,41 @@ async function handleCreate(formData: FormData) {
   redirect(`/admin/comms/templates/${result.id}`);
 }
 
-export default function NewTemplatePage() {
+export default async function NewTemplatePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ campaign_id?: string }>;
+}) {
+  const { campaign_id: campaignId } = await searchParams;
+  const backHref = campaignId ? `/admin/comms/campaigns/${campaignId}` : "/admin/comms/templates";
+
   return (
     <main>
-      <Link href="/admin/comms/templates" className="text-sm text-gray-500 hover:text-gray-700">
-        ← Templates
+      <Link href={backHref} className="text-sm text-gray-500 hover:text-gray-700">
+        {campaignId ? "← Campaign" : "← Templates"}
       </Link>
-      <h1 className="mt-2 text-2xl font-bold text-gray-900">New Template</h1>
+      <h1 className="mt-2 text-2xl font-bold text-gray-900">
+        {campaignId ? "New Email for This Campaign" : "New Template"}
+      </h1>
       <p className="mt-1 text-sm text-gray-600">
-        Custom templates can be used in campaigns and are not managed by the system.
+        {campaignId
+          ? "This email belongs to this campaign only — editing it later won't affect the shared template library."
+          : "Custom templates can be used in campaigns and are not managed by the system."}
       </p>
 
       <form action={handleCreate} className="mt-6 space-y-5 max-w-3xl">
+        {campaignId && <input type="hidden" name="campaign_id" value={campaignId} />}
 
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Name <span className="text-accent">*</span>
-            </label>
-            <input
-              name="name"
-              required
-              placeholder="e.g. Newsletter — Spring 2026"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
-            />
-          </div>
-          <div>
-            <label className="block text-sm font-medium text-gray-700">
-              Key <span className="text-accent">*</span>
-            </label>
-            <p className="text-xs text-gray-500 mb-1">Unique slug — lowercase, underscores only.</p>
-            <input
-              name="key"
-              required
-              pattern="[a-z][a-z0-9_]*"
-              placeholder="e.g. newsletter_spring_2026"
-              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
-            />
-          </div>
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            Name <span className="text-accent">*</span>
+          </label>
+          <input
+            name="name"
+            required
+            placeholder="e.g. Newsletter — Spring 2026"
+            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+          />
         </div>
 
         <div className="grid grid-cols-2 gap-4">
@@ -104,22 +101,21 @@ export default function NewTemplatePage() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700">
-            Variable Keys
-          </label>
-          <p className="text-xs text-gray-500 mb-1">
-            Comma-separated. Use these as{" "}
-            <code className="bg-gray-100 rounded px-1">{`{{variable_name}}`}</code>{" "}
-            tokens in subject and body. e.g.{" "}
-            <code className="text-xs text-accent">first_name, org_name, conference_year</code>
-          </p>
+        <label className="flex items-start gap-2 rounded-lg border border-gray-200 p-3 cursor-pointer hover:bg-gray-50">
           <input
-            name="variable_keys"
-            placeholder="first_name, org_name, conference_year"
-            className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+            type="checkbox"
+            name="is_transactional"
+            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-accent focus:ring-accent/20"
           />
-        </div>
+          <span>
+            <span className="block text-sm font-medium text-gray-900">Transactional / operational</span>
+            <span className="block text-xs text-gray-500">
+              Confirmations, receipts, and account notices the recipient needs regardless of marketing
+              preferences. These skip the unsubscribe link and are never suppressed. Leave unchecked for
+              newsletters, promotions, and other marketing content.
+            </span>
+          </span>
+        </label>
 
         <div>
           <label className="block text-sm font-medium text-gray-700">
@@ -133,15 +129,7 @@ export default function NewTemplatePage() {
           />
         </div>
 
-        <div>
-          <label className="block text-sm font-medium text-gray-700">Body</label>
-          <p className="text-xs text-gray-500 mb-1">
-            Use{" "}
-            <code className="bg-gray-100 rounded px-1 text-xs">{`{{variable_name}}`}</code>{" "}
-            tokens — replaced when the email is sent.
-          </p>
-          <TemplateBodyEditor initialHtml="" fieldName="body_html" />
-        </div>
+        <TemplateVariablesAndBody initialVariableKeys={[]} initialBodyHtml="" initialBlocks={null} defaultMode="visual" />
 
         <div className="flex gap-3 pt-2">
           <button

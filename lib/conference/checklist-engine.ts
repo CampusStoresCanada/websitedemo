@@ -19,7 +19,7 @@ const CHECKS: Record<
   CheckType,
   (db: AdminClient, organizationId: string, conferenceId: string, entityId: string | null) => Promise<boolean>
 > = {
-  async seat_assigned(db, organizationId, _conferenceId, entityId) {
+  async seat_assigned(db, organizationId, conferenceId, entityId) {
     if (!entityId) return true; // malformed task — never blocks, but shouldn't happen (form requires it)
     const { data } = await db
       .from("entity_balance_seats")
@@ -27,6 +27,34 @@ const CHECKS: Record<
       .eq("organization_id", organizationId)
       .eq("entity_id", entityId);
     if (!data || data.length === 0) return true; // org holds none of this entity — nothing to assign
+    const assignedCount = data.filter((s) => s.holder_person_id !== null).length;
+
+    // "All purchased seats assigned" is only the right definition of done
+    // when the org actually intends to use every seat it bought — someone
+    // who buys 4 exhibitor registrations but is only sending 1 person isn't
+    // "behind," they're done. If they've told us how many they actually
+    // plan to use (conference_entity_usage_intents), that number is what
+    // "complete" means instead — capped at the real seat count so a stale
+    // over-declaration can never make this impossible to satisfy.
+    const { data: intent } = await db
+      .from("conference_entity_usage_intents")
+      .select("intended_quantity, declared_against_total")
+      .eq("organization_id", organizationId)
+      .eq("entity_id", entityId)
+      .eq("conference_id", conferenceId)
+      .maybeSingle();
+
+    // A later purchase can raise the real seat count past what the org saw
+    // when they declared — e.g. they said "using 1 of 4," then bought 2
+    // more, now holding 6. The old "1" no longer reflects a real decision
+    // about those extra seats, so it's treated as stale (not merely
+    // clamped) and this falls through to strict mode until they re-declare.
+    if (intent && data.length <= intent.declared_against_total) {
+      return assignedCount >= Math.min(intent.intended_quantity, data.length);
+    }
+
+    // No declared intent, or the declaration is stale — fall back to the
+    // original strict definition.
     return data.every((s) => s.holder_person_id !== null);
   },
 
@@ -294,6 +322,23 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
   }
 
   return result;
+}
+
+/**
+ * Run a single checklist task's completion check for one org — the same
+ * CHECKS registry the reminder digest uses internally, exposed so other
+ * callers (the comms condition system's "Checklist Task" subject) can ask
+ * "is this org done with this task yet" without duplicating the check
+ * logic or its fixed vocabulary.
+ */
+export async function evaluateChecklistTaskCheck(
+  db: AdminClient,
+  checkType: CheckType,
+  organizationId: string,
+  conferenceId: string,
+  entityId: string | null
+): Promise<boolean> {
+  return CHECKS[checkType](db, organizationId, conferenceId, entityId);
 }
 
 export { CHECK_TYPES, type CheckType };

@@ -11,6 +11,79 @@ interface SendEmailOptions {
   html: string;
   replyTo?: string;
   attachments?: Array<{ filename: string; content: string | Buffer }>;
+  /** Per-recipient unsubscribe/preferences link — see wrapEmailBody. Omit for transactional app emails. */
+  manageUrl?: string;
+}
+
+export interface BatchSendItem {
+  to: string;
+  subject: string;
+  html: string;
+  replyTo?: string;
+  /** Per-recipient unsubscribe/preferences link — see wrapEmailBody. Omit for transactional app emails. */
+  manageUrl?: string;
+}
+
+export interface BatchSendResult {
+  success: boolean;
+  error?: string;
+  messageId?: string;
+}
+
+const BATCH_CHUNK_SIZE = 100; // Resend's batch endpoint limit per call
+
+/**
+ * Send many emails via Resend's batch endpoint, chunked to its 100-per-call
+ * limit — one request per up-to-100 recipients instead of one request per
+ * recipient. Used for campaign sends so a few-hundred-person send finishes
+ * in a handful of round trips instead of racking up hundreds of sequential
+ * ones (which risks both the team-wide rate limit and the function's time
+ * budget). `batchValidation: "permissive"` means one bad address in a chunk
+ * fails just that item, not the whole chunk.
+ */
+export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendResult[]> {
+  const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const results: BatchSendResult[] = new Array(items.length);
+
+  for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
+    const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
+
+    const payload = chunk.map((item) => ({
+      from: FROM_ADDRESS,
+      to: intercept ?? item.to,
+      subject: intercept ? `[DEV → ${item.to}] ${item.subject}` : item.subject,
+      html: wrapEmailBody(item.html, undefined, item.manageUrl),
+      replyTo: item.replyTo,
+    }));
+
+    try {
+      const { data, error } = await resend.batch.send(payload, {
+        batchValidation: "permissive",
+      });
+
+      if (error) {
+        for (let i = 0; i < chunk.length; i++) {
+          results[start + i] = { success: false, error: error.message };
+        }
+        continue;
+      }
+
+      const failedByIndex = new Map(data.errors.map((e) => [e.index, e.message]));
+      chunk.forEach((_, i) => {
+        const failMessage = failedByIndex.get(i);
+        results[start + i] = failMessage
+          ? { success: false, error: failMessage }
+          : { success: true, messageId: data.data[i]?.id };
+      });
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Unknown email error";
+      for (let i = 0; i < chunk.length; i++) {
+        results[start + i] = { success: false, error: msg };
+      }
+    }
+  }
+
+  return results;
 }
 
 export async function sendEmail(options: SendEmailOptions): Promise<{ success: boolean; error?: string; messageId?: string }> {
@@ -27,7 +100,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       from: FROM_ADDRESS,
       to,
       subject,
-      html: wrapEmailBody(options.html),
+      html: wrapEmailBody(options.html, undefined, options.manageUrl),
       replyTo: options.replyTo,
       attachments: options.attachments,
     });

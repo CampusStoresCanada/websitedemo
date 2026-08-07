@@ -11,10 +11,15 @@ export default function OfferCard({
   offer,
   conferenceId,
   organizationId,
+  compact = false,
 }: {
   offer: ConferenceOffer;
   conferenceId: string;
   organizationId: string;
+  /** Lighter-weight row treatment for optional add-ons already covered by a
+   *  registration (e.g. an extra Meet & Greet ticket for a guest) — so it
+   *  doesn't read with the same visual weight as picking a registration tier. */
+  compact?: boolean;
 }) {
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -41,6 +46,31 @@ export default function OfferCard({
   };
 
   const disabled = isPending || !offer.eligible || offer.soldOut;
+
+  if (compact) {
+    return (
+      <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-gray-700">{offer.name}</p>
+          <p className="text-xs text-gray-500">Already included with your registration — buy extra for a colleague or guest.</p>
+          {!offer.eligible ? <p className="mt-1 text-xs text-amber-700">{offer.ineligibleReason}</p> : null}
+          {feedback ? (
+            <p className={`mt-1 text-xs ${feedback.ok ? "text-green-700" : "text-red-600"}`}>{feedback.text}</p>
+          ) : null}
+        </div>
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="text-sm text-gray-500">{formatCents(offer.unitPriceCents)}</span>
+          <button
+            onClick={add}
+            disabled={disabled}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-100 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            {isPending ? "Adding…" : offer.soldOut ? "Sold out" : "Add extra"}
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-4">

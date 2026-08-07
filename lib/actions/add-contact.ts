@@ -1,5 +1,6 @@
 "use server";
 
+import { revalidateTag } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
@@ -15,6 +16,8 @@ interface AddContactParams {
   roleTitle?: string;
   phone?: string;
   workPhoneNumber?: string;
+  /** Non-member segmentation tags (see lib/contacts/tags.ts). Defaults to ["directory"] when omitted. */
+  tags?: string[];
 }
 
 interface AddContactResult {
@@ -41,6 +44,7 @@ export async function addContact({
   roleTitle,
   phone,
   workPhoneNumber,
+  tags,
 }: AddContactParams): Promise<AddContactResult> {
   try {
     const auth = await requireAuthenticated();
@@ -95,7 +99,7 @@ export async function addContact({
       roleTitle: roleTitle ?? null,
       phone: phone ?? null,
       workPhone: workPhoneNumber ?? null,
-      contactType: ["directory"],
+      contactType: tags && tags.length > 0 ? ["directory", ...tags] : ["directory"],
     });
 
     if (contact.error || !contact.contactId) {
@@ -105,6 +109,8 @@ export async function addContact({
 
     // Queue Circle provisioning for the new contact (fire-and-forget)
     void enqueueNewContactCircleProvisioning(contact.contactId, organizationId);
+
+    revalidateTag("org-profile", "max");
 
     return { success: true, contactId: contact.contactId };
   } catch (err) {

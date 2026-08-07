@@ -3,6 +3,7 @@ import { createClient } from "@supabase/supabase-js";
 
 const DEFAULT_TABLES = [
   "contacts",
+  "people",
   "user_organizations",
   "brand_colors",
   "conference_people",
@@ -12,6 +13,8 @@ const DEFAULT_TABLES = [
   "conference_entitlement_assignment_events",
   "membership_assessments",
   "benchmarking_promotions",
+  "invoices",
+  "renewal_events",
 ];
 
 function parseArgs(argv) {

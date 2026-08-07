@@ -1,3 +1,9 @@
+export interface MeetingWindow {
+  startTime: string;
+  endTime: string;
+  meetingCount: number;
+}
+
 export interface MeetingDayGeometry {
   date: string;
   dayNumber: number;
@@ -6,6 +12,11 @@ export interface MeetingDayGeometry {
   bufferMinutes: number;
   startTime: string;
   endTime: string | null;
+  /** When set, the day's meetings run as separate blocks (breaks/lunch carved
+   *  out between them) rather than one continuous startTime→endTime span.
+   *  startTime/endTime/meetingCount above become the outer bounds/total across
+   *  all windows, for display — slot generation iterates windows instead. */
+  windows?: MeetingWindow[];
 }
 
 export interface MeetingGeometryResolution {
@@ -171,8 +182,35 @@ function isMeetingDayAttributes(a: Record<string, unknown>): boolean {
     a.meeting_start_time != null ||
     a.meeting_end_time != null ||
     a.meeting_count != null ||
-    a.meeting_slots_per_day != null
+    a.meeting_slots_per_day != null ||
+    (Array.isArray(a.meeting_windows) && a.meeting_windows.length > 0)
   );
+}
+
+/** Parses an optional `meeting_windows` attribute — an array of
+ *  `{start_time, end_time}` blocks — into ordered MeetingWindow entries with
+ *  their own derived meeting count. Invalid/empty input yields null so the
+ *  caller falls back to the single continuous-window behavior. */
+function parseMeetingWindows(
+  value: unknown,
+  slotDurationMinutes: number,
+  bufferMinutes: number
+): MeetingWindow[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const windows: MeetingWindow[] = [];
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const e = entry as Record<string, unknown>;
+    const startTime = normalizeTimeValue(e.start_time, "");
+    const endTime = normalizeTimeValue(e.end_time, "");
+    if (!startTime || !endTime) continue;
+    const meetingCount = deriveMeetingCountFromWindow(startTime, endTime, slotDurationMinutes, bufferMinutes);
+    if (meetingCount <= 0) continue;
+    windows.push({ startTime, endTime, meetingCount });
+  }
+  if (windows.length === 0) return null;
+  windows.sort((a, b) => a.startTime.localeCompare(b.startTime));
+  return windows;
 }
 
 export function resolveMeetingGeometryFromEntities(
@@ -190,6 +228,23 @@ export function resolveMeetingGeometryFromEntities(
       const a = byDate.get(date) ?? {};
       const slotDurationMinutes = normalizePositiveInt(a.slot_duration_minutes, 15);
       const bufferMinutes = normalizeNonNegativeInt(a.meeting_buffer_minutes ?? a.buffer_minutes, 0);
+
+      const windows = parseMeetingWindows(a.meeting_windows, slotDurationMinutes, bufferMinutes);
+      if (windows) {
+        const meetingCount = windows.reduce((sum, w) => sum + w.meetingCount, 0);
+        if (meetingCount <= 0) return null;
+        return {
+          date,
+          dayNumber: index + 1,
+          meetingCount,
+          slotDurationMinutes,
+          bufferMinutes,
+          startTime: windows[0].startTime,
+          endTime: windows[windows.length - 1].endTime,
+          windows,
+        } satisfies MeetingDayGeometry;
+      }
+
       const startTime = normalizeTimeValue(a.meeting_start_time, "09:00:00");
       const endTime = normalizeTimeValue(a.meeting_end_time, "17:00:00");
       const configuredCount = normalizePositiveInt(a.meeting_count ?? a.meeting_slots_per_day, 0);

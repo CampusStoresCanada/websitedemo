@@ -3,7 +3,12 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
 import { getPartnershipRateCents, applyProration } from "@/lib/stripe/billing";
-import { computeNewExpiresAt, nextCycleStartOnOrAfter, cyclesNeededFrom } from "@/lib/membership/renewal-activation";
+import {
+  computeNewExpiresAt,
+  nextCycleStartOnOrAfter,
+  cyclesNeededFrom,
+  isWithinPreRenewalSkipWindow,
+} from "@/lib/membership/renewal-activation";
 import { getRenewalConfig } from "@/lib/policy/engine";
 
 /**
@@ -35,11 +40,8 @@ async function priceProspectiveMembershipCents(conferenceEndDate: string): Promi
     await getRenewalConfig();
   const now = new Date();
   const cycleStartDate = nextCycleStartOnOrAfter(now, cycleStartMonthDay);
-  const daysUntilCycleStart = Math.round(
-    (new Date(`${cycleStartDate}T00:00:00Z`).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  );
 
-  if (daysUntilCycleStart <= skipStubDays) {
+  if (isWithinPreRenewalSkipWindow(now, cycleStartMonthDay, skipStubDays)) {
     const cyclesFromCycleStart = await cyclesNeededFrom(cycleStartDate, conferenceEndDate);
     return perCycleCents * cyclesFromCycleStart;
   }

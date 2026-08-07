@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { listTemplates } from "@/lib/comms/templates";
 import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
+import { getCampaignInitiative } from "@/lib/comms/campaigns";
+import { listConditions } from "@/lib/comms/conditions/store";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import type { AudienceDefinition, AudienceType } from "@/lib/comms/types";
@@ -9,6 +11,8 @@ import NewCampaignForm from "@/components/comms/NewCampaignForm";
 export const metadata = {
   title: "New Campaign | Communications | Admin | Campus Stores Canada",
 };
+
+export const maxDuration = 60; // "Send Immediately" can push a few hundred recipients through sendEmailBatch
 
 /**
  * "email,name,var1,var2" header row, then one row per recipient. Each
@@ -49,7 +53,7 @@ async function handleCreateCampaign(formData: FormData) {
   "use server";
 
   const name = formData.get("name") as string;
-  const templateKey = (formData.get("template_key") as string) || undefined;
+  const templateId = (formData.get("template_id") as string) || undefined;
   const subjectOverride = (formData.get("subject") as string) || undefined;
   const bodyOverride = (formData.get("body_html") as string) || undefined;
   const audienceType = formData.get("audience_type") as AudienceType;
@@ -60,6 +64,7 @@ async function handleCreateCampaign(formData: FormData) {
   const sendTiming = (formData.get("send_timing") as string) || "draft";
   const scheduledAtRaw = formData.get("scheduled_at") as string | null;
   const scheduledAt = scheduledAtRaw ? new Date(scheduledAtRaw) : undefined;
+  const campaignId = (formData.get("campaign_id") as string) || undefined;
 
   // Collect variable values from var_* prefixed fields
   const variableValues: Record<string, string> = {};
@@ -89,6 +94,16 @@ async function handleCreateCampaign(formData: FormData) {
     audience.filters!.recipients = parseMailMergeCsv(mailMergeCsv);
   }
 
+  if (audienceType === "contact_tags") {
+    const tags = formData.getAll("contact_tags") as string[];
+    if (tags.length > 0) audience.filters!.tags = tags;
+  }
+
+  if (audienceType === "org_admins") {
+    const orgType = (formData.get("org_type") as string | null)?.trim();
+    if (orgType) audience.filters!.org_type = orgType;
+  }
+
   const entityScopedAudiences = new Set<AudienceType>([
     "conference_holders",
     "conference_orgs_with_open_seats",
@@ -98,15 +113,22 @@ async function handleCreateCampaign(formData: FormData) {
     audience.filters!.entity_id = entityId;
   }
 
+  const conditionKeys = formData.getAll("condition_keys") as string[];
+  if (conditionKeys.length > 0) {
+    audience.filters!.condition_keys = conditionKeys;
+    audience.filters!.condition_match = (formData.get("condition_match") as "all" | "any") || "all";
+  }
+
   const result = await createCampaign({
     name,
-    templateKey: templateKey as Parameters<typeof createCampaign>[0]["templateKey"],
+    templateId,
     subjectOverride,
     bodyOverride,
     audience,
     variableValues: Object.keys(variableValues).length > 0 ? variableValues : undefined,
     triggerSource: "manual",
     scheduledAt: sendTiming === "scheduled" ? scheduledAt : undefined,
+    campaignId,
   });
 
   if (!result.success || !result.campaignId) {
@@ -116,7 +138,8 @@ async function handleCreateCampaign(formData: FormData) {
   if (sendTiming === "immediate") {
     await executeCampaignSend(result.campaignId);
   }
-  // "scheduled" campaigns: stored with scheduled_at, fired by the scheduler (v1.4)
+  // "scheduled" campaigns: created with status "scheduled", fired by the
+  // comms-scheduled-send cron once scheduled_at arrives.
 
   redirect(`/admin/comms/${result.campaignId}`);
 }
@@ -124,11 +147,20 @@ async function handleCreateCampaign(formData: FormData) {
 export default async function NewCampaignPage({
   searchParams,
 }: {
-  searchParams: Promise<{ conference_id?: string }>;
+  searchParams: Promise<{ conference_id?: string; campaign_id?: string; template_id?: string }>;
 }) {
   const db = createAdminClient();
-  const templates = await listTemplates();
-  const { conference_id: defaultConferenceId } = await searchParams;
+  const {
+    conference_id: defaultConferenceId,
+    campaign_id: campaignId,
+    template_id: defaultTemplateId,
+  } = await searchParams;
+
+  const [templates, campaignInitiative, conditions] = await Promise.all([
+    listTemplates(campaignId ? { campaignId } : undefined),
+    campaignId ? getCampaignInitiative(campaignId) : Promise.resolve(null),
+    listConditions(),
+  ]);
 
   const { data: conferences } = await db
     .from("conference_instances")
@@ -158,12 +190,17 @@ export default async function NewCampaignPage({
 
   return (
     <main>
-      <Link href="/admin/comms" className="text-sm text-gray-500 hover:text-gray-700">
-        ← Communications
+      <Link
+        href={campaignInitiative ? `/admin/comms/campaigns/${campaignInitiative.id}` : "/admin/comms"}
+        className="text-sm text-gray-500 hover:text-gray-700"
+      >
+        {campaignInitiative ? "← Campaign" : "← Communications"}
       </Link>
-      <h1 className="mt-2 text-2xl font-bold text-gray-900">New Campaign</h1>
+      <h1 className="mt-2 text-2xl font-bold text-gray-900">New Send</h1>
       <p className="mt-1 text-sm text-gray-600">
-        Create a targeted email campaign. Choose a template and audience, then send now or save as draft.
+        {campaignInitiative
+          ? `Send an email from "${campaignInitiative.name}". Choose the audience, then send now or save as draft.`
+          : "Create a one-off send. Choose a template and audience, then send now or save as draft."}
       </p>
 
       <NewCampaignForm
@@ -172,6 +209,10 @@ export default async function NewCampaignPage({
         conferences={conferences ?? []}
         entitiesByConference={entitiesByConference}
         defaultConferenceId={defaultConferenceId}
+        campaignId={campaignInitiative?.id}
+        campaignName={campaignInitiative?.name}
+        defaultTemplateId={defaultTemplateId}
+        conditions={conditions.map((c) => ({ key: c.key, label: c.label }))}
       />
     </main>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import type { BrandColor } from "@/lib/types/db";
@@ -12,7 +12,7 @@ import BlurredField from "@/components/ui/BlurredField";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToolkit } from "@/components/ui/Toolkit";
-import { allocateSeat, deallocateSeat, addConferenceAttendee } from "@/lib/actions/conference-entity-commerce";
+import { allocateSeat, deallocateSeat, addConferenceAttendee, setEntityUsageIntent } from "@/lib/actions/conference-entity-commerce";
 import { addOfferToCart } from "@/lib/actions/conference-commerce";
 import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
@@ -131,6 +131,67 @@ interface PartnerProfileProps {
   renewalWindowOpen?: boolean;
   /** renewal.grace_days policy value — feeds the GracePeriodBanner countdown. */
   graceDays?: number;
+}
+
+/**
+ * "How many of these will you actually use?" — separate from how many were
+ * purchased. Without this, an org that buys 4 exhibitor registrations but
+ * only sends 1 person keeps getting nagged to assign the other 3 forever;
+ * declaring intent here is what lets the checklist reminder system tell
+ * "not done yet" apart from "done, just not using all of them." Debounced
+ * on change (not saved on every keystroke, and not solely reliant on blur
+ * firing, which is inconsistent across input methods/assistive tech).
+ */
+function UsageIntentInput({
+  organizationId,
+  entityId,
+  conferenceId,
+  totalSeats,
+  initialValue,
+}: {
+  organizationId: string;
+  entityId: string;
+  conferenceId: string;
+  totalSeats: number;
+  initialValue: number;
+}) {
+  const [value, setValue] = useState(String(initialValue));
+  const [saving, setSaving] = useState(false);
+  const lastSavedRef = useRef(initialValue);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  async function commit(raw: string) {
+    const parsed = Math.max(0, Math.min(totalSeats, Math.round(Number(raw)) || 0));
+    if (parsed === lastSavedRef.current) return;
+    lastSavedRef.current = parsed;
+    setSaving(true);
+    await setEntityUsageIntent(organizationId, entityId, conferenceId, parsed);
+    setSaving(false);
+  }
+
+  function handleChange(raw: string) {
+    setValue(raw);
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => commit(raw), 600);
+  }
+
+  return (
+    <div className="mt-1 flex items-center gap-1 font-normal normal-case text-[10px] text-gray-400">
+      <span>Using</span>
+      <input
+        type="number"
+        min={0}
+        max={totalSeats}
+        value={value}
+        onChange={(e) => handleChange(e.target.value)}
+        onBlur={(e) => commit(e.target.value)}
+        onClick={(e) => e.stopPropagation()}
+        disabled={saving}
+        className="w-10 rounded border border-gray-300 px-1 py-0.5 text-center text-xs text-gray-700 disabled:opacity-50"
+      />
+      <span>of {totalSeats}</span>
+    </div>
+  );
 }
 
 export default function PartnerProfile({
@@ -957,7 +1018,18 @@ export default function PartnerProfile({
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
                       {assignableEntities.map((entity) => (
-                        <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
+                        <th key={entity.entityId} className="pb-2 pl-3 font-semibold align-bottom">
+                          <div>{entity.name}</div>
+                          {editMode && canEditThisOrg && currentConferenceId && entity.seats.length > 1 && (
+                            <UsageIntentInput
+                              organizationId={organization.id}
+                              entityId={entity.entityId}
+                              conferenceId={currentConferenceId}
+                              totalSeats={entity.seats.length}
+                              initialValue={entity.intendedQuantity ?? entity.seats.length}
+                            />
+                          )}
+                        </th>
                       ))}
                       {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Badge</th>}
                       {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Check-in</th>}

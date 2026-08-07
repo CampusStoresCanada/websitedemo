@@ -1,7 +1,9 @@
 import type { AccessSummary } from "@/lib/conference/entity-commerce";
 
 const TRADE_SHOW_WEDNESDAY_ID = "5eb4edca-a7ec-4924-997f-e369baf408e0";
-const COURSE_MATERIALS_UNCONFERENCE_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
+// Canonical name throughout the conference is "Big Ideas Day" — not "Big
+// Shiny Ideas" or "Course Materials Unconference" (its former name).
+const BIG_IDEAS_DAY_ID = "5752d511-1a55-4c14-9b38-9b8e8b565c2b";
 
 /**
  * Persuasive "what you get" summary for a registration card — grouped and
@@ -14,12 +16,15 @@ export default function AccessSummaryList({ access }: { access: AccessSummary })
   if (access.days.length === 1) {
     lines.push(`${access.days[0]} on-site`);
   } else if (access.days.length > 1) {
-    lines.push(`${access.days.length} days on-site — ${access.days[0]} to ${access.days[access.days.length - 1]}`);
+    // Deliberately no day count — for Full Conference this spans Mon–Thu, but
+    // the trade show itself is only Tue/Wed/Thu, so "4 days" reads as a
+    // mismatch against the Day Pass's Tue/Wed/Thu choices right above it.
+    lines.push(`On-site ${access.days[0]} to ${access.days[access.days.length - 1]}`);
   }
   if (access.meetingDay) lines.push(`${access.meetingDay} — curated partner meetings, matched to you`);
 
   for (const day of access.tradeShowDays) {
-    if (day.id === COURSE_MATERIALS_UNCONFERENCE_ID) continue;
+    if (day.id === BIG_IDEAS_DAY_ID) continue;
     if (day.id === TRADE_SHOW_WEDNESDAY_ID) {
       lines.push(`${day.name} — the full floor, all ${access.exhibitorCount} exhibitors`);
     } else {
@@ -29,8 +34,8 @@ export default function AccessSummaryList({ access }: { access: AccessSummary })
   // Now a real, Member-only catalog entity (session) — reachable via
   // Full Conference Registration and Thursday Day Pass's `involved_in` refs,
   // with its own when/start/end spanning the full day past the floor's close.
-  if (access.tradeShowDays.some((d) => d.id === COURSE_MATERIALS_UNCONFERENCE_ID)) {
-    lines.push("Course Materials Unconference — all day, including after the floor closes (optional, included)");
+  if (access.tradeShowDays.some((d) => d.id === BIG_IDEAS_DAY_ID)) {
+    lines.push("Big Ideas Day — all day, including after the floor closes (optional, included)");
   }
 
   if (access.mealsIncluded) lines.push("All meals included");

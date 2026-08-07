@@ -59,6 +59,28 @@ export function nextCycleStartOnOrAfter(date: Date, cycleStartMonthDay: string):
 }
 
 /**
+ * True when `today` is within the admin-configured pre-renewal skip-stub
+ * window (renewal.pre_renewal_skip_stub_days) of the next cycle-start
+ * anniversary — the point past which a signup is priced/covered as the year
+ * ahead rather than a small prorated stub of the dying cycle. Shared by
+ * every caller that used to duplicate this day-count inline
+ * (conference-commerce.ts, prospective-booth-checkout.ts) plus the plain
+ * membership/partnership pricing path (lib/stripe/billing.ts's
+ * applyProration, and the public pricing-table display).
+ */
+export function isWithinPreRenewalSkipWindow(
+  today: Date,
+  cycleStartMonthDay: string,
+  preRenewalSkipStubDays: number
+): boolean {
+  const cycleStartDate = nextCycleStartOnOrAfter(today, cycleStartMonthDay);
+  const daysUntilCycleStart = Math.round(
+    (new Date(`${cycleStartDate}T00:00:00Z`).getTime() - today.getTime()) / (1000 * 60 * 60 * 24)
+  );
+  return daysUntilCycleStart <= preRenewalSkipStubDays;
+}
+
+/**
  * Anchor a new membership period to the fiscal year. If the current expiry
  * is null or already in the past, anchors to today instead — otherwise a
  * long-lapsed org would "renew" into a period that's still in the past.

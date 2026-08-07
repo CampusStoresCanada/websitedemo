@@ -23,7 +23,12 @@ import {
 // computeMembershipAssessment has no import-time side effects (createAdminClient
 // is only a function reference), so a relative import is safe here.
 import { computeMembershipAssessment } from "../membership/pricing";
-import { computeNewExpiresAt, nextCycleStartOnOrAfter, cyclesNeededFrom } from "../membership/renewal-activation";
+import {
+  computeNewExpiresAt,
+  nextCycleStartOnOrAfter,
+  cyclesNeededFrom,
+  isWithinPreRenewalSkipWindow,
+} from "../membership/renewal-activation";
 // getRenewalConfig has no import-time side effects (createAdminClient is only
 // a function reference), so a relative import is safe here.
 import { getRenewalConfig } from "../policy/engine";
@@ -262,11 +267,8 @@ async function priceMembershipRenewalForOrg(
     await getRenewalConfig();
   const now = new Date();
   const cycleStartDate = nextCycleStartOnOrAfter(now, cycleStartMonthDay);
-  const daysUntilCycleStart = Math.round(
-    (new Date(`${cycleStartDate}T00:00:00Z`).getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
-  );
 
-  if (daysUntilCycleStart <= skipStubDays) {
+  if (isWithinPreRenewalSkipWindow(now, cycleStartMonthDay, skipStubDays)) {
     // Case 2: skip the stub — price starting from the upcoming cycle start
     // (a real boundary), not from today, so the very next cycle counts as
     // cycle 1 rather than stacking on top of an uncounted stub.
@@ -668,8 +670,8 @@ export async function addOfferToCart(params: {
         .eq("id", params.organizationId)
         .single();
       // direct_purchase_category may be a single category (string) or a list
-      // of eligible categories (string[]) — e.g. Big Shiny Ideas Thursday
-      // presentation slots are open to both "Store Operations" and "Books".
+      // of eligible categories (string[]) — e.g. Big Ideas Presentations
+      // slots are open to both "Store Operations" and "Books".
       const categoryOk =
         requiredCategory == null ||
         (typeof requiredCategory === "string" && buyerOrg?.primary_category === requiredCategory) ||

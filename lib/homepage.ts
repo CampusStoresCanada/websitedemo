@@ -500,6 +500,7 @@ async function fetchMapOrgsWithBenchmarking(
     )
     .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
     .is("archived_at", null)
+    .eq("is_test", false)
     .order("name", { ascending: true });
 
   if (typeFilter) {

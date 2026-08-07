@@ -17,6 +17,7 @@ export default function ConferenceHero({
   venue,
   copy,
   sideContent,
+  ctaContent,
 }: {
   name: string;
   startDate: string | null;
@@ -24,6 +25,8 @@ export default function ConferenceHero({
   venue: string;
   copy: string;
   sideContent?: ReactNode;
+  /** Optional major call-to-action rendered under the copy paragraph — e.g. the Member view's "Register your interest" bursary CTA. */
+  ctaContent?: ReactNode;
 }) {
   return (
     <section className="bg-gradient-to-br from-[#163D6D] to-[#0d2547] py-16 md:py-24">
@@ -36,6 +39,7 @@ export default function ConferenceHero({
             </span>
             <h1 className="mt-5 text-4xl md:text-6xl font-bold text-white tracking-tight">{name}</h1>
             <p className="mt-5 text-lg md:text-xl text-white/80 leading-relaxed">{copy}</p>
+            {ctaContent}
           </div>
 
           {sideContent && (

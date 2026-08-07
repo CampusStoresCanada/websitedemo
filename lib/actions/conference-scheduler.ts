@@ -165,23 +165,33 @@ async function ensureMeetingScaffolding(
   const startBase = "1970-01-01T00:00:00.000Z";
   const slotRows: Database["public"]["Tables"]["meeting_slots"]["Insert"][] = [];
   for (const dayConfig of geometry.dayConfigs) {
-    for (let slot = 1; slot <= dayConfig.meetingCount; slot += 1) {
-      const start = parseTimeToDate(startBase, dayConfig.startTime);
-      const slotOffsetMinutes = (slot - 1) * (dayConfig.slotDurationMinutes + dayConfig.bufferMinutes);
-      start.setUTCMinutes(start.getUTCMinutes() + slotOffsetMinutes);
+    // Windowed days (breaks/lunch carved out between blocks) run as separate
+    // ranges but share one continuous slot_number sequence for the day, since
+    // (conference_id, day_number, slot_number, suite_id) must stay unique.
+    const windows = dayConfig.windows?.length
+      ? dayConfig.windows
+      : [{ startTime: dayConfig.startTime, endTime: dayConfig.endTime ?? dayConfig.startTime, meetingCount: dayConfig.meetingCount }];
 
-      const end = new Date(start);
-      end.setUTCMinutes(end.getUTCMinutes() + dayConfig.slotDurationMinutes);
+    let slot = 1;
+    for (const w of windows) {
+      for (let i = 0; i < w.meetingCount; i += 1, slot += 1) {
+        const start = parseTimeToDate(startBase, w.startTime);
+        const slotOffsetMinutes = i * (dayConfig.slotDurationMinutes + dayConfig.bufferMinutes);
+        start.setUTCMinutes(start.getUTCMinutes() + slotOffsetMinutes);
 
-      for (const suite of suites) {
-        slotRows.push({
-          conference_id: conferenceId,
-          day_number: dayConfig.dayNumber,
-          slot_number: slot,
-          start_time: formatTimeFromDate(start),
-          end_time: formatTimeFromDate(end),
-          suite_id: suite.id,
-        });
+        const end = new Date(start);
+        end.setUTCMinutes(end.getUTCMinutes() + dayConfig.slotDurationMinutes);
+
+        for (const suite of suites) {
+          slotRows.push({
+            conference_id: conferenceId,
+            day_number: dayConfig.dayNumber,
+            slot_number: slot,
+            start_time: formatTimeFromDate(start),
+            end_time: formatTimeFromDate(end),
+            suite_id: suite.id,
+          });
+        }
       }
     }
   }

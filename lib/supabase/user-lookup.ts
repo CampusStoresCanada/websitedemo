@@ -44,3 +44,60 @@ export async function lookupUserEmailsByIds(
   }
   return emailMap;
 }
+
+/**
+ * Resolve the active org_admin emails for an organization, oldest
+ * assignment first (deterministic — user_organizations has no
+ * is_primary/primary_admin column). Billing and renewal notices need the
+ * org_admin's login email, not organizations.email (a separate,
+ * public-facing "Store Contact" address shown on the org page — see
+ * components/org/MemberProfile.tsx's "Public email" field).
+ */
+export async function resolveOrgAdminEmails(
+  supabase: AdminClient,
+  orgId: string
+): Promise<string[]> {
+  const { data: admins } = await supabase
+    .from("user_organizations")
+    .select("user_id")
+    .eq("organization_id", orgId)
+    .eq("role", "org_admin")
+    .eq("status", "active")
+    .order("created_at", { ascending: true });
+
+  if (!admins?.length) return [];
+
+  const emailMap = await lookupUserEmailsByIds(
+    supabase,
+    admins.map((a) => a.user_id)
+  );
+  return admins.map((a) => emailMap[a.user_id]).filter((email): email is string => Boolean(email));
+}
+
+/**
+ * Last-resort billing/renewal email for an org with no active org_admin
+ * account and no organizations.email: fall back to a real person already
+ * on file in `contacts` (the CRM-style roster synced from Circle/Notion —
+ * a "person exists" doesn't imply they ever created a login). Prefers the
+ * contact flagged is_primary, then the oldest non-archived contact.
+ */
+export async function resolveOrgPrimaryContactEmail(
+  supabase: AdminClient,
+  orgId: string
+): Promise<string | null> {
+  const { data: contacts } = await supabase
+    .from("contacts")
+    .select("email, work_email, is_primary, created_at")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .order("is_primary", { ascending: false, nullsFirst: false })
+    .order("created_at", { ascending: true });
+
+  if (!contacts?.length) return null;
+
+  for (const c of contacts) {
+    const email = c.work_email ?? c.email;
+    if (email) return email;
+  }
+  return null;
+}

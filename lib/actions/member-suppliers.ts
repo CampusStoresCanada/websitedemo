@@ -114,6 +114,7 @@ export async function getMemberSupplierData(
     .select("id, name, slug, province, primary_category, catalogue_url, certifications")
     .eq("type", "Vendor Partner")
     .eq("membership_status", "active")
+    .eq("is_test", false)
     .not("primary_category", "is", null);
 
   // 6. Score each partner

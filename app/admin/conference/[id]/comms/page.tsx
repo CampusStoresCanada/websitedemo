@@ -26,8 +26,8 @@ export default async function ConferenceCommsPage({
 
   // Scoped to campaigns tagged with this conference — automated triggers set
   // this on audience_definition.filters.conference_instance_id regardless of
-  // audience type, and manual broadcasts to conference_delegates/exhibitors/
-  // all/holders do the same when scoped to an instance.
+  // audience type, and manual broadcasts (all/holders/org admins/etc.) do
+  // the same when scoped to an instance.
   const { data: campaigns } = await db
     .from("message_campaigns")
     .select(

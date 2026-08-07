@@ -3,10 +3,12 @@
 import { useState } from "react";
 import { updateField } from "@/lib/actions/update-field";
 import { addContact } from "@/lib/actions/add-contact";
+import { updateContactTags } from "@/lib/actions/update-contact-tags";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
 import type { VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
+import { CONTACT_TAGS } from "@/lib/contacts/tags";
 
 interface ContactEditModalProps {
   /** null = create-mode: same form, empty defaults, inserts instead of updating. */
@@ -53,6 +55,15 @@ export default function ContactEditModal({
     work_phone_number: (contact?.work_phone_number as string | null) ?? (contact?.phone as string | null) ?? "",
   });
 
+  // Segmentation tags — lapsed/prospect/conference-only/board/external
+  // vendor. contact_type also carries unrelated values (e.g. "Staff",
+  // "directory") which this UI leaves untouched.
+  const VALID_TAG_VALUES = new Set<string>(CONTACT_TAGS.map((t) => t.value));
+  const initialTags = new Set<string>(
+    ((contact?.contact_type as string[] | null) ?? []).filter((t) => VALID_TAG_VALUES.has(t))
+  );
+  const [selectedTags, setSelectedTags] = useState<Set<string>>(initialTags);
+
   // ── Procurement tab state (edit-mode only — a new contact has no assignments yet) ──
   // Which categories is this contact already a buyer for?
   const [buyerCategories, setBuyerCategories] = useState<Set<string>>(() => {
@@ -98,6 +109,7 @@ export default function ContactEditModal({
         workEmail: fields.work_email.trim() || undefined,
         roleTitle: fields.role_title.trim() || undefined,
         workPhoneNumber: fields.work_phone_number.trim() || undefined,
+        tags: selectedTags.size > 0 ? [...selectedTags] : undefined,
       });
       setSaving(false);
       if (!result.success || !result.contactId) {
@@ -138,6 +150,20 @@ export default function ContactEditModal({
       }
       window.dispatchEvent(new CustomEvent("csc:field-updated", {
         detail: { table: "contacts", column, entityId: contact.id },
+      }));
+    }
+
+    const tagsChanged =
+      selectedTags.size !== initialTags.size || [...selectedTags].some((t) => !initialTags.has(t));
+    if (tagsChanged) {
+      const tagResult = await updateContactTags(contact.id, organizationId, [...selectedTags]);
+      if (!tagResult.success) {
+        setError(tagResult.error ?? "Failed to save tags.");
+        setSaving(false);
+        return;
+      }
+      window.dispatchEvent(new CustomEvent("csc:field-updated", {
+        detail: { table: "contacts", column: "contact_type", entityId: contact.id },
       }));
     }
 
@@ -305,6 +331,40 @@ export default function ContactEditModal({
                     className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30 focus:border-[#EE2A2E]"
                     placeholder="+1 (555) 000-0000"
                   />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    Tags
+                  </label>
+                  <p className="text-[11px] text-gray-400 mb-2">
+                    People we stay in touch with who aren&apos;t a current member/partner login. Tagged contacts never get a portal login or Circle account.
+                  </p>
+                  <div className="flex flex-wrap gap-2">
+                    {CONTACT_TAGS.map((tag) => {
+                      const checked = selectedTags.has(tag.value);
+                      return (
+                        <button
+                          key={tag.value}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTags((prev) => {
+                              const next = new Set(prev);
+                              checked ? next.delete(tag.value) : next.add(tag.value);
+                              return next;
+                            });
+                          }}
+                          className={`px-2.5 py-1 rounded-full text-xs font-medium transition-colors ${
+                            checked
+                              ? "bg-[#EE2A2E] text-white"
+                              : "bg-white border border-gray-300 text-gray-600 hover:border-gray-400"
+                          }`}
+                        >
+                          {tag.label}
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
 
                 {/* Visibility toggle — edit-mode only, nothing to toggle before a contact exists */}

@@ -19,8 +19,14 @@ export async function POST(request: NextRequest) {
   const host  = request.headers.get("host") ?? "localhost:3000";
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? `${proto}://${host}`;
 
+  // Preview has no real recipient to evaluate conditions against, so
+  // {{#if}} blocks are shown unwrapped (as if true) — this is purely for
+  // authoring, not a preview of what any specific person would see.
+  const unwrapConditionals = (template: string): string =>
+    template.replace(/\{\{#if\s+[a-zA-Z0-9_-]+\}\}([\s\S]*?)\{\{\/if\}\}/g, "$1");
+
   const substitute = (template: string): string =>
-    template.replace(/\{\{(\w+)\}\}/g, (_, key) =>
+    unwrapConditionals(template).replace(/\{\{(\w+)\}\}/g, (_, key) =>
       key in variables && variables[key] ? variables[key] : `[${key}]`
     );
 

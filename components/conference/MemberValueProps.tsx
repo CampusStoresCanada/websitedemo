@@ -9,20 +9,20 @@ const DAYS = [
   {
     name: "Tuesday",
     color: "#EE2A2E",
-    tagline: "Speed-pitch meetings, matched to you.",
-    detail: "A day of curated meetings with the partners who most closely match your institution's needs.",
+    tagline: "Curated meetings, matched to you.",
+    detail: "A day of pre-arranged meetings — CSC matches you with the partners most relevant to your institution, using what we already know about you. Built primarily around general merchandise (accessories, apparel, campus living, gifts & promotion, graduation & regalia, school & lab supplies, technology), closing with an evening trade show session.",
   },
   {
     name: "Wednesday",
     color: "#163D6D",
     tagline: "A full day on the trade show floor.",
-    detail: "Browse, connect, and meet with exhibitors and sponsors across the whole show.",
+    detail: "The full floor, every exhibitor — browse, connect, and write orders across the whole show, breakfast through dinner. The day wraps with the Wednesday Offsite, included with your registration.",
   },
   {
     name: "Thursday",
     color: "#64748B",
-    tagline: "The floor, plus the Unconference all day.",
-    detail: "A half day on the trade show floor with every exhibitor, alongside our Course Materials Unconference — which keeps going after the floor closes.",
+    tagline: "The floor, plus Big Ideas Day.",
+    detail: "A half day on the trade show floor with every exhibitor, alongside Big Ideas Day — starting with the 8:30 AM Keynote, a combined track for Course Materials, Operations, and their related vendors to present, discuss, and come together around the big ideas shaping our industry now and in the future.",
   },
 ];
 
@@ -30,7 +30,7 @@ const BULLETS = [
   "More networking sessions and offsite opportunities than ever.",
   "Continuous 5-minute shuttles to and from Toronto Pearson Airport.",
   "Trade-show-only pricing and specials that can help offset the cost of attending.",
-  "Registering qualifies your institution for a share of the delegate travel bursary.*",
+  "Full Conference registration for your institution's general merchandise buyer qualifies you for a share of the delegate travel bursary.*",
 ];
 
 /** The pitch for why a member institution should send a delegate — the counterpart to SponsorshipLadder on the partner side. */

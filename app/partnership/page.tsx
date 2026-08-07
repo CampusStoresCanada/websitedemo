@@ -7,6 +7,7 @@ import RenewalTerms from "@/components/pricing/RenewalTerms";
 import { getPartnersPageData, getMembersPageData } from "@/lib/homepage";
 import { getActiveConferenceInstance } from "@/lib/actions/conference-availability";
 import { getBillingConfig, getRenewalConfig } from "@/lib/policy/engine";
+import { effectiveProrationDiscountPct } from "@/lib/policy/proration";
 
 export const metadata: Metadata = {
   title: "Partnership | Campus Stores Canada",
@@ -23,6 +24,12 @@ export default async function PartnershipPage() {
       getBillingConfig(),
       getRenewalConfig(),
     ]);
+
+  const discountPct = effectiveProrationDiscountPct(
+    billing.proration_rules,
+    renewal.cycle_start_month_day,
+    renewal.pre_renewal_skip_stub_days
+  );
 
   return (
     <div>
@@ -57,7 +64,7 @@ export default async function PartnershipPage() {
             <div className="w-full max-w-md lg:shrink-0">
               <PartnershipPricingCard
                 vendorRate={billing.partnership_rate}
-                prorationRules={billing.proration_rules}
+                discountPct={discountPct}
               />
               <RenewalTerms cycleStartMonthDay={renewal.cycle_start_month_day} />
             </div>

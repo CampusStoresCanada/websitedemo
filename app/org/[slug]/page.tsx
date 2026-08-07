@@ -18,6 +18,7 @@ import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/confere
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
+import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
 
@@ -77,6 +78,8 @@ export type AssignableEntityColumn = {
   seats: OrgEntitySeat[];
   /** Set only when this entity can be bought individually beyond what's included — drives the overage-to-cart flow. */
   overageOffer: { unitPriceCents: number; eligible: boolean; soldOut: boolean } | null;
+  /** How many of these seats the org has said it actually plans to use — null means never declared (defaults to "all of them" for readiness purposes). See setEntityUsageIntent. */
+  intendedQuantity: number | null;
 };
 
 // Viewer-dependent masking means different responses per viewer
@@ -295,7 +298,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
       // Booths are an org-level holding (entity_balances) — they never mint
       // a person-level seat row in entity_balance_seats, so booth ownership
       // has to be read from entity_balances directly, not listEntitySeatsForOrg.
-      const [seatsResult, offersResult, boothBalanceResult] = await Promise.all([
+      const [seatsResult, offersResult, boothBalanceResult, usageIntentsResult] = await Promise.all([
         listEntitySeatsForOrg(currentConferenceId, organization.id),
         listConferenceOffers(currentConferenceId, organization.id),
         createAdminClient()
@@ -303,8 +306,16 @@ export default async function OrgProfilePage({ params }: PageProps) {
           .select("entity:conference_entities!entity_balances_entity_id_fkey(name, kind)")
           .eq("conference_id", currentConferenceId)
           .eq("organization_id", organization.id),
+        createAdminClient()
+          .from("conference_entity_usage_intents")
+          .select("entity_id, intended_quantity, declared_against_total")
+          .eq("conference_id", currentConferenceId)
+          .eq("organization_id", organization.id),
       ]);
       const offerById = new Map((offersResult.success ? offersResult.data : []).map((o) => [o.id, o]));
+      const usageIntentByEntity = new Map(
+        (usageIntentsResult.data ?? []).map((r) => [r.entity_id, r])
+      );
 
       // The booth(s) are a place, not a person — surfaced as a plain headline
       // (heldBooths below), never as an assignable checkbox column.
@@ -332,9 +343,25 @@ export default async function OrgProfilePage({ params }: PageProps) {
             overageOffer: offer
               ? { unitPriceCents: offer.unitPriceCents, eligible: offer.eligible, soldOut: offer.soldOut }
               : null,
+            // Filled in below, once each entity's final seat count is known.
+            intendedQuantity: null,
           });
         }
       }
+
+      // A declared intent only still applies if the org hasn't since bought
+      // more of this entity — same staleness rule as CHECKS.seat_assigned,
+      // so the UI's default never contradicts what the checklist actually
+      // requires. Done as a pass after the loop above because a seat's
+      // final count isn't known until every seat for that entity has been
+      // collected.
+      for (const column of byEntity.values()) {
+        const intent = usageIntentByEntity.get(column.entityId);
+        if (intent && column.seats.length <= intent.declared_against_total) {
+          column.intendedQuantity = intent.intended_quantity;
+        }
+      }
+
       assignableEntities = [...byEntity.values()].sort((a, b) => a.name.localeCompare(b.name));
 
       // Held entities stay in buyableExtras too now — MemberProfile/
@@ -434,16 +461,16 @@ export default async function OrgProfilePage({ params }: PageProps) {
     const renewalConfig = await getRenewalConfig();
     graceDays = renewalConfig.grace_days;
     const maxReminderDay = Math.max(...renewalConfig.reminder_days);
-    if (organization.membership_expires_at) {
-      const daysUntilExpiry = Math.ceil(
-        (new Date(organization.membership_expires_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
-      );
-      renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
-    } else {
-      // Never had a renewal cycle at all (e.g. a new org) — no future date to
-      // count down to, so there's nothing to gate; always eligible.
-      renewalWindowOpen = true;
-    }
+    // No per-org expiry yet (never completed a renewal cycle) — count down to
+    // the same shared cycle-start date the reminder cron falls back to
+    // (lib/renewal/jobs.ts), instead of treating "no date" as "always open."
+    const targetExpiry =
+      organization.membership_expires_at ??
+      nextCycleStartOnOrAfter(new Date(), renewalConfig.cycle_start_month_day);
+    const daysUntilExpiry = Math.ceil(
+      (new Date(targetExpiry).getTime() - Date.now()) / (1000 * 60 * 60 * 24)
+    );
+    renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
   }
 
   // Render different layouts based on organization type

@@ -81,7 +81,8 @@ export type TemplateKey =
 
 export interface MessageTemplate {
   id: string;
-  key: TemplateKey;
+  /** Known system keys autocomplete; campaign-forked/custom templates carry a generated key outside this union. */
+  key: TemplateKey | (string & {});
   category: TemplateCategory;
   name: string;
   description: string | null;
@@ -89,6 +90,20 @@ export interface MessageTemplate {
   body_html: string;
   variable_keys: string[];
   is_system: boolean;
+  /** Operational/transactional — bypasses unsubscribe preferences (CASL-exempt). Commercial templates respect comms_suppressions. */
+  is_transactional: boolean;
+  /** Set when this template is a campaign-scoped fork, not part of the shared library. */
+  campaign_id: string | null;
+  /** The library template this was forked from, if any (null for a blank-started campaign email). */
+  forked_from_template_id: string | null;
+  /**
+   * Visual-builder authoring data (see lib/comms/blocks/). Null for
+   * templates authored the old way — raw body_html, hand-edited. When
+   * set, body_html is compiled from this on every save and stays the
+   * thing that actually gets sent; nothing else in the comms system
+   * needs to know blocks exist.
+   */
+  body_blocks: import("./blocks/types").ContentBlock[] | null;
   created_at: string;
   updated_at: string;
 }
@@ -106,12 +121,52 @@ export interface MessageCampaign {
   trigger_source: TriggerSource;
   automation_mode: AutomationMode | null;
   trigger_event_key: string | null;
+  /** The campaign initiative this send belongs to, if any. */
+  campaign_id: string | null;
   scheduled_at: string | null;
   sent_at: string | null;
   completed_at: string | null;
   created_by: string | null;
   created_at: string;
   updated_at: string;
+}
+
+// ── Campaign initiative (the ongoing thing with a goal — e.g. "Onboarding
+// for Partner Admins") — distinct from MessageCampaign, which is one send.
+// A CommsCampaign owns a roster of forked MessageTemplates (its emails);
+// each of those can be sent (and resent) many times as MessageCampaign rows.
+
+export type CampaignInitiativeStatus = "active" | "paused" | "ended";
+
+export interface CommsCampaign {
+  id: string;
+  name: string;
+  goal: string | null;
+  status: CampaignInitiativeStatus;
+  /**
+   * Saved condition keys that must ALL still be true for someone to keep
+   * receiving this campaign's sends. Re-evaluated at send time (not when
+   * the send was created) — see resolveEffectiveAudience in
+   * lib/comms/audience.ts. Empty = every send under this campaign is
+   * unfiltered by campaign-level relevance.
+   */
+  target_condition_keys: string[];
+  /** "all" (default) requires every target condition; "any" requires at least one. */
+  target_condition_match: "all" | "any";
+  created_by: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CommsCampaignMilestone {
+  id: string;
+  campaign_id: string;
+  /** The specific email (forked template) this milestone is about, if any. */
+  template_id: string | null;
+  occurred_at: string;
+  note: string;
+  created_by: string | null;
+  created_at: string;
 }
 
 export interface MessageRecipient {
@@ -137,6 +192,19 @@ export interface MessageDelivery {
   bounced_at: string | null;
   failed_at: string | null;
   complained_at: string | null;
+  opened_at: string | null;
+  open_count: number;
+  first_clicked_at: string | null;
+  click_count: number;
+}
+
+/** One click on one link within one delivered email. Powers the per-link click map. */
+export interface MessageLinkClick {
+  id: string;
+  delivery_id: string;
+  campaign_id: string;
+  url: string;
+  clicked_at: string;
 }
 
 export interface MessageAutomationRun {
@@ -153,8 +221,6 @@ export interface MessageAutomationRun {
 // ── Audience definition ───────────────────────────────────────────
 
 export type AudienceType =
-  | "conference_delegates"
-  | "conference_exhibitors"
   | "conference_all"
   | "conference_holders"
   | "conference_orgs_with_open_seats"
@@ -162,6 +228,7 @@ export type AudienceType =
   | "global_admins"
   | "org_admins"
   | "event_registrants"
+  | "contact_tags"
   | "custom_emails"
   /**
    * Exact recipients with per-recipient variable overrides already
@@ -178,6 +245,8 @@ export interface AudienceDefinition {
     conference_instance_id?: string;
     event_id?: string;
     org_ids?: string[];
+    /** For org_admins: limit to orgs of this type (e.g. "Vendor Partner", "Member"). Combines with org_ids as AND when both are set. Test orgs (organizations.is_test) are always excluded. */
+    org_type?: string;
     emails?: string[];
     /** For conference_holders / conference_orgs_*: limit to people holding a seat of this kind (e.g. "booth"). */
     seat_kind?: string;
@@ -190,6 +259,32 @@ export interface AudienceDefinition {
     entity_id?: string;
     /** For custom_recipient_list: exactly who to send to, with per-recipient variables already resolved. */
     recipients?: { email: string; name?: string | null; variableOverrides?: Record<string, string> }[];
+    /** For contact_tags: contacts.contact_type values to match (see lib/contacts/tags.ts). Any-of match. */
+    tags?: string[];
+    /**
+     * Saved condition keys (see lib/comms/conditions/) further narrowing
+     * whichever audience type resolved above — a recipient must satisfy
+     * ALL of these (AND) to stay in. Applied after the type-specific
+     * resolution, regardless of audience type. Recipients with no
+     * user_id (custom_emails/custom_recipient_list) have no resolvable
+     * identity to check a condition against — they pass through
+     * unfiltered rather than being excluded by default, since silently
+     * emptying an admin-supplied list would be worse than not being able
+     * to segment it.
+     */
+    condition_keys?: string[];
+    /** "all" (default) requires every condition_keys entry; "any" requires at least one. */
+    condition_match?: "all" | "any";
+    /**
+     * Set only by resolveEffectiveAudience (lib/comms/campaigns.ts), never
+     * authored directly — the parent campaign's own "Still Relevant While"
+     * gate, kept as a second, independent AND'd pass rather than merged
+     * into condition_keys/condition_match above, since audience
+     * segmentation and campaign-level ongoing relevance are two different
+     * concerns that can each independently be ALL or ANY.
+     */
+    campaign_condition_keys?: string[];
+    campaign_condition_match?: "all" | "any";
   };
 }
 

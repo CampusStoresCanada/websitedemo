@@ -19,6 +19,7 @@ export async function GET(req: NextRequest) {
       .select("id, name, slug, type")
       .ilike("name", `%${q}%`)
       .not("slug", "is", null)
+      .eq("is_test", false)
       .limit(5),
     db
       .from("contacts")

@@ -195,7 +195,8 @@ export default async function BusinessCasePage({
           </>,
           <>
             <strong>Bursary Support:</strong> CSC's goal is to help send a delegate from every member institution —
-            registering for this conference qualifies your institution for a share of the delegate travel bursary.
+            registering your institution's general merchandise buyer for the Full Conference qualifies you for a
+            share of the delegate travel bursary.
           </>,
           <>
             <strong>Risk of Non-Attendance:</strong> Lost opportunities for vendor relationships and reduced

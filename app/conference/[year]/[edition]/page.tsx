@@ -15,10 +15,15 @@ import { nonMemberDayPassToOffer } from "@/lib/conference/entity-commerce";
 import { getRequiredLegalDocumentsPublic } from "@/lib/actions/conference-legal";
 import { LEGAL_DOCUMENT_LABELS, type LegalDocumentType } from "@/lib/constants/conference";
 import { getBursaryProgress } from "@/lib/actions/conference-bursary";
+import { getBoothTierAvailability } from "@/lib/actions/conference-availability";
+import { membershipCoversConference } from "@/lib/conference/membership-gate";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import PersonaTabs from "@/components/conference/PersonaTabs";
 import ConferenceHero from "@/components/conference/ConferenceHero";
-import BursaryThermometer from "@/components/conference/BursaryThermometer";
+import BursaryImpactStat from "@/components/conference/BursaryImpactStat";
+import RegisterBursaryInterestCTA from "@/components/conference/RegisterBursaryInterestCTA";
+import TuesdayAudienceNote from "@/components/conference/TuesdayAudienceNote";
+import HotelInfo from "@/components/conference/HotelInfo";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
 import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
@@ -75,7 +80,7 @@ export default async function ConferenceEditionHubPage({
   const isDraftPreview = canPreviewUnpublished && !isPublicStatus;
 
   let memberOrg: { id: string; name: string } | null = null;
-  let partnerOrg: { id: string; name: string } | null = null;
+  let partnerOrg: { id: string; name: string; membership_expires_at: string | null } | null = null;
   let needsLegal = false;
   // An org can hold more than one booth (board decision — buying a second
   // Connected booth doesn't multiply meeting time, but it's still a second
@@ -83,12 +88,29 @@ export default async function ConferenceEditionHubPage({
   let heldBooths: Array<{ name: string; track: "exhibitor" | "bronze" }> = [];
 
   if (viewer.viewerLevel !== "public" && viewer.viewerOrgIds.length > 0) {
-    const { data: orgRows } = await db.from("organizations").select("id, name, type").in("id", viewer.viewerOrgIds);
+    const { data: orgRows } = await db
+      .from("organizations")
+      .select("id, name, type, membership_expires_at")
+      .in("id", viewer.viewerOrgIds);
     memberOrg = (orgRows ?? []).find((o) => o.type === "Member") ?? null;
     if (!memberOrg) partnerOrg = (orgRows ?? []).find((o) => o.type === "Vendor Partner") ?? null;
   }
 
+  // Already renewed through this conference's dates — the Vendor Partnership
+  // pitch in the tier ladder doesn't apply to them, so it gets swapped for a
+  // thank-you instead of re-selling something they've already bought.
+  const partnerAlreadyRenewed =
+    !!partnerOrg && membershipCoversConference(partnerOrg.membership_expires_at, conference.end_date ?? "");
+
   const knownOrg = memberOrg ?? partnerOrg;
+
+  // Prefills the "Register your interest" bursary CTA so a member can submit
+  // in one click without retyping their own name.
+  let viewerDisplayName = "";
+  if (memberOrg && viewer.userId) {
+    const { data: profile } = await db.from("profiles").select("display_name").eq("id", viewer.userId).maybeSingle();
+    viewerDisplayName = profile?.display_name ?? "";
+  }
 
   // Booths are an org-level holding (entity_balances) — they never mint a
   // person-level seat row in entity_balance_seats, so booth ownership has to
@@ -110,7 +132,7 @@ export default async function ConferenceEditionHubPage({
       : Promise.resolve(null),
     !knownOrg ? getNonMemberDayPasses(conference.id) : Promise.resolve([]),
     !knownOrg ? getRequiredLegalDocumentsPublic(conference.id, ["non_member"]) : Promise.resolve(null),
-    db.from("organizations").select("id", { count: "exact", head: true }).eq("type", "Member").eq("membership_status", "active"),
+    db.from("organizations").select("id", { count: "exact", head: true }).eq("type", "Member").eq("membership_status", "active").eq("is_test", false),
   ]);
   const nonMemberLegalDocs = (nonMemberLegalResult?.success ? nonMemberLegalResult.data ?? [] : []).map((d) => ({
     documentType: d.document_type,
@@ -176,17 +198,42 @@ export default async function ConferenceEditionHubPage({
       .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
   }
 
-  const bursaryResult = await getBursaryProgress(conference.id);
+  const CONNECTED_BOOTH_PRICE_CENTS = 600000;
+  const [bursaryResult, boothAvailability] = await Promise.all([
+    getBursaryProgress(conference.id),
+    getBoothTierAvailability(conference.id),
+  ]);
   const bursary = bursaryResult.success ? bursaryResult.data : null;
+  const connectedAvailability = boothAvailability.find((a) => a.priceCents === CONNECTED_BOOTH_PRICE_CENTS);
+  const boothsTotal = connectedAvailability?.total ?? 0;
+  const boothsSold = connectedAvailability ? connectedAvailability.total - connectedAvailability.remaining : 0;
   const bursarySideContent =
-    bursary && (bursary.goalCents ?? 0) > 0 ? (
+    bursary && (bursary.goalCents ?? 0) > 0 && boothsTotal > 0 && memberCount > 0 ? (
       <>
         <p className="mb-3 text-sm font-medium uppercase tracking-wide text-white/60">
           Help send every member institution
         </p>
-        <BursaryThermometer raisedCents={bursary.raisedCents} goalCents={bursary.goalCents ?? 0} />
+        <BursaryImpactStat boothsSold={boothsSold} boothsTotal={boothsTotal} memberCount={memberCount} />
       </>
     ) : undefined;
+
+  // Members get the bursary ask itself in the side slot — the "is your
+  // institution represented" pitch + Register your interest button — instead
+  // of the funding thermometer, which is the Partner-facing framing.
+  const memberSideContent = memberOrg ? (
+    <div className="max-w-sm">
+      <p className="text-lg text-white/80 leading-relaxed">
+        Campus Stores Canada is committed to making sure your institution has a buyer represented at this
+        year&apos;s conference.
+      </p>
+      <RegisterBursaryInterestCTA
+        conferenceId={conference.id}
+        organizationId={memberOrg.id}
+        defaultName={viewerDisplayName}
+        defaultEmail={viewer.userEmail ?? ""}
+      />
+    </div>
+  ) : undefined;
 
   const venue = [conference.location_venue?.trim(), conference.location_city?.trim(), conference.location_province?.trim()]
     .filter(Boolean)
@@ -245,13 +292,14 @@ export default async function ConferenceEditionHubPage({
             copy={
               partnerOrg
                 ? exhibitorHeroCopy
-                : "One conference, all of CSC. This year we've lowered costs and are subsidizing travel so every " +
-                  "member institution can send someone — the connections only work when everyone's in the room."
+                : "Meet the partners who matter to your store, see the full trade show floor, and connect " +
+                  "with campus stores from across Canada — all in one trip."
             }
-            sideContent={bursarySideContent}
+            sideContent={memberOrg ? memberSideContent : bursarySideContent}
           />
           <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
             {needsLegalBanner}
+            {memberOrg && <TuesdayAudienceNote />}
             <section className="space-y-4">
               {partnerOrg && heldBooths.length > 0 ? (
                 <p className="text-sm text-[#6B6B6B]">
@@ -286,9 +334,12 @@ export default async function ConferenceEditionHubPage({
               ) : (
                 <p className="text-sm text-red-600">{offers.error}</p>
               )}
+              <div className="pt-4">
+                <HotelInfo venue={venue} />
+              </div>
               {partnerOrg && (
                 <div className="pt-4">
-                  <SponsorshipLadder conferenceId={conference.id} />
+                  <SponsorshipLadder conferenceId={conference.id} partnerAlreadyRenewed={partnerAlreadyRenewed} />
                 </div>
               )}
               {memberOrg && (

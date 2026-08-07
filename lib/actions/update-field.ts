@@ -1,6 +1,6 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, revalidateTag } from "next/cache";
 import {
   canManageOrganization,
   requireAuthenticated,
@@ -148,7 +148,12 @@ export async function updateField({
       resolvedDisplayName = resolvedDisplayName || (orgData.name as string) || "";
       canEdit = canManageOrganization(auth.ctx, entityId);
     } else if (table === "contacts") {
-      const { data: contact } = await supabase
+      // Session client lost SELECT on contacts when the public-read policy
+      // was dropped (PII leak fix); use the admin client like every other
+      // contacts read in this file. Authorization is still enforced below
+      // via canManageOrganization / isOwnContact.
+      const adminClient = createAdminClient();
+      const { data: contact } = await adminClient
         .from("contacts")
         .select("id, name, organization_id, " + column)
         .eq("id", entityId)
@@ -270,7 +275,7 @@ export async function updateField({
 
     // 5. Post-write side effects
     if (table === "contacts") {
-      const { data: updatedContact, error: updatedContactError } = await supabase
+      const { data: updatedContact, error: updatedContactError } = await adminClient
         .from("contacts")
         .select("id, organization_id, name, work_email, email, role_title, work_phone_number, phone, archived_at")
         .eq("id", entityId)
@@ -317,6 +322,10 @@ export async function updateField({
     } else {
       // No specific path — revalidate everything (edits are infrequent admin ops)
       revalidatePath("/", "layout");
+    }
+    if (resolvedOrgId) {
+      // revalidatePath doesn't reach the unstable_cache-tagged org profile data cache
+      revalidateTag("org-profile", "max");
     }
 
     console.log(`[update-field] ${table}.${column} updated`, { entityId, previousValue, newValue, user: userEmail });

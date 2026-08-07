@@ -1706,6 +1706,183 @@ export type Database = {
         }
         Relationships: []
       }
+      comms_campaign_milestones: {
+        Row: {
+          campaign_id: string
+          created_at: string
+          created_by: string | null
+          id: string
+          note: string
+          occurred_at: string
+          template_id: string | null
+        }
+        Insert: {
+          campaign_id: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note: string
+          occurred_at?: string
+          template_id?: string | null
+        }
+        Update: {
+          campaign_id?: string
+          created_at?: string
+          created_by?: string | null
+          id?: string
+          note?: string
+          occurred_at?: string
+          template_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comms_campaign_milestones_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaign_totals"
+            referencedColumns: ["campaign_id"]
+          },
+          {
+            foreignKeyName: "comms_campaign_milestones_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comms_campaign_milestones_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "comms_campaign_milestones_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "message_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      comms_campaigns: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          goal: string | null
+          id: string
+          name: string
+          status: Database["public"]["Enums"]["comms_initiative_status"]
+          target_condition_keys: string[]
+          target_condition_match: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          goal?: string | null
+          id?: string
+          name: string
+          status?: Database["public"]["Enums"]["comms_initiative_status"]
+          target_condition_keys?: string[]
+          target_condition_match?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          goal?: string | null
+          id?: string
+          name?: string
+          status?: Database["public"]["Enums"]["comms_initiative_status"]
+          target_condition_keys?: string[]
+          target_condition_match?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comms_campaigns_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      comms_conditions: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          field: string
+          id: string
+          key: string
+          label: string
+          operator: string
+          reference_id: string | null
+          subject: string
+          updated_at: string
+          value: string | null
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          field: string
+          id?: string
+          key: string
+          label: string
+          operator: string
+          reference_id?: string | null
+          subject: string
+          updated_at?: string
+          value?: string | null
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          field?: string
+          id?: string
+          key?: string
+          label?: string
+          operator?: string
+          reference_id?: string | null
+          subject?: string
+          updated_at?: string
+          value?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "comms_conditions_created_by_fkey"
+            columns: ["created_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      comms_suppressions: {
+        Row: {
+          category: string
+          created_at: string
+          email: string
+          id: string
+          reason: string | null
+        }
+        Insert: {
+          category?: string
+          created_at?: string
+          email: string
+          id?: string
+          reason?: string | null
+        }
+        Update: {
+          category?: string
+          created_at?: string
+          email?: string
+          id?: string
+          reason?: string | null
+        }
+        Relationships: []
+      }
       computed_metrics: {
         Row: {
           adoption_completion_rate: number | null
@@ -2353,6 +2530,78 @@ export type Database = {
             columns: ["to_entity_id"]
             isOneToOne: false
             referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_entity_usage_intents: {
+        Row: {
+          conference_id: string
+          created_at: string
+          declared_against_total: number
+          declared_by: string | null
+          entity_id: string
+          id: string
+          intended_quantity: number
+          organization_id: string
+          updated_at: string
+        }
+        Insert: {
+          conference_id: string
+          created_at?: string
+          declared_against_total?: number
+          declared_by?: string | null
+          entity_id: string
+          id?: string
+          intended_quantity: number
+          organization_id: string
+          updated_at?: string
+        }
+        Update: {
+          conference_id?: string
+          created_at?: string
+          declared_against_total?: number
+          declared_by?: string | null
+          entity_id?: string
+          id?: string
+          intended_quantity?: number
+          organization_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_entity_usage_intents_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_entity_usage_intents_declared_by_fkey"
+            columns: ["declared_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_entity_usage_intents_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_entity_usage_intents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_entity_usage_intents_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -5088,6 +5337,7 @@ export type Database = {
           audience_definition: Json
           automation_mode: Database["public"]["Enums"]["automation_mode"] | null
           body_override: string | null
+          campaign_id: string | null
           channel: Database["public"]["Enums"]["campaign_channel"]
           completed_at: string | null
           created_at: string
@@ -5110,6 +5360,7 @@ export type Database = {
             | Database["public"]["Enums"]["automation_mode"]
             | null
           body_override?: string | null
+          campaign_id?: string | null
           channel?: Database["public"]["Enums"]["campaign_channel"]
           completed_at?: string | null
           created_at?: string
@@ -5132,6 +5383,7 @@ export type Database = {
             | Database["public"]["Enums"]["automation_mode"]
             | null
           body_override?: string | null
+          campaign_id?: string | null
           channel?: Database["public"]["Enums"]["campaign_channel"]
           completed_at?: string | null
           created_at?: string
@@ -5150,6 +5402,20 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "message_campaigns_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaign_totals"
+            referencedColumns: ["campaign_id"]
+          },
+          {
+            foreignKeyName: "message_campaigns_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "message_campaigns_template_id_fkey"
             columns: ["template_id"]
             isOneToOne: false
@@ -5162,11 +5428,15 @@ export type Database = {
         Row: {
           bounced_at: string | null
           campaign_id: string
+          click_count: number
           complained_at: string | null
           delivered_at: string | null
           error: string | null
           failed_at: string | null
+          first_clicked_at: string | null
           id: string
+          open_count: number
+          opened_at: string | null
           provider_message_id: string | null
           queued_at: string
           recipient_id: string
@@ -5176,11 +5446,15 @@ export type Database = {
         Insert: {
           bounced_at?: string | null
           campaign_id: string
+          click_count?: number
           complained_at?: string | null
           delivered_at?: string | null
           error?: string | null
           failed_at?: string | null
+          first_clicked_at?: string | null
           id?: string
+          open_count?: number
+          opened_at?: string | null
           provider_message_id?: string | null
           queued_at?: string
           recipient_id: string
@@ -5190,11 +5464,15 @@ export type Database = {
         Update: {
           bounced_at?: string | null
           campaign_id?: string
+          click_count?: number
           complained_at?: string | null
           delivered_at?: string | null
           error?: string | null
           failed_at?: string | null
+          first_clicked_at?: string | null
           id?: string
+          open_count?: number
+          opened_at?: string | null
           provider_message_id?: string | null
           queued_at?: string
           recipient_id?: string
@@ -5214,6 +5492,45 @@ export type Database = {
             columns: ["recipient_id"]
             isOneToOne: false
             referencedRelation: "message_recipients"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      message_link_clicks: {
+        Row: {
+          campaign_id: string
+          clicked_at: string
+          delivery_id: string
+          id: string
+          url: string
+        }
+        Insert: {
+          campaign_id: string
+          clicked_at?: string
+          delivery_id: string
+          id?: string
+          url: string
+        }
+        Update: {
+          campaign_id?: string
+          clicked_at?: string
+          delivery_id?: string
+          id?: string
+          url?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "message_link_clicks_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "message_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_link_clicks_delivery_id_fkey"
+            columns: ["delivery_id"]
+            isOneToOne: false
+            referencedRelation: "message_deliveries"
             referencedColumns: ["id"]
           },
         ]
@@ -5258,12 +5575,16 @@ export type Database = {
       }
       message_templates: {
         Row: {
+          body_blocks: Json | null
           body_html: string
+          campaign_id: string | null
           category: string
           created_at: string
           description: string | null
+          forked_from_template_id: string | null
           id: string
           is_system: boolean
+          is_transactional: boolean
           key: string
           name: string
           subject: string
@@ -5271,12 +5592,16 @@ export type Database = {
           variable_keys: string[]
         }
         Insert: {
+          body_blocks?: Json | null
           body_html: string
+          campaign_id?: string | null
           category: string
           created_at?: string
           description?: string | null
+          forked_from_template_id?: string | null
           id?: string
           is_system?: boolean
+          is_transactional?: boolean
           key: string
           name: string
           subject: string
@@ -5284,19 +5609,45 @@ export type Database = {
           variable_keys?: string[]
         }
         Update: {
+          body_blocks?: Json | null
           body_html?: string
+          campaign_id?: string | null
           category?: string
           created_at?: string
           description?: string | null
+          forked_from_template_id?: string | null
           id?: string
           is_system?: boolean
+          is_transactional?: boolean
           key?: string
           name?: string
           subject?: string
           updated_at?: string
           variable_keys?: string[]
         }
-        Relationships: []
+        Relationships: [
+          {
+            foreignKeyName: "message_templates_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaign_totals"
+            referencedColumns: ["campaign_id"]
+          },
+          {
+            foreignKeyName: "message_templates_campaign_id_fkey"
+            columns: ["campaign_id"]
+            isOneToOne: false
+            referencedRelation: "comms_campaigns"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "message_templates_forked_from_template_id_fkey"
+            columns: ["forked_from_template_id"]
+            isOneToOne: false
+            referencedRelation: "message_templates"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       metadata_privacy_rules: {
         Row: {
@@ -5505,6 +5856,7 @@ export type Database = {
           highlight_the_deal: string | null
           id: string
           is_cancoll_member: boolean
+          is_test: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null
@@ -5610,6 +5962,7 @@ export type Database = {
           highlight_the_deal?: string | null
           id: string
           is_cancoll_member?: boolean
+          is_test?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -5715,6 +6068,7 @@ export type Database = {
           highlight_the_deal?: string | null
           id?: string
           is_cancoll_member?: boolean
+          is_test?: boolean
           join_date?: string | null
           last_edited_time?: string | null
           last_synced_circle_at?: string | null
@@ -9400,6 +9754,21 @@ export type Database = {
           },
         ]
       }
+      comms_campaign_totals: {
+        Row: {
+          campaign_id: string | null
+          clicked_count: number | null
+          complained_count: number | null
+          delivered_count: number | null
+          failed_count: number | null
+          last_sent_at: string | null
+          opened_count: number | null
+          send_count: number | null
+          sent_count: number | null
+          total_deliveries: number | null
+        }
+        Relationships: []
+      }
       contacts_needing_circle_sync: {
         Row: {
           archived_at: string | null
@@ -9628,6 +9997,24 @@ export type Database = {
           },
         ]
       }
+      message_campaign_series: {
+        Row: {
+          campaign_id: string | null
+          clicked_count: number | null
+          complained_count: number | null
+          delivered_count: number | null
+          failed_count: number | null
+          first_sent_at: string | null
+          last_sent_at: string | null
+          opened_count: number | null
+          send_count: number | null
+          sent_count: number | null
+          series_key: string | null
+          series_label: string | null
+          total_deliveries: number | null
+        }
+        Relationships: []
+      }
       person_activity_summary: {
         Row: {
           conference_checkins_count: number | null
@@ -9809,6 +10196,7 @@ export type Database = {
           highlight_the_deal: string | null
           id: string
           is_cancoll_member: boolean
+          is_test: boolean
           join_date: string | null
           last_edited_time: string | null
           last_synced_circle_at: string | null
@@ -10048,6 +10436,14 @@ export type Database = {
         }
         Returns: Json
       }
+      record_delivery_click: {
+        Args: { p_campaign_id: string; p_delivery_id: string; p_url: string }
+        Returns: undefined
+      }
+      record_delivery_open: {
+        Args: { p_delivery_id: string }
+        Returns: undefined
+      }
       reject_booth_request: {
         Args: { p_approval_id: string; p_reason: string }
         Returns: string
@@ -10139,6 +10535,7 @@ export type Database = {
         | "completed"
         | "failed"
         | "canceled"
+      comms_initiative_status: "active" | "paused" | "ended"
       delivery_status:
         | "queued"
         | "sent"
@@ -10299,6 +10696,7 @@ export const Constants = {
         "failed",
         "canceled",
       ],
+      comms_initiative_status: ["active", "paused", "ended"],
       delivery_status: [
         "queued",
         "sent",

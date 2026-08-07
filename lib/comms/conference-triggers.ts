@@ -6,22 +6,11 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { triggerAutomation } from "./automation";
+import { formatConferenceDates } from "./format";
 import { formatCents } from "@/lib/utils";
 import type { createAdminClient } from "@/lib/supabase/admin";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
-
-function formatConferenceDates(startDate: string | null, endDate: string | null): string {
-  if (!startDate) return "";
-  const start = new Date(`${startDate}T00:00:00Z`);
-  const startLabel = start.toLocaleDateString("en-CA", { month: "long", day: "numeric", timeZone: "UTC" });
-  if (!endDate || endDate === startDate) {
-    return `${startLabel}, ${start.getUTCFullYear()}`;
-  }
-  const end = new Date(`${endDate}T00:00:00Z`);
-  const endLabel = end.toLocaleDateString("en-CA", { month: "long", day: "numeric", timeZone: "UTC" });
-  return `${startLabel} – ${endLabel}, ${end.getUTCFullYear()}`;
-}
 
 /**
  * Fire the registration confirmation email for a newly minted conference

@@ -10,6 +10,8 @@ import {
 } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { sendTransactional } from "@/lib/comms/send";
+import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
+import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import type { Json } from "@/lib/database.types";
 import {
   hasRenewalEventForOrgYear,
@@ -37,11 +39,37 @@ const REMINDER_EVENT_MAP: Record<number, RenewalEventType> = {
   0: "reminder_0",
 };
 
+// Each org's renewal work is ~5-8s of sequential Stripe calls. At full
+// sequential (concurrency 1) this hit Vercel's 300s function timeout at
+// 57 of 169 orgs on 2026-08-02. 8 in flight brings ~169 orgs comfortably
+// under the limit without leaning on Stripe rate limits.
+const RENEWAL_JOB_CONCURRENCY = 8;
+
 // ─────────────────────────────────────────────────────────────────
 // Helpers
 // ─────────────────────────────────────────────────────────────────
 
 type AdminClient = ReturnType<typeof createAdminClient>;
+
+/**
+ * Renewal/billing notices must reach the org_admin(s) — their own login
+ * email — not organizations.email, which is the public "Store Contact"
+ * address shown on the org page (see components/org/MemberProfile.tsx).
+ * Falls back to that public address only if the org has no active
+ * org_admin on file yet, so a notice still goes out somewhere rather than
+ * silently vanishing.
+ */
+async function resolveRenewalRecipients(
+  db: AdminClient,
+  orgId: string,
+  fallbackEmail: string | null
+): Promise<string[]> {
+  const adminEmails = await resolveOrgAdminEmails(db, orgId);
+  if (adminEmails.length) return adminEmails;
+  if (fallbackEmail) return [fallbackEmail];
+  const contactEmail = await resolveOrgPrimaryContactEmail(db, orgId);
+  return contactEmail ? [contactEmail] : [];
+}
 
 /** Start a job run record and return its ID. */
 async function startJobRun(
@@ -59,6 +87,50 @@ async function startJobRun(
   }
 
   return data.id;
+}
+
+/**
+ * Write current counts onto a still-"running" job_run row without marking
+ * it complete. Called after every chunk in runWithConcurrency so a run that
+ * gets killed by the platform's function timeout (has happened — see
+ * 2026-08-02 incident, 57/169 orgs done then silently orphaned at
+ * "running"/0-processed) leaves an accurate partial-progress record instead
+ * of hiding the failure from anything checking job_run status.
+ */
+async function updateJobRunProgress(
+  db: AdminClient,
+  jobRunId: string,
+  counts: { orgsProcessed: number; orgsSucceeded: number; orgsFailed: number }
+): Promise<void> {
+  await db
+    .from("renewal_job_runs")
+    .update({
+      orgs_processed: counts.orgsProcessed,
+      orgs_succeeded: counts.orgsSucceeded,
+      orgs_failed: counts.orgsFailed,
+    })
+    .eq("id", jobRunId);
+}
+
+/**
+ * Run `worker` over `items` with at most `concurrency` in flight at once,
+ * calling `onChunkDone` after each batch settles. Each org's renewal work
+ * is several sequential Stripe calls (~5-8s) — fully sequential processing
+ * of 169 orgs is what hit the 300s platform timeout at 57 orgs on
+ * 2026-08-02. Bounded concurrency cuts wall-clock time roughly by the
+ * concurrency factor without hammering Stripe's rate limits.
+ */
+async function runWithConcurrency<T>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T) => Promise<void>,
+  onChunkDone: () => Promise<void>
+): Promise<void> {
+  for (let i = 0; i < items.length; i += concurrency) {
+    const chunk = items.slice(i, i + concurrency);
+    await Promise.all(chunk.map((item) => worker(item)));
+    await onChunkDone();
+  }
 }
 
 /** Complete a job run record. */
@@ -180,12 +252,18 @@ export async function renewalReminderRun(): Promise<JobResult> {
     const renewalYear = Number(cycleStartDate.split("-")[0]) + 1;
 
     // Find all orgs eligible for renewal reminders — active or reactivated.
+    // Dedicated test orgs (see draft-preview.ts) are excluded so they never
+    // get a live Stripe invoice or reminder email from a production run —
+    // 2026-08-05: Test Org (Member)/(Partner) both got real finalized
+    // invoices from this job because nothing filtered them out.
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
         "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
       )
-      .in("membership_status", ["active", "reactivated"]);
+      .in("membership_status", ["active", "reactivated"])
+      .is("archived_at", null)
+      .not("id", "in", `(${DRAFT_PREVIEW_ORG_IDS.join(",")})`);
 
     if (queryError) {
       throw new Error(`Failed to query orgs: ${queryError.message}`);
@@ -214,69 +292,100 @@ export async function renewalReminderRun(): Promise<JobResult> {
     // Only process orgs within the reminder window — the countdown is the
     // same for every org, so this check happens once, not per org.
     if (daysUntilCycleStart <= maxReminderDay && daysUntilCycleStart >= 0) {
-      for (const org of orgs) {
-        // Find which reminder(s) should fire
+      const worker = async (org: (typeof orgs)[number]) => {
+        // An org that already paid through this renewal year or beyond
+        // (e.g. bridged multiple cycles at once via `bridgeFrom` in
+        // renewal-activation.ts, covering a future conference) shouldn't
+        // get a new invoice or a "your membership expires soon" reminder
+        // for a cycle its own membership_expires_at already covers.
+        if (
+          org.membership_expires_at &&
+          getRenewalYear(org.membership_expires_at) >= renewalYear
+        ) {
+          return;
+        }
+
+        // Invoice generation is a catch-up check ("has this org gotten its
+        // cycle invoice yet?"), not an exact-day match on maxReminderDay.
+        // 2026-08-02: the old exact-match gate meant any org missed on the
+        // one day it fired (timeout, transient Stripe error) got skipped
+        // for the entire renewal year — no invoice, no charge, ever, until
+        // someone noticed. Now any day inside the window retries orgs that
+        // still don't have one, so a bad day self-heals on the next run.
+        const hasInvoice = await hasRenewalEventForOrgYear(
+          db,
+          org.id,
+          renewalYear,
+          "invoice_generated"
+        );
+
+        let invoiceId: string | undefined;
+
+        if (!hasInvoice) {
+          processed++;
+          try {
+            // Fiscal-year-anchored — shared with the bundled
+            // conference-checkout renewal path so both compute the exact
+            // same boundary instead of drifting apart. An org with no
+            // expiry set at all (active status with a never-populated
+            // date) is anchored to the SAME shared cycle boundary every
+            // other org uses, not to "today" — otherwise
+            // computeNewExpiresAt(null) would anchor to today and produce
+            // an invoice for a nonsensical few-week period instead of a
+            // real annual one.
+            const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
+              org.membership_expires_at ?? cycleBillingPeriodStart
+            );
+
+            const invoice =
+              org.type === "Vendor Partner"
+                ? await createPartnershipInvoice(org.id, {
+                    billingPeriodStart,
+                    billingPeriodEnd,
+                  })
+                : await createMembershipInvoice(org.id, {
+                    billingPeriodStart,
+                    billingPeriodEnd,
+                    policySetId: activePolicySet.id,
+                  });
+
+            await finalizeAndSendInvoice(invoice.id);
+            invoiceId = invoice.id;
+
+            await recordRenewalEvent(db, org.id, renewalYear, "invoice_generated", invoiceId, {
+              billing_period_start: billingPeriodStart,
+              billing_period_end: billingPeriodEnd,
+            });
+            succeeded++;
+          } catch (err) {
+            failed++;
+            const msg = err instanceof Error ? err.message : "Unknown error";
+            errors.push(`Org ${org.id} (invoice): ${msg}`);
+            console.error(`[renewal/reminder] Invoice failed for org ${org.id}:`, msg);
+            return; // don't attempt the reminder email without an invoice
+          }
+        }
+
+        // Exact-day informational reminders (30/14/7/0) — unchanged
+        // semantics, still one-shot per day since "days_until_expiry" in
+        // the email is only meaningful on the day it names.
         for (const reminderDay of reminderDays) {
           if (daysUntilCycleStart !== reminderDay) continue;
 
           const eventType = REMINDER_EVENT_MAP[reminderDay];
           if (!eventType) continue;
 
-          // Idempotency check
-          const alreadySent = await hasRenewalEventForOrgYear(
-            db,
-            org.id,
-            renewalYear,
-            eventType
-          );
+          const alreadySent = await hasRenewalEventForOrgYear(db, org.id, renewalYear, eventType);
           if (alreadySent) continue;
 
           processed++;
 
           try {
-            let invoiceId: string | undefined;
-
-            // On the first reminder (highest day count), generate the invoice
-            if (reminderDay === maxReminderDay) {
-              // Fiscal-year-anchored — shared with the bundled
-              // conference-checkout renewal path so both compute the exact
-              // same boundary instead of drifting apart. An org with no
-              // expiry set at all (the data-integrity gap this session
-              // found — active status with a never-populated date) is
-              // anchored to the SAME shared cycle boundary every other org
-              // uses, not to "today" — otherwise computeNewExpiresAt(null)
-              // would anchor to today and produce an invoice for a
-              // nonsensical few-week period instead of a real annual one.
-              const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
-                org.membership_expires_at ?? cycleBillingPeriodStart
-              );
-
-              const invoice =
-                org.type === "Vendor Partner"
-                  ? await createPartnershipInvoice(org.id, {
-                      billingPeriodStart,
-                      billingPeriodEnd,
-                    })
-                  : await createMembershipInvoice(org.id, {
-                      billingPeriodStart,
-                      billingPeriodEnd,
-                      policySetId: activePolicySet.id,
-                    });
-
-              await finalizeAndSendInvoice(invoice.id);
-              invoiceId = invoice.id;
-
-              // Record invoice generation event
-              await recordRenewalEvent(db, org.id, renewalYear, "invoice_generated", invoiceId, {
-                billing_period_start: billingPeriodStart,
-                billing_period_end: billingPeriodEnd,
-              });
-            }
-
-            if (org.email) {
+            const reminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+            for (const to of reminderRecipients) {
               await sendTransactional({
                 templateKey: "renewal_reminder",
-                to: org.email,
+                to,
                 variables: {
                   contact_name: org.name,
                   org_name: org.name,
@@ -288,7 +397,6 @@ export async function renewalReminderRun(): Promise<JobResult> {
               });
             }
 
-            // Record reminder event
             await recordRenewalEvent(db, org.id, renewalYear, eventType, invoiceId, {
               days_before_expiry: reminderDay,
             });
@@ -296,16 +404,20 @@ export async function renewalReminderRun(): Promise<JobResult> {
             succeeded++;
           } catch (err) {
             failed++;
-            const msg =
-              err instanceof Error ? err.message : "Unknown error";
-            errors.push(`Org ${org.id}: ${msg}`);
-            console.error(
-              `[renewal/reminder] Failed for org ${org.id}:`,
-              msg
-            );
+            const msg = err instanceof Error ? err.message : "Unknown error";
+            errors.push(`Org ${org.id} (reminder ${reminderDay}): ${msg}`);
+            console.error(`[renewal/reminder] Reminder failed for org ${org.id}:`, msg);
           }
         }
-      }
+      };
+
+      await runWithConcurrency(orgs, RENEWAL_JOB_CONCURRENCY, worker, () =>
+        updateJobRunProgress(db, jobRunId, {
+          orgsProcessed: processed,
+          orgsSucceeded: succeeded,
+          orgsFailed: failed,
+        })
+      );
     }
 
     await completeJobRun(db, jobRunId, {
@@ -378,7 +490,9 @@ export async function renewalChargeRun(): Promise<JobResult> {
         "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
       )
       .in("membership_status", ["active", "reactivated"])
-      .not("membership_expires_at", "is", null);
+      .is("archived_at", null)
+      .not("membership_expires_at", "is", null)
+      .not("id", "in", `(${DRAFT_PREVIEW_ORG_IDS.join(",")})`);
 
     if (queryError) {
       throw new Error(`Failed to query orgs: ${queryError.message}`);
@@ -504,10 +618,11 @@ export async function renewalChargeRun(): Promise<JobResult> {
               { error: stripeMsg }
             );
 
-            if (org.email) {
+            const chargeFailedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+            for (const to of chargeFailedRecipients) {
               await sendTransactional({
                 templateKey: "renewal_charge_failed",
-                to: org.email,
+                to,
                 variables: {
                   contact_name: org.name,
                   org_name: org.name,
@@ -708,10 +823,11 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               grace_days_policy: graceDays,
             });
 
-            if (org.email) {
+            const lockedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+            for (const to of lockedRecipients) {
               await sendTransactional({
                 templateKey: "membership_locked",
-                to: org.email,
+                to,
                 variables: {
                   contact_name: org.name,
                   org_name: org.name,
@@ -739,10 +855,11 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               days_remaining: Math.ceil(graceDays - daysInGrace),
             });
 
-            if (org.email) {
+            const graceReminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+            for (const to of graceReminderRecipients) {
               await sendTransactional({
                 templateKey: "grace_weekly_reminder",
-                to: org.email,
+                to,
                 variables: {
                   contact_name: org.name,
                   org_name: org.name,
