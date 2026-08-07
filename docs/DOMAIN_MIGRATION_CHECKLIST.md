@@ -12,10 +12,11 @@ board action notifications (`lib/board/action-notify.ts`, `action-ics.ts`), RFP 
 
 ## 2. Hardcoded fallback domains in code
 
-These two files fall back to a **hardcoded** `https://websitedemo-khaki.vercel.app` if the env var above is ever empty — deliberate, so a missing env var degrades gracefully instead of breaking outright. They do **not** need editing for the migration to work (the env var always wins when set) — just noting they exist, since they're easy to forget about and will keep pointing at the old domain forever unless someone eventually updates the literal string:
+These three files fall back to a **hardcoded** `https://websitedemo-khaki.vercel.app` if the env var above is ever empty — deliberate, so a missing env var degrades gracefully instead of breaking outright. They do **not** need editing for the migration to work (the env var always wins when set) — just noting they exist, since they're easy to forget about and will keep pointing at the old domain forever unless someone eventually updates the literal string:
 
 - `lib/email/layout.ts` — header logo / footer mark image URLs (added 2026-08-07)
 - `lib/actions/partner-market.ts` — Ghost Butler DM + email fallback links (pre-existing)
+- `app/api/admin/comms/test-send/route.ts` — the `{{app_url}}` value used when rendering a test send (added 2026-08-07). Deliberately production-safe rather than localhost, since a test send actually leaves the dev environment and lands in a real inbox — see the code comment.
 
 ## 3. Supabase Auth (not in this codebase — dashboard config)
 
