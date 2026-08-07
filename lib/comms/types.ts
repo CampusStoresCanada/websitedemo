@@ -221,8 +221,6 @@ export interface MessageAutomationRun {
 // ── Audience definition ───────────────────────────────────────────
 
 export type AudienceType =
-  | "conference_delegates"
-  | "conference_exhibitors"
   | "conference_all"
   | "conference_holders"
   | "conference_orgs_with_open_seats"
@@ -247,6 +245,8 @@ export interface AudienceDefinition {
     conference_instance_id?: string;
     event_id?: string;
     org_ids?: string[];
+    /** For org_admins: limit to orgs of this type (e.g. "Vendor Partner", "Member"). Combines with org_ids as AND when both are set. Test orgs (organizations.is_test) are always excluded. */
+    org_type?: string;
     emails?: string[];
     /** For conference_holders / conference_orgs_*: limit to people holding a seat of this kind (e.g. "booth"). */
     seat_kind?: string;

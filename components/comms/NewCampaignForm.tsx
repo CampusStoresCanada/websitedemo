@@ -30,8 +30,6 @@ interface ConferenceEntityOption {
 }
 
 const AUDIENCE_OPTIONS: { value: AudienceType; label: string }[] = [
-  { value: "conference_delegates", label: "Conference Delegates (members)" },
-  { value: "conference_exhibitors", label: "Conference Exhibitors (partners)" },
   { value: "conference_all", label: "All Conference Attendees" },
   { value: "conference_holders", label: "Conference seat-holders (v3)" },
   { value: "conference_orgs_with_open_seats", label: "Orgs with unassigned seats" },
@@ -263,6 +261,24 @@ export default function NewCampaignForm({
             ))}
           </select>
         </div>
+
+        {/* Org type filter — only relevant for the Org Admins audience */}
+        {selectedAudienceType === "org_admins" && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Organization type (optional)</label>
+            <p className="text-xs text-gray-500 mb-1">Narrows "All Org Admins" to just one side of membership.</p>
+            <select
+              name="org_type"
+              defaultValue=""
+              className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
+            >
+              <option value="">— Any org type —</option>
+              <option value="Member">Member</option>
+              <option value="Vendor Partner">Vendor Partner</option>
+              <option value="Non-Member">Non-Member</option>
+            </select>
+          </div>
+        )}
 
         {/* Contact tags filter — only relevant for the Tagged Contacts audience */}
         {selectedAudienceType === "contact_tags" && (

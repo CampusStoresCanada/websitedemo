@@ -35,7 +35,12 @@ export interface ConditionSubjectDef {
   fields: Record<string, ConditionFieldDef>;
 }
 
-export type ConditionSubjectKey = "organization" | "person" | "event_registration" | "checklist_task";
+export type ConditionSubjectKey =
+  | "organization"
+  | "person"
+  | "event_registration"
+  | "checklist_task"
+  | "conference_entity_ownership";
 
 export const CONDITION_SUBJECTS: Record<ConditionSubjectKey, ConditionSubjectDef> = {
   organization: {
@@ -84,6 +89,22 @@ export const CONDITION_SUBJECTS: Record<ConditionSubjectKey, ConditionSubjectDef
       // a raw column, so this is the one field every checklist task has,
       // regardless of its check_type.
       is_complete: { label: "Complete", type: "boolean" },
+    },
+  },
+  conference_entity_ownership: {
+    label: "Conference Purchase",
+    // Reference is a conference (a real conference_instances row — reference_id
+    // is a genuine uuid column, so it can't carry a synthetic compound key).
+    // "Booth" vs "registration" are two fields on that same referenced
+    // conference rather than two different references, because neither one
+    // maps to a single conference_entities row: Standard/Connected are
+    // different booth entities, and Day Pass/Full Conference are different
+    // registration entities — "owns a booth of either kind" is the kind-level
+    // fact a suppression gate actually needs. See resolve.ts.
+    requiresReference: { label: "Conference", endpoint: "/api/admin/comms/conditions/conferences" },
+    fields: {
+      owns_booth: { label: "Owns a booth (any tier)", type: "boolean" },
+      owns_registration: { label: "Has a registration (Day Pass or Full Conference)", type: "boolean" },
     },
   },
 };

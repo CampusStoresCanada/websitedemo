@@ -148,12 +148,6 @@ async function resolveAudienceByType(
   audience: AudienceDefinition
 ): Promise<ResolvedRecipient[]> {
   switch (audience.type) {
-    case "conference_delegates":
-      return resolveConferenceDelegates(supabase, audience.filters ?? {});
-
-    case "conference_exhibitors":
-      return resolveConferenceExhibitors(supabase, audience.filters ?? {});
-
     case "conference_all":
       return resolveConferenceAll(supabase, audience.filters ?? {});
 
@@ -190,87 +184,6 @@ async function resolveAudienceByType(
   }
 }
 
-// ── Conference Delegates ──────────────────────────────────────────
-
-async function resolveConferenceDelegates(
-  supabase: AdminClient,
-  filters: AudienceDefinition["filters"]
-): Promise<ResolvedRecipient[]> {
-  let q = supabase
-    .from("conference_people")
-    .select(
-      `id, user_id, contact_email, display_name, conference_id, organization_id,
-       conference_registrations!inner(registration_type)`
-    )
-    .eq("conference_registrations.registration_type", "member");
-
-  if (filters?.conference_instance_id) {
-    q = q.eq("conference_id", filters.conference_instance_id);
-  }
-
-  const { data, error } = await q;
-  if (error) {
-    console.error("[comms/audience] resolveConferenceDelegates error:", error);
-    return [];
-  }
-
-  const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
-  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
-  const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
-
-  return (data ?? []).map((row) => ({
-    userId: row.user_id ?? null,
-    email: row.contact_email ?? "",
-    name: row.display_name ?? null,
-    variableOverrides: {
-      ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
-      ...conferenceVars,
-      ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
-      ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
-    },
-  })).filter((r) => r.email !== "");
-}
-
-// ── Conference Exhibitors ─────────────────────────────────────────
-
-async function resolveConferenceExhibitors(
-  supabase: AdminClient,
-  filters: AudienceDefinition["filters"]
-): Promise<ResolvedRecipient[]> {
-  let q = supabase
-    .from("conference_people")
-    .select(
-      `id, user_id, contact_email, display_name, conference_id, organization_id,
-       conference_registrations!inner(registration_type)`
-    )
-    .eq("conference_registrations.registration_type", "partner");
-
-  if (filters?.conference_instance_id) {
-    q = q.eq("conference_id", filters.conference_instance_id);
-  }
-
-  const { data, error } = await q;
-  if (error) {
-    console.error("[comms/audience] resolveConferenceExhibitors error:", error);
-    return [];
-  }
-
-  const conferenceVars = await loadConferenceVariables(supabase, filters?.conference_instance_id);
-  const orgVarsByOrgId = await batchLoadOrganizationVariables(supabase, (data ?? []).map((r) => r.organization_id));
-  const personVarsByUserId = await batchLoadPersonVariables(supabase, (data ?? []).map((r) => r.user_id));
-
-  return (data ?? []).map((row) => ({
-    userId: row.user_id ?? null,
-    email: row.contact_email ?? "",
-    name: row.display_name ?? null,
-    variableOverrides: {
-      ...deriveRecipientNameVariables(row.display_name, row.contact_email ?? ""),
-      ...conferenceVars,
-      ...(row.organization_id ? orgVarsByOrgId.get(row.organization_id) : {}),
-      ...(row.user_id ? personVarsByUserId.get(row.user_id) : {}),
-    },
-  })).filter((r) => r.email !== "");
-}
 
 // ── All Conference Attendees ──────────────────────────────────────
 
@@ -518,21 +431,38 @@ async function resolveOrgAdmins(
       orgIdByUserId.set(row.user_id, row.organization_id);
     }
   }
-  const { data: orgs } = await supabase
+  const { data: allOrgs } = await supabase
     .from("organizations")
     .select("*")
     .in("id", [...new Set(orgIdByUserId.values())]);
-  const orgNameById = new Map((orgs ?? []).map((o) => [o.id, o.name]));
-  const orgVarsById = new Map((orgs ?? []).map((o) => [o.id, deriveSubjectVariables("organization", o)]));
 
-  const { data: profiles } = await supabase.from("profiles").select("*").in("id", userIds);
+  // Test orgs never belong in a real send, and org_type (e.g. "Vendor
+  // Partner" vs "Member") is the only way today to scope org_admins to one
+  // side of the membership — there's no dedicated audience type for it.
+  const orgs = (allOrgs ?? []).filter((o) => {
+    if (o.is_test) return false;
+    if (filters?.org_type && o.type !== filters.org_type) return false;
+    return true;
+  });
+  const allowedOrgIds = new Set(orgs.map((o) => o.id));
+  for (const [uid, orgId] of orgIdByUserId) {
+    if (!allowedOrgIds.has(orgId)) orgIdByUserId.delete(uid);
+  }
+  const filteredUserIds = userIds.filter((uid) => orgIdByUserId.has(uid));
+
+  const orgNameById = new Map(orgs.map((o) => [o.id, o.name]));
+  const orgVarsById = new Map(orgs.map((o) => [o.id, deriveSubjectVariables("organization", o)]));
+
+  if (filteredUserIds.length === 0) return [];
+
+  const { data: profiles } = await supabase.from("profiles").select("*").in("id", filteredUserIds);
   const nameMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.display_name]));
   const personVarsById = new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
 
   // Resolve emails via auth.users admin lookup (profiles table has no email column)
-  const emailMap = await lookupUserEmails(supabase, userIds);
+  const emailMap = await lookupUserEmails(supabase, filteredUserIds);
 
-  return userIds
+  return filteredUserIds
     .map((uid) => {
       const orgId = orgIdByUserId.get(uid);
       return {

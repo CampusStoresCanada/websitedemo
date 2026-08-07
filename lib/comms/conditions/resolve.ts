@@ -105,6 +105,34 @@ export async function resolveConditionSubjectRow(
       return { is_complete: isComplete };
     }
 
+    case "conference_entity_ownership": {
+      // referenceId = conference_instances.id. owns_booth/owns_registration
+      // are both computed off the same referenced conference in one query —
+      // a synthetic row, same precedent as checklist_task's is_complete.
+      if (!recipient.userId || !referenceId) return null;
+      const organizationId = await resolveRecipientOrgId(supabase, recipient.userId);
+      if (!organizationId) return null;
+
+      // entity_balances is org-scoped (mint_v3_for_order always writes the
+      // purchasing org's id) — kind-level ownership, not a specific booth
+      // or registration tier, is what a "have they bought anything of this
+      // kind yet" suppression gate actually needs.
+      const { data: balances } = await supabase
+        .from("entity_balances")
+        .select("conference_entities!inner(kind)")
+        .eq("organization_id", organizationId)
+        .eq("conference_id", referenceId)
+        .gt("quantity", 0);
+
+      const ownedKinds = new Set(
+        (balances ?? []).map((b) => {
+          const entity = Array.isArray(b.conference_entities) ? b.conference_entities[0] : b.conference_entities;
+          return entity?.kind;
+        })
+      );
+      return { owns_booth: ownedKinds.has("booth"), owns_registration: ownedKinds.has("registration") };
+    }
+
     default:
       return null;
   }

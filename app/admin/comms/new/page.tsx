@@ -99,6 +99,11 @@ async function handleCreateCampaign(formData: FormData) {
     if (tags.length > 0) audience.filters!.tags = tags;
   }
 
+  if (audienceType === "org_admins") {
+    const orgType = (formData.get("org_type") as string | null)?.trim();
+    if (orgType) audience.filters!.org_type = orgType;
+  }
+
   const entityScopedAudiences = new Set<AudienceType>([
     "conference_holders",
     "conference_orgs_with_open_seats",
