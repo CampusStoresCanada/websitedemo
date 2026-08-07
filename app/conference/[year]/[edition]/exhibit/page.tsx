@@ -1,4 +1,5 @@
 import { notFound } from "next/navigation";
+import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { getViewerContext } from "@/lib/visibility/viewer";
@@ -73,6 +74,20 @@ export default async function ExhibitPage({
         reviews every new partnership application. You&apos;ll finish your application
         right after payment.
       </p>
+
+      <div className="mt-6 rounded-lg border border-blue-200 bg-blue-50 p-4">
+        <p className="text-sm font-semibold text-blue-900">Already exhibited with us before?</p>
+        <p className="mt-1 text-sm text-blue-800">
+          Sign in to buy through your existing account — anything purchased below creates a new prospect record
+          instead of attaching to it.
+        </p>
+        <Link
+          href={`/login?next=${encodeURIComponent(`/conference/${year}/${edition}`)}`}
+          className="mt-2 inline-block text-sm font-medium text-blue-900 underline hover:no-underline"
+        >
+          Sign in instead →
+        </Link>
+      </div>
 
       {availableBooths.length === 0 ? (
         <div className="mt-8 rounded-lg border border-gray-200 p-8 text-center text-gray-600">

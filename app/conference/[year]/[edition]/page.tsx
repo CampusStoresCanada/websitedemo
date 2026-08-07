@@ -467,6 +467,20 @@ export default async function ConferenceEditionHubPage({
               />
               <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
                 {needsLegalBanner}
+                <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                  <h3 className="text-sm font-semibold text-blue-900">Already exhibited with us before?</h3>
+                  <p className="mt-1 text-sm text-blue-800">
+                    This form is for new exhibitors. If your organization has bought a booth with CSC before, sign
+                    in to buy through your existing account — anything purchased below creates a new prospect
+                    record instead of attaching to it.
+                  </p>
+                  <Link
+                    href={`/login?next=${encodeURIComponent(`/conference/${year}/${edition}`)}`}
+                    className="mt-3 inline-flex h-9 items-center rounded-full bg-[#163D6D] px-5 text-sm font-medium text-white transition-all hover:bg-[#0F2C50]"
+                  >
+                    Sign in instead →
+                  </Link>
+                </div>
                 <div className="space-y-8">
                   <SponsorshipLadder conferenceId={conference.id} />
                   <ScheduleAtAGlance conferenceId={conference.id} conferenceStartDate={conference.start_date ?? ""} track={null} />
