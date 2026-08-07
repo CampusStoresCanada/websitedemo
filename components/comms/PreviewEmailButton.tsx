@@ -17,6 +17,7 @@ export default function PreviewEmailButton({ variableKeys }: PreviewEmailButtonP
   const [snapshot, setSnapshot] = useState<{
     bodyHtml: string;
     subject: string;
+    isTransactional: boolean;
   } | null>(null);
 
   const handleOpen = () => {
@@ -26,7 +27,10 @@ export default function PreviewEmailButton({ variableKeys }: PreviewEmailButtonP
     const subject =
       (document.querySelector('input[name="subject"]') as HTMLInputElement)
         ?.value ?? "";
-    setSnapshot({ bodyHtml, subject });
+    const isTransactional =
+      (document.querySelector('input[name="is_transactional"]') as HTMLInputElement)
+        ?.checked ?? false;
+    setSnapshot({ bodyHtml, subject, isTransactional });
     setOpen(true);
   };
 
@@ -46,6 +50,7 @@ export default function PreviewEmailButton({ variableKeys }: PreviewEmailButtonP
           bodyHtml={snapshot.bodyHtml}
           subject={snapshot.subject}
           variableKeys={variableKeys}
+          isTransactional={snapshot.isTransactional}
           onClose={() => setOpen(false)}
         />
       )}

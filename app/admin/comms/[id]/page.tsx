@@ -160,6 +160,7 @@ export default async function CampaignDetailPage({
               subject={previewSubject}
               variableKeys={previewVariableKeys}
               variableValues={previewVariableValues}
+              isTransactional={!!tmpl?.is_transactional}
             />
           )}
           {canClickMap && (
@@ -170,6 +171,7 @@ export default async function CampaignDetailPage({
               variableValues={previewVariableValues}
               clicksByUrl={clicksByUrl}
               totalClicks={totalClicks}
+              isTransactional={!!tmpl?.is_transactional}
             />
           )}
           {canSendNow && (

@@ -528,6 +528,7 @@ export default function NewCampaignForm({
           subject={getCurrentSubject()}
           variableKeys={selectedTemplate?.variable_keys ?? []}
           initialVariables={variableValues}
+          isTransactional={!!selectedTemplate?.is_transactional}
           onClose={() => setPreviewOpen(false)}
         />
       )}

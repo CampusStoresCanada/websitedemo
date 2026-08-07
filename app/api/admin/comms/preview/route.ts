@@ -7,10 +7,11 @@ import { wrapEmailBody } from "@/lib/email/layout";
  * Accepts { body_html, subject, variables } — unknown {{keys}} rendered as [key] placeholders.
  */
 export async function POST(request: NextRequest) {
-  const { body_html, subject, variables = {} } = (await request.json()) as {
+  const { body_html, subject, variables = {}, is_transactional = false } = (await request.json()) as {
     body_html: string;
     subject: string;
     variables?: Record<string, string>;
+    is_transactional?: boolean;
   };
 
   // Derive base URL from the request so assets resolve in dev and prod
@@ -30,7 +31,12 @@ export async function POST(request: NextRequest) {
       key in variables && variables[key] ? variables[key] : `[${key}]`
     );
 
-  const html = wrapEmailBody(substitute(body_html ?? ""), baseUrl);
+  // Real sends always pass a per-delivery manageUrl (CASL unsubscribe/
+  // preferences link) unless the template is transactional (see send.ts) —
+  // there's no real delivery to link to here, so a placeholder stands in
+  // just to make the footer preview match what a recipient actually gets.
+  const manageUrl = is_transactional ? undefined : `${baseUrl}/email-preferences/preview`;
+  const html = wrapEmailBody(substitute(body_html ?? ""), baseUrl, manageUrl);
   const renderedSubject = substitute(subject ?? "");
 
   return NextResponse.json({ html, subject: renderedSubject });

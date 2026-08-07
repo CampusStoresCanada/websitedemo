@@ -12,6 +12,8 @@ interface CampaignPreviewButtonProps {
   variableValues: Record<string, string>;
   /** Icon-only, no border/label — for inline use in a table row next to a name. */
   compact?: boolean;
+  /** Transactional templates never get the CASL unsubscribe/preferences footer link. */
+  isTransactional?: boolean;
 }
 
 export default function CampaignPreviewButton({
@@ -20,6 +22,7 @@ export default function CampaignPreviewButton({
   variableKeys,
   variableValues,
   compact = false,
+  isTransactional = false,
 }: CampaignPreviewButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -45,6 +48,7 @@ export default function CampaignPreviewButton({
           subject={subject}
           variableKeys={variableKeys}
           initialVariables={variableValues}
+          isTransactional={isTransactional}
           onClose={() => setOpen(false)}
         />
       )}

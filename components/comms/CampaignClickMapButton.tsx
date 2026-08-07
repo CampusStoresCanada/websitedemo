@@ -12,6 +12,7 @@ interface CampaignClickMapButtonProps {
   /** Click count per exact link URL, aggregated from message_link_clicks. */
   clicksByUrl: Record<string, number>;
   totalClicks: number;
+  isTransactional?: boolean;
 }
 
 export default function CampaignClickMapButton({
@@ -21,6 +22,7 @@ export default function CampaignClickMapButton({
   variableValues,
   clicksByUrl,
   totalClicks,
+  isTransactional = false,
 }: CampaignClickMapButtonProps) {
   const [open, setOpen] = useState(false);
 
@@ -43,6 +45,7 @@ export default function CampaignClickMapButton({
           variableValues={variableValues}
           clicksByUrl={clicksByUrl}
           totalClicks={totalClicks}
+          isTransactional={isTransactional}
           onClose={() => setOpen(false)}
         />
       )}

@@ -9,6 +9,8 @@ interface EmailPreviewModalProps {
   variableKeys: string[];
   /** Pre-filled values (e.g. from campaign.variable_values) */
   initialVariables?: Record<string, string>;
+  /** Transactional templates never get the CASL unsubscribe/preferences footer link — see wrapEmailBody. */
+  isTransactional?: boolean;
   onClose: () => void;
 }
 
@@ -17,6 +19,7 @@ export default function EmailPreviewModal({
   subject,
   variableKeys,
   initialVariables = {},
+  isTransactional = false,
   onClose,
 }: EmailPreviewModalProps) {
   const [variables, setVariables] = useState<Record<string, string>>(
@@ -35,7 +38,7 @@ export default function EmailPreviewModal({
         const res = await fetch("/api/admin/comms/preview", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ body_html: bodyHtml, subject, variables: vars }),
+          body: JSON.stringify({ body_html: bodyHtml, subject, variables: vars, is_transactional: isTransactional }),
         });
         const data = await res.json();
         setPreviewHtml(data.html);
@@ -44,7 +47,7 @@ export default function EmailPreviewModal({
         setLoading(false);
       }
     },
-    [bodyHtml, subject]
+    [bodyHtml, subject, isTransactional]
   );
 
   // Load preview on mount

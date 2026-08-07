@@ -292,6 +292,7 @@ export default async function CampaignInitiativePage({
                           subject={t.subject}
                           variableKeys={t.variable_keys}
                           variableValues={{}}
+                          isTransactional={!!t.is_transactional}
                           compact
                         />
                       </div>

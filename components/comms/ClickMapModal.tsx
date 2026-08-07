@@ -10,6 +10,7 @@ interface ClickMapModalProps {
   variableValues: Record<string, string>;
   clicksByUrl: Record<string, number>;
   totalClicks: number;
+  isTransactional?: boolean;
   onClose: () => void;
 }
 
@@ -33,6 +34,7 @@ export default function ClickMapModal({
   variableValues,
   clicksByUrl,
   totalClicks,
+  isTransactional = false,
   onClose,
 }: ClickMapModalProps) {
   const [previewHtml, setPreviewHtml] = useState("");
@@ -45,7 +47,7 @@ export default function ClickMapModal({
     fetch("/api/admin/comms/preview", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body_html: bodyHtml, subject, variables: vars }),
+      body: JSON.stringify({ body_html: bodyHtml, subject, variables: vars, is_transactional: isTransactional }),
     })
       .then((res) => res.json())
       .then((data) => {
