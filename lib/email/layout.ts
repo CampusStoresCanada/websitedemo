@@ -23,7 +23,13 @@ const BODY_BG      = "#EEEDE9";
 const MAILING_ADDRESS = "P.O. Box 71157 Silver Springs, Calgary, Alberta, Canada";
 const CONTACT_EMAIL = "info@campusstores.ca";
 
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
+// Real sends (lib/email/send.ts) call wrapEmailBody with no baseUrl override —
+// unlike the admin preview route, which always derives one from the request —
+// so this env var is the ONLY source for header/footer asset URLs on an actual
+// delivery. Falls back to the known production domain rather than "" so a
+// missing/misconfigured env var can't silently blank out the header logo the
+// way it did for the password-reset email before that was hardcoded too.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
 
 /**
  * Wraps a raw HTML content block in the branded CSC email layout.
