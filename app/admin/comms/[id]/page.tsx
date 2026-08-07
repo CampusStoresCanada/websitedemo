@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { executeCampaignSend, cancelScheduledCampaign } from "@/lib/comms/send";
+import { executeCampaignSend, cancelScheduledCampaign, scheduleCampaign } from "@/lib/comms/send";
 import { previewAudience } from "@/lib/comms/audience";
 import { resolveEffectiveAudience } from "@/lib/comms/campaigns";
 import type {
@@ -22,6 +22,14 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 60; // "Send Now" server action can push a few hundred recipients through sendEmailBatch
 
+/** UTC ISO string -> "YYYY-MM-DDTHH:mm" in the viewer's local time, for a datetime-local input's defaultValue. Date's getters already return local components, so this is just formatting, no offset math. */
+function toLocalDateTimeInputValue(iso: string | null): string {
+  if (!iso) return "";
+  const d = parseUTC(iso);
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const STATUS_COLORS: Record<DeliveryStatus, string> = {
   queued: "bg-gray-100 text-gray-600",
   sent: "bg-blue-100 text-accent",
@@ -39,6 +47,14 @@ async function sendCampaignAction(campaignId: string) {
 async function cancelCampaignAction(campaignId: string) {
   "use server";
   await cancelScheduledCampaign(campaignId);
+}
+
+async function scheduleCampaignAction(formData: FormData) {
+  "use server";
+  const campaignId = formData.get("campaign_id") as string;
+  const scheduledAtRaw = formData.get("scheduled_at") as string;
+  if (!scheduledAtRaw) return;
+  await scheduleCampaign(campaignId, new Date(scheduledAtRaw));
 }
 
 export default async function CampaignDetailPage({
@@ -155,6 +171,23 @@ export default async function CampaignDetailPage({
               clicksByUrl={clicksByUrl}
               totalClicks={totalClicks}
             />
+          )}
+          {canSendNow && (
+            <form action={scheduleCampaignAction} className="flex items-center gap-1.5">
+              <input type="hidden" name="campaign_id" value={id} />
+              <input
+                type="datetime-local"
+                name="scheduled_at"
+                defaultValue={toLocalDateTimeInputValue(campaign.scheduled_at)}
+                className="rounded-lg border border-gray-300 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
+              />
+              <button
+                type="submit"
+                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors whitespace-nowrap"
+              >
+                {isScheduled ? "Update Schedule" : "Schedule"}
+              </button>
+            </form>
           )}
           {isScheduled && (
             <form

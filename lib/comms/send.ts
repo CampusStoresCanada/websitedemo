@@ -369,6 +369,29 @@ export async function cancelScheduledCampaign(
   return { success: true };
 }
 
+/**
+ * Set (or change) a draft or already-scheduled campaign's send date —
+ * the retrofit counterpart to createCampaign's scheduledAt, for a send
+ * that was saved as a draft first and only later given a date. Only
+ * touches draft/scheduled rows, same guard as cancelScheduledCampaign,
+ * so it can't accidentally reschedule something already sending/sent.
+ */
+export async function scheduleCampaign(
+  campaignId: string,
+  scheduledAt: Date
+): Promise<{ success: boolean; error?: string }> {
+  const supabase = createAdminClient();
+  const { error, count } = await supabase
+    .from("message_campaigns")
+    .update({ status: "scheduled", scheduled_at: scheduledAt.toISOString() }, { count: "exact" })
+    .eq("id", campaignId)
+    .in("status", ["draft", "scheduled"]);
+
+  if (error) return { success: false, error: error.message };
+  if (!count) return { success: false, error: "Campaign isn't a draft or scheduled send." };
+  return { success: true };
+}
+
 // ── Scheduled dispatch (cron) ──────────────────────────────────────
 
 export interface DispatchScheduledResult {
