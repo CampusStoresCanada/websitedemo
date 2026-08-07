@@ -8,10 +8,51 @@ import {
   updateCampaignInitiative,
   deleteCampaignInitiative,
   createMilestone,
+  resolveEffectiveAudience,
 } from "@/lib/comms/campaigns";
 import { listTemplates, forkTemplateIntoCampaign } from "@/lib/comms/templates";
 import { listConditions } from "@/lib/comms/conditions/store";
-import type { CampaignInitiativeStatus } from "@/lib/comms/types";
+import { previewAudience } from "@/lib/comms/audience";
+import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
+import type { CampaignInitiativeStatus, AudienceDefinition, CampaignStatus } from "@/lib/comms/types";
+
+const SEND_STATUS_COLORS: Record<CampaignStatus, string> = {
+  draft: "bg-gray-100 text-gray-600",
+  scheduled: "bg-blue-100 text-blue-700",
+  sending: "bg-yellow-100 text-yellow-700",
+  completed: "bg-green-100 text-green-700",
+  failed: "bg-red-100 text-red-700",
+  canceled: "bg-gray-100 text-gray-500",
+};
+
+/** Short, human label for an AudienceDefinition — the same shape the New Send form builds, condensed for a table cell. */
+function describeAudience(audience: AudienceDefinition | null): string {
+  if (!audience) return "—";
+  switch (audience.type) {
+    case "org_admins":
+      return audience.filters?.org_type ? `${audience.filters.org_type} org admins` : "All org admins";
+    case "conference_all":
+      return "All conference attendees";
+    case "conference_holders":
+      return "Conference seat-holders";
+    case "conference_orgs_with_open_seats":
+      return "Orgs with unassigned seats";
+    case "conference_orgs_fully_assigned":
+      return "Orgs — all seats assigned";
+    case "contact_tags":
+      return "Tagged contacts";
+    case "custom_emails":
+      return "Custom email list";
+    case "custom_recipient_list":
+      return "Individual / mail merge";
+    case "global_admins":
+      return "Global admins";
+    case "event_registrants":
+      return "Event registrants";
+    default:
+      return audience.type;
+  }
+}
 
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
@@ -94,6 +135,47 @@ export default async function CampaignInitiativePage({
   ]);
 
   const seriesByTemplateId = new Map((rosterSeries ?? []).map((s) => [s.series_key, s]));
+
+  // Most recent send per roster template — a template can in principle be
+  // sent more than once (History), but for "what's this email's status/
+  // audience right now" the latest send is what actually matters.
+  const rosterIds = roster.map((t) => t.id);
+  const { data: rosterSends } = rosterIds.length
+    ? await db
+        .from("message_campaigns")
+        .select("id, template_id, status, scheduled_at, audience_definition, created_at")
+        .eq("campaign_id", id)
+        .in("template_id", rosterIds)
+        .order("created_at", { ascending: false })
+    : { data: [] };
+  type RosterSendRow = {
+    id: string;
+    template_id: string | null;
+    status: CampaignStatus;
+    scheduled_at: string | null;
+    audience_definition: unknown;
+    created_at: string;
+  };
+  const latestSendByTemplateId = new Map<string, RosterSendRow>();
+  for (const row of (rosterSends ?? []) as RosterSendRow[]) {
+    if (row.template_id && !latestSendByTemplateId.has(row.template_id)) {
+      latestSendByTemplateId.set(row.template_id, row);
+    }
+  }
+
+  // Live audience count per email — the gate-applied count right now, not
+  // whatever it was when the send was created (matches the send detail
+  // page's own "Audience preview" — same resolveEffectiveAudience call).
+  const audienceCountByTemplateId = new Map<string, number>();
+  await Promise.all(
+    roster.map(async (t) => {
+      const send = latestSendByTemplateId.get(t.id);
+      if (!send || send.status === "completed" || send.status === "sending") return;
+      const effective = await resolveEffectiveAudience(send.audience_definition as unknown as AudienceDefinition, id);
+      const preview = await previewAudience(effective, t.is_transactional ? undefined : t.category);
+      audienceCountByTemplateId.set(t.id, preview.count);
+    })
+  );
 
   return (
     <main>
@@ -185,6 +267,8 @@ export default async function CampaignInitiativePage({
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Email</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Status</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Audience</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Sends</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Delivered</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Open Rate</th>
@@ -195,11 +279,43 @@ export default async function CampaignInitiativePage({
             <tbody className="divide-y divide-gray-100">
               {roster.map((t) => {
                 const s = seriesByTemplateId.get(t.id);
+                const send = latestSendByTemplateId.get(t.id);
+                const audienceLabel = send ? describeAudience(send.audience_definition as unknown as AudienceDefinition) : "—";
+                const liveCount = audienceCountByTemplateId.get(t.id);
                 return (
                   <tr key={t.id} className="hover:bg-gray-50">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-gray-900">{t.name}</div>
+                      <div className="flex items-center gap-1.5">
+                        <div className="font-medium text-gray-900">{t.name}</div>
+                        <CampaignPreviewButton
+                          bodyHtml={t.body_html}
+                          subject={t.subject}
+                          variableKeys={t.variable_keys}
+                          variableValues={{}}
+                          compact
+                        />
+                      </div>
                       {t.description && <div className="text-xs text-gray-500 mt-0.5">{t.description}</div>}
+                    </td>
+                    <td className="px-4 py-3">
+                      {send ? (
+                        <div>
+                          <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SEND_STATUS_COLORS[send.status as CampaignStatus] ?? "bg-gray-100 text-gray-600"}`}>
+                            {send.status}
+                          </span>
+                          {send.status === "scheduled" && send.scheduled_at && (
+                            <div className="mt-0.5 text-xs text-gray-500">
+                              {parseUTC(send.scheduled_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                            </div>
+                          )}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-gray-400">Not yet sent</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-gray-600">
+                      {audienceLabel}
+                      {liveCount !== undefined && <div className="text-gray-400">{liveCount} eligible now</div>}
                     </td>
                     <td className="px-4 py-3 text-gray-700">{s?.send_count ?? 0}</td>
                     <td className="px-4 py-3 text-gray-700">{s?.delivered_count ?? 0}</td>
@@ -218,12 +334,18 @@ export default async function CampaignInitiativePage({
                           History
                         </Link>
                       )}
-                      <Link
-                        href={`/admin/comms/new?campaign_id=${id}&template_id=${t.id}`}
-                        className="text-xs text-accent hover:underline"
-                      >
-                        Send
-                      </Link>
+                      {send ? (
+                        <Link href={`/admin/comms/${send.id}`} className="text-xs text-accent hover:underline">
+                          Manage
+                        </Link>
+                      ) : (
+                        <Link
+                          href={`/admin/comms/new?campaign_id=${id}&template_id=${t.id}`}
+                          className="text-xs text-accent hover:underline"
+                        >
+                          Send
+                        </Link>
+                      )}
                       <Link
                         href={`/admin/comms/templates/${t.id}`}
                         className="text-xs text-accent hover:underline"
