@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useRef } from "react";
-import { X, Monitor, Smartphone, RefreshCw } from "lucide-react";
+import { X, Monitor, Smartphone, RefreshCw, Send } from "lucide-react";
 
 interface EmailPreviewModalProps {
   bodyHtml: string;
@@ -30,6 +30,38 @@ export default function EmailPreviewModal({
   const [viewWidth, setViewWidth] = useState<"desktop" | "mobile">("desktop");
   const [loading, setLoading] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
+
+  const [testEmail, setTestEmail] = useState("");
+  const [sendingTest, setSendingTest] = useState(false);
+  const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
+
+  const handleSendTest = async () => {
+    setSendingTest(true);
+    setTestResult(null);
+    try {
+      const res = await fetch("/api/admin/comms/test-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          body_html: bodyHtml,
+          subject,
+          variables,
+          is_transactional: isTransactional,
+          to: testEmail,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setTestResult({ ok: false, message: data.error ?? "Send failed" });
+      } else {
+        setTestResult({ ok: true, message: `Sent to ${testEmail}` });
+      }
+    } catch {
+      setTestResult({ ok: false, message: "Send failed — network error" });
+    } finally {
+      setSendingTest(false);
+    }
+  };
 
   const fetchPreview = useCallback(
     async (vars: Record<string, string>) => {
@@ -207,11 +239,34 @@ export default function EmailPreviewModal({
           </div>
         </div>
 
-        {/* ── Footer note ── */}
-        <div className="px-5 py-2 border-t border-gray-100 bg-gray-50 shrink-0">
-          <p className="text-[10px] text-gray-400">
-            Rendered using the branded email layout. Actual appearance varies by email client — this is an HTML approximation.
+        {/* ── Footer: test send ── */}
+        <div className="px-5 py-2.5 border-t border-gray-100 bg-gray-50 shrink-0 flex items-center gap-2">
+          <p className="text-[10px] text-gray-400 shrink-0 hidden sm:block">
+            This is an HTML approximation — send a real test to check an actual inbox.
           </p>
+          <div className="flex items-center gap-1.5 ml-auto">
+            <input
+              type="email"
+              value={testEmail}
+              onChange={(e) => setTestEmail(e.target.value)}
+              placeholder="you@campusstores.ca"
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-xs w-48 focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            <button
+              type="button"
+              onClick={handleSendTest}
+              disabled={sendingTest || !testEmail}
+              className="flex items-center gap-1.5 rounded-lg bg-[#163D6D] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#0F2C50] disabled:opacity-50 transition-colors shrink-0"
+            >
+              <Send size={11} className={sendingTest ? "animate-pulse" : ""} />
+              {sendingTest ? "Sending…" : "Send Test"}
+            </button>
+          </div>
+          {testResult && (
+            <span className={`text-[11px] shrink-0 ${testResult.ok ? "text-green-600" : "text-red-600"}`}>
+              {testResult.message}
+            </span>
+          )}
         </div>
       </div>
     </div>
