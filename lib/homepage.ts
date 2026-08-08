@@ -406,7 +406,7 @@ function findCommonTraits(
     .filter(([, count]) => count >= Math.ceil(slices.length * 0.5))
     .map(([svc]) => svc);
   if (sharedServices.length > 0) {
-    traits.push(`shared: ${sharedServices.slice(0, 3).join(", ")}`);
+    traits.push(`Shared services: ${sharedServices.slice(0, 3).join(", ")}`);
   }
 
   // Shared LMS
