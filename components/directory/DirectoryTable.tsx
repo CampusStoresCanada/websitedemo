@@ -426,7 +426,7 @@ export default function DirectoryTable({
                 {/* Member viewing partners: personalised procurement view */}
                 {showMemberPartnerCols ? (
                   <>
-                    {renderSortHeader({ label: "Category", sortKeyVal: "primaryCategory" })}
+                    {renderSortHeader({ label: "Category", sortKeyVal: "primaryCategory", className: "max-w-[144px]" })}
                     {renderSortHeader({ label: "Certifications", sortKeyVal: "preferredCertifications" })}
                     {renderSortHeader({ label: "Province", sortKeyVal: "province" })}
                   </>
@@ -440,7 +440,7 @@ export default function DirectoryTable({
                       About
                     </th>
                     {renderSortHeader({ label: "Catalogue", sortKeyVal: "hasCatalogue", className: "w-28" })}
-                    {renderSortHeader({ label: "Category", sortKeyVal: "primaryCategory" })}
+                    {renderSortHeader({ label: "Category", sortKeyVal: "primaryCategory", className: "max-w-[144px]" })}
                   </>
                 ) : !showPartnerMemberCols ? (
                   /* Member / mixed view (member is viewing): location + type */
@@ -535,12 +535,12 @@ export default function DirectoryTable({
                       /* Member viewing partners: category match + certs + province */
                       <>
                         {/* Category — highlighted ring if it matches member's carried categories */}
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-3 py-3 max-w-[144px] align-top">
                           {org.primaryCategory ? (() => {
                             const s = getCategoryStyle(org.primaryCategory);
                             const isMatch = memberProfile?.categories.includes(org.primaryCategory) ?? false;
                             return (
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${s.bg} ${s.text} ${isMatch ? "ring-2 ring-offset-1 ring-green-400 border-transparent" : s.border}`}>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-normal ${s.bg} ${s.text} ${isMatch ? "ring-2 ring-offset-1 ring-green-400 border-transparent" : s.border}`}>
                                 {org.primaryCategory}
                               </span>
                             );
@@ -622,11 +622,11 @@ export default function DirectoryTable({
                           )}
                         </td>
                         {/* Category — coloured pill */}
-                        <td className="px-3 py-3 whitespace-nowrap">
+                        <td className="px-3 py-3 max-w-[144px] align-top">
                           {org.primaryCategory ? (() => {
                             const s = getCategoryStyle(org.primaryCategory);
                             return (
-                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium ${s.bg} ${s.text} ${s.border}`}>
+                              <span className={`inline-flex rounded-full border px-2 py-0.5 text-[10px] font-medium whitespace-normal ${s.bg} ${s.text} ${s.border}`}>
                                 {org.primaryCategory}
                               </span>
                             );
