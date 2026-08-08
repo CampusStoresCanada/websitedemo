@@ -12,9 +12,9 @@ export default function Footer() {
               <Image
                 src="/logos/csc-logo-horizontal-wordmark.svg"
                 alt="Campus Stores Canada"
-                width={210}
-                height={62}
-                className="h-7 w-auto"
+                width={160}
+                height={100}
+                className="h-9 w-auto"
               />
             </div>
             <p className="text-sm text-[var(--text-secondary)] max-w-sm">

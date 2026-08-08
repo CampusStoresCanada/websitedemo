@@ -4,8 +4,9 @@
 //
 // Assets live in /public/email/ (see /public/email/background.png etc.)
 // Background image: 1201×161px @2x → displayed at 600×80
-// Wordmark logo:    381×108px  @2x → displayed at 190×54
-// Logo mark:        1000×1000px @2x → displayed at 40×40 in footer
+// Wordmark logo:    172×108px @2x → displayed at 86×54 (updated 2026-08-08,
+//                    official mark — a ~1.6:1 oval, not the old text lockup)
+// Logo mark:         104×64px @2x → displayed at 52×32 in footer
 //
 // Outlook (Windows) does not support CSS background-image.
 // We use: bgcolor attribute + CSS background-image for modern clients.
@@ -93,8 +94,8 @@ export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?:
                 ? `<!--[if !mso]><!-->
               <img src="${wordmarkUrl}"
                    alt="Campus Stores Canada"
-                   width="190" height="54"
-                   style="display:block;border:0;outline:none;text-decoration:none;max-width:190px;height:auto;" />
+                   width="86" height="54"
+                   style="display:block;border:0;outline:none;text-decoration:none;max-width:86px;height:auto;" />
               <!--<![endif]-->
               <!--[if mso]>
               <span style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;color:${BRAND_NAVY};">Campus Stores Canada</span>
@@ -121,8 +122,8 @@ export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?:
           <tr>
             <td align="center" style="background-color:${FOOTER_BG};border:1px solid #E0DDD8;border-top:none;border-radius:0 0 8px 8px;padding:18px 32px 22px;text-align:center;">
               ${markUrl
-                ? `<img src="${markUrl}" alt="" width="40" height="40"
-                       style="display:block;margin:0 auto 8px;border:0;outline:none;text-decoration:none;width:40px;height:40px;" />`
+                ? `<img src="${markUrl}" alt="" width="52" height="32"
+                       style="display:block;margin:0 auto 8px;border:0;outline:none;text-decoration:none;width:52px;height:32px;" />`
                 : ""}
               <p style="margin:0 0 3px;font-family:${FONT};font-size:12px;font-weight:700;color:${BRAND_NAVY};letter-spacing:0.1px;">
                 Campus Stores Canada

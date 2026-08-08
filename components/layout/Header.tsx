@@ -479,18 +479,10 @@ export default function Header() {
             <Image
               src="/logos/csc-logo.svg"
               alt="Campus Stores Canada"
-              width={36}
-              height={36}
+              width={160}
+              height={100}
               priority
-              className="h-9 w-9 sm:hidden"
-            />
-            <Image
-              src="/logos/csc-logo-horizontal-wordmark.svg"
-              alt="Campus Stores Canada"
-              width={252}
-              height={76}
-              priority
-              className="hidden h-8 w-auto sm:block"
+              className="h-9 w-auto"
             />
           </Link>
 
