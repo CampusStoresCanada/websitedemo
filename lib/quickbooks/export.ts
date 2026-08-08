@@ -181,7 +181,15 @@ export async function resolveMembershipTaxCode(
   db: ReturnType<typeof createAdminClient>,
   org: { name: string; province: string | null; country: string | null }
 ): Promise<string> {
-  if (org.province) {
+  // "Out of Canada" is a literal province value the partner application form
+  // (app/apply/partner/PartnerApplicationForm.tsx) offers for non-Canadian
+  // orgs — country isn't collected on that form and defaults to 'Canada' at
+  // the DB level, so it can't be relied on here to detect these orgs.
+  const isOutsideCanada =
+    org.province?.trim().toLowerCase() === "out of canada" ||
+    (!!org.country && org.country.trim().toLowerCase() !== "canada");
+
+  if (org.province && !isOutsideCanada) {
     const { data } = await db
       .from("app_settings")
       .select("value")
@@ -201,7 +209,7 @@ export async function resolveMembershipTaxCode(
     }
   }
 
-  if (org.country && org.country.trim().toLowerCase() !== "canada") {
+  if (isOutsideCanada) {
     const { data } = await db
       .from("app_settings")
       .select("value")
@@ -359,6 +367,7 @@ async function processExportRow(
 
   // If invoice is already paid, create the payment record in QB
   if (invoice.status === "paid" && invoice.paid_at) {
+    const depositAccountId = await resolveStripeDepositAccountId(db);
     const payment = await createQBPayment({
       CustomerRef: { value: customer.Id },
       TotalAmt: invoice.total_cents / 100,
@@ -368,6 +377,7 @@ async function processExportRow(
       }],
       TxnDate: invoice.paid_at.slice(0, 10),
       CurrencyRef: { value: invoice.currency ?? "CAD" },
+      DepositToAccountRef: { value: depositAccountId },
     });
     qbPaymentId = payment.Id;
   }

@@ -52,6 +52,7 @@ export interface QBPaymentInput {
   }>;
   TxnDate?: string;
   CurrencyRef?: { value: string };
+  DepositToAccountRef: { value: string }; // without this QB defaults to Undeposited Funds — see qbo_stripe_deposit_account_id
 }
 
 export interface QBPayment {
