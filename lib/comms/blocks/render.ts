@@ -17,10 +17,41 @@
 // ─────────────────────────────────────────────────────────────────
 
 import type { ContentBlock } from "./types";
-import { BRAND_RED, FONT } from "@/lib/email/layout";
+import { BRAND_NAVY, BRAND_RED, FONT } from "@/lib/email/layout";
 
 function escAttr(value: string): string {
   return value.replace(/"/g, "&quot;");
+}
+
+// Rich-text tags the text-block editor's "/" menu can insert (see
+// components/ui/SlashCommands.tsx) come out of Tiptap as plain, unstyled
+// HTML — <h1>, <ul><li>, etc. Email clients don't read a <style> block
+// (Outlook desktop especially), so every element needs its styling inlined
+// directly on the tag. Rather than making whoever writes an email's copy
+// hand-author style="..." attributes, every text block's HTML is passed
+// through here once at compile time — the same inline styles every time,
+// applied automatically, regardless of whether the HTML came from the
+// visual editor's slash menu or was typed directly in Raw HTML mode.
+const RICH_TEXT_TAG_STYLES: Record<string, string> = {
+  h1: `margin:24px 0 12px;font-family:${FONT};font-size:24px;line-height:1.3;font-weight:700;color:${BRAND_NAVY};`,
+  h2: `margin:20px 0 10px;font-family:${FONT};font-size:20px;line-height:1.3;font-weight:700;color:${BRAND_NAVY};`,
+  h3: `margin:16px 0 8px;font-family:${FONT};font-size:17px;line-height:1.3;font-weight:700;color:${BRAND_NAVY};`,
+  ul: `margin:0 0 16px;padding-left:22px;`,
+  ol: `margin:0 0 16px;padding-left:22px;`,
+  li: `margin:0 0 6px;`,
+  blockquote: `margin:16px 0;padding:10px 16px;border-left:3px solid ${BRAND_RED};color:#6B7280;background:#F9F8F6;`,
+};
+
+/** Inlines RICH_TEXT_TAG_STYLES onto matching opening tags — skips any tag that already carries a style attribute, so re-running this on already-processed HTML (or hand-written HTML that sets its own style) is a no-op for that tag. */
+export function applyEmailSafeRichTextStyles(html: string): string {
+  let out = html;
+  for (const [tag, style] of Object.entries(RICH_TEXT_TAG_STYLES)) {
+    const re = new RegExp(`<${tag}(?![a-zA-Z-])([^>]*)>`, "g");
+    out = out.replace(re, (match, attrs: string) =>
+      /style\s*=/.test(attrs) ? match : `<${tag}${attrs} style="${style}">`
+    );
+  }
+  return out;
 }
 
 function renderButton(block: Extract<ContentBlock, { type: "button" }>): string {
@@ -89,7 +120,7 @@ function renderColumns(block: Extract<ContentBlock, { type: "columns" }>): strin
 function renderBlockContent(block: ContentBlock): string {
   switch (block.type) {
     case "text":
-      return block.html;
+      return applyEmailSafeRichTextStyles(block.html);
     case "button":
       return renderButton(block);
     case "image":

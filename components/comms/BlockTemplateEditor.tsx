@@ -5,6 +5,7 @@ import { useEditor, EditorContent } from "@tiptap/react";
 import StarterKit from "@tiptap/starter-kit";
 import Underline from "@tiptap/extension-underline";
 import Link from "@tiptap/extension-link";
+import { useSlashCommands, type SlashCmd } from "@/components/ui/SlashCommands";
 import {
   Bold,
   Italic,
@@ -203,6 +204,22 @@ function BlockBackgroundControl({
   );
 }
 
+type TiptapEditor = NonNullable<ReturnType<typeof useEditor>>;
+
+// Trimmed from SlashCommands' full default list — Code Block (monospace
+// text rarely renders as intended across email clients) and Divider (this
+// block system already has a dedicated Divider block type, with its own
+// color picker; an inline rule from here would just be a confusing second
+// way to do the same thing) don't fit email content, so they're left out.
+const EMAIL_SLASH_COMMANDS: SlashCmd[] = [
+  { title: "Heading 1",     description: "Large section heading",  shortcut: "H1", action: (e) => e.chain().focus().toggleHeading({ level: 1 }).run() },
+  { title: "Heading 2",     description: "Medium section heading", shortcut: "H2", action: (e) => e.chain().focus().toggleHeading({ level: 2 }).run() },
+  { title: "Heading 3",     description: "Small section heading",  shortcut: "H3", action: (e) => e.chain().focus().toggleHeading({ level: 3 }).run() },
+  { title: "Bullet List",   description: "Unordered list",         shortcut: "–",  action: (e) => e.chain().focus().toggleBulletList().run() },
+  { title: "Numbered List", description: "Ordered list",           shortcut: "1.", action: (e) => e.chain().focus().toggleOrderedList().run() },
+  { title: "Blockquote",    description: "Highlighted callout",    shortcut: '"',  action: (e) => e.chain().focus().toggleBlockquote().run() },
+];
+
 function TextBlockEditor({
   html,
   onChange,
@@ -212,14 +229,24 @@ function TextBlockEditor({
   onChange: (html: string) => void;
   customKeys: string[];
 }) {
+  const editorRef = useRef<TiptapEditor | null>(null);
+  const slash = useSlashCommands(editorRef, EMAIL_SLASH_COMMANDS);
+
   const editor = useEditor({
-    extensions: [StarterKit, Underline, Link.configure({ openOnClick: false })],
+    extensions: [StarterKit, Underline, Link.configure({ openOnClick: false }), slash.extension],
     content: html,
     onUpdate({ editor }) {
       onChange(editor.getHTML());
     },
+    editorProps: {
+      handleKeyDown(_, event) {
+        return slash.handleKeyDown(event);
+      },
+    },
     immediatelyRender: false,
   });
+
+  editorRef.current = editor ?? null;
 
   if (!editor) return null;
   const ia = (type: string) => editor.isActive(type);
@@ -253,8 +280,14 @@ function TextBlockEditor({
           customKeys={customKeys}
           onInsert={(key) => editor.chain().focus().insertContent(`{{${key}}}`).run()}
         />
+        <div className="ml-auto flex items-center gap-1 pr-1">
+          <span className="text-[10px] text-gray-300">Type</span>
+          <kbd className="text-[10px] text-gray-400 border border-gray-200 rounded px-1 py-px font-mono leading-none">/</kbd>
+          <span className="text-[10px] text-gray-300">for headings & lists</span>
+        </div>
       </div>
       <EditorContent editor={editor} className="px-3 py-2 prose prose-sm max-w-none [&_.ProseMirror]:outline-none [&_.ProseMirror]:min-h-[60px]" />
+      {slash.menu}
     </div>
   );
 }
