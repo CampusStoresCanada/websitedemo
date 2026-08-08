@@ -93,6 +93,8 @@ export default function NewCampaignForm({
   );
   const [selectedContactTags, setSelectedContactTags] = useState<Set<string>>(new Set());
   const subjectRef = useRef<HTMLInputElement>(null);
+  const scheduledAtInputRef = useRef<HTMLInputElement>(null);
+  const scheduledAtHiddenRef = useRef<HTMLInputElement>(null);
 
   const conferenceEntities = entitiesByConference[selectedConferenceId] ?? [];
   const entitiesByKind = conferenceEntities.reduce<Record<string, ConferenceEntityOption[]>>(
@@ -129,9 +131,22 @@ export default function NewCampaignForm({
 
   const getCurrentSubject = () => subjectRef.current?.value ?? "";
 
+  // datetime-local inputs return a naive "YYYY-MM-DDTHH:mm" string with no
+  // timezone. Parsed here (in the browser) that's correctly the admin's own
+  // wall-clock time; parsed server-side it would be the server's timezone
+  // (UTC on Vercel) instead. So the conversion to a real UTC instant has to
+  // happen client-side, right before submit — copied into the hidden field
+  // the server action actually reads, leaving the visible input un-submitted.
+  const handleSubmit = () => {
+    if (scheduledAtInputRef.current && scheduledAtHiddenRef.current) {
+      const raw = scheduledAtInputRef.current.value;
+      scheduledAtHiddenRef.current.value = raw ? new Date(raw).toISOString() : "";
+    }
+  };
+
   return (
     <>
-      <form action={action} className="mt-6 max-w-3xl space-y-5">
+      <form action={action} onSubmit={handleSubmit} className="mt-6 max-w-3xl space-y-5">
 
         {campaignId && (
           <div className="rounded-lg border border-blue-100 bg-blue-50 px-4 py-2.5">
@@ -481,12 +496,13 @@ export default function NewCampaignForm({
                 Schedule date &amp; time
               </label>
               <input
-                name="scheduled_at"
+                ref={scheduledAtInputRef}
                 type="datetime-local"
                 required
                 min={localInputNow(5 * 60000)}
                 className="rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
               />
+              <input ref={scheduledAtHiddenRef} type="hidden" name="scheduled_at" />
               <p className="mt-1 text-xs text-gray-500">
                 Time is in your local timezone.
               </p>

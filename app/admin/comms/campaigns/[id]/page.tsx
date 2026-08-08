@@ -14,6 +14,7 @@ import { listTemplates, forkTemplateIntoCampaign } from "@/lib/comms/templates";
 import { listConditions } from "@/lib/comms/conditions/store";
 import { previewAudience } from "@/lib/comms/audience";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
+import LocalDateTime from "@/components/comms/LocalDateTime";
 import type { CampaignInitiativeStatus, AudienceDefinition, CampaignStatus } from "@/lib/comms/types";
 
 const SEND_STATUS_COLORS: Record<CampaignStatus, string> = {
@@ -306,7 +307,10 @@ export default async function CampaignInitiativePage({
                           </span>
                           {send.status === "scheduled" && send.scheduled_at && (
                             <div className="mt-0.5 text-xs text-gray-500">
-                              {parseUTC(send.scheduled_at).toLocaleString("en-CA", { dateStyle: "medium", timeStyle: "short" })}
+                              <LocalDateTime
+                                iso={send.scheduled_at}
+                                options={{ dateStyle: "medium", timeStyle: "short" }}
+                              />
                             </div>
                           )}
                         </div>

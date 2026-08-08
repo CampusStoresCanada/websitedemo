@@ -12,6 +12,8 @@ import type {
 } from "@/lib/comms/types";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
 import CampaignClickMapButton from "@/components/comms/CampaignClickMapButton";
+import RescheduleCampaignForm from "@/components/comms/RescheduleCampaignForm";
+import LocalDateTime from "@/components/comms/LocalDateTime";
 import { parseUTC } from "@/lib/utils";
 
 export const metadata = {
@@ -21,14 +23,6 @@ export const metadata = {
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 export const maxDuration = 60; // "Send Now" server action can push a few hundred recipients through sendEmailBatch
-
-/** UTC ISO string -> "YYYY-MM-DDTHH:mm" in the viewer's local time, for a datetime-local input's defaultValue. Date's getters already return local components, so this is just formatting, no offset math. */
-function toLocalDateTimeInputValue(iso: string | null): string {
-  if (!iso) return "";
-  const d = parseUTC(iso);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
 
 const STATUS_COLORS: Record<DeliveryStatus, string> = {
   queued: "bg-gray-100 text-gray-600",
@@ -175,21 +169,12 @@ export default async function CampaignDetailPage({
             />
           )}
           {canSendNow && (
-            <form action={scheduleCampaignAction} className="flex items-center gap-1.5">
-              <input type="hidden" name="campaign_id" value={id} />
-              <input
-                type="datetime-local"
-                name="scheduled_at"
-                defaultValue={toLocalDateTimeInputValue(campaign.scheduled_at)}
-                className="rounded-lg border border-gray-300 px-2.5 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30"
-              />
-              <button
-                type="submit"
-                className="rounded-lg border border-gray-300 px-3 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors whitespace-nowrap"
-              >
-                {isScheduled ? "Update Schedule" : "Schedule"}
-              </button>
-            </form>
+            <RescheduleCampaignForm
+              campaignId={id}
+              scheduledAt={campaign.scheduled_at}
+              action={scheduleCampaignAction}
+              buttonLabel={isScheduled ? "Update Schedule" : "Schedule"}
+            />
           )}
           {isScheduled && (
             <form
@@ -245,13 +230,13 @@ export default async function CampaignDetailPage({
         <div className="rounded-xl border border-gray-200 bg-white p-3">
           <p className="text-xs text-gray-500">{isScheduled ? "Scheduled For" : "Completed"}</p>
           <p className="mt-1 font-semibold text-gray-900 text-sm">
-            {isScheduled
-              ? campaign.scheduled_at
-                ? parseUTC(campaign.scheduled_at).toLocaleString("en-CA")
-                : "—"
-              : campaign.completed_at
-                ? parseUTC(campaign.completed_at).toLocaleString("en-CA")
-                : "—"}
+            {isScheduled ? (
+              <LocalDateTime iso={campaign.scheduled_at} />
+            ) : campaign.completed_at ? (
+              parseUTC(campaign.completed_at).toLocaleString("en-CA")
+            ) : (
+              "—"
+            )}
           </p>
         </div>
       </div>
