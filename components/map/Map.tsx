@@ -270,9 +270,8 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
 
   // Conference venue pin — separate from the org-marker effect above (its own
   // ref, own lifecycle) so it isn't wiped and rebuilt every time the org list
-  // changes, and reads immediately as "not another org dot": a teardrop pin
-  // shape instead of a circle, in a colour neither Member (red) nor Partner
-  // (blue) uses.
+  // changes. Renders the CSC conference brand mark instead of a plain dot,
+  // so it reads immediately as "not another org marker" by shape alone.
   useEffect(() => {
     if (!map.current || !mapLoaded) return;
 
@@ -281,11 +280,14 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     if (!conferencePin) return;
 
     // Draft conferences are only ever visible here because the viewer is an
-    // admin (fetchConferencePin gates this server-side) — amber instead of
-    // the site's usual near-black pin, matching DraftPreviewBanner's palette,
-    // so it reads as "not live yet" rather than looking like a real, public
-    // pin nobody else can see.
-    const pinColor = conferencePin.isDraftPreview ? "#B45309" : "#1A1A1A";
+    // admin (fetchConferencePin gates this server-side) — an amber ring +
+    // dimmed mark instead of the live drop-shadow treatment, matching
+    // DraftPreviewBanner's palette, so it reads as "not live yet" rather
+    // than looking like a real, public pin nobody else can see. Outer box
+    // size stays fixed either way so the marker's bottom anchor doesn't shift.
+    const wrapperStyle = conferencePin.isDraftPreview
+      ? "background:rgba(180,83,9,0.18);border-radius:9999px;box-shadow:0 0 0 2px #B45309,0 2px 4px rgba(0,0,0,0.25);"
+      : "filter:drop-shadow(0 2px 4px rgba(0,0,0,0.35));";
 
     const el = document.createElement("div");
     el.className = "conference-marker";
@@ -294,11 +296,12 @@ const Map = forwardRef<MapRef, MapProps>(function Map(
     // regular org markers, regardless of which attract slide is active.
     el.style.zIndex = "10";
     el.innerHTML = `
-      <svg width="44" height="59" viewBox="0 0 36 48" fill="none" xmlns="http://www.w3.org/2000/svg" style="filter: drop-shadow(0 2px 4px rgba(0,0,0,0.35))">
-        <path d="M18 0C8.06 0 0 8.06 0 18c0 13.5 18 30 18 30s18-16.5 18-30C36 8.06 27.94 0 18 0z" fill="${pinColor}"/>
-        <circle cx="18" cy="18" r="9" fill="white"/>
-        <path d="M13 16.5h10M13 19.5h10M15 13v-1.5M21 13v-1.5" stroke="${pinColor}" stroke-width="1.5" stroke-linecap="round"/>
-      </svg>
+      <div style="width:48px;height:52px;display:flex;align-items:center;justify-content:center;${wrapperStyle}">
+        <svg width="42" height="45" viewBox="0 0 49.77 53.59" xmlns="http://www.w3.org/2000/svg" style="${conferencePin.isDraftPreview ? "opacity:0.55;" : ""}">
+          <path fill="#e72a28" d="M22.1,6.03L1.07,31.23c-1.64,1.96-1.37,4.87.59,6.51l17.71,14.78c1.96,1.64,4.87,1.37,6.51-.59l21.03-25.2L22.1,6.03ZM21.27,40.95l-.38,1.33-2.78-3.23c-.85-.98-1.85-1.82-2.98-2.48l-3.68-2.16,1.24-.61c.42-.21.65-.67.57-1.13l-1.26-6.89,1.19.22c.14.03.28-.04.34-.17l1.51-3.14,2.1,2.15c.13.13.33.15.48.06l1.39-.88.31,4.15c.02.33.46.43.63.14l3.35-5.8.77,1.98c.09.22.34.34.56.25l4.23-1.57-.79,4.45c-.04.24.11.46.35.51l2.09.4-5.11,4.33c-.25.22-.08.63.25.59l4.14-.44-.62,1.52c-.07.17-.01.36.14.46l2.49,1.68-2.82,2.04c-.11.08-.16.23-.11.37l.43,1.13h-7.01c-.47,0-.88.3-1.01.75Z"/>
+          <path fill="#16345a" d="M49.77,21.41l-.85-17.07c-.13-2.66-2.51-4.65-5.15-4.3l-16.95,2.22c-1.14.15-2.18.72-2.91,1.6l-.7.83,24.81,20.7.7-.83c.73-.88,1.11-2,1.06-3.15ZM40.2,9.56c-1.29-1.08-1.46-3-.39-4.29s3-1.46,4.29-.39,1.47,3,.39,4.29-3,1.46-4.29.39Z"/>
+        </svg>
+      </div>
     `;
     const popup = new mapboxgl.Popup({ offset: [0, -48], closeButton: false }).setHTML(
       `<div style="font-size:13px;line-height:1.4">
