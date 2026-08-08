@@ -401,7 +401,7 @@ export default function MapExplore({
         o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
     return pool;
   }, [lensPool, compoundFilters, lens, checkedCategories, checkedSubcategories]);
 
@@ -578,7 +578,7 @@ export default function MapExplore({
             o.certifications?.includes(cert)
           );
         }
-        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
+        if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
         return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id), searchRanking: rankingMap.size > 0 ? rankingMap : undefined };
       }
 
@@ -592,7 +592,7 @@ export default function MapExplore({
       );
       // Apply compound filters even on search results
       if (compoundFilters.province) pool = pool.filter((o) => matchesProvinceFilter(o.province, compoundFilters.province!));
-      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
+      if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
       return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
     }
 
@@ -675,7 +675,7 @@ export default function MapExplore({
         o.certifications?.includes(cert)
       );
     }
-    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.certifications?.includes("CANCOLL"));
+    if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
   }, [organizations, members, partners, lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
