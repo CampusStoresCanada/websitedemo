@@ -57,9 +57,16 @@ export function applyEmailSafeRichTextStyles(html: string): string {
 function renderButton(block: Extract<ContentBlock, { type: "button" }>): string {
   const align = block.align ?? "center";
   const color = block.color || BRAND_RED;
+  // The legacy align="..." attribute below is what Outlook desktop (the
+  // Word rendering engine) actually honours, but everywhere else an inline
+  // style attribute always wins over a presentational hint like align — a
+  // flat "margin:0" here was silently overriding align="center" back to
+  // flush-left in every modern client. Centering a block-level <table>
+  // needs margin:0 auto; "right" needs the left margin pushed to auto too.
+  const tableMargin = align === "center" ? "0 auto" : align === "right" ? "0 0 0 auto" : "0";
   return `
 <div style="text-align:${align};margin:16px 0;">
-  <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="${align}" style="margin:0;">
+  <table role="presentation" border="0" cellpadding="0" cellspacing="0" align="${align}" style="margin:${tableMargin};">
     <tr>
       <td style="border-radius:6px;background-color:${escAttr(color)};">
         <a href="${escAttr(block.href)}" target="_blank" style="display:inline-block;padding:12px 28px;font-family:${FONT};font-size:15px;font-weight:600;color:#ffffff;text-decoration:none;border-radius:6px;">${block.text}</a>
