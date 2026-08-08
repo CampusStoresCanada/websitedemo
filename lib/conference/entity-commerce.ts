@@ -139,9 +139,16 @@ export function summarizeAccess(entityId: string, byId: Map<string, BuildEntity>
   const byDate = <T extends { id: string }>(items: T[]) =>
     [...items].sort((a, b) => whenDate(a.id, byId).localeCompare(whenDate(b.id, byId)));
 
+  // Several session entities can share the meeting day (Get Organized,
+  // Meeting Block 1-5, Move-in - Tuesday, ...) — meetingSession is just
+  // whichever one represents that day's name in the summary line, so
+  // tradeShowDays must exclude every session on that day, not only the one
+  // object meetingSession happens to point at (that left sibling meeting
+  // blocks in tradeShowDays, leaking raw scheduler entities like "Meeting
+  // Block 1" into the public "what's included" bullet list).
   const sessions = byDate(things.filter((t) => t.kind === "session"));
   const meetingSession = sessions.find((s) => isMeetingDay(s.id, byId));
-  const tradeShowSessions = sessions.filter((s) => s !== meetingSession);
+  const tradeShowSessions = sessions.filter((s) => !isMeetingDay(s.id, byId));
 
   const exhibitorCount = [...byId.values()].filter((e) => e.kind === "booth" && e.isForSale).length;
 
