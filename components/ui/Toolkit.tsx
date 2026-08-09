@@ -14,7 +14,7 @@ import { captureAndCreateSnapshot, shareInternally, searchMembersForShare, type 
 import { submitExplainRequest } from "@/lib/actions/explain-requests";
 import { detectPageContext } from "@/lib/utils/page-context";
 import { findElementBySelector, findElementByText } from "@/lib/utils/dom-highlight";
-import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV, exportPartnerMarketCSV } from "@/lib/actions/export-page";
+import { exportOrgContacts, exportOrgInfo, exportEventICS, exportEventAttendees, canExportEventAttendees, exportMembersDirectory, exportPartnersDirectory, exportMemberBuyersCSV, exportPartnerMarketCSV, exportFullMemberDirectoryCSV } from "@/lib/actions/export-page";
 import { checkNudgeCooldown, notifyMembersWithoutProcurement } from "@/lib/actions/partner-market";
 import { peekReviewToken, consumeReviewToken } from "@/lib/actions/content-change-tokens";
 import { approvePendingChange, rejectPendingChange } from "@/lib/actions/pending-content-changes";
@@ -2853,6 +2853,12 @@ function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs 
           description: "One row per member that carries your category — buyer name, email, phone, buying window",
           icon: "📇",
           action: () => run("My Buyer Contacts", () => exportMemberBuyersCSV()),
+        },
+        {
+          label: "Full Member Directory CSV",
+          description: "Every visible member and every contact on file there — one row per person. Anyone who's hidden their info is excluded, not just blanked.",
+          icon: "📚",
+          action: () => run("Full Member Directory CSV", () => exportFullMemberDirectoryCSV()),
         },
       ];
     } else {

@@ -2,6 +2,7 @@
 
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
 
 /** Export contacts for an org as CSV rows. */
 export async function exportOrgContacts(slug: string): Promise<{
@@ -145,8 +146,11 @@ export async function exportMembersDirectory(): Promise<{
 
   const { data: orgs, error } = await supabase
     .from("organizations")
-    .select("name, city, province, website, organization_type")
-    .eq("organization_type", "member")
+    .select("name, city, province, website, type")
+    .eq("type", "Member")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .is("archived_at", null)
+    .eq("is_test", false)
     .order("name");
 
   if (error) return { error: "Failed to load directory" };
@@ -157,7 +161,7 @@ export async function exportMembersDirectory(): Promise<{
       o.name ?? "",
       o.city ?? "",
       o.province ?? "",
-      o.organization_type ?? "",
+      o.type ?? "",
       o.website ?? "",
     ]),
   ];
@@ -180,7 +184,10 @@ export async function exportPartnersDirectory(): Promise<{
   const { data: orgs, error } = await supabase
     .from("organizations")
     .select("name, city, province, website, primary_category")
-    .eq("organization_type", "partner")
+    .eq("type", "Vendor Partner")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .is("archived_at", null)
+    .eq("is_test", false)
     .order("name");
 
   if (error) return { error: "Failed to load directory" };
@@ -198,6 +205,98 @@ export async function exportPartnersDirectory(): Promise<{
 
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
   return { csv, filename: "csc_partners.csv" };
+}
+
+/**
+ * Partner-only export: the full visible member directory (same "visible"
+ * definition as the public /members page — active/reactivated, not
+ * archived, not a test org), one row per PERSON at each member — every
+ * non-hidden, non-archived contact, not just the primary. Unlike
+ * exportMemberBuyersCSV (scoped to the partner's own category), this is the
+ * literal "give me everyone" list a partner asked for.
+ *
+ * A member with zero eligible contacts (all hidden, or none on file) still
+ * gets exactly one row with blank contact fields — organizations have no
+ * visibility opt-out of their own directory listing, only individual people
+ * do, so the org stays discoverable even when every person there has opted
+ * out. Hidden contacts are simply never in the pool a row can be built from.
+ */
+export async function exportFullMemberDirectoryCSV(): Promise<{
+  csv?: string;
+  filename?: string;
+  error?: string;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { error: "Not authenticated" };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const userSb = auth.ctx.supabase as any;
+  const { data: memberships } = await userSb
+    .from("user_organizations")
+    .select("role, organization:organizations(type)")
+    .eq("user_id", auth.ctx.userId)
+    .eq("status", "active");
+
+  const isPartnerAdmin = (memberships ?? []).some(
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (m: any) => m.organization?.type === "Vendor Partner" && m.role === "org_admin"
+  );
+  if (!isPartnerAdmin) return { error: "Partner org admin access required" };
+
+  // Admin client: this crosses into contacts on orgs the partner has no
+  // membership in, which is exactly what a directory export needs to do —
+  // the RLS policy on contacts (correctly) only covers your own org.
+  const db = createAdminClient();
+
+  const { data: orgs, error: orgsError } = await db
+    .from("organizations")
+    .select("id, name, city, province, website")
+    .eq("type", "Member")
+    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .is("archived_at", null)
+    .eq("is_test", false)
+    .order("name");
+
+  if (orgsError) return { error: "Failed to load directory" };
+  if (!orgs || orgs.length === 0) return { error: "No visible members found." };
+
+  const orgIds = orgs.map((o) => o.id);
+  const { data: contacts } = await db
+    .from("contacts")
+    .select("organization_id, name, role_title, work_email, email, work_phone_number, phone")
+    .in("organization_id", orgIds)
+    .is("archived_at", null)
+    .not("hidden", "eq", true)
+    .order("name");
+
+  const contactsByOrgId = new Map<string, { name: string; roleTitle: string; email: string; phone: string }[]>();
+  for (const c of contacts ?? []) {
+    if (!c.organization_id) continue;
+    const list = contactsByOrgId.get(c.organization_id) ?? [];
+    list.push({
+      name: c.name ?? "",
+      roleTitle: c.role_title ?? "",
+      email: c.work_email || c.email || "",
+      phone: c.work_phone_number || c.phone || "",
+    });
+    contactsByOrgId.set(c.organization_id, list);
+  }
+
+  const rows = [["Name", "City", "Province", "Website", "Contact Name", "Contact Title", "Contact Email", "Contact Phone"]];
+  for (const o of orgs) {
+    const orgContacts = contactsByOrgId.get(o.id) ?? [];
+    const base = [o.name ?? "", o.city ?? "", o.province ?? "", o.website ?? ""];
+    if (orgContacts.length === 0) {
+      rows.push([...base, "", "", "", ""]);
+      continue;
+    }
+    for (const c of orgContacts) {
+      rows.push([...base, c.name, c.roleTitle, c.email, c.phone]);
+    }
+  }
+
+  const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
+  return { csv, filename: `csc_members_full_${new Date().toISOString().slice(0, 10)}.csv` };
 }
 
 /**
