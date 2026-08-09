@@ -23,6 +23,7 @@ function ent(
     needsDefinition: false,
     inventory: null,
     qboItemId: null,
+    salesWindow: null,
     tierPrices: {},
     refs: refs.map<EntityRefView>(([role, toEntityId, toName, toKind]) => ({
       role,

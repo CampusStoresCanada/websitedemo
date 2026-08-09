@@ -153,6 +153,8 @@ const CONFERENCE_UPDATE_FIELDS = [
   "registration_close_at",
   "on_sale_at",
   "board_decision_at",
+  "booth_sales_general_open_at",
+  "booth_sales_sponsor_open_at",
 ] as const;
 
 export async function updateConference(

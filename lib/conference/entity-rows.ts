@@ -25,6 +25,7 @@ export type RawEntityRow = {
   inventory: number | null;
   tier_prices: unknown;
   qbo_item_id: string | null;
+  sales_window: string | null;
 };
 
 export type RawRefRow = {
@@ -36,7 +37,7 @@ export type RawRefRow = {
 
 /** The column list every entity read selects — kept beside the row type. */
 export const ENTITY_SELECT =
-  "id, kind, name, is_for_sale, price_cents, currency, attributes, needs_definition, inventory, tier_prices, qbo_item_id";
+  "id, kind, name, is_for_sale, price_cents, currency, attributes, needs_definition, inventory, tier_prices, qbo_item_id, sales_window";
 
 /** Build the flat entity graph (entities + resolved refs) from raw rows. */
 export function buildEntityGraph(
@@ -72,6 +73,7 @@ export function buildEntityGraph(
     inventory: r.inventory,
     tierPrices: (r.tier_prices as Record<string, number>) ?? {},
     qboItemId: r.qbo_item_id,
+    salesWindow: (r.sales_window as "member" | "vendor" | null) ?? null,
     refs: refsByFrom.get(r.id) ?? [],
   }));
 }

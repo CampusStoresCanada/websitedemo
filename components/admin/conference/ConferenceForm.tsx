@@ -48,6 +48,9 @@ export default function ConferenceForm({
   const [endDate, setEndDate] = useState(conference?.end_date ?? "");
   const [registrationOpenAt, setRegistrationOpenAt] = useState(conference?.registration_open_at ?? "");
   const [registrationCloseAt, setRegistrationCloseAt] = useState(conference?.registration_close_at ?? "");
+  const [boothSalesGeneralOpenAt, setBoothSalesGeneralOpenAt] = useState(
+    conference?.booth_sales_general_open_at ?? ""
+  );
   const [enableOverride, setEnableOverride] = useState(false);
   const [overrideReason, setOverrideReason] = useState("");
   const [placesReady, setPlacesReady] = useState(false);
@@ -140,6 +143,7 @@ export default function ConferenceForm({
       end_date: endDate || null,
       registration_open_at: registrationOpenAt || null,
       registration_close_at: registrationCloseAt || null,
+      booth_sales_general_open_at: boothSalesGeneralOpenAt || null,
     };
 
     const result = isEdit
@@ -260,12 +264,18 @@ export default function ConferenceForm({
             <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
           </div>
           <div>
-            <label className="block text-xs text-gray-500 mb-1">Registration Opens</label>
+            <label className="block text-xs text-gray-500 mb-1">Member Registration Opens</label>
             <input type="datetime-local" value={registrationOpenAt ? utcToLocalInput(registrationOpenAt) : ""} onChange={(e) => setRegistrationOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+            <p className="mt-1 text-[11px] text-gray-400">Auto-opens every entity tagged "Member" sales window in the Build tab, on the minute.</p>
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Closes</label>
             <input type="datetime-local" value={registrationCloseAt ? utcToLocalInput(registrationCloseAt) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Vendor / Booth Sales Open</label>
+            <input type="datetime-local" value={boothSalesGeneralOpenAt ? utcToLocalInput(boothSalesGeneralOpenAt) : ""} onChange={(e) => setBoothSalesGeneralOpenAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+            <p className="mt-1 text-[11px] text-gray-400">Auto-opens every entity tagged "Vendor" sales window (booths, exhibitor staff reg) — independent from the member date above.</p>
           </div>
         </div>
       </fieldset>

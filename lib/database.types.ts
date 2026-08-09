@@ -2437,6 +2437,7 @@ export type Database = {
           needs_definition: boolean
           price_cents: number | null
           qbo_item_id: string | null
+          sales_window: string | null
           tier_prices: Json
           updated_at: string
         }
@@ -2453,6 +2454,7 @@ export type Database = {
           needs_definition?: boolean
           price_cents?: number | null
           qbo_item_id?: string | null
+          sales_window?: string | null
           tier_prices?: Json
           updated_at?: string
         }
@@ -2469,6 +2471,7 @@ export type Database = {
           needs_definition?: boolean
           price_cents?: number | null
           qbo_item_id?: string | null
+          sales_window?: string | null
           tier_prices?: Json
           updated_at?: string
         }

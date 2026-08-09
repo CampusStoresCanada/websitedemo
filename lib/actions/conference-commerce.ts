@@ -317,7 +317,7 @@ function minimalOfferEntity(input: {
     id: input.id, kind: input.kind, name: input.name, isForSale: true,
     priceCents: input.priceCents, currency: input.currency, attributes: {},
     needsDefinition: false, inventory: input.inventory, tierPrices: input.tierPrices,
-    qboItemId: null, refs: input.refs,
+    qboItemId: null, salesWindow: null, refs: input.refs,
   };
 }
 

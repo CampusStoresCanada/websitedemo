@@ -141,7 +141,7 @@ export default function BuildWorkspace({
     upsertLocal({
       id: res.data.id, kind, name: name.trim(), isForSale: false, priceCents: null,
       currency: "CAD", attributes: attributes ?? {}, needsDefinition: true, inventory: null, tierPrices: {},
-      qboItemId: null, refs: [],
+      qboItemId: null, salesWindow: null, refs: [],
     });
     return { id: res.data.id, name: name.trim(), kind };
   }
@@ -154,7 +154,7 @@ export default function BuildWorkspace({
       upsertLocal({
         id, kind: type?.kind ?? "thing", name, isForSale: false, priceCents: null,
         currency: "CAD", attributes: {}, needsDefinition: false, inventory: null, tierPrices: {},
-        qboItemId: null,
+        qboItemId: null, salesWindow: null,
         refs: [{ toEntityId: typeId, toName: type?.name ?? "", toKind: type?.kind ?? "", role: "instance_of", quantity: null }],
       });
     }
@@ -701,6 +701,7 @@ function ThingForm({
     return [];
   });
   const [isForSale, setIsForSale] = useState(editing?.isForSale ?? false);
+  const [salesWindow, setSalesWindow] = useState<"member" | "vendor" | null>(editing?.salesWindow ?? null);
   const [qboItemId, setQboItemId] = useState<string | null>(editing?.qboItemId ?? null);
   const [price, setPrice] = useState(editing?.priceCents != null ? (editing.priceCents / 100).toString() : "");
   const [inventory, setInventory] = useState(editing?.inventory != null ? String(editing.inventory) : "");
@@ -830,6 +831,11 @@ function ThingForm({
       }
     }
 
+    // Unlike qboItemId, salesWindow is meaningful precisely when the item is
+    // NOT yet for sale (it's what the cron will later flip on) — gate on
+    // `sellable` (the kind can ever be sold), not `finalSale` (is right now).
+    const finalSalesWindow = sellable ? salesWindow : null;
+
     const connRefs = conns
       .filter((c) => c.target)
       .map((c) => ({
@@ -848,13 +854,14 @@ function ThingForm({
       const res = await updateEntity(editing.id, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
         attributes, needsDefinition: false, inventory: finalInventory, tierPrices: finalTierPrices,
-        qboItemId: finalSale ? qboItemId : null,
+        qboItemId: finalSale ? qboItemId : null, salesWindow: finalSalesWindow,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
     } else {
       const res = await createEntity(conferenceId, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice, attributes,
         inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
+        salesWindow: finalSalesWindow,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
       id = res.data.id;
@@ -888,7 +895,7 @@ function ThingForm({
       id, kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
       currency: editing?.currency ?? "CAD", attributes, needsDefinition: false,
       inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
-      refs: viewRefs,
+      salesWindow: finalSalesWindow, refs: viewRefs,
     });
   }
 
@@ -1015,6 +1022,25 @@ function ThingForm({
             <input type="checkbox" checked={isForSale} onChange={(e) => setIsForSale(e.target.checked)} />
             For sale (an Offer)
           </label>
+          <div className="mt-2 space-y-1">
+            <label className="flex items-center gap-1.5 text-xs text-gray-600">
+              Sales window
+              <select
+                value={salesWindow ?? ""}
+                onChange={(e) => setSalesWindow((e.target.value || null) as "member" | "vendor" | null)}
+                className={inputClass}
+              >
+                <option value="">Manual only — toggle by hand</option>
+                <option value="member">Member — opens with conference registration_open_at</option>
+                <option value="vendor">Vendor — opens with conference booth_sales_general_open_at</option>
+              </select>
+            </label>
+            <p className="text-[11px] text-gray-500">
+              {isForSale
+                ? "Set here so the conference-sales-open cron knows this is already-on item belongs to; harmless once it's already for sale."
+                : "Not for sale yet — pick a window and the conference-sales-open cron will flip \"For sale\" on automatically at that scheduled time. Leave Manual to keep controlling it by hand."}
+            </p>
+          </div>
           {isForSale && (
             <div className="mt-2 space-y-2 rounded-md border border-gray-100 bg-gray-50 p-2">
               <QBItemPicker

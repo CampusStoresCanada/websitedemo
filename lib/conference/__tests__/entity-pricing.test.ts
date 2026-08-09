@@ -6,7 +6,7 @@ import type { BuildEntity, EntityRefView } from "../../actions/conference-entiti
 function thing(p: Partial<BuildEntity> & { id: string; kind: string; name: string }): BuildEntity {
   return {
     isForSale: false, priceCents: null, currency: "CAD", attributes: {}, needsDefinition: false,
-    inventory: null, tierPrices: {}, qboItemId: null, refs: [], ...p,
+    inventory: null, tierPrices: {}, qboItemId: null, salesWindow: null, refs: [], ...p,
   };
 }
 const ref = (toEntityId: string, toName: string, toKind: string, role: string): EntityRefView =>

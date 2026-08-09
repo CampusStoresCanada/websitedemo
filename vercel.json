@@ -1,6 +1,10 @@
 {
   "crons": [
     {
+      "path": "/api/cron/conference-sales-open",
+      "schedule": "* * * * *"
+    },
+    {
       "path": "/api/cron/renewal-reminders",
       "schedule": "0 11 * * *"
     },

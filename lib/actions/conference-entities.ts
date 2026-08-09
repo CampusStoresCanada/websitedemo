@@ -52,6 +52,11 @@ export type BuildEntity = {
   /** QuickBooks item this entity's sales post to — usually set on the type
    * and inherited by instances (see effectiveQboItemId in entity-graph.ts). */
   qboItemId: string | null;
+  /** Which scheduled open time the conference-sales-open cron gates this
+   * entity's is_for_sale flip on — 'member' (registration_open_at),
+   * 'vendor' (booth_sales_general_open_at), or null (manual only, no
+   * automated scheduling). See lib/conference/sales-open.ts. */
+  salesWindow: "member" | "vendor" | null;
   refs: EntityRefView[];
 };
 
@@ -103,6 +108,7 @@ export async function createEntity(
     inventory?: number | null;
     tierPrices?: Record<string, number>;
     qboItemId?: string | null;
+    salesWindow?: "member" | "vendor" | null;
   }
 ): Promise<Result<{ id: string }>> {
   const auth = await requireAdmin();
@@ -125,6 +131,7 @@ export async function createEntity(
       inventory: input.inventory ?? null,
       tier_prices: input.tierPrices ?? {},
       qbo_item_id: input.qboItemId ?? null,
+      sales_window: input.salesWindow ?? null,
     })
     .select("id")
     .single();
@@ -144,6 +151,7 @@ export async function updateEntity(
     inventory?: number | null;
     tierPrices?: Record<string, number>;
     qboItemId?: string | null;
+    salesWindow?: "member" | "vendor" | null;
   }
 ): Promise<Result<null>> {
   const auth = await requireAdmin();
@@ -160,6 +168,7 @@ export async function updateEntity(
   if (input.inventory !== undefined) patch.inventory = input.inventory;
   if (input.tierPrices !== undefined) patch.tier_prices = input.tierPrices;
   if (input.qboItemId !== undefined) patch.qbo_item_id = input.qboItemId;
+  if (input.salesWindow !== undefined) patch.sales_window = input.salesWindow;
 
   const { error } = await db.from("conference_entities").update(patch).eq("id", entityId);
   if (error) return { success: false, error: error.message };
@@ -847,7 +856,7 @@ export async function getBuildWorkspace(conferenceId: string): Promise<Result<Bu
   const [entitiesRes, refsRes, purchasesRes, linkedEventsRes] = await Promise.all([
     db
       .from("conference_entities")
-      .select("id, kind, name, is_for_sale, price_cents, currency, attributes, needs_definition, inventory, tier_prices, qbo_item_id")
+      .select(ENTITY_SELECT)
       .eq("conference_id", conferenceId)
       .order("name"),
     db
