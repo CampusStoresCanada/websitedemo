@@ -324,7 +324,7 @@ export default function MapAttract({
 
       {/* Story card — top right */}
       {activeSpecial ? (
-        <div className="absolute top-6 right-6 z-20 w-[min(360px,calc(100vw-3rem))] rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl p-5">
+        <div className="hidden md:block absolute top-6 right-6 z-20 w-[min(360px,calc(100vw-3rem))] rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs uppercase tracking-wide text-gray-500">
               {SPECIAL_LABELS[activeSpecial.kind]}
@@ -439,7 +439,7 @@ export default function MapAttract({
           )}
         </div>
       ) : story ? (
-        <div className="absolute top-6 right-6 z-20 w-[min(360px,calc(100vw-3rem))] rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl p-5">
+        <div className="hidden md:block absolute top-6 right-6 z-20 w-[min(360px,calc(100vw-3rem))] rounded-2xl bg-white/95 backdrop-blur-sm border border-gray-200 shadow-xl p-5">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs uppercase tracking-wide text-gray-500">
               {STORY_LABELS[story.storyType] ?? story.storyType.replaceAll("_", " ")}
