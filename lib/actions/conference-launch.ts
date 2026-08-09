@@ -4,7 +4,9 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getConferenceCatalogReadiness } from "@/lib/actions/conference-entities";
 import {
+  computeAnnounceReadiness,
   computeLaunchReadiness,
+  type AnnounceReadiness,
   type LaunchReadiness,
   type LaunchReadinessInput,
 } from "@/lib/conference/launch-readiness";
@@ -63,13 +65,32 @@ export async function loadLaunchReadinessInput(
   };
 }
 
-export async function getConferenceLaunchReadiness(
+export type ConferenceStatusReadiness = {
+  announce: AnnounceReadiness;
+  launch: LaunchReadiness;
+};
+
+/**
+ * The one readiness loader for the conference lifecycle — covers both gated
+ * transitions (draft → announced, announced → registration_open) from a
+ * single DB round-trip. Consumed by ConferenceLifecycle, the single control
+ * component shared by the Overview and Status admin pages, and mirrors
+ * exactly what performConferenceStatusTransition itself gates on — one
+ * model, no drift between what the UI shows and what the server allows.
+ */
+export async function getConferenceStatusReadiness(
   conferenceId: string
-): Promise<Result<LaunchReadiness>> {
+): Promise<Result<ConferenceStatusReadiness>> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
 
   const input = await loadLaunchReadinessInput(conferenceId);
   if (!input.success) return input;
-  return { success: true, data: computeLaunchReadiness(input.data) };
+  return {
+    success: true,
+    data: {
+      announce: computeAnnounceReadiness(input.data),
+      launch: computeLaunchReadiness(input.data),
+    },
+  };
 }
