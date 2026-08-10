@@ -224,7 +224,15 @@ export async function activateMembershipRenewal(
     return { success: false, error: updateError.message };
   }
 
-  if (org.membership_status === "grace" || org.membership_status === "locked") {
+  if (org.membership_status === "grace" || org.membership_status === "locked" || org.membership_status === "approved") {
+    // "approved" here is a first-time activation, not a renewal — an org
+    // whose partnership/membership application was approved but who hasn't
+    // paid yet. createPartnershipInvoice/createMembershipInvoice set a
+    // billing period on that first invoice same as any renewal, so this
+    // webhook path is what actually moves them into "active" once it's
+    // paid. Without this branch, the expiry date got set correctly but the
+    // org stayed stuck on "approved" forever — masked as if logged out,
+    // with no way for its own admin to edit the profile.
     const nextStatus = org.membership_status === "locked" ? "reactivated" : "active";
     // Both activation sources are ultimately driven by a Stripe webhook
     // (the invoice-paid event, or the conference-checkout-session-completed
@@ -236,7 +244,7 @@ export async function activateMembershipRenewal(
       nextStatus,
       "stripe_webhook",
       null,
-      "Renewal payment received"
+      org.membership_status === "approved" ? "First payment received" : "Renewal payment received"
     );
     if (!transitionResult.success) {
       // Don't fail the whole activation over a status transition — the
