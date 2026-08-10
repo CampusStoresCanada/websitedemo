@@ -420,6 +420,19 @@ export default async function ConferenceEditionHubPage({
               <div className="max-w-6xl mx-auto space-y-8 px-6 py-12">
                 {needsLegalBanner}
                 <div className="space-y-8">
+                  <div className="rounded-2xl border border-blue-200 bg-blue-50 p-5">
+                    <h3 className="text-sm font-semibold text-blue-900">Already a CSC member?</h3>
+                    <p className="mt-1 text-sm text-blue-800">
+                      If you&apos;re a member, sign in to see all the proper pricing and options — what&apos;s
+                      shown below is the non-member rate.
+                    </p>
+                    <Link
+                      href={`/login?next=${encodeURIComponent(`/conference/${year}/${edition}`)}`}
+                      className="mt-3 inline-flex h-9 items-center rounded-full bg-[#163D6D] px-5 text-sm font-medium text-white transition-all hover:bg-[#0F2C50]"
+                    >
+                      Sign in instead →
+                    </Link>
+                  </div>
                   {nonMemberDayPasses.length > 0 && (
                     <div>
                       <h3 className="text-lg font-semibold text-[#1A1A1A]">Attend without joining</h3>
