@@ -8,6 +8,7 @@ import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
 import {
   listConferenceOffers,
   getPublicConferenceFloorPlan,
+  getFloorPlanForVisitor,
   getNonMemberDayPasses,
   type ConferenceFloorPlan,
 } from "@/lib/actions/conference-entities";
@@ -31,6 +32,7 @@ import MemberValueProps from "@/components/conference/MemberValueProps";
 import DayPassOfferCard from "@/components/conference/DayPassOfferCard";
 import OffersClient from "./offers/offers-client";
 import ExhibitCheckoutForm from "./exhibit/exhibit-checkout-form";
+import FloorPlanViewer from "./floor-plan/floor-plan-viewer";
 
 export const metadata = { title: "Conference Hub" };
 
@@ -183,6 +185,10 @@ export default async function ConferenceEditionHubPage({
   // anonymous visitor exploring the vendor tab. Global admins get the
   // internal admin framing instead.
   let anonymousBooths: Array<{ id: string; name: string; priceCents: number }> = [];
+  // Fallback for when no booths are for sale yet — the map itself (dimmed,
+  // unclickable) is still worth showing rather than a blank "no booths"
+  // message, same reasoning as the known-org path in OffersClient.
+  let anonymousFloorPlan: ConferenceFloorPlan | null = null;
   if (!knownOrg && !isGlobalAdminViewer) {
     const { data: purchases } = await db.from("entity_purchases").select("offer_entity_id").eq("conference_id", conference.id);
     const claimedIds = new Set((purchases ?? []).map((p) => p.offer_entity_id).filter(Boolean));
@@ -196,6 +202,11 @@ export default async function ConferenceEditionHubPage({
     anonymousBooths = (boothRows ?? [])
       .filter((b) => !claimedIds.has(b.id))
       .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
+
+    if (anonymousBooths.length === 0) {
+      const floorResult = await getFloorPlanForVisitor(conference.id);
+      anonymousFloorPlan = floorResult.success ? floorResult.data : null;
+    }
   }
 
   const CONNECTED_BOOTH_PRICE_CENTS = 600000;
@@ -490,17 +501,33 @@ export default async function ConferenceEditionHubPage({
                     conferenceEndDate={conference.end_date ?? ""}
                     audiences={["Partner"]}
                   />
-                  {anonymousBooths.length === 0 ? (
-                    <div className="rounded-2xl border border-[#E5E5E5] bg-white p-6 text-sm text-[#6B6B6B] shadow-sm">
-                      No booths are currently available for this conference.
-                    </div>
-                  ) : (
+                  {anonymousBooths.length > 0 ? (
                     <ExhibitCheckoutForm
                       conferenceId={conference.id}
                       conferenceYear={conference.year}
                       conferenceEdition={conference.edition_code}
                       booths={anonymousBooths}
                     />
+                  ) : anonymousFloorPlan?.floorPlanUrl && anonymousFloorPlan.booths.length > 0 ? (
+                    <div className="space-y-3">
+                      <div>
+                        <h2 className="text-base font-semibold text-[#1A1A1A]">Choose a Booth</h2>
+                        <p className="text-sm text-[#6B6B6B]">Booth sales haven&apos;t opened yet — take a look around</p>
+                      </div>
+                      <FloorPlanViewer
+                        conferenceId={conference.id}
+                        conferenceYear={year}
+                        conferenceEdition={edition}
+                        organizationId={null}
+                        floorPlanUrl={anonymousFloorPlan.floorPlanUrl}
+                        booths={anonymousFloorPlan.booths}
+                        sponsorshipAnchorId="find-your-level"
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-[#E5E5E5] bg-white p-6 text-sm text-[#6B6B6B] shadow-sm">
+                      No booths are currently available for this conference.
+                    </div>
                   )}
                 </div>
                 {footerLinks}

@@ -29,7 +29,10 @@ export default function OffersClient({
   /** If set, the inline floor plan's legend links down to the tier comparison section with this id. */
   sponsorshipAnchorId?: string;
 }) {
-  if (initialOffers.length === 0) {
+  // Even with nothing currently purchasable, the floor plan itself is still
+  // worth showing (dimmed, unclickable booths) — sales opening later doesn't
+  // mean there's nothing to look at yet.
+  if (initialOffers.length === 0 && !floorPlan?.floorPlanUrl) {
     return (
       <div className="rounded-lg border border-gray-200 p-8 text-center">
         <h2 className="text-lg font-semibold text-gray-900">Nothing on sale yet</h2>
@@ -60,18 +63,25 @@ export default function OffersClient({
   const registrationOffers = otherOffers.filter((o) => o.kind === "registration");
   const addOnOffers = otherOffers.filter((o) => o.kind !== "registration");
   const boothsEligible = booths.some((b) => b.eligible);
-  const boothsAvailable = booths.filter((b) => !b.soldOut && b.eligible).length;
   const boothIneligibleReason = booths.find((b) => !b.eligible)?.ineligibleReason ?? null;
   const boothPrices = booths.map((b) => b.unitPriceCents);
   const minBoothPrice = boothPrices.length ? Math.min(...boothPrices) : null;
   const maxBoothPrice = boothPrices.length ? Math.max(...boothPrices) : null;
 
   const showInlineMap = Boolean(floorPlan?.floorPlanUrl);
+  // The map itself is sourced from floorPlan.booths (every booth entity,
+  // regardless of is_for_sale) — not the `booths` list above, which comes
+  // from listConferenceOffers and only ever includes currently-for-sale
+  // entities. Booth sales open on their own schedule (see sales_window), so
+  // the map needs to render, dimmed and unclickable, before that window
+  // opens rather than disappearing entirely.
+  const floorPlanBooths = floorPlan?.booths ?? [];
+  const boothsAvailable = floorPlanBooths.filter((b) => b.status === "available").length;
 
   return (
     <section className="space-y-4">
-      {booths.length > 0 ? (
-        showInlineMap ? (
+      {showInlineMap ? (
+        floorPlanBooths.length > 0 ? (
           // Inline floor plan for partners / admins.
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -79,14 +89,14 @@ export default function OffersClient({
                 <h2 className="text-base font-semibold text-gray-900">Choose a Booth</h2>
                 <p className="text-sm text-gray-500">
                   {boothsAvailable > 0
-                    ? `${boothsAvailable} of ${booths.length} available · ${
+                    ? `${boothsAvailable} of ${floorPlanBooths.length} available · ${
                         minBoothPrice != null && maxBoothPrice != null
                           ? minBoothPrice === maxBoothPrice
                             ? formatCents(minBoothPrice)
                             : `from ${formatCents(minBoothPrice)}`
                           : ""
                       }`
-                    : "All booths are currently sold or reserved"}
+                    : "Booth sales haven't opened yet — take a look around"}
                 </p>
               </div>
               <Link
@@ -102,48 +112,48 @@ export default function OffersClient({
               conferenceEdition={conferenceEdition}
               organizationId={organizationId}
               floorPlanUrl={floorPlan!.floorPlanUrl!}
-              booths={floorPlan!.booths}
+              booths={floorPlanBooths}
               myCartOfferIds={myCartOfferIds}
               sponsorshipAnchorId={sponsorshipAnchorId}
             />
           </div>
-        ) : (
-          // Summary card + link for everyone else.
-          <div className="rounded-xl border border-gray-200 bg-white p-4">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Booth</div>
-                <h3 className="text-base font-semibold text-gray-900">Exhibit at a Booth</h3>
-                <p className="mt-1 text-sm text-gray-600">
-                  {!boothsEligible
-                    ? (boothIneligibleReason ?? "Not eligible to purchase a booth.")
-                    : boothsAvailable > 0
-                      ? `${boothsAvailable} of ${booths.length} booths available`
-                      : "All booths are currently sold or reserved"}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <div className="text-lg font-semibold text-gray-900">
-                  {minBoothPrice != null && maxBoothPrice != null
-                    ? minBoothPrice === maxBoothPrice
-                      ? formatCents(minBoothPrice)
-                      : `From ${formatCents(minBoothPrice)}`
-                    : null}
-                </div>
+        ) : null
+      ) : booths.length > 0 ? (
+        // Summary card + link for everyone else.
+        <div className="rounded-xl border border-gray-200 bg-white p-4">
+          <div className="flex items-start justify-between gap-2">
+            <div className="min-w-0">
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">Booth</div>
+              <h3 className="text-base font-semibold text-gray-900">Exhibit at a Booth</h3>
+              <p className="mt-1 text-sm text-gray-600">
+                {!boothsEligible
+                  ? (boothIneligibleReason ?? "Not eligible to purchase a booth.")
+                  : boothsAvailable > 0
+                    ? `${boothsAvailable} of ${booths.length} booths available`
+                    : "All booths are currently sold or reserved"}
+              </p>
+            </div>
+            <div className="shrink-0 text-right">
+              <div className="text-lg font-semibold text-gray-900">
+                {minBoothPrice != null && maxBoothPrice != null
+                  ? minBoothPrice === maxBoothPrice
+                    ? formatCents(minBoothPrice)
+                    : `From ${formatCents(minBoothPrice)}`
+                  : null}
               </div>
             </div>
-            {boothsEligible ? (
-              <div className="mt-4">
-                <Link
-                  href={`/conference/${conferenceYear}/${conferenceEdition}/floor-plan?org=${organizationId}`}
-                  className="block w-full rounded-md bg-[#EE2A2E] px-4 py-2 text-center text-sm font-medium text-white hover:bg-[#b50001]"
-                >
-                  View the floor plan to choose your spot →
-                </Link>
-              </div>
-            ) : null}
           </div>
-        )
+          {boothsEligible ? (
+            <div className="mt-4">
+              <Link
+                href={`/conference/${conferenceYear}/${conferenceEdition}/floor-plan?org=${organizationId}`}
+                className="block w-full rounded-md bg-[#EE2A2E] px-4 py-2 text-center text-sm font-medium text-white hover:bg-[#b50001]"
+              >
+                View the floor plan to choose your spot →
+              </Link>
+            </div>
+          ) : null}
+        </div>
       ) : null}
 
       {registrationOffers.length > 0 || dayPasses.length > 0 ? (
