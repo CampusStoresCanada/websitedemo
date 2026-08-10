@@ -417,12 +417,14 @@ export function PartnerApplicationForm({
         {isLoading ? "Submitting…" : "Submit Application"}
       </button>
 
-      <p className="text-xs text-gray-500 text-center">
-        Looking to become a member institution instead?{" "}
-        <Link href="/membership" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
-          Learn about membership
-        </Link>
-      </p>
+      {!paymentId && (
+        <p className="text-xs text-gray-500 text-center">
+          Looking to become a member institution instead?{" "}
+          <Link href="/apply/member" className="text-[#EE2A2E] hover:text-[#D92327] font-medium">
+            Switch to the member application
+          </Link>
+        </p>
+      )}
     </form>
   );
 }
