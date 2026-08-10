@@ -45,6 +45,7 @@ import { findOverlappingRegistration } from "../conference/registration-overlap"
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import { enqueueQBConferenceRefund } from "../quickbooks/conference-export";
 import type { BuildEntity, EntityRefView } from "./conference-entities";
+import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 
 /**
  * Conference commerce — v3 Offers only.
@@ -628,9 +629,12 @@ export async function addOfferToCart(params: {
     // end date (needed for the membership-coverage gate below).
     const { data: confRow } = await adminClient
       .from("conference_instances")
-      .select("cart_reservation_minutes, end_date")
+      .select("cart_reservation_minutes, end_date, status")
       .eq("id", params.conferenceId)
       .maybeSingle();
+    if (!confRow || !(SALES_OPEN_STATUSES as readonly string[]).includes(confRow.status)) {
+      return { success: false, error: "This conference isn't open for purchases yet." };
+    }
     const reservationMinutes = confRow?.cart_reservation_minutes ?? 15;
     const expiresAt = new Date(Date.now() + reservationMinutes * 60 * 1000).toISOString();
 
@@ -1245,12 +1249,15 @@ export async function createConferenceCheckout(
 
     const { data: conference, error: conferenceError } = await adminClient
       .from("conference_instances")
-      .select("tax_rate_pct, stripe_tax_rate_id, end_date")
+      .select("tax_rate_pct, stripe_tax_rate_id, end_date, status")
       .eq("id", input.conferenceId)
       .single();
 
     if (conferenceError || !conference) {
       return { success: false, error: conferenceError?.message ?? "Conference not found" };
+    }
+    if (!(SALES_OPEN_STATUSES as readonly string[]).includes(conference.status)) {
+      return { success: false, error: "This conference isn't open for purchases yet." };
     }
 
     // v3 Offer lines: eligibility (who-can-buy) + the buyer's tier price (or,
