@@ -80,6 +80,7 @@ export default function Header() {
   const [circleReplies, setCircleReplies] = useState<CircleAlertItem[]>([]);
   const [circleDms, setCircleDms] = useState<CircleDmItem[]>([]);
   const [activeConference, setActiveConference] = useState<ActiveConference>(null);
+  const [conferenceNavHref, setConferenceNavHref] = useState<string | null>(null);
 
   const userMenuRef = useRef<HTMLDivElement>(null);
   const alertMenuRef = useRef<HTMLDivElement>(null);
@@ -229,6 +230,26 @@ export default function Header() {
     };
 
     void loadActiveConference();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadConferenceNavHref = async () => {
+      try {
+        const response = await fetch("/api/conference/nav-link", { cache: "no-store" });
+        if (!response.ok) return;
+        const data = (await response.json()) as { href?: string | null };
+        if (!cancelled) setConferenceNavHref(data.href ?? null);
+      } catch {
+        if (!cancelled) setConferenceNavHref(null);
+      }
+    };
+
+    void loadConferenceNavHref();
     return () => {
       cancelled = true;
     };
@@ -491,6 +512,9 @@ export default function Header() {
             <Link href="/members" className="hover:text-[#1A1A1A]">Members</Link>
             <Link href="/partners" className="hover:text-[#1A1A1A]">Partners</Link>
             <Link href="/events" className="hover:text-[#1A1A1A]">Events</Link>
+            {conferenceNavHref && (
+              <Link href={conferenceNavHref} className="hover:text-[#1A1A1A]">Conference</Link>
+            )}
             <Link href="/resources" className="hover:text-[#1A1A1A]">Resources</Link>
 
             <a href={memberSpaceHref} className="hover:text-[#1A1A1A]">Member Space</a>
@@ -828,6 +852,9 @@ export default function Header() {
               <Link href="/members" className="px-2 py-2 rounded-md hover:bg-gray-50">Members</Link>
               <Link href="/partners" className="px-2 py-2 rounded-md hover:bg-gray-50">Partners</Link>
               <Link href="/events" className="px-2 py-2 rounded-md hover:bg-gray-50">Events</Link>
+              {conferenceNavHref && (
+                <Link href={conferenceNavHref} className="px-2 py-2 rounded-md hover:bg-gray-50">Conference</Link>
+              )}
               <Link href="/resources" className="px-2 py-2 rounded-md hover:bg-gray-50">Resources</Link>
               <a href={memberSpaceHref} className="px-2 py-2 rounded-md hover:bg-gray-50">Member Space</a>
 
