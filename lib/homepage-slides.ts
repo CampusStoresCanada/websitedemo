@@ -64,7 +64,7 @@ export async function fetchConferenceStartingPrices(
       .limit(1),
     db
       .from("conference_entity_refs")
-      .select("from_entity:conference_entities!conference_entity_refs_from_entity_id_fkey(price_cents, is_for_sale), to_entity:conference_entities!conference_entity_refs_to_entity_id_fkey(attributes)")
+      .select("from_entity:conference_entities!conference_entity_refs_from_entity_id_fkey(kind, price_cents, is_for_sale), to_entity:conference_entities!conference_entity_refs_to_entity_id_fkey(attributes)")
       .eq("conference_id", conferenceId)
       .eq("role", "who"),
   ]);
@@ -76,7 +76,7 @@ export async function fetchConferenceStartingPrices(
       const from = Array.isArray(r.from_entity) ? r.from_entity[0] : r.from_entity;
       const to = Array.isArray(r.to_entity) ? r.to_entity[0] : r.to_entity;
       const audienceRole = (to?.attributes as Record<string, unknown> | null)?.["source_role"];
-      if (audienceRole !== "member" || !from?.is_for_sale) return null;
+      if (audienceRole !== "member" || from?.kind !== "registration" || !from?.is_for_sale) return null;
       return from.price_cents;
     })
     .filter((c): c is number => typeof c === "number" && c > 0);
