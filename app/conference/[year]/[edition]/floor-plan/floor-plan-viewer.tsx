@@ -567,7 +567,6 @@ export default function FloorPlanViewer({
                   }
                   stroke={typeStroke}
                   strokeWidth={isHov ? sw * 3 : sw * 1.75}
-                  opacity={b.status === "draft" ? 0.4 : 1}
                 />
                 {showLogo ? (
                   <>

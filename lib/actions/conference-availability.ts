@@ -55,7 +55,7 @@ export async function getBoothTierAvailability(conferenceId: string): Promise<Bo
   const db = createAdminClient();
   const [{ data: boothRows }, { data: purchases }] = await Promise.all([
     db.from("conference_entities").select("id, price_cents")
-      .eq("conference_id", conferenceId).eq("kind", "booth").eq("is_for_sale", true),
+      .eq("conference_id", conferenceId).eq("kind", "booth"),
     db.from("entity_purchases").select("offer_entity_id").eq("conference_id", conferenceId),
   ]);
 

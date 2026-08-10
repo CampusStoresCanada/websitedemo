@@ -493,14 +493,6 @@ export default async function ConferenceEditionHubPage({
                   </Link>
                 </div>
                 <div className="space-y-8">
-                  <SponsorshipLadder conferenceId={conference.id} />
-                  <ScheduleAtAGlance conferenceId={conference.id} conferenceStartDate={conference.start_date ?? ""} track={null} />
-                  <DeadlinesTimeline
-                    conferenceId={conference.id}
-                    conferenceStartDate={conference.start_date ?? ""}
-                    conferenceEndDate={conference.end_date ?? ""}
-                    audiences={["Partner"]}
-                  />
                   {anonymousBooths.length > 0 ? (
                     <ExhibitCheckoutForm
                       conferenceId={conference.id}
@@ -529,6 +521,14 @@ export default async function ConferenceEditionHubPage({
                       No booths are currently available for this conference.
                     </div>
                   )}
+                  <SponsorshipLadder conferenceId={conference.id} />
+                  <ScheduleAtAGlance conferenceId={conference.id} conferenceStartDate={conference.start_date ?? ""} track={null} />
+                  <DeadlinesTimeline
+                    conferenceId={conference.id}
+                    conferenceStartDate={conference.start_date ?? ""}
+                    conferenceEndDate={conference.end_date ?? ""}
+                    audiences={["Partner"]}
+                  />
                 </div>
                 {footerLinks}
               </div>
