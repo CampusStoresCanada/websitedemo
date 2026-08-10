@@ -30,8 +30,11 @@ const SEND_STATUS_COLORS: Record<CampaignStatus, string> = {
 function describeAudience(audience: AudienceDefinition | null): string {
   if (!audience) return "—";
   switch (audience.type) {
-    case "org_admins":
-      return audience.filters?.org_type ? `${audience.filters.org_type} org admins` : "All org admins";
+    case "org_admins": {
+      const roles = audience.filters?.roles?.length ? audience.filters.roles : ["org_admin"];
+      const who = roles.length > 1 ? "org admins + members" : roles.includes("member") ? "members" : "org admins";
+      return audience.filters?.org_type ? `${audience.filters.org_type} ${who}` : `All ${who}`;
+    }
     case "conference_all":
       return "All conference attendees";
     case "conference_holders":

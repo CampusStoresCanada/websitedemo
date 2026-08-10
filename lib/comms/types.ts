@@ -247,6 +247,8 @@ export interface AudienceDefinition {
     org_ids?: string[];
     /** For org_admins: limit to orgs of this type (e.g. "Vendor Partner", "Member"). Combines with org_ids as AND when both are set. Test orgs (organizations.is_test) are always excluded. */
     org_type?: string;
+    /** For org_admins: which user_organizations.role values to include (any-of). Defaults to ["org_admin"] when unset, matching the type's own "All Org Admins" label — set to ["org_admin", "member"] to also reach regular (non-admin) org members. */
+    roles?: string[];
     emails?: string[];
     /** For conference_holders / conference_orgs_*: limit to people holding a seat of this kind (e.g. "booth"). */
     seat_kind?: string;

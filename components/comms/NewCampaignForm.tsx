@@ -92,6 +92,7 @@ export default function NewCampaignForm({
     AUDIENCE_OPTIONS[0].value
   );
   const [selectedContactTags, setSelectedContactTags] = useState<Set<string>>(new Set());
+  const [selectedRoles, setSelectedRoles] = useState<Set<string>>(new Set(["org_admin"]));
   const subjectRef = useRef<HTMLInputElement>(null);
   const scheduledAtInputRef = useRef<HTMLInputElement>(null);
   const scheduledAtHiddenRef = useRef<HTMLInputElement>(null);
@@ -292,6 +293,52 @@ export default function NewCampaignForm({
               <option value="Vendor Partner">Vendor Partner</option>
               <option value="Non-Member">Non-Member</option>
             </select>
+          </div>
+        )}
+
+        {/* Role filter — which user_organizations.role values to include */}
+        {selectedAudienceType === "org_admins" && (
+          <div>
+            <label className="block text-sm font-medium text-gray-700">Include (any match)</label>
+            <p className="text-xs text-gray-500 mb-1">
+              Org Admins is the default and matches the audience name — check Members too to also reach
+              regular (non-admin) people at each org.
+            </p>
+            <div className="flex flex-wrap gap-2">
+              {[
+                { value: "org_admin", label: "Org Admins" },
+                { value: "member", label: "Members" },
+              ].map((role) => {
+                const checked = selectedRoles.has(role.value);
+                return (
+                  <label
+                    key={role.value}
+                    className={`px-2.5 py-1 rounded-full text-xs font-medium cursor-pointer transition-colors ${
+                      checked
+                        ? "bg-[#163D6D] text-white"
+                        : "bg-white border border-gray-300 text-gray-600 hover:border-gray-400"
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      name="roles"
+                      value={role.value}
+                      checked={checked}
+                      onChange={(e) => {
+                        setSelectedRoles((prev) => {
+                          const next = new Set(prev);
+                          if (e.target.checked) next.add(role.value);
+                          else next.delete(role.value);
+                          return next;
+                        });
+                      }}
+                      className="sr-only"
+                    />
+                    {role.label}
+                  </label>
+                );
+              })}
+            </div>
           </div>
         )}
 

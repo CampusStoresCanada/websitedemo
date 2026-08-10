@@ -408,7 +408,8 @@ async function resolveOrgAdmins(
   // FK between the two tables, so PostgREST can't auto-detect the relationship
   // for an embedded select (confirmed via PGRST200 at runtime). Two plain
   // queries instead, same pattern as resolveEventRegistrants below.
-  let q = supabase.from("user_organizations").select("user_id, organization_id").eq("role", "org_admin").eq("status", "active");
+  const roles = filters?.roles?.length ? filters.roles : ["org_admin"];
+  let q = supabase.from("user_organizations").select("user_id, organization_id").in("role", roles).eq("status", "active");
 
   if (filters?.org_ids?.length) {
     q = q.in("organization_id", filters.org_ids);
