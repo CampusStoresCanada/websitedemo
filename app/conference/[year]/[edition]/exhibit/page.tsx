@@ -4,8 +4,10 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
+import { getFloorPlanForVisitor } from "@/lib/actions/conference-entities";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import ExhibitCheckoutForm from "./exhibit-checkout-form";
+import FloorPlanViewer from "../floor-plan/floor-plan-viewer";
 
 export const metadata = { title: "Exhibit at CSC" };
 
@@ -64,8 +66,19 @@ export default async function ExhibitPage({
     .filter((b) => !claimedIds.has(b.id))
     .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
 
+  // No booths on sale yet (e.g. booth sales haven't opened) — the map is
+  // still worth showing, dimmed and unclickable, rather than blank text.
+  // Same reasoning as the conference hub's exhibitor path.
+  let floorPlan: { floorPlanUrl: string | null; booths: import("@/lib/actions/conference-entities").FloorPlanBooth[] } | null = null;
+  if (availableBooths.length === 0) {
+    const floorResult = await getFloorPlanForVisitor(conference.id);
+    floorPlan = floorResult.success ? floorResult.data : null;
+  }
+
+  const showFloorPlanFallback = availableBooths.length === 0 && floorPlan?.floorPlanUrl && floorPlan.booths.length > 0;
+
   return (
-    <main className="max-w-2xl mx-auto px-4 py-12">
+    <main className={`mx-auto px-4 py-12 ${showFloorPlanFallback ? "max-w-4xl" : "max-w-2xl"}`}>
       {isDraftPreview && <div className="mb-6"><DraftPreviewBanner status={conference.status} /></div>}
       <h1 className="text-2xl font-semibold text-gray-900">Exhibit at {conference.name}</h1>
       <p className="mt-2 text-sm text-gray-600">
@@ -89,17 +102,32 @@ export default async function ExhibitPage({
         </Link>
       </div>
 
-      {availableBooths.length === 0 ? (
-        <div className="mt-8 rounded-lg border border-gray-200 p-8 text-center text-gray-600">
-          No booths are currently available for this conference.
-        </div>
-      ) : (
+      {availableBooths.length > 0 ? (
         <ExhibitCheckoutForm
           conferenceId={conference.id}
           conferenceYear={conference.year}
           conferenceEdition={conference.edition_code}
           booths={availableBooths}
         />
+      ) : showFloorPlanFallback ? (
+        <div className="mt-8 space-y-3">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Choose a Booth</h2>
+            <p className="text-sm text-gray-500">Booth sales haven&apos;t opened yet — take a look around</p>
+          </div>
+          <FloorPlanViewer
+            conferenceId={conference.id}
+            conferenceYear={year}
+            conferenceEdition={edition}
+            organizationId={null}
+            floorPlanUrl={floorPlan!.floorPlanUrl!}
+            booths={floorPlan!.booths}
+          />
+        </div>
+      ) : (
+        <div className="mt-8 rounded-lg border border-gray-200 p-8 text-center text-gray-600">
+          No booths are currently available for this conference.
+        </div>
       )}
     </main>
   );
