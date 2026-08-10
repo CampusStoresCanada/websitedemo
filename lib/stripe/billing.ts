@@ -436,7 +436,8 @@ export async function processRefund(
 
   // 2. Check refund window
   const refundWindowDays = await getEffectivePolicy<number>(
-    "renewal.refund_window_days"
+    "renewal.refund_window_days",
+    "number"
   );
 
   if (invoice.paid_at) {

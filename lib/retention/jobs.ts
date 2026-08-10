@@ -68,7 +68,7 @@ export async function retentionPurgeRun(): Promise<RetentionPurgeJobResult> {
 
   let rule: string;
   try {
-    rule = await getEffectivePolicy<string>("retention.travel_delete_rule");
+    rule = await getEffectivePolicy<string>("retention.travel_delete_rule", "string");
   } catch (error) {
     return {
       success: false,

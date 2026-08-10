@@ -115,8 +115,19 @@ export async function getPublishedPolicySet(): Promise<PolicySet | null> {
 /**
  * Get the current effective value for a single policy key.
  * Returns the unwrapped value (not the full PolicyValue row).
+ *
+ * `expectedType` is optional runtime insurance for primitive-typed callers:
+ * `T` is a compile-time-only annotation, so a policy value authored with the
+ * wrong JSON shape (e.g. the string "72h" where a plain number of hours was
+ * meant) would otherwise flow through uncaught and fail silently downstream
+ * — arithmetic on a non-numeric value produces NaN/Invalid Date rather than
+ * an error. Pass it whenever the caller does arithmetic or comparison on
+ * the result, so a bad value throws here instead.
  */
-export async function getEffectivePolicy<T = unknown>(key: string): Promise<T> {
+export async function getEffectivePolicy<T = unknown>(
+  key: string,
+  expectedType?: "number" | "string" | "boolean"
+): Promise<T> {
   const cacheKey = `policy_value:${key}`
   const cached = getCached<T>(cacheKey)
   if (cached !== null) return cached
@@ -150,6 +161,13 @@ export async function getEffectivePolicy<T = unknown>(key: string): Promise<T> {
 
   const data = rows[0]
   const value = data.value_json as T
+
+  if (expectedType && typeof value !== expectedType) {
+    throw new Error(
+      `Policy key "${key}" expected a ${expectedType} but got ${typeof value} (${JSON.stringify(value)}) in active set "${policySet.name}"`
+    )
+  }
+
   setCache(cacheKey, value)
   return value
 }

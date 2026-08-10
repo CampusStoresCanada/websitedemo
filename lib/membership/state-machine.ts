@@ -57,7 +57,8 @@ export async function transitionMembershipState(
 
     if (org?.membership_status === "locked" && org?.locked_at) {
       const reactivationDays = await getEffectivePolicy<number>(
-        "renewal.reactivation_days"
+        "renewal.reactivation_days",
+        "number"
       );
       const daysSinceLock =
         (Date.now() - new Date(org.locked_at).getTime()) / (1000 * 60 * 60 * 24);

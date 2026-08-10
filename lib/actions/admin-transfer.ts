@@ -84,7 +84,8 @@ export async function initiateAdminTransfer(
     let timeoutHours: number;
     try {
       timeoutHours = await getEffectivePolicy<number>(
-        "admin_transfer.timeout_duration"
+        "admin_transfer.timeout_duration",
+        "number"
       );
     } catch {
       // Default to 72 hours if policy not configured
