@@ -3,7 +3,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolveConditionSubjectRow, type ConditionRecipient } from "./resolve";
+import { resolveConditionSubjectRows, type ConditionRecipient } from "./resolve";
 import type { ConditionOperator, ConditionSubjectKey } from "./registry";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -49,32 +49,38 @@ export function evaluateOperator(value: unknown, operator: ConditionOperator, co
 }
 
 /**
- * Evaluate one saved condition against one recipient. False (not an
- * error) whenever the subject can't be resolved — e.g. the recipient
- * has no org membership, so an organization-subject condition reads as
- * false rather than blowing up the whole send.
+ * Evaluate every given condition against every given recipient. Each
+ * condition's subject is resolved once for the whole recipient group
+ * (see resolveConditionSubjectRows) instead of once per recipient, so
+ * this scales to hundreds of recipients as a handful of batched queries
+ * rather than a Promise.all of hundreds of individual ones.
+ *
+ * Returns one flags object per recipient, in the same order as the
+ * input array — keyed by condition.key, the same keys used in
+ * {{#if key}} blocks. A recipient with no userId, or whose subject
+ * can't be resolved for a given condition, reads as false for that
+ * condition rather than erroring.
  */
-export async function evaluateCondition(
-  supabase: AdminClient,
-  condition: CommsCondition,
-  recipient: ConditionRecipient
-): Promise<boolean> {
-  const row = await resolveConditionSubjectRow(supabase, condition.subject, recipient, condition.reference_id);
-  if (!row) return false;
-  return evaluateOperator(row[condition.field], condition.operator, condition.value);
-}
-
-/**
- * Evaluate every given condition against one recipient, keyed by
- * condition.key — the same keys used in {{#if key}} blocks.
- */
-export async function evaluateConditionsForRecipient(
+export async function evaluateConditionsBatch(
   supabase: AdminClient,
   conditions: CommsCondition[],
-  recipient: ConditionRecipient
-): Promise<Record<string, boolean>> {
-  const entries = await Promise.all(
-    conditions.map(async (c) => [c.key, await evaluateCondition(supabase, c, recipient)] as const)
+  recipients: ConditionRecipient[]
+): Promise<Record<string, boolean>[]> {
+  if (conditions.length === 0) return recipients.map(() => ({}));
+
+  const perCondition = await Promise.all(
+    conditions.map(async (condition) => ({
+      condition,
+      rows: await resolveConditionSubjectRows(supabase, condition.subject, recipients, condition.reference_id),
+    }))
   );
-  return Object.fromEntries(entries);
+
+  return recipients.map((recipient) => {
+    const flags: Record<string, boolean> = {};
+    for (const { condition, rows } of perCondition) {
+      const row = recipient.userId ? rows.get(recipient.userId) : undefined;
+      flags[condition.key] = row ? evaluateOperator(row[condition.field], condition.operator, condition.value) : false;
+    }
+    return flags;
+  });
 }

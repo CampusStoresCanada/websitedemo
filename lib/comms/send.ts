@@ -8,7 +8,7 @@ import { resolveAudience } from "./audience";
 import { resolveEffectiveAudience } from "./campaigns";
 import { getTemplate, getTemplateById, renderTemplateContent, renderConditionalBlocks, renderTemplate } from "./templates";
 import { extractConditionKeys, getConditionsByKeys } from "./conditions/store";
-import { evaluateConditionsForRecipient } from "./conditions/evaluate";
+import { evaluateConditionsBatch } from "./conditions/evaluate";
 import { filterSuppressedRecipients } from "./suppressions";
 import type {
   AudienceDefinition,
@@ -154,40 +154,41 @@ export async function executeCampaignSend(
   const conditionKeys = [...extractConditionKeys(subjectRaw), ...extractConditionKeys(bodyRaw)];
   const conditions = await getConditionsByKeys(conditionKeys);
 
-  // Render each recipient's subject/body up front. Condition evaluation
-  // is per-recipient I/O, so this is no longer synchronous.
-  const rendered = await Promise.all(
-    insertedRecipients.map(async (recipient) => {
-      const variables: Record<string, string> = {
-        // Base value every send gets, regardless of audience type — lets
-        // an admin build a CTA link like {{app_url}}/org/{{organization_slug}}
-        // in any template, not just code-generated ones.
-        app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
-        ...(campaign.variable_values as Record<string, string>),
-        ...(recipient.variable_overrides as Record<string, string>),
-      };
-
-      const flags = conditions.length
-        ? await evaluateConditionsForRecipient(supabase, conditions, {
-            userId: recipient.user_id,
-            email: recipient.contact_email,
-          })
-        : {};
-
-      const { subject, bodyHtml } = template
-        ? renderTemplateContent(
-            { ...template, subject: subjectRaw, body_html: bodyRaw },
-            variables,
-            flags
-          )
-        : {
-            subject: renderTemplate(renderConditionalBlocks(subjectRaw, flags), variables),
-            bodyHtml: renderTemplate(renderConditionalBlocks(bodyRaw, flags), variables),
-          };
-
-      return { recipient, subject, bodyHtml };
-    })
+  // Condition evaluation is batched once for the whole recipient group
+  // (see evaluateConditionsBatch) rather than once per recipient, so a
+  // 300+ recipient send stays a handful of queries instead of hundreds
+  // of concurrent ones. Rendering itself is synchronous per recipient.
+  const flagsByRecipient = await evaluateConditionsBatch(
+    supabase,
+    conditions,
+    insertedRecipients.map((r) => ({ userId: r.user_id, email: r.contact_email }))
   );
+
+  const rendered = insertedRecipients.map((recipient, i) => {
+    const variables: Record<string, string> = {
+      // Base value every send gets, regardless of audience type — lets
+      // an admin build a CTA link like {{app_url}}/org/{{organization_slug}}
+      // in any template, not just code-generated ones.
+      app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
+      ...(campaign.variable_values as Record<string, string>),
+      ...(recipient.variable_overrides as Record<string, string>),
+    };
+
+    const flags = flagsByRecipient[i];
+
+    const { subject, bodyHtml } = template
+      ? renderTemplateContent(
+          { ...template, subject: subjectRaw, body_html: bodyRaw },
+          variables,
+          flags
+        )
+      : {
+          subject: renderTemplate(renderConditionalBlocks(subjectRaw, flags), variables),
+          bodyHtml: renderTemplate(renderConditionalBlocks(bodyRaw, flags), variables),
+        };
+
+    return { recipient, subject, bodyHtml };
+  });
 
   // Bulk-insert queued delivery rows for every recipient, then batch-send
   // (chunks of up to 100 per Resend API call, not one call per recipient —

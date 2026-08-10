@@ -6,7 +6,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds as lookupUserEmails } from "@/lib/supabase/user-lookup";
 import { deriveRecipientNameVariables, formatConferenceDates } from "./format";
 import { getConditionsByKeys } from "./conditions/store";
-import { evaluateCondition } from "./conditions/evaluate";
+import { evaluateConditionsBatch } from "./conditions/evaluate";
 import { deriveSubjectVariables } from "./variables/deriveSubjectVariables";
 import { filterSuppressedRecipients } from "./suppressions";
 import type { SystemVariableKey } from "./variables/registry";
@@ -94,21 +94,21 @@ async function applyConditionGate(
   const conditions = await getConditionsByKeys(conditionKeys);
   if (conditions.length === 0) return recipients;
 
-  const results = await Promise.all(
-    recipients.map(async (r) => {
-      // No resolvable identity (custom_emails/custom_recipient_list) —
-      // can't check a condition, so it passes through rather than being
-      // silently dropped.
-      if (!r.userId) return { recipient: r, keep: true };
-      const satisfactions = await Promise.all(
-        conditions.map((c) => evaluateCondition(supabase, c, { userId: r.userId!, email: r.email }))
-      );
-      const keep = matchMode === "any" ? satisfactions.some(Boolean) : satisfactions.every(Boolean);
-      return { recipient: r, keep };
-    })
+  // No resolvable identity (custom_emails/custom_recipient_list) — can't
+  // check a condition, so those recipients pass through rather than being
+  // silently dropped. Batched once for the whole group instead of once
+  // per recipient — see evaluateConditionsBatch.
+  const flagsByRecipient = await evaluateConditionsBatch(
+    supabase,
+    conditions,
+    recipients.map((r) => ({ userId: r.userId, email: r.email }))
   );
 
-  return results.filter((r) => r.keep).map((r) => r.recipient);
+  return recipients.filter((r, i) => {
+    if (!r.userId) return true;
+    const satisfactions = conditions.map((c) => flagsByRecipient[i][c.key]);
+    return matchMode === "any" ? satisfactions.some(Boolean) : satisfactions.every(Boolean);
+  });
 }
 
 /**
