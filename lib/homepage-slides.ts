@@ -98,8 +98,7 @@ export async function fetchBoothCount(db: ReturnType<typeof createAdminClient>, 
     .from("conference_entities")
     .select("id", { count: "exact", head: true })
     .eq("conference_id", conferenceId)
-    .eq("kind", "booth")
-    .eq("is_for_sale", true);
+    .eq("kind", "booth");
   return count ?? 0;
 }
 
