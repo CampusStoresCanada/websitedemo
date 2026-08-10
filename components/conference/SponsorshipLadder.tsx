@@ -11,6 +11,7 @@ interface Tier {
   color: string;
   highlight?: boolean;
   items: string[];
+  note?: string;
 }
 
 // Exhibitor/Connected colours match the floor plan's own TYPE_STROKE exactly
@@ -84,6 +85,7 @@ function TierCard({ tier }: { tier: Tier }) {
           </li>
         ))}
       </ul>
+      {tier.note && <p className="mt-4 text-xs text-[#6B6B6B]">{tier.note}</p>}
     </div>
   );
 }
@@ -122,6 +124,7 @@ export default async function SponsorshipLadder({
     tagline: "Every partnership starts here.",
     color: "#0F766E",
     items: ["Member contact list", "Self-managed directory listing", "Circle community access"],
+    note: "Please note, purchase of a Vendor tier does not give participation in the 2027 conference.",
   };
 
   let conferenceTiers: Tier[] = [];
@@ -163,8 +166,8 @@ export default async function SponsorshipLadder({
     <section id="find-your-level">
       <h2 className="text-xl font-bold tracking-tight text-[#1A1A1A]">Find your level</h2>
       <p className="mt-1 max-w-2xl text-sm text-[#6B6B6B]">
-        Vendor is the year-round base every partner gets. When there&apos;s a conference open for registration, the
-        tiers below add on top of it.
+        Vendor is the year-round partnership required to participate in CSC year round. Not a partner yet? No
+        worries, it will be added to your cart!
       </p>
 
       <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
