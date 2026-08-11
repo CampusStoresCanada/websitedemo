@@ -9,19 +9,38 @@ mapboxgl.accessToken = process.env.NEXT_PUBLIC_MAPBOX_TOKEN || "";
 /**
  * Same static mini-map treatment as OrgLocation.tsx (light-v11, non-interactive,
  * pinned marker) for one visual language site-wide, rather than a Google Maps
- * iframe that looks like a different product. No stored lat/lng for the
- * conference venue, so it geocodes the address once via Mapbox's own
- * Geocoding API and centers there. The whole map links out to Google Maps
- * for directions — it's a locator, not a navigation tool.
+ * iframe that looks like a different product. Prefers verified `lat`/`lng`
+ * (conference_instances.location_latitude/longitude — the same source
+ * MapHero's own conference pin uses) when given; only falls back to live-
+ * geocoding the address text when coordinates aren't available. Text
+ * geocoding is a best-effort fallback, not a source of truth — a hotel name
+ * shared by multiple properties in the same city (e.g. more than one local
+ * Hilton) can resolve to the wrong one. The whole map links out to Google
+ * Maps for directions — it's a locator, not a navigation tool.
  */
-export default function HotelMap({ address }: { address: string }) {
+export default function HotelMap({
+  address,
+  lat,
+  lng,
+}: {
+  address: string;
+  lat?: number | null;
+  lng?: number | null;
+}) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<mapboxgl.Map | null>(null);
-  const [coords, setCoords] = useState<[number, number] | null>(null);
+  const hasVerifiedCoords = lat != null && lng != null;
+  const [coords, setCoords] = useState<[number, number] | null>(
+    hasVerifiedCoords ? [lng as number, lat as number] : null
+  );
   const [mapLoaded, setMapLoaded] = useState(false);
   const [geocodeFailed, setGeocodeFailed] = useState(false);
 
   useEffect(() => {
+    if (hasVerifiedCoords) {
+      setCoords([lng as number, lat as number]);
+      return;
+    }
     let cancelled = false;
     fetch(
       `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?access_token=${mapboxgl.accessToken}&limit=1`
@@ -42,7 +61,7 @@ export default function HotelMap({ address }: { address: string }) {
     return () => {
       cancelled = true;
     };
-  }, [address]);
+  }, [address, hasVerifiedCoords, lat, lng]);
 
   useEffect(() => {
     if (!mapContainer.current || !coords) return;
