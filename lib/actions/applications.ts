@@ -170,7 +170,7 @@ export async function submitApplication(
   }
 
   // Send verification email
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
   const verificationUrl = `${baseUrl}/apply/verify?token=${token}`;
 
   const emailContent = verificationEmail(contactName, verificationUrl);
@@ -236,7 +236,7 @@ export async function verifyApplicationEmail(
     (appData?.company_name as string) ||
     "Unknown";
 
-  const baseUrl = process.env.NEXT_PUBLIC_SITE_URL || "http://localhost:3000";
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
   const adminContent = adminNewApplicationEmail(
     app.applicant_name ?? "Applicant",
     orgName,
@@ -516,7 +516,7 @@ export async function approveApplication(
 
   // 7. Send approval email with payment link
   if (app.applicant_email) {
-    const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_SITE_URL || ""}/account/billing`;
+    const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
     const approvedContent = applicationApprovedEmail(
       app.applicant_name ?? "there",
       applicationType,
@@ -862,7 +862,7 @@ export async function resendApplicationInvite(
 
       const paymentUrl = invoice?.stripe_invoice_id
         ? `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`
-        : `${process.env.NEXT_PUBLIC_SITE_URL || ""}/account/billing`;
+        : `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
 
       const approvedContent = applicationApprovedEmail(
         app.applicant_name ?? "there",
