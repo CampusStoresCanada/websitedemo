@@ -5,6 +5,7 @@ import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import { getBillingConfig, getEffectivePolicy, getRenewalConfig } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
+import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
 import type {
   Invoice,
   PaymentMethod,
@@ -188,7 +189,7 @@ export async function createMembershipInvoice(
   // 1. Read org FTE + stripe customer
   const { data: org, error: orgError } = await db
     .from("organizations")
-    .select("id, name, fte, stripe_customer_id, email")
+    .select("id, name, fte, stripe_customer_id, email, province, country")
     .eq("id", orgId)
     .single();
 
@@ -227,6 +228,15 @@ export async function createMembershipInvoice(
   // 4. Ensure Stripe customer exists
   const stripeCustomerId = await ensureStripeCustomer(orgId);
 
+  // 4b. Resolve the buyer's-own-province tax rate — dues are taxed by the
+  // member org's own location, not CSC's (see lib/stripe/tax.ts).
+  if (!org.province) {
+    throw new Error(
+      `"${org.name}" has no province on file — cannot determine its tax rate. Set it before invoicing.`
+    );
+  }
+  const taxRateId = await resolveMembershipStripeTaxRateId(db, org.province);
+
   // 5. Create Stripe invoice
   const stripeInvoice = await stripe.invoices.create({
     customer: stripeCustomerId,
@@ -243,7 +253,16 @@ export async function createMembershipInvoice(
     amount: finalCents,
     currency: billing.currency.toLowerCase(),
     description: `Membership - ${assessment.explanation}${prorationPct > 0 ? `, ${prorationPct}% prorated` : ""}`,
+    tax_rates: [taxRateId],
   });
+
+  // Stripe computes tax as soon as a taxed line item is added, even on a
+  // draft invoice — read it back rather than hand-computing from the rate
+  // table, so our local total_cents always matches what Stripe (and later
+  // QBO, once paid) actually shows.
+  const taxedInvoice = await stripe.invoices.retrieve(stripeInvoice.id);
+  const taxAmountCents = taxedInvoice.total - taxedInvoice.subtotal;
+  const totalCents = taxedInvoice.total;
 
   // 6. Insert local invoice record
   const description = prorationPct > 0
@@ -258,8 +277,8 @@ export async function createMembershipInvoice(
       description,
       amount_cents: finalCents,
       currency: billing.currency,
-      tax_amount_cents: 0,
-      total_cents: finalCents,
+      tax_amount_cents: taxAmountCents,
+      total_cents: totalCents,
       proration_discount_pct: prorationPct,
       original_amount_cents: originalCents,
       status: "draft",
@@ -303,6 +322,16 @@ export async function createPartnershipInvoice(
   const db = createAdminClient();
   const billing = await getBillingConfig();
 
+  const { data: org, error: orgError } = await db
+    .from("organizations")
+    .select("id, name, province, country")
+    .eq("id", orgId)
+    .single();
+
+  if (orgError || !org) {
+    throw new Error(`Organization ${orgId} not found`);
+  }
+
   const baseCents = await getPartnershipRateCents();
 
   // Apply proration if requested
@@ -322,6 +351,15 @@ export async function createPartnershipInvoice(
   // Ensure Stripe customer
   const stripeCustomerId = await ensureStripeCustomer(orgId);
 
+  // Resolve the buyer's-own-province tax rate — dues are taxed by the
+  // member org's own location, not CSC's (see lib/stripe/tax.ts).
+  if (!org.province) {
+    throw new Error(
+      `"${org.name}" has no province on file — cannot determine its tax rate. Set it before invoicing.`
+    );
+  }
+  const taxRateId = await resolveMembershipStripeTaxRateId(db, org.province);
+
   // Create Stripe invoice
   const stripeInvoice = await stripe.invoices.create({
     customer: stripeCustomerId,
@@ -337,7 +375,16 @@ export async function createPartnershipInvoice(
     amount: finalCents,
     currency: billing.currency.toLowerCase(),
     description: `Partnership ($${(finalCents / 100).toFixed(2)}${prorationPct > 0 ? `, ${prorationPct}% prorated` : ""})`,
+    tax_rates: [taxRateId],
   });
+
+  // Stripe computes tax as soon as a taxed line item is added, even on a
+  // draft invoice — read it back rather than hand-computing from the rate
+  // table, so our local total_cents always matches what Stripe (and later
+  // QBO, once paid) actually shows.
+  const taxedInvoice = await stripe.invoices.retrieve(stripeInvoice.id);
+  const taxAmountCents = taxedInvoice.total - taxedInvoice.subtotal;
+  const totalCents = taxedInvoice.total;
 
   // Insert local record
   const description = prorationPct > 0
@@ -352,8 +399,8 @@ export async function createPartnershipInvoice(
       description,
       amount_cents: finalCents,
       currency: billing.currency,
-      tax_amount_cents: 0,
-      total_cents: finalCents,
+      tax_amount_cents: taxAmountCents,
+      total_cents: totalCents,
       proration_discount_pct: prorationPct,
       original_amount_cents: originalCents,
       status: "draft",

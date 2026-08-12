@@ -11,6 +11,7 @@ import {
 } from "@/lib/membership/renewal-activation";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { PROVINCES } from "@/lib/constants/provinces";
+import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
 
 /**
  * "Pay first, apply second" for a non-member buying a booth — there is
@@ -21,62 +22,6 @@ import { PROVINCES } from "@/lib/constants/provinces";
  */
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
-
-// ─────────────────────────────────────────────────────────────────
-// Tax rate resolution — the membership line item is taxed by the buyer's
-// own province (origin-based), mirroring resolveMembershipTaxCode in
-// lib/quickbooks/export.ts. The booth line item's tax (if any) is
-// destination-based — one flat conference.stripe_tax_rate_id — and is
-// resolved independently, not here.
-// ─────────────────────────────────────────────────────────────────
-
-const STRIPE_MEMBERSHIP_TAX_RATE_IDS_KEY = "stripe_membership_tax_rate_ids";
-
-interface StripeMembershipTaxRateMapping {
-  province: string;
-  stripeTaxRateId: string;
-}
-
-/**
- * Resolve the Stripe Tax Rate object ID for a membership line item, from the
- * buyer's own province. Configured in /admin/settings/quickbooks as a
- * province → Stripe Tax Rate ID list (same shape/admin surface as the QBO
- * mapping). No silent guessing: a province not in the mapping throws, since
- * mistaxing a real payment is worse than a clear config error a human can fix.
- */
-async function resolveMembershipStripeTaxRateId(
-  db: ReturnType<typeof createAdminClient>,
-  province: string
-): Promise<string> {
-  const isOutsideCanada = province.trim().toLowerCase() === "out of canada";
-
-  const settingKey = isOutsideCanada ? "stripe_tax_rate_id_outside_canada" : STRIPE_MEMBERSHIP_TAX_RATE_IDS_KEY;
-
-  if (isOutsideCanada) {
-    const { data } = await db.from("app_settings").select("value").eq("key", settingKey).single();
-    if (data?.value) return data.value;
-  } else {
-    const { data } = await db
-      .from("app_settings")
-      .select("value")
-      .eq("key", STRIPE_MEMBERSHIP_TAX_RATE_IDS_KEY)
-      .single();
-
-    if (data?.value) {
-      try {
-        const mappings: StripeMembershipTaxRateMapping[] = JSON.parse(data.value);
-        const match = mappings.find((m) => m.province.trim().toLowerCase() === province.trim().toLowerCase());
-        if (match?.stripeTaxRateId) return match.stripeTaxRateId;
-      } catch {
-        // fall through to error below
-      }
-    }
-  }
-
-  throw new Error(
-    `No Stripe tax rate configured for province "${province}". Set it in /admin/settings/quickbooks.`
-  );
-}
 
 /**
  * The membership-dues portion of a brand-new prospect's bundle. A booth
