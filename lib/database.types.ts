@@ -10456,6 +10456,17 @@ export type Database = {
         Args: { p_booth_id: string; p_org_id: string }
         Returns: string
       }
+      reserve_booth_cart_item: {
+        Args: {
+          p_conference_id: string
+          p_expires_at: string
+          p_max_booths?: number
+          p_offer_entity_id: string
+          p_organization_id: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       resolve_person_access: {
         Args: { p_conference_id: string; p_person_id: string }
         Returns: {

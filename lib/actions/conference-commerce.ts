@@ -47,6 +47,9 @@ import { enqueueQBConferenceRefund } from "../quickbooks/conference-export";
 import type { BuildEntity, EntityRefView } from "./conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 
+// Board decision: orgs can hold multiple booths, but not the whole floor.
+const MAX_BOOTHS_PER_CART = 4;
+
 /**
  * Conference commerce — v3 Offers only.
  *
@@ -691,29 +694,47 @@ export async function addOfferToCart(params: {
       return { success: false, error: "Membership renewal can't be added directly — it's attached automatically when required by another purchase." };
     }
 
-    // Orgs can hold multiple booths (board decision) — no per-org cap here.
+    // Orgs can hold multiple booths (board decision), capped at
+    // MAX_BOOTHS_PER_CART so one org can't lock up the whole floor plan.
     // What still has to hold is per-booth exclusivity: this specific booth
     // can't be held by a DIFFERENT org's active cart reservation, nor
     // already sold to anyone (checked below via entity_purchases/inventory).
+    // The exclusivity check + the cap check + writing the hold all happen
+    // atomically inside one Postgres function (advisory-locked on the booth
+    // id, and separately on the org id for the cap) — doing this as a plain
+    // check-then-insert here would leave the same race window that let two
+    // buyers both reserve the same booth, or an org's own rapid double-click
+    // slip past the cap.
+    let boothCartItemId!: string;
     if (offerRow.kind === "booth") {
-      const { data: heldByOther } = await adminClient
-        .from("cart_items")
-        .select("id, organization_id, organization:organizations!cart_items_organization_id_fkey(name)")
-        .eq("conference_id", params.conferenceId)
-        .eq("offer_entity_id", params.offerEntityId)
-        .neq("organization_id", params.organizationId)
-        .not("expires_at", "is", null)
-        .gt("expires_at", new Date().toISOString())
-        .limit(1)
-        .maybeSingle();
-      if (heldByOther) {
-        const org = Array.isArray(heldByOther.organization) ? heldByOther.organization[0] : heldByOther.organization;
+      const { data: reserveResult, error: reserveError } = await adminClient.rpc("reserve_booth_cart_item", {
+        p_conference_id: params.conferenceId,
+        p_organization_id: params.organizationId,
+        p_user_id: authz.userId,
+        p_offer_entity_id: params.offerEntityId,
+        p_expires_at: expiresAt,
+        p_max_booths: MAX_BOOTHS_PER_CART,
+      });
+      if (reserveError) return { success: false, error: reserveError.message };
+      const result = reserveResult as
+        | { success: true; cart_item_id: string }
+        | { success: false; code: "BOOTH_RESERVED"; org_name: string | null }
+        | { success: false; code: "TOO_MANY_BOOTHS"; max: number };
+      if (!result.success) {
+        if (result.code === "BOOTH_RESERVED") {
+          return {
+            success: false,
+            code: "BOOTH_RESERVED",
+            error: `This booth is currently reserved by ${result.org_name ?? "another organization"}. Try again once their hold expires.`,
+          };
+        }
         return {
           success: false,
-          code: "BOOTH_RESERVED",
-          error: `This booth is currently reserved by ${org?.name ?? "another organization"}. Try again once their hold expires.`,
+          code: "TOO_MANY_BOOTHS",
+          error: `Your organization can hold at most ${result.max} booths in cart at once.`,
         };
       }
+      boothCartItemId = result.cart_item_id;
     }
 
     // The Offer's `who` audiences carry the permission tiers that may buy it.
@@ -825,42 +846,43 @@ export async function addOfferToCart(params: {
     // seat↔attendee zip at mint time).
     const newSlots: (AttendeeRef | null)[] = Array.from({ length: quantity }, (_, i) => params.attendees?.[i] ?? null);
 
-    let boothCartItemId: string;
-    if (existing) {
-      // Refresh expires_at on every re-add so the reservation window extends,
-      // and append this call's attendee slots after whatever's already there —
-      // topping up quantity must not clobber attendees already assigned to
-      // earlier units in the line.
-      const existingAttendees = parseAttendees(existing.metadata, existing.quantity);
-      const nextMetadata =
-        offerRow.kind === "registration" ? { attendees: [...existingAttendees, ...newSlots] } : existing.metadata;
-      const { error: updErr } = await adminClient
-        .from("cart_items")
-        .update({
-          quantity: wanted,
-          updated_at: new Date().toISOString(),
-          expires_at: expiresAt,
-          metadata: nextMetadata,
-        })
-        .eq("id", existing.id);
-      if (updErr) return { success: false, error: updErr.message };
-      boothCartItemId = existing.id;
-    } else {
-      const { data: inserted, error: insErr } = await adminClient
-        .from("cart_items")
-        .insert({
-          conference_id: params.conferenceId,
-          organization_id: params.organizationId,
-          user_id: authz.userId,
-          offer_entity_id: params.offerEntityId,
-          quantity: wanted,
-          expires_at: expiresAt,
-          metadata: offerRow.kind === "registration" ? { attendees: newSlots } : null,
-        })
-        .select("id")
-        .single();
-      if (insErr || !inserted) return { success: false, error: insErr?.message ?? "Failed to add to cart." };
-      boothCartItemId = inserted.id;
+    if (offerRow.kind !== "booth") {
+      if (existing) {
+        // Refresh expires_at on every re-add so the reservation window extends,
+        // and append this call's attendee slots after whatever's already there —
+        // topping up quantity must not clobber attendees already assigned to
+        // earlier units in the line.
+        const existingAttendees = parseAttendees(existing.metadata, existing.quantity);
+        const nextMetadata =
+          offerRow.kind === "registration" ? { attendees: [...existingAttendees, ...newSlots] } : existing.metadata;
+        const { error: updErr } = await adminClient
+          .from("cart_items")
+          .update({
+            quantity: wanted,
+            updated_at: new Date().toISOString(),
+            expires_at: expiresAt,
+            metadata: nextMetadata,
+          })
+          .eq("id", existing.id);
+        if (updErr) return { success: false, error: updErr.message };
+        boothCartItemId = existing.id;
+      } else {
+        const { data: inserted, error: insErr } = await adminClient
+          .from("cart_items")
+          .insert({
+            conference_id: params.conferenceId,
+            organization_id: params.organizationId,
+            user_id: authz.userId,
+            offer_entity_id: params.offerEntityId,
+            quantity: wanted,
+            expires_at: expiresAt,
+            metadata: offerRow.kind === "registration" ? { attendees: newSlots } : null,
+          })
+          .select("id")
+          .single();
+        if (insErr || !inserted) return { success: false, error: insErr?.message ?? "Failed to add to cart." };
+        boothCartItemId = inserted.id;
+      }
     }
 
     // Membership gate: if this offer `requires` a membership-renewal entity
