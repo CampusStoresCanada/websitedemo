@@ -15,6 +15,11 @@ interface MembershipTaxCodeInput {
   taxCodeId: string | null;
 }
 
+interface StripeMembershipTaxRateInput {
+  province: string;
+  stripeTaxRateId: string | null;
+}
+
 export async function POST(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok || !isSuperAdmin(auth.ctx.globalRole)) {
@@ -34,6 +39,7 @@ export async function POST(req: NextRequest) {
     ["stripeDepositAccountId", "qbo_stripe_deposit_account_id"],
     ["outsideCanadaTaxCode", "qbo_tax_code_outside_canada"],
     ["publicTicketTaxCode", "qbo_tax_code_public_ticket"],
+    ["stripeTaxRateIdOutsideCanada", "stripe_tax_rate_id_outside_canada"],
   ] as const) {
     if (typeof body[bodyKey] === "string" || body[bodyKey] === null) {
       updates.push({ key: settingKey, value: body[bodyKey] ?? "" });
@@ -53,6 +59,20 @@ export async function POST(req: NextRequest) {
       .filter((m) => m && typeof m.province === "string" && m.province && typeof m.taxCodeId === "string" && m.taxCodeId)
       .map((m) => ({ province: m.province, taxCodeId: m.taxCodeId as string }));
     updates.push({ key: "qbo_membership_tax_codes", value: JSON.stringify(taxCodes) });
+  }
+
+  if (Array.isArray(body.stripeMembershipTaxRateIds)) {
+    const taxRates = (body.stripeMembershipTaxRateIds as StripeMembershipTaxRateInput[])
+      .filter(
+        (m) =>
+          m &&
+          typeof m.province === "string" &&
+          m.province &&
+          typeof m.stripeTaxRateId === "string" &&
+          m.stripeTaxRateId
+      )
+      .map((m) => ({ province: m.province, stripeTaxRateId: m.stripeTaxRateId as string }));
+    updates.push({ key: "stripe_membership_tax_rate_ids", value: JSON.stringify(taxRates) });
   }
 
   for (const { key, value } of updates) {

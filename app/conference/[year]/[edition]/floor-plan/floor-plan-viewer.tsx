@@ -6,6 +6,7 @@ import { createProspectiveBoothCheckout } from "@/lib/actions/prospective-booth-
 import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
 import type { FloorPlanBooth } from "@/lib/actions/conference-entities";
+import { PROVINCES } from "@/lib/constants/provinces";
 
 const VIEW_W = 1000;
 
@@ -59,12 +60,13 @@ function ProspectBoothForm({
 }) {
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
+  const [province, setProvince] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!companyName.trim() || !email.trim()) {
-      setError("Company name and email are required.");
+    if (!companyName.trim() || !email.trim() || !province) {
+      setError("Company name, email, and province are required.");
       return;
     }
     setSubmitting(true);
@@ -76,6 +78,7 @@ function ProspectBoothForm({
       boothEntityId: booth.id,
       companyName,
       email,
+      province,
       successUrl: `${baseUrl}${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`,
       cancelUrl: `${baseUrl}${conferencePath}/floor-plan`,
     });
@@ -104,6 +107,19 @@ function ProspectBoothForm({
         onChange={e => setEmail(e.target.value)}
         className={inputClass}
       />
+      <select
+        value={province}
+        onChange={e => setProvince(e.target.value)}
+        className={`${inputClass} bg-white`}
+      >
+        <option value="">Province…</option>
+        <option value="Out of Canada">Out of Canada</option>
+        <optgroup label="Canadian Provinces &amp; Territories">
+          {PROVINCES.map((p) => (
+            <option key={p} value={p}>{p}</option>
+          ))}
+        </optgroup>
+      </select>
       {error && <p className="text-[11px] text-red-600">{error}</p>}
       <button
         onClick={submit}

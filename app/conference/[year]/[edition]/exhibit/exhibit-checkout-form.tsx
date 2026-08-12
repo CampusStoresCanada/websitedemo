@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { createProspectiveBoothCheckout } from "@/lib/actions/prospective-booth-checkout";
 import { formatCents } from "@/lib/utils";
+import { PROVINCES } from "@/lib/constants/provinces";
 
 export default function ExhibitCheckoutForm({
   conferenceId,
@@ -17,6 +18,7 @@ export default function ExhibitCheckoutForm({
 }) {
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
+  const [province, setProvince] = useState("");
   const [boothId, setBoothId] = useState(booths[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -32,6 +34,7 @@ export default function ExhibitCheckoutForm({
         boothEntityId: boothId,
         companyName,
         email,
+        province,
         successUrl: `${baseUrl}${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`,
         cancelUrl: `${baseUrl}${conferencePath}/exhibit`,
       });
@@ -66,6 +69,28 @@ export default function ExhibitCheckoutForm({
           required
           className={`mt-1 ${inputClass}`}
         />
+      </label>
+      <label className="block">
+        <span className="text-sm font-medium text-gray-700">Province</span>
+        <select
+          value={province}
+          onChange={(e) => setProvince(e.target.value)}
+          required
+          className={`mt-1 ${inputClass} bg-white`}
+        >
+          <option value="">Select…</option>
+          <option value="Out of Canada">Out of Canada</option>
+          <optgroup label="Canadian Provinces &amp; Territories">
+            {PROVINCES.map((p) => (
+              <option key={p} value={p}>
+                {p}
+              </option>
+            ))}
+          </optgroup>
+        </select>
+        <span className="mt-1 block text-xs text-gray-400">
+          Determines the tax rate on your membership dues line.
+        </span>
       </label>
       <label className="block">
         <span className="text-sm font-medium text-gray-700">Booth</span>

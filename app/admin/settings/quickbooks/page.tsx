@@ -24,6 +24,8 @@ const SETTINGS_KEYS = [
   "qbo_membership_tax_codes",
   "qbo_tax_code_outside_canada",
   "qbo_tax_code_public_ticket",
+  "stripe_membership_tax_rate_ids",
+  "stripe_tax_rate_id_outside_canada",
 ];
 
 export default async function QuickBooksSettingsPage() {
@@ -68,6 +70,24 @@ export default async function QuickBooksSettingsPage() {
     }
   }
 
+  let stripeMembershipTaxRateIds: Array<{ province: string; stripeTaxRateId: string | null }> = [];
+  if (map["stripe_membership_tax_rate_ids"]) {
+    try {
+      const parsed = JSON.parse(map["stripe_membership_tax_rate_ids"]) as Array<{
+        province: string;
+        stripeTaxRateId: string;
+      }>;
+      if (Array.isArray(parsed)) {
+        stripeMembershipTaxRateIds = parsed.map((m) => ({
+          province: m.province,
+          stripeTaxRateId: m.stripeTaxRateId,
+        }));
+      }
+    } catch {
+      stripeMembershipTaxRateIds = [];
+    }
+  }
+
   return (
     <main>
       <AdminPageHeader
@@ -84,6 +104,8 @@ export default async function QuickBooksSettingsPage() {
         membershipTaxCodes={membershipTaxCodes}
         outsideCanadaTaxCode={map["qbo_tax_code_outside_canada"] || null}
         publicTicketTaxCode={map["qbo_tax_code_public_ticket"] || null}
+        stripeMembershipTaxRateIds={stripeMembershipTaxRateIds}
+        stripeTaxRateIdOutsideCanada={map["stripe_tax_rate_id_outside_canada"] || null}
       />
     </main>
   );

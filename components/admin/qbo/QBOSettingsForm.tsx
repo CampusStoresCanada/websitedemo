@@ -16,6 +16,11 @@ interface MembershipTaxCode {
   taxCodeId: string | null;
 }
 
+interface StripeMembershipTaxRate {
+  province: string;
+  stripeTaxRateId: string | null;
+}
+
 interface Props {
   defaultItemId: string | null;
   membershipItemId: string | null;
@@ -26,6 +31,8 @@ interface Props {
   membershipTaxCodes: MembershipTaxCode[];
   outsideCanadaTaxCode: string | null;
   publicTicketTaxCode: string | null;
+  stripeMembershipTaxRateIds: StripeMembershipTaxRate[];
+  stripeTaxRateIdOutsideCanada: string | null;
 }
 
 export default function QBOSettingsForm({
@@ -38,6 +45,8 @@ export default function QBOSettingsForm({
   membershipTaxCodes: initialMembershipTaxCodes,
   outsideCanadaTaxCode: initialOutsideCanadaTaxCode,
   publicTicketTaxCode: initialPublicTicketTaxCode,
+  stripeMembershipTaxRateIds: initialStripeMembershipTaxRateIds,
+  stripeTaxRateIdOutsideCanada: initialStripeTaxRateIdOutsideCanada,
 }: Props) {
   const [defaultItemId, setDefaultItemId] = useState(initialDefault);
   const [membershipItemId, setMembershipItemId] = useState(initialMembership);
@@ -52,6 +61,12 @@ export default function QBOSettingsForm({
   );
   const [outsideCanadaTaxCode, setOutsideCanadaTaxCode] = useState(initialOutsideCanadaTaxCode);
   const [publicTicketTaxCode, setPublicTicketTaxCode] = useState(initialPublicTicketTaxCode);
+  const [stripeMembershipTaxRateIds, setStripeMembershipTaxRateIds] = useState<StripeMembershipTaxRate[]>(
+    initialStripeMembershipTaxRateIds
+  );
+  const [stripeTaxRateIdOutsideCanada, setStripeTaxRateIdOutsideCanada] = useState(
+    initialStripeTaxRateIdOutsideCanada
+  );
   const [saving, startSave] = useTransition();
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,6 +95,18 @@ export default function QBOSettingsForm({
     setMembershipTaxCodes((prev) => prev.filter((_, i) => i !== index));
   }
 
+  function updateStripeTaxRate(index: number, patch: Partial<StripeMembershipTaxRate>) {
+    setStripeMembershipTaxRateIds((prev) => prev.map((m, i) => (i === index ? { ...m, ...patch } : m)));
+  }
+
+  function addStripeTaxRate() {
+    setStripeMembershipTaxRateIds((prev) => [...prev, { province: PROVINCES[0], stripeTaxRateId: null }]);
+  }
+
+  function removeStripeTaxRate(index: number) {
+    setStripeMembershipTaxRateIds((prev) => prev.filter((_, i) => i !== index));
+  }
+
   async function handleSave() {
     setError(null);
     startSave(async () => {
@@ -96,6 +123,8 @@ export default function QBOSettingsForm({
           membershipTaxCodes,
           outsideCanadaTaxCode,
           publicTicketTaxCode,
+          stripeMembershipTaxRateIds,
+          stripeTaxRateIdOutsideCanada,
         }),
       });
       if (!res.ok) {
@@ -252,6 +281,78 @@ export default function QBOSettingsForm({
             value={outsideCanadaTaxCode}
             onChange={(id) => setOutsideCanadaTaxCode(id)}
             label="Outside Canada (fallback)"
+          />
+        </div>
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-1">
+          Membership Tax by Province — Stripe (Prospective Partner Checkout)
+        </h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Separate from the QuickBooks mapping above: when a brand-new prospect buys a booth and
+          their first-year membership together in one Stripe checkout, the membership line item is
+          taxed at this rate, by the buyer&apos;s own province. Enter the Stripe Tax Rate object ID
+          (e.g. <code>txr_...</code>) for each province — provinces sharing a rate (5% GST-only:
+          BC/AB/SK/MB/QC/NT/NU/YT; 13% ON; 14% NS; 15% NB/NL/PE) can reuse the same Tax Rate ID.
+          Create these once in the Stripe Dashboard under Tax → Rates.
+        </p>
+
+        {stripeMembershipTaxRateIds.length > 0 && (
+          <div className="space-y-3">
+            {stripeMembershipTaxRateIds.map((m, i) => (
+              <div
+                key={i}
+                className="flex items-end gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3"
+              >
+                <div>
+                  <label className="block text-xs text-gray-500 mb-1">Province</label>
+                  <select
+                    value={m.province}
+                    onChange={(e) => updateStripeTaxRate(i, { province: e.target.value })}
+                    className="rounded-md border border-gray-300 px-2 py-1.5 text-sm bg-white"
+                  >
+                    {PROVINCES.map((p) => (
+                      <option key={p} value={p}>
+                        {p}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="flex-1">
+                  <label className="block text-xs text-gray-500 mb-1">Stripe Tax Rate ID</label>
+                  <input
+                    value={m.stripeTaxRateId ?? ""}
+                    onChange={(e) => updateStripeTaxRate(i, { stripeTaxRateId: e.target.value })}
+                    placeholder="txr_..."
+                    className="w-full rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                  />
+                </div>
+                <button
+                  onClick={() => removeStripeTaxRate(i)}
+                  className="mb-1 rounded-md border border-gray-300 px-2 py-1.5 text-xs text-gray-500 hover:bg-gray-100"
+                >
+                  Remove
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <button
+          onClick={addStripeTaxRate}
+          className="mt-3 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+        >
+          + Add province
+        </button>
+
+        <div className="mt-4">
+          <label className="block text-xs text-gray-500 mb-1">Outside Canada (fallback) — Stripe Tax Rate ID</label>
+          <input
+            value={stripeTaxRateIdOutsideCanada ?? ""}
+            onChange={(e) => setStripeTaxRateIdOutsideCanada(e.target.value)}
+            placeholder="txr_..."
+            className="w-full max-w-xs rounded-md border border-gray-300 px-2 py-1.5 text-sm"
           />
         </div>
       </div>
