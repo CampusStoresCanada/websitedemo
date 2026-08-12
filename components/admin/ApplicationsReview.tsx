@@ -2,7 +2,13 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { approveApplication, rejectApplication } from "@/lib/actions/applications";
+import {
+  approveApplication,
+  rejectApplication,
+  fastTrackApplicationVerification,
+  mergeApplicationIntoOrganization,
+} from "@/lib/actions/applications";
+import type { DuplicateOrgMatch } from "@/lib/actions/applications";
 import { parseUTC } from "@/lib/utils";
 import type { Json } from "@/lib/database.types";
 
@@ -48,8 +54,10 @@ const STATUS_BADGES: Record<string, { label: string; className: string }> = {
 
 export function ApplicationsReview({
   initialApplications,
+  isSuperAdmin = false,
 }: {
   initialApplications: Application[];
+  isSuperAdmin?: boolean;
 }) {
   const router = useRouter();
   const [applications, setApplications] = useState(initialApplications);
@@ -60,6 +68,11 @@ export function ApplicationsReview({
   const [rejectingId, setRejectingId] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [error, setError] = useState<string | null>(null);
+  const [duplicateWarning, setDuplicateWarning] = useState<{
+    id: string;
+    matches: DuplicateOrgMatch[];
+  } | null>(null);
+  const [fastTrackConfirmId, setFastTrackConfirmId] = useState<string | null>(null);
 
   const filtered = applications.filter((app) => {
     if (filterType !== "all" && app.application_type !== filterType) return false;
@@ -71,20 +84,25 @@ export function ApplicationsReview({
     (a) => a.status === "pending_review"
   ).length;
 
-  async function handleApprove(id: string) {
+  async function handleApprove(id: string, confirmDuplicates = false) {
     setError(null);
     setActionLoading(id);
 
-    const result = await approveApplication(id);
+    const result = await approveApplication(id, { confirmDuplicates });
 
     setActionLoading(null);
 
     if (!result.success) {
+      if (result.duplicates && result.duplicates.length > 0) {
+        setDuplicateWarning({ id, matches: result.duplicates });
+        return;
+      }
       setError(result.error || "Failed to approve");
       return;
     }
 
     // Update local state
+    setDuplicateWarning(null);
     setApplications((prev) =>
       prev.map((a) => (a.id === id ? { ...a, status: "approved" } : a))
     );
@@ -119,6 +137,47 @@ export function ApplicationsReview({
     );
     setRejectingId(null);
     setRejectReason("");
+    setExpandedId(null);
+    router.refresh();
+  }
+
+  async function handleFastTrack(id: string) {
+    setError(null);
+    setActionLoading(id);
+
+    const result = await fastTrackApplicationVerification(id);
+
+    setActionLoading(null);
+
+    if (!result.success) {
+      setError(result.error || "Failed to fast-track verification");
+      return;
+    }
+
+    setApplications((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "pending_review" } : a))
+    );
+    setFastTrackConfirmId(null);
+    router.refresh();
+  }
+
+  async function handleMerge(id: string, targetOrgId: string) {
+    setError(null);
+    setActionLoading(id);
+
+    const result = await mergeApplicationIntoOrganization(id, targetOrgId);
+
+    setActionLoading(null);
+
+    if (!result.success) {
+      setError(result.error || "Failed to merge into organization");
+      return;
+    }
+
+    setDuplicateWarning(null);
+    setApplications((prev) =>
+      prev.map((a) => (a.id === id ? { ...a, status: "approved" } : a))
+    );
     setExpandedId(null);
     router.refresh();
   }
@@ -221,7 +280,15 @@ export function ApplicationsReview({
                           actionLoading={actionLoading}
                           rejectingId={rejectingId}
                           rejectReason={rejectReason}
+                          duplicateWarning={
+                            duplicateWarning?.id === app.id ? duplicateWarning.matches : null
+                          }
+                          isFastTrackConfirming={fastTrackConfirmId === app.id}
+                          isSuperAdmin={isSuperAdmin}
                           onApprove={() => handleApprove(app.id)}
+                          onConfirmApproveAnyway={() => handleApprove(app.id, true)}
+                          onCancelDuplicateWarning={() => setDuplicateWarning(null)}
+                          onMerge={(targetOrgId) => handleMerge(app.id, targetOrgId)}
                           onStartReject={() => setRejectingId(app.id)}
                           onCancelReject={() => {
                             setRejectingId(null);
@@ -229,7 +296,14 @@ export function ApplicationsReview({
                           }}
                           onReject={() => handleReject(app.id)}
                           onRejectReasonChange={setRejectReason}
-                          onCollapse={() => setExpandedId(null)}
+                          onStartFastTrack={() => setFastTrackConfirmId(app.id)}
+                          onCancelFastTrack={() => setFastTrackConfirmId(null)}
+                          onConfirmFastTrack={() => handleFastTrack(app.id)}
+                          onCollapse={() => {
+                            setExpandedId(null);
+                            setDuplicateWarning(null);
+                            setFastTrackConfirmId(null);
+                          }}
                         />
                       ) : (
                         <div>
@@ -302,11 +376,20 @@ function ExpandedView({
   actionLoading,
   rejectingId,
   rejectReason,
+  duplicateWarning,
+  isFastTrackConfirming,
+  isSuperAdmin,
   onApprove,
+  onConfirmApproveAnyway,
+  onCancelDuplicateWarning,
+  onMerge,
   onStartReject,
   onCancelReject,
   onReject,
   onRejectReasonChange,
+  onStartFastTrack,
+  onCancelFastTrack,
+  onConfirmFastTrack,
   onCollapse,
 }: {
   app: Application;
@@ -315,11 +398,20 @@ function ExpandedView({
   actionLoading: string | null;
   rejectingId: string | null;
   rejectReason: string;
+  duplicateWarning: DuplicateOrgMatch[] | null;
+  isFastTrackConfirming: boolean;
+  isSuperAdmin: boolean;
   onApprove: () => void;
+  onConfirmApproveAnyway: () => void;
+  onCancelDuplicateWarning: () => void;
+  onMerge: (targetOrgId: string) => void;
   onStartReject: () => void;
   onCancelReject: () => void;
   onReject: () => void;
   onRejectReasonChange: (v: string) => void;
+  onStartFastTrack: () => void;
+  onCancelFastTrack: () => void;
+  onConfirmFastTrack: () => void;
   onCollapse: () => void;
 }) {
   const data = (app.application_data as Record<string, unknown>) || {};
@@ -410,8 +502,125 @@ function ExpandedView({
         </div>
       )}
 
+      {/* Fast-track: skip waiting for the applicant to click the verification email */}
+      {app.status === "pending_verification" && (
+        <div className="pt-2 border-t border-gray-200">
+          {isFastTrackConfirming ? (
+            <div className="p-3 bg-blue-50 rounded-lg border border-blue-200 space-y-2">
+              <p className="text-sm text-blue-900">
+                This skips waiting for {app.applicant_name || "the applicant"} to click the
+                verification link sent to {app.applicant_email}. Only do this if you&apos;ve
+                confirmed the applicant and their email some other way (phone call, known
+                contact, etc) — it moves the application straight to Pending Review.
+              </p>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={onConfirmFastTrack}
+                  disabled={isLoading}
+                  className="px-4 py-1.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50 transition-colors"
+                >
+                  {isLoading ? "Fast-tracking…" : "Confirm fast-track"}
+                </button>
+                <button
+                  onClick={onCancelFastTrack}
+                  disabled={isLoading}
+                  className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <button
+              onClick={onStartFastTrack}
+              className="text-sm text-accent hover:text-accent font-medium"
+            >
+              Fast-track verification (skip email link) →
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Duplicate organization / duplicate charge warning */}
+      {canAct && duplicateWarning && duplicateWarning.length > 0 && (
+        <div className="p-3 bg-amber-50 rounded-lg border border-amber-300 space-y-3">
+          <p className="text-sm font-semibold text-amber-900">
+            {"⚠️"} Possible duplicate organization
+            {duplicateWarning.length > 1 ? "s" : ""} found
+          </p>
+          <div className="space-y-2">
+            {duplicateWarning.map((match) => (
+              <div
+                key={match.id}
+                className="p-2.5 bg-white rounded-md border border-amber-200 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-medium text-gray-900">{match.name}</span>
+                  <span className="text-xs text-gray-500">
+                    {match.type ?? "—"} · {match.membershipStatus ?? "no status"}
+                  </span>
+                </div>
+                {(match.email || match.website) && (
+                  <p className="text-xs text-gray-500">
+                    {[match.email, match.website].filter(Boolean).join(" · ")}
+                  </p>
+                )}
+                <p className="text-xs text-gray-500 mt-1">
+                  Matched on: {match.matchReasons.join(", ")}
+                </p>
+                {(match.hasOutstandingInvoice || match.hasPaidInvoice) && (
+                  <p className="text-xs font-medium text-red-700 mt-1">
+                    {match.hasPaidInvoice
+                      ? "This organization already has a paid invoice — approving may double-charge."
+                      : "This organization already has an outstanding invoice."}
+                  </p>
+                )}
+                {isSuperAdmin && (
+                  <div className="mt-2 pt-2 border-t border-amber-100">
+                    <button
+                      onClick={() => onMerge(match.id)}
+                      disabled={isLoading}
+                      className="text-xs font-medium text-accent hover:text-accent disabled:opacity-50"
+                    >
+                      {isLoading ? "Merging…" : `Merge this application into "${match.name}" →`}
+                    </button>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Updates {match.name}&apos;s profile with the application&apos;s details,
+                      links this application to it, and grants {app.applicant_name || "the applicant"} org_admin
+                      login — no new invoice is created.
+                    </p>
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+          <p className="text-xs text-amber-800">
+            Approving will create a brand-new organization and generate a new invoice.
+            {isSuperAdmin
+              ? " If this applicant belongs to one of the organizations above, merge into it instead using the link on that organization's card."
+              : " If this applicant belongs to one of the organizations above, cancel and ask a super admin to merge instead of approving."}
+          </p>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={onConfirmApproveAnyway}
+              disabled={isLoading}
+              className="px-4 py-1.5 bg-amber-600 text-white text-sm font-medium rounded-lg hover:bg-amber-700 disabled:opacity-50 transition-colors"
+            >
+              {isLoading ? "Approving…" : "This is a new org — approve anyway"}
+            </button>
+            <button
+              onClick={onCancelDuplicateWarning}
+              disabled={isLoading}
+              className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-800"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Actions for pending_review */}
-      {canAct && (
+      {canAct && !duplicateWarning && (
         <div className="flex items-center gap-3 pt-2 border-t border-gray-200">
           {isRejecting ? (
             <div className="flex-1 space-y-2">
