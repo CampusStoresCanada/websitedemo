@@ -116,3 +116,91 @@ export async function triggerConferencePaymentConfirmation(params: {
     },
   });
 }
+
+function prospectApplyUrl(payment: { id: string; company_name: string; email: string }): string {
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  return `${appUrl}/apply/partner?paymentId=${payment.id}&companyName=${encodeURIComponent(payment.company_name)}&email=${encodeURIComponent(payment.email)}`;
+}
+
+/**
+ * "Pay first, apply second" confirmation — fires right after a prospect's
+ * checkout.session.completed for a booth they bought with no org/account
+ * yet (see lib/actions/prospective-booth-checkout.ts). No org-scoped
+ * conference_orders row exists for this path, so this is keyed off the
+ * prospective_booth_payments row directly, not an order id.
+ */
+export async function triggerProspectiveBoothPaymentConfirmation(params: {
+  db: AdminClient;
+  paymentId: string;
+}): Promise<void> {
+  const { db, paymentId } = params;
+
+  const { data: payment } = await db
+    .from("prospective_booth_payments")
+    .select("id, email, company_name, amount_cents, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name)")
+    .eq("id", paymentId)
+    .maybeSingle();
+
+  if (!payment) {
+    console.error(`triggerProspectiveBoothPaymentConfirmation: payment ${paymentId} not found`);
+    return;
+  }
+
+  const boothName = (Array.isArray(payment.booth) ? payment.booth[0] : payment.booth)?.name ?? "";
+
+  await triggerAutomation({
+    triggerSource: "conference",
+    triggerEventKey: `prospective_booth_payment_confirmation:${paymentId}`,
+    templateKey: "prospective_booth_payment_confirmation",
+    automationMode: "auto_send",
+    campaignName: `Prospective Booth Payment Confirmation: ${payment.company_name}`,
+    audience: { type: "custom_emails", filters: { emails: [payment.email] } },
+    variableValues: {
+      company_name: payment.company_name,
+      booth_name: boothName,
+      amount_paid: formatCents(payment.amount_cents ?? 0),
+      apply_url: prospectApplyUrl(payment),
+    },
+  });
+}
+
+/**
+ * One-time nudge (see lib/onboarding/nudge-job.ts for the cadence
+ * convention this mirrors) for a prospect who paid but hasn't submitted
+ * their partnership application a few days later. Fired by
+ * /api/cron/prospective-booth-followup, keyed by payment id so it can
+ * never double-send for the same payment.
+ */
+export async function triggerProspectiveBoothApplicationReminder(params: {
+  db: AdminClient;
+  paymentId: string;
+}): Promise<void> {
+  const { db, paymentId } = params;
+
+  const { data: payment } = await db
+    .from("prospective_booth_payments")
+    .select("id, email, company_name, booth:conference_entities!prospective_booth_payments_booth_entity_id_fkey(name)")
+    .eq("id", paymentId)
+    .maybeSingle();
+
+  if (!payment) {
+    console.error(`triggerProspectiveBoothApplicationReminder: payment ${paymentId} not found`);
+    return;
+  }
+
+  const boothName = (Array.isArray(payment.booth) ? payment.booth[0] : payment.booth)?.name ?? "";
+
+  await triggerAutomation({
+    triggerSource: "conference",
+    triggerEventKey: `prospective_booth_application_reminder:${paymentId}`,
+    templateKey: "prospective_booth_application_reminder",
+    automationMode: "auto_send",
+    campaignName: `Prospective Booth Application Reminder: ${payment.company_name}`,
+    audience: { type: "custom_emails", filters: { emails: [payment.email] } },
+    variableValues: {
+      company_name: payment.company_name,
+      booth_name: boothName,
+      apply_url: prospectApplyUrl(payment),
+    },
+  });
+}

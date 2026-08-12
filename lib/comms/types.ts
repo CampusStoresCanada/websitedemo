@@ -70,6 +70,8 @@ export type TemplateKey =
   | "conference_reminder"
   | "conference_waitlist_approved"
   | "conference_checklist_reminder"
+  | "prospective_booth_payment_confirmation"
+  | "prospective_booth_application_reminder"
   // Events
   | "event_submitted"
   | "event_approved"

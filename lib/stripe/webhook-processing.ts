@@ -9,6 +9,7 @@ import { mintRegistrationAttendeesFromOrder } from "../conference/registration-m
 import {
   triggerConferenceRegistrationConfirmation,
   triggerConferencePaymentConfirmation,
+  triggerProspectiveBoothPaymentConfirmation,
 } from "../comms/conference-triggers";
 import { enqueueQBExport, enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import {
@@ -559,6 +560,7 @@ async function handleCheckoutSessionCompleted(
     }
     if (boothPayment?.id) {
       await enqueueQBMiscReceipt("prospective_booth", boothPayment.id);
+      await triggerProspectiveBoothPaymentConfirmation({ db, paymentId: boothPayment.id });
     }
     return { conferenceOrderId: null };
   }

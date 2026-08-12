@@ -630,7 +630,7 @@ export async function getConfirmedExhibitors(conferenceId: string): Promise<Conf
 async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFloorPlan>> {
   const db = createAdminClient();
   const now = new Date().toISOString();
-  const [boothsRes, salesRes, cartRes, pendingOrderRes, confRes, refsRes] = await Promise.all([
+  const [boothsRes, salesRes, cartRes, pendingOrderRes, prospectRes, confRes, refsRes] = await Promise.all([
     db.from("conference_entities").select("id, name, is_for_sale, price_cents, attributes").eq("conference_id", conferenceId).eq("kind", "booth"),
     // Sold: entity_balances tells us which org holds each booth (1 row per purchase → entity).
     db.from("entity_balances")
@@ -648,6 +648,15 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
       .eq("conference_id", conferenceId)
       .eq("status", "pending")
       .or(`expires_at.is.null,expires_at.gt.${now}`),
+    // A paid "pay first, apply second" prospect (no org yet) holds the booth
+    // too, from payment until their application is approved and it actually
+    // mints — otherwise the map shows it available the whole time someone's
+    // board review is pending, contradicting the "booth is reserved" promise
+    // on the post-payment success page.
+    db.from("prospective_booth_payments")
+      .select("booth_entity_id, company_name")
+      .eq("conference_id", conferenceId)
+      .eq("status", "paid"),
     db.from("conference_instances").select("floor_plan_url").eq("id", conferenceId).maybeSingle(),
     // instance_of refs so we know which type each booth belongs to.
     db.from("conference_entity_refs").select("from_entity_id, to_entity_id")
@@ -695,6 +704,16 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
       if (item.offer_entity_id && !reservedByEntity.has(item.offer_entity_id)) {
         reservedByEntity.set(item.offer_entity_id, { orgName, orgId: row.organization_id });
       }
+    }
+  }
+  // A paid prospective-booth payment reserves too, until it either mints
+  // (moves to the sold map, which takes precedence below) or the prospect's
+  // application is never approved and an admin manually frees it back up.
+  // No org exists yet, so orgId is "" — never matches a real viewer org, so
+  // this never mistakenly reads as "your booth."
+  for (const row of prospectRes.data ?? []) {
+    if (row.booth_entity_id && row.company_name && !reservedByEntity.has(row.booth_entity_id)) {
+      reservedByEntity.set(row.booth_entity_id, { orgName: row.company_name, orgId: "" });
     }
   }
 
