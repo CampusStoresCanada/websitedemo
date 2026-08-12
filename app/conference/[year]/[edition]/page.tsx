@@ -185,9 +185,13 @@ export default async function ConferenceEditionHubPage({
   // anonymous visitor exploring the vendor tab. Global admins get the
   // internal admin framing instead.
   let anonymousBooths: Array<{ id: string; name: string; priceCents: number }> = [];
-  // Fallback for when no booths are for sale yet — the map itself (dimmed,
-  // unclickable) is still worth showing rather than a blank "no booths"
-  // message, same reasoning as the known-org path in OffersClient.
+  // Always loaded (not just when nothing's for sale) — the interactive map
+  // is the primary way anyone picks a specific booth, signed-in or not, same
+  // as OffersClient's showInlineMap. Previously this only fetched when
+  // anonymousBooths was empty, so the moment real sales opened, anonymous
+  // visitors got dropped from the map into a plain name-ordered dropdown
+  // (ExhibitCheckoutForm) — exactly backwards, since that's the moment the
+  // map matters most.
   let anonymousFloorPlan: ConferenceFloorPlan | null = null;
   if (!knownOrg && !isGlobalAdminViewer) {
     const { data: purchases } = await db.from("entity_purchases").select("offer_entity_id").eq("conference_id", conference.id);
@@ -203,10 +207,8 @@ export default async function ConferenceEditionHubPage({
       .filter((b) => !claimedIds.has(b.id))
       .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
 
-    if (anonymousBooths.length === 0) {
-      const floorResult = await getFloorPlanForVisitor(conference.id);
-      anonymousFloorPlan = floorResult.success ? floorResult.data : null;
-    }
+    const floorResult = await getFloorPlanForVisitor(conference.id);
+    anonymousFloorPlan = floorResult.success ? floorResult.data : null;
   }
 
   const CONNECTED_BOOTH_PRICE_CENTS = 600000;
@@ -506,18 +508,15 @@ export default async function ConferenceEditionHubPage({
                   </Link>
                 </div>
                 <div className="space-y-8">
-                  {anonymousBooths.length > 0 ? (
-                    <ExhibitCheckoutForm
-                      conferenceId={conference.id}
-                      conferenceYear={conference.year}
-                      conferenceEdition={conference.edition_code}
-                      booths={anonymousBooths}
-                    />
-                  ) : anonymousFloorPlan?.floorPlanUrl && anonymousFloorPlan.booths.length > 0 ? (
+                  {anonymousFloorPlan?.floorPlanUrl && anonymousFloorPlan.booths.length > 0 ? (
                     <div className="space-y-3">
                       <div>
                         <h2 className="text-base font-semibold text-[#1A1A1A]">Choose a Booth</h2>
-                        <p className="text-sm text-[#6B6B6B]">Booth sales haven&apos;t opened yet — take a look around</p>
+                        <p className="text-sm text-[#6B6B6B]">
+                          {anonymousFloorPlan.booths.filter((b) => b.status === "available").length > 0
+                            ? `${anonymousFloorPlan.booths.filter((b) => b.status === "available").length} of ${anonymousFloorPlan.booths.length} available`
+                            : "Booth sales haven't opened yet — take a look around"}
+                        </p>
                       </div>
                       <FloorPlanViewer
                         conferenceId={conference.id}
@@ -529,6 +528,13 @@ export default async function ConferenceEditionHubPage({
                         sponsorshipAnchorId="find-your-level"
                       />
                     </div>
+                  ) : anonymousBooths.length > 0 ? (
+                    <ExhibitCheckoutForm
+                      conferenceId={conference.id}
+                      conferenceYear={conference.year}
+                      conferenceEdition={conference.edition_code}
+                      booths={anonymousBooths}
+                    />
                   ) : (
                     <div className="rounded-2xl border border-[#E5E5E5] bg-white p-6 text-sm text-[#6B6B6B] shadow-sm">
                       No booths are currently available for this conference.

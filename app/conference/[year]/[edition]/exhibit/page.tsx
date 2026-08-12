@@ -66,16 +66,18 @@ export default async function ExhibitPage({
     .filter((b) => !claimedIds.has(b.id))
     .map((b) => ({ id: b.id, name: b.name, priceCents: b.price_cents ?? 0 }));
 
-  // No booths on sale yet (e.g. booth sales haven't opened) — the map is
-  // still worth showing, dimmed and unclickable, rather than blank text.
-  // Same reasoning as the conference hub's exhibitor path.
-  let floorPlan: { floorPlanUrl: string | null; booths: import("@/lib/actions/conference-entities").FloorPlanBooth[] } | null = null;
-  if (availableBooths.length === 0) {
-    const floorResult = await getFloorPlanForVisitor(conference.id);
-    floorPlan = floorResult.success ? floorResult.data : null;
-  }
+  // Always loaded (not just when nothing's for sale) — the interactive map
+  // is the primary way to pick a specific booth once sales are live, not
+  // just a pre-sale preview. Previously this only fetched when
+  // availableBooths was empty, so the moment real sales opened, visitors
+  // got dropped from the map into a plain name-ordered dropdown
+  // (ExhibitCheckoutForm) — exactly backwards, since that's the moment the
+  // map matters most. Same fix as the conference hub's exhibitor path.
+  const floorResult = await getFloorPlanForVisitor(conference.id);
+  const floorPlan: { floorPlanUrl: string | null; booths: import("@/lib/actions/conference-entities").FloorPlanBooth[] } | null =
+    floorResult.success ? floorResult.data : null;
 
-  const showFloorPlanFallback = availableBooths.length === 0 && floorPlan?.floorPlanUrl && floorPlan.booths.length > 0;
+  const showFloorPlanFallback = Boolean(floorPlan?.floorPlanUrl) && (floorPlan?.booths.length ?? 0) > 0;
 
   return (
     <main className={`mx-auto px-4 py-12 ${showFloorPlanFallback ? "max-w-4xl" : "max-w-2xl"}`}>
@@ -102,18 +104,15 @@ export default async function ExhibitPage({
         </Link>
       </div>
 
-      {availableBooths.length > 0 ? (
-        <ExhibitCheckoutForm
-          conferenceId={conference.id}
-          conferenceYear={conference.year}
-          conferenceEdition={conference.edition_code}
-          booths={availableBooths}
-        />
-      ) : showFloorPlanFallback ? (
+      {showFloorPlanFallback ? (
         <div className="mt-8 space-y-3">
           <div>
             <h2 className="text-base font-semibold text-gray-900">Choose a Booth</h2>
-            <p className="text-sm text-gray-500">Booth sales haven&apos;t opened yet — take a look around</p>
+            <p className="text-sm text-gray-500">
+              {floorPlan!.booths.filter((b) => b.status === "available").length > 0
+                ? `${floorPlan!.booths.filter((b) => b.status === "available").length} of ${floorPlan!.booths.length} available`
+                : "Booth sales haven't opened yet — take a look around"}
+            </p>
           </div>
           <FloorPlanViewer
             conferenceId={conference.id}
@@ -124,6 +123,13 @@ export default async function ExhibitPage({
             booths={floorPlan!.booths}
           />
         </div>
+      ) : availableBooths.length > 0 ? (
+        <ExhibitCheckoutForm
+          conferenceId={conference.id}
+          conferenceYear={conference.year}
+          conferenceEdition={conference.edition_code}
+          booths={availableBooths}
+        />
       ) : (
         <div className="mt-8 rounded-lg border border-gray-200 p-8 text-center text-gray-600">
           No booths are currently available for this conference.
