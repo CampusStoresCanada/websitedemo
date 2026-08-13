@@ -3,9 +3,11 @@ import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { CONFERENCE_STATUS_LABELS, type ConferenceStatus } from "@/lib/constants/conference";
 import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
+import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
 import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
+import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -154,6 +156,7 @@ export default async function AdminConsolePage() {
     nextMeetingResult,
     driveSettingsResult,
     financials,
+    renewalProgress,
   ] = await Promise.all([
     // Current conference
     db.from("conference_instances")
@@ -218,6 +221,9 @@ export default async function AdminConsolePage() {
 
     // Latest QBO financial snapshot
     getLatestFinancialSummary(),
+
+    // Renewal-season progress widget — null outside a season
+    getRenewalProgressData(),
   ]);
 
   const conf         = conferenceResult.data;
@@ -361,6 +367,9 @@ export default async function AdminConsolePage() {
           <div className="mt-1 text-sm text-gray-500">{alertCount === 0 ? "system healthy" : alertCount === 1 ? "needs attention" : "need attention"}</div>
         </Link>
       </div>
+
+      {/* ── Membership renewals (glanceable, season-only) ─────────── */}
+      {renewalProgress && <MembershipRenewalsWidget data={renewalProgress} />}
 
       {/* ── Conference quick access ─────────────────────────────── */}
       {conf && (
