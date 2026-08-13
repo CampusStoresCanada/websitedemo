@@ -254,7 +254,7 @@ function normalizeMapOrg(row: Record<string, unknown>): HomeOrgRecord {
     province: (row.province as string | null) ?? null,
     latitude: typeof row.latitude === "number" ? row.latitude : null,
     longitude: typeof row.longitude === "number" ? row.longitude : null,
-    logoUrl: (row.logo_url as string | null) ?? null,
+    logoUrl: (row.logo_url as string | null) ?? (row.logo_horizontal_url as string | null) ?? null,
     website: (row.website as string | null) ?? null,
     primaryCategory: (row.primary_category as string | null) ?? null,
     organizationType: (row.organization_type as string | null) ?? null,
@@ -496,7 +496,7 @@ async function fetchMapOrgsWithBenchmarking(
   let orgQuery = supabase
     .from("organizations")
     .select(
-      "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, website, primary_category, organization_type, fte, company_description, highlight_product_name, catalogue_url, certifications, is_cancoll_member, procurement_info"
+      "id, slug, name, type, membership_status, city, province, latitude, longitude, logo_url, logo_horizontal_url, website, primary_category, organization_type, fte, company_description, highlight_product_name, catalogue_url, certifications, is_cancoll_member, procurement_info"
     )
     .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
     .is("archived_at", null)
