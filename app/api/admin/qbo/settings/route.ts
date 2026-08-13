@@ -36,6 +36,8 @@ export async function POST(req: NextRequest) {
     ["membershipItemId", "qbo_item_id_membership"],
     ["partnershipItemId", "qbo_item_id_partnership"],
     ["conferencePartialRefundItemId", "qbo_item_id_conference_partial_refund"],
+    ["conferenceConnectedBoothItemId", "qbo_item_id_conference_connected_booth"],
+    ["conferenceExhibitorBoothItemId", "qbo_item_id_conference_exhibitor_booth"],
     ["stripeDepositAccountId", "qbo_stripe_deposit_account_id"],
     ["outsideCanadaTaxCode", "qbo_tax_code_outside_canada"],
     ["publicTicketTaxCode", "qbo_tax_code_public_ticket"],

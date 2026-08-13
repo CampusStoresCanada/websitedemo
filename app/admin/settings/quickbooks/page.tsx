@@ -20,6 +20,8 @@ const SETTINGS_KEYS = [
   "qbo_item_id_partnership",
   "qbo_membership_price_bands",
   "qbo_item_id_conference_partial_refund",
+  "qbo_item_id_conference_connected_booth",
+  "qbo_item_id_conference_exhibitor_booth",
   "qbo_stripe_deposit_account_id",
   "qbo_membership_tax_codes",
   "qbo_tax_code_outside_canada",
@@ -100,6 +102,8 @@ export default async function QuickBooksSettingsPage() {
         partnershipItemId={map["qbo_item_id_partnership"] || null}
         priceBands={priceBands}
         conferencePartialRefundItemId={map["qbo_item_id_conference_partial_refund"] || null}
+        conferenceConnectedBoothItemId={map["qbo_item_id_conference_connected_booth"] || null}
+        conferenceExhibitorBoothItemId={map["qbo_item_id_conference_exhibitor_booth"] || null}
         stripeDepositAccountId={map["qbo_stripe_deposit_account_id"] || null}
         membershipTaxCodes={membershipTaxCodes}
         outsideCanadaTaxCode={map["qbo_tax_code_outside_canada"] || null}
