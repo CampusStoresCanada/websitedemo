@@ -59,7 +59,7 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * org_admin on file yet, so a notice still goes out somewhere rather than
  * silently vanishing.
  */
-async function resolveRenewalRecipients(
+export async function resolveRenewalRecipients(
   db: AdminClient,
   orgId: string,
   fallbackEmail: string | null

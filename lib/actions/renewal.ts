@@ -8,6 +8,7 @@ import { stripe } from "@/lib/stripe/client";
 import { computeNewExpiresAt } from "@/lib/membership/renewal-activation";
 import { getActivePolicySet } from "@/lib/policy/engine";
 import { sendTransactional } from "@/lib/comms/send";
+import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -189,10 +190,11 @@ export async function optOutOfRenewal(
     };
   }
 
-  if (org.email) {
+  const optOutRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+  for (const to of optOutRecipients) {
     await sendTransactional({
       templateKey: "opt_out_confirmation",
-      to: org.email,
+      to,
       variables: {
         contact_name: org.name,
         org_name: org.name,
