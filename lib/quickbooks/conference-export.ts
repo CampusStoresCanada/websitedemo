@@ -12,7 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveQBCustomer, createQBSalesReceipt, createQBRefundReceipt, qboDocNumber } from "./client";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
-import { resolveMembershipTaxCode } from "./export";
+import { resolveMembershipTaxCode, resolveMembershipTierItemId } from "./export";
 import type {
   QBLineItem,
   QBConferenceReceiptQueueRow,
@@ -186,6 +186,28 @@ async function resolveEntityQBItemId(
   return type?.qbo_item_id ?? null;
 }
 
+/**
+ * A bundled membership-renewal line has one catalog entity but two very
+ * different real prices behind it: a Member org pays by FTE tier (same
+ * bands as a standalone membership invoice — see resolveMembershipTierItemId
+ * in ./export), a Vendor Partner org pays the flat partnership rate. The
+ * entity's own qbo_item_id only holds one item, so it's kept pointed at the
+ * flat/partner item; Member orgs are tier-resolved first and only fall back
+ * to that flat item if no band matches (mirrors the standalone invoice path).
+ */
+async function resolveMembershipRenewalItemId(
+  db: Db,
+  entity: { id: string; name: string; qbo_item_id: string | null },
+  organizationType: string | null,
+  amountCents: number
+): Promise<string | null> {
+  if (organizationType === "Member") {
+    const tierItemId = await resolveMembershipTierItemId(db, amountCents);
+    if (tierItemId) return tierItemId;
+  }
+  return resolveEntityQBItemId(db, entity);
+}
+
 /** Builds the QB line items for a conference order — shared by the receipt
  * worker and the full-refund path (a full refund mirrors these exactly).
  * taxCodeRef is resolved once per conference (see resolveConferenceTaxCode)
@@ -193,6 +215,7 @@ async function resolveEntityQBItemId(
 async function resolveConferenceLineItems(
   db: Db,
   conferenceOrderId: string,
+  organizationId: string,
   taxCodeRef: string
 ): Promise<QBLineItem[]> {
   const { data: items, error } = await db
@@ -203,6 +226,12 @@ async function resolveConferenceLineItems(
   if (error) throw new Error(`Failed to load order items: ${error.message}`);
   if (!items || items.length === 0) throw new Error(`Conference order has no line items: ${conferenceOrderId}`);
 
+  const { data: org } = await db
+    .from("organizations")
+    .select("type")
+    .eq("id", organizationId)
+    .single();
+
   const lines: QBLineItem[] = [];
   for (const item of items) {
     if (!item.offer_entity_id) {
@@ -211,13 +240,16 @@ async function resolveConferenceLineItems(
 
     const { data: entity, error: entityError } = await db
       .from("conference_entities")
-      .select("id, name, qbo_item_id")
+      .select("id, name, kind, qbo_item_id")
       .eq("id", item.offer_entity_id)
       .single();
 
     if (entityError || !entity) throw new Error(`Entity not found for order item ${item.id}`);
 
-    const itemId = await resolveEntityQBItemId(db, entity);
+    const itemId =
+      entity.kind === "membership_renewal"
+        ? await resolveMembershipRenewalItemId(db, entity, org?.type ?? null, item.total_cents)
+        : await resolveEntityQBItemId(db, entity);
     if (!itemId) {
       throw new Error(
         `"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`
@@ -358,7 +390,7 @@ export async function quickbooksConferenceReceiptExportRun(): Promise<QBConferen
       const order = await loadOrder(db, row.conference_order_id);
       const customerId = await resolveQBCustomerId(db, order.organizationId);
       const taxCodeRef = await resolveConferenceTaxCode(db, order.conferenceId);
-      const lines = await resolveConferenceLineItems(db, row.conference_order_id, taxCodeRef);
+      const lines = await resolveConferenceLineItems(db, row.conference_order_id, order.organizationId, taxCodeRef);
       const depositAccountId = await resolveStripeDepositAccountId(db);
 
       const receipt = await createQBSalesReceipt({
@@ -487,7 +519,7 @@ export async function quickbooksConferenceRefundExportRun(): Promise<QBConferenc
       const isFullRefundEvent = row.refund_amount_cents >= orderRow.total_cents;
       let lines: QBLineItem[];
       if (isFullRefundEvent) {
-        lines = await resolveConferenceLineItems(db, row.conference_order_id, taxCodeRef);
+        lines = await resolveConferenceLineItems(db, row.conference_order_id, order.organizationId, taxCodeRef);
       } else {
         const partialItemId = await resolvePartialRefundItemId(db);
         lines = [

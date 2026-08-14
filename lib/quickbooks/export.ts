@@ -106,7 +106,7 @@ interface MembershipPriceBand {
  * top tier if it exceeds all configured ceilings. Returns null (falls through
  * to the flat qbo_item_id_membership) if no bands are configured.
  */
-async function resolveMembershipTierItemId(
+export async function resolveMembershipTierItemId(
   db: ReturnType<typeof createAdminClient>,
   amountCents: number
 ): Promise<string | null> {
