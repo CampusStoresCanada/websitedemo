@@ -60,8 +60,15 @@ export interface UserOrganization {
     /** Org-level lifecycle status (active/grace/locked/...) — distinct from
      *  this row's own `status` (the user's membership record status). Used
      *  to gate elevated permission tiers on the org's own access being
-     *  active, not just the user's link to it. */
+     *  active, not just the user's link to it.
+     *  @deprecated Phase 4 Stage 0/1: kept as the Stage 0 backfill/mirror
+     *  target and as a fallback if no `memberships` row matches. New reads
+     *  should go through `resolveMembershipStatus()` (lib/auth/org-level.ts),
+     *  which prefers `memberships` and falls back to this field. */
     membership_status: OrgMembershipStatus | null;
+    /** Phase 4: the org's membership as its own entity — normally exactly
+     *  one row per org today, but the schema allows more (see plan). */
+    memberships?: { status: OrgMembershipStatus; program_key: string }[];
   };
 }
 

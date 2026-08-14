@@ -1,4 +1,5 @@
 import type { MembershipProgramDef } from "@/lib/policy/types";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 /**
  * The facts `resolveOrgLevel` needs about one active org membership —
@@ -46,4 +47,33 @@ export function resolveOrgLevel(
   if (hasLevel("partner")) return "partner";
 
   return null;
+}
+
+/**
+ * Phase 4 Stage 1: resolve an org's current membership-lifecycle status
+ * (active/grace/locked/...) from its `memberships` row(s) — the entity
+ * now responsible for that fact — falling back to the org's own
+ * `membership_status` column if no matching row exists (e.g. a query that
+ * didn't embed `memberships`, or an org type with no configured program).
+ * Single choke point for lib/auth/permissions.ts's derivePermissionState
+ * and lib/visibility/viewer.ts's getViewerContext, which both previously
+ * read `organization.membership_status` directly.
+ */
+export function resolveMembershipStatus(
+  organization:
+    | {
+        type: string;
+        membership_status: OrgMembershipStatus | null;
+        memberships?: { status: OrgMembershipStatus; program_key: string }[];
+      }
+    | null
+    | undefined,
+  programs: MembershipProgramDef[]
+): OrgMembershipStatus | null {
+  if (!organization) return null;
+
+  const programKey = programs.find((p) => p.orgTypeValue === organization.type)?.key;
+  const matched = organization.memberships?.find((m) => m.program_key === programKey);
+
+  return matched?.status ?? organization.membership_status ?? null;
 }

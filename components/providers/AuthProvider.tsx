@@ -360,7 +360,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             role,
             status,
             created_at,
-            organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status)
+            organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status, memberships(status, program_key))
           `
           )
           .eq("user_id", userId)

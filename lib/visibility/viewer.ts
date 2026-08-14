@@ -1,7 +1,7 @@
 import { getOptionalAuthContext, getIdentitySnapshot, type AuthContext } from "@/lib/auth/guards";
 import type { ViewerLevel } from "./defaults";
 import { isOrgAccessActive } from "@/lib/membership/status";
-import { resolveOrgLevel } from "@/lib/auth/org-level";
+import { resolveOrgLevel, resolveMembershipStatus } from "@/lib/auth/org-level";
 import { getProgramsConfig } from "@/lib/policy/engine";
 
 /**
@@ -66,7 +66,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
       orgRows.map((uo) => [uo.organization_id, uo.organization?.type])
     );
     const statusByOrgId = new Map(
-      orgRows.map((uo) => [uo.organization_id, uo.organization?.membership_status ?? null])
+      orgRows.map((uo) => [uo.organization_id, resolveMembershipStatus(uo.organization, programs)])
     );
 
     // A lapsed org (locked/canceled) shouldn't elevate the viewer's masking

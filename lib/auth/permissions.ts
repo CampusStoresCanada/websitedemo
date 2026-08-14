@@ -1,6 +1,6 @@
 import { PERMISSION_LEVELS, type PermissionState, type UserOrganization, type GlobalRole } from "./types";
 import { isOrgAccessActive } from "@/lib/membership/status";
-import { resolveOrgLevel } from "./org-level";
+import { resolveOrgLevel, resolveMembershipStatus } from "./org-level";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 
 /**
@@ -106,7 +106,7 @@ export function derivePermissionState(
   // ORG's own access has to be active too, or this only ever narrows
   // (never expands) what the user already had.
   const activeOrgs = organizations.filter(
-    (uo) => uo.status === "active" && isOrgAccessActive(uo.organization?.membership_status ?? null)
+    (uo) => uo.status === "active" && isOrgAccessActive(resolveMembershipStatus(uo.organization, programs))
   );
 
   const level = resolveOrgLevel(

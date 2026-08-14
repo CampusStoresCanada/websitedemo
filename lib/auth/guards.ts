@@ -87,7 +87,7 @@ export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => 
           role,
           status,
           created_at,
-          organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status)
+          organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status, memberships(status, program_key))
         `
         )
         .eq("user_id", userId)
