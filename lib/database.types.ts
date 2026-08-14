@@ -5377,6 +5377,82 @@ export type Database = {
           },
         ]
       }
+      memberships: {
+        Row: {
+          canceled_at: string | null
+          cancoll_tier: string | null
+          created_at: string
+          expires_at: string | null
+          fte: number | null
+          grace_period_started_at: string | null
+          id: string
+          is_cancoll_member: boolean
+          locked_at: string | null
+          organization_id: string | null
+          person_id: string | null
+          program_key: string
+          status: Database["public"]["Enums"]["org_membership_status"]
+          status_changed_at: string | null
+          updated_at: string
+        }
+        Insert: {
+          canceled_at?: string | null
+          cancoll_tier?: string | null
+          created_at?: string
+          expires_at?: string | null
+          fte?: number | null
+          grace_period_started_at?: string | null
+          id?: string
+          is_cancoll_member?: boolean
+          locked_at?: string | null
+          organization_id?: string | null
+          person_id?: string | null
+          program_key: string
+          status: Database["public"]["Enums"]["org_membership_status"]
+          status_changed_at?: string | null
+          updated_at?: string
+        }
+        Update: {
+          canceled_at?: string | null
+          cancoll_tier?: string | null
+          created_at?: string
+          expires_at?: string | null
+          fte?: number | null
+          grace_period_started_at?: string | null
+          id?: string
+          is_cancoll_member?: boolean
+          locked_at?: string | null
+          organization_id?: string | null
+          person_id?: string | null
+          program_key?: string
+          status?: Database["public"]["Enums"]["org_membership_status"]
+          status_changed_at?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "memberships_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memberships_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "memberships_person_id_fkey"
+            columns: ["person_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       message_automation_runs: {
         Row: {
           campaign_id: string | null

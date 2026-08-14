@@ -517,6 +517,21 @@ export async function approveApplication(
     return { success: false, error: `Failed to create organization: ${orgError?.message}` };
   }
 
+  // Phase 4 Stage 0: mirror into memberships alongside the org insert above,
+  // in the same step, so there's no gap where the org exists without a
+  // matching membership row (transition_membership_state's mirror only
+  // fires on the NEXT transition, e.g. applied -> approved).
+  const programKey = applicationType === "member" ? "member" : "partner";
+  const { error: membershipError } = await db.from("memberships").insert({
+    organization_id: org.id,
+    program_key: programKey,
+    status: "applied",
+    status_changed_at: new Date().toISOString(),
+  });
+  if (membershipError) {
+    console.error("Failed to create membership row:", membershipError);
+  }
+
   // Link application to org
   await db
     .from("signup_applications")
