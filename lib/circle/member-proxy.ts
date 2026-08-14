@@ -138,20 +138,34 @@ export class CircleMemberClient {
    * Create a direct chat room with another member.
    * Circle auto-deduplicates: if a direct room already exists with this member,
    * it returns the existing one (idempotent).
+   *
+   * Per the real Headless Member API (api-headless.circle.so, "Member APIs" ->
+   * Chat Room -> POST /messages "Create a chat room") there is no /chat_rooms
+   * resource at all — room creation goes through the same /messages endpoint
+   * listChatRooms() reads from, with the payload nested under "chat_room" and
+   * the kind field named "kind" (not "chat_room_kind" — that name only
+   * appears on the *response* shape, e.g. CircleChatRoom.chat_room_kind).
+   * The response is nested the same way.
    */
   async createDirectChatRoom(targetMemberId: number): Promise<CircleChatRoom> {
-    return this.request<CircleChatRoom>("POST", "/chat_rooms", {
+    const result = await this.request<{ chat_room: CircleChatRoom }>("POST", "/messages", {
       body: {
-        chat_room_kind: "direct",
-        community_member_ids: [targetMemberId],
+        chat_room: {
+          kind: "direct",
+          community_member_ids: [targetMemberId],
+        },
       },
     });
+    return result.chat_room;
   }
 
   // ---- Messages -----------------------------------------------------------
 
   /**
    * Get messages in a specific chat room.
+   * Real path per api-headless.circle.so (Member APIs -> Chat Room ->
+   * GET /messages/{chat_room_uuid}/chat_room_messages) — chat rooms are
+   * nested under /messages, there's no /chat_rooms resource in this API.
    */
   async getChatMessages(
     chatRoomUuid: string,
@@ -159,7 +173,7 @@ export class CircleMemberClient {
   ): Promise<CircleMessage[]> {
     const result = await this.request<{ records: CircleMessage[] }>(
       "GET",
-      `/chat_rooms/${chatRoomUuid}/chat_room_messages`,
+      `/messages/${chatRoomUuid}/chat_room_messages`,
       {
         params: {
           per_page: options?.per_page ?? 20,
@@ -172,28 +186,31 @@ export class CircleMemberClient {
 
   /**
    * Send a message to a chat room.
-   * Body should be in TipTap JSON format or plain text.
+   * Real path/shape per api-headless.circle.so ("Create chat room message"):
+   * POST /messages/{chat_room_uuid}/chat_room_messages with the TipTap doc
+   * nested under rich_text_body.body — not a flat {chat_room, body} POST to
+   * /messages (that path+shape 404s; /messages alone is room creation, see
+   * createDirectChatRoom above).
    */
   async sendMessage(
-    chatRoomIdOrUuid: number | string,
+    chatRoomUuid: string,
     plainText: string
   ): Promise<CircleMessage> {
-    // Circle headless v1: POST /messages
-    // chat_room accepts either the numeric room id or UUID — testing numeric first.
     return this.request<CircleMessage>(
       "POST",
-      `/messages`,
+      `/messages/${chatRoomUuid}/chat_room_messages`,
       {
         body: {
-          chat_room: chatRoomIdOrUuid,
-          body: {
-            type: "doc",
-            content: [
-              {
-                type: "paragraph",
-                content: [{ type: "text", text: plainText }],
-              },
-            ],
+          rich_text_body: {
+            body: {
+              type: "doc",
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: plainText }],
+                },
+              ],
+            },
           },
         },
       }

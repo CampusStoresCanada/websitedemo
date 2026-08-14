@@ -166,6 +166,32 @@ export function determineTierPrice(
   return { price: lastTier.price, tierIndex: sorted.length - 1 };
 }
 
+/**
+ * Resolve an org's tier display code (e.g. "XS"–"XL") from FTE, the same
+ * way determineTierPrice resolves price — display-only, never used for
+ * pricing. Returns null when the matched tier has no code set.
+ */
+export function determineTierCode(
+  fte: number | null,
+  tiers: MembershipTier[]
+): string | null {
+  const orgFte = fte ?? 0;
+
+  const sorted = [...tiers].sort((a, b) => {
+    if (a.max_fte === null) return 1;
+    if (b.max_fte === null) return -1;
+    return a.max_fte - b.max_fte;
+  });
+
+  for (const tier of sorted) {
+    if (tier.max_fte === null || orgFte <= tier.max_fte) {
+      return tier.code ?? null;
+    }
+  }
+
+  return sorted[sorted.length - 1]?.code ?? null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Invoice Creation
 // ─────────────────────────────────────────────────────────────────
@@ -442,14 +468,22 @@ export async function finalizeAndSendInvoice(
     return { success: false, error: "No Stripe invoice linked" };
   }
 
-  // Finalize in Stripe (this sends the invoice email)
-  await stripe.invoices.finalizeInvoice(invoice.stripe_invoice_id);
+  // Finalize in Stripe (this sends the invoice email) — the finalized
+  // invoice already has invoice_pdf/hosted_invoice_url populated, so we
+  // capture them here rather than fetching live later just to render a
+  // download link.
+  const finalized = await stripe.invoices.finalizeInvoice(invoice.stripe_invoice_id);
   await stripe.invoices.sendInvoice(invoice.stripe_invoice_id);
 
   // Update local status
   await db
     .from("invoices")
-    .update({ status: "invoiced", updated_at: new Date().toISOString() })
+    .update({
+      status: "invoiced",
+      invoice_pdf_url: finalized.invoice_pdf ?? null,
+      hosted_invoice_url: finalized.hosted_invoice_url ?? null,
+      updated_at: new Date().toISOString(),
+    })
     .eq("id", invoiceId);
 
   return { success: true };

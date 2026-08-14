@@ -75,6 +75,7 @@ export interface ProrationResult {
 export interface MembershipTier {
   max_fte: number | null;
   price: number;
+  code?: string;
 }
 
 /** Proration rule from policy billing.proration_rules */

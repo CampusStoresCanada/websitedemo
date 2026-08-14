@@ -27,13 +27,20 @@ interface ChatMessage {
 export function CircleDMPanel({
   isOpen,
   onClose,
+  initialRoomUuid,
+  initialRoomLabel,
 }: {
   isOpen: boolean;
   onClose: () => void;
+  /** When set, the panel skips the conversation list and opens straight
+   *  into this room — e.g. the admin membership directory's "message this
+   *  org's contact" action, which already knows the target room. */
+  initialRoomUuid?: string;
+  initialRoomLabel?: string;
 }) {
   const { user } = useAuth();
   const [chatRooms, setChatRooms] = useState<ChatRoom[]>([]);
-  const [selectedRoom, setSelectedRoom] = useState<string | null>(null);
+  const [selectedRoom, setSelectedRoom] = useState<string | null>(initialRoomUuid ?? null);
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [newMessage, setNewMessage] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -41,11 +48,18 @@ export function CircleDMPanel({
   const [error, setError] = useState<string | null>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
-  // Fetch chat rooms when panel opens
+  // Fetch chat rooms when panel opens (still needed even with an initial
+  // target room, so the back button has a list to return to)
   useEffect(() => {
     if (!isOpen || !user) return;
     fetchChatRooms();
   }, [isOpen, user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Jump straight to the target room whenever a new one is opened
+  useEffect(() => {
+    if (!isOpen || !initialRoomUuid) return;
+    setSelectedRoom(initialRoomUuid);
+  }, [isOpen, initialRoomUuid]);
 
   // Fetch messages when a room is selected
   useEffect(() => {
@@ -144,7 +158,9 @@ export function CircleDMPanel({
             </button>
           )}
           <h2 className="font-semibold text-gray-900">
-            {selectedRoom ? "Conversation" : "Messages"}
+            {selectedRoom
+              ? (selectedRoom === initialRoomUuid && initialRoomLabel) || "Conversation"
+              : "Messages"}
           </h2>
         </div>
         <button

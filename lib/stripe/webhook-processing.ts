@@ -656,6 +656,12 @@ async function handleInvoicePaid(
         paid_at: new Date().toISOString(),
         stripe_payment_intent_id: paymentIntentId,
         stripe_charge_id: chargeId,
+        // Already have the full Stripe Invoice object from the webhook
+        // payload — persist the PDF/hosted links here too (idempotent with
+        // the finalize-time capture, covers invoices from before this
+        // existed).
+        invoice_pdf_url: stripeInvoice.invoice_pdf ?? null,
+        hosted_invoice_url: stripeInvoice.hosted_invoice_url ?? null,
         updated_at: new Date().toISOString(),
       })
       .eq("stripe_invoice_id", stripeInvoice.id)

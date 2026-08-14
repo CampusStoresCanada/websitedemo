@@ -1,18 +1,13 @@
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/server";
-import OrgDirectory from "@/components/admin/OrgDirectory";
+import { getRenewalDirectory } from "@/lib/renewal/renewal-directory";
+import { RenewalsDirectory } from "@/components/admin/RenewalsDirectory";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 
 export const metadata = { title: "Membership | Admin" };
+export const dynamic = "force-dynamic";
 
 export default async function MembershipAdminPage() {
-  const supabase = await createClient();
-  const { data: orgs } = await supabase
-    .from("organizations")
-    .select(
-      "id, name, slug, type, city, province, country, membership_status, membership_expires_at, fte, payment_status, created_at, onboarding_completed_at"
-    )
-    .order("name");
+  const rows = await getRenewalDirectory();
 
   return (
     <main>
@@ -42,7 +37,7 @@ export default async function MembershipAdminPage() {
           </>
         }
       />
-      <OrgDirectory initialOrgs={orgs ?? []} />
+      <RenewalsDirectory rows={rows} />
     </main>
   );
 }

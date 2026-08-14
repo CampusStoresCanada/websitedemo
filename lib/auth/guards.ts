@@ -1,5 +1,6 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { cache } from "react";
+import { unstable_rethrow } from "next/navigation";
 import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -192,6 +193,10 @@ export async function requireAuthenticated(): Promise<GuardResult> {
     }
     return { ok: true, ctx };
   } catch (error) {
+    // Next.js signals static-generation bailouts (e.g. cookies() during
+    // prerendering) by throwing DynamicServerError/redirect/notFound through
+    // this same try/catch. Those aren't auth failures — let them propagate.
+    unstable_rethrow(error);
     console.error("[auth/guards] requireAuthenticated failed", error);
     await logAuditEventSafe({
       action: "auth_guard_error",
@@ -301,6 +306,7 @@ export async function requireConferenceOpsAccess(): Promise<GuardResult> {
     }
     return auth;
   } catch (error) {
+    unstable_rethrow(error);
     console.error("[auth/guards] requireConferenceOpsAccess failed", error);
     await logAuditEventSafe({
       action: "auth_guard_error",

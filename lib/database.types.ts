@@ -2066,6 +2066,83 @@ export type Database = {
           },
         ]
       }
+      conference_booth_moves: {
+        Row: {
+          actor_id: string | null
+          conference_id: string
+          created_at: string
+          delta_cents: number
+          id: string
+          new_booth_entity_ids: string[]
+          new_order_id: string | null
+          new_total_cents: number
+          old_booth_entity_ids: string[]
+          old_total_cents: number
+          organization_id: string
+          reason: string | null
+          refund_ids: string[]
+        }
+        Insert: {
+          actor_id?: string | null
+          conference_id: string
+          created_at?: string
+          delta_cents: number
+          id?: string
+          new_booth_entity_ids: string[]
+          new_order_id?: string | null
+          new_total_cents: number
+          old_booth_entity_ids: string[]
+          old_total_cents: number
+          organization_id: string
+          reason?: string | null
+          refund_ids?: string[]
+        }
+        Update: {
+          actor_id?: string | null
+          conference_id?: string
+          created_at?: string
+          delta_cents?: number
+          id?: string
+          new_booth_entity_ids?: string[]
+          new_order_id?: string | null
+          new_total_cents?: number
+          old_booth_entity_ids?: string[]
+          old_total_cents?: number
+          organization_id?: string
+          reason?: string | null
+          refund_ids?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_booth_moves_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_moves_new_order_id_fkey"
+            columns: ["new_order_id"]
+            isOneToOne: false
+            referencedRelation: "conference_orders"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_moves_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_booth_moves_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       conference_bursary_applications: {
         Row: {
           conference_id: string
@@ -4840,7 +4917,9 @@ export type Database = {
           description: string
           due_date: string | null
           external_payment_id: string | null
+          hosted_invoice_url: string | null
           id: string
+          invoice_pdf_url: string | null
           metadata: Json | null
           organization_id: string
           original_amount_cents: number | null
@@ -4871,7 +4950,9 @@ export type Database = {
           description: string
           due_date?: string | null
           external_payment_id?: string | null
+          hosted_invoice_url?: string | null
           id?: string
+          invoice_pdf_url?: string | null
           metadata?: Json | null
           organization_id: string
           original_amount_cents?: number | null
@@ -4902,7 +4983,9 @@ export type Database = {
           description?: string
           due_date?: string | null
           external_payment_id?: string | null
+          hosted_invoice_url?: string | null
           id?: string
+          invoice_pdf_url?: string | null
           metadata?: Json | null
           organization_id?: string
           original_amount_cents?: number | null
@@ -6993,6 +7076,7 @@ export type Database = {
           id: string
           linked_application_id: string | null
           paid_at: string | null
+          province: string | null
           status: string
           stripe_checkout_session_id: string
         }
@@ -7006,6 +7090,7 @@ export type Database = {
           id?: string
           linked_application_id?: string | null
           paid_at?: string | null
+          province?: string | null
           status?: string
           stripe_checkout_session_id: string
         }
@@ -7019,6 +7104,7 @@ export type Database = {
           id?: string
           linked_application_id?: string | null
           paid_at?: string | null
+          province?: string | null
           status?: string
           stripe_checkout_session_id?: string
         }
@@ -10159,6 +10245,26 @@ export type Database = {
       exec_sql: { Args: { sql: string }; Returns: undefined }
       execute_admin_transfer: {
         Args: { p_completed_by?: string; p_request_id: string }
+        Returns: Json
+      }
+      execute_booth_move: {
+        Args: {
+          p_actor_id: string
+          p_conference_id: string
+          p_new_booth_entity_ids: string[]
+          p_new_order_subtotal_cents: number
+          p_new_order_tax_cents: number
+          p_new_order_total_cents: number
+          p_new_total_cents: number
+          p_old_booth_entity_ids: string[]
+          p_old_total_cents: number
+          p_organization_id: string
+          p_reason: string
+          p_refund_ids: string[]
+          p_refund_updates: Json
+          p_should_mint_immediately: boolean
+          p_stripe_checkout_session_id: string
+        }
         Returns: Json
       }
       find_organizations_by_email_domain: {

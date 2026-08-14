@@ -74,15 +74,15 @@ export async function sendCircleNotification(params: {
         room.other_participants_preview.some((m) => m.community_member_id === recipientCircleId)
     );
 
-    let roomId: number;
+    let roomUuid: string;
     if (directRoom) {
-      roomId = directRoom.id;
+      roomUuid = directRoom.uuid;
     } else {
       const newRoom = await memberClient.createDirectChatRoom(recipientCircleId);
-      roomId = newRoom.id;
+      roomUuid = newRoom.uuid;
     }
 
-    await memberClient.sendMessage(roomId, params.message);
+    await memberClient.sendMessage(roomUuid, params.message);
     return { success: true };
   } catch (err) {
     const errorMsg = err instanceof Error ? err.message : String(err);

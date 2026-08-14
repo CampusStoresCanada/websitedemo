@@ -284,6 +284,9 @@ type TierRow = {
   max_fte?: number | null;
   max_value?: number | null;
   price: number;
+  /** Optional 2-letter display code (e.g. "XS"–"XL") shown in admin UI —
+   *  cosmetic only, never read by pricing logic. */
+  code?: string;
 };
 
 type FormulaConfig = {
@@ -587,7 +590,7 @@ function MembershipTiersEditor({
   }
 
   function addRow() {
-    setRows((current) => [...current, { max_fte: null, price: 0 }]);
+    setRows((current) => [...current, { max_fte: null, price: 0, code: "" }]);
   }
 
   function removeRow(index: number) {
@@ -602,6 +605,7 @@ function MembershipTiersEditor({
             <tr>
               <th className="px-2 py-1 text-left font-medium text-[var(--text-secondary)]">Max</th>
               <th className="px-2 py-1 text-left font-medium text-[var(--text-secondary)]">Price</th>
+              <th className="px-2 py-1 text-left font-medium text-[var(--text-secondary)]">Code</th>
               <th className="px-2 py-1" />
             </tr>
           </thead>
@@ -634,6 +638,17 @@ function MembershipTiersEditor({
                     className="w-20 rounded border border-[var(--border-default)] px-1.5 py-0.5"
                   />
                 </td>
+                <td className="px-2 py-1">
+                  <input
+                    type="text"
+                    value={row.code ?? ""}
+                    onChange={(event) =>
+                      updateRow(index, { code: event.target.value.toUpperCase().slice(0, 4) })
+                    }
+                    className="w-14 rounded border border-[var(--border-default)] px-1.5 py-0.5 uppercase"
+                    placeholder="XS"
+                  />
+                </td>
                 <td className="px-2 py-1 text-right">
                   <button
                     type="button"
@@ -648,7 +663,7 @@ function MembershipTiersEditor({
             ))}
             {rows.length === 0 ? (
               <tr>
-                <td className="px-2 py-2 text-[var(--text-tertiary)]" colSpan={3}>
+                <td className="px-2 py-2 text-[var(--text-tertiary)]" colSpan={4}>
                   No rows configured.
                 </td>
               </tr>

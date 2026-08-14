@@ -15,7 +15,8 @@
     "check:checkout-v3-live": "node scripts/conference-checkout-v3-live-check.mjs",
     "check:swaps-live": "node scripts/swaps-live-check.mjs",
     "check:swaps-live:dev": "SWAPS_LIVE_ALLOW_TEMP_ACTIVE_FIXTURE=true node scripts/swaps-live-check.mjs",
-    "sync:about-people": "node scripts/sync-about-people.mjs"
+    "sync:about-people": "node scripts/sync-about-people.mjs",
+    "backfill:invoice-pdf-urls": "node scripts/backfill-invoice-pdf-urls.mjs"
   },
   "dependencies": {
     "@emoji-mart/data": "^1.2.1",

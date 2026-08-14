@@ -70,7 +70,10 @@ export interface RenewalConfig {
 
 export interface BillingConfig {
   proration_rules: Array<{ after_month_day: string; discount_pct: number }>
-  membership_tiers: Array<{ max_fte: number | null; price: number }>
+  /** `code` is an optional 2-letter display label (e.g. "XS"–"XL") shown in
+   *  admin UI next to an org's dues — cosmetic only, never read by pricing
+   *  logic (determineTierPrice in lib/stripe/billing.ts ignores it). */
+  membership_tiers: Array<{ max_fte: number | null; price: number; code?: string }>
   partnership_rate: number
   downgrade_policy: string
   currency: string
