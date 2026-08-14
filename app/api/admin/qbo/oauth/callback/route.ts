@@ -9,7 +9,7 @@ const APP_SETTINGS_KEY = "qbo_refresh_token";
 export async function GET(req: NextRequest) {
   const auth = await requireAdmin();
   if (!auth.ok) {
-    return NextResponse.redirect(new URL("/admin/board/financials?qbo_error=forbidden", req.url));
+    return NextResponse.redirect(new URL("/admin/settings/quickbooks?qbo_error=forbidden", req.url));
   }
 
   const { searchParams } = req.nextUrl;
@@ -21,13 +21,13 @@ export async function GET(req: NextRequest) {
   // User cancelled or Intuit returned an error
   if (error) {
     return NextResponse.redirect(
-      new URL(`/admin/board/financials?qbo_error=${encodeURIComponent(error)}`, req.url),
+      new URL(`/admin/settings/quickbooks?qbo_error=${encodeURIComponent(error)}`, req.url),
     );
   }
 
   if (!code || !state || !realmId) {
     return NextResponse.redirect(
-      new URL("/admin/board/financials?qbo_error=missing_params", req.url),
+      new URL("/admin/settings/quickbooks?qbo_error=missing_params", req.url),
     );
   }
 
@@ -38,7 +38,7 @@ export async function GET(req: NextRequest) {
 
   if (!savedState || savedState !== state) {
     return NextResponse.redirect(
-      new URL("/admin/board/financials?qbo_error=state_mismatch", req.url),
+      new URL("/admin/settings/quickbooks?qbo_error=state_mismatch", req.url),
     );
   }
 
@@ -47,7 +47,7 @@ export async function GET(req: NextRequest) {
 
   if (!clientId || !clientSecret) {
     return NextResponse.redirect(
-      new URL("/admin/board/financials?qbo_error=missing_credentials", req.url),
+      new URL("/admin/settings/quickbooks?qbo_error=missing_credentials", req.url),
     );
   }
 
@@ -73,7 +73,7 @@ export async function GET(req: NextRequest) {
     const body = await tokenRes.text();
     console.error("[QBO OAuth callback] token exchange failed:", body);
     return NextResponse.redirect(
-      new URL(`/admin/board/financials?qbo_error=token_exchange_failed`, req.url),
+      new URL(`/admin/settings/quickbooks?qbo_error=token_exchange_failed`, req.url),
     );
   }
 
@@ -82,7 +82,7 @@ export async function GET(req: NextRequest) {
 
   if (!refreshToken) {
     return NextResponse.redirect(
-      new URL("/admin/board/financials?qbo_error=no_refresh_token", req.url),
+      new URL("/admin/settings/quickbooks?qbo_error=no_refresh_token", req.url),
     );
   }
 
@@ -103,6 +103,6 @@ export async function GET(req: NextRequest) {
   console.log(`[QBO OAuth] Successfully connected. Realm ID: ${realmId}`);
 
   return NextResponse.redirect(
-    new URL("/admin/board/financials?qbo_connected=true", req.url),
+    new URL("/admin/settings/quickbooks?qbo_connected=true", req.url),
   );
 }
