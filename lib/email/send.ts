@@ -263,6 +263,40 @@ export function accountInviteEmail(
   };
 }
 
+/**
+ * Terminal email for a pay-first booth applicant (paid for a booth +
+ * partnership before an org/account existed — see prospective-booth-checkout.ts
+ * and approveApplication). Replaces accountInviteEmail for this case so
+ * there's exactly one email confirming "you're paid, click here to log in
+ * and start onboarding" instead of a generic invite plus a separate (and
+ * incorrect) payment request.
+ */
+export function paidBoothWelcomeEmail(
+  applicantName: string,
+  inviteUrl: string,
+  boothLabel: string | null,
+  conferenceLabel: string | null
+): { subject: string; html: string } {
+  const purchase = [boothLabel, conferenceLabel].filter(Boolean).join(" at ");
+  return {
+    subject: "You're all set — Campus Stores Canada",
+    html: `
+      <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2>Welcome to Campus Stores Canada</h2>
+        <p>Hi ${applicantName},</p>
+        <p>Your partnership application has been approved, and your payment${purchase ? ` for ${purchase}` : ""} is already on file — there's nothing more to pay.</p>
+        <p>Click below to set your password and get started:</p>
+        <p style="margin: 24px 0;">
+          <a href="${inviteUrl}"
+             style="background-color: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
+            Set Up Your Account
+          </a>
+        </p>
+      </div>
+    `,
+  };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Second-signer / content approval email templates
 // ─────────────────────────────────────────────────────────────────
