@@ -2,6 +2,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
+import { getProgramsConfig } from "@/lib/policy/engine";
+import { deriveGlobalPersona } from "@/lib/onboarding/persona";
 import {
   type Persona,
   type AnyStepKey,
@@ -39,34 +41,21 @@ export async function derivePersona(): Promise<Persona | null> {
 
   const db = createAdminClient();
 
-  // Fetch the user's active org memberships with org types
-  const { data: memberships } = await db
-    .from("user_organizations")
-    .select("role, organizations(type)")
-    .eq("user_id", auth.ctx.userId)
-    .eq("status", "active");
+  const [{ data: memberships }, programs] = await Promise.all([
+    db
+      .from("user_organizations")
+      .select("role, organizations(type)")
+      .eq("user_id", auth.ctx.userId)
+      .eq("status", "active"),
+    getProgramsConfig(),
+  ]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const orgs = (memberships ?? []) as Array<{ role: string; organizations: { type: string } | null }>;
 
-  console.log("[derivePersona] orgs:", JSON.stringify(orgs));
-
-  const isMemberOrgAdmin = orgs.some(
-    (o) => o.role === "org_admin" && o.organizations?.type === "Member"
+  return deriveGlobalPersona(
+    orgs.map((o) => ({ orgType: o.organizations?.type, role: o.role })),
+    programs
   );
-  const isPartnerOrgAdmin = orgs.some(
-    (o) => o.role === "org_admin" && o.organizations?.type === "Vendor Partner"
-  );
-  const isMemberUser = orgs.some((o) => o.organizations?.type === "Member");
-  const isPartnerUser = orgs.some((o) => o.organizations?.type === "Vendor Partner");
-  console.log("[derivePersona] flags:", { isMemberOrgAdmin, isPartnerOrgAdmin, isMemberUser, isPartnerUser });
-
-  // Precedence: org admin roles first, then member roles
-  if (isMemberOrgAdmin) return "org_admin_member";
-  if (isPartnerOrgAdmin) return "org_admin_partner";
-  if (isMemberUser) return "member_member";
-  if (isPartnerUser) return "member_partner";
-  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -5,6 +5,8 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboarding";
 import type { Persona } from "@/lib/onboarding/steps";
 import { STEPS_BY_PERSONA } from "@/lib/onboarding/steps";
+import { personaForMembership } from "@/lib/onboarding/persona";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 import ToolkitTourModal from "@/components/onboarding/ToolkitTourModal";
 
 interface OrgOnboardingCalloutProps {
@@ -358,19 +360,16 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
 
 function deriveLocalPersona(
   organizations: Array<{ role: string; organization: { slug: string; type: string } }>,
-  orgSlug: string
+  orgSlug: string,
+  programs: MembershipProgramDef[]
 ): { persona: Persona | null; isOwnOrgPage: boolean } {
   const membership = organizations.find((o) => o.organization?.slug === orgSlug);
   if (!membership) return { persona: null, isOwnOrgPage: false };
 
-  const type = membership.organization?.type ?? "";
-  const role = membership.role ?? "";
-  let persona: Persona | null = null;
-
-  if (type === "Member" && role === "org_admin") persona = "org_admin_member";
-  else if (type === "Vendor Partner" && role === "org_admin") persona = "org_admin_partner";
-  else if (type === "Member") persona = "member_member";
-  else if (type === "Vendor Partner") persona = "member_partner";
+  const persona = personaForMembership(
+    { orgType: membership.organization?.type, role: membership.role },
+    programs
+  );
 
   return { persona, isOwnOrgPage: true };
 }
@@ -388,11 +387,12 @@ type Phase = "intro" | "show-field" | "highlight-edit" | "highlight-field" | "do
 export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutProps) {
   if (process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true") return null;
 
-  const { user, organizations, isLoading } = useAuth();
+  const { user, organizations, programs, isLoading } = useAuth();
 
   const { persona, isOwnOrgPage } = deriveLocalPersona(
     organizations as any[],
-    orgSlug
+    orgSlug,
+    programs
   );
 
   const [activeStep, setActiveStep] = useState<string | null>(null);

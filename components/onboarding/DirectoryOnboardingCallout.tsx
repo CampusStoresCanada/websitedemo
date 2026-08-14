@@ -4,7 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboarding";
-import type { Persona } from "@/lib/onboarding/steps";
+import { deriveGlobalPersona } from "@/lib/onboarding/persona";
 
 interface DirectoryOnboardingCalloutProps {
   /** Which directory page this instance is on */
@@ -13,29 +13,18 @@ interface DirectoryOnboardingCalloutProps {
 
 type SubPhase = "toggle" | "refine" | "institution" | "done";
 
-function deriveLocalPersona(
-  organizations: Array<{ role: string; organization: { slug: string; type: string } }>
-): Persona | null {
-  const isMemberOrgAdmin = organizations.some(o => o.role === "org_admin" && o.organization?.type === "Member");
-  const isPartnerOrgAdmin = organizations.some(o => o.role === "org_admin" && o.organization?.type === "Vendor Partner");
-  const isMemberUser = organizations.some(o => o.organization?.type === "Member");
-  const isPartnerUser = organizations.some(o => o.organization?.type === "Vendor Partner");
-  if (isMemberOrgAdmin) return "org_admin_member";
-  if (isPartnerOrgAdmin) return "org_admin_partner";
-  if (isMemberUser) return "member_member";
-  if (isPartnerUser) return "member_partner";
-  return null;
-}
-
 export default function DirectoryOnboardingCallout({ page }: DirectoryOnboardingCalloutProps) {
   if (process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true") return null;
 
-  const { user, organizations, isLoading } = useAuth();
+  const { user, organizations, programs, isLoading } = useAuth();
   const pathname = usePathname();
   const [active, setActive] = useState(false);
   const [subPhase, setSubPhase] = useState<SubPhase>("toggle");
   const hasSeenMap = useRef(false);
-  const persona = deriveLocalPersona(organizations as any[]);
+  const persona = deriveGlobalPersona(
+    (organizations as any[]).map((o) => ({ orgType: o.organization?.type, role: o.role })),
+    programs
+  );
 
   const stepKey = page === "members" ? "network_members" : "network_partners";
 

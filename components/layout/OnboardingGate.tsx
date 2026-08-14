@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, initJourney, derivePersona } from "@/lib/actions/onboarding";
 import type { Persona } from "@/lib/onboarding/steps";
+import { orgTypeForPersona } from "@/lib/onboarding/persona";
 import WelcomeModal from "@/components/onboarding/WelcomeModal";
 
 interface OnboardingGateProps {
@@ -18,7 +19,7 @@ interface OnboardingGateProps {
 type GateState = "checking" | "modal" | "open";
 
 export default function OnboardingGate({ children, serverHasOnboarding }: OnboardingGateProps) {
-  const { user, profile, organizations, isLoading } = useAuth();
+  const { user, profile, organizations, programs, isLoading } = useAuth();
 
   const onboardingDisabled = process.env.NEXT_PUBLIC_DISABLE_ONBOARDING === "true";
   const [state, setState] = useState<GateState>(
@@ -82,12 +83,9 @@ export default function OnboardingGate({ children, serverHasOnboarding }: Onboar
 
   // Resolve display values for the modal
   const displayName = profile?.display_name ? profile.display_name.split(" ")[0] : null;
-  const orgMembership = persona
-    ? organizations.find((o) =>
-        persona === "org_admin_member" || persona === "member_member"
-          ? o.organization?.type === "Member"
-          : o.organization?.type === "Vendor Partner"
-      )
+  const personaOrgType = persona ? orgTypeForPersona(persona, programs) : null;
+  const orgMembership = personaOrgType
+    ? organizations.find((o) => o.organization?.type === personaOrgType)
     : null;
   const orgName = orgMembership?.organization?.name ?? null;
   const orgSlug = orgMembership?.organization?.slug ?? null;

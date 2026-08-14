@@ -36,6 +36,9 @@ interface AuthContextValue {
   globalRole: GlobalRole;
   permissionState: PermissionState;
   organizations: UserOrganization[];
+  /** SSR-seeded once per session; reused (not re-fetched) for every
+   *  client-side persona/permission re-derivation — see programsRef. */
+  programs: MembershipProgramDef[];
   isLoading: boolean;
   decryptionKey: CryptoKey | null;
   /** True if the user's primary member org has completed the benchmarking survey */
@@ -65,6 +68,7 @@ const AuthContext = createContext<AuthContextValue>({
   globalRole: "user",
   permissionState: "public",
   organizations: [],
+  programs: FALLBACK_PROGRAMS,
   isLoading: true,
   decryptionKey: null,
   isSurveyParticipant: false,
@@ -857,6 +861,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       globalRole,
       permissionState: effectivePermission,
       organizations,
+      programs: programsRef.current,
       isLoading,
       decryptionKey,
       isSurveyParticipant: effectiveSurveyParticipant,

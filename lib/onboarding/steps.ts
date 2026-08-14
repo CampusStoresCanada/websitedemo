@@ -7,6 +7,19 @@
  *   org_admin_partner — org admin of a Vendor Partner organization
  *   member_member     — regular user of a Member organization
  *   member_partner    — regular user of a Vendor Partner organization
+ *
+ * Each value is `${role}_${program.key}` for CSC's configured
+ * `programs.definitions` (lib/policy/types.ts's MembershipProgramDef) —
+ * see lib/onboarding/persona.ts's `computePersonaCandidate`, which derives
+ * this formulaically rather than through a hardcoded per-program lookup,
+ * so a 3rd configured program is a derivation no-op. This list stays a
+ * closed, hardcoded union deliberately, though: `STEPS_BY_PERSONA` and
+ * `CORE_STEPS_BY_PERSONA` below require real, authored step content per
+ * persona, and there's no meaningful content to add for a program that
+ * doesn't exist yet. Adding a 3rd program here means adding its 2 persona
+ * strings AND authoring its step arrays (and the separate hardcoded copy
+ * in OrgOnboardingCallout.tsx's CONFIGS / WelcomeModal.tsx's getCopy) —
+ * a deliberate content decision, not something to speculatively pre-build.
  */
 
 export const PERSONAS = [
