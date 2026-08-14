@@ -3,6 +3,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { isCircleConfigured } from "@/lib/circle/config";
 import { mintMemberToken } from "@/lib/circle/headless-auth";
 import { resolveUserCircleId } from "@/lib/circle/member-link";
+import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -16,7 +17,7 @@ export async function POST(request: NextRequest) {
   // Suppress unused var warning — request is needed for route handler signature
   void request;
 
-  if (!isCircleConfigured()) {
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json(
       { error: "Circle not configured" },
       { status: 503 }

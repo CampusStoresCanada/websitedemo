@@ -11,6 +11,7 @@ import {
 } from "./client";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
+import { isFeatureEnabled } from "@/lib/data";
 import type { QBExportQueueRow, QBMembershipRefundQueueRow } from "./types";
 import type { Invoice } from "@/lib/stripe/types";
 
@@ -237,8 +238,10 @@ export interface QBExportJobResult {
 }
 
 export async function quickbooksExportRun(): Promise<QBExportJobResult> {
-  const db = createAdminClient();
   const result: QBExportJobResult = { processed: 0, succeeded: 0, failed: 0, errors: [] };
+  if (!(await isFeatureEnabled("quickbooks"))) return result;
+
+  const db = createAdminClient();
   const now = new Date();
 
   // Reclaim stale leases before claiming new rows. next_retry_at must be set
@@ -518,8 +521,10 @@ export async function enqueueQBExportRefund(
 }
 
 export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
-  const db = createAdminClient();
   const result: QBExportJobResult = { processed: 0, succeeded: 0, failed: 0, errors: [] };
+  if (!(await isFeatureEnabled("quickbooks"))) return result;
+
+  const db = createAdminClient();
   const now = new Date();
 
   const staleThreshold = new Date(now.getTime() - STALE_LEASE_THRESHOLD_MS).toISOString();

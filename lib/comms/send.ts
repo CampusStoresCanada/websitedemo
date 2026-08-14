@@ -17,8 +17,6 @@ import type {
   TemplateKey,
 } from "./types";
 
-const FROM_ADDRESS = "Campus Stores Canada <noreply@campusstores.ca>";
-
 // ── Transactional send (no campaign record) ───────────────────────
 
 /**

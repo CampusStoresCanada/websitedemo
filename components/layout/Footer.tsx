@@ -1,7 +1,11 @@
 import Link from "next/link";
 import Image from "next/image";
+import { getPlatformIdentity } from "@/lib/data";
 
-export default function Footer() {
+export default async function Footer() {
+  const identity = await getPlatformIdentity();
+  const domainHref = identity.clientDomain ? `https://${identity.clientDomain}` : null;
+
   return (
     <footer className="bg-white border-t border-[var(--border-subtle)]">
       <div className="max-w-7xl mx-auto px-6 py-12">
@@ -10,16 +14,16 @@ export default function Footer() {
           <div className="col-span-1 md:col-span-2">
             <div className="mb-4">
               <Image
-                src="/logos/csc-logo-horizontal-wordmark.svg"
-                alt="Campus Stores Canada"
+                src={identity.logoUrl ?? "/logos/csc-logo-horizontal-wordmark.svg"}
+                alt={identity.clientName}
                 width={160}
                 height={100}
                 className="h-9 w-auto"
               />
             </div>
             <p className="text-sm text-[var(--text-secondary)] max-w-sm">
-              Connecting campus stores coast-to-coast with resources,
-              partnerships, and expertise since 2005.
+              Connecting {identity.clientName}&rsquo;s members and partners with
+              resources, partnerships, and expertise.
             </p>
           </div>
 
@@ -39,7 +43,7 @@ export default function Footer() {
               </li>
               <li>
                 <Link href="/join" className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
-                  Join CSC
+                  Join {identity.clientShortName}
                 </Link>
               </li>
             </ul>
@@ -50,7 +54,7 @@ export default function Footer() {
             <ul className="space-y-2">
               <li>
                 <Link href="/about" className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
-                  About CSC
+                  About {identity.clientShortName}
                 </Link>
               </li>
               <li>
@@ -63,16 +67,18 @@ export default function Footer() {
                   Partner Playbook
                 </Link>
               </li>
-              <li>
-                <a
-                  href="https://campusstores.ca"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
-                >
-                  campusstores.ca
-                </a>
-              </li>
+              {domainHref ? (
+                <li>
+                  <a
+                    href={domainHref}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors"
+                  >
+                    {identity.clientDomain}
+                  </a>
+                </li>
+              ) : null}
               <li>
                 <Link href="/contact" className="text-sm text-[var(--text-secondary)] hover:text-[var(--text-primary)] transition-colors">
                   Contact
@@ -85,7 +91,7 @@ export default function Footer() {
         {/* Bottom */}
         <div className="mt-12 pt-8 border-t border-[var(--border-subtle)] flex flex-col sm:flex-row justify-between items-center gap-4">
           <p className="text-sm text-[var(--text-tertiary)]">
-            © {new Date().getFullYear()} Campus Stores Canada. All rights reserved.
+            © {new Date().getFullYear()} {identity.clientName}. All rights reserved.
           </p>
           <div className="flex gap-6">
             <Link href="/privacy" className="text-sm text-[var(--text-tertiary)] hover:text-[var(--text-secondary)] transition-colors">

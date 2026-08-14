@@ -4,6 +4,7 @@ import { isCircleConfigured } from "@/lib/circle/config";
 import { mintMemberToken } from "@/lib/circle/headless-auth";
 import { resolveUserCircleId } from "@/lib/circle/member-link";
 import { getIntegrationConfig } from "@/lib/policy/engine";
+import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -30,7 +31,7 @@ export async function POST() {
     return NextResponse.json({ ok: true, skipped: "cutover_disabled" }, { status: 200 });
   }
 
-  if (!isCircleConfigured()) {
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json({ ok: true, skipped: "circle_not_configured" }, { status: 200 });
   }
 

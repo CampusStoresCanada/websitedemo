@@ -6648,6 +6648,7 @@ export type Database = {
           client_name: string
           client_short_name: string
           created_at: string
+          host_org_slug: string | null
           id: string
           logo_url: string | null
           primary_color: string
@@ -6661,6 +6662,7 @@ export type Database = {
           client_name?: string
           client_short_name?: string
           created_at?: string
+          host_org_slug?: string | null
           id?: string
           logo_url?: string | null
           primary_color?: string
@@ -6674,6 +6676,7 @@ export type Database = {
           client_name?: string
           client_short_name?: string
           created_at?: string
+          host_org_slug?: string | null
           id?: string
           logo_url?: string | null
           primary_color?: string

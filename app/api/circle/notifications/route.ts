@@ -3,6 +3,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { isCircleConfigured } from "@/lib/circle/config";
 import { getCircleClientForUser } from "@/lib/circle/member-session";
 import { TTLCache } from "@/lib/cache/ttl-cache";
+import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -25,7 +26,7 @@ function summaryCacheKey(userId: string): string {
 }
 
 export async function POST(request: NextRequest) {
-  if (!isCircleConfigured()) return NextResponse.json({ ok: false }, { status: 200 });
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) return NextResponse.json({ ok: false }, { status: 200 });
 
   const auth = await requireAuthenticated();
   if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
@@ -55,7 +56,7 @@ export async function POST(request: NextRequest) {
 }
 
 export async function GET() {
-  if (!isCircleConfigured()) {
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json({ notifications: [], replies: [], linked: false }, { status: 200 });
   }
 

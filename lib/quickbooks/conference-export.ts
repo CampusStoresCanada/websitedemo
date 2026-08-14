@@ -13,6 +13,7 @@ import { resolveQBCustomer, createQBSalesReceipt, createQBRefundReceipt, qboDocN
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { resolveMembershipTaxCode } from "./export";
+import { isFeatureEnabled } from "@/lib/data";
 import type {
   QBLineItem,
   QBConferenceReceiptQueueRow,
@@ -313,8 +314,10 @@ export interface QBConferenceExportJobResult {
 }
 
 export async function quickbooksConferenceReceiptExportRun(): Promise<QBConferenceExportJobResult> {
-  const db = createAdminClient();
   const result: QBConferenceExportJobResult = { processed: 0, succeeded: 0, failed: 0, errors: [] };
+  if (!(await isFeatureEnabled("quickbooks"))) return result;
+
+  const db = createAdminClient();
   const now = new Date();
 
   const staleThreshold = new Date(now.getTime() - STALE_LEASE_THRESHOLD_MS).toISOString();
@@ -426,8 +429,10 @@ async function failReceiptRow(db: Db, row: QBConferenceReceiptQueueRow, message:
 // ─────────────────────────────────────────────────────────────────
 
 export async function quickbooksConferenceRefundExportRun(): Promise<QBConferenceExportJobResult> {
-  const db = createAdminClient();
   const result: QBConferenceExportJobResult = { processed: 0, succeeded: 0, failed: 0, errors: [] };
+  if (!(await isFeatureEnabled("quickbooks"))) return result;
+
+  const db = createAdminClient();
   const now = new Date();
 
   const staleThreshold = new Date(now.getTime() - STALE_LEASE_THRESHOLD_MS).toISOString();
@@ -712,8 +717,10 @@ async function resolveMiscReceiptDetails(
 }
 
 export async function quickbooksMiscReceiptExportRun(): Promise<QBConferenceExportJobResult> {
-  const db = createAdminClient();
   const result: QBConferenceExportJobResult = { processed: 0, succeeded: 0, failed: 0, errors: [] };
+  if (!(await isFeatureEnabled("quickbooks"))) return result;
+
+  const db = createAdminClient();
   const now = new Date();
 
   const staleThreshold = new Date(now.getTime() - STALE_LEASE_THRESHOLD_MS).toISOString();

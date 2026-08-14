@@ -4,6 +4,7 @@ import { isCircleConfigured } from "@/lib/circle/config";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import { getCircleClientForUser } from "@/lib/circle/member-session";
 import { TTLCache } from "@/lib/cache/ttl-cache";
+import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -19,7 +20,7 @@ const dmSummaryCache = new TTLCache<DmSummaryPayload>(SUMMARY_CACHE_TTL_MS);
 // ---------------------------------------------------------------------------
 
 export async function GET(request: NextRequest) {
-  if (!isCircleConfigured()) {
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json(
       { error: "Circle not configured" },
       { status: 503 }
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
 // ---------------------------------------------------------------------------
 
 export async function POST(request: NextRequest) {
-  if (!isCircleConfigured()) {
+  if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json(
       { error: "Circle not configured" },
       { status: 503 }

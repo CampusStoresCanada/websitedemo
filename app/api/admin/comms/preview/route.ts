@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
   // there's no real delivery to link to here, so a placeholder stands in
   // just to make the footer preview match what a recipient actually gets.
   const manageUrl = is_transactional ? undefined : `${baseUrl}/email-preferences/preview`;
-  const html = wrapEmailBody(substitute(body_html ?? ""), baseUrl, manageUrl);
+  const html = await wrapEmailBody(substitute(body_html ?? ""), baseUrl, manageUrl);
   const renderedSubject = substitute(subject ?? "");
 
   return NextResponse.json({ html, subject: renderedSubject });

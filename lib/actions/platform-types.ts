@@ -6,6 +6,10 @@ export interface PlatformConfig {
   support_email: string;
   logo_url: string | null;
   primary_color: string;
+  /** Slug of the organization considered "the platform operator" — resolves
+   *  concepts like the staff directory that need a specific org row, not
+   *  just a display name. Null on a fresh deployment until set. */
+  host_org_slug: string | null;
   bootstrapped_at: string | null;
   bootstrapped_by: string | null;
   created_at: string;

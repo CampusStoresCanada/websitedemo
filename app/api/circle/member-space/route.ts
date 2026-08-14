@@ -4,6 +4,7 @@ import { isCircleConfigured } from "@/lib/circle/config";
 import { mintMemberToken } from "@/lib/circle/headless-auth";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import { resolveUserCircleId } from "@/lib/circle/member-link";
+import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
@@ -43,7 +44,7 @@ export async function GET(request: NextRequest) {
     legacyFallbackEnabled = true;
   }
 
-  if (!cutoverEnabled || !isCircleConfigured()) {
+  if (!cutoverEnabled || !isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.redirect(toAbsoluteUrl(legacyUrl, request));
   }
 

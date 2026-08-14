@@ -1,9 +1,14 @@
 import { Resend } from "resend";
 import { wrapEmailBody } from "./layout";
+import { getPlatformIdentity } from "@/lib/data";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
-const FROM_ADDRESS = "Campus Stores Canada <noreply@campusstores.ca>";
+async function resolveFromAddress(): Promise<string> {
+  const identity = await getPlatformIdentity();
+  const domain = identity.clientDomain || "example.com";
+  return `${identity.clientName} <noreply@${domain}>`;
+}
 
 interface SendEmailOptions {
   to: string;
@@ -43,18 +48,22 @@ const BATCH_CHUNK_SIZE = 100; // Resend's batch endpoint limit per call
  */
 export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendResult[]> {
   const intercept = process.env.DEV_EMAIL_INTERCEPT;
+  const fromAddress = await resolveFromAddress();
+  const identity = await getPlatformIdentity();
   const results: BatchSendResult[] = new Array(items.length);
 
   for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
     const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
 
-    const payload = chunk.map((item) => ({
-      from: FROM_ADDRESS,
-      to: intercept ?? item.to,
-      subject: intercept ? `[DEV → ${item.to}] ${item.subject}` : item.subject,
-      html: wrapEmailBody(item.html, undefined, item.manageUrl),
-      replyTo: item.replyTo,
-    }));
+    const payload = await Promise.all(
+      chunk.map(async (item) => ({
+        from: fromAddress,
+        to: intercept ?? item.to,
+        subject: intercept ? `[DEV → ${item.to}] ${item.subject}` : item.subject,
+        html: await wrapEmailBody(item.html, undefined, item.manageUrl, identity),
+        replyTo: item.replyTo,
+      }))
+    );
 
     try {
       const { data, error } = await resend.batch.send(payload, {
@@ -97,10 +106,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
 
   try {
     const { data, error } = await resend.emails.send({
-      from: FROM_ADDRESS,
+      from: await resolveFromAddress(),
       to,
       subject,
-      html: wrapEmailBody(options.html, undefined, options.manageUrl),
+      html: await wrapEmailBody(options.html, undefined, options.manageUrl),
       replyTo: options.replyTo,
       attachments: options.attachments,
     });
@@ -122,17 +131,18 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
 // Application email templates (minimal HTML for v1)
 // ─────────────────────────────────────────────────────────────────
 
-export function verificationEmail(
+export async function verificationEmail(
   applicantName: string,
   verificationUrl: string
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   return {
-    subject: "Verify your application — Campus Stores Canada",
+    subject: `Verify your application — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>Verify Your Application</h2>
         <p>Hi ${applicantName},</p>
-        <p>Thank you for applying to Campus Stores Canada. Please verify your email address to continue:</p>
+        <p>Thank you for applying to ${identity.clientName}. Please verify your email address to continue:</p>
         <p style="margin: 24px 0;">
           <a href="${verificationUrl}"
              style="background-color: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
@@ -147,32 +157,33 @@ export function verificationEmail(
   };
 }
 
-export function applicationReceivedEmail(
+export async function applicationReceivedEmail(
   applicantName: string,
   applicationType: "member" | "partner"
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   const typeLabel = applicationType === "member" ? "Membership" : "Partnership";
   return {
-    subject: `${typeLabel} Application Received — Campus Stores Canada`,
+    subject: `${typeLabel} Application Received — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>${typeLabel} Application Received</h2>
         <p>Hi ${applicantName},</p>
         <p>Your ${typeLabel.toLowerCase()} application has been received and is under review.
            We'll be in touch once our team has reviewed your application.</p>
-        <p>If you have questions, reply to this email or contact us at
-           <a href="mailto:info@campusstores.ca">info@campusstores.ca</a>.</p>
+        <p>If you have questions, reply to this email${identity.supportEmail ? ` or contact us at
+           <a href="mailto:${identity.supportEmail}">${identity.supportEmail}</a>` : ""}.</p>
       </div>
     `,
   };
 }
 
-export function adminNewApplicationEmail(
+export async function adminNewApplicationEmail(
   applicantName: string,
   orgName: string,
   applicationType: "member" | "partner",
   adminUrl: string
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
   const typeLabel = applicationType === "member" ? "Membership" : "Partnership";
   return {
     subject: `New ${typeLabel} Application: ${orgName}`,
@@ -191,19 +202,20 @@ export function adminNewApplicationEmail(
   };
 }
 
-export function applicationApprovedEmail(
+export async function applicationApprovedEmail(
   applicantName: string,
   applicationType: "member" | "partner",
   paymentUrl: string
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   const typeLabel = applicationType === "member" ? "Membership" : "Partnership";
   return {
-    subject: `${typeLabel} Application Approved — Campus Stores Canada`,
+    subject: `${typeLabel} Application Approved — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>Your Application Has Been Approved!</h2>
         <p>Hi ${applicantName},</p>
-        <p>Great news — your ${typeLabel.toLowerCase()} application to Campus Stores Canada has been approved.</p>
+        <p>Great news — your ${typeLabel.toLowerCase()} application to ${identity.clientName} has been approved.</p>
         <p>To complete your setup, please submit your payment:</p>
         <p style="margin: 24px 0;">
           <a href="${paymentUrl}"
@@ -219,37 +231,39 @@ export function applicationApprovedEmail(
   };
 }
 
-export function applicationRejectedEmail(
+export async function applicationRejectedEmail(
   applicantName: string,
   applicationType: "member" | "partner",
   reason: string
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   const typeLabel = applicationType === "member" ? "Membership" : "Partnership";
   return {
-    subject: `${typeLabel} Application Update — Campus Stores Canada`,
+    subject: `${typeLabel} Application Update — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>${typeLabel} Application Update</h2>
         <p>Hi ${applicantName},</p>
-        <p>Thank you for your interest in Campus Stores Canada. After reviewing your application,
+        <p>Thank you for your interest in ${identity.clientName}. After reviewing your application,
            we're unable to approve it at this time.</p>
         ${reason ? `<p><strong>Reason:</strong> ${reason}</p>` : ""}
-        <p>If you have questions or would like to discuss this further, please contact us at
-           <a href="mailto:info@campusstores.ca">info@campusstores.ca</a>.</p>
+        <p>If you have questions or would like to discuss this further, please contact us${identity.supportEmail ? ` at
+           <a href="mailto:${identity.supportEmail}">${identity.supportEmail}</a>` : ""}.</p>
       </div>
     `,
   };
 }
 
-export function accountInviteEmail(
+export async function accountInviteEmail(
   applicantName: string,
   inviteUrl: string
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   return {
-    subject: "Set Up Your Account — Campus Stores Canada",
+    subject: `Set Up Your Account — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Welcome to Campus Stores Canada</h2>
+        <h2>Welcome to ${identity.clientName}</h2>
         <p>Hi ${applicantName},</p>
         <p>Your account has been created. Click below to set your password and get started:</p>
         <p style="margin: 24px 0;">

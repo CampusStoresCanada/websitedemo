@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { supabase } from "./supabase";
 import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./types/db";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -554,29 +555,126 @@ export async function getDirectoryPartners(): Promise<Partial<Organization>[]> {
 // CSC staff — live contact query
 // ─────────────────────────────────────────────────────────────────
 
+export interface PlatformIdentity {
+  clientName: string;
+  clientShortName: string;
+  clientDomain: string;
+  supportEmail: string;
+  logoUrl: string | null;
+  primaryColor: string;
+  hostOrgSlug: string | null;
+}
+
+const DEFAULT_PLATFORM_IDENTITY: PlatformIdentity = {
+  clientName: "Your Organization",
+  clientShortName: "Org",
+  clientDomain: "",
+  supportEmail: "",
+  logoUrl: null,
+  primaryColor: "#1e3a5f",
+  hostOrgSlug: null,
+};
+
 /**
- * Fetch all non-archived contacts from the Campus Stores Canada organization
- * whose contact_type includes "Staff", ordered by name.
+ * Public, unauthenticated read of the platform's branding/identity —
+ * for Header/Footer/page metadata/email templates, none of which have an
+ * admin session to satisfy `getPlatformConfig()`'s auth guard. Falls back
+ * to generic placeholder values on a fresh, not-yet-bootstrapped deployment
+ * (no platform_config row yet) rather than failing the page render.
+ * React-cached so one request rendering Header+Footer+layout only hits the
+ * database once.
+ */
+export const getPlatformIdentity = cache(async (): Promise<PlatformIdentity> => {
+  try {
+    const adminClient = createAdminClient();
+    const result = await withTimeout(
+      adminClient
+        .from("platform_config")
+        .select("client_name, client_short_name, client_domain, support_email, logo_url, primary_color, host_org_slug")
+        .maybeSingle(),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    );
+
+    if (result.error || !result.data) {
+      return DEFAULT_PLATFORM_IDENTITY;
+    }
+
+    return {
+      clientName: result.data.client_name || DEFAULT_PLATFORM_IDENTITY.clientName,
+      clientShortName: result.data.client_short_name || DEFAULT_PLATFORM_IDENTITY.clientShortName,
+      clientDomain: result.data.client_domain || DEFAULT_PLATFORM_IDENTITY.clientDomain,
+      supportEmail: result.data.support_email || DEFAULT_PLATFORM_IDENTITY.supportEmail,
+      logoUrl: result.data.logo_url,
+      primaryColor: result.data.primary_color || DEFAULT_PLATFORM_IDENTITY.primaryColor,
+      hostOrgSlug: result.data.host_org_slug,
+    };
+  } catch (err) {
+    console.error("getPlatformIdentity: unexpected error", err);
+    return DEFAULT_PLATFORM_IDENTITY;
+  }
+});
+
+/**
+ * Public, unauthenticated check of whether a platform feature module is
+ * turned on for this deployment — for gating actual code paths (Circle
+ * API routes, conference actions, QuickBooks export), not just the admin
+ * policy UI's tab visibility (which `FEATURE_POLICY_CATEGORIES` already
+ * handles separately). Fails OPEN (returns true) on a read error or on a
+ * fresh, not-yet-bootstrapped deployment with no `platform_features` rows
+ * yet — so a broken/unconfigured toggle can't silently disable a feature
+ * that was never deliberately turned off. React-cached per request.
+ */
+export const isFeatureEnabled = cache(async (featureKey: string): Promise<boolean> => {
+  try {
+    const adminClient = createAdminClient();
+    const result = await withTimeout(
+      adminClient
+        .from("platform_features")
+        .select("enabled, always_on")
+        .eq("feature_key", featureKey)
+        .maybeSingle(),
+      DB_TIMEOUT,
+      { data: null, error: TIMEOUT_ERROR }
+    );
+
+    if (result.error || !result.data) return true;
+    return result.data.always_on || result.data.enabled;
+  } catch (err) {
+    console.error("isFeatureEnabled: unexpected error", err);
+    return true;
+  }
+});
+
+/**
+ * Fetch all non-archived contacts from the organization configured as the
+ * platform operator (`platform_config.host_org_slug`), whose contact_type
+ * includes "Staff", ordered by name.
  *
  * Uses the admin client so it works server-side without depending on RLS.
  */
 export async function getCSCStaff(): Promise<Contact[]> {
   try {
     const adminClient = createAdminClient();
+    const identity = await getPlatformIdentity();
 
-    // Look up the CSC org by slug — avoids hardcoding a UUID.
+    if (!identity.hostOrgSlug) {
+      console.error("getCSCStaff: no host_org_slug configured on platform_config");
+      return [];
+    }
+
     const orgResult = await withTimeout(
       adminClient
         .from("organizations")
         .select("id")
-        .eq("slug", "campus-stores-canada")
+        .eq("slug", identity.hostOrgSlug)
         .single(),
       DB_TIMEOUT,
       { data: null, error: TIMEOUT_ERROR }
     );
 
     if (orgResult.error || !orgResult.data?.id) {
-      console.error("getCSCStaff: could not resolve CSC organization", orgResult.error);
+      console.error("getCSCStaff: could not resolve host organization", orgResult.error);
       return [];
     }
 

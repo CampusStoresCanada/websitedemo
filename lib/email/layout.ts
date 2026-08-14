@@ -13,6 +13,8 @@
 // The background is purely decorative — email is fully functional without it.
 // ─────────────────────────────────────────────────────────────────
 
+import { getPlatformIdentity } from "@/lib/data";
+
 export const BRAND_NAVY = "#163D6D";
 export const BRAND_RED  = "#EE2A2E";
 export const FONT = "Calibri,'Segoe UI',-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif";
@@ -21,8 +23,9 @@ const TEXT_MUTED   = "#6B7280";
 const HEADER_BG    = "#F5F4F1"; // fallback when bg image doesn't load
 const FOOTER_BG    = "#F5F4F1";
 const BODY_BG      = "#EEEDE9";
+// CSC-specific — no equivalent field on platform_config yet, so this stays
+// a literal default rather than a half-wired config lookup.
 const MAILING_ADDRESS = "P.O. Box 71157 Silver Springs, Calgary, Alberta, Canada";
-const CONTACT_EMAIL = "info@campusstores.ca";
 
 // Real sends (lib/email/send.ts) call wrapEmailBody with no baseUrl override —
 // unlike the admin preview route, which always derives one from the request —
@@ -44,10 +47,23 @@ const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.ve
  *                  category to manage preferences for. CASL requires this
  *                  on commercial messages; comms campaign sends always
  *                  pass it (see executeCampaignSend).
+ * @param identity  Pre-fetched platform identity, for callers wrapping many
+ *                  emails in one loop (e.g. sendEmailBatch) so it's only
+ *                  fetched once rather than per item. Self-fetches when
+ *                  omitted.
  */
-export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?: string): string {
+export async function wrapEmailBody(
+  contentHtml: string,
+  baseUrl?: string,
+  manageUrl?: string,
+  identity?: Awaited<ReturnType<typeof getPlatformIdentity>>
+): Promise<string> {
+  const resolvedIdentity = identity ?? (await getPlatformIdentity());
   const base        = baseUrl ?? APP_URL;
   const bgUrl       = base ? `${base}/email/background.png`    : "";
+  // Wordmark/mark images are CSC's specific assets — a fresh deployment
+  // without them configured falls back to the text lockup below, which
+  // already reads from identity.clientName.
   const wordmarkUrl = base ? `${base}/email/logo-wordmark.png` : "";
   const markUrl     = base ? `${base}/email/logo-mark.png`     : "";
 
@@ -93,14 +109,14 @@ export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?:
               ${wordmarkUrl
                 ? `<!--[if !mso]><!-->
               <img src="${wordmarkUrl}"
-                   alt="Campus Stores Canada"
+                   alt="${resolvedIdentity.clientName}"
                    width="86" height="54"
                    style="display:block;border:0;outline:none;text-decoration:none;max-width:86px;height:auto;" />
               <!--<![endif]-->
               <!--[if mso]>
-              <span style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;color:${BRAND_NAVY};">Campus Stores Canada</span>
+              <span style="font-family:Arial,sans-serif;font-size:20px;font-weight:bold;color:${BRAND_NAVY};">${resolvedIdentity.clientName}</span>
               <![endif]-->`
-                : `<span style="font-family:${FONT};font-size:20px;font-weight:700;color:${BRAND_NAVY};">Campus Stores Canada</span>`}
+                : `<span style="font-family:${FONT};font-size:20px;font-weight:700;color:${BRAND_NAVY};">${resolvedIdentity.clientName}</span>`}
 
             </td>
           </tr>
@@ -126,11 +142,11 @@ export function wrapEmailBody(contentHtml: string, baseUrl?: string, manageUrl?:
                        style="display:block;margin:0 auto 8px;border:0;outline:none;text-decoration:none;width:52px;height:32px;" />`
                 : ""}
               <p style="margin:0 0 3px;font-family:${FONT};font-size:12px;font-weight:700;color:${BRAND_NAVY};letter-spacing:0.1px;">
-                Campus Stores Canada
+                ${resolvedIdentity.clientName}
               </p>
               <p style="margin:0 0 ${manageUrl ? "8px" : "0"};font-family:${FONT};font-size:11px;color:${TEXT_MUTED};line-height:1.5;">
-                ${MAILING_ADDRESS}<br />
-                <a href="mailto:${CONTACT_EMAIL}" style="color:${TEXT_MUTED};text-decoration:underline;">${CONTACT_EMAIL}</a>
+                ${MAILING_ADDRESS}${resolvedIdentity.supportEmail ? `<br />
+                <a href="mailto:${resolvedIdentity.supportEmail}" style="color:${TEXT_MUTED};text-decoration:underline;">${resolvedIdentity.supportEmail}</a>` : ""}
               </p>
               ${manageUrl
                 ? `<p style="margin:0;font-family:${FONT};font-size:11px;color:${TEXT_MUTED};line-height:1.5;">

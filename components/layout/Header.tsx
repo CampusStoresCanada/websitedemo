@@ -7,10 +7,11 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { CONFERENCE_CART_UPDATED_EVENT, type ConferenceCartUpdatedDetail } from "@/lib/conference/cart-events";
 import { hadPriorSession, hasKnownAccountPersona } from "@/lib/auth/persona-cookie";
+import type { PlatformIdentity } from "@/lib/data";
 
 const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   super_admin: { label: "Super Admin", color: "bg-purple-100 text-purple-700" },
-  admin: { label: "Admin", color: "bg-blue-100 text-[#D92327]" },
+  admin: { label: "Admin", color: "bg-blue-100 text-[var(--brand-red-hover)]" },
   org_admin: { label: "Org Admin", color: "bg-amber-100 text-amber-700" },
   member: { label: "Member", color: "bg-green-100 text-green-700" },
   partner: { label: "Partner", color: "bg-cyan-100 text-cyan-700" },
@@ -62,7 +63,7 @@ function isGlobalAdmin(role: string): boolean {
   return role === "admin" || role === "super_admin";
 }
 
-export default function Header() {
+export default function Header({ identity }: { identity: PlatformIdentity }) {
   const [isScrolled, setIsScrolled] = useState(false);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
@@ -498,8 +499,8 @@ export default function Header() {
         <div className="h-full max-w-7xl mx-auto px-4 md:px-6 flex items-center justify-between gap-4">
           <Link href="/" onClick={handleLogoClick} className="flex items-center">
             <Image
-              src="/logos/csc-logo.svg"
-              alt="Campus Stores Canada"
+              src={identity.logoUrl ?? "/logos/csc-logo.svg"}
+              alt={identity.clientName}
               width={160}
               height={100}
               priority
@@ -605,7 +606,7 @@ export default function Header() {
                             }}
                             className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${alert.isRead ? "opacity-60" : ""}`}
                           >
-                            {!alert.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
+                            {!alert.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--brand-red)]" />}
                             {alert.isRead && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
                             <div className="min-w-0">
                               <p className="text-[11px] uppercase tracking-wide text-gray-400">{alert.source}</p>
@@ -628,12 +629,12 @@ export default function Header() {
                             href={dm.href}
                             className={`mt-1 flex items-start gap-2 rounded-md px-2 py-2 hover:bg-gray-50 ${dm.unreadCount === 0 ? "opacity-60" : ""}`}
                           >
-                            {dm.unreadCount > 0 && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[#EE2A2E]" />}
+                            {dm.unreadCount > 0 && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--brand-red)]" />}
                             {dm.unreadCount === 0 && <span className="mt-1.5 h-1.5 w-1.5 flex-shrink-0" />}
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center justify-between gap-2">
                                 <p className={`text-sm truncate ${dm.unreadCount > 0 ? "text-gray-800 font-medium" : "text-gray-500"}`}>{dm.name}</p>
-                                {dm.unreadCount > 0 && <span className="text-[10px] font-medium text-white bg-[#EE2A2E] rounded-full px-1.5 py-0.5 flex-shrink-0">{dm.unreadCount}</span>}
+                                {dm.unreadCount > 0 && <span className="text-[10px] font-medium text-white bg-[var(--brand-red)] rounded-full px-1.5 py-0.5 flex-shrink-0">{dm.unreadCount}</span>}
                               </div>
                               {dm.lastMessage && (
                                 <p className="text-xs text-gray-500 truncate">

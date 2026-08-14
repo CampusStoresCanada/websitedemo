@@ -284,7 +284,7 @@ export async function submitApplication(
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
   const verificationUrl = `${baseUrl}/apply/verify?token=${token}`;
 
-  const emailContent = verificationEmail(contactName, verificationUrl);
+  const emailContent = await verificationEmail(contactName, verificationUrl);
   await sendEmail({
     to: normalizedEmail,
     subject: emailContent.subject,
@@ -330,7 +330,7 @@ export async function verifyApplicationEmail(
     .eq("id", app.id);
 
   // Send "application received" to applicant
-  const receivedContent = applicationReceivedEmail(
+  const receivedContent = await applicationReceivedEmail(
     app.applicant_name ?? "Applicant",
     app.application_type as "member" | "partner"
   );
@@ -348,7 +348,7 @@ export async function verifyApplicationEmail(
     "Unknown";
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
-  const adminContent = adminNewApplicationEmail(
+  const adminContent = await adminNewApplicationEmail(
     app.applicant_name ?? "Applicant",
     orgName,
     app.application_type as "member" | "partner",
@@ -409,7 +409,7 @@ export async function fastTrackApplicationVerification(
   // Let the applicant know their application is moving forward, same
   // email they'd have gotten had they clicked the verification link.
   if (app.applicant_email) {
-    const receivedContent = applicationReceivedEmail(
+    const receivedContent = await applicationReceivedEmail(
       app.applicant_name ?? "Applicant",
       app.application_type as "member" | "partner"
     );
@@ -683,7 +683,7 @@ export async function approveApplication(
       });
 
       if (resetData?.properties?.action_link) {
-        const inviteContent = accountInviteEmail(
+        const inviteContent = await accountInviteEmail(
           app.applicant_name ?? "there",
           resetData.properties.action_link
         );
@@ -702,7 +702,7 @@ export async function approveApplication(
   // 7. Send approval email with payment link
   if (app.applicant_email) {
     const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
-    const approvedContent = applicationApprovedEmail(
+    const approvedContent = await applicationApprovedEmail(
       app.applicant_name ?? "there",
       applicationType,
       paymentUrl
@@ -946,7 +946,7 @@ export async function mergeApplicationIntoOrganization(
           email: app.applicant_email!,
         });
         if (resetData?.properties?.action_link) {
-          const inviteContent = accountInviteEmail(
+          const inviteContent = await accountInviteEmail(
             app.applicant_name ?? "there",
             resetData.properties.action_link
           );
@@ -1004,7 +1004,7 @@ export async function rejectApplication(
 
   // Send rejection email
   if (app.applicant_email) {
-    const rejectedContent = applicationRejectedEmail(
+    const rejectedContent = await applicationRejectedEmail(
       app.applicant_name ?? "Applicant",
       app.application_type as "member" | "partner",
       reason
@@ -1267,7 +1267,7 @@ export async function resendApplicationInvite(
       email: app.applicant_email,
     });
     if (resetData?.properties?.action_link) {
-      const inviteContent = accountInviteEmail(
+      const inviteContent = await accountInviteEmail(
         app.applicant_name ?? "there",
         resetData.properties.action_link
       );
@@ -1298,7 +1298,7 @@ export async function resendApplicationInvite(
         ? `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`
         : `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
 
-      const approvedContent = applicationApprovedEmail(
+      const approvedContent = await applicationApprovedEmail(
         app.applicant_name ?? "there",
         app.application_type as "member" | "partner",
         paymentUrl

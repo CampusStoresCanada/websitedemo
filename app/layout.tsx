@@ -13,12 +13,15 @@ import PublicHighlightHandler from "@/components/ui/PublicHighlightHandler";
 import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
 import OnboardingGate from "@/components/layout/OnboardingGate";
+import { getPlatformIdentity } from "@/lib/data";
 
-export const metadata: Metadata = {
-  title: "Campus Stores Canada | Canada's Campus Store Network",
-  description:
-    "Connecting 70 campus stores coast-to-coast with resources, partnerships, and expertise.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const identity = await getPlatformIdentity();
+  return {
+    title: `${identity.clientName} | Member & Partner Network`,
+    description: `Connecting ${identity.clientName}'s members and partners with resources, partnerships, and expertise.`,
+  };
+}
 
 // Hydrate client auth from server truth to avoid initial client-side auth drift.
 export default async function RootLayout({
@@ -26,7 +29,10 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const serverAuth = await getServerAuthState();
+  const [serverAuth, identity] = await Promise.all([
+    getServerAuthState(),
+    getPlatformIdentity(),
+  ]);
   const initialAuth = {
     user: serverAuth.user,
     profile: serverAuth.profile,
@@ -56,7 +62,7 @@ export default async function RootLayout({
       <body className="antialiased">
         <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
           <ToolkitProvider>
-            <Suspense><Header /></Suspense>
+            <Suspense><Header identity={identity} /></Suspense>
             <OnboardingGate serverHasOnboarding={serverHasOnboarding}>
               <main className="min-h-screen">{children}</main>
               <Footer />
