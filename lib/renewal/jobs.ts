@@ -4,8 +4,7 @@ import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { computeNewExpiresAt, nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
 import {
-  createMembershipInvoice,
-  createPartnershipInvoice,
+  createProgramInvoice,
   finalizeAndSendInvoice,
 } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
@@ -337,17 +336,11 @@ export async function renewalReminderRun(): Promise<JobResult> {
               org.membership_expires_at ?? cycleBillingPeriodStart
             );
 
-            const invoice =
-              org.type === "Vendor Partner"
-                ? await createPartnershipInvoice(org.id, {
-                    billingPeriodStart,
-                    billingPeriodEnd,
-                  })
-                : await createMembershipInvoice(org.id, {
-                    billingPeriodStart,
-                    billingPeriodEnd,
-                    policySetId: activePolicySet.id,
-                  });
+            const invoice = await createProgramInvoice(org.id, {
+              billingPeriodStart,
+              billingPeriodEnd,
+              policySetId: activePolicySet.id,
+            });
 
             await finalizeAndSendInvoice(invoice.id);
             invoiceId = invoice.id;

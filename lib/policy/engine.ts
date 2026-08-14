@@ -340,6 +340,7 @@ function defaultMembershipPrograms(partnershipRateCents: number): MembershipProg
       permissionLevel: 'member',
       orgAdminElevates: true,
       conferenceTier: 'member',
+      invoiceType: 'membership',
       billing: { mode: 'metric_engine' },
     },
     {
@@ -349,6 +350,7 @@ function defaultMembershipPrograms(partnershipRateCents: number): MembershipProg
       permissionLevel: 'partner',
       orgAdminElevates: false,
       conferenceTier: 'partner',
+      invoiceType: 'partnership',
       billing: { mode: 'flat_rate', rateCents: partnershipRateCents },
     },
   ]

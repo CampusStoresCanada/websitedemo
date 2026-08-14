@@ -113,6 +113,11 @@ export interface MembershipProgramDef {
   orgAdminElevates: boolean
   /** Conference/booth purchase-eligibility tier this program resolves to. */
   conferenceTier: string
+  /** The `invoices.type` value used for this program's invoices — kept
+   *  distinct from `key` since the historical values ("membership",
+   *  "partnership") don't match the program keys ("member", "partner"),
+   *  and changing stored invoice data isn't part of this generalization. */
+  invoiceType: string
   billing:
     | { mode: 'metric_engine' }
     | { mode: 'flat_rate'; rateCents: number }

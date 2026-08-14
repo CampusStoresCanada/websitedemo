@@ -19,8 +19,7 @@ import {
 import { getRenewalConfig } from "@/lib/policy/engine";
 import {
   createStripeCustomer,
-  createMembershipInvoice,
-  createPartnershipInvoice,
+  createProgramInvoice,
   finalizeAndSendInvoice,
 } from "@/lib/stripe/billing";
 import {
@@ -628,10 +627,7 @@ export async function approveApplication(
         ? { billingPeriodStart, billingPeriodEnd }
         : { billingPeriodStart, billingPeriodEnd, applyProrationFromDate: now };
 
-      const invoice =
-        applicationType === "member"
-          ? await createMembershipInvoice(org.id, invoiceOptions)
-          : await createPartnershipInvoice(org.id, invoiceOptions);
+      const invoice = await createProgramInvoice(org.id, invoiceOptions);
 
       // Finalize and send via Stripe
       await finalizeAndSendInvoice(invoice.id);

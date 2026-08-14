@@ -3,7 +3,7 @@
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
-import { createMembershipInvoice, createPartnershipInvoice, finalizeAndSendInvoice, processRefund } from "@/lib/stripe/billing";
+import { createProgramInvoice, finalizeAndSendInvoice, processRefund } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { computeNewExpiresAt } from "@/lib/membership/renewal-activation";
 import { getActivePolicySet } from "@/lib/policy/engine";
@@ -216,9 +216,9 @@ export async function optOutOfRenewal(
  * immediately, instead of waiting for the reminder cron's 30-day mark or
  * getting swept into it as a side effect of an unrelated purchase (e.g. the
  * conference-commerce membership-gate bundle). Reuses the exact same
- * invoice-generation path the cron uses (createMembershipInvoice /
- * createPartnershipInvoice + computeNewExpiresAt's cycle-anchored billing
- * period), so the amount and coverage dates are identical whichever path
+ * invoice-generation path the cron uses (createProgramInvoice +
+ * computeNewExpiresAt's cycle-anchored billing period), so the amount and
+ * coverage dates are identical whichever path
  * triggers it — only the timing differs.
  *
  * Idempotent: if an unpaid invoice already exists for this org, returns its
@@ -312,14 +312,11 @@ export async function renewMembershipNow(
       org.membership_expires_at ?? null
     );
 
-    const invoice =
-      org.type === "Vendor Partner"
-        ? await createPartnershipInvoice(orgId, { billingPeriodStart, billingPeriodEnd })
-        : await createMembershipInvoice(orgId, {
-            billingPeriodStart,
-            billingPeriodEnd,
-            policySetId: (await getActivePolicySet())?.id,
-          });
+    const invoice = await createProgramInvoice(orgId, {
+      billingPeriodStart,
+      billingPeriodEnd,
+      policySetId: (await getActivePolicySet())?.id,
+    });
 
     await finalizeAndSendInvoice(invoice.id);
     stripeInvoiceId = invoice.stripe_invoice_id;

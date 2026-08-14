@@ -26,8 +26,8 @@ import type { MembershipProgramDef } from "@/lib/policy/types";
 // client-side; createAdminClient() is server-only). rateCents is a
 // placeholder here since permission resolution never reads it.
 const FALLBACK_PROGRAMS: MembershipProgramDef[] = [
-  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member", orgAdminElevates: true, conferenceTier: "member", billing: { mode: "metric_engine" } },
-  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner", orgAdminElevates: false, conferenceTier: "partner", billing: { mode: "flat_rate", rateCents: 0 } },
+  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member", orgAdminElevates: true, conferenceTier: "member", invoiceType: "membership", billing: { mode: "metric_engine" } },
+  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner", orgAdminElevates: false, conferenceTier: "partner", invoiceType: "partnership", billing: { mode: "flat_rate", rateCents: 0 } },
 ];
 
 interface AuthContextValue {

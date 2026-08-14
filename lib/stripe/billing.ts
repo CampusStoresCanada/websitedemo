@@ -2,10 +2,11 @@ import { stripe } from "./client";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
-import { getBillingConfig, getEffectivePolicy, getRenewalConfig } from "@/lib/policy/engine";
+import { getBillingConfig, getEffectivePolicy, getRenewalConfig, getProgramsConfig } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 import type {
   Invoice,
   PaymentMethod,
@@ -137,138 +138,6 @@ export async function applyProration(
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Create a membership invoice for an org.
- * Reads FTE from org, tiers from policy, applies proration if applicable.
- */
-export async function createMembershipInvoice(
-  orgId: string,
-  options?: {
-    applyProrationFromDate?: Date;
-    billingPeriodStart?: string;
-    billingPeriodEnd?: string;
-    policySetId?: string;
-  }
-): Promise<Invoice> {
-  const db = createAdminClient();
-  const billing = await getBillingConfig();
-
-  // 1. Read org FTE + stripe customer
-  const { data: org, error: orgError } = await db
-    .from("organizations")
-    .select("id, name, fte, stripe_customer_id, email, province, country")
-    .eq("id", orgId)
-    .single();
-
-  if (orgError || !org) {
-    throw new Error(`Organization ${orgId} not found`);
-  }
-
-  // 2. Compute deterministic policy-pinned assessment for this cycle
-  const assessment = await computeMembershipAssessment(orgId, {
-    policySetId: options?.policySetId,
-    billingPeriodStart: options?.billingPeriodStart,
-  });
-
-  if (assessment.assessmentStatus === "manual_required") {
-    throw new Error(
-      `Membership assessment requires manual override for organization ${orgId}`
-    );
-  }
-
-  const baseCents = assessment.computedAmountCents;
-
-  // 3. Apply proration if requested
-  let finalCents = baseCents;
-  let prorationPct = 0;
-  let originalCents: number | null = null;
-
-  if (options?.applyProrationFromDate) {
-    const proration = await applyProration(baseCents, options.applyProrationFromDate);
-    finalCents = proration.amountCents;
-    prorationPct = proration.discountPct;
-    if (prorationPct > 0) {
-      originalCents = baseCents;
-    }
-  }
-
-  // 4. Ensure Stripe customer exists
-  const stripeCustomerId = await ensureStripeCustomer(orgId);
-
-  // 4b. Resolve the buyer's-own-province tax rate — dues are taxed by the
-  // member org's own location, not CSC's (see lib/stripe/tax.ts).
-  if (!org.province) {
-    throw new Error(
-      `"${org.name}" has no province on file — cannot determine its tax rate. Set it before invoicing.`
-    );
-  }
-  const taxRateId = await resolveMembershipStripeTaxRateId(db, org.province);
-
-  // 5. Create Stripe invoice
-  const stripeInvoice = await stripe.invoices.create({
-    customer: stripeCustomerId,
-    collection_method: "send_invoice",
-    days_until_due: 30,
-    currency: billing.currency.toLowerCase(),
-    metadata: { org_id: orgId, invoice_type: "membership" },
-  });
-
-  // Add line item
-  await stripe.invoiceItems.create({
-    customer: stripeCustomerId,
-    invoice: stripeInvoice.id,
-    amount: finalCents,
-    currency: billing.currency.toLowerCase(),
-    description: `Membership - ${assessment.explanation}${prorationPct > 0 ? `, ${prorationPct}% prorated` : ""}`,
-    tax_rates: [taxRateId],
-  });
-
-  // Stripe computes tax as soon as a taxed line item is added, even on a
-  // draft invoice — read it back rather than hand-computing from the rate
-  // table, so our local total_cents always matches what Stripe (and later
-  // QBO, once paid) actually shows.
-  const taxedInvoice = await stripe.invoices.retrieve(stripeInvoice.id);
-  const taxAmountCents = taxedInvoice.total - taxedInvoice.subtotal;
-  const totalCents = taxedInvoice.total;
-
-  // 6. Insert local invoice record
-  const description = prorationPct > 0
-    ? `Membership - ${assessment.explanation} (${prorationPct}% prorated)`
-    : `Membership - ${assessment.explanation}`;
-
-  const { data: invoice, error: insertError } = await db
-    .from("invoices")
-    .insert({
-      organization_id: orgId,
-      type: "membership",
-      description,
-      amount_cents: finalCents,
-      currency: billing.currency,
-      tax_amount_cents: taxAmountCents,
-      total_cents: totalCents,
-      proration_discount_pct: prorationPct,
-      original_amount_cents: originalCents,
-      status: "draft",
-      stripe_invoice_id: stripeInvoice.id,
-      stripe_customer_id: stripeCustomerId,
-      billing_period_start: options?.billingPeriodStart ?? null,
-      billing_period_end: options?.billingPeriodEnd ?? null,
-      metadata: {
-        policy_set_id: assessment.policySetId,
-        membership_assessment_id: assessment.id,
-        assessment_status: assessment.assessmentStatus,
-      },
-    })
-    .select()
-    .single();
-
-  if (insertError || !invoice) {
-    throw new Error(`Failed to insert invoice: ${insertError?.message}`);
-  }
-
-  return invoice as unknown as Invoice;
-}
-
-/**
  * The flat Vendor Partner annual rate, in cents, from policy.
  * Shared by the invoice path here and per-org cart pricing in
  * lib/actions/conference-commerce.ts, so both quote the same number.
@@ -279,18 +148,31 @@ export async function getPartnershipRateCents(): Promise<number> {
 }
 
 /**
- * Create a partnership invoice for a vendor partner org.
+ * Create an invoice for an org, priced according to its membership
+ * program (lib/policy/types.ts — MembershipProgramDef). Replaces what
+ * used to be two separately-implemented functions
+ * (createMembershipInvoice/createPartnershipInvoice) that were ~90%
+ * identical plumbing and diverged only in price resolution — that
+ * divergence is now the only branch here, on `program.billing.mode`:
+ * "metric_engine" resolves price via the already program-agnostic
+ * computeMembershipAssessment (FTE tiers, single-metric tiers, or a
+ * linear formula, per policy), "flat_rate" uses a fixed rate.
  */
-export async function createPartnershipInvoice(
+export async function createProgramInvoice(
   orgId: string,
-  options?: { applyProrationFromDate?: Date; billingPeriodStart?: string; billingPeriodEnd?: string }
+  options?: {
+    applyProrationFromDate?: Date;
+    billingPeriodStart?: string;
+    billingPeriodEnd?: string;
+    policySetId?: string;
+  }
 ): Promise<Invoice> {
   const db = createAdminClient();
-  const billing = await getBillingConfig();
+  const [billing, programs] = await Promise.all([getBillingConfig(), getProgramsConfig()]);
 
   const { data: org, error: orgError } = await db
     .from("organizations")
-    .select("id, name, province, country")
+    .select("id, name, type, province, country")
     .eq("id", orgId)
     .single();
 
@@ -298,9 +180,40 @@ export async function createPartnershipInvoice(
     throw new Error(`Organization ${orgId} not found`);
   }
 
-  const baseCents = await getPartnershipRateCents();
+  const program = programs.find((p) => p.orgTypeValue === org.type);
+  if (!program) {
+    throw new Error(`Organization ${orgId} has type "${org.type}", which matches no configured membership program`);
+  }
 
-  // Apply proration if requested
+  // 1. Resolve the base price and description for this program's billing mode.
+  // Description text uses invoiceType (e.g. "Membership"/"Partnership" — the
+  // transaction type), not program.label (e.g. "Member"/"Vendor Partner" —
+  // the org's display name), matching what these invoices have always said.
+  const invoiceTypeLabel = program.invoiceType.charAt(0).toUpperCase() + program.invoiceType.slice(1);
+  let baseCents: number;
+  let priceDescription: string;
+  let assessment: Awaited<ReturnType<typeof computeMembershipAssessment>> | null = null;
+
+  if (program.billing.mode === "metric_engine") {
+    assessment = await computeMembershipAssessment(orgId, {
+      policySetId: options?.policySetId,
+      billingPeriodStart: options?.billingPeriodStart,
+    });
+
+    if (assessment.assessmentStatus === "manual_required") {
+      throw new Error(
+        `Membership assessment requires manual override for organization ${orgId}`
+      );
+    }
+
+    baseCents = assessment.computedAmountCents;
+    priceDescription = `${invoiceTypeLabel} - ${assessment.explanation}`;
+  } else {
+    baseCents = program.billing.rateCents;
+    priceDescription = `${invoiceTypeLabel} ($${(baseCents / 100).toFixed(2)})`;
+  }
+
+  // 2. Apply proration if requested
   let finalCents = baseCents;
   let prorationPct = 0;
   let originalCents: number | null = null;
@@ -314,11 +227,11 @@ export async function createPartnershipInvoice(
     }
   }
 
-  // Ensure Stripe customer
+  // 3. Ensure Stripe customer exists
   const stripeCustomerId = await ensureStripeCustomer(orgId);
 
-  // Resolve the buyer's-own-province tax rate — dues are taxed by the
-  // member org's own location, not CSC's (see lib/stripe/tax.ts).
+  // 3b. Resolve the buyer's-own-province tax rate — dues are taxed by the
+  // org's own location, not CSC's (see lib/stripe/tax.ts).
   if (!org.province) {
     throw new Error(
       `"${org.name}" has no province on file — cannot determine its tax rate. Set it before invoicing.`
@@ -326,13 +239,13 @@ export async function createPartnershipInvoice(
   }
   const taxRateId = await resolveMembershipStripeTaxRateId(db, org.province);
 
-  // Create Stripe invoice
+  // 4. Create Stripe invoice
   const stripeInvoice = await stripe.invoices.create({
     customer: stripeCustomerId,
     collection_method: "send_invoice",
     days_until_due: 30,
     currency: billing.currency.toLowerCase(),
-    metadata: { org_id: orgId, invoice_type: "partnership" },
+    metadata: { org_id: orgId, invoice_type: program.invoiceType },
   });
 
   await stripe.invoiceItems.create({
@@ -340,7 +253,7 @@ export async function createPartnershipInvoice(
     invoice: stripeInvoice.id,
     amount: finalCents,
     currency: billing.currency.toLowerCase(),
-    description: `Partnership ($${(finalCents / 100).toFixed(2)}${prorationPct > 0 ? `, ${prorationPct}% prorated` : ""})`,
+    description: `${priceDescription}${prorationPct > 0 ? `, ${prorationPct}% prorated` : ""}`,
     tax_rates: [taxRateId],
   });
 
@@ -352,16 +265,16 @@ export async function createPartnershipInvoice(
   const taxAmountCents = taxedInvoice.total - taxedInvoice.subtotal;
   const totalCents = taxedInvoice.total;
 
-  // Insert local record
+  // 5. Insert local invoice record
   const description = prorationPct > 0
-    ? `Partnership ($${billing.partnership_rate}) (${prorationPct}% prorated)`
-    : `Partnership ($${billing.partnership_rate})`;
+    ? `${priceDescription} (${prorationPct}% prorated)`
+    : priceDescription;
 
-  const { data: invoice, error } = await db
+  const { data: invoice, error: insertError } = await db
     .from("invoices")
     .insert({
       organization_id: orgId,
-      type: "partnership",
+      type: program.invoiceType,
       description,
       amount_cents: finalCents,
       currency: billing.currency,
@@ -374,12 +287,19 @@ export async function createPartnershipInvoice(
       stripe_customer_id: stripeCustomerId,
       billing_period_start: options?.billingPeriodStart ?? null,
       billing_period_end: options?.billingPeriodEnd ?? null,
+      metadata: assessment
+        ? {
+            policy_set_id: assessment.policySetId,
+            membership_assessment_id: assessment.id,
+            assessment_status: assessment.assessmentStatus,
+          }
+        : null,
     })
     .select()
     .single();
 
-  if (error || !invoice) {
-    throw new Error(`Failed to insert partnership invoice: ${error?.message}`);
+  if (insertError || !invoice) {
+    throw new Error(`Failed to insert invoice: ${insertError?.message}`);
   }
 
   return invoice as unknown as Invoice;
