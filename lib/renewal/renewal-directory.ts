@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig } from "@/lib/policy/engine";
-import { determineTierCode } from "@/lib/stripe/billing";
+import { evaluateBucketPrice } from "@/lib/membership/pricing-core";
 
 export type RenewalDirectoryOrgType = "Member" | "Vendor Partner";
 
@@ -162,7 +162,15 @@ export async function getRenewalDirectory(): Promise<RenewalDirectoryRow[]> {
     const invoice = invoiceByOrg.get(o.id);
     const contact = contactByOrg.get(o.id);
     const type = o.type as RenewalDirectoryOrgType;
-    const typeClass = type === "Member" ? determineTierCode(o.fte, billing.membership_tiers) : null;
+    // Tier-class badge only applies to FTE-sized member dues (CSC's current
+    // model) — resolved through the real pricing engine (pricing-core.ts)
+    // so this always agrees with what actually drives invoicing, rather
+    // than duplicating the tier-match logic. Other pricing modes have no
+    // FTE-shaped "class" concept, so no badge is shown.
+    const typeClass =
+      type === "Member" && billing.pricing_mode === "FTE_BUCKETS"
+        ? evaluateBucketPrice(o.fte ?? 0, billing.membership_tiers, "FTE_BUCKETS").code
+        : null;
 
     // Some legacy rows have circle_id literally set to the string
     // "undefined" rather than a real id or null — guard explicitly rather

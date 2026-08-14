@@ -10,7 +10,6 @@ import type {
   Invoice,
   PaymentMethod,
   ProrationResult,
-  MembershipTier,
   ProrationRule,
 } from "./types";
 
@@ -131,65 +130,6 @@ export async function applyProration(
     amountCents: applyDiscountPct(baseAmountCents, applicableDiscount),
     discountPct: applicableDiscount,
   };
-}
-
-// ─────────────────────────────────────────────────────────────────
-// Tier Calculation
-// ─────────────────────────────────────────────────────────────────
-
-/**
- * Determine the membership tier price based on org FTE.
- * Tiers are sorted ascending by max_fte; null max_fte means unlimited.
- */
-export function determineTierPrice(
-  fte: number | null,
-  tiers: MembershipTier[]
-): { price: number; tierIndex: number } {
-  const orgFte = fte ?? 0;
-
-  // Sort tiers by max_fte ascending, null (unlimited) last
-  const sorted = [...tiers].sort((a, b) => {
-    if (a.max_fte === null) return 1;
-    if (b.max_fte === null) return -1;
-    return a.max_fte - b.max_fte;
-  });
-
-  for (let i = 0; i < sorted.length; i++) {
-    const tier = sorted[i];
-    if (tier.max_fte === null || orgFte <= tier.max_fte) {
-      return { price: tier.price, tierIndex: i };
-    }
-  }
-
-  // Should not reach here if tiers are well-defined — fallback to last tier
-  const lastTier = sorted[sorted.length - 1];
-  return { price: lastTier.price, tierIndex: sorted.length - 1 };
-}
-
-/**
- * Resolve an org's tier display code (e.g. "XS"–"XL") from FTE, the same
- * way determineTierPrice resolves price — display-only, never used for
- * pricing. Returns null when the matched tier has no code set.
- */
-export function determineTierCode(
-  fte: number | null,
-  tiers: MembershipTier[]
-): string | null {
-  const orgFte = fte ?? 0;
-
-  const sorted = [...tiers].sort((a, b) => {
-    if (a.max_fte === null) return 1;
-    if (b.max_fte === null) return -1;
-    return a.max_fte - b.max_fte;
-  });
-
-  for (const tier of sorted) {
-    if (tier.max_fte === null || orgFte <= tier.max_fte) {
-      return tier.code ?? null;
-    }
-  }
-
-  return sorted[sorted.length - 1]?.code ?? null;
 }
 
 // ─────────────────────────────────────────────────────────────────

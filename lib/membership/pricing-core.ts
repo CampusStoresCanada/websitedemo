@@ -9,6 +9,7 @@ interface PricingTier {
   max_fte?: number | null;
   max_value?: number | null;
   price: number;
+  code?: string;
 }
 
 export function toCents(dollars: number): number {
@@ -28,7 +29,7 @@ export function evaluateBucketPrice(
   metricValue: number,
   tiers: PricingTier[],
   mode: PricingMode
-): { amountCents: number; tierLabel: string } {
+): { amountCents: number; tierLabel: string; code: string | null } {
   const normalized = [...tiers].sort((a, b) => {
     const aMax = mode === "FTE_BUCKETS" ? a.max_fte : a.max_value;
     const bMax = mode === "FTE_BUCKETS" ? b.max_fte : b.max_value;
@@ -47,6 +48,7 @@ export function evaluateBucketPrice(
           maxValue === null || maxValue === undefined
             ? `Tier ${i + 1} (open-ended)`
             : `Tier ${i + 1} (<= ${maxValue})`,
+        code: tier.code ?? null,
       };
     }
   }
@@ -55,6 +57,7 @@ export function evaluateBucketPrice(
   return {
     amountCents: toCents(fallback?.price ?? 0),
     tierLabel: `Tier ${normalized.length}`,
+    code: fallback?.code ?? null,
   };
 }
 

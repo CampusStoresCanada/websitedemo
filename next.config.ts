@@ -1,6 +1,12 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Pin the workspace root explicitly: a stray lockfile one level up
+  // (outside this repo) otherwise makes Turbopack infer the wrong root and
+  // collide with any sibling checkout's dev server (e.g. a git worktree).
+  turbopack: {
+    root: import.meta.dirname,
+  },
   typescript: {
     // Temporary unblock for deploys while DB-generated types are resynced.
     ignoreBuildErrors: true,
