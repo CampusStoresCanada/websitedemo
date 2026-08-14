@@ -9,6 +9,7 @@ import { availability, canBuy, priceForTier } from "@/lib/conference/entity-pric
 import { accessibleThings, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
+import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import {
   offerRequiresOwnershipOfEntityIds,
   expandWithInstanceOfParents,
@@ -381,14 +382,6 @@ export async function getConferenceCatalogReadiness(
   return { success: true, data: { thingCount: entities.length, openQuestionCount, forSaleCount } };
 }
 
-/** Map an organization's type to the permission tier the v3 Offer pricing uses. */
-function orgTypeToTier(orgType: string | null): string {
-  if (orgType === "Member") return "member";
-  if (orgType === "Vendor Partner") return "partner";
-  if (orgType === "Non-Member") return "non_member";
-  return "public";
-}
-
 /** A for-sale thing as the storefront shows it to one buyer org. */
 export type ConferenceOffer = {
   id: string;
@@ -424,7 +417,7 @@ export async function listConferenceOffers(
   }
 
   const db = createAdminClient();
-  const [orgRes, entitiesRes, refsRes, salesRes, balancesRes] = await Promise.all([
+  const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([
     db.from("organizations").select("type").eq("id", organizationId).maybeSingle(),
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
     db
@@ -437,11 +430,12 @@ export async function listConferenceOffers(
       .select("entity_id")
       .eq("conference_id", conferenceId)
       .eq("organization_id", organizationId),
+    getProgramsConfig(),
   ]);
   if (entitiesRes.error) return { success: false, error: entitiesRes.error.message };
   if (refsRes.error) return { success: false, error: refsRes.error.message };
 
-  const buyerTier = orgTypeToTier(orgRes.data?.type ?? null);
+  const buyerTier = resolveConferenceTier(orgRes.data?.type ?? null, programs);
   const entities = buildEntityGraph(entitiesRes.data ?? [], refsRes.data ?? []);
   const byId = indexById(entities);
 

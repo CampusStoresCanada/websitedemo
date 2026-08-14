@@ -31,7 +31,7 @@ import {
 } from "../membership/renewal-activation";
 // getRenewalConfig has no import-time side effects (createAdminClient is only
 // a function reference), so a relative import is safe here.
-import { getRenewalConfig } from "../policy/engine";
+import { getRenewalConfig, getProgramsConfig, resolveConferenceTier } from "../policy/engine";
 // getPartnershipRateCents/applyProration use the "@/" alias so they can be
 // mocked wholesale in tests — lib/stripe/billing.ts transitively imports the
 // real Stripe client via a relative path that an alias-keyed mock can't
@@ -96,22 +96,13 @@ async function assertUserCanManageOrg(params: {
   return { ok: true, userId: auth.ctx.userId, userEmail: auth.ctx.userEmail };
 }
 
-/** Map an organization's type to the permission tier the v3 Offer pricing uses. */
-function orgTypeToTier(orgType: string | null): string {
-  if (orgType === "Member") return "member";
-  if (orgType === "Vendor Partner") return "partner";
-  if (orgType === "Non-Member") return "non_member";
-  return "public";
-}
-
 async function loadBuyerTier(organizationId: string): Promise<string> {
   const adminClient = createAdminClient();
-  const { data: org } = await adminClient
-    .from("organizations")
-    .select("type")
-    .eq("id", organizationId)
-    .single();
-  return orgTypeToTier(org?.type ?? null);
+  const [{ data: org }, programs] = await Promise.all([
+    adminClient.from("organizations").select("type").eq("id", organizationId).single(),
+    getProgramsConfig(),
+  ]);
+  return resolveConferenceTier(org?.type ?? null, programs);
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;

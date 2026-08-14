@@ -365,6 +365,27 @@ export async function getProgramsConfig(): Promise<MembershipProgramDef[]> {
   return defaultMembershipPrograms(Math.round(partnershipRate * 100))
 }
 
+/**
+ * Resolve an org's conference/booth purchase-eligibility tier — the single
+ * source of truth for what used to be two verbatim-duplicated
+ * `orgTypeToTier()` functions (lib/actions/conference-commerce.ts and
+ * lib/actions/conference-entities.ts). Member/Partner orgs resolve through
+ * the configured programs, same as billing/permissions; "Non-Member" is a
+ * conference-only classification with no corresponding permission program
+ * (it's never been part of the auth model — an org of this type has always
+ * resolved to "public" PermissionState), so it stays a direct, literal
+ * check here rather than being forced into the program abstraction.
+ */
+export function resolveConferenceTier(
+  orgType: string | null | undefined,
+  programs: MembershipProgramDef[]
+): string {
+  const program = programs.find((p) => p.orgTypeValue === orgType)
+  if (program) return program.conferenceTier
+  if (orgType === 'Non-Member') return 'non_member'
+  return 'public'
+}
+
 export async function getSchedulingConfig(): Promise<SchedulingConfig> {
   const policies = await getEffectivePolicies([
     'conference.swap_cap',
