@@ -1,4 +1,5 @@
 import Stripe from "stripe";
+import { stripe } from "@/lib/stripe/client";
 import { parseUTC } from "@/lib/utils";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 // Relative import: vitest has no @/ alias resolver for real (non-mocked)
@@ -775,6 +776,20 @@ async function handleInvoicePaymentFailed(
   }
 }
 
+// The charge snapshot on a charge.refunded webhook event is not guaranteed
+// to have caught up with `refunds.data` yet. Stripe's own list endpoint is
+// authoritative and sorts most-recent-first, matching the ordering
+// assumption the caller already makes about `charge.refunds.data[0]`.
+async function fetchLatestRefundForCharge(chargeId: string): Promise<Stripe.Refund | null> {
+  try {
+    const refunds = await stripe.refunds.list({ charge: chargeId, limit: 1 });
+    return refunds.data[0] ?? null;
+  } catch (err) {
+    console.error(`charge.refunded: failed to list refunds for charge ${chargeId}:`, err);
+    return null;
+  }
+}
+
 async function handleChargeRefunded(
   charge: Stripe.Charge,
   db: AdminClient
@@ -797,11 +812,22 @@ async function handleChargeRefunded(
     // the most recent one as the refund this event is about. stripe_refund_id
     // is the idempotency key on qbo_conference_refund_queue, so a duplicate
     // delivery (or the admin action having already enqueued the same refund)
-    // is naturally a no-op.
-    const latestRefund = charge.refunds?.data?.[0];
+    // is naturally a no-op — but only if this handler reports the same real
+    // Stripe refund ID that the admin-side call used. The charge snapshot
+    // embedded in the webhook event can lag and ship with an empty
+    // `refunds.data` (observed in production 2026-08-14), so when that
+    // happens we ask the Refunds API directly rather than inventing an ID
+    // that will never match and would double-enqueue the refund.
+    const latestRefund =
+      charge.refunds?.data?.[0] ?? (await fetchLatestRefundForCharge(charge.id));
     if (latestRefund) {
       await enqueueQBConferenceRefund(chargeMetadataOrderId, latestRefund.id, latestRefund.amount);
     } else {
+      console.error(
+        `charge.refunded: Stripe API returned no refunds for charge ${charge.id} ` +
+          `(conference order ${chargeMetadataOrderId}) — falling back to a synthetic ` +
+          `refund id, which will NOT dedup against an explicit application-side enqueue`
+      );
       await enqueueQBConferenceRefund(
         chargeMetadataOrderId,
         `${charge.id}_${charge.amount_refunded}`,
