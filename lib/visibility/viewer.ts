@@ -1,6 +1,8 @@
 import { getOptionalAuthContext, getIdentitySnapshot, type AuthContext } from "@/lib/auth/guards";
 import type { ViewerLevel } from "./defaults";
 import { isOrgAccessActive } from "@/lib/membership/status";
+import { resolveOrgLevel } from "@/lib/auth/org-level";
+import { getProgramsConfig } from "@/lib/policy/engine";
 
 /**
  * Context about who is viewing a page, used for visibility decisions.
@@ -54,7 +56,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
   if (viewerLevel === "authenticated" && ctx.activeOrgIds.length > 0) {
     // Same-request memoized snapshot (already fetched by getOptionalAuthContext
     // above) — reads org type off it instead of a third, separate query.
-    const snapshot = await getIdentitySnapshot();
+    const [snapshot, programs] = await Promise.all([getIdentitySnapshot(), getProgramsConfig()]);
     const orgRows =
       snapshot.status === "resolved" && !snapshot.orgsError
         ? (snapshot.organizations ?? [])
@@ -70,23 +72,15 @@ export async function getViewerContext(): Promise<ViewerContext> {
     // A lapsed org (locked/canceled) shouldn't elevate the viewer's masking
     // level on OTHER orgs' pages either — only an org whose own access is
     // active counts here.
-    const hasMemberOrg = ctx.activeOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Member" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
-    );
-    const hasPartnerOrg = ctx.activeOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Vendor Partner" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
-    );
-    const isMemberOrgAdmin = ctx.orgAdminOrgIds.some(
-      (orgId) => typeByOrgId.get(orgId) === "Member" && isOrgAccessActive(statusByOrgId.get(orgId) ?? null)
-    );
+    const activeMemberships = ctx.activeOrgIds
+      .filter((orgId) => isOrgAccessActive(statusByOrgId.get(orgId) ?? null))
+      .map((orgId) => ({
+        orgType: typeByOrgId.get(orgId),
+        isOrgAdmin: ctx.orgAdminOrgIds.includes(orgId),
+      }));
 
-    if (isMemberOrgAdmin) {
-      viewerLevel = "org_admin";
-    } else if (hasMemberOrg) {
-      viewerLevel = "member";
-    } else if (hasPartnerOrg) {
-      viewerLevel = "partner";
-    }
+    const resolved = resolveOrgLevel(activeMemberships, programs);
+    if (resolved) viewerLevel = resolved;
   }
 
   return {

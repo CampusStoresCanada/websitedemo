@@ -18,6 +18,17 @@ import type {
   UserOrganization,
   UserProfile,
 } from "@/lib/auth/types";
+import type { MembershipProgramDef } from "@/lib/policy/types";
+
+// Client-safe fallback matching lib/policy/engine.ts's server-only
+// defaultMembershipPrograms() — only used if this provider somehow mounts
+// without SSR-seeded initialAuth (programs config can't be fetched
+// client-side; createAdminClient() is server-only). rateCents is a
+// placeholder here since permission resolution never reads it.
+const FALLBACK_PROGRAMS: MembershipProgramDef[] = [
+  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member", orgAdminElevates: true, conferenceTier: "member", billing: { mode: "metric_engine" } },
+  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner", orgAdminElevates: false, conferenceTier: "partner", billing: { mode: "flat_rate", rateCents: 0 } },
+];
 
 interface AuthContextValue {
   user: User | null;
@@ -86,6 +97,7 @@ interface AuthProviderProps {
     globalRole: GlobalRole;
     permissionState: PermissionState;
     organizations: UserOrganization[];
+    programs: MembershipProgramDef[];
     isSurveyParticipant: boolean;
     isBenchmarkingReviewer: boolean;
     isCancollMember?: boolean;
@@ -220,6 +232,11 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   const [reauthUrl] = useState("/login");
   const [idleWarningVisible, setIdleWarningVisible] = useState(false);
   const [idleSecondsRemaining, setIdleSecondsRemaining] = useState(0);
+  // Programs config rarely changes (admin-edited only) — reuse the SSR-seeded
+  // snapshot for every client-side re-derivation rather than re-fetching
+  // (getProgramsConfig() is server-only anyway, so there's no client fetch
+  // path to add even if we wanted fresher data on every auth-state-change).
+  const programsRef = useRef<MembershipProgramDef[]>(initialAuth?.programs ?? FALLBACK_PROGRAMS);
   const consecutivePermissionFailuresRef = useRef(0);
   const lastActivityAtRef = useRef<number>(0);
   const idleTimeoutTriggeredRef = useRef(false);
@@ -372,16 +389,21 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       const userProfile = (profileResult.data as unknown as UserProfile) || null;
       const userOrgs = (orgsResult.data as unknown as UserOrganization[]) || [];
       const role: GlobalRole = userProfile?.global_role || "user";
-      const resolvedPermissionState = derivePermissionState(role, userOrgs);
+      const programs = programsRef.current;
+      const resolvedPermissionState = derivePermissionState(role, userOrgs, programs);
 
       // Super admins and admins always have survey access.
       // For other roles, attempt benchmarking lookup best-effort only.
       let hasSurveyData = role === "super_admin" || role === "admin";
       if (!hasSurveyData) {
+        const elevatingOrgTypes = new Set(
+          programs.filter((p) => p.orgAdminElevates).map((p) => p.orgTypeValue)
+        );
         const memberOrgIds = userOrgs
           .filter(
             (uo) =>
-              uo.organization?.type === "Member" &&
+              uo.organization?.type != null &&
+              elevatingOrgTypes.has(uo.organization.type) &&
               uo.role === "org_admin" &&
               uo.status === "active"
           )

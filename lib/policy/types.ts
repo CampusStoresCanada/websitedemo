@@ -94,6 +94,30 @@ export interface BillingConfig {
   override_persistence: 'cycle_only' | 'until_cleared'
 }
 
+/**
+ * One "membership program" — the configurable replacement for the
+ * hardcoded organizations.type: "Member" | "Vendor Partner" binary. Each
+ * program maps a literal organizations.type value to the capabilities
+ * that used to be baked directly into derivePermissionState/orgTypeToTier/
+ * the two Stripe invoice functions.
+ */
+export interface MembershipProgramDef {
+  key: string
+  /** The literal value stored in organizations.type for orgs on this program. */
+  orgTypeValue: string
+  label: string
+  permissionLevel: 'member' | 'partner'
+  /** Whether an org_admin of this program's orgs gets the elevated
+   *  `org_admin` PermissionState. CSC: true for Member, false for Vendor
+   *  Partner (an existing, deliberately-preserved quirk, not a bug). */
+  orgAdminElevates: boolean
+  /** Conference/booth purchase-eligibility tier this program resolves to. */
+  conferenceTier: string
+  billing:
+    | { mode: 'metric_engine' }
+    | { mode: 'flat_rate'; rateCents: number }
+}
+
 export interface SchedulingConfig {
   swap_cap: number
   swap_count_mode: 'requested' | 'committed'

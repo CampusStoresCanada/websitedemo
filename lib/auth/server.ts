@@ -2,6 +2,8 @@ import { cache } from "react";
 import { getIdentitySnapshot } from "./guards";
 import { derivePermissionState } from "./permissions";
 import { generateSessionKey, exportKeyToBase64 } from "./crypto";
+import { getProgramsConfig } from "@/lib/policy/engine";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 import type {
   GlobalRole,
   PermissionState,
@@ -17,6 +19,10 @@ export interface ServerAuthState {
   globalRole: GlobalRole;
   permissionState: PermissionState;
   organizations: UserOrganization[];
+  /** Resolved once per request, threaded into AuthProvider's initialAuth so
+   *  client-side permission re-derivation (on auth-state-change) reuses this
+   *  instead of re-fetching — see components/providers/AuthProvider.tsx. */
+  programs: MembershipProgramDef[];
   encryptionKey: CryptoKey | null;
   encryptionKeyBase64: string | null;
 }
@@ -28,7 +34,7 @@ export interface ServerAuthState {
  * instead of querying directly — cheap even if called more than once per request.
  */
 export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
-  const snapshot = await getIdentitySnapshot();
+  const [snapshot, programs] = await Promise.all([getIdentitySnapshot(), getProgramsConfig()]);
 
   if (snapshot.status === "anonymous") {
     return {
@@ -37,6 +43,7 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
       globalRole: "user",
       permissionState: "public",
       organizations: [],
+      programs,
       encryptionKey: null,
       encryptionKeyBase64: null,
     };
@@ -45,7 +52,7 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
   const profile = snapshot.profileError ? null : snapshot.profile;
   const organizations = snapshot.orgsError ? [] : (snapshot.organizations ?? []);
   const globalRole: GlobalRole = profile?.global_role || "user";
-  const permissionState = derivePermissionState(globalRole, organizations);
+  const permissionState = derivePermissionState(globalRole, organizations, programs);
 
   // Generate encryption key for this session
   const encryptionKey = await generateSessionKey(snapshot.userId, ENCRYPTION_SECRET);
@@ -57,6 +64,7 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
     globalRole,
     permissionState,
     organizations,
+    programs,
     encryptionKey,
     encryptionKeyBase64,
   };

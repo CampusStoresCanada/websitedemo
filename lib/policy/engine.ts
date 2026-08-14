@@ -5,6 +5,7 @@ import type {
   PolicyValue,
   RenewalConfig,
   BillingConfig,
+  MembershipProgramDef,
   SchedulingConfig,
   VisibilityConfig,
   IntegrationConfig,
@@ -319,6 +320,47 @@ export async function getBillingConfig(): Promise<BillingConfig> {
       (policies['billing.override_persistence'] as BillingConfig['override_persistence'] | undefined) ??
       'cycle_only',
   }
+}
+
+/**
+ * The default program set this codebase was built around — used whenever
+ * `programs.definitions` hasn't been configured (every deployment today,
+ * including CSC's). Reproduces the historically-hardcoded
+ * "Member"/"Vendor Partner" behavior exactly, including the existing
+ * quirk that a Vendor Partner org_admin does not get elevated org_admin
+ * permission (orgAdminElevates: false) — this is a preserved behavior,
+ * not a bug to fix here.
+ */
+function defaultMembershipPrograms(partnershipRateCents: number): MembershipProgramDef[] {
+  return [
+    {
+      key: 'member',
+      orgTypeValue: 'Member',
+      label: 'Member',
+      permissionLevel: 'member',
+      orgAdminElevates: true,
+      conferenceTier: 'member',
+      billing: { mode: 'metric_engine' },
+    },
+    {
+      key: 'partner',
+      orgTypeValue: 'Vendor Partner',
+      label: 'Vendor Partner',
+      permissionLevel: 'partner',
+      orgAdminElevates: false,
+      conferenceTier: 'partner',
+      billing: { mode: 'flat_rate', rateCents: partnershipRateCents },
+    },
+  ]
+}
+
+export async function getProgramsConfig(): Promise<MembershipProgramDef[]> {
+  const policies = await getEffectivePolicies(['programs.definitions', 'billing.partnership_rate'])
+  const configured = policies['programs.definitions'] as MembershipProgramDef[] | undefined
+  if (configured && configured.length > 0) return configured
+
+  const partnershipRate = (policies['billing.partnership_rate'] as number | undefined) ?? 0
+  return defaultMembershipPrograms(Math.round(partnershipRate * 100))
 }
 
 export async function getSchedulingConfig(): Promise<SchedulingConfig> {

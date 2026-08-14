@@ -1,5 +1,7 @@
 import { PERMISSION_LEVELS, type PermissionState, type UserOrganization, type GlobalRole } from "./types";
 import { isOrgAccessActive } from "@/lib/membership/status";
+import { resolveOrgLevel } from "./org-level";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 
 /**
  * Check if a permission level meets or exceeds the required level.
@@ -73,19 +75,28 @@ export function canFlagContent(isAuthenticated: boolean): boolean {
 }
 
 /**
- * Derive the effective permission state from global role and org memberships.
+ * Derive the effective permission state from global role, org memberships,
+ * and the configured membership programs (lib/policy/types.ts —
+ * MembershipProgramDef, resolved via getProgramsConfig()). Each program
+ * maps an organizations.type value to a permission level and whether its
+ * org_admins get elevated access — this is CSC-configured today to
+ * reproduce the historical "Member"/"Vendor Partner" hardcoding exactly,
+ * including the existing quirk that Vendor Partner org_admins do NOT get
+ * elevated org_admin permission (page-level elevation for them instead
+ * comes from PageOwnerProvider on their own org pages).
  *
  * Permission hierarchy:
  * - super_admin: Global super admin
  * - admin: Global admin
- * - org_admin: Org admin of a MEMBER organization (has member-level access + editing)
- * - member: Regular member of a Member organization
- * - partner: Anyone associated with a Vendor Partner organization (including org_admins)
- * - public: Not logged in or no org association
+ * - org_admin: Org admin of a program whose orgAdminElevates is true
+ * - member: Active member of a "member"-permissionLevel program
+ * - partner: Active member of a "partner"-permissionLevel program
+ * - public: Not logged in, or no org association resolving to a program
  */
 export function derivePermissionState(
   globalRole: GlobalRole,
-  organizations: UserOrganization[]
+  organizations: UserOrganization[],
+  programs: MembershipProgramDef[]
 ): PermissionState {
   if (globalRole === "super_admin") return "super_admin";
   if (globalRole === "admin") return "admin";
@@ -97,20 +108,11 @@ export function derivePermissionState(
   const activeOrgs = organizations.filter(
     (uo) => uo.status === "active" && isOrgAccessActive(uo.organization?.membership_status ?? null)
   );
-  const orgTypes = activeOrgs.map((uo) => uo.organization?.type).filter(Boolean);
 
-  // Check if user is org_admin of a MEMBER organization
-  const isMemberOrgAdmin = activeOrgs.some(
-    (uo) => uo.role === "org_admin" && uo.organization?.type === "Member"
+  const level = resolveOrgLevel(
+    activeOrgs.map((uo) => ({ orgType: uo.organization?.type, isOrgAdmin: uo.role === "org_admin" })),
+    programs
   );
-  if (isMemberOrgAdmin) return "org_admin";
 
-  // Member organization users (non-admin) get member permission
-  if (orgTypes.includes("Member")) return "member";
-
-  // Partner organization users (including org_admins) get partner permission
-  // Note: partner org admins get page-level elevation via PageOwnerProvider on their own org pages
-  if (orgTypes.includes("Vendor Partner")) return "partner";
-
-  return "public";
+  return level ?? "public";
 }

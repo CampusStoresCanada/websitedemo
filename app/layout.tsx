@@ -39,12 +39,14 @@ export default async function RootLayout({
     globalRole: serverAuth.globalRole,
     permissionState: serverAuth.permissionState,
     organizations: serverAuth.organizations,
+    programs: serverAuth.programs,
+    // org_admin permissionState is already exactly "org_admin of a program
+    // whose orgAdminElevates is true" (see derivePermissionState) — no need
+    // to re-derive the same org-type check independently here.
     isSurveyParticipant:
       serverAuth.globalRole === "super_admin" ||
       serverAuth.globalRole === "admin" ||
-      serverAuth.organizations.some(
-        (uo) => uo.role === "org_admin" && uo.organization?.type === "Member"
-      ),
+      serverAuth.permissionState === "org_admin",
     isBenchmarkingReviewer: serverAuth.profile?.is_benchmarking_reviewer ?? false,
     isCancollMember: serverAuth.organizations.some(
       (uo) => uo.organization?.is_cancoll_member === true
