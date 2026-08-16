@@ -6,10 +6,15 @@ import { TTLCache } from "@/lib/cache/ttl-cache";
 
 export const dynamic = "force-dynamic";
 
-// Header.tsx polls this route every ~90s (and it's cheap for other callers
-// to hit within that window too) — cache the summary payload briefly rather
-// than re-minting a Circle token and re-listing notifications/rooms each time.
-const SUMMARY_CACHE_TTL_MS = 30_000;
+// Each miss here costs two billed Circle calls (notifications + chat rooms).
+//
+// This MUST stay just under Header.tsx's BADGE_POLL_INTERVAL_MS (300s), not
+// well below it: at the old 30s TTL against a 90s poll the entry had always
+// expired by the time the next poll arrived, so the hit rate was ~0 and the
+// cache bought us nothing. Sitting just under the poll interval means a
+// single tab still refreshes on schedule, while extra tabs, other devices,
+// and tab-refocus catch-ups collapse onto the cached payload.
+const CIRCLE_SUMMARY_CACHE_TTL_MS = 270_000;
 type NotificationsSummaryPayload = {
   notifications: unknown[];
   replies: unknown[];
@@ -18,7 +23,7 @@ type NotificationsSummaryPayload = {
   unreadCount?: number;
   dmUnreadCount?: number;
 };
-const notificationsSummaryCache = new TTLCache<NotificationsSummaryPayload>(SUMMARY_CACHE_TTL_MS);
+const notificationsSummaryCache = new TTLCache<NotificationsSummaryPayload>(CIRCLE_SUMMARY_CACHE_TTL_MS);
 
 function summaryCacheKey(userId: string): string {
   return `notifications-summary:${userId}`;
@@ -66,7 +71,9 @@ export async function GET() {
 
   const cacheKey = summaryCacheKey(auth.ctx.userId);
   const cached = notificationsSummaryCache.get(cacheKey);
-  if (cached) return NextResponse.json(cached, { status: 200 });
+  if (cached) {
+    return NextResponse.json(cached, { status: 200, headers: { "x-circle-cache": "HIT" } });
+  }
 
   try {
     const client = await getCircleClientForUser(auth.ctx.userId, auth.ctx.userEmail);
@@ -119,7 +126,7 @@ export async function GET() {
 
     const payload: NotificationsSummaryPayload = { notifications, replies, dms, linked: true, unreadCount, dmUnreadCount };
     notificationsSummaryCache.set(cacheKey, payload);
-    return NextResponse.json(payload, { status: 200 });
+    return NextResponse.json(payload, { status: 200, headers: { "x-circle-cache": "MISS" } });
   } catch (error) {
     console.error("[api/circle/notifications] fetch failed:", error instanceof Error ? error.message : error);
     // Deliberately not cached — an error path shouldn't blank the badge for
