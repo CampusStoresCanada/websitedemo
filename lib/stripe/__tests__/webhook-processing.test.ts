@@ -13,19 +13,25 @@ import type Stripe from "stripe";
 const {
   transitionMembershipStateMock,
   enqueueQBExportMock,
+  enqueueQBConferenceReceiptMock,
+  enqueueQBConferenceRefundMock,
   createAdminClientMock,
   stripeInvoicesRetrieveMock,
   stripeInvoicesVoidInvoiceMock,
   stripeInvoicesDelMock,
+  stripeRefundsListMock,
   resolveAssigneeForEmailMock,
   findExistingUserByEmailMock,
 } = vi.hoisted(() => ({
   transitionMembershipStateMock: vi.fn(),
   enqueueQBExportMock: vi.fn(),
+  enqueueQBConferenceReceiptMock: vi.fn(),
+  enqueueQBConferenceRefundMock: vi.fn(),
   createAdminClientMock: vi.fn(),
   stripeInvoicesRetrieveMock: vi.fn(),
   stripeInvoicesVoidInvoiceMock: vi.fn(),
   stripeInvoicesDelMock: vi.fn(),
+  stripeRefundsListMock: vi.fn(),
   resolveAssigneeForEmailMock: vi.fn(),
   findExistingUserByEmailMock: vi.fn(),
 }));
@@ -39,18 +45,33 @@ vi.mock("@/lib/membership/state-machine", () => ({
 vi.mock("@/lib/quickbooks/export", () => ({
   enqueueQBExport: enqueueQBExportMock,
 }));
+// lib/quickbooks/conference-export.ts (pulled in unmocked by
+// handleCheckoutSessionCompleted/handleChargeRefunded) calls createAdminClient()
+// itself — these webhook tests inject `db` directly into processStripeWebhookEvent
+// rather than configuring createAdminClientMock's return value, so an unmocked
+// conference-export would always see an undefined admin client. Not the focus
+// of these tests (which pin the webhook -> RPC seam), same treatment as
+// enqueueQBExport above.
+vi.mock("@/lib/quickbooks/conference-export", () => ({
+  enqueueQBConferenceReceipt: enqueueQBConferenceReceiptMock,
+  enqueueQBConferenceRefund: enqueueQBConferenceRefundMock,
+}));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: createAdminClientMock,
 }));
 // lib/membership/renewal-activation.ts (pulled in unmocked by this suite via
 // handleInvoicePaid) imports the real stripe client to void pending renewal
 // invoices — mock it here rather than requiring STRIPE_SECRET_KEY in tests.
+// refunds.list is used by fetchLatestRefundForCharge (charge.refunded handling).
 vi.mock("@/lib/stripe/client", () => ({
   stripe: {
     invoices: {
       retrieve: stripeInvoicesRetrieveMock,
       voidInvoice: stripeInvoicesVoidInvoiceMock,
       del: stripeInvoicesDelMock,
+    },
+    refunds: {
+      list: stripeRefundsListMock,
     },
   },
 }));
@@ -131,6 +152,9 @@ const CONFERENCE_METADATA = {
 
 beforeEach(() => {
   vi.clearAllMocks();
+  // Default: no refunds on file yet — individual tests override via
+  // stripeRefundsListMock.mockResolvedValue(...) where the refund id/amount matters.
+  stripeRefundsListMock.mockResolvedValue({ data: [] });
 });
 
 // ---------------------------------------------------------------------------

@@ -126,8 +126,14 @@ function happyPathQueues(): Record<string, QueryResult[]> {
     cart_items: [{ data: [OFFER_CART_ROW] }],
     conference_entities: [{ data: [OFFER_ENTITY_ROW] }],
     conference_entity_refs: [{ data: [] }], // no `who` audience restrictions
-    conference_instances: [{ data: { tax_rate_pct: 13, stripe_tax_rate_id: "txr_test" } }],
+    conference_instances: [{ data: { tax_rate_pct: 13, stripe_tax_rate_id: "txr_test", status: "registration_open" } }],
     organizations: [{ data: { type: "Member" } }],
+    // loadBuyerTier's resolveConferenceTier(org.type, programs) call chain
+    // (Phase 2.3) reads getProgramsConfig() -> getEffectivePolicies(), which
+    // requires an active policy_sets row to exist at all -- policy_values
+    // itself can stay unmocked/empty, since getProgramsConfig() falls back
+    // to its own hardcoded Member/Vendor Partner defaults when unseeded.
+    policy_sets: [{ data: [{ id: "policy-set-1", is_active: true, created_at: "2026-01-01T00:00:00Z" }] }],
     conference_order_items: [
       {
         // offer line items for the Stripe session
@@ -249,7 +255,7 @@ describe("createConferenceCheckout — contract with the Stripe webhook", () => 
 
   it("omits Stripe tax rates when the conference has no Stripe tax rate id", async () => {
     const queues = happyPathQueues();
-    queues.conference_instances = [{ data: { tax_rate_pct: 13, stripe_tax_rate_id: null } }];
+    queues.conference_instances = [{ data: { tax_rate_pct: 13, stripe_tax_rate_id: null, status: "registration_open" } }];
     const { db } = makeFakeDb(queues, ORDER_RPC_RESULT);
     createAdminClientMock.mockReturnValue(db);
 
