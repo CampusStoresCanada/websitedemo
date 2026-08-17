@@ -57,6 +57,10 @@
       "schedule": "0 */4 * * *"
     },
     {
+      "path": "/api/cron/qbo-tax-reconcile",
+      "schedule": "30 6 * * *"
+    },
+    {
       "path": "/api/cron/expire-pending-changes",
       "schedule": "0 3 * * *"
     },

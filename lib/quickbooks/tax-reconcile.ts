@@ -1,0 +1,263 @@
+// Tax reconciliation — the safety net for the whole GST/HST money path.
+//
+// Every tax bug this system has had shared a shape: some code applied ONE tax
+// treatment to a sale that contained two (conference supplies are taxed where
+// the conference is held, membership dues where the buyer is), and nobody
+// noticed until a customer's receipt looked wrong. Some of those bugs were
+// consistent across our own tables AND QuickBooks — the cart stored 13% on a
+// BC partner's dues and QBO faithfully booked the same 13% — so simply
+// comparing our database to QuickBooks would have found nothing.
+//
+// This therefore recomputes what the tax SHOULD be from first principles, per
+// line, from the authoritative rate sources, and compares that independent
+// figure against all three places a number can be wrong:
+//
+//   charged  — what we billed (conference_orders.tax_cents, or Stripe's own
+//              computed tax on a prospective-booth checkout)
+//   booked   — what the QuickBooks Sales Receipt actually posted
+//   expected — recomputed here
+//
+// Any disagreement raises an ops alert. Read-only: it never edits QuickBooks
+// or our own rows, because the right correction depends on whether money
+// actually moved and that's a human call.
+
+import { createAdminClient } from "@/lib/supabase/admin";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import { stripe } from "@/lib/stripe/client";
+import { getQBSalesReceipt } from "./client";
+import { resolveProspectiveDuesProvince } from "./conference-export";
+import { resolveConferenceOrderTaxRates, resolveMembershipTaxRatePct } from "@/lib/stripe/tax";
+
+const MEMBERSHIP_RENEWAL_KIND = "membership_renewal";
+
+/** Cent-level rounding differs legitimately between Stripe, QBO and us on
+ * multi-line orders; anything at or under this is noise, not a bug. */
+const TOLERANCE_CENTS = 2;
+
+export interface TaxDiscrepancy {
+  source: "conference_order" | "prospective_booth";
+  reference: string;
+  qboDocId: string | null;
+  subject: string;
+  expectedTaxCents: number;
+  chargedTaxCents: number | null;
+  bookedTaxCents: number | null;
+  summary: string;
+}
+
+export interface TaxReconciliationResult {
+  checked: number;
+  discrepancies: TaxDiscrepancy[];
+  skipped: string[];
+}
+
+const bad = (expected: number, actual: number | null) =>
+  actual !== null && Math.abs(expected - actual) > TOLERANCE_CENTS;
+
+const d = (cents: number | null) => (cents === null ? "—" : `$${(cents / 100).toFixed(2)}`);
+
+/**
+ * Recompute a conference order's correct tax line by line, then compare it to
+ * what we charged and what QuickBooks posted.
+ */
+async function reconcileConferenceOrders(
+  db: ReturnType<typeof createAdminClient>,
+  sinceIso: string,
+  result: TaxReconciliationResult
+): Promise<void> {
+  const { data: rows, error } = await db
+    .from("qbo_conference_receipt_queue")
+    .select("conference_order_id, qbo_sales_receipt_id, conference_orders!inner(organization_id, conference_id, subtotal_cents, tax_cents, status)")
+    .eq("status", "completed")
+    .gte("processed_at", sinceIso);
+
+  if (error) throw new Error(`Failed to load conference receipt queue: ${error.message}`);
+
+  for (const row of rows ?? []) {
+    const order = row.conference_orders;
+    result.checked++;
+
+    let rates: { conferenceRatePct: number; membershipRatePct: number };
+    try {
+      rates = await resolveConferenceOrderTaxRates(db, {
+        conferenceId: order.conference_id,
+        organizationId: order.organization_id,
+      });
+    } catch (err) {
+      // A missing province is itself worth surfacing, but as a skip rather
+      // than a tax mismatch — we genuinely cannot compute an expected figure.
+      result.skipped.push(`order ${row.conference_order_id}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
+    const { data: items } = await db
+      .from("conference_order_items")
+      .select("quantity, unit_price_cents, tax_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(kind)")
+      .eq("order_id", row.conference_order_id);
+
+    if (!items || items.length === 0) {
+      result.skipped.push(`order ${row.conference_order_id}: no line items`);
+      continue;
+    }
+
+    let expectedTaxCents = 0;
+    for (const item of items) {
+      const offer = Array.isArray(item.offer) ? item.offer[0] : item.offer;
+      const ratePct =
+        offer?.kind === MEMBERSHIP_RENEWAL_KIND ? rates.membershipRatePct : rates.conferenceRatePct;
+      expectedTaxCents += Math.round(item.quantity * item.unit_price_cents * (ratePct / 100));
+    }
+
+    const chargedTaxCents = order.tax_cents;
+
+    let bookedTaxCents: number | null = null;
+    if (row.qbo_sales_receipt_id) {
+      const receipt = await getQBSalesReceipt(row.qbo_sales_receipt_id);
+      if (receipt) bookedTaxCents = Math.round((receipt.TxnTaxDetail?.TotalTax ?? 0) * 100);
+    }
+
+    // A refunded order's QBO position is the receipt net of its refund
+    // receipt, which this single-document check can't see — skip rather than
+    // report a mismatch we can't substantiate.
+    const refunded = order.status !== "paid";
+    if (bad(expectedTaxCents, chargedTaxCents) || (!refunded && bad(expectedTaxCents, bookedTaxCents))) {
+      const { data: org } = await db
+        .from("organizations")
+        .select("name")
+        .eq("id", order.organization_id)
+        .maybeSingle();
+
+      result.discrepancies.push({
+        source: "conference_order",
+        reference: row.conference_order_id,
+        qboDocId: row.qbo_sales_receipt_id,
+        subject: org?.name ?? order.organization_id,
+        expectedTaxCents,
+        chargedTaxCents,
+        bookedTaxCents,
+        summary:
+          `expected ${d(expectedTaxCents)} tax ` +
+          `(conference ${rates.conferenceRatePct}%, dues ${rates.membershipRatePct}%), ` +
+          `charged ${d(chargedTaxCents)}, QuickBooks booked ${d(bookedTaxCents)}`,
+      });
+    }
+  }
+}
+
+/**
+ * The prospective-booth checkout is the one place Stripe computes the tax
+ * itself (per-line tax_rates) rather than us handing it a total, so here the
+ * "charged" figure has to come from Stripe rather than our own row.
+ */
+async function reconcileProspectiveBooths(
+  db: ReturnType<typeof createAdminClient>,
+  sinceIso: string,
+  result: TaxReconciliationResult
+): Promise<void> {
+  const { data: rows, error } = await db
+    .from("qbo_misc_receipt_queue")
+    .select("payment_id, qbo_sales_receipt_id")
+    .eq("status", "completed")
+    .eq("payment_kind", "prospective_booth")
+    .gte("processed_at", sinceIso);
+
+  if (error) throw new Error(`Failed to load misc receipt queue: ${error.message}`);
+
+  for (const row of rows ?? []) {
+    result.checked++;
+
+    const { data: payment } = await db
+      .from("prospective_booth_payments")
+      .select("company_name, province, linked_application_id, conference_id, booth_amount_cents, membership_amount_cents, stripe_checkout_session_id")
+      .eq("id", row.payment_id)
+      .maybeSingle();
+
+    if (!payment) {
+      result.skipped.push(`prospective booth ${row.payment_id}: payment row missing`);
+      continue;
+    }
+
+    const { data: conference } = await db
+      .from("conference_instances")
+      .select("tax_rate_pct")
+      .eq("id", payment.conference_id)
+      .maybeSingle();
+
+    let duesRatePct: number;
+    try {
+      // Must use the SAME province the QBO exporter used, or this check
+      // "finds" a mismatch that is really just the two of us disagreeing —
+      // the linked org's address wins over the province typed at checkout.
+      const duesOrg = await resolveProspectiveDuesProvince(db, payment);
+      if (!duesOrg.province) throw new Error("no province on the payment or its linked org");
+      duesRatePct = await resolveMembershipTaxRatePct(db, duesOrg.province);
+    } catch (err) {
+      result.skipped.push(`prospective booth ${row.payment_id}: ${err instanceof Error ? err.message : String(err)}`);
+      continue;
+    }
+
+    const conferenceRatePct = Number(conference?.tax_rate_pct ?? 0);
+    const expectedTaxCents =
+      Math.round(payment.booth_amount_cents * (conferenceRatePct / 100)) +
+      Math.round(payment.membership_amount_cents * (duesRatePct / 100));
+
+    let chargedTaxCents: number | null = null;
+    try {
+      const session = await stripe.checkout.sessions.retrieve(payment.stripe_checkout_session_id);
+      chargedTaxCents = session.total_details?.amount_tax ?? null;
+    } catch {
+      // Stripe unreachable for this session — still worth checking QBO.
+    }
+
+    let bookedTaxCents: number | null = null;
+    if (row.qbo_sales_receipt_id) {
+      const receipt = await getQBSalesReceipt(row.qbo_sales_receipt_id);
+      if (receipt) bookedTaxCents = Math.round((receipt.TxnTaxDetail?.TotalTax ?? 0) * 100);
+    }
+
+    if (bad(expectedTaxCents, chargedTaxCents) || bad(expectedTaxCents, bookedTaxCents)) {
+      result.discrepancies.push({
+        source: "prospective_booth",
+        reference: row.payment_id,
+        qboDocId: row.qbo_sales_receipt_id,
+        subject: payment.company_name,
+        expectedTaxCents,
+        chargedTaxCents,
+        bookedTaxCents,
+        summary:
+          `expected ${d(expectedTaxCents)} tax ` +
+          `(booth ${conferenceRatePct}%, dues ${duesRatePct}%), ` +
+          `Stripe collected ${d(chargedTaxCents)}, QuickBooks booked ${d(bookedTaxCents)}`,
+      });
+    }
+  }
+}
+
+export async function quickbooksTaxReconciliationRun(
+  options: { sinceDays?: number } = {}
+): Promise<TaxReconciliationResult> {
+  const db = createAdminClient();
+  const sinceIso = new Date(Date.now() - (options.sinceDays ?? 120) * 86_400_000).toISOString();
+
+  const result: TaxReconciliationResult = { checked: 0, discrepancies: [], skipped: [] };
+
+  await reconcileConferenceOrders(db, sinceIso, result);
+  await reconcileProspectiveBooths(db, sinceIso, result);
+
+  // One alert per affected sale, keyed by its reference so a persistent
+  // discrepancy doesn't re-alert every four hours until someone fixes it.
+  for (const discrepancy of result.discrepancies) {
+    await raiseAlertIfNotOpen({
+      ruleKey: `qbo_tax_mismatch:${discrepancy.source}:${discrepancy.reference}`,
+      severity: "critical",
+      message: `Tax mismatch on ${discrepancy.subject}: ${discrepancy.summary}`,
+      details: { ...discrepancy },
+    });
+  }
+
+  if (result.skipped.length > 0) {
+    console.warn("[qbo] tax reconciliation skipped:", result.skipped);
+  }
+
+  return result;
+}

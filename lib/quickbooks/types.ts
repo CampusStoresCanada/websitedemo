@@ -79,6 +79,9 @@ export interface QBSalesReceipt extends QBSalesReceiptInput {
   Id: string;
   SyncToken: string;
   TotalAmt: number;
+  /** QBO-computed tax, present on read. Never send this on a write — QBO
+   * recalculates it from each line's TaxCodeRef. */
+  TxnTaxDetail?: { TotalTax?: number };
 }
 
 export interface QBRefundReceiptInput {

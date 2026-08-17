@@ -217,8 +217,15 @@ async function resolveMembershipRenewalItemId(
 
 /** Builds the QB line items for a conference order — shared by the receipt
  * worker and the full-refund path (a full refund mirrors these exactly).
- * taxCodeRef is resolved once per conference (see resolveConferenceTax)
- * and applied to every line — conference tax doesn't vary by item.
+ *
+ * Tax code is resolved PER LINE, not per order. Conference supplies (booths,
+ * registrations, sponsorships) are destination-based and all share the
+ * conference's code; a bundled membership_renewal line is origin-based and
+ * takes the buyer's own province code instead. Applying the conference code
+ * to every line booked 13% ON HST on dues for a BC partner (should be 5% GST)
+ * and for an out-of-Canada partner. See the two-treatment note in
+ * lib/stripe/tax.ts — this is the QBO mirror of the same rule the cart RPC
+ * applies to what gets charged.
  *
  * Amount must be the line's PRE-tax subtotal, never total_cents.
  * conference_order_items.total_cents is tax-INCLUSIVE (the order-from-cart RPC
@@ -243,9 +250,21 @@ async function resolveConferenceLineItems(
 
   const { data: org } = await db
     .from("organizations")
-    .select("type")
+    .select("name, type, province, country")
     .eq("id", organizationId)
     .single();
+
+  // Resolved lazily and once: resolveMembershipTaxCode throws when an org has
+  // no province on file, and most conference orders carry no membership line
+  // at all — those shouldn't fail to export over a field they never use.
+  let membershipTaxCodeRef: string | null = null;
+  const membershipTaxCode = async (): Promise<string> => {
+    if (membershipTaxCodeRef === null) {
+      if (!org) throw new Error(`Organization not found: ${organizationId}`);
+      membershipTaxCodeRef = await resolveMembershipTaxCode(db, org);
+    }
+    return membershipTaxCodeRef;
+  };
 
   const lines: QBLineItem[] = [];
   for (const item of items) {
@@ -267,10 +286,11 @@ async function resolveConferenceLineItems(
     // the next band up whenever the tax pushes it past a boundary.
     const netAmountCents = item.total_cents - item.tax_cents;
 
-    const itemId =
-      entity.kind === "membership_renewal"
-        ? await resolveMembershipRenewalItemId(db, entity, org?.type ?? null, netAmountCents)
-        : await resolveEntityQBItemId(db, entity);
+    const isMembershipLine = entity.kind === "membership_renewal";
+
+    const itemId = isMembershipLine
+      ? await resolveMembershipRenewalItemId(db, entity, org?.type ?? null, netAmountCents)
+      : await resolveEntityQBItemId(db, entity);
     if (!itemId) {
       throw new Error(
         `"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`
@@ -284,7 +304,7 @@ async function resolveConferenceLineItems(
       SalesItemLineDetail: {
         ItemRef: { value: itemId },
         Qty: item.quantity,
-        TaxCodeRef: { value: taxCodeRef },
+        TaxCodeRef: { value: isMembershipLine ? await membershipTaxCode() : taxCodeRef },
       },
     });
   }
@@ -638,12 +658,79 @@ async function resolveOneOffQBCustomerId(displayName: string, email: string): Pr
   return customer.Id;
 }
 
+/**
+ * Lines rather than one amount/item/tax-code, because a prospective-booth
+ * payment is two supplies in one charge — a booth taxed where the conference
+ * is, and first-year dues taxed where the buyer is. Posting it as a single
+ * line forced one tax code onto both and booked 13% ON HST on an Alberta
+ * partner's dues. The other two kinds are genuinely single-line and just
+ * wrap their one line in the array.
+ */
 interface MiscReceiptDetails {
   customerId: string;
-  taxCodeRef: string;
-  itemId: string;
+  lines: QBLineItem[];
+}
+
+function miscReceiptLine(params: {
   amountCents: number;
   description: string;
+  itemId: string;
+  taxCodeRef: string;
+}): QBLineItem {
+  return {
+    Amount: params.amountCents / 100,
+    Description: params.description,
+    DetailType: "SalesItemLineDetail",
+    SalesItemLineDetail: {
+      ItemRef: { value: params.itemId },
+      Qty: 1,
+      TaxCodeRef: { value: params.taxCodeRef },
+    },
+  };
+}
+
+/** The QB item for the dues half of a prospective booth sale — the same flat
+ * Vendor Partner item the standalone partnership invoice path uses. */
+async function resolvePartnershipItemId(db: Db): Promise<string> {
+  for (const key of ["qbo_item_id_partnership", "qbo_item_id_default"]) {
+    const { data } = await db.from("app_settings").select("value").eq("key", key).maybeSingle();
+    if (data?.value) return data.value;
+  }
+  throw new Error(
+    "No QB item configured for partnership dues. Set 'qbo_item_id_partnership' in /admin/settings/quickbooks."
+  );
+}
+
+/**
+ * Which province governs the dues half of a prospective booth sale.
+ *
+ * Prefers the organization the payment was eventually linked to over the
+ * province typed into the checkout form — once an application is approved the
+ * org record is the authoritative address, and the two can genuinely disagree
+ * (a buyer typed "Ontario" at checkout for an Alberta company).
+ */
+export async function resolveProspectiveDuesProvince(
+  db: Db,
+  payment: { province: string | null; linked_application_id: string | null; company_name: string }
+): Promise<{ name: string; province: string | null; country: string | null }> {
+  if (payment.linked_application_id) {
+    const { data: application } = await db
+      .from("signup_applications")
+      .select("organization_id")
+      .eq("id", payment.linked_application_id)
+      .maybeSingle();
+
+    if (application?.organization_id) {
+      const { data: org } = await db
+        .from("organizations")
+        .select("name, province, country")
+        .eq("id", application.organization_id)
+        .maybeSingle();
+      if (org?.province) return org;
+    }
+  }
+
+  return { name: payment.company_name, province: payment.province, country: null };
 }
 
 async function resolveMiscReceiptDetails(
@@ -654,7 +741,7 @@ async function resolveMiscReceiptDetails(
   if (kind === "prospective_booth") {
     const { data: payment, error } = await db
       .from("prospective_booth_payments")
-      .select("company_name, email, amount_cents, conference_id, booth_entity_id")
+      .select("company_name, email, conference_id, booth_entity_id, province, linked_application_id, booth_amount_cents, membership_amount_cents")
       .eq("id", paymentId)
       .single();
     if (error || !payment) throw new Error(`Prospective booth payment not found: ${paymentId}`);
@@ -666,19 +753,39 @@ async function resolveMiscReceiptDetails(
       .single();
     if (entityError || !entity) throw new Error(`Booth entity not found for payment ${paymentId}`);
 
-    const itemId = await resolveEntityQBItemId(db, entity);
-    if (!itemId) throw new Error(`"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`);
+    const boothItemId = await resolveEntityQBItemId(db, entity);
+    if (!boothItemId) throw new Error(`"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`);
 
-    // amount_cents here is already pre-tax (startProspectiveBoothCheckout
-    // stores boothPriceCents + membershipCents, with tax left to Stripe's own
-    // line-item tax_rates), so unlike conference_order_items it needs no
-    // netting. NB: that checkout currently puts tax_rates on the membership
-    // line only, so Stripe under-collects tax relative to what this receipt
-    // posts — tracked separately, don't "fix" it by netting here.
-    const { codeRef: taxCodeRef } = await resolveConferenceTax(db, payment.conference_id);
+    // Both halves are stored pre-tax (the checkout persists the split and
+    // leaves tax to Stripe's per-line tax_rates), so unlike
+    // conference_order_items these need no netting — but they DO need
+    // different tax codes: the booth follows the conference, the dues follow
+    // the buyer's own province.
+    const { codeRef: conferenceTaxCode } = await resolveConferenceTax(db, payment.conference_id);
     const customerId = await resolveOneOffQBCustomerId(payment.company_name, payment.email);
 
-    return { customerId, taxCodeRef, itemId, amountCents: payment.amount_cents, description: entity.name };
+    const lines: QBLineItem[] = [
+      miscReceiptLine({
+        amountCents: payment.booth_amount_cents,
+        description: entity.name,
+        itemId: boothItemId,
+        taxCodeRef: conferenceTaxCode,
+      }),
+    ];
+
+    if (payment.membership_amount_cents > 0) {
+      const duesOrg = await resolveProspectiveDuesProvince(db, payment);
+      lines.push(
+        miscReceiptLine({
+          amountCents: payment.membership_amount_cents,
+          description: "CSC Partnership membership",
+          itemId: await resolvePartnershipItemId(db),
+          taxCodeRef: await resolveMembershipTaxCode(db, duesOrg),
+        })
+      );
+    }
+
+    return { customerId, lines };
   }
 
   if (kind === "prospective_registration") {
@@ -699,11 +806,22 @@ async function resolveMiscReceiptDetails(
     const itemId = await resolveEntityQBItemId(db, entity);
     if (!itemId) throw new Error(`"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`);
 
-    // Pre-tax, same as the prospective-booth branch above.
+    // Genuinely single-supply — a day-pass registration is a conference
+    // supply, taxed where the conference is, with no dues bundled in.
     const { codeRef: taxCodeRef } = await resolveConferenceTax(db, payment.conference_id);
     const customerId = await resolveOneOffQBCustomerId(payment.organization_name, payment.email);
 
-    return { customerId, taxCodeRef, itemId, amountCents: payment.amount_cents, description: entity.name };
+    return {
+      customerId,
+      lines: [
+        miscReceiptLine({
+          amountCents: payment.amount_cents,
+          description: entity.name,
+          itemId,
+          taxCodeRef,
+        }),
+      ],
+    };
   }
 
   // event_ticket
@@ -769,10 +887,14 @@ async function resolveMiscReceiptDetails(
 
   return {
     customerId,
-    taxCodeRef,
-    itemId: ticketType.qbo_item_id,
-    amountCents: registration.amount_paid_cents,
-    description: ticketType.name,
+    lines: [
+      miscReceiptLine({
+        amountCents: registration.amount_paid_cents,
+        description: ticketType.name,
+        itemId: ticketType.qbo_item_id,
+        taxCodeRef,
+      }),
+    ],
   };
 }
 
@@ -822,18 +944,7 @@ export async function quickbooksMiscReceiptExportRun(): Promise<QBConferenceExpo
 
       const receipt = await createQBSalesReceipt({
         CustomerRef: { value: details.customerId },
-        Line: [
-          {
-            Amount: details.amountCents / 100,
-            Description: details.description,
-            DetailType: "SalesItemLineDetail",
-            SalesItemLineDetail: {
-              ItemRef: { value: details.itemId },
-              Qty: 1,
-              TaxCodeRef: { value: details.taxCodeRef },
-            },
-          },
-        ],
+        Line: details.lines,
         TxnDate: new Date().toISOString().slice(0, 10),
         DocNumber: qboDocNumber(row.payment_id),
         PrivateNote: `CSC ${row.payment_kind} payment ID: ${row.payment_id}`,

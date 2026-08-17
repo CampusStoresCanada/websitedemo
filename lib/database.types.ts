@@ -7147,6 +7147,7 @@ export type Database = {
       prospective_booth_payments: {
         Row: {
           amount_cents: number
+          booth_amount_cents: number
           booth_entity_id: string
           company_name: string
           conference_id: string
@@ -7154,6 +7155,7 @@ export type Database = {
           email: string
           id: string
           linked_application_id: string | null
+          membership_amount_cents: number
           paid_at: string | null
           province: string | null
           status: string
@@ -7161,6 +7163,7 @@ export type Database = {
         }
         Insert: {
           amount_cents: number
+          booth_amount_cents: number
           booth_entity_id: string
           company_name: string
           conference_id: string
@@ -7168,6 +7171,7 @@ export type Database = {
           email: string
           id?: string
           linked_application_id?: string | null
+          membership_amount_cents: number
           paid_at?: string | null
           province?: string | null
           status?: string
@@ -7175,6 +7179,7 @@ export type Database = {
         }
         Update: {
           amount_cents?: number
+          booth_amount_cents?: number
           booth_entity_id?: string
           company_name?: string
           conference_id?: string
@@ -7182,6 +7187,7 @@ export type Database = {
           email?: string
           id?: string
           linked_application_id?: string | null
+          membership_amount_cents?: number
           paid_at?: string | null
           province?: string | null
           status?: string
@@ -10277,6 +10283,7 @@ export type Database = {
           p_checkout_idempotency_key: string
           p_conference_id: string
           p_currency?: string
+          p_membership_tax_rate_pct?: number
           p_offer_prices?: Json
           p_organization_id: string
           p_price_overrides?: Json

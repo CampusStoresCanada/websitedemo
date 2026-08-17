@@ -3,6 +3,7 @@
 import crypto from "node:crypto";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { stripe } from "@/lib/stripe/client";
+import { resolveConferenceOrderTaxRates } from "@/lib/stripe/tax";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
@@ -543,7 +544,7 @@ export async function getConferenceCart(
 
   try {
     const adminClient = createAdminClient();
-    const [offerCart, conference, buyerTier] = await Promise.all([
+    const [offerCart, conference, buyerTier, taxRates] = await Promise.all([
       getOfferCartRows({ conferenceId, organizationId, userId: authz.userId }),
       adminClient
         .from("conference_instances")
@@ -555,9 +556,11 @@ export async function getConferenceCart(
           return result.data;
         }),
       loadBuyerTier(organizationId),
+      // Must use the same two-rate split as create_conference_order_from_cart,
+      // or the total quoted in the cart won't match what checkout charges.
+      resolveConferenceOrderTaxRates(adminClient, { conferenceId, organizationId }),
     ]);
 
-    const taxRate = Number(conference.tax_rate_pct ?? 0);
     let subtotalCents = 0;
     let taxCents = 0;
     // A membership-renewal line linked to a booth is always Partner-track dues,
@@ -578,7 +581,13 @@ export async function getConferenceCart(
         );
         const lineSubtotal = cartQuantity * unitPriceCents;
         subtotalCents += lineSubtotal;
-        taxCents += Math.round(lineSubtotal * (taxRate / 100));
+        // Dues are taxed at the buyer's own province, everything else at the
+        // conference's — see the two-treatment note in lib/stripe/tax.ts.
+        const lineRatePct =
+          offer.kind === MEMBERSHIP_RENEWAL_KIND
+            ? taxRates.membershipRatePct
+            : taxRates.conferenceRatePct;
+        taxCents += Math.round(lineSubtotal * (lineRatePct / 100));
         return {
           cartItemId,
           offerEntityId: offer.id,
@@ -1352,6 +1361,11 @@ export async function createConferenceCheckout(
       input.idempotencyKey ??
       `${input.conferenceId}:${input.organizationId}:${authz.userId}:${crypto.randomUUID()}`;
 
+    const taxRates = await resolveConferenceOrderTaxRates(adminClient, {
+      conferenceId: input.conferenceId,
+      organizationId: input.organizationId,
+    });
+
     const { data: order, error: orderError } = await adminClient.rpc(
       "create_conference_order_from_cart",
       {
@@ -1359,7 +1373,8 @@ export async function createConferenceCheckout(
         p_organization_id: input.organizationId,
         p_conference_id: input.conferenceId,
         p_checkout_idempotency_key: idempotencyKey,
-        p_tax_rate_pct: Number(conference.tax_rate_pct ?? 0),
+        p_tax_rate_pct: taxRates.conferenceRatePct,
+        p_membership_tax_rate_pct: taxRates.membershipRatePct,
         p_currency: "CAD",
         p_offer_prices: Object.keys(offerPrices).length > 0 ? offerPrices : null,
       }
@@ -1892,12 +1907,18 @@ export async function devCompleteConferenceCheckout(params: {
       );
     }
 
+    const devTaxRates = await resolveConferenceOrderTaxRates(adminClient, {
+      conferenceId: params.conferenceId,
+      organizationId: params.organizationId,
+    });
+
     const { data: order, error: orderError } = await adminClient.rpc("create_conference_order_from_cart", {
       p_user_id: auth.ctx.userId,
       p_organization_id: params.organizationId,
       p_conference_id: params.conferenceId,
       p_checkout_idempotency_key: `dev-${crypto.randomUUID()}`,
-      p_tax_rate_pct: Number(conference.tax_rate_pct ?? 0),
+      p_tax_rate_pct: devTaxRates.conferenceRatePct,
+      p_membership_tax_rate_pct: devTaxRates.membershipRatePct,
       p_currency: "CAD",
       p_offer_prices: offerPrices,
     });
