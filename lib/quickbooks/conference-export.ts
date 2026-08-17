@@ -102,11 +102,18 @@ async function loadOrder(db: Db, conferenceOrderId: string): Promise<ResolvedOrd
  * sponsorship sale, never per item. Set on the conference's own "Tax"
  * fieldset (components/admin/conference/ConferenceForm.tsx), alongside
  * tax_jurisdiction/tax_rate_pct (the Stripe-side equivalent).
+ *
+ * ratePct comes back alongside the code because the partial-refund path has
+ * only a gross (tax-inclusive) dollar figure to work from and has to back the
+ * tax out of it — see the QBO-computes-the-tax note on resolveConferenceLineItems.
  */
-async function resolveConferenceTaxCode(db: Db, conferenceId: string): Promise<string> {
+async function resolveConferenceTax(
+  db: Db,
+  conferenceId: string
+): Promise<{ codeRef: string; ratePct: number }> {
   const { data: conference, error } = await db
     .from("conference_instances")
-    .select("name, qbo_tax_code_ref")
+    .select("name, qbo_tax_code_ref, tax_rate_pct")
     .eq("id", conferenceId)
     .single();
 
@@ -116,7 +123,7 @@ async function resolveConferenceTaxCode(db: Db, conferenceId: string): Promise<s
       `"${conference.name}" has no QuickBooks tax code set — set it on the conference's Tax fieldset (Edit tab).`
     );
   }
-  return conference.qbo_tax_code_ref;
+  return { codeRef: conference.qbo_tax_code_ref, ratePct: Number(conference.tax_rate_pct ?? 0) };
 }
 
 async function resolveQBCustomerId(db: Db, organizationId: string): Promise<string> {
@@ -210,8 +217,16 @@ async function resolveMembershipRenewalItemId(
 
 /** Builds the QB line items for a conference order — shared by the receipt
  * worker and the full-refund path (a full refund mirrors these exactly).
- * taxCodeRef is resolved once per conference (see resolveConferenceTaxCode)
- * and applied to every line — conference tax doesn't vary by item. */
+ * taxCodeRef is resolved once per conference (see resolveConferenceTax)
+ * and applied to every line — conference tax doesn't vary by item.
+ *
+ * Amount must be the line's PRE-tax subtotal, never total_cents.
+ * conference_order_items.total_cents is tax-INCLUSIVE (the order-from-cart RPC
+ * stores `line_subtotal + line_tax`), while a QBO line carrying a taxable
+ * TaxCodeRef is tax-EXCLUSIVE — QBO adds the tax itself on top of Amount.
+ * Passing the gross figure therefore taxed every conference sale twice: a
+ * $6,600 + $858 HST order posted as $7,458 of lines + $969.54 of QBO-computed
+ * HST = $8,427.54, ~$970 above what Stripe actually collected. */
 async function resolveConferenceLineItems(
   db: Db,
   conferenceOrderId: string,
@@ -220,7 +235,7 @@ async function resolveConferenceLineItems(
 ): Promise<QBLineItem[]> {
   const { data: items, error } = await db
     .from("conference_order_items")
-    .select("id, offer_entity_id, quantity, total_cents")
+    .select("id, offer_entity_id, quantity, tax_cents, total_cents")
     .eq("order_id", conferenceOrderId);
 
   if (error) throw new Error(`Failed to load order items: ${error.message}`);
@@ -246,9 +261,15 @@ async function resolveConferenceLineItems(
 
     if (entityError || !entity) throw new Error(`Entity not found for order item ${item.id}`);
 
+    // Pre-tax subtotal: the taxable base QBO expects, and — for a bundled
+    // membership renewal — the figure the FTE price bands are denominated in.
+    // Matching a band against the tax-inclusive total lands a Member org in
+    // the next band up whenever the tax pushes it past a boundary.
+    const netAmountCents = item.total_cents - item.tax_cents;
+
     const itemId =
       entity.kind === "membership_renewal"
-        ? await resolveMembershipRenewalItemId(db, entity, org?.type ?? null, item.total_cents)
+        ? await resolveMembershipRenewalItemId(db, entity, org?.type ?? null, netAmountCents)
         : await resolveEntityQBItemId(db, entity);
     if (!itemId) {
       throw new Error(
@@ -257,7 +278,7 @@ async function resolveConferenceLineItems(
     }
 
     lines.push({
-      Amount: item.total_cents / 100,
+      Amount: netAmountCents / 100,
       Description: entity.name,
       DetailType: "SalesItemLineDetail",
       SalesItemLineDetail: {
@@ -389,7 +410,7 @@ export async function quickbooksConferenceReceiptExportRun(): Promise<QBConferen
     try {
       const order = await loadOrder(db, row.conference_order_id);
       const customerId = await resolveQBCustomerId(db, order.organizationId);
-      const taxCodeRef = await resolveConferenceTaxCode(db, order.conferenceId);
+      const { codeRef: taxCodeRef } = await resolveConferenceTax(db, order.conferenceId);
       const lines = await resolveConferenceLineItems(db, row.conference_order_id, order.organizationId, taxCodeRef);
       const depositAccountId = await resolveStripeDepositAccountId(db);
 
@@ -502,7 +523,7 @@ export async function quickbooksConferenceRefundExportRun(): Promise<QBConferenc
     try {
       const order = await loadOrder(db, row.conference_order_id);
       const customerId = await resolveQBCustomerId(db, order.organizationId);
-      const taxCodeRef = await resolveConferenceTaxCode(db, order.conferenceId);
+      const { codeRef: taxCodeRef, ratePct: taxRatePct } = await resolveConferenceTax(db, order.conferenceId);
 
       const { data: orderRow, error: orderError } = await db
         .from("conference_orders")
@@ -522,9 +543,14 @@ export async function quickbooksConferenceRefundExportRun(): Promise<QBConferenc
         lines = await resolveConferenceLineItems(db, row.conference_order_id, order.organizationId, taxCodeRef);
       } else {
         const partialItemId = await resolvePartialRefundItemId(db);
+        // refund_amount_cents is a share of conference_orders.total_cents, so
+        // it's gross (tax-inclusive) — back the tax out for the same reason
+        // the sale's lines are pre-tax: QBO re-adds it from taxCodeRef. The
+        // full-refund branch above gets this for free by mirroring the lines.
+        const netRefundCents = Math.round(row.refund_amount_cents / (1 + taxRatePct / 100));
         lines = [
           {
-            Amount: row.refund_amount_cents / 100,
+            Amount: netRefundCents / 100,
             Description: `Partial refund — conference order ${row.conference_order_id}`,
             DetailType: "SalesItemLineDetail",
             SalesItemLineDetail: {
@@ -643,7 +669,13 @@ async function resolveMiscReceiptDetails(
     const itemId = await resolveEntityQBItemId(db, entity);
     if (!itemId) throw new Error(`"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`);
 
-    const taxCodeRef = await resolveConferenceTaxCode(db, payment.conference_id);
+    // amount_cents here is already pre-tax (startProspectiveBoothCheckout
+    // stores boothPriceCents + membershipCents, with tax left to Stripe's own
+    // line-item tax_rates), so unlike conference_order_items it needs no
+    // netting. NB: that checkout currently puts tax_rates on the membership
+    // line only, so Stripe under-collects tax relative to what this receipt
+    // posts — tracked separately, don't "fix" it by netting here.
+    const { codeRef: taxCodeRef } = await resolveConferenceTax(db, payment.conference_id);
     const customerId = await resolveOneOffQBCustomerId(payment.company_name, payment.email);
 
     return { customerId, taxCodeRef, itemId, amountCents: payment.amount_cents, description: entity.name };
@@ -667,7 +699,8 @@ async function resolveMiscReceiptDetails(
     const itemId = await resolveEntityQBItemId(db, entity);
     if (!itemId) throw new Error(`"${entity.name}" has no QuickBooks item mapped — set it on its type in the Build tab.`);
 
-    const taxCodeRef = await resolveConferenceTaxCode(db, payment.conference_id);
+    // Pre-tax, same as the prospective-booth branch above.
+    const { codeRef: taxCodeRef } = await resolveConferenceTax(db, payment.conference_id);
     const customerId = await resolveOneOffQBCustomerId(payment.organization_name, payment.email);
 
     return { customerId, taxCodeRef, itemId, amountCents: payment.amount_cents, description: entity.name };
