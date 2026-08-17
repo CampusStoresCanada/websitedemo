@@ -117,7 +117,7 @@ async function reconcileConferenceOrders(
 ): Promise<void> {
   const { data: rows, error } = await db
     .from("qbo_conference_receipt_queue")
-    .select("conference_order_id, qbo_sales_receipt_id, conference_orders!inner(organization_id, conference_id, subtotal_cents, tax_cents, status)")
+    .select("conference_order_id, qbo_sales_receipt_id, conference_orders!inner(organization_id, conference_id, subtotal_cents, tax_cents, status, stripe_payment_intent_id)")
     .eq("status", "completed")
     .gte("processed_at", sinceIso);
 
@@ -158,7 +158,32 @@ async function reconcileConferenceOrders(
       expectedTaxCents += Math.round(item.quantity * item.unit_price_cents * (ratePct / 100));
     }
 
-    const chargedTaxCents = order.tax_cents;
+    // "Charged" must mean what Stripe actually took, not what our own row says
+    // it took — otherwise the check can't see the case where the order RPC and
+    // the checkout session disagree about a line's rate, which is precisely
+    // how a customer ends up billed a total the order doesn't record. Falls
+    // back to our row only when the payment intent can't be read.
+    let chargedTaxCents = order.tax_cents;
+    if (order.stripe_payment_intent_id) {
+      try {
+        const pi = await stripe.paymentIntents.retrieve(order.stripe_payment_intent_id, {
+          expand: ["latest_charge"],
+        });
+        const charge = pi.latest_charge as { amount_refunded?: number } | null;
+        const refundedCents = charge?.amount_refunded ?? 0;
+        // Only meaningful on a fully-intact payment. Once anything has been
+        // refunded, the amount left on the charge no longer decomposes into
+        // "this subtotal plus its tax" — part of the goods went back, and
+        // working out the remaining tax position needs the refund receipt,
+        // which this check doesn't model. Deriving anyway produced a nonsense
+        // negative on a partially-refunded order.
+        if (refundedCents === 0 && (pi.amount_received ?? 0) > 0) {
+          chargedTaxCents = (pi.amount_received ?? 0) - order.subtotal_cents;
+        }
+      } catch {
+        // Unreadable payment intent — keep our own figure rather than skipping.
+      }
+    }
 
     let bookedTaxCents: number | null = null;
     if (row.qbo_sales_receipt_id) {

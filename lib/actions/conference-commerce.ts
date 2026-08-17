@@ -1390,7 +1390,7 @@ export async function createConferenceCheckout(
 
     const { data: offerOrderItems, error: offerOrderItemsError } = await adminClient
       .from("conference_order_items")
-      .select("quantity, unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(name)")
+      .select("quantity, unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(name, kind)")
       .eq("order_id", order.id)
       .not("offer_entity_id", "is", null);
     if (offerOrderItemsError) return { success: false, error: offerOrderItemsError.message };
@@ -1400,7 +1400,15 @@ export async function createConferenceCheckout(
     }
 
     const lineItems = (offerOrderItems ?? []).map((item) => {
-      const offer = (item as unknown as { offer: { name: string } | null }).offer;
+      const offer = (item as unknown as { offer: { name: string; kind: string } | null }).offer;
+      // Must mirror the per-line branch create_conference_order_from_cart just
+      // used to price this order. If Stripe taxes a dues line at the
+      // conference's rate while the order priced it at the buyer's province,
+      // the customer is charged a total the order doesn't record.
+      const stripeTaxRateId =
+        offer?.kind === MEMBERSHIP_RENEWAL_KIND
+          ? taxRates.membershipStripeTaxRateId
+          : taxRates.conferenceStripeTaxRateId;
       return {
         quantity: item.quantity,
         price_data: {
@@ -1408,8 +1416,7 @@ export async function createConferenceCheckout(
           unit_amount: item.unit_price_cents,
           product_data: { name: offer?.name ?? "Conference offer" },
         },
-        // Offers are taxed at the conference rate in the order RPC.
-        ...(conference.stripe_tax_rate_id ? { tax_rates: [conference.stripe_tax_rate_id] } : {}),
+        ...(stripeTaxRateId ? { tax_rates: [stripeTaxRateId] } : {}),
       };
     });
 

@@ -119,10 +119,24 @@ export async function resolveMembershipTaxRatePct(
 export async function resolveConferenceOrderTaxRates(
   db: ReturnType<typeof createAdminClient>,
   params: { conferenceId: string; organizationId: string }
-): Promise<{ conferenceRatePct: number; membershipRatePct: number }> {
+): Promise<{
+  conferenceRatePct: number;
+  membershipRatePct: number;
+  /** Stripe Tax Rate ids for the same two treatments. The percentages drive
+   * what we store on the order; these drive what Stripe actually charges, and
+   * the two MUST be kept in step — if the order RPC prices dues at the buyer's
+   * province while the checkout session taxes them at the conference's, the
+   * customer is charged a different total than the order records. */
+  conferenceStripeTaxRateId: string | null;
+  membershipStripeTaxRateId: string;
+}> {
   const [{ data: conference, error: conferenceError }, { data: org, error: orgError }] =
     await Promise.all([
-      db.from("conference_instances").select("tax_rate_pct").eq("id", params.conferenceId).single(),
+      db
+        .from("conference_instances")
+        .select("tax_rate_pct, stripe_tax_rate_id")
+        .eq("id", params.conferenceId)
+        .single(),
       db.from("organizations").select("name, province").eq("id", params.organizationId).single(),
     ]);
 
@@ -141,5 +155,7 @@ export async function resolveConferenceOrderTaxRates(
   return {
     conferenceRatePct: Number(conference.tax_rate_pct ?? 0),
     membershipRatePct: await resolveMembershipTaxRatePct(db, org.province),
+    conferenceStripeTaxRateId: conference.stripe_tax_rate_id,
+    membershipStripeTaxRateId: await resolveMembershipStripeTaxRateId(db, org.province),
   };
 }

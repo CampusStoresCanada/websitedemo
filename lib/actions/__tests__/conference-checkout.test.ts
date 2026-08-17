@@ -58,6 +58,8 @@ vi.mock("@/lib/stripe/tax", () => ({
   resolveConferenceOrderTaxRates: vi.fn(async () => ({
     conferenceRatePct: 13,
     membershipRatePct: 5,
+    conferenceStripeTaxRateId: "txr_conference_test",
+    membershipStripeTaxRateId: "txr_membership_test",
   })),
 }));
 vi.mock("@/lib/ops/audit", () => ({
