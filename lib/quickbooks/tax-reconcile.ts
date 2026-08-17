@@ -48,7 +48,57 @@ export interface TaxDiscrepancy {
 export interface TaxReconciliationResult {
   checked: number;
   discrepancies: TaxDiscrepancy[];
+  /** Discrepancies that are real but previously reviewed and accepted — still
+   * reported here so they stay visible, but they raise no alert. */
+  acknowledged: TaxDiscrepancy[];
   skipped: string[];
+}
+
+type ExceptionKey = string;
+const exceptionKey = (source: string, reference: string): ExceptionKey => `${source}:${reference}`;
+
+interface AcknowledgedException {
+  expectedTaxCents: number;
+  chargedTaxCents: number | null;
+  bookedTaxCents: number | null;
+  reason: string;
+}
+
+async function loadExceptions(
+  db: ReturnType<typeof createAdminClient>
+): Promise<Map<ExceptionKey, AcknowledgedException>> {
+  const { data } = await db
+    .from("tax_reconciliation_exceptions")
+    .select("source, reference, expected_tax_cents, charged_tax_cents, booked_tax_cents, reason");
+
+  return new Map(
+    (data ?? []).map((row) => [
+      exceptionKey(row.source, row.reference),
+      {
+        expectedTaxCents: row.expected_tax_cents,
+        chargedTaxCents: row.charged_tax_cents,
+        bookedTaxCents: row.booked_tax_cents,
+        reason: row.reason,
+      },
+    ])
+  );
+}
+
+/**
+ * An acceptance covers the discrepancy as it was reviewed, not the sale
+ * forever — every figure must still match. A sale whose numbers have since
+ * moved is a new finding and surfaces again.
+ */
+function isAcknowledged(
+  exception: AcknowledgedException | undefined,
+  found: TaxDiscrepancy
+): boolean {
+  if (!exception) return false;
+  return (
+    exception.expectedTaxCents === found.expectedTaxCents &&
+    exception.chargedTaxCents === found.chargedTaxCents &&
+    exception.bookedTaxCents === found.bookedTaxCents
+  );
 }
 
 const bad = (expected: number, actual: number | null) =>
@@ -239,13 +289,27 @@ export async function quickbooksTaxReconciliationRun(
   const db = createAdminClient();
   const sinceIso = new Date(Date.now() - (options.sinceDays ?? 120) * 86_400_000).toISOString();
 
-  const result: TaxReconciliationResult = { checked: 0, discrepancies: [], skipped: [] };
+  const result: TaxReconciliationResult = { checked: 0, discrepancies: [], acknowledged: [], skipped: [] };
 
   await reconcileConferenceOrders(db, sinceIso, result);
   await reconcileProspectiveBooths(db, sinceIso, result);
 
+  // Split off the ones a human has already reviewed and accepted. They stay in
+  // the returned report — visible to anyone reading it — but raise no alert,
+  // so the genuinely new findings aren't buried under permanent known ones.
+  const exceptions = await loadExceptions(db);
+  const stillOpen: TaxDiscrepancy[] = [];
+  for (const discrepancy of result.discrepancies) {
+    if (isAcknowledged(exceptions.get(exceptionKey(discrepancy.source, discrepancy.reference)), discrepancy)) {
+      result.acknowledged.push(discrepancy);
+    } else {
+      stillOpen.push(discrepancy);
+    }
+  }
+  result.discrepancies = stillOpen;
+
   // One alert per affected sale, keyed by its reference so a persistent
-  // discrepancy doesn't re-alert every four hours until someone fixes it.
+  // discrepancy doesn't re-alert every run until someone fixes it.
   for (const discrepancy of result.discrepancies) {
     await raiseAlertIfNotOpen({
       ruleKey: `qbo_tax_mismatch:${discrepancy.source}:${discrepancy.reference}`,

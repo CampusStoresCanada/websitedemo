@@ -9268,6 +9268,42 @@ export type Database = {
           },
         ]
       }
+      tax_reconciliation_exceptions: {
+        Row: {
+          booked_tax_cents: number | null
+          charged_tax_cents: number | null
+          created_at: string
+          created_by: string | null
+          expected_tax_cents: number
+          id: string
+          reason: string
+          reference: string
+          source: string
+        }
+        Insert: {
+          booked_tax_cents?: number | null
+          charged_tax_cents?: number | null
+          created_at?: string
+          created_by?: string | null
+          expected_tax_cents: number
+          id?: string
+          reason: string
+          reference: string
+          source: string
+        }
+        Update: {
+          booked_tax_cents?: number | null
+          charged_tax_cents?: number | null
+          created_at?: string
+          created_by?: string | null
+          expected_tax_cents?: number
+          id?: string
+          reason?: string
+          reference?: string
+          source?: string
+        }
+        Relationships: []
+      }
       tenants: {
         Row: {
           circle_community_id: string | null
