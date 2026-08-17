@@ -35,7 +35,7 @@ const MEMBERSHIP_RENEWAL_KIND = "membership_renewal";
 const TOLERANCE_CENTS = 2;
 
 export interface TaxDiscrepancy {
-  source: "conference_order" | "prospective_booth";
+  source: "conference_order" | "prospective_booth" | "prospective_registration" | "event_ticket";
   reference: string;
   qboDocId: string | null;
   subject: string;
@@ -308,6 +308,88 @@ async function reconcileProspectiveBooths(
   }
 }
 
+/**
+ * The two remaining misc-receipt kinds are single-supply, so there's no
+ * per-line split to verify — but they still need the charged-vs-booked
+ * comparison, because both went live carrying no Stripe tax at all while
+ * their QuickBooks receipts booked it. Expected is taken from the QBO
+ * receipt's own tax, so this specifically answers "did Stripe collect what
+ * QuickBooks says we collected".
+ */
+async function reconcileSingleSupplyMiscReceipts(
+  db: ReturnType<typeof createAdminClient>,
+  sinceIso: string,
+  result: TaxReconciliationResult
+): Promise<void> {
+  const { data: rows, error } = await db
+    .from("qbo_misc_receipt_queue")
+    .select("payment_id, payment_kind, qbo_sales_receipt_id")
+    .eq("status", "completed")
+    .in("payment_kind", ["prospective_registration", "event_ticket"])
+    .gte("processed_at", sinceIso);
+
+  if (error) throw new Error(`Failed to load misc receipt queue: ${error.message}`);
+
+  for (const row of rows ?? []) {
+    result.checked++;
+
+    let sessionId: string | null = null;
+    let subject = row.payment_id;
+
+    if (row.payment_kind === "prospective_registration") {
+      const { data: payment } = await db
+        .from("prospective_registration_payments")
+        .select("organization_name, stripe_checkout_session_id")
+        .eq("id", row.payment_id)
+        .maybeSingle();
+      sessionId = payment?.stripe_checkout_session_id ?? null;
+      subject = payment?.organization_name ?? subject;
+    } else {
+      const { data: registration } = await db
+        .from("event_registrations")
+        .select("stripe_session_id, event:events(title)")
+        .eq("id", row.payment_id)
+        .maybeSingle();
+      sessionId = registration?.stripe_session_id ?? null;
+      const event = Array.isArray(registration?.event) ? registration?.event[0] : registration?.event;
+      subject = event?.title ?? subject;
+    }
+
+    let bookedTaxCents: number | null = null;
+    if (row.qbo_sales_receipt_id) {
+      const receipt = await getQBSalesReceipt(row.qbo_sales_receipt_id);
+      if (receipt) bookedTaxCents = Math.round((receipt.TxnTaxDetail?.TotalTax ?? 0) * 100);
+    }
+    if (bookedTaxCents === null) {
+      result.skipped.push(`${row.payment_kind} ${row.payment_id}: QBO receipt unreadable`);
+      continue;
+    }
+
+    let chargedTaxCents: number | null = null;
+    if (sessionId) {
+      try {
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+        chargedTaxCents = session.total_details?.amount_tax ?? null;
+      } catch {
+        // Session unreadable — leave null, which reports as "—" rather than 0.
+      }
+    }
+
+    if (bad(bookedTaxCents, chargedTaxCents)) {
+      result.discrepancies.push({
+        source: row.payment_kind as TaxDiscrepancy["source"],
+        reference: row.payment_id,
+        qboDocId: row.qbo_sales_receipt_id,
+        subject,
+        expectedTaxCents: bookedTaxCents,
+        chargedTaxCents,
+        bookedTaxCents,
+        summary: `Stripe collected ${d(chargedTaxCents)} tax, QuickBooks booked ${d(bookedTaxCents)}`,
+      });
+    }
+  }
+}
+
 export async function quickbooksTaxReconciliationRun(
   options: { sinceDays?: number } = {}
 ): Promise<TaxReconciliationResult> {
@@ -318,6 +400,7 @@ export async function quickbooksTaxReconciliationRun(
 
   await reconcileConferenceOrders(db, sinceIso, result);
   await reconcileProspectiveBooths(db, sinceIso, result);
+  await reconcileSingleSupplyMiscReceipts(db, sinceIso, result);
 
   // Split off the ones a human has already reviewed and accepted. They stay in
   // the returned report — visible to anyone reading it — but raise no alert,

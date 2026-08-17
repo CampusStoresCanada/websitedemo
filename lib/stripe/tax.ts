@@ -75,6 +75,52 @@ export async function resolveMembershipStripeTaxRateId(
   );
 }
 
+/**
+ * The Stripe Tax Rate for an event ticket.
+ *
+ * Mirrors exactly what the QBO side already does for the same sale
+ * (resolveMiscReceiptDetails' event_ticket branch): a buyer with an org is
+ * taxed at that org's province, and a public buyer falls back to one flat
+ * configured rate. Both halves must agree or the receipt won't match the
+ * charge — that mismatch is the whole reason this function exists.
+ *
+ * ⚠️ Treatment caveat: admission to a *physical* event is arguably taxed
+ * where the event is held, not where the buyer is. Events carry only a
+ * free-text `location` and an `is_virtual` flag, so there's no structured
+ * province to drive that, and for a virtual event the recipient's own
+ * province is the right answer anyway. Revisit if in-person ticketed events
+ * outside Ontario ever start selling — it needs event-level tax config,
+ * not a change here.
+ */
+export async function resolveEventTicketStripeTaxRateId(
+  db: ReturnType<typeof createAdminClient>,
+  org: { name: string; province: string | null } | null
+): Promise<string> {
+  if (org) {
+    // Having an org but no province is a config error, not a public sale.
+    // The QBO side throws here too — quietly falling back to the public rate
+    // would charge one thing and book another for the same ticket.
+    if (!org.province) {
+      throw new Error(
+        `"${org.name}" has no province on file — cannot determine its event ticket tax rate. Set it before selling tickets.`
+      );
+    }
+    return resolveMembershipStripeTaxRateId(db, org.province);
+  }
+
+  const { data } = await db
+    .from("app_settings")
+    .select("value")
+    .eq("key", "stripe_tax_rate_id_public_ticket")
+    .maybeSingle();
+
+  if (data?.value) return data.value;
+
+  throw new Error(
+    "No Stripe tax rate configured for public event tickets. Set 'stripe_tax_rate_id_public_ticket' in /admin/settings/quickbooks."
+  );
+}
+
 // The Stripe Tax Rate object is the single source of truth for the numeric
 // percentage — deliberately NOT a third province→percentage mapping in
 // app_settings alongside the Stripe-id and QBO-code ones, which would be a
