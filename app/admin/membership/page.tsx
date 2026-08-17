@@ -7,7 +7,7 @@ export const metadata = { title: "Membership | Admin" };
 export const dynamic = "force-dynamic";
 
 export default async function MembershipAdminPage() {
-  const rows = await getRenewalDirectory();
+  const { rows, programs } = await getRenewalDirectory();
 
   return (
     <main>
@@ -37,7 +37,7 @@ export default async function MembershipAdminPage() {
           </>
         }
       />
-      <RenewalsDirectory rows={rows} />
+      <RenewalsDirectory rows={rows} programs={programs} />
     </main>
   );
 }

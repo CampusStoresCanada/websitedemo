@@ -3,6 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { RenewalDirectoryOrgType, RenewalDirectoryRow } from "@/lib/renewal/renewal-directory";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
@@ -10,10 +11,13 @@ import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
 const INK = "#16345a";
 const RED = "#e72a28";
 
-const TABS: { type: RenewalDirectoryOrgType; label: string }[] = [
-  { type: "Member", label: "Members" },
-  { type: "Vendor Partner", label: "Partners" },
-];
+/** Naive pluralization for tab labels ("Member" -> "Members", "Vendor
+ *  Partner" -> "Vendor Partners") — a reasonable default until a program
+ *  needs real authored copy, same posture as Phase 3's onboarding-content
+ *  deferral: not worth building for a program that doesn't exist yet. */
+function pluralLabel(label: string): string {
+  return label.endsWith("s") ? label : `${label}s`;
+}
 
 type SortKey = "name" | "status" | "value" | "expiry";
 
@@ -247,8 +251,21 @@ function DirectoryRow({
 // Widget
 // ─────────────────────────────────────────────────────────────────
 
-export function RenewalsDirectory({ rows }: { rows: RenewalDirectoryRow[] }) {
-  const [activeType, setActiveType] = useState<RenewalDirectoryOrgType>("Member");
+export function RenewalsDirectory({
+  rows,
+  programs,
+}: {
+  rows: RenewalDirectoryRow[];
+  programs: MembershipProgramDef[];
+}) {
+  const tabs = useMemo(
+    () => programs.map((p) => ({ type: p.orgTypeValue, label: pluralLabel(p.label) })),
+    [programs]
+  );
+
+  const [activeType, setActiveType] = useState<RenewalDirectoryOrgType>(
+    () => tabs[0]?.type ?? ""
+  );
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<string>>(new Set());
   const [sort, setSort] = useState<SortKey>("name");
@@ -257,10 +274,14 @@ export function RenewalsDirectory({ rows }: { rows: RenewalDirectoryRow[] }) {
   const refineRef = useRef<HTMLDivElement>(null);
 
   const counts = useMemo(() => {
-    const c: Record<RenewalDirectoryOrgType, number> = { Member: 0, "Vendor Partner": 0 };
-    for (const r of rows) c[r.type]++;
+    const c: Record<RenewalDirectoryOrgType, number> = Object.fromEntries(
+      tabs.map((t) => [t.type, 0])
+    );
+    for (const r of rows) {
+      if (r.type in c) c[r.type]++;
+    }
     return c;
-  }, [rows]);
+  }, [rows, tabs]);
 
   const visible = useMemo(() => {
     let list = rows.filter((r) => r.type === activeType);
@@ -308,7 +329,7 @@ export function RenewalsDirectory({ rows }: { rows: RenewalDirectoryRow[] }) {
       </p>
 
       <div className="flex gap-7 border-b mb-4" style={{ borderColor: "rgba(22,52,90,0.15)" }}>
-        {TABS.map((tab) => (
+        {tabs.map((tab) => (
           <button
             key={tab.type}
             type="button"

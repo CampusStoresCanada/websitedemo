@@ -1,8 +1,13 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getBillingConfig } from "@/lib/policy/engine";
+import { getBillingConfig, getProgramsConfig } from "@/lib/policy/engine";
 import { evaluateBucketPrice } from "@/lib/membership/pricing-core";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 
-export type RenewalDirectoryOrgType = "Member" | "Vendor Partner";
+/** The literal organizations.type value for a configured program — no
+ *  longer a closed 2-value union now that programs are policy-configured
+ *  (lib/policy/types.ts's MembershipProgramDef), but kept as a named type
+ *  so callers don't just see a bare `string`. */
+export type RenewalDirectoryOrgType = string;
 
 export interface RenewalDirectoryRow {
   id: string;
@@ -83,31 +88,44 @@ async function findBundledRenewalOrderIds(
   return receiptOrderByOrg;
 }
 
+export interface RenewalDirectory {
+  rows: RenewalDirectoryRow[];
+  /** Configured membership programs (lib/policy/engine.ts's getProgramsConfig)
+   *  — threaded through so the UI can render tabs/labels/counts per program
+   *  instead of hardcoding "Member"/"Vendor Partner". */
+  programs: MembershipProgramDef[];
+}
+
 /**
  * Full active-org membership roster with renewal info — the replacement
  * list for /admin/membership. Not season-gated (unlike the admin-dashboard
- * renewals widget): every active Member/Vendor Partner org appears, with
+ * renewals widget): every active org on a configured program appears, with
  * their most recent renewal cycle's data regardless of whether a season is
  * currently open.
  */
-export async function getRenewalDirectory(): Promise<RenewalDirectoryRow[]> {
+export async function getRenewalDirectory(): Promise<RenewalDirectory> {
   const db = createAdminClient();
 
-  const [{ data: orgs }, billing] = await Promise.all([
+  const [{ data: orgs }, billing, programs] = await Promise.all([
     db
       .from("organizations")
-      .select("id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at")
-      .in("type", ["Member", "Vendor Partner"])
+      .select(
+        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, memberships(status, fte, program_key)"
+      )
+      // Filled in once programs resolves — see below. Left broad here since
+      // this destructure runs concurrently with getProgramsConfig().
       .eq("is_test", false)
       .not("membership_status", "in", "(canceled,applied)")
       .is("archived_at", null)
       .order("name"),
     getBillingConfig(),
+    getProgramsConfig(),
   ]);
 
-  const orgList = orgs ?? [];
+  const programByOrgType = new Map(programs.map((p) => [p.orgTypeValue, p]));
+  const orgList = (orgs ?? []).filter((o) => programByOrgType.has(o.type));
   const orgIds = orgList.map((o) => o.id);
-  if (orgIds.length === 0) return [];
+  if (orgIds.length === 0) return { rows: [], programs };
 
   const [{ data: contactRows }, { data: invoiceRows }] = await Promise.all([
     db
@@ -158,18 +176,30 @@ export async function getRenewalDirectory(): Promise<RenewalDirectoryRow[]> {
   const orgsNeedingReceiptFallback = orgList.filter((o) => !invoiceByOrg.has(o.id)).map((o) => o.id);
   const receiptOrderByOrg = await findBundledRenewalOrderIds(db, orgsNeedingReceiptFallback);
 
-  return orgList.map((o) => {
+  const rows = orgList.map((o) => {
     const invoice = invoiceByOrg.get(o.id);
     const contact = contactByOrg.get(o.id);
     const type = o.type as RenewalDirectoryOrgType;
-    // Tier-class badge only applies to FTE-sized member dues (CSC's current
-    // model) — resolved through the real pricing engine (pricing-core.ts)
-    // so this always agrees with what actually drives invoicing, rather
-    // than duplicating the tier-match logic. Other pricing modes have no
-    // FTE-shaped "class" concept, so no badge is shown.
+    const program = programByOrgType.get(type);
+
+    // Phase 4: `memberships` now owns status/fte going forward (mirrored
+    // from organizations by transition_membership_state() and the various
+    // fte/cancoll write paths — see lib/membership/mirror.ts) — prefer it,
+    // falling back to the organizations columns when no matching row exists
+    // (same fallback posture as resolveMembershipStatus in lib/auth/org-level.ts).
+    const membership = (o.memberships ?? []).find((m) => m.program_key === program?.key) ?? null;
+    const membershipStatus = membership?.status ?? o.membership_status;
+    const fte = membership?.fte ?? o.fte;
+
+    // Tier-class badge only applies to programs billed through the FTE
+    // metric engine (CSC's "Member" program today) — resolved through the
+    // real pricing engine (pricing-core.ts) so this always agrees with what
+    // actually drives invoicing, rather than duplicating the tier-match
+    // logic. Flat-rate programs (e.g. "Vendor Partner") have no FTE-shaped
+    // "class" concept, so no badge is shown.
     const typeClass =
-      type === "Member" && billing.pricing_mode === "FTE_BUCKETS"
-        ? evaluateBucketPrice(o.fte ?? 0, billing.membership_tiers, "FTE_BUCKETS").code
+      program?.billing.mode === "metric_engine" && billing.pricing_mode === "FTE_BUCKETS"
+        ? evaluateBucketPrice(fte ?? 0, billing.membership_tiers, "FTE_BUCKETS").code
         : null;
 
     // Some legacy rows have circle_id literally set to the string
@@ -187,9 +217,9 @@ export async function getRenewalDirectory(): Promise<RenewalDirectoryRow[]> {
       orgAdminName: contact?.name ?? null,
       orgAdminCircleId,
       orgAdminEmail: contact?.work_email ?? contact?.email ?? null,
-      membershipStatus: o.membership_status,
+      membershipStatus,
       typeClass,
-      fte: o.fte,
+      fte,
       membershipExpiresAt: o.membership_expires_at,
       renewalAmountCents: invoice?.amount_cents ?? null,
       invoiceStatus: invoice?.status ?? null,
@@ -197,4 +227,6 @@ export async function getRenewalDirectory(): Promise<RenewalDirectoryRow[]> {
       receiptOrderId: invoice ? null : (receiptOrderByOrg.get(o.id) ?? null),
     };
   });
+
+  return { rows, programs };
 }
