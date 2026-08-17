@@ -7,6 +7,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
 // NOTE: sponsor_* tables are new — not yet in database.types.ts.
 // The `db` cast below removes Supabase's generated-type strictness for these
@@ -563,6 +564,19 @@ export async function setCANCOLLMembership(
     })
     .eq("id", organizationId);
   if (error) return { success: false, error: error.message };
+
+  // Phase 4 Stage 2a: mirror the cancoll flags into `memberships` so they
+  // don't drift from `organizations` ahead of the Stage 2 billing cutover
+  // (CANCOLL status feeds pricing). Same two columns as the write above.
+  await mirrorFieldsToMembership(
+    organizationId,
+    {
+      is_cancoll_member: isMember,
+      cancoll_tier: isMember ? (tier ?? null) : null,
+    },
+    { source: "setCANCOLLMembership" }
+  );
+
   revalidatePath("/admin/sponsorships");
   return { success: true, data: undefined };
 }

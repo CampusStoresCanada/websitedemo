@@ -17,6 +17,7 @@ import {
 import { queueTier2Change } from "@/lib/actions/pending-content-changes";
 import { sendContentChangeFyi } from "@/lib/email/send";
 import { enqueueCircleSync } from "@/lib/circle/sync";
+import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
 interface UpdateFieldParams {
   table: EditableTable;
@@ -271,6 +272,22 @@ export async function updateField({
     if (updateError) {
       console.error(`Error updating ${table}.${column}:`, updateError);
       return { success: false, error: "Failed to update field" };
+    }
+
+    // Phase 4 Stage 2a: keep the org's `memberships` row in step with the
+    // FTE just written, so billing reads can move onto that table without
+    // silently pricing off a stale number. Deliberately scoped to the
+    // organizations.fte case only — this handler serves dozens of other
+    // table/column combos that have nothing to do with membership.
+    if (isManualFteEdit) {
+      const mirroredFte = newValue === null ? null : Number(newValue);
+      if (mirroredFte === null || Number.isFinite(mirroredFte)) {
+        await mirrorFieldsToMembership(
+          entityId,
+          { fte: mirroredFte },
+          { source: "update-field" }
+        );
+      }
     }
 
     // 5. Post-write side effects

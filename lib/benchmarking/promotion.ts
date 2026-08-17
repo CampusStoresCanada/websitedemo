@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 import type { Json } from "@/lib/database.types";
 
 export interface PromotionResult {
@@ -110,6 +111,18 @@ export async function promoteBenchmarkingToOrganizationCurrentState(params: {
       square_footage: updatedOrg.square_footage,
       organization_type: updatedOrg.organization_type,
     };
+
+    // Phase 4 Stage 2a: benchmarking promotion is one of the live write
+    // paths that changes an org's priced FTE — mirror it into `memberships`
+    // so that table stays a faithful copy ahead of the Stage 2 billing
+    // cutover. Mirrors the value actually persisted, not the input.
+    if (promotedFields.includes("fte")) {
+      await mirrorFieldsToMembership(
+        orgRow.id,
+        { fte: updatedOrg.fte },
+        { source: "benchmarking-promotion" }
+      );
+    }
   }
 
   const promotionPayload = {

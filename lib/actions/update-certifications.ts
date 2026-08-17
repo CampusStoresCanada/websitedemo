@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerAuthState } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
 import { CERTIFICATION_NAMES } from "@/lib/certifications";
+import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
 interface UpdateCertificationsResult {
   success: boolean;
@@ -97,6 +98,17 @@ export async function updateCancollStatus(
     console.error("[updateCancollStatus] DB error:", error);
     return { success: false, error: "Failed to update CANCOLL status" };
   }
+
+  // Phase 4 Stage 2a: mirror into `memberships` ahead of the Stage 2 billing
+  // cutover. Deliberately mirrors `is_cancoll_member` only — unlike
+  // setCANCOLLMembership (lib/actions/sponsorship.ts), this path does not
+  // touch `cancoll_tier` on `organizations`, so the mirror must not either,
+  // or the two tables would disagree in the opposite direction.
+  await mirrorFieldsToMembership(
+    orgId,
+    { is_cancoll_member: isCancollMember },
+    { source: "updateCancollStatus" }
+  );
 
   return { success: true };
 }
