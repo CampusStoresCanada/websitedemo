@@ -10491,6 +10491,13 @@ export type Database = {
         Args: { link_id: string }
         Returns: undefined
       }
+      lookup_auth_user_emails: {
+        Args: { p_user_ids: string[] }
+        Returns: {
+          email: string
+          id: string
+        }[]
+      }
       mint_entity_offer_purchase: {
         Args: {
           p_buyer: string

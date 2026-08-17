@@ -53,10 +53,15 @@ function fakeClientForAdd(
   return {
     spy: { insertSpy, dedupSelectSpy },
     client: {
-      auth: {
-        admin: {
-          listUsers: async () => ({ data: { users: opts.existingUsers ?? [] }, error: null }),
-        },
+      // findUserByEmail resolves accounts through the get_users_by_emails RPC
+      // rather than paginating auth.admin.listUsers() — see lib/supabase/user-lookup.ts.
+      rpc: async (fn: string, args: { p_emails?: string[] }) => {
+        if (fn !== "get_users_by_emails") return { data: null, error: null };
+        const wanted = (args?.p_emails ?? []).map((e) => e.toLowerCase());
+        return {
+          data: (opts.existingUsers ?? []).filter((u) => wanted.includes(u.email.toLowerCase())),
+          error: null,
+        };
       },
       from: (table: string) => {
         if (table === "conference_people") {
