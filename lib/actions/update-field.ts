@@ -287,18 +287,32 @@ export async function updateField({
         await syncContactIdentity(updatedContact as ContactIdentityRow);
       }
 
-      // Push name changes to Circle. handleUpdateProfile already supports
-      // this — the gap was that nothing enqueued it. enqueueCircleSync
-      // no-ops silently if Circle isn't configured or cutover is off.
-      if (column === "name" && typeof newValue === "string" && newValue) {
-        void enqueueCircleSync({
-          operation: "update_profile",
-          entityType: "contact",
-          entityId,
-          payload: { name: newValue },
-          orgId: resolvedOrgId ?? undefined,
-          idempotencyKey: `update-profile-name-${entityId}-${newValue}`,
-        });
+      // Push profile edits outward. The database is the source of truth: a
+      // change made here has to reach the other endpoints, not sit locally.
+      // This used to fire for `name` only, so editing someone's job title on
+      // the website never reached Circle at all.
+      //
+      // Circle accepts name and custom profile fields. It has no field for
+      // phone, and member email is an identity change rather than a profile
+      // edit, so neither is pushed.
+      if (typeof newValue === "string" && newValue) {
+        const payload =
+          column === "name"
+            ? { name: newValue }
+            : column === "role_title"
+              ? { jobTitle: newValue }
+              : null;
+
+        if (payload) {
+          void enqueueCircleSync({
+            operation: "update_profile",
+            entityType: "contact",
+            entityId,
+            payload,
+            orgId: resolvedOrgId ?? undefined,
+            idempotencyKey: `update-profile-${column}-${entityId}-${newValue}`,
+          });
+        }
       }
     }
 

@@ -92,13 +92,27 @@ async function handleLinkMember(
   if (existing) {
     circleId = existing.id;
   } else if (name) {
-    // Create new member
     const created = await client.createMember({
       email,
       name,
       skip_invitation: true,
     });
-    circleId = created.id;
+
+    // POST /community_members does not return the member object, so
+    // `created.id` is undefined — this used to be stored as the literal
+    // string "undefined" (12 contacts in prod), leaving them linked to
+    // nothing. Read the id back by email instead of trusting the response.
+    const resolvedId =
+      typeof created?.id === "number"
+        ? created.id
+        : (await client.searchMembers(email))[0]?.id;
+
+    if (typeof resolvedId !== "number") {
+      throw new Error(
+        `Created Circle member for ${email} but could not resolve its id`
+      );
+    }
+    circleId = resolvedId;
   } else {
     throw new Error(`No Circle member found for ${email} and no name for creation`);
   }
@@ -268,6 +282,16 @@ async function handleUpdateProfile(
   const updates: Partial<CircleMemberInput> = {};
   if (typeof item.payload.name === "string") updates.name = item.payload.name;
   if (typeof item.payload.headline === "string") updates.headline = item.payload.headline;
+
+  // Job title is a custom profile field on Circle (key `jobtitle`), not a
+  // top-level member column — sending it as `title` silently did nothing,
+  // which is why website title edits never showed up in Circle.
+  if (typeof item.payload.jobTitle === "string") {
+    updates.community_member_profile_fields = {
+      ...(updates.community_member_profile_fields ?? {}),
+      jobtitle: item.payload.jobTitle,
+    };
+  }
 
   if (Object.keys(updates).length === 0) return;
 
