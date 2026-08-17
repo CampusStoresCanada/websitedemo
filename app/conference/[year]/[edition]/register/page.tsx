@@ -173,8 +173,8 @@ export default async function RegisterPage({
   // Pull known people contacts for the selected org.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: peopleRows } = (await (adminClient as any)
-    .from("people")
-    .select("id, first_name, last_name, primary_email, title, work_phone, mobile_phone")
+    .from("contacts")
+    .select("id, first_name, last_name, primary_email:work_email, title:role_title, work_phone:work_phone_number, mobile_phone:phone")
     .eq("organization_id", org.id)
     .order("first_name", { ascending: true })
     .order("last_name", { ascending: true })) as { data: any[] | null };
@@ -205,8 +205,8 @@ export default async function RegisterPage({
   if (userRow?.person_id) {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: person } = (await (adminClient as any)
-      .from("people")
-      .select("first_name, last_name, primary_email, title, work_phone, mobile_phone")
+      .from("contacts")
+      .select("first_name, last_name, primary_email:work_email, title:role_title, work_phone:work_phone_number, mobile_phone:phone")
       .eq("id", userRow.person_id)
       .maybeSingle()) as { data: any };
     if (person) {

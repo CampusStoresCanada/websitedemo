@@ -548,15 +548,9 @@ async function resolveContactForLogin(
     return { error: `Can't create a login — ${LOGIN_SKIP_MESSAGES[skip]}.` };
   }
 
-  // contacts has no person_id; the projection is matched on email.
-  const { data: person } = await adminClient
-    .from("people")
-    .select("id")
-    .eq("organization_id", orgId)
-    .eq("primary_email", email.toLowerCase())
-    .maybeSingle();
-
-  return { email, personId: person?.id ?? null };
+  // `people` is retired — the contact IS the person record now, so its own
+  // id is the person id. No second lookup, no email re-match.
+  return { email, personId: contactId };
 }
 
 // ---------------------------------------------------------------------------

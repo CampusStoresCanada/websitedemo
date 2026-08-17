@@ -360,8 +360,8 @@ export async function listConferencePeople(
   >();
   if (canonicalIds.length > 0) {
     const { data: peopleRows } = await db
-      .from("people")
-      .select("id, first_name, last_name, primary_email, title")
+      .from("contacts")
+      .select("id, first_name, last_name, primary_email:work_email, title:role_title")
       .in("id", canonicalIds);
     for (const person of (peopleRows ?? []) as Array<Record<string, unknown>>) {
       const id = person.id as string | null;
@@ -604,7 +604,7 @@ export async function applyCanonicalConferencePersonIdentityEdit(
     if (userRow?.person_id) {
       const parts = splitName(nextDisplayName);
       await db
-        .from("people")
+        .from("contacts")
         .update({
           first_name: parts.firstName || undefined,
           last_name: parts.lastName || undefined,
@@ -621,9 +621,9 @@ export async function applyCanonicalConferencePersonIdentityEdit(
       peoplePatch.first_name = parts.firstName || null;
       peoplePatch.last_name = parts.lastName || null;
     }
-    if (nextContactEmail) peoplePatch.primary_email = nextContactEmail;
-    if (nextRoleTitle !== null) peoplePatch.title = nextRoleTitle;
-    await db.from("people").update(peoplePatch).eq("id", canonicalPersonId);
+    if (nextContactEmail) peoplePatch.work_email = nextContactEmail;
+    if (nextRoleTitle !== null) peoplePatch.role_title = nextRoleTitle;
+    await db.from("contacts").update(peoplePatch).eq("id", canonicalPersonId);
   }
 
   if (nextContactEmail || nextRoleTitle || nextDisplayName) {
@@ -746,9 +746,9 @@ export async function resolveConferencePersonCanonicalLink(
   if (!canonicalPersonId && contactEmail?.trim()) {
     const normalizedEmail = contactEmail.trim().toLowerCase();
     const { data: emailMatches, error: emailError } = await db
-      .from("people")
+      .from("contacts")
       .select("id")
-      .ilike("primary_email", normalizedEmail);
+      .ilike("work_email", normalizedEmail);
     if (emailError) diagnostics.push(`email_lookup_error=${emailError.message}`);
     const emailIds = Array.from(
       new Set(((emailMatches ?? []) as Array<{ id: string }>).map((row) => row.id))
@@ -766,7 +766,7 @@ export async function resolveConferencePersonCanonicalLink(
     const parts = splitName(displayName);
     if (parts.firstName && parts.lastName) {
       const { data: nameMatches, error: nameError } = await db
-        .from("people")
+        .from("contacts")
         .select("id")
         .eq("organization_id", organizationId)
         .ilike("first_name", parts.firstName)
@@ -896,8 +896,8 @@ export async function setConferencePersonCanonicalLink(params: {
         .eq("id", personId)
         .maybeSingle(),
       db
-        .from("people")
-        .select("id, first_name, last_name, primary_email, title")
+        .from("contacts")
+        .select("id, first_name, last_name, primary_email:work_email, title:role_title")
         .eq("id", canonicalPersonId)
         .maybeSingle(),
     ]);
@@ -955,7 +955,7 @@ export async function setConferencePersonCanonicalLink(params: {
 
   if (canonicalFieldsUpdated) {
     const { error: canonicalUpdateError } = await db
-      .from("people")
+      .from("contacts")
       .update(canonicalPatch)
       .eq("id", canonicalPersonId);
     if (canonicalUpdateError) {
