@@ -1,4 +1,5 @@
 import { createAdminClient } from "../supabase/admin";
+import { getProgramsConfig } from "../policy/engine";
 import type { BillingConfig } from "../policy/types";
 import type { Json } from "../database.types";
 import {
@@ -195,10 +196,22 @@ function parseBillingPricingConfig(policies: Record<string, unknown>) {
   };
 }
 
+/**
+ * Phase 4 Stage 2: the columns that `memberships` now owns. A configured
+ * metric key still *names* them under `organizations.` — the policy-facing
+ * metric vocabulary is deliberately unchanged (genericizing that vocabulary
+ * is separate, further-out work) — but the value is now read from the org's
+ * `memberships` row, which is the entity that actually holds these facts.
+ * Any OTHER `organizations.` field a policy might name (square_footage, …)
+ * still reads straight off `organizations`.
+ */
+const MEMBERSHIP_OWNED_ORG_FIELDS = new Set(["fte", "is_cancoll_member", "cancoll_tier"]);
+
 function extractMetric(
   metricKey: string,
   organizationRow: Record<string, unknown>,
-  benchmarkingRow: Record<string, unknown> | null
+  benchmarkingRow: Record<string, unknown> | null,
+  membershipRow: Record<string, unknown> | null
 ): { value: number | null; reason: FallbackReasonCode | null } {
   const [source, field] = metricKey.split(".");
   if (!source || !field) {
@@ -206,12 +219,20 @@ function extractMetric(
   }
 
   if (source === "organizations") {
-    const numeric = safeNumeric(organizationRow[field]);
+    // Fall back to `organizations` when the org has no matching membership
+    // row (an org type with no configured program, or a query that didn't
+    // embed one) — same fallback posture as resolveMembershipStatus.
+    const row =
+      MEMBERSHIP_OWNED_ORG_FIELDS.has(field) && membershipRow
+        ? membershipRow
+        : organizationRow;
+
+    const numeric = safeNumeric(row[field]);
     if (numeric === null) {
       return {
         value: null,
         reason:
-          organizationRow[field] === null || organizationRow[field] === undefined
+          row[field] === null || row[field] === undefined
             ? "metric_missing"
             : "metric_non_numeric",
       };
@@ -425,22 +446,40 @@ export async function computeMembershipAssessment(
   const policySetId = await resolvePolicySetId(options?.policySetId);
   const billingCycleYear = resolveBillingCycleYear(options);
 
-  const [policyValues, organizationRes, benchmarkingRes] = await Promise.all([
-    loadBillingPolicyValues(policySetId),
-    db.from("organizations").select("*").eq("id", organizationId).single(),
-    db
-      .from("benchmarking")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .order("fiscal_year", { ascending: false })
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const [policyValues, organizationRes, benchmarkingRes, membershipsRes, programs] =
+    await Promise.all([
+      loadBillingPolicyValues(policySetId),
+      db.from("organizations").select("*").eq("id", organizationId).single(),
+      db
+        .from("benchmarking")
+        .select("*")
+        .eq("organization_id", organizationId)
+        .order("fiscal_year", { ascending: false })
+        .order("created_at", { ascending: false })
+        .limit(1)
+        .maybeSingle(),
+      db.from("memberships").select("*").eq("organization_id", organizationId),
+      getProgramsConfig(),
+    ]);
 
   if (organizationRes.error || !organizationRes.data) {
     throw new Error(`Organization ${organizationId} not found`);
   }
+
+  // Phase 4 Stage 2: pick the membership row for the program this org's type
+  // maps to — the same type→program resolution used by permissions
+  // (resolveMembershipStatus) and by createProgramInvoice, so all three agree
+  // on which membership a given org is being assessed under. An org may hold
+  // more than one membership row by design; null here means "no matching row",
+  // and extractMetric then falls back to `organizations`.
+  const orgType = (organizationRes.data as unknown as Record<string, unknown>).type;
+  const programKey = programs.find((p) => p.orgTypeValue === orgType)?.key ?? null;
+  const membershipRow =
+    (programKey &&
+      (membershipsRes.data ?? []).find(
+        (m) => (m as unknown as Record<string, unknown>).program_key === programKey
+      )) ||
+    null;
 
   const config = parseBillingPricingConfig(policyValues);
 
@@ -479,7 +518,8 @@ export async function computeMembershipAssessment(
       const metricResult = extractMetric(
         config.metricKey,
         organizationRes.data as unknown as Record<string, unknown>,
-        (benchmarkingRes.data as unknown as Record<string, unknown> | null) ?? null
+        (benchmarkingRes.data as unknown as Record<string, unknown> | null) ?? null,
+        (membershipRow as unknown as Record<string, unknown> | null) ?? null
       );
 
       if (metricResult.value === null || metricResult.reason) {

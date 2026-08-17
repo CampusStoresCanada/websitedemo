@@ -172,7 +172,7 @@ export async function createProgramInvoice(
 
   const { data: org, error: orgError } = await db
     .from("organizations")
-    .select("id, name, type, province, country")
+    .select("id, name, type, province, country, memberships(program_key)")
     .eq("id", orgId)
     .single();
 
@@ -180,7 +180,20 @@ export async function createProgramInvoice(
     throw new Error(`Organization ${orgId} not found`);
   }
 
-  const program = programs.find((p) => p.orgTypeValue === org.type);
+  // Phase 4 Stage 2: resolve which program to invoice from the org's
+  // `memberships` row — the entity that now holds that fact — rather than
+  // from `organizations.type`. Falls back to the type lookup when the
+  // membership data can't answer it unambiguously (no row yet, or an org
+  // holding several memberships, which the schema permits but nothing in
+  // CSC's data produces today), so behavior is preserved either way.
+  const membershipPrograms = programs.filter((p) =>
+    (org.memberships ?? []).some((m) => m.program_key === p.key)
+  );
+  const program =
+    membershipPrograms.length === 1
+      ? membershipPrograms[0]
+      : programs.find((p) => p.orgTypeValue === org.type);
+
   if (!program) {
     throw new Error(`Organization ${orgId} has type "${org.type}", which matches no configured membership program`);
   }
