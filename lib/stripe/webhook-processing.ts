@@ -18,6 +18,7 @@ import {
   enqueueQBConferenceRefund,
   enqueueQBMiscReceipt,
 } from "@/lib/quickbooks/conference-export";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import type { Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 
@@ -422,6 +423,17 @@ async function handleCheckoutSessionCompleted(
   const paymentIntentId = extractStringField(raw, "payment_intent");
 
   if (checkoutKind === "conference" && conferenceOrderId) {
+    // Read the pre-payment status: a buyer can take longer than the 60-minute
+    // pending window and still complete a real payment. The RPC revives such
+    // an order rather than fulfilling it behind a 'canceled' status, but a
+    // human should know it happened — whatever it holds may have been offered
+    // to someone else during the gap.
+    const { data: priorOrder } = await db
+      .from("conference_orders")
+      .select("status, expires_at")
+      .eq("id", conferenceOrderId)
+      .maybeSingle();
+
     const { error: conferenceOrderError } = await db.rpc("process_conference_order_paid", {
       p_order_id: conferenceOrderId,
       p_checkout_session_id: session.id,
@@ -432,6 +444,21 @@ async function handleCheckoutSessionCompleted(
       throw new Error(
         `Failed to mark conference order as paid (${conferenceOrderId}): ${conferenceOrderError.message}`
       );
+    }
+
+    if (priorOrder?.status === "canceled") {
+      await raiseAlertIfNotOpen({
+        ruleKey: `conference_order_paid_after_expiry:${conferenceOrderId}`,
+        severity: "warning",
+        message:
+          `Conference order ${conferenceOrderId} was paid after its checkout window expired ` +
+          `(${priorOrder.expires_at}) and has been revived to paid. Confirm nothing it holds was resold in the gap.`,
+        details: {
+          conferenceOrderId,
+          expiresAt: priorOrder.expires_at,
+          checkoutSessionId: session.id,
+        },
+      });
     }
 
     await enqueueQBConferenceReceipt(conferenceOrderId);

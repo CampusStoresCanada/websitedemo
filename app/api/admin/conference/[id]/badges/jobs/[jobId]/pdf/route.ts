@@ -441,8 +441,8 @@ export async function GET(
   }
   if (personIds.length > 0) {
     const { data: peopleIdentityRows } = await db
-      .from("people")
-      .select("id, first_name, last_name, primary_email, title")
+      .from("contacts")
+      .select("id, first_name, last_name, primary_email:work_email, title:role_title")
       .in("id", personIds);
     for (const row of (peopleIdentityRows as CanonicalPersonRow[] | null) ?? []) {
       canonicalPersonById.set(row.id, row);

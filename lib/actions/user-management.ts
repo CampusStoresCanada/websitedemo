@@ -7,13 +7,16 @@ import {
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueCircleSync } from "@/lib/circle/sync";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import {
-  ensureKnownPerson,
-  ensurePersonForUser,
-  linkUserToPerson,
-  upsertPersonContact,
-} from "@/lib/identity/lifecycle";
 import { sendTransactional } from "@/lib/comms/send";
+import {
+  loginSkipReason,
+  LOGIN_SKIP_MESSAGES,
+  type LoginSkipReason,
+} from "@/lib/contacts/login-policy";
+import {
+  provisionOrgLogin,
+  type ProvisionOrgLoginResult,
+} from "@/lib/identity/org-login";
 import { findUserByEmail } from "../supabase/user-lookup";
 
 // ─────────────────────────────────────────────────────────────────
@@ -28,204 +31,24 @@ import { findUserByEmail } from "../supabase/user-lookup";
  * - If they don't have an account, we create one via
  *   `auth.admin.inviteUserByEmail` which sends a magic-link invite.
  *
+ * The work itself lives in provisionOrgLogin, shared with addContact so that
+ * adding a person and giving them a login are one operation rather than two
+ * that can silently drift apart.
+ *
  * Guard: caller must be org_admin of this org, or global admin/super_admin.
  */
 export async function inviteOrgUser(
   orgId: string,
   email: string,
   role: "member" | "org_admin"
-): Promise<{ success: boolean; error?: string }> {
-  // --- Auth ---
+): Promise<ProvisionOrgLoginResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
   if (!canManageOrganization(auth.ctx, orgId)) {
     return { success: false, error: "Not authorized for this organization" };
   }
 
-  const adminClient = createAdminClient();
-  const normalizedEmail = email.trim().toLowerCase();
-
-  try {
-    const { data: orgRow } = await adminClient
-      .from("organizations")
-      .select("id, name, tenant_id, circle_tag_id")
-      .eq("id", orgId)
-      .maybeSingle();
-
-    if (!orgRow) {
-      return { success: false, error: "Organization not found" };
-    }
-
-    // Prefer an already-known real name over the raw email. A contact for
-    // this email/org often already exists — e.g. an admin registering a
-    // known person (by name) for a conference, which invites them under the
-    // hood via resolveAssigneeForEmail() below. Passing the email as `name`
-    // unconditionally used to overwrite that person's real contact name
-    // with their email address on every invite, a confirmed real bug —
-    // ensureKnownPerson's own existing-person match doesn't touch the name
-    // field, but upsertPersonContact's existing-contact match does, and a
-    // non-empty `name` here always wins over the record's real one.
-    const { data: existingContact } = await adminClient
-      .from("contacts")
-      .select("name")
-      .eq("organization_id", orgId)
-      .or(`work_email.eq.${normalizedEmail},email.eq.${normalizedEmail}`)
-      .limit(1)
-      .maybeSingle();
-    const knownName = existingContact?.name?.trim() || normalizedEmail;
-
-    const knownPerson = await ensureKnownPerson({
-      organizationId: orgId,
-      tenantId: orgRow.tenant_id,
-      name: knownName,
-      email: normalizedEmail,
-    });
-    if (knownPerson.personId) {
-      await upsertPersonContact({
-        organizationId: orgId,
-        personId: knownPerson.personId,
-        name: knownName,
-        email: normalizedEmail,
-        contactType: ["directory"],
-      });
-    }
-
-    // Check if a user with this email already exists in auth
-    const existingUser = await findUserByEmail(adminClient, normalizedEmail);
-
-    let userId: string;
-
-    if (existingUser) {
-      userId = existingUser.id;
-      const ensuredPerson = await ensurePersonForUser({
-        userId,
-        organizationId: orgId,
-        fallbackEmail: normalizedEmail,
-      });
-      if (!ensuredPerson.personId && knownPerson.personId) {
-        await linkUserToPerson({ userId, personId: knownPerson.personId });
-      }
-
-      // Check if they're already a member of this org
-      const { data: existingMembership } = await adminClient
-        .from("user_organizations")
-        .select("id, status")
-        .eq("user_id", userId)
-        .eq("organization_id", orgId)
-        .maybeSingle();
-
-      if (existingMembership) {
-        if (existingMembership.status === "active") {
-          return {
-            success: false,
-            error: "User is already an active member of this organization",
-          };
-        }
-        // Reactivate if inactive
-        const { error: updateErr } = await adminClient
-          .from("user_organizations")
-          .update({ status: "active", role, updated_at: new Date().toISOString() })
-          .eq("id", existingMembership.id);
-
-        if (updateErr) {
-          console.error("[inviteOrgUser] Reactivation failed:", updateErr);
-          return { success: false, error: "Failed to reactivate user membership" };
-        }
-
-        sendTransactional({
-          templateKey: "org_user_added_to_org",
-          to: normalizedEmail,
-          variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
-        }).catch(() => {});
-        return { success: true };
-      }
-    } else {
-      // Create a new auth user via invite (sends magic-link email)
-      const { data: inviteData, error: inviteErr } =
-        await adminClient.auth.admin.inviteUserByEmail(normalizedEmail);
-
-      if (inviteErr || !inviteData.user) {
-        console.error("[inviteOrgUser] Invite failed:", inviteErr);
-        return {
-          success: false,
-          error: inviteErr?.message ?? "Failed to send invite",
-        };
-      }
-
-      userId = inviteData.user.id;
-
-      // Create profile row if it doesn't exist
-      const { error: profileErr } = await adminClient
-        .from("profiles")
-        .upsert(
-          {
-            id: userId,
-            global_role: "user",
-          },
-          { onConflict: "id" }
-        );
-
-      if (profileErr) {
-        console.error("[inviteOrgUser] Profile creation failed:", profileErr);
-        // Non-fatal: the profile trigger may handle this
-      }
-
-      const ensuredPerson = await ensurePersonForUser({
-        userId,
-        organizationId: orgId,
-        fallbackEmail: normalizedEmail,
-      });
-      if (!ensuredPerson.personId && knownPerson.personId) {
-        await linkUserToPerson({ userId, personId: knownPerson.personId });
-      }
-    }
-
-    // Create user_organizations row
-    const { error: orgErr } = await adminClient
-      .from("user_organizations")
-      .insert({
-        user_id: userId,
-        organization_id: orgId,
-        role,
-        status: "active",
-      });
-
-    if (orgErr) {
-      console.error("[inviteOrgUser] user_organizations insert failed:", orgErr);
-      return {
-        success: false,
-        error: orgErr.message.includes("duplicate")
-          ? "User is already a member of this organization"
-          : "Failed to add user to organization",
-      };
-    }
-
-    // Circle sync: tag the new user with their org's tag
-    if (orgRow.circle_tag_id) {
-      await enqueueCircleSync({
-        operation: "add_tag",
-        entityType: "contact",
-        entityId: userId,
-        payload: { tagId: Number(orgRow.circle_tag_id), email: normalizedEmail },
-        orgId,
-        idempotencyKey: `invite-tag:${userId}:${orgRow.circle_tag_id}`,
-      });
-    }
-
-    sendTransactional({
-      templateKey: "org_user_added_to_org",
-      to: normalizedEmail,
-      variables: { user_name: normalizedEmail, org_name: orgRow.name ?? orgId, role },
-    }).catch(() => {});
-
-    return { success: true };
-  } catch (err) {
-    console.error("[inviteOrgUser] Unexpected error:", err);
-    return {
-      success: false,
-      error: err instanceof Error ? err.message : "Unknown error",
-    };
-  }
+  return provisionOrgLogin({ orgId, email, role, syncIdentity: true });
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -650,6 +473,306 @@ export async function setContactHidden(
   });
 
   return { success: true };
+}
+
+// ---------------------------------------------------------------------------
+// Invite an existing contact
+// ---------------------------------------------------------------------------
+
+/**
+ * Provision a login for a contact who already exists in the directory.
+ *
+ * Distinct from inviteOrgUser: that one takes a bare email and builds the
+ * person/contact records around it, which overwrites title and phone with
+ * nulls. Here the contact is the source of truth and already has those
+ * fields, so the identity sync is skipped.
+ *
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function inviteExistingContact(
+  orgId: string,
+  contactId: string,
+  role: "member" | "org_admin"
+): Promise<ProvisionOrgLoginResult> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const resolved = await resolveContactForLogin(orgId, contactId);
+  if ("error" in resolved) return { success: false, error: resolved.error };
+
+  return provisionOrgLogin({
+    orgId,
+    email: resolved.email,
+    role,
+    syncIdentity: false,
+    personId: resolved.personId,
+  });
+}
+
+/**
+ * Shared lookup: a contact's login email, its person projection, and whether
+ * the login policy allows provisioning at all. Callers must authorize first.
+ */
+async function resolveContactForLogin(
+  orgId: string,
+  contactId: string
+): Promise<{ email: string; personId: string | null } | { error: string }> {
+  const adminClient = createAdminClient();
+
+  const [{ data: contact }, { data: org }] = await Promise.all([
+    adminClient
+      .from("contacts")
+      .select("email, work_email, contact_type")
+      .eq("id", contactId)
+      .eq("organization_id", orgId)
+      .maybeSingle(),
+    adminClient
+      .from("organizations")
+      .select("membership_status")
+      .eq("id", orgId)
+      .maybeSingle(),
+  ]);
+
+  if (!contact) return { error: "Contact not found" };
+
+  const email = (contact.work_email ?? contact.email ?? "").trim();
+  const skip = loginSkipReason({
+    email,
+    contactType: contact.contact_type,
+    membershipStatus: org?.membership_status ?? null,
+  });
+  if (skip) {
+    return { error: `Can't create a login — ${LOGIN_SKIP_MESSAGES[skip]}.` };
+  }
+
+  // `people` is retired — the contact IS the person record now, so its own
+  // id is the person id. No second lookup, no email re-match.
+  return { email, personId: contactId };
+}
+
+// ---------------------------------------------------------------------------
+// Grant / revoke org admin, addressed by contact
+// ---------------------------------------------------------------------------
+
+export type SetContactAdminOutcome =
+  | "granted"
+  | "invited_as_admin"
+  | "revoked"
+  | "no_change";
+
+/**
+ * Make a contact an org admin, or step them back down to member.
+ *
+ * Addressed by contact rather than user id because the org profile's people
+ * table is a list of contacts — some of whom have no account yet. Granting
+ * admin to one of those provisions the login and sends the invite in the same
+ * pass, so "make this person an admin" is one action from the admin's side
+ * regardless of whether they had an account.
+ *
+ * Revoking is guarded against removing the last admin. This is deliberately
+ * NOT the handover ceremony: adding or removing a co-admin leaves the org
+ * with an admin either way, so it needs no successor timeout. Handing over
+ * sole control still goes through initiateAdminTransfer.
+ *
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function setContactOrgAdmin(
+  orgId: string,
+  contactId: string,
+  makeAdmin: boolean
+): Promise<{ success: boolean; error?: string; outcome?: SetContactAdminOutcome }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const adminClient = createAdminClient();
+
+  try {
+    const resolved = await resolveContactForLogin(orgId, contactId);
+
+    // Revoking from someone who can't hold a login is already the desired
+    // state — only report the policy problem when trying to grant.
+    if ("error" in resolved) {
+      return makeAdmin
+        ? { success: false, error: resolved.error }
+        : { success: true, outcome: "no_change" };
+    }
+
+    const existingUser = await findUserByEmail(adminClient, resolved.email);
+
+    if (!existingUser) {
+      if (!makeAdmin) return { success: true, outcome: "no_change" };
+
+      const provisioned = await provisionOrgLogin({
+        orgId,
+        email: resolved.email,
+        role: "org_admin",
+        syncIdentity: false,
+        personId: resolved.personId,
+      });
+      return provisioned.success
+        ? { success: true, outcome: "invited_as_admin" }
+        : { success: false, error: provisioned.error };
+    }
+
+    const { data: membership } = await adminClient
+      .from("user_organizations")
+      .select("id, role, status")
+      .eq("user_id", existingUser.id)
+      .eq("organization_id", orgId)
+      .maybeSingle();
+
+    // Has an account but isn't an active member here — provisionOrgLogin
+    // covers both "no membership" and "inactive membership" and sets the role.
+    if (!membership || membership.status !== "active") {
+      if (!makeAdmin) return { success: true, outcome: "no_change" };
+
+      const provisioned = await provisionOrgLogin({
+        orgId,
+        email: resolved.email,
+        role: "org_admin",
+        syncIdentity: false,
+        personId: resolved.personId,
+      });
+      return provisioned.success
+        ? { success: true, outcome: "granted" }
+        : { success: false, error: provisioned.error };
+    }
+
+    const targetRole = makeAdmin ? "org_admin" : "member";
+    if (membership.role === targetRole) {
+      return { success: true, outcome: "no_change" };
+    }
+
+    // changeOrgUserRole owns the last-admin guard, the audit entry, and the
+    // notification email — don't reimplement any of it here.
+    const result = await changeOrgUserRole(orgId, existingUser.id, targetRole);
+    if (!result.success) {
+      return { success: false, error: result.error };
+    }
+
+    return { success: true, outcome: makeAdmin ? "granted" : "revoked" };
+  } catch (err) {
+    console.error("[setContactOrgAdmin] Failed:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Could not update admin access",
+    };
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Login status for a single contact
+// ---------------------------------------------------------------------------
+
+export interface ContactLoginStatus {
+  email: string | null;
+  /** An auth account exists for this contact's email. */
+  hasAccount: boolean;
+  /** Their membership row in THIS org, if any. */
+  membership: { role: "member" | "org_admin"; status: string } | null;
+  /** True once they have actually signed in — distinguishes a live account
+   *  from an invite that was sent and never accepted. */
+  hasSignedIn: boolean;
+  /** Null when they qualify for a login; otherwise why they don't. */
+  skipReason: LoginSkipReason | null;
+}
+
+/**
+ * Report whether a contact has a working login, for the contact editor.
+ *
+ * Exists because a contact row and a login are separate records: a contact
+ * can sit in the directory looking perfectly normal while having no account
+ * at all. The editor surfaces this so an admin can see and fix it in place,
+ * rather than discovering it when the person says they never got in.
+ *
+ * Guard: caller must be org_admin of this org, or global admin/super_admin.
+ */
+export async function getContactLoginStatus(
+  orgId: string,
+  contactId: string
+): Promise<{ success: boolean; error?: string; status?: ContactLoginStatus }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, orgId)) {
+    return { success: false, error: "Not authorized for this organization" };
+  }
+
+  const adminClient = createAdminClient();
+
+  try {
+    const [{ data: contact }, { data: org }] = await Promise.all([
+      adminClient
+        .from("contacts")
+        .select("email, work_email, contact_type")
+        .eq("id", contactId)
+        .eq("organization_id", orgId)
+        .maybeSingle(),
+      adminClient
+        .from("organizations")
+        .select("membership_status")
+        .eq("id", orgId)
+        .maybeSingle(),
+    ]);
+
+    if (!contact) return { success: false, error: "Contact not found" };
+
+    const email = (contact.work_email ?? contact.email ?? "").trim() || null;
+    const skipReason = loginSkipReason({
+      email,
+      contactType: contact.contact_type,
+      membershipStatus: org?.membership_status ?? null,
+    });
+
+    if (!email) {
+      return {
+        success: true,
+        status: { email: null, hasAccount: false, membership: null, hasSignedIn: false, skipReason },
+      };
+    }
+
+    const user = await findUserByEmail(adminClient, email);
+    if (!user) {
+      return {
+        success: true,
+        status: { email, hasAccount: false, membership: null, hasSignedIn: false, skipReason },
+      };
+    }
+
+    const [{ data: membership }, { data: userRes }] = await Promise.all([
+      adminClient
+        .from("user_organizations")
+        .select("role, status")
+        .eq("user_id", user.id)
+        .eq("organization_id", orgId)
+        .maybeSingle(),
+      adminClient.auth.admin.getUserById(user.id),
+    ]);
+
+    return {
+      success: true,
+      status: {
+        email,
+        hasAccount: true,
+        membership: membership
+          ? { role: membership.role as "member" | "org_admin", status: membership.status }
+          : null,
+        hasSignedIn: !!userRes?.user?.last_sign_in_at,
+        skipReason,
+      },
+    };
+  } catch (err) {
+    console.error("[getContactLoginStatus] Failed:", err);
+    return {
+      success: false,
+      error: err instanceof Error ? err.message : "Could not check login status",
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------

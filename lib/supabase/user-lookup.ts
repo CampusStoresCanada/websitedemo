@@ -3,44 +3,66 @@ import type { createAdminClient } from "@/lib/supabase/admin";
 type AdminClient = ReturnType<typeof createAdminClient>;
 
 /**
- * supabase.auth.admin.listUsers() defaults to a 50-user page — an unpaginated
- * call against this project's 751 auth users silently checks only the first
- * page, so real existing users beyond it look "not found." Paginates until a
- * short page confirms the end.
+ * Both lookups below query auth.users directly through a SECURITY DEFINER
+ * function rather than walking auth.admin.listUsers() pages.
+ *
+ * listUsers() cannot be paginated safely on this project. GoTrue pages it with
+ * ORDER BY created_at DESC + LIMIT/OFFSET, and 563 of our 767 auth users share
+ * one identical created_at (2026-02-05 20:36:24.389964+00, from a bulk import).
+ * That sort is ambiguous across the tie, so each page request may order the
+ * tied rows differently — pages overlap and some rows land on no page at all.
+ * Replaying the 4-page walk returned 767 rows but only 597 distinct users,
+ * leaving 170 users permanently invisible. Adding pages cannot fix it; the
+ * sort key itself is not unique. See migration 20260817160000.
+ */
+
+/**
+ * Resolve an account id by email.
+ *
+ * Returns null only when the account genuinely does not exist. Throws if the
+ * lookup could not be completed — callers use this to decide whether to
+ * provision a new account, and the old "return null on error" behaviour meant
+ * a failed lookup was indistinguishable from "no such user", which is what
+ * sent existing members down the create-account path and into a 422.
  */
 export async function findUserByEmail(supabase: AdminClient, email: string): Promise<{ id: string } | null> {
-  const target = email.toLowerCase();
-  const perPage = 200;
-  for (let page = 1; ; page++) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error || !data?.users?.length) return null;
-    const match = data.users.find((u) => u.email?.toLowerCase() === target);
-    if (match) return { id: match.id };
-    if (data.users.length < perPage) return null; // last page
+  const target = email.trim().toLowerCase();
+  if (!target) return null;
+
+  const { data, error } = await supabase.rpc("get_users_by_emails", { p_emails: [target] });
+  if (error) {
+    console.error("[findUserByEmail] lookup failed:", error);
+    throw new Error(`Could not look up account for ${email}: ${error.message}`);
   }
+  const match = (data ?? [])[0];
+  return match ? { id: match.id } : null;
 }
 
 /**
- * Resolve emails for a known set of user ids — same pagination problem as
- * findUserByEmail, but keyed the other direction (id -> email) for the
- * common "I have profile/membership rows with user ids, I need their
- * emails to notify/display them" case. Stops early once every id has been
- * found rather than always walking the full user table.
+ * Resolve emails for a known set of user ids — the common "I have
+ * profile/membership rows with user ids, I need their emails to notify or
+ * display them" case.
+ *
+ * Unlike findUserByEmail this does not throw: every caller is a display or
+ * notification path where one unresolvable id should not take down a page or
+ * abort a whole batch of sends. It returns whatever it resolved.
  */
 export async function lookupUserEmailsByIds(
   supabase: AdminClient,
   userIds: string[]
 ): Promise<Record<string, string>> {
-  const wanted = new Set(userIds);
+  const unique = [...new Set(userIds)].filter(Boolean);
+  if (unique.length === 0) return {};
+
+  const { data, error } = await supabase.rpc("lookup_auth_user_emails", { p_user_ids: unique });
+  if (error) {
+    console.error("[lookupUserEmailsByIds] lookup failed:", error);
+    return {};
+  }
+
   const emailMap: Record<string, string> = {};
-  const perPage = 200;
-  for (let page = 1; wanted.size > Object.keys(emailMap).length; page++) {
-    const { data, error } = await supabase.auth.admin.listUsers({ page, perPage });
-    if (error || !data?.users?.length) break;
-    for (const u of data.users) {
-      if (wanted.has(u.id) && u.email) emailMap[u.id] = u.email;
-    }
-    if (data.users.length < perPage) break; // last page
+  for (const row of (data ?? []) as Array<{ id: string; email: string }>) {
+    if (row.email) emailMap[row.id] = row.email;
   }
   return emailMap;
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useRef } from "react";
+import { useVisiblePolling } from "@/hooks/useVisiblePolling";
 import Link from "next/link";
 import Image from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
@@ -17,10 +18,20 @@ const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   partner: { label: "Partner", color: "bg-cyan-100 text-cyan-700" },
 };
 
-// Server-side responses for these are cached ~30s (see the respective
-// app/api/circle/* and app/api/alerts route handlers) — 90s keeps client
-// call volume down without the badges feeling stale.
-const BADGE_POLL_INTERVAL_MS = 90_000;
+// Circle bills per API call, so these are direct cost levers.
+//
+// useVisiblePolling only ticks while the tab is visible, so BADGE_POLL_INTERVAL_MS
+// is the refresh rate for someone actively looking at the page — not a background
+// drip. Keep it >= the server-side summary cache TTL in
+// app/api/circle/notifications (see CIRCLE_SUMMARY_CACHE_TTL_MS) so a second tab
+// or a tab-refocus collapses onto the cached payload instead of billing another
+// upstream call.
+//
+// Quiet cycles then decay the cadence 5m → 10m → 20m → 30m. New data, refocusing
+// the tab, or any click/keypress snaps it straight back to 5m, so this only ever
+// slows down for someone who isn't there.
+const BADGE_POLL_INTERVAL_MS = 300_000;
+const BADGE_IDLE_MAX_INTERVAL_MS = 1_800_000;
 
 type ActiveConference = { year: string; edition: string } | null;
 type WebsiteAlert = {
@@ -313,68 +324,29 @@ export default function Header({ identity }: { identity: PlatformIdentity }) {
     };
   }, [user, showCart, cartOrgId, conferenceContext.year, conferenceContext.edition]);
 
-  useEffect(() => {
-    if (!user) return;
+  // NOTE: there is deliberately no separate /api/circle/dm?summary=true poll.
+  // The notifications summary below already returns `dms` and `dmUnreadCount`
+  // from the same listChatRooms() call, so polling the DM route too was
+  // duplicating a billed Circle call every cycle for identical data.
+  const circleUnsupportedRef = useRef(false);
+  const circleSignatureRef = useRef<string | null>(null);
+  const alertsSignatureRef = useRef<string | null>(null);
 
-    let cancelled = false;
-
-    const loadCircleSummary = async () => {
-      try {
-        const response = await fetch("/api/circle/dm?summary=true", { cache: "no-store" });
-        if (!response.ok) return;
-        const data = (await response.json()) as { chatRooms?: Array<Record<string, unknown>> };
-        const rooms = Array.isArray(data.chatRooms) ? data.chatRooms : [];
-
-        const count = rooms.reduce((sum, room) => {
-          const candidate =
-            (room.unread_count as number | undefined) ??
-            (room.unread_messages_count as number | undefined) ??
-            (room.unseen_messages_count as number | undefined) ??
-            0;
-          return sum + (typeof candidate === "number" ? candidate : 0);
-        }, 0);
-
-        if (!cancelled) {
-          setDmUnreadCount(count);
-        }
-      } catch {
-        if (!cancelled) setDmUnreadCount(0);
-      }
-    };
-
-    void loadCircleSummary();
-
-    const intervalId = window.setInterval(() => {
-      void loadCircleSummary();
-    }, BADGE_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    let cancelled = false;
-    let unsupported = false;
-
-    const loadCircleAlertSummary = async () => {
-      if (unsupported) return;
+  useVisiblePolling(
+    async (signal) => {
+      if (circleUnsupportedRef.current) return false;
       try {
         const response = await fetch("/api/circle/notifications?summary=true", {
           cache: "no-store",
+          signal,
         });
         if (response.status === 404) {
-          unsupported = true;
-          if (!cancelled) {
-            setCircleNotifications([]);
-            setCircleReplies([]);
-          }
-          return;
+          circleUnsupportedRef.current = true;
+          setCircleNotifications([]);
+          setCircleReplies([]);
+          return false;
         }
-        if (!response.ok) return;
+        if (!response.ok) return false;
 
         const data = (await response.json()) as {
           notifications?: CircleAlertItem[];
@@ -382,62 +354,70 @@ export default function Header({ identity }: { identity: PlatformIdentity }) {
           dms?: CircleDmItem[];
           dmUnreadCount?: number;
         };
-        if (cancelled) return;
-        setCircleNotifications(Array.isArray(data.notifications) ? data.notifications : []);
-        setCircleReplies(Array.isArray(data.replies) ? data.replies : []);
-        setCircleDms(Array.isArray(data.dms) ? data.dms : []);
-        if (typeof data.dmUnreadCount === "number") setDmUnreadCount(data.dmUnreadCount);
+        if (signal.aborted) return false;
+
+        const notifications = Array.isArray(data.notifications) ? data.notifications : [];
+        const replies = Array.isArray(data.replies) ? data.replies : [];
+        const dms = Array.isArray(data.dms) ? data.dms : [];
+
+        setCircleNotifications(notifications);
+        setCircleReplies(replies);
+        setCircleDms(dms);
+        setDmUnreadCount(typeof data.dmUnreadCount === "number" ? data.dmUnreadCount : 0);
+
+        // Feed the idle backoff: identical payloads mean nothing is happening
+        // in Circle, so there's no reason to keep asking at full rate.
+        const signature = JSON.stringify([
+          notifications.map((i) => [i.id, i.isRead]),
+          replies.map((i) => [i.id, i.isRead]),
+          dms.map((d) => [d.uuid, d.unreadCount]),
+          data.dmUnreadCount ?? 0,
+        ]);
+        const first = circleSignatureRef.current === null;
+        const changed = !first && circleSignatureRef.current !== signature;
+        circleSignatureRef.current = signature;
+        // Hold base cadence for one more cycle after a fresh page load — the
+        // user just arrived, so they're presumably still here.
+        return first || changed;
       } catch {
-        if (!cancelled) {
-          setCircleNotifications([]);
-          setCircleReplies([]);
-        }
+        if (signal.aborted) return false;
+        setCircleNotifications([]);
+        setCircleReplies([]);
+        return false;
       }
-    };
+    },
+    { intervalMs: BADGE_POLL_INTERVAL_MS, maxIntervalMs: BADGE_IDLE_MAX_INTERVAL_MS },
+    Boolean(user)
+  );
 
-    void loadCircleAlertSummary();
-    const intervalId = window.setInterval(() => {
-      void loadCircleAlertSummary();
-    }, BADGE_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [user]);
-
-  useEffect(() => {
-    if (!user) return;
-
-    let cancelled = false;
-
-    const loadWebsiteAlerts = async () => {
+  useVisiblePolling(
+    async (signal) => {
       try {
-        const response = await fetch("/api/alerts", { cache: "no-store" });
-        if (!response.ok) return;
+        const response = await fetch("/api/alerts", { cache: "no-store", signal });
+        if (!response.ok) return false;
         const data = (await response.json()) as { items?: WebsiteAlert[]; total?: number; unreadCount?: number };
-        if (cancelled) return;
+        if (signal.aborted) return false;
         const items = Array.isArray(data.items) ? data.items : [];
         setWebsiteAlerts(items);
-        setWebsiteAlertCount(typeof data.unreadCount === "number" ? data.unreadCount : items.filter(i => !i.isRead).length);
+        const unread =
+          typeof data.unreadCount === "number" ? data.unreadCount : items.filter(i => !i.isRead).length;
+        setWebsiteAlertCount(unread);
+
+        const signature = JSON.stringify([items.map((i) => [i.id, i.isRead]), unread]);
+        const first = alertsSignatureRef.current === null;
+        const changed = !first && alertsSignatureRef.current !== signature;
+        alertsSignatureRef.current = signature;
+        return first || changed;
       } catch {
-        if (!cancelled) {
-          setWebsiteAlerts([]);
-          setWebsiteAlertCount(0);
-        }
+        if (signal.aborted) return false;
+        setWebsiteAlerts([]);
+        setWebsiteAlertCount(0);
+        return false;
       }
-    };
-
-    void loadWebsiteAlerts();
-    const intervalId = window.setInterval(() => {
-      void loadWebsiteAlerts();
-    }, BADGE_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(intervalId);
-    };
-  }, [user]);
+    },
+    { intervalMs: BADGE_POLL_INTERVAL_MS, maxIntervalMs: BADGE_IDLE_MAX_INTERVAL_MS },
+    Boolean(user)
+  );
 
   useEffect(() => {
     const handleOutsideClick = (event: MouseEvent) => {

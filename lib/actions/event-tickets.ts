@@ -11,6 +11,7 @@
 import { requireAuthenticated, getOptionalAuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
+import { resolveEventTicketStripeTaxRateId } from "@/lib/stripe/tax";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { sendTransactional } from "@/lib/comms/send";
 import { addAttendeeToCalendarEvent } from "@/lib/google/calendar";
@@ -297,10 +298,32 @@ export async function createEventCheckoutSession(
       { onConflict: "event_id,user_id" }
     );
 
+  // Tax at the same rate the QuickBooks receipt for this sale will use — the
+  // buyer's own org province, or the flat public-ticket rate when they have
+  // no org. This line carried no tax_rates at all until 2026-08-17, so Stripe
+  // collected nothing while QBO booked tax on it.
+  const { data: buyerOrgLink } = await adminClient
+    .from("user_organizations")
+    .select("organization_id")
+    .eq("user_id", userId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  const { data: buyerOrg } = buyerOrgLink?.organization_id
+    ? await adminClient
+        .from("organizations")
+        .select("name, province")
+        .eq("id", buyerOrgLink.organization_id)
+        .maybeSingle()
+    : { data: null };
+
+  const ticketTaxRateId = await resolveEventTicketStripeTaxRateId(adminClient, buyerOrg);
+
   // Stripe Checkout Session
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    line_items: [{ price: stripePriceId, quantity: 1 }],
+    line_items: [{ price: stripePriceId, quantity: 1, tax_rates: [ticketTaxRateId] }],
     customer_email: auth.ctx.userEmail ?? undefined,
     metadata: {
       source: "event_ticket",
@@ -403,10 +426,20 @@ export async function orgAdminBulkCheckout(
       .eq("id", ticketTypeId);
   }
 
+  // Bulk purchase is always org-admin driven, so the buying org is known
+  // outright — no user_organizations lookup needed, unlike the single path.
+  const { data: buyerOrg } = await adminClient
+    .from("organizations")
+    .select("name, province")
+    .eq("id", orgId)
+    .maybeSingle();
+
+  const ticketTaxRateId = await resolveEventTicketStripeTaxRateId(adminClient, buyerOrg);
+
   // Create Stripe Checkout for N tickets
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
-    line_items: [{ price: stripePriceId, quantity: eligible.length }],
+    line_items: [{ price: stripePriceId, quantity: eligible.length, tax_rates: [ticketTaxRateId] }],
     customer_email: auth.ctx.userEmail ?? undefined,
     metadata: {
       source: "event_ticket_bulk",

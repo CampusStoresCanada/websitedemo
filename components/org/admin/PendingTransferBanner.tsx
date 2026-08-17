@@ -94,7 +94,7 @@ export function PendingTransferBanner({
         </div>
 
         <Link
-          href={`/org/${orgSlug}/admin/transfer`}
+          href={`/org/${orgSlug}`}
           className="text-xs text-amber-700 hover:text-amber-900 underline whitespace-nowrap"
         >
           View details

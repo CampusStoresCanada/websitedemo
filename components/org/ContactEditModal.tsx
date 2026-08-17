@@ -1,14 +1,20 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { updateField } from "@/lib/actions/update-field";
 import { addContact } from "@/lib/actions/add-contact";
 import { updateContactTags } from "@/lib/actions/update-contact-tags";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
+import {
+  getContactLoginStatus,
+  inviteExistingContact,
+  type ContactLoginStatus,
+} from "@/lib/actions/user-management";
 import type { VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
-import { CONTACT_TAGS } from "@/lib/contacts/tags";
+import { CONTACT_TAGS, hasNonMemberTag } from "@/lib/contacts/tags";
+import { LOGIN_SKIP_MESSAGES } from "@/lib/contacts/login-policy";
 
 interface ContactEditModalProps {
   /** null = create-mode: same form, empty defaults, inserts instead of updating. */
@@ -87,6 +93,59 @@ export default function ContactEditModal({
     return map;
   });
 
+  // ── Login state ────────────────────────────────────────────────────────────
+  // Adding a person and giving them a login are one action, not two. Create-
+  // mode invites by default; the checkbox is for the exceptions.
+  const [sendInvite, setSendInvite] = useState(true);
+  const [inviteRole, setInviteRole] = useState<"member" | "org_admin">("member");
+  const [loginStatus, setLoginStatus] = useState<ContactLoginStatus | null>(null);
+  const [loginLoading, setLoginLoading] = useState(!isCreate);
+  const [inviting, setInviting] = useState(false);
+  const [inviteNotice, setInviteNotice] = useState<string | null>(null);
+
+  const trimmedEmail = fields.work_email.trim();
+  // Mirrors the server-side gate in lib/contacts/login-policy.ts. The org's
+  // membership status is only known server-side, so that case comes back in
+  // the result rather than being predicted here.
+  const tagsBlockLogin = hasNonMemberTag([...selectedTags]);
+  const canInvite = trimmedEmail.length > 0 && !tagsBlockLogin;
+
+  useEffect(() => {
+    if (isCreate || !contact) return;
+    let cancelled = false;
+    void getContactLoginStatus(organizationId, contact.id).then((result) => {
+      if (cancelled) return;
+      setLoginStatus(result.status ?? null);
+      setLoginLoading(false);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isCreate, contact, organizationId]);
+
+  async function handleSendInvite() {
+    if (!contact || !loginStatus?.email) return;
+    setInviting(true);
+    setInviteNotice(null);
+
+    const result = await inviteExistingContact(organizationId, contact.id, inviteRole);
+
+    if (!result.success && result.outcome !== "already_member") {
+      setInviteNotice(result.error ?? "Failed to send the invite.");
+      setInviting(false);
+      return;
+    }
+
+    const refreshed = await getContactLoginStatus(organizationId, contact.id);
+    setLoginStatus(refreshed.status ?? null);
+    setInviteNotice(
+      result.outcome === "already_member"
+        ? "They already had access to this organization."
+        : `Invite sent to ${loginStatus.email}.`
+    );
+    setInviting(false);
+  }
+
   // ── Shared state ───────────────────────────────────────────────────────────
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -110,6 +169,8 @@ export default function ContactEditModal({
         roleTitle: fields.role_title.trim() || undefined,
         workPhoneNumber: fields.work_phone_number.trim() || undefined,
         tags: selectedTags.size > 0 ? [...selectedTags] : undefined,
+        invite: sendInvite && canInvite,
+        inviteRole,
       });
       setSaving(false);
       if (!result.success || !result.contactId) {
@@ -119,6 +180,25 @@ export default function ContactEditModal({
       window.dispatchEvent(
         new CustomEvent("csc:field-updated", { detail: { table: "contacts", column: "name", entityId: result.contactId } })
       );
+
+      // The contact exists either way. If we asked for a login and didn't get
+      // one, stay open and say so — silently closing is how this went unnoticed
+      // in the first place.
+      if (sendInvite && canInvite && result.invite.status !== "sent") {
+        if (result.invite.status === "failed") {
+          setError(`Contact added, but the invite failed: ${result.invite.reason}`);
+          return;
+        }
+        if (result.invite.status === "skipped") {
+          const why =
+            result.invite.reason && result.invite.reason in LOGIN_SKIP_MESSAGES
+              ? LOGIN_SKIP_MESSAGES[result.invite.reason as keyof typeof LOGIN_SKIP_MESSAGES]
+              : result.invite.reason;
+          setError(`Contact added, but no login was created — ${why}.`);
+          return;
+        }
+      }
+
       onCreated?.({ id: result.contactId, name, email: fields.work_email.trim() || null });
       onClose();
       return;
@@ -366,6 +446,107 @@ export default function ContactEditModal({
                     })}
                   </div>
                 </div>
+
+                {/* ── Login ── */}
+                {isCreate ? (
+                  <div className="pt-1 border-t border-gray-100">
+                    <label
+                      className={`flex items-start gap-3 px-3 py-2.5 rounded-lg border transition-colors ${
+                        canInvite
+                          ? "border-gray-200 bg-gray-50 cursor-pointer hover:bg-gray-100"
+                          : "border-gray-100 bg-gray-50/60 cursor-not-allowed"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] disabled:cursor-not-allowed"
+                        checked={sendInvite && canInvite}
+                        disabled={!canInvite}
+                        onChange={(e) => setSendInvite(e.target.checked)}
+                      />
+                      <span className="min-w-0">
+                        <span
+                          className={`block text-sm font-medium ${
+                            canInvite ? "text-[#1A1A1A]" : "text-gray-400"
+                          }`}
+                        >
+                          Give them a login
+                        </span>
+                        <span className="block text-[11px] text-gray-500 mt-0.5">
+                          {!trimmedEmail
+                            ? "Add an email address above to invite them."
+                            : tagsBlockLogin
+                              ? "Tagged contacts don't get a login or Circle account."
+                              : "Creates their account and emails them an invite to set a password."}
+                        </span>
+                      </span>
+                    </label>
+
+                    {sendInvite && canInvite && (
+                      <div className="mt-2 pl-3">
+                        <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                          Access level
+                        </label>
+                        <select
+                          value={inviteRole}
+                          onChange={(e) => setInviteRole(e.target.value as "member" | "org_admin")}
+                          className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30 focus:border-[#EE2A2E]"
+                        >
+                          <option value="member">Member — can view and edit their own profile</option>
+                          <option value="org_admin">Admin — can manage this organization</option>
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                ) : (
+                  <div className="pt-1 border-t border-gray-100">
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      Login
+                    </label>
+                    {loginLoading ? (
+                      <p className="text-xs text-gray-400 px-3 py-2.5">Checking…</p>
+                    ) : !loginStatus ? (
+                      <p className="text-xs text-gray-400 px-3 py-2.5">Couldn&apos;t check login status.</p>
+                    ) : loginStatus.hasAccount && loginStatus.membership?.status === "active" ? (
+                      <p className="text-xs text-gray-600 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
+                        {loginStatus.hasSignedIn
+                          ? `Has a login (${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"}).`
+                          : `Invited as ${loginStatus.membership.role === "org_admin" ? "Admin" : "Member"} — hasn't signed in yet.`}
+                      </p>
+                    ) : loginStatus.skipReason ? (
+                      <p className="text-xs text-gray-500 px-3 py-2.5 rounded-lg bg-gray-50 border border-gray-200">
+                        No login — {LOGIN_SKIP_MESSAGES[loginStatus.skipReason]}.
+                      </p>
+                    ) : (
+                      <div className="px-3 py-2.5 rounded-lg bg-amber-50 border border-amber-200">
+                        <p className="text-xs text-amber-800 font-medium">
+                          No login — they can&apos;t sign in.
+                        </p>
+                        <div className="mt-2 flex items-center gap-2">
+                          <select
+                            value={inviteRole}
+                            onChange={(e) => setInviteRole(e.target.value as "member" | "org_admin")}
+                            className="flex-1 min-w-0 px-2 py-1.5 text-xs border border-amber-300 rounded-lg bg-white focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/30"
+                          >
+                            <option value="member">Member</option>
+                            <option value="org_admin">Admin</option>
+                          </select>
+                          <button
+                            type="button"
+                            onClick={() => void handleSendInvite()}
+                            disabled={inviting}
+                            className="px-3 py-1.5 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-xs font-semibold rounded-lg transition-colors disabled:opacity-60 shrink-0"
+                          >
+                            {inviting ? "Sending…" : "Send invite"}
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                    {inviteNotice && (
+                      <p className="text-[11px] text-gray-500 mt-1.5 px-3">{inviteNotice}</p>
+                    )}
+                  </div>
+                )}
 
                 {/* Visibility toggle — edit-mode only, nothing to toggle before a contact exists */}
                 {!isCreate && (

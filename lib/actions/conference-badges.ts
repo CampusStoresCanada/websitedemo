@@ -253,8 +253,8 @@ async function runBadgePreflight(params: {
   const canonicalById = new Map<string, { first_name: string | null; last_name: string | null; title: string | null }>();
   if (canonicalIds.length > 0) {
     const { data: canonicalRows } = await db
-      .from("people")
-      .select("id, first_name, last_name, title")
+      .from("contacts")
+      .select("id, first_name, last_name, title:role_title")
       .in("id", canonicalIds);
     for (const row of (canonicalRows as Array<Record<string, unknown>> | null) ?? []) {
       if (typeof row.id !== "string") continue;

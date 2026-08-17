@@ -45,6 +45,26 @@ const FALLBACK_ITEM_ID_KEYS: Record<string, string> = {
   partnership: "qbo_item_id_partnership",
 };
 
+// Manual conference invoices (booths sold by hand outside the v3 checkout —
+// e.g. sponsor-benefit or pre-sale deals) have no catalog entity to resolve
+// an item from, only a free-text description. Every one so far has been
+// written as "... (Connected Exhibitor)" or "... (Exhibitor)", so route on
+// that word rather than collapsing both booth types into one item.
+const CONFERENCE_CONNECTED_ITEM_KEY = "qbo_item_id_conference_connected_booth";
+const CONFERENCE_EXHIBITOR_ITEM_KEY = "qbo_item_id_conference_exhibitor_booth";
+
+async function resolveManualConferenceInvoiceItemId(
+  db: ReturnType<typeof createAdminClient>,
+  description: string | null
+): Promise<string | null> {
+  if (!description) return null;
+  const key = /connected/i.test(description)
+    ? CONFERENCE_CONNECTED_ITEM_KEY
+    : CONFERENCE_EXHIBITOR_ITEM_KEY;
+  const { data } = await db.from("app_settings").select("value").eq("key", key).single();
+  return data?.value || null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Enqueue
 // ─────────────────────────────────────────────────────────────────
@@ -87,7 +107,7 @@ interface MembershipPriceBand {
  * top tier if it exceeds all configured ceilings. Returns null (falls through
  * to the flat qbo_item_id_membership) if no bands are configured.
  */
-async function resolveMembershipTierItemId(
+export async function resolveMembershipTierItemId(
   db: ReturnType<typeof createAdminClient>,
   amountCents: number
 ): Promise<string | null> {
@@ -117,18 +137,27 @@ async function resolveMembershipTierItemId(
  * - Membership: price-tier match first (see resolveMembershipTierItemId), then
  *   the flat qbo_item_id_membership, then qbo_item_id_default.
  * - Partnership: reads qbo_item_id_partnership from app_settings.
- * - Conference invoices: not yet wired to the v3 catalog (parked) — falls back to
- *   qbo_item_id_default like any other type.
+ * - Conference invoices: not wired to the v3 catalog (these are hand-created,
+ *   off-checkout booth invoices with no catalog entity) — routed by the
+ *   "Connected"/"Exhibitor" wording in the description, see
+ *   resolveManualConferenceInvoiceItemId. Falls back to qbo_item_id_default
+ *   if neither is configured.
  * - Unknown types: falls back to qbo_item_id_default in app_settings.
  */
 async function resolveQBItemId(
   db: ReturnType<typeof createAdminClient>,
   invoiceType: string,
-  amountCents: number
+  amountCents: number,
+  description: string | null = null
 ): Promise<string> {
   if (invoiceType === "membership") {
     const tierItemId = await resolveMembershipTierItemId(db, amountCents);
     if (tierItemId) return tierItemId;
+  }
+
+  if (invoiceType === "conference") {
+    const manualItemId = await resolveManualConferenceInvoiceItemId(db, description);
+    if (manualItemId) return manualItemId;
   }
 
   // Membership (flat fallback) / partnership: app_settings
@@ -361,7 +390,7 @@ async function processExportRow(
   }
 
   // Map and create QB invoice
-  const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents);
+  const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents, invoice.description);
   const taxCodeRef = await resolveMembershipTaxCode(db, org);
   const invoiceInput = mapToQBInvoice(invoice as unknown as Invoice, customer.Id, itemId, taxCodeRef);
   const qbInvoice = await createQBInvoice(invoiceInput);
@@ -568,7 +597,7 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       const { data: invoice, error: invErr } = await db
         .from("invoices")
         .select(`
-          id, type, amount_cents, currency,
+          id, type, description, amount_cents, currency,
           organization_id,
           organization:organizations(id, name, email, quickbooks_customer_id, province, country)
         `)
@@ -593,7 +622,7 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       // resolution runs against invoice.amount_cents (the invoice's own
       // amount), not refund_amount_cents, so a partial refund doesn't get
       // misresolved into a lower price tier's item.
-      const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents);
+      const itemId = await resolveQBItemId(db, invoice.type ?? "default", invoice.amount_cents, invoice.description);
       const taxCodeRef = await resolveMembershipTaxCode(db, org);
       const depositAccountId = await resolveStripeDepositAccountId(db);
 

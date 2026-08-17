@@ -79,7 +79,11 @@ export async function createProspectiveBoothCheckout(params: {
       .eq("id", params.boothEntityId)
       .eq("conference_id", params.conferenceId)
       .maybeSingle(),
-    db.from("conference_instances").select("end_date").eq("id", params.conferenceId).maybeSingle(),
+    db
+      .from("conference_instances")
+      .select("end_date, stripe_tax_rate_id")
+      .eq("id", params.conferenceId)
+      .maybeSingle(),
   ]);
 
   if (!booth || booth.kind !== "booth" || !booth.is_for_sale) {
@@ -87,6 +91,17 @@ export async function createProspectiveBoothCheckout(params: {
   }
   if (!conference?.end_date) {
     return { success: false, error: "Conference not found." };
+  }
+  // The booth is a destination-based supply — taxed where the conference is
+  // held, at the same flat rate every other booth sale uses. This line carried
+  // no tax_rates at all until 2026-08-17, so prospects paid no HST on the
+  // booth while the QBO receipt booked it anyway. Refuse the sale rather than
+  // silently under-collecting again (same rule as resolveMembershipStripeTaxRateId).
+  if (!conference.stripe_tax_rate_id) {
+    return {
+      success: false,
+      error: "This conference has no Stripe tax rate configured — set it on the conference's Tax fieldset before selling booths.",
+    };
   }
 
   // Already sold to someone? Booths aren't tier-gated for prospects (they
@@ -118,6 +133,8 @@ export async function createProspectiveBoothCheckout(params: {
           unit_amount: boothPriceCents,
           product_data: { name: `Booth ${booth.name}` },
         },
+        // Conference's rate, NOT the buyer's province — see above.
+        tax_rates: [conference.stripe_tax_rate_id],
       },
       {
         quantity: 1,
@@ -159,6 +176,10 @@ export async function createProspectiveBoothCheckout(params: {
     conference_id: params.conferenceId,
     booth_entity_id: params.boothEntityId,
     amount_cents: totalCents,
+    // Persist the split, not just the sum — the two halves are taxed under
+    // different rules and the QBO receipt has to post them as separate lines.
+    booth_amount_cents: boothPriceCents,
+    membership_amount_cents: membershipCents,
     stripe_checkout_session_id: session.id,
     status: "pending",
   });

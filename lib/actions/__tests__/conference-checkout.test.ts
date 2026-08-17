@@ -51,6 +51,17 @@ vi.mock("@/lib/supabase/admin", () => ({
 vi.mock("@/lib/stripe/client", () => ({
   stripe: { checkout: { sessions: { create: stripeSessionCreateMock } } },
 }));
+// Conference lines are taxed where the conference is, membership lines where
+// the buyer is — checkout resolves both up front. Mocked rather than exercised
+// here: the real resolver reads app_settings and calls Stripe's tax rate API.
+vi.mock("@/lib/stripe/tax", () => ({
+  resolveConferenceOrderTaxRates: vi.fn(async () => ({
+    conferenceRatePct: 13,
+    membershipRatePct: 5,
+    conferenceStripeTaxRateId: "txr_conference_test",
+    membershipStripeTaxRateId: "txr_membership_test",
+  })),
+}));
 vi.mock("@/lib/ops/audit", () => ({
   logAuditEventSafe: logAuditEventSafeMock,
 }));

@@ -8,10 +8,12 @@ import { isFeatureEnabled } from "@/lib/data";
 
 export const dynamic = "force-dynamic";
 
-// Header.tsx (and CircleDMBadge.tsx) poll ?summary=true repeatedly for badge
-// counts — cache that response briefly rather than re-minting a Circle token
-// and re-listing chat rooms on every poll.
-const SUMMARY_CACHE_TTL_MS = 30_000;
+// Header.tsx no longer polls ?summary=true — it reads dmUnreadCount off the
+// /api/circle/notifications summary, which already lists chat rooms, so the
+// two polls were billing Circle twice for the same data. This cache now only
+// serves CircleDMPanel and any direct callers; kept in line with
+// CIRCLE_SUMMARY_CACHE_TTL_MS in app/api/circle/notifications/route.ts.
+const SUMMARY_CACHE_TTL_MS = 270_000;
 type DmSummaryPayload = { chatRooms: unknown[]; messages?: unknown[]; linked: boolean };
 const dmSummaryCache = new TTLCache<DmSummaryPayload>(SUMMARY_CACHE_TTL_MS);
 

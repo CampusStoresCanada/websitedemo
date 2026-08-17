@@ -1,10 +1,14 @@
-import { defineConfig } from "vitest/config";
-import path from "node:path";
+import { defineConfig, configDefaults } from "vitest/config";
+import { fileURLToPath } from "node:url";
 
 export default defineConfig({
   resolve: {
     alias: {
-      "@": path.resolve(__dirname, "."),
+      // tsconfig maps "@/*" -> "./*". Vitest doesn't read tsconfig paths, so
+      // without this any suite that transitively imports through "@/" dies with
+      // "Cannot find package '@/...'" — which is why conference-checkout and
+      // webhook-processing were failing while everything else passed.
+      "@": fileURLToPath(new URL("./", import.meta.url)),
     },
   },
   test: {
@@ -15,5 +19,13 @@ export default defineConfig({
       NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
       NEXT_PUBLIC_SUPABASE_ANON_KEY: "test-anon-key",
     },
+    exclude: [
+      ...configDefaults.exclude,
+      "**/.next/**",
+      // Agent worktrees under .claude/worktrees are full checkouts of this same
+      // repo. Without this, every suite in an active worktree runs a second time
+      // and its failures show up as duplicates of the real ones.
+      "**/.claude/worktrees/**",
+    ],
   },
 });

@@ -83,22 +83,38 @@ async function handleLinkMember(
 
   if (!email) throw new Error("link_member requires email in payload");
 
-  // Use pre-built map when available (avoids re-fetching all pages per item)
-  const existing = emailMap
-    ? emailMap.get(email.toLowerCase())
-    : (await client.searchMembers(email))[0];
+  // The batch map is built from the paginated member list, which omits anyone
+  // who never accepted their invitation. A miss there means "not in the list",
+  // NOT "not in Circle" — so always confirm against the search endpoint before
+  // concluding the member is absent. Skipping that check is what sent existing
+  // members down the create path.
+  const existing =
+    (emailMap ? emailMap.get(email.toLowerCase()) : undefined) ??
+    (await client.findMemberByEmail(email));
 
   let circleId: number;
-  if (existing) {
+  if (existing?.id) {
     circleId = existing.id;
   } else if (name) {
-    // Create new member
     const created = await client.createMember({
       email,
       name,
       skip_invitation: true,
     });
-    circleId = created.id;
+
+    // createMember unwraps the nested `community_member`, but fall back to a
+    // lookup rather than ever storing a non-numeric id again.
+    const resolvedId =
+      typeof created?.id === "number"
+        ? created.id
+        : (await client.findMemberByEmail(email))?.id;
+
+    if (typeof resolvedId !== "number") {
+      throw new Error(
+        `Created Circle member for ${email} but could not resolve its id`
+      );
+    }
+    circleId = resolvedId;
   } else {
     throw new Error(`No Circle member found for ${email} and no name for creation`);
   }
@@ -268,6 +284,16 @@ async function handleUpdateProfile(
   const updates: Partial<CircleMemberInput> = {};
   if (typeof item.payload.name === "string") updates.name = item.payload.name;
   if (typeof item.payload.headline === "string") updates.headline = item.payload.headline;
+
+  // Job title is a custom profile field on Circle (key `jobtitle`), not a
+  // top-level member column — sending it as `title` silently did nothing,
+  // which is why website title edits never showed up in Circle.
+  if (typeof item.payload.jobTitle === "string") {
+    updates.community_member_profile_fields = {
+      ...(updates.community_member_profile_fields ?? {}),
+      jobtitle: item.payload.jobTitle,
+    };
+  }
 
   if (Object.keys(updates).length === 0) return;
 

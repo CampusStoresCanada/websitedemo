@@ -110,8 +110,8 @@ export default async function ConferenceBadgeOpsPage({
         .order("person_kind", { ascending: true })
         .order("display_name", { ascending: true }),
       adminClient
-        .from("people")
-        .select("id, first_name, last_name, primary_email")
+        .from("contacts")
+        .select("id, first_name, last_name, primary_email:work_email")
         .limit(800),
     ]);
 
@@ -472,8 +472,8 @@ export default async function ConferenceBadgeOpsPage({
   >();
   if (canonicalIds.length > 0) {
     const { data: canonicalRows } = await adminClient
-      .from("people")
-      .select("id, first_name, last_name, primary_email, title")
+      .from("contacts")
+      .select("id, first_name, last_name, primary_email:work_email, title:role_title")
       .in("id", canonicalIds);
     for (const row of (canonicalRows ?? []) as Array<Record<string, unknown>>) {
       const id = row.id as string | null;

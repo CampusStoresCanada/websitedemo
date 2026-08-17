@@ -330,6 +330,18 @@ export async function createQBSalesReceipt(input: QBSalesReceiptInput): Promise<
   return res.SalesReceipt;
 }
 
+/** Read a posted Sales Receipt back. Returns null if it's been deleted or is
+ * otherwise unreadable — the tax reconciler treats that as "can't verify"
+ * rather than "mismatch". */
+export async function getQBSalesReceipt(id: string): Promise<QBSalesReceipt | null> {
+  try {
+    const res = await qbRequest<{ SalesReceipt: QBSalesReceipt }>("GET", `/salesreceipt/${id}`);
+    return res.SalesReceipt;
+  } catch {
+    return null;
+  }
+}
+
 export async function createQBRefundReceipt(input: QBRefundReceiptInput): Promise<QBRefundReceipt> {
   const res = await qbRequest<{ RefundReceipt: QBRefundReceipt }>("POST", "/refundreceipt", input);
   return res.RefundReceipt;

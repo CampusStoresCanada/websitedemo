@@ -82,6 +82,24 @@ export async function createProspectiveRegistrationCheckout(params: {
     ? tierPrices[NON_MEMBER_SOURCE_ROLE]
     : offer.price_cents ?? 0;
 
+  // A day pass is a conference supply — destination-based, taxed where the
+  // conference is held, at the same flat rate every booth and registration
+  // uses. This line carried no tax_rates at all until 2026-08-17, so the
+  // buyer paid nothing while the QuickBooks receipt booked the tax anyway.
+  // Refuse rather than silently under-collect (same rule as the booth path).
+  const { data: conference } = await db
+    .from("conference_instances")
+    .select("stripe_tax_rate_id")
+    .eq("id", params.conferenceId)
+    .maybeSingle();
+
+  if (!conference?.stripe_tax_rate_id) {
+    return {
+      success: false,
+      error: "This conference has no Stripe tax rate configured — set it on the conference's Tax fieldset before selling registrations.",
+    };
+  }
+
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer_email: email,
@@ -95,6 +113,7 @@ export async function createProspectiveRegistrationCheckout(params: {
           unit_amount: priceCents,
           product_data: { name: offer.name },
         },
+        tax_rates: [conference.stripe_tax_rate_id],
       },
     ],
     custom_text: {

@@ -30,6 +30,7 @@ import {
   applicationApprovedEmail,
   applicationRejectedEmail,
   accountInviteEmail,
+  paidBoothWelcomeEmail,
 } from "@/lib/email/send";
 import {
   ensureKnownPerson,
@@ -587,17 +588,29 @@ export async function approveApplication(
   // they already paid for (their org didn't exist yet at payment time) and
   // advance membership_expires_at through the same shared helper the normal
   // invoice-paid webhook uses.
+  const isPaidFirstBoothApplication = Boolean(
+    app.paid_at && app.paid_booth_entity_id && app.paid_conference_id
+  );
   let stripeInvoiceUrl = "";
-  if (app.paid_at && app.paid_booth_entity_id && app.paid_conference_id) {
+  // Populated below for the pay-first case — used to make the welcome email
+  // (step 6) say what they actually paid for, instead of a bare "you're paid".
+  let paidBoothLabel: string | null = null;
+  let paidConferenceLabel: string | null = null;
+  if (isPaidFirstBoothApplication) {
+    // Non-null: isPaidFirstBoothApplication already confirmed both are set.
+    const paidBoothEntityId = app.paid_booth_entity_id!;
+    const paidConferenceId = app.paid_conference_id!;
     try {
       const [{ data: booth }, { data: conference }] = await Promise.all([
-        db.from("conference_entities").select("price_cents").eq("id", app.paid_booth_entity_id).maybeSingle(),
-        db.from("conference_instances").select("end_date").eq("id", app.paid_conference_id).maybeSingle(),
+        db.from("conference_entities").select("name, price_cents").eq("id", paidBoothEntityId).maybeSingle(),
+        db.from("conference_instances").select("name, end_date").eq("id", paidConferenceId).maybeSingle(),
       ]);
+      paidBoothLabel = booth?.name ? `Booth ${booth.name}` : null;
+      paidConferenceLabel = conference?.name ?? null;
       await db.rpc("mint_prospective_booth_purchase", {
-        p_conference_id: app.paid_conference_id,
+        p_conference_id: paidConferenceId,
         p_organization_id: org.id,
-        p_booth_entity_id: app.paid_booth_entity_id,
+        p_booth_entity_id: paidBoothEntityId,
         p_price_cents: booth?.price_cents ?? 0,
         p_buyer: `application:${applicationId}`,
       });
@@ -694,10 +707,18 @@ export async function approveApplication(
       });
 
       if (resetData?.properties?.action_link) {
-        const inviteContent = await accountInviteEmail(
-          app.applicant_name ?? "there",
-          resetData.properties.action_link
-        );
+        // Pay-first applicants get one terminal email confirming they're
+        // paid up and can log in — not the generic invite, which says
+        // nothing about payment status and previously left step 7's (now
+        // skipped) payment-request email as the only mention of billing.
+        const inviteContent = isPaidFirstBoothApplication
+          ? paidBoothWelcomeEmail(
+              app.applicant_name ?? "there",
+              resetData.properties.action_link,
+              paidBoothLabel,
+              paidConferenceLabel
+            )
+          : accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
         await sendEmail({
           to: app.applicant_email!,
           subject: inviteContent.subject,
@@ -710,8 +731,12 @@ export async function approveApplication(
     // Non-fatal — admin can manually invite
   }
 
-  // 7. Send approval email with payment link
-  if (app.applicant_email) {
+  // 7. Send approval email with payment link — skipped for a pay-first booth
+  // application, same condition as step 5: dues are already collected, so
+  // asking them to "complete payment" (and pointing that link at a billing
+  // page with nothing owed) would be wrong. The account invite in step 6
+  // already gets them into the app and on to the next onboarding step.
+  if (app.applicant_email && !isPaidFirstBoothApplication) {
     const paymentUrl = stripeInvoiceUrl || `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
     const approvedContent = await applicationApprovedEmail(
       app.applicant_name ?? "there",
@@ -1256,7 +1281,7 @@ export async function resendApplicationInvite(
 
   const { data: app } = await db
     .from("signup_applications")
-    .select("id, applicant_name, applicant_email, application_type, organization_id, status")
+    .select("id, applicant_name, applicant_email, application_type, organization_id, status, paid_at, paid_booth_entity_id, paid_conference_id")
     .eq("id", applicationId)
     .single();
 
@@ -1268,8 +1293,25 @@ export async function resendApplicationInvite(
     return { success: false, error: "No email on file for this applicant" };
   }
 
+  // Same pay-first booth check as approveApplication — dues already
+  // collected, so there's no payment link to resend.
+  const isPaidFirstBoothApplication = Boolean(
+    app.paid_at && app.paid_booth_entity_id && app.paid_conference_id
+  );
+
   let sentInvite = false;
   let sentPayment = false;
+
+  let paidBoothLabel: string | null = null;
+  let paidConferenceLabel: string | null = null;
+  if (isPaidFirstBoothApplication) {
+    const [{ data: booth }, { data: conference }] = await Promise.all([
+      db.from("conference_entities").select("name").eq("id", app.paid_booth_entity_id!).maybeSingle(),
+      db.from("conference_instances").select("name").eq("id", app.paid_conference_id!).maybeSingle(),
+    ]);
+    paidBoothLabel = booth?.name ? `Booth ${booth.name}` : null;
+    paidConferenceLabel = conference?.name ?? null;
+  }
 
   // Resend account invite (password reset link)
   try {
@@ -1278,10 +1320,14 @@ export async function resendApplicationInvite(
       email: app.applicant_email,
     });
     if (resetData?.properties?.action_link) {
-      const inviteContent = await accountInviteEmail(
-        app.applicant_name ?? "there",
-        resetData.properties.action_link
-      );
+      const inviteContent = isPaidFirstBoothApplication
+        ? paidBoothWelcomeEmail(
+            app.applicant_name ?? "there",
+            resetData.properties.action_link,
+            paidBoothLabel,
+            paidConferenceLabel
+          )
+        : accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
       await sendEmail({
         to: app.applicant_email,
         subject: inviteContent.subject,
@@ -1294,7 +1340,7 @@ export async function resendApplicationInvite(
   }
 
   // Resend payment link
-  if (app.organization_id) {
+  if (app.organization_id && !isPaidFirstBoothApplication) {
     try {
       const { data: invoice } = await db
         .from("invoices")

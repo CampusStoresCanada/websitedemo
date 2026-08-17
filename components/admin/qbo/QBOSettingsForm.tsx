@@ -27,6 +27,8 @@ interface Props {
   partnershipItemId: string | null;
   priceBands: PriceBand[];
   conferencePartialRefundItemId: string | null;
+  conferenceConnectedBoothItemId: string | null;
+  conferenceExhibitorBoothItemId: string | null;
   stripeDepositAccountId: string | null;
   membershipTaxCodes: MembershipTaxCode[];
   outsideCanadaTaxCode: string | null;
@@ -41,6 +43,8 @@ export default function QBOSettingsForm({
   partnershipItemId: initialPartnership,
   priceBands: initialBands,
   conferencePartialRefundItemId: initialConferencePartialRefund,
+  conferenceConnectedBoothItemId: initialConferenceConnectedBooth,
+  conferenceExhibitorBoothItemId: initialConferenceExhibitorBooth,
   stripeDepositAccountId: initialStripeDepositAccountId,
   membershipTaxCodes: initialMembershipTaxCodes,
   outsideCanadaTaxCode: initialOutsideCanadaTaxCode,
@@ -54,6 +58,12 @@ export default function QBOSettingsForm({
   const [bands, setBands] = useState<PriceBand[]>(initialBands);
   const [conferencePartialRefundItemId, setConferencePartialRefundItemId] = useState(
     initialConferencePartialRefund
+  );
+  const [conferenceConnectedBoothItemId, setConferenceConnectedBoothItemId] = useState(
+    initialConferenceConnectedBooth
+  );
+  const [conferenceExhibitorBoothItemId, setConferenceExhibitorBoothItemId] = useState(
+    initialConferenceExhibitorBooth
   );
   const [stripeDepositAccountId, setStripeDepositAccountId] = useState(initialStripeDepositAccountId);
   const [membershipTaxCodes, setMembershipTaxCodes] = useState<MembershipTaxCode[]>(
@@ -119,6 +129,8 @@ export default function QBOSettingsForm({
           partnershipItemId,
           priceBands: bands,
           conferencePartialRefundItemId,
+          conferenceConnectedBoothItemId,
+          conferenceExhibitorBoothItemId,
           stripeDepositAccountId,
           membershipTaxCodes,
           outsideCanadaTaxCode,
@@ -369,6 +381,28 @@ export default function QBOSettingsForm({
           onChange={(id) => setPublicTicketTaxCode(id)}
           label="Public Registrant Tax Code"
         />
+      </div>
+
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-sm font-semibold text-gray-800 mb-1">Manual Conference Booth Invoices</h2>
+        <p className="text-xs text-gray-400 mb-4">
+          Booths sold by hand outside the self-serve checkout (e.g. pre-sale or sponsor-benefit
+          deals) are plain invoices with no catalog entity to resolve an item from — instead they
+          route by the word &quot;Connected&quot; in the invoice description. Keep using that word
+          for connected-exhibitor deals so they land on the right item below.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-2">
+          <QBItemPicker
+            value={conferenceConnectedBoothItemId}
+            onChange={(id) => setConferenceConnectedBoothItemId(id)}
+            label="Connected Booth Item"
+          />
+          <QBItemPicker
+            value={conferenceExhibitorBoothItemId}
+            onChange={(id) => setConferenceExhibitorBoothItemId(id)}
+            label="Exhibitor Booth Item"
+          />
+        </div>
       </div>
 
       <div className="rounded-xl border border-gray-200 bg-white p-5">

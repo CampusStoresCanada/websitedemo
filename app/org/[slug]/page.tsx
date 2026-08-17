@@ -6,6 +6,10 @@ import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
+import type {
+  PendingTransferInfo,
+  TransferCandidate,
+} from "@/components/org/admin/AdminTransferFlow";
 import { parsePartnerLinks, canViewLink } from "@/lib/partner-links";
 import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document-url";
 import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
@@ -473,6 +477,47 @@ export default async function OrgProfilePage({ params }: PageProps) {
     renewalWindowOpen = daysUntilExpiry <= maxReminderDay;
   }
 
+  // Admin handover state. Loaded here rather than on a dedicated admin page —
+  // the standalone /admin/transfer page was retired and the flow now lives
+  // inline on the profile, next to the per-contact Admin toggles.
+  let pendingTransfer: PendingTransferInfo | null = null;
+  let transferCandidates: TransferCandidate[] = [];
+  const viewerUserId = viewer.userId ?? null;
+
+  if (viewerUserId && orgAssignableUsers.length > 0) {
+    const adminClient = createAdminClient();
+    const { data: pending } = await adminClient
+      .from("admin_transfer_requests")
+      .select("id, from_user_id, to_user_id, timeout_at, reason")
+      .eq("organization_id", organization.id)
+      .eq("status", "pending")
+      .maybeSingle();
+
+    const nameFor = (userId: string | null) =>
+      userId
+        ? (orgAssignableUsers.find((u) => u.userId === userId)?.displayName ??
+           orgAssignableUsers.find((u) => u.userId === userId)?.email ??
+           null)
+        : null;
+
+    if (pending) {
+      pendingTransfer = {
+        id: pending.id as string,
+        fromUserId: pending.from_user_id as string,
+        fromUserName: nameFor(pending.from_user_id as string),
+        toUserId: (pending.to_user_id as string | null) ?? null,
+        toUserName: nameFor((pending.to_user_id as string | null) ?? null),
+        timeoutAt: pending.timeout_at as string,
+        reason: (pending.reason as string | null) ?? null,
+      };
+    }
+
+    // Eligible successors: every other active member of the org.
+    transferCandidates = orgAssignableUsers
+      .filter((u) => u.userId !== viewerUserId)
+      .map((u) => ({ userId: u.userId, displayName: u.displayName, email: u.email }));
+  }
+
   // Render different layouts based on organization type
   if (organization.type === "Member") {
     return (
@@ -496,6 +541,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
         memberSuppliers={memberSuppliers}
         renewalWindowOpen={renewalWindowOpen}
         graceDays={graceDays}
+        viewerUserId={viewerUserId}
+        pendingTransfer={pendingTransfer}
+        transferCandidates={transferCandidates}
       />
       </>
     );
@@ -527,6 +575,9 @@ export default async function OrgProfilePage({ params }: PageProps) {
       nudgeAvailableAt={nudgeAvailableAt}
       renewalWindowOpen={renewalWindowOpen}
       graceDays={graceDays}
+      viewerUserId={viewerUserId}
+      pendingTransfer={pendingTransfer}
+      transferCandidates={transferCandidates}
     />
     </>
   );

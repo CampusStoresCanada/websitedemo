@@ -126,14 +126,17 @@ export async function initiateAdminTransfer(
 
     // Fire-and-forget: send notification emails
     Promise.all([
-      adminClient.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+      adminClient.from("organizations").select("name, slug").eq("id", orgId).maybeSingle(),
       adminClient.auth.admin.getUserById(auth.ctx.userId),
       toUserId ? adminClient.auth.admin.getUserById(toUserId) : Promise.resolve({ data: { user: null } }),
     ]).then(([{ data: orgRes }, { data: fromRes }, { data: toRes }]) => {
       const orgName = orgRes?.name ?? orgId;
       const fromName = fromRes?.user?.email ?? auth.ctx.userId;
       const toName = toRes?.user?.email ?? toUserId ?? "Unknown";
-      const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${orgId}/admin/transfer`;
+      // The org profile, not the retired /admin/transfer page — the pending
+      // transfer surfaces inline there for the successor to accept. Was also
+      // interpolating orgId into a slug route, so this link never resolved.
+      const acceptUrl = `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/${orgRes?.slug ?? orgId}`;
       if (toRes?.user?.email) {
         sendTransactional({
           templateKey: "admin_transfer_initiated",

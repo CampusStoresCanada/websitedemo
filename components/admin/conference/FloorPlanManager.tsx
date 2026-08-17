@@ -4,6 +4,7 @@ import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setBoothLayout, type FloorPlanBooth } from "@/lib/actions/conference-entities";
 import { uploadFloorPlanImage, removeFloorPlanImage } from "@/lib/actions/conference-floor-plan";
+import BoothMoveModal from "@/components/admin/conference/BoothMoveModal";
 
 const VIEW_W = 1000;
 const DEFAULT_VB_H = 600;
@@ -76,6 +77,7 @@ export default function FloorPlanManager({
   const [showGrid, setShowGrid]     = useState(false);
   const [busy, setBusy]             = useState(false);
   const [error, setError]           = useState<string | null>(null);
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
 
   // ── snap helpers ─────────────────────────────────────────────────────────────
   const snapFrac = gridSize / 100;
@@ -193,6 +195,10 @@ export default function FloorPlanManager({
   const selArray = placed.filter(b => selectedIds.has(b.id));
   const keyed    = booths.find(b => b.id === keyId) ?? null;
   const solo     = selArray.length === 1 ? selArray[0] : null;
+
+  // "Move" is offered when every selected booth is sold and all belong to the same org.
+  const soldOrgIds  = new Set(selArray.map(b => b.soldOrg?.id).filter((id): id is string => !!id));
+  const moveEligible = selArray.length > 0 && selArray.every(b => b.status === "sold" && b.soldOrg) && soldOrgIds.size === 1;
 
   // ── pointer → canvas coordinates ────────────────────────────────────────────
   const toUser = (cx: number, cy: number) => {
@@ -739,6 +745,20 @@ export default function FloorPlanManager({
               </div>
             ) : null}
 
+            {/* booth move — offered when every selected booth is sold and shares one org */}
+            {moveEligible ? (
+              <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2">
+                <h2 className="font-semibold text-gray-700">Booth move</h2>
+                <p className="text-[10px] text-gray-400">
+                  {selArray.length} booth{selArray.length > 1 ? "s" : ""} held by <strong>{selArray[0].soldOrg!.name}</strong>
+                </p>
+                <button type="button" onClick={() => setMoveModalOpen(true)}
+                  className="w-full rounded border border-[#EE2A2E] bg-[#fff1f1] py-1.5 text-[11px] font-medium text-[#EE2A2E] hover:bg-[#ffe4e4]">
+                  Move to different booth(s)…
+                </button>
+              </div>
+            ) : null}
+
             {/* alignment panel — only when 2+ selected */}
             {selArray.length >= 2 ? (
               <div className="rounded-lg border border-gray-200 bg-white p-3 text-xs space-y-2">
@@ -973,6 +993,18 @@ export default function FloorPlanManager({
           </div>
         </div>
       )}
+
+      {moveModalOpen && moveEligible ? (
+        <BoothMoveModal
+          conferenceId={conferenceId}
+          organizationId={selArray[0].soldOrg!.id}
+          orgName={selArray[0].soldOrg!.name}
+          oldBooths={selArray.map(b => ({ id: b.id, name: b.name }))}
+          allBooths={booths}
+          onClose={() => setMoveModalOpen(false)}
+          onSuccess={() => { setMoveModalOpen(false); router.refresh(); }}
+        />
+      ) : null}
     </div>
   );
 }

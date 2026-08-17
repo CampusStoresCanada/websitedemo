@@ -109,20 +109,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "activities_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "activities_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
-          {
             foreignKeyName: "activities_tenant_id_fkey"
             columns: ["tenant_id"]
             isOneToOne: false
@@ -3027,6 +3013,7 @@ export type Database = {
           conference_id: string
           conference_staff_id: string | null
           contact_email: string | null
+          contact_id: string | null
           created_at: string
           data_quality_flags: string[]
           departure_flight_details: string | null
@@ -3079,6 +3066,7 @@ export type Database = {
           conference_id: string
           conference_staff_id?: string | null
           contact_email?: string | null
+          contact_id?: string | null
           created_at?: string
           data_quality_flags?: string[]
           departure_flight_details?: string | null
@@ -3131,6 +3119,7 @@ export type Database = {
           conference_id?: string
           conference_staff_id?: string | null
           contact_email?: string | null
+          contact_id?: string | null
           created_at?: string
           data_quality_flags?: string[]
           departure_flight_details?: string | null
@@ -3174,20 +3163,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "conference_people_canonical_person_id_fkey"
-            columns: ["canonical_person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_people_canonical_person_id_fkey"
-            columns: ["canonical_person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
-          {
             foreignKeyName: "conference_people_conference_id_fkey"
             columns: ["conference_id"]
             isOneToOne: false
@@ -3199,6 +3174,34 @@ export type Database = {
             columns: ["conference_staff_id"]
             isOneToOne: false
             referencedRelation: "conference_staff"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_people_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_people_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_people_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_people_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
           {
@@ -3859,11 +3862,13 @@ export type Database = {
           created_at: string | null
           dietary_restrictions: string | null
           email: string | null
+          first_name: string | null
           hidden: boolean
           id: string
           is_primary: boolean
           last_contact_date: string | null
           last_edited_time: string | null
+          last_name: string | null
           metadata: Json | null
           name: string
           notes: string | null
@@ -3878,6 +3883,7 @@ export type Database = {
           synced_from_notion_at: string | null
           synced_to_circle_at: string | null
           synced_to_notion_at: string | null
+          tenant_id: string | null
           updated_at: string | null
           vcard: string | null
           vcard_url: string | null
@@ -3893,11 +3899,13 @@ export type Database = {
           created_at?: string | null
           dietary_restrictions?: string | null
           email?: string | null
+          first_name?: string | null
           hidden?: boolean
           id?: string
           is_primary?: boolean
           last_contact_date?: string | null
           last_edited_time?: string | null
+          last_name?: string | null
           metadata?: Json | null
           name: string
           notes?: string | null
@@ -3912,6 +3920,7 @@ export type Database = {
           synced_from_notion_at?: string | null
           synced_to_circle_at?: string | null
           synced_to_notion_at?: string | null
+          tenant_id?: string | null
           updated_at?: string | null
           vcard?: string | null
           vcard_url?: string | null
@@ -3927,11 +3936,13 @@ export type Database = {
           created_at?: string | null
           dietary_restrictions?: string | null
           email?: string | null
+          first_name?: string | null
           hidden?: boolean
           id?: string
           is_primary?: boolean
           last_contact_date?: string | null
           last_edited_time?: string | null
+          last_name?: string | null
           metadata?: Json | null
           name?: string
           notes?: string | null
@@ -3946,6 +3957,7 @@ export type Database = {
           synced_from_notion_at?: string | null
           synced_to_circle_at?: string | null
           synced_to_notion_at?: string | null
+          tenant_id?: string | null
           updated_at?: string | null
           vcard?: string | null
           vcard_url?: string | null
@@ -6515,7 +6527,7 @@ export type Database = {
           },
         ]
       }
-      people: {
+      people_deprecated: {
         Row: {
           affiliations: Json
           avatar_url: string | null
@@ -6693,20 +6705,6 @@ export type Database = {
           tag_id?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "person_tags_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "person_tags_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
           {
             foreignKeyName: "person_tags_tag_id_fkey"
             columns: ["tag_id"]
@@ -7085,20 +7083,6 @@ export type Database = {
         }
         Relationships: [
           {
-            foreignKeyName: "posts_author_id_fkey"
-            columns: ["author_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "posts_author_id_fkey"
-            columns: ["author_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
-          {
             foreignKeyName: "posts_created_by_fkey"
             columns: ["created_by"]
             isOneToOne: false
@@ -7147,6 +7131,7 @@ export type Database = {
       prospective_booth_payments: {
         Row: {
           amount_cents: number
+          booth_amount_cents: number
           booth_entity_id: string
           company_name: string
           conference_id: string
@@ -7154,6 +7139,7 @@ export type Database = {
           email: string
           id: string
           linked_application_id: string | null
+          membership_amount_cents: number
           paid_at: string | null
           province: string | null
           status: string
@@ -7161,6 +7147,7 @@ export type Database = {
         }
         Insert: {
           amount_cents: number
+          booth_amount_cents: number
           booth_entity_id: string
           company_name: string
           conference_id: string
@@ -7168,6 +7155,7 @@ export type Database = {
           email: string
           id?: string
           linked_application_id?: string | null
+          membership_amount_cents: number
           paid_at?: string | null
           province?: string | null
           status?: string
@@ -7175,6 +7163,7 @@ export type Database = {
         }
         Update: {
           amount_cents?: number
+          booth_amount_cents?: number
           booth_entity_id?: string
           company_name?: string
           conference_id?: string
@@ -7182,6 +7171,7 @@ export type Database = {
           email?: string
           id?: string
           linked_application_id?: string | null
+          membership_amount_cents?: number
           paid_at?: string | null
           province?: string | null
           status?: string
@@ -8700,7 +8690,6 @@ export type Database = {
           opened_at: string | null
           partial_responses: Json | null
           participant_type: string | null
-          person_id: string | null
           responded_at: string | null
           sent_at: string | null
           survey_id: string
@@ -8716,7 +8705,6 @@ export type Database = {
           opened_at?: string | null
           partial_responses?: Json | null
           participant_type?: string | null
-          person_id?: string | null
           responded_at?: string | null
           sent_at?: string | null
           survey_id: string
@@ -8732,7 +8720,6 @@ export type Database = {
           opened_at?: string | null
           partial_responses?: Json | null
           participant_type?: string | null
-          person_id?: string | null
           responded_at?: string | null
           sent_at?: string | null
           survey_id?: string
@@ -8768,20 +8755,6 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "survey_invitations_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "survey_invitations_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
-          {
             foreignKeyName: "survey_invitations_survey_id_fkey"
             columns: ["survey_id"]
             isOneToOne: false
@@ -8797,7 +8770,6 @@ export type Database = {
           created_at: string | null
           id: string
           participant_type: string | null
-          person_id: string | null
           responses: Json
           submitted_from_ip: string | null
           survey_id: string
@@ -8810,7 +8782,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           participant_type?: string | null
-          person_id?: string | null
           responses?: Json
           submitted_from_ip?: string | null
           survey_id: string
@@ -8823,7 +8794,6 @@ export type Database = {
           created_at?: string | null
           id?: string
           participant_type?: string | null
-          person_id?: string | null
           responses?: Json
           submitted_from_ip?: string | null
           survey_id?: string
@@ -8858,20 +8828,6 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "survey_responses_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "survey_responses_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
           },
           {
             foreignKeyName: "survey_responses_survey_id_fkey"
@@ -9262,6 +9218,42 @@ export type Database = {
           },
         ]
       }
+      tax_reconciliation_exceptions: {
+        Row: {
+          booked_tax_cents: number | null
+          charged_tax_cents: number | null
+          created_at: string
+          created_by: string | null
+          expected_tax_cents: number
+          id: string
+          reason: string
+          reference: string
+          source: string
+        }
+        Insert: {
+          booked_tax_cents?: number | null
+          charged_tax_cents?: number | null
+          created_at?: string
+          created_by?: string | null
+          expected_tax_cents: number
+          id?: string
+          reason: string
+          reference: string
+          source: string
+        }
+        Update: {
+          booked_tax_cents?: number | null
+          charged_tax_cents?: number | null
+          created_at?: string
+          created_by?: string | null
+          expected_tax_cents?: number
+          id?: string
+          reason?: string
+          reference?: string
+          source?: string
+        }
+        Relationships: []
+      }
       tenants: {
         Row: {
           circle_community_id: string | null
@@ -9596,20 +9588,6 @@ export type Database = {
           updated_at?: string
         }
         Relationships: [
-          {
-            foreignKeyName: "users_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "people"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "users_person_id_fkey"
-            columns: ["person_id"]
-            isOneToOne: false
-            referencedRelation: "person_activity_summary"
-            referencedColumns: ["person_id"]
-          },
           {
             foreignKeyName: "users_tenant_id_fkey"
             columns: ["tenant_id"]
@@ -10183,17 +10161,6 @@ export type Database = {
         }
         Relationships: []
       }
-      person_activity_summary: {
-        Row: {
-          conference_checkins_count: number | null
-          conference_participations_count: number | null
-          has_completed_conference_registration: boolean | null
-          last_conference_activity_at: string | null
-          last_conference_checkin_at: string | null
-          person_id: string | null
-        }
-        Relationships: []
-      }
       user_onboarding_summary: {
         Row: {
           completed_steps: number | null
@@ -10277,6 +10244,7 @@ export type Database = {
           p_checkout_idempotency_key: string
           p_conference_id: string
           p_currency?: string
+          p_membership_tax_rate_pct?: number
           p_offer_prices?: Json
           p_organization_id: string
           p_price_overrides?: Json
@@ -10490,6 +10458,13 @@ export type Database = {
       increment_share_link_use: {
         Args: { link_id: string }
         Returns: undefined
+      }
+      lookup_auth_user_emails: {
+        Args: { p_user_ids: string[] }
+        Returns: {
+          email: string
+          id: string
+        }[]
       }
       mint_entity_offer_purchase: {
         Args: {

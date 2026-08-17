@@ -31,6 +31,12 @@ export interface CircleMemberInput {
   space_ids?: number[];
   skip_invitation?: boolean;
   active?: boolean;
+  /**
+   * Custom profile fields, keyed by Circle's field `key` (not its label).
+   * Job title lives here as `jobtitle` — it is not a top-level member column,
+   * which is why title edits never reached Circle before.
+   */
+  community_member_profile_fields?: Record<string, string>;
 }
 
 export interface CirclePost {
