@@ -25,6 +25,7 @@ const {
   applyProrationMock,
   resolveAssigneeForEmailMock,
   findExistingUserByEmailMock,
+  resolveConferenceOrderTaxRatesMock,
 } = vi.hoisted(() => ({
   requireAuthenticatedMock: vi.fn(),
   isGlobalAdminMock: vi.fn(),
@@ -39,6 +40,12 @@ const {
   applyProrationMock: vi.fn((baseAmountCents: number) => ({ amountCents: baseAmountCents, discountPct: 0 })),
   resolveAssigneeForEmailMock: vi.fn(),
   findExistingUserByEmailMock: vi.fn(),
+  resolveConferenceOrderTaxRatesMock: vi.fn(async () => ({
+    conferenceRatePct: 13,
+    membershipRatePct: 5,
+    conferenceStripeTaxRateId: "txr_conference_test",
+    membershipStripeTaxRateId: "txr_membership_test",
+  })),
 }));
 
 vi.mock("@/lib/auth/guards", () => ({
@@ -55,12 +62,7 @@ vi.mock("@/lib/stripe/client", () => ({
 // the buyer is — checkout resolves both up front. Mocked rather than exercised
 // here: the real resolver reads app_settings and calls Stripe's tax rate API.
 vi.mock("@/lib/stripe/tax", () => ({
-  resolveConferenceOrderTaxRates: vi.fn(async () => ({
-    conferenceRatePct: 13,
-    membershipRatePct: 5,
-    conferenceStripeTaxRateId: "txr_conference_test",
-    membershipStripeTaxRateId: "txr_membership_test",
-  })),
+  resolveConferenceOrderTaxRates: resolveConferenceOrderTaxRatesMock,
 }));
 vi.mock("@/lib/ops/audit", () => ({
   logAuditEventSafe: logAuditEventSafeMock,
@@ -184,6 +186,12 @@ beforeEach(() => {
   priceForTierMock.mockReturnValue(50_000);
   availabilityMock.mockReturnValue({ remaining: null, soldOut: false });
   logAuditEventSafeMock.mockResolvedValue(undefined);
+  resolveConferenceOrderTaxRatesMock.mockResolvedValue({
+    conferenceRatePct: 13,
+    membershipRatePct: 5,
+    conferenceStripeTaxRateId: "txr_conference_test",
+    membershipStripeTaxRateId: "txr_membership_test",
+  });
   stripeSessionCreateMock.mockResolvedValue({
     id: "cs_test_1",
     url: "https://checkout.stripe.test/cs_test_1",
@@ -259,15 +267,19 @@ describe("createConferenceCheckout — contract with the Stripe webhook", () => 
           unit_amount: 50_000,
           product_data: { name: "Delegate Pass" },
         },
-        tax_rates: ["txr_test"],
+        tax_rates: ["txr_conference_test"],
       },
     ]);
   });
 
-  it("omits Stripe tax rates when the conference has no Stripe tax rate id", async () => {
-    const queues = happyPathQueues();
-    queues.conference_instances = [{ data: { tax_rate_pct: 13, stripe_tax_rate_id: null, status: "registration_open" } }];
-    const { db } = makeFakeDb(queues, ORDER_RPC_RESULT);
+  it("omits Stripe tax rates when resolveConferenceOrderTaxRates has no Stripe tax rate id for this line", async () => {
+    resolveConferenceOrderTaxRatesMock.mockResolvedValue({
+      conferenceRatePct: 13,
+      membershipRatePct: 5,
+      conferenceStripeTaxRateId: null,
+      membershipStripeTaxRateId: "txr_membership_test",
+    });
+    const { db } = makeFakeDb(happyPathQueues(), ORDER_RPC_RESULT);
     createAdminClientMock.mockReturnValue(db);
 
     await createConferenceCheckout(INPUT);

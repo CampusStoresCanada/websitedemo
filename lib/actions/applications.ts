@@ -718,7 +718,7 @@ export async function approveApplication(
               paidBoothLabel,
               paidConferenceLabel
             )
-          : accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
+          : await accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
         await sendEmail({
           to: app.applicant_email!,
           subject: inviteContent.subject,
@@ -1327,7 +1327,7 @@ export async function resendApplicationInvite(
             paidBoothLabel,
             paidConferenceLabel
           )
-        : accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
+        : await accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
       await sendEmail({
         to: app.applicant_email,
         subject: inviteContent.subject,
