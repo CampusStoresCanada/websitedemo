@@ -83,13 +83,17 @@ async function handleLinkMember(
 
   if (!email) throw new Error("link_member requires email in payload");
 
-  // Use pre-built map when available (avoids re-fetching all pages per item)
-  const existing = emailMap
-    ? emailMap.get(email.toLowerCase())
-    : (await client.searchMembers(email))[0];
+  // The batch map is built from the paginated member list, which omits anyone
+  // who never accepted their invitation. A miss there means "not in the list",
+  // NOT "not in Circle" — so always confirm against the search endpoint before
+  // concluding the member is absent. Skipping that check is what sent existing
+  // members down the create path.
+  const existing =
+    (emailMap ? emailMap.get(email.toLowerCase()) : undefined) ??
+    (await client.findMemberByEmail(email));
 
   let circleId: number;
-  if (existing) {
+  if (existing?.id) {
     circleId = existing.id;
   } else if (name) {
     const created = await client.createMember({
@@ -98,14 +102,12 @@ async function handleLinkMember(
       skip_invitation: true,
     });
 
-    // POST /community_members does not return the member object, so
-    // `created.id` is undefined — this used to be stored as the literal
-    // string "undefined" (12 contacts in prod), leaving them linked to
-    // nothing. Read the id back by email instead of trusting the response.
+    // createMember unwraps the nested `community_member`, but fall back to a
+    // lookup rather than ever storing a non-numeric id again.
     const resolvedId =
       typeof created?.id === "number"
         ? created.id
-        : (await client.searchMembers(email))[0]?.id;
+        : (await client.findMemberByEmail(email))?.id;
 
     if (typeof resolvedId !== "number") {
       throw new Error(

@@ -3,6 +3,7 @@
 // ---------------------------------------------------------------------------
 
 import { CIRCLE_ADMIN_API_BASE, CIRCLE_V1_API_BASE, getCircleConfig } from "./config";
+import { CircleApiError } from "./types";
 import type {
   CircleMember,
   CircleMemberInput,
@@ -14,7 +15,6 @@ import type {
   CircleEventInput,
   CircleEventAttendee,
 } from "./types";
-import { CircleApiError } from "./types";
 
 interface ListPostsOptions {
   per_page?: number;
@@ -105,13 +105,37 @@ export class CircleAdminClient {
   }
 
   /**
-   * Search for a member by email.
-   * Circle's API ignores all filter params and returns all members,
-   * so we fetch all pages and match client-side.
+   * Look up a single member by email.
+   *
+   * Uses Circle's dedicated search endpoint. This previously paginated the
+   * whole member list and matched client-side, on the belief that Circle had
+   * no server-side email filter — it does, and more importantly the list
+   * endpoint does NOT return members who never accepted their invitation,
+   * while this one does. Circle's own spec documents the 200 response as
+   * "Invited (unconfirmed) community member is returned".
+   *
+   * That gap is why link_member kept missing existing members, falling through
+   * to create, and stranding contacts with no usable Circle id. It is also 1
+   * API call instead of ~8 pages — see the Circle call-volume work.
+   *
+   * Returns null when Circle has no member for that email (404).
    */
+  async findMemberByEmail(email: string): Promise<CircleMember | null> {
+    try {
+      return await this.request<CircleMember>("GET", "/community_members/search", {
+        params: { email },
+      });
+    } catch (err) {
+      // Circle answers 404 when no member has that email — that is "absent",
+      // not a failure. Anything else (auth, rate limit, 5xx) must propagate.
+      if (err instanceof CircleApiError && err.status === 404) return null;
+      throw err;
+    }
+  }
+
+  /** @deprecated Use findMemberByEmail — this shape exists for older callers. */
   async searchMembers(email: string): Promise<CircleMember[]> {
-    const map = await this.buildEmailMap();
-    const member = map.get(email.toLowerCase());
+    const member = await this.findMemberByEmail(email);
     return member ? [member] : [];
   }
 
@@ -140,10 +164,21 @@ export class CircleAdminClient {
     return map;
   }
 
+  /**
+   * Create/invite a member.
+   *
+   * The response is `{ message, community_member: {...} }` — the member is
+   * NESTED, so reading `.id` off the top level always yielded undefined. That
+   * undefined was being stringified into contacts.circle_id as the literal
+   * text "undefined". Unwrap it here so callers get a real member back.
+   */
   async createMember(data: CircleMemberInput): Promise<CircleMember> {
-    return this.request<CircleMember>("POST", "/community_members", {
+    const raw = await this.request<
+      CircleMember & { community_member?: CircleMember }
+    >("POST", "/community_members", {
       body: data as unknown as Record<string, unknown>,
     });
+    return raw?.community_member ?? raw;
   }
 
   async updateMember(
