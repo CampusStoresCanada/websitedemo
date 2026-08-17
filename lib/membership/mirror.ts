@@ -14,10 +14,13 @@ import { getProgramsConfig } from "@/lib/policy/engine";
  * moment Stage 2 moves billing reads onto this table. This closes the gap
  * ahead of that cutover.
  *
- * `organizations` remains the sole write authority through Stage 2 — this
- * is strictly an additive, best-effort mirror. It must never fail or block
- * the authoritative write that precedes it, so every error is logged and
- * swallowed rather than thrown.
+ * Direction of authority, as of Stage 3: membership *lifecycle status* is
+ * owned by `memberships` and mirrored outward into `organizations` by
+ * transition_membership_state(). These three fields go the other way —
+ * they are still written to `organizations` first by the paths below, and
+ * mirrored inward here. So this remains an additive, best-effort mirror:
+ * it must never fail or block the authoritative `organizations` write that
+ * precedes it, and every error is logged and swallowed rather than thrown.
  */
 export interface MembershipMirrorFields {
   fte?: number | null;
