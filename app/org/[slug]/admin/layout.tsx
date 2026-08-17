@@ -46,12 +46,9 @@ export default async function OrgAdminLayout({
           >
             Users
           </Link>
-          <Link
-            href={`/org/${slug}/admin/transfer`}
-            className="text-sm font-medium text-gray-600 hover:text-gray-900 px-3 py-1.5 rounded-md hover:bg-white/50 transition-colors"
-          >
-            Transfer Admin
-          </Link>
+          {/* Admin assignment and handover moved onto the org profile itself —
+              the Admin column in the people table, plus "Hand over admin"
+              beneath it. The standalone transfer page was retired. */}
         </div>
 
         {children}

@@ -520,7 +520,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
             {/*
              * TODO (post-launch): Fold org-admin management into Edit mode on the org profile page.
              *
-             * Two features currently live at standalone pages but belong inline in Edit mode:
+             * One feature still lives at a standalone page but belongs inline in Edit mode:
              *
              * 1. MANAGE TEAM — /org/[slug]/admin/users
              *    A table of all org members with roles + statuses. Should become a "Manage Team"
@@ -528,12 +528,11 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
              *    Inline role/status editing per row; invite via InviteUserDialog.
              *    Components: app/org/[slug]/admin/users/page.tsx, OrgUserTable, InviteUserDialog
              *
-             * 2. TRANSFER ADMIN — /org/[slug]/admin/transfer
-             *    A deliberate ownership-transfer process backed by admin_transfer_requests (with
-             *    timeout + pending state). Should appear as a clearly-separated "Transfer ownership"
-             *    panel at the bottom of Edit mode — OrgAdmin/SuperAdmin only, behind a button that
-             *    opens a focused confirmation flow.
-             *    Components: app/org/[slug]/admin/transfer/page.tsx, AdminTransferFlow
+             * 2. TRANSFER ADMIN — DONE. Retired /org/[slug]/admin/transfer and moved it onto the
+             *    org profile: an Admin column in the people table grants/revokes co-admins
+             *    immediately, and "Hand over admin" beneath it runs the unchanged
+             *    admin_transfer_requests ceremony (accept + timeout) for handing over sole control.
+             *    Components: components/org/OrgAdminAssignment.tsx, AdminTransferFlow
              *    Cron: app/api/cron/admin-transfer-timeout/route.ts
              */}
 

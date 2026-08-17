@@ -20,6 +20,14 @@ import BenchmarkingComparison from "./BenchmarkingComparison";
 import PartnerViewOfMember from "./PartnerViewOfMember";
 import EditableProcurementSection from "./EditableProcurementSection";
 import ContactEditModal from "./ContactEditModal";
+import {
+  ContactAdminToggle,
+  AdminHandoverSection,
+} from "@/components/org/OrgAdminAssignment";
+import type {
+  PendingTransferInfo,
+  TransferCandidate,
+} from "@/components/org/admin/AdminTransferFlow";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { useToolkit } from "@/components/ui/Toolkit";
@@ -83,6 +91,10 @@ interface MemberProfileProps {
     role: string;
   }>;
   assignableEntities: AssignableEntityColumn[];
+  /** Viewer's auth user id — drives the inline admin handover flow. */
+  viewerUserId?: string | null;
+  pendingTransfer?: PendingTransferInfo | null;
+  transferCandidates?: TransferCandidate[];
   buyableExtras: ConferenceOffer[];
   currentConferenceId: string | null;
   /** Whether currentConferenceId is actually public-facing (not a draft) — computed
@@ -107,6 +119,9 @@ export default function MemberProfile({
   conferenceAttendance,
   orgAssignableUsers,
   assignableEntities,
+  viewerUserId = null,
+  pendingTransfer = null,
+  transferCandidates = [],
   buyableExtras,
   currentConferenceId,
   currentConferenceIsPublic,
@@ -471,6 +486,26 @@ export default function MemberProfile({
     } finally {
       setSavingContactId(null);
     }
+  };
+
+  // ── Org admin assignment ────────────────────────────────────────────────
+  // Same shape as the conference columns: a checkbox per contact, editable
+  // only in edit mode by someone who can manage this org.
+  const canEditOrgAdmins =
+    editMode &&
+    (canEditThisOrg || permissionState === "admin" || permissionState === "super_admin");
+  const showAdminColumn =
+    canEditThisOrg || permissionState === "admin" || permissionState === "super_admin";
+  const adminUserIds = new Set(
+    orgAssignableUsers.filter((u) => u.role === "org_admin").map((u) => u.userId)
+  );
+
+  const getContactAdminState = (contact: VisibleContact) => {
+    const orgUser = resolveOrgUserForContact(contact);
+    return {
+      isOrgAdmin: Boolean(orgUser && adminUserIds.has(orgUser.userId)),
+      hasLogin: Boolean(orgUser),
+    };
   };
 
   const getEntityAttendanceCell = (contact: VisibleContact, entity: AssignableEntityColumn) => {
@@ -968,6 +1003,7 @@ export default function MemberProfile({
                         <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
                       ))}
                       {/* Badge/check-in status is a CSC staff concern, not something an org admin manages or needs to see. */}
+                      {showAdminColumn && <th className="pb-2 pl-3 font-semibold">Admin</th>}
                       {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Badge</th>}
                       {isCscAdmin && <th className="pb-2 pl-3 font-semibold">Check-in</th>}
                       {editMode && canEditThisOrg ? <th className="pb-2 pl-4 font-semibold">Actions</th> : null}
@@ -1020,6 +1056,22 @@ export default function MemberProfile({
                             </td>
                           );
                         })}
+                        {showAdminColumn && (() => {
+                          const adminState = getContactAdminState(contact);
+                          return (
+                            <td className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()} /* admin checkbox — intentional */>
+                              <ContactAdminToggle
+                                organizationId={organization.id}
+                                contactId={contact.id}
+                                contactName={(contact.name as string | null) ?? null}
+                                isAdmin={adminState.isOrgAdmin}
+                                hasLogin={adminState.hasLogin}
+                                disabled={!canEditOrgAdmins}
+                                onError={setAttendanceError}
+                              />
+                            </td>
+                          );
+                        })()}
                         {isCscAdmin && <td className="py-2 pl-3 text-gray-400">{person?.badgeStatus ?? "—"}</td>}
                         {isCscAdmin && <td className="py-2 pl-3 text-gray-400">{person?.checkedInAt ? "Checked in" : "—"}</td>}
                         {/* Actions — delete only in edit mode; eye moved to contact edit modal */}
@@ -1062,6 +1114,15 @@ export default function MemberProfile({
                 {attendanceError ? (
                   <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
                 ) : null}
+                {showAdminColumn && (
+                  <AdminHandoverSection
+                    organizationId={organization.id}
+                    orgSlug={organization.slug ?? ""}
+                    viewerUserId={viewerUserId}
+                    candidates={transferCandidates}
+                    pendingTransfer={pendingTransfer}
+                  />
+                )}
                 {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
                 {hasPublicConference && buyableExtras.length > 0 ? (
                   <div className="mt-4 grid gap-3 sm:grid-cols-2">
@@ -1559,6 +1620,25 @@ export default function MemberProfile({
                             </div>
                           );
                         })}
+                        {showAdminColumn && (() => {
+                          const adminState = getContactAdminState(contact);
+                          return (
+                            <div className="text-xs mt-1 font-medium">
+                              <label className="inline-flex items-center gap-2" onClick={(e) => e.stopPropagation()}>
+                                <span>Admin</span>
+                                <ContactAdminToggle
+                                  organizationId={organization.id}
+                                  contactId={contact.id}
+                                  contactName={(contact.name as string | null) ?? null}
+                                  isAdmin={adminState.isOrgAdmin}
+                                  hasLogin={adminState.hasLogin}
+                                  disabled={!canEditOrgAdmins}
+                                  onError={setAttendanceError}
+                                />
+                              </label>
+                            </div>
+                          );
+                        })()}
                         {isCscAdmin && person ? (
                           <div className="text-[11px] text-gray-400 mt-1">
                             Badge: {person.badgeStatus} · {person.checkedInAt ? "Checked in" : "Not checked in"}
@@ -1615,6 +1695,15 @@ export default function MemberProfile({
                 {attendanceError ? (
                   <p className="mt-2 text-xs text-red-600">{attendanceError}</p>
                 ) : null}
+                {showAdminColumn && (
+                  <AdminHandoverSection
+                    organizationId={organization.id}
+                    orgSlug={organization.slug ?? ""}
+                    viewerUserId={viewerUserId}
+                    candidates={transferCandidates}
+                    pendingTransfer={pendingTransfer}
+                  />
+                )}
                 {/* Add-ons are secondary to the roster above — nice to have, not required, so they sit below the names. */}
                 {hasPublicConference && buyableExtras.length > 0 ? (
                   <div className="mt-4 space-y-3">

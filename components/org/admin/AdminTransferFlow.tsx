@@ -7,9 +7,15 @@ import {
   acceptAdminTransfer,
   cancelAdminTransfer,
 } from "@/lib/actions/admin-transfer";
-import type { TransferCandidate } from "@/app/org/[slug]/admin/transfer/page";
+/** Defined here rather than on a page: the standalone transfer page was
+ *  retired and this flow is now rendered inline on the org profile. */
+export interface TransferCandidate {
+  userId: string;
+  displayName: string | null;
+  email: string | null;
+}
 
-interface PendingTransferInfo {
+export interface PendingTransferInfo {
   id: string;
   fromUserId: string;
   fromUserName: string | null;

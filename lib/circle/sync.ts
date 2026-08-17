@@ -10,6 +10,7 @@ import { executeCircleSyncOperation } from "./operations";
 import type { CircleMember, CircleSyncOperation, CircleSyncQueueItem } from "./types";
 import type { Json } from "@/lib/database.types";
 import { hasNonMemberTag } from "@/lib/contacts/tags";
+import { ACCESS_ACTIVE_STATUSES } from "@/lib/contacts/login-policy";
 
 // ---------------------------------------------------------------------------
 // Enqueue — called from server actions, non-throwing
@@ -386,12 +387,10 @@ export async function sweepInboundFromCircle(): Promise<{
 /**
  * Active-access statuses: add to the appropriate access group.
  * Inactive statuses: remove from the access group, optionally add to alumni.
+ *
+ * Now shared with the portal-login provisioning gate — see
+ * lib/contacts/login-policy.ts.
  */
-const ACCESS_ACTIVE_STATUSES = new Set([
-  "active",
-  "reactivated",
-  "grace",
-]);
 
 /**
  * Enqueue Circle access group add/remove operations for all contacts in an org.
