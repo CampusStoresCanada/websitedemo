@@ -13,8 +13,42 @@ import { logAuditEventSafe } from "@/lib/ops/audit";
 import Ajv from "ajv";
 import addFormats from "ajv-formats";
 
+import {
+  PROGRAMS_DEFINITIONS_SCHEMA,
+  validateProgramsSemantics,
+} from "@/lib/policy/programs-validation";
+import { defaultMembershipPrograms } from "@/lib/policy/engine";
+
+/** billing.partnership_rate (600 CAD) in cents, live value at 2026-08-18. */
+const PARTNERSHIP_RATE_CENTS_AT_SEED = 60000;
+import type { MembershipProgramDef } from "@/lib/policy/types";
+
 const ajv = new Ajv({ allErrors: true });
 addFormats(ajv);
+
+const REQUIRED_PROGRAM_POLICY_DEFAULTS = [
+  {
+    key: "programs.definitions",
+    category: "programs",
+    type: "json",
+    label: "Membership Programs",
+    description:
+      "The membership programs this deployment offers. Each program maps an organizations.type value to a program key, the permission level it grants, its conference tier, its invoice type, and how it is billed. Every read path — pricing, permissions, conference eligibility, the memberships mirror — resolves through this list, so a change here moves all of them together.",
+    // The fallback IS the seed — see defaultMembershipPrograms in
+    // lib/policy/engine.ts. Production runs on that fallback until this key is
+    // seeded, so calling it (rather than copying its output) makes a silent
+    // behaviour change structurally impossible.
+    //
+    // The rate is passed as a literal because a seeded program owns its own
+    // price: after seeding, editing billing.partnership_rate no longer moves
+    // the partner program. That is the intended destination (per-program
+    // billing), but it is a real decoupling, not a no-op.
+    value: defaultMembershipPrograms(PARTNERSHIP_RATE_CENTS_AT_SEED),
+    validationSchema: PROGRAMS_DEFINITIONS_SCHEMA as unknown as Record<string, unknown>,
+    isHighRisk: true,
+    displayOrder: 0,
+  },
+];
 
 const REQUIRED_BILLING_POLICY_DEFAULTS = [
   {
@@ -358,6 +392,65 @@ type TravelWindowPolicySeed =
 type IntegrationPolicySeed =
   (typeof REQUIRED_INTEGRATION_POLICY_DEFAULTS)[number];
 type RenewalPolicySeed = (typeof REQUIRED_RENEWAL_POLICY_DEFAULTS)[number];
+
+async function ensureRequiredProgramPolicies(
+  supabase: SupabaseClient<Database>,
+  policySetId: string
+): Promise<{ success: boolean; error?: string; insertedCount?: number }> {
+  const keys = REQUIRED_PROGRAM_POLICY_DEFAULTS.map((item) => item.key);
+  const { data: existingRows, error: existingRowsError } = await supabase
+    .from("policy_values")
+    .select("key")
+    .eq("policy_set_id", policySetId)
+    .in("key", keys);
+
+  if (existingRowsError) {
+    return {
+      success: false,
+      error: `Failed to inspect program keys for policy set ${policySetId}: ${existingRowsError.message}`,
+    };
+  }
+
+  const existingKeys = new Set((existingRows ?? []).map((row) => row.key));
+  const missing = REQUIRED_PROGRAM_POLICY_DEFAULTS.filter(
+    (item) => !existingKeys.has(item.key)
+  );
+
+  if (missing.length === 0) {
+    return { success: true, insertedCount: 0 };
+  }
+
+  const rowsToInsert: Database["public"]["Tables"]["policy_values"]["Insert"][] =
+    missing.map((item) => ({
+      policy_set_id: policySetId,
+      key: item.key,
+      category: item.category,
+      label: item.label,
+      description: item.description,
+      type: item.type,
+      value_json:
+        item.value as unknown as Database["public"]["Tables"]["policy_values"]["Insert"]["value_json"],
+      // The only seeded key that carries a real schema — everything else
+      // passes null, so nothing else is validated on edit.
+      validation_schema:
+        item.validationSchema as Database["public"]["Tables"]["policy_values"]["Insert"]["validation_schema"],
+      is_high_risk: item.isHighRisk,
+      display_order: item.displayOrder,
+    }));
+
+  const { error: insertError } = await supabase
+    .from("policy_values")
+    .insert(rowsToInsert);
+
+  if (insertError) {
+    return {
+      success: false,
+      error: `Failed to seed program keys: ${insertError.message}`,
+    };
+  }
+
+  return { success: true, insertedCount: missing.length };
+}
 
 async function ensureRequiredBillingPolicies(
   supabase: SupabaseClient<Database>,
@@ -828,6 +921,11 @@ export async function createPolicyDraft(
     }
   }
 
+  const programSeedResult = await ensureRequiredProgramPolicies(supabase, newDraft.id);
+  if (!programSeedResult.success) {
+    return { success: false, error: programSeedResult.error };
+  }
+
   const billingSeedResult = await ensureRequiredBillingPolicies(supabase, newDraft.id);
   if (!billingSeedResult.success) {
     await supabase.from("policy_sets").delete().eq("id", newDraft.id);
@@ -1178,6 +1276,35 @@ export async function validateDraft(
           validate.errors
             ?.map((e) => `${e.instancePath || "value"} ${e.message}`)
             .join("; ") ?? "Invalid value",
+      });
+    }
+  }
+
+  // Cross-item and referential checks JSON Schema can't express: duplicate
+  // program keys / org types, and orgTypeValue pointing at a type no
+  // organization actually has. Runs here rather than on every edit because it
+  // needs the whole array plus a DB read.
+  const programsRow = values.find((v) => v.key === "programs.definitions");
+  if (programsRow && Array.isArray(programsRow.value_json)) {
+    const { data: orgTypeRows } = await auth.supabase
+      .from("organizations")
+      .select("type")
+      .not("type", "is", null);
+
+    const orgTypesInUse = new Set(
+      (orgTypeRows ?? [])
+        .map((r) => (r as { type: string | null }).type)
+        .filter((t): t is string => Boolean(t))
+    );
+
+    for (const message of validateProgramsSemantics(
+      programsRow.value_json as unknown as MembershipProgramDef[],
+      orgTypesInUse
+    )) {
+      errors.push({
+        key: programsRow.key,
+        label: programsRow.label,
+        message,
       });
     }
   }

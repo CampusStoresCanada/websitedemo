@@ -331,7 +331,14 @@ export async function getBillingConfig(): Promise<BillingConfig> {
  * permission (orgAdminElevates: false) — this is a preserved behavior,
  * not a bug to fix here.
  */
-function defaultMembershipPrograms(partnershipRateCents: number): MembershipProgramDef[] {
+/**
+ * The programs a deployment falls back to when `programs.definitions` has not
+ * been seeded. Exported because it is ALSO the seed value used by
+ * lib/actions/policy.ts — seeding a literal copy instead would let the two
+ * drift, and a drifted seed changes pricing, permissions, conference tier and
+ * the memberships mirror all at once while looking like a no-op.
+ */
+export function defaultMembershipPrograms(partnershipRateCents: number): MembershipProgramDef[] {
   return [
     {
       key: 'member',

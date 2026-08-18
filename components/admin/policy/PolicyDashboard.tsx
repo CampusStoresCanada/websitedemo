@@ -20,6 +20,7 @@ import PlatformFeaturesTab from "./PlatformFeaturesTab";
 import PlatformIdentityEditor from "./PlatformIdentityEditor";
 
 const CATEGORY_LABELS: Record<PolicyCategory, string> = {
+  programs: "Membership Programs",
   renewals: "Renewals",
   billing: "Billing / Pricing",
   scheduling: "Scheduling",

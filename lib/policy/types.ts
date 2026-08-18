@@ -165,6 +165,7 @@ export interface RetentionConsentConfig {
 
 // All policy categories
 export const POLICY_CATEGORIES = [
+  'programs',
   'renewals',
   'billing',
   'scheduling',
