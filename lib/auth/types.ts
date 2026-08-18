@@ -30,6 +30,23 @@ export const PERMISSION_LEVELS: Record<PermissionState, number> = {
 };
 
 export type ApplicationStatus = "pending" | "approved" | "rejected";
+/**
+ * ⚠️ This alias does NOT describe what `signup_applications.application_type`
+ * actually holds in production. The approval path
+ * (lib/actions/applications.ts) reads and writes "member" / "partner" — which
+ * share NO values with the three below. Only `join_existing` is ever written
+ * from here (components/auth/SignupForm.tsx), and it has produced zero rows;
+ * `new_member` / `new_partner` are written by nothing at all.
+ *
+ * The column conflates two questions — WHICH PROGRAM (member/partner/…, which
+ * should come from `programs.definitions`) and WHAT KIND of application
+ * (new org vs joining an existing one). Splitting them into `program_key` +
+ * `application_kind` is deliberately deferred, not forgotten:
+ * see "Deferred — recorded, not scheduled" in
+ * ~/.claude/plans/membership-terms-and-programs.md
+ *
+ * Until then: trust lib/actions/applications.ts over this alias.
+ */
 export type ApplicationType = "join_existing" | "new_member" | "new_partner";
 export type MembershipStatus = "active" | "pending" | "rejected";
 
