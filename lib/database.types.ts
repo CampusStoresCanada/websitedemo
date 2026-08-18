@@ -3877,6 +3877,7 @@ export type Database = {
           organization_id: string | null
           personal_tag_ids: string[] | null
           phone: string | null
+          profile_id: string | null
           profile_picture_url: string | null
           role_title: string | null
           synced_from_circle_at: string | null
@@ -3914,6 +3915,7 @@ export type Database = {
           organization_id?: string | null
           personal_tag_ids?: string[] | null
           phone?: string | null
+          profile_id?: string | null
           profile_picture_url?: string | null
           role_title?: string | null
           synced_from_circle_at?: string | null
@@ -3951,6 +3953,7 @@ export type Database = {
           organization_id?: string | null
           personal_tag_ids?: string[] | null
           phone?: string | null
+          profile_id?: string | null
           profile_picture_url?: string | null
           role_title?: string | null
           synced_from_circle_at?: string | null
@@ -3977,6 +3980,13 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "contacts_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]

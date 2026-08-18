@@ -36,8 +36,10 @@ function keepIfAbsent(value: string | null | undefined): string | undefined {
  * Resolve the contact behind a logged-in user.
  *
  * Previously read `public.users` — a table with zero rows — and so returned
- * null on every call in production. Now it resolves through the auth email,
- * which is what the callers actually needed.
+ * null on every call in production. Now prefers the real
+ * `contacts.profile_id` link (fast, unambiguous — see linkUserToPerson),
+ * falling back to matching the auth email only for contacts that predate
+ * that link or were skipped by the backfill's shared-inbox exclusion.
  */
 export async function ensurePersonForUser(params: {
   userId: string;
@@ -45,6 +47,17 @@ export async function ensurePersonForUser(params: {
   fallbackEmail?: string | null;
 }): Promise<{ personId: string | null; error?: string }> {
   const adminClient = createAdminClient();
+
+  let linkedQuery = adminClient
+    .from("contacts")
+    .select("id")
+    .eq("profile_id", params.userId)
+    .is("archived_at", null);
+  if (params.organizationId) linkedQuery = linkedQuery.eq("organization_id", params.organizationId);
+
+  const { data: linked, error: linkedError } = await linkedQuery.limit(1).maybeSingle();
+  if (linkedError) return { personId: null, error: linkedError.message };
+  if (linked?.id) return { personId: linked.id };
 
   let email = params.fallbackEmail?.trim().toLowerCase() ?? null;
   if (!email) {
@@ -67,14 +80,33 @@ export async function ensurePersonForUser(params: {
 }
 
 /**
- * Formerly wrote `users.person_id`. That table is empty, so this was a silent
- * no-op on every call. Contacts are resolved by email, so there is no link to
- * maintain; kept as a no-op so the call sites keep working unchanged.
+ * Record that this login (`profiles`/`auth.users`) IS this contact.
+ *
+ * Formerly wrote `users.person_id` — that table was empty, so this was a
+ * silent no-op on every call, kept intentionally so call sites didn't have
+ * to change. Now writes `contacts.profile_id`, the real link that replaces
+ * resolving a contact from a logged-in user by matching email strings (the
+ * same soft-linking pattern that caused the contacts/people drift — see
+ * e5b299d). Not unique: the same real person can legitimately have one
+ * contact per org they belong to, all pointing at the same profile.
+ *
+ * Best-effort — a failed link write must never fail the login/invite flow
+ * that's already succeeded by the time this runs.
  */
-export async function linkUserToPerson(_params: {
+export async function linkUserToPerson(params: {
   userId: string;
   personId: string;
 }): Promise<{ success: boolean; error?: string }> {
+  const adminClient = createAdminClient();
+  const { error } = await adminClient
+    .from("contacts")
+    .update({ profile_id: params.userId })
+    .eq("id", params.personId);
+
+  if (error) {
+    console.warn("[linkUserToPerson] failed to write contacts.profile_id (non-blocking):", error.message);
+    return { success: false, error: error.message };
+  }
   return { success: true };
 }
 

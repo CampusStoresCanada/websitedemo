@@ -115,8 +115,14 @@ export async function provisionOrgLogin(params: {
         organizationId: orgId,
         fallbackEmail: normalizedEmail,
       });
-      if (!ensuredPerson.personId && knownPersonId) {
-        await linkUserToPerson({ userId, personId: knownPersonId });
+      // Link whichever contact we resolved — the freshly-matched one (most
+      // trustworthy: it's this exact user's email in this exact org) if we
+      // found one, otherwise the one syncIdentity resolved/created above.
+      // Now that this is a real write (not the old no-op), it should run
+      // whenever we have a contact in hand, not just as an email-lookup fallback.
+      const linkPersonId = ensuredPerson.personId ?? knownPersonId;
+      if (linkPersonId) {
+        await linkUserToPerson({ userId, personId: linkPersonId });
       }
 
       // Check if they're already a member of this org
@@ -189,8 +195,9 @@ export async function provisionOrgLogin(params: {
         organizationId: orgId,
         fallbackEmail: normalizedEmail,
       });
-      if (!ensuredPerson.personId && knownPersonId) {
-        await linkUserToPerson({ userId, personId: knownPersonId });
+      const linkPersonId = ensuredPerson.personId ?? knownPersonId;
+      if (linkPersonId) {
+        await linkUserToPerson({ userId, personId: linkPersonId });
       }
     }
 

@@ -40,7 +40,12 @@ const {
   applyProrationMock: vi.fn((baseAmountCents: number) => ({ amountCents: baseAmountCents, discountPct: 0 })),
   resolveAssigneeForEmailMock: vi.fn(),
   findExistingUserByEmailMock: vi.fn(),
-  resolveConferenceOrderTaxRatesMock: vi.fn(async () => ({
+  resolveConferenceOrderTaxRatesMock: vi.fn(async (): Promise<{
+    conferenceRatePct: number;
+    membershipRatePct: number;
+    conferenceStripeTaxRateId: string | null;
+    membershipStripeTaxRateId: string | null;
+  }> => ({
     conferenceRatePct: 13,
     membershipRatePct: 5,
     conferenceStripeTaxRateId: "txr_conference_test",
