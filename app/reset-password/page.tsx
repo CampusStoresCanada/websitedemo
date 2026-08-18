@@ -69,8 +69,15 @@ function ResetPasswordContent() {
     setSuccess(true);
     setIsLoading(false);
 
+    // Land on /onboarding rather than the public homepage. A first-time org
+    // admin arriving from an invite has just set their password and would
+    // otherwise be dropped on the marketing site with nothing telling them
+    // the wizard exists — nothing else in the app links to it. /onboarding
+    // triages on its own: anyone who has already onboarded, or who isn't an
+    // org admin, is bounced to /me, so an ordinary password reset still ends
+    // up somewhere sensible.
     setTimeout(() => {
-      router.push("/");
+      router.push("/onboarding");
       router.refresh();
     }, 2000);
   };

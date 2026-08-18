@@ -497,17 +497,23 @@ export async function enqueueOrgCircleAccessSync(
       if (!contact.email) continue;
 
       if (isActive) {
-        // Re-add to Circle if they were deleted during a prior lock/cancel
-        if (newStatus === "reactivated") {
-          await enqueueCircleSync({
-            operation: "link_member",
-            entityType: "contact",
-            entityId: contact.id,
-            payload: { email: contact.email, name: contact.name ?? contact.email },
-            orgId,
-            idempotencyKey: `reactivate-link-${contact.id}-${now}`,
-          });
-        }
+        // Make sure the contact actually exists in Circle before anything
+        // below tries to act on them. add_to_access_group and add_tag both
+        // address the member by email, so if no Circle account exists yet
+        // they 404 — which is exactly what happened to every first-time
+        // activation: this used to run only for "reactivated", so an org
+        // going approved → active on its first payment got the group and
+        // tag jobs queued against a member Circle had never heard of.
+        // link_member is find-or-create, so queuing it for every activation
+        // is a no-op for contacts who are already linked.
+        await enqueueCircleSync({
+          operation: "link_member",
+          entityType: "contact",
+          entityId: contact.id,
+          payload: { email: contact.email, name: contact.name ?? contact.email },
+          orgId,
+          idempotencyKey: `activate-link-${contact.id}-${now}`,
+        });
         // Add to access group
         if (activeGroupId) {
           await enqueueCircleSync({

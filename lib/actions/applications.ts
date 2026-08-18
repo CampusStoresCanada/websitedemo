@@ -102,6 +102,19 @@ function extractDomain(value: string | null | undefined): string | null {
 }
 
 /**
+ * Invoice statuses that mean "this org still owes us money", matching the set
+ * already used by optOutOfRenewal / activateMembershipRenewal / stripe reconcile.
+ *
+ * Both call sites in this file previously hardcoded
+ * ["pending", "sent", "overdue", "pending_settlement"] — but three of those four
+ * are not statuses this app ever writes (the real ones are invoiced / paid /
+ * voided / draft). So the duplicate-org reviewer under-reported outstanding
+ * invoices, and the invite resend fell through to a generic billing link for
+ * every org including ones that had already paid.
+ */
+const UNPAID_INVOICE_STATUSES = new Set(["invoiced", "pending_settlement", "draft"]);
+
+/**
  * Looks for existing organizations that plausibly match a would-be-approved
  * application, by exact name, exact contact email, shared email domain, or
  * shared website domain. Also flags whether any match already has an
@@ -172,11 +185,10 @@ async function findDuplicateOrganizations(
     .select("organization_id, status")
     .in("organization_id", ids);
 
-  const outstandingStatuses = new Set(["pending", "sent", "overdue", "pending_settlement"]);
   for (const inv of invoices ?? []) {
     const match = byId.get(inv.organization_id);
     if (!match) continue;
-    if (outstandingStatuses.has(inv.status)) match.hasOutstandingInvoice = true;
+    if (UNPAID_INVOICE_STATUSES.has(inv.status)) match.hasOutstandingInvoice = true;
     if (inv.status === "paid") match.hasPaidInvoice = true;
   }
 
@@ -706,19 +718,28 @@ export async function approveApplication(
         email: app.applicant_email!,
       });
 
-      if (resetData?.properties?.action_link) {
+      // A 6-digit code, not a link — generateLink mints the credential and
+      // sends nothing, so we deliver it ourselves and email_otp is the same
+      // code /reset-password already verifies. See accountSetupBlock in
+      // lib/email/send.ts for why this is not action_link.
+      if (resetData?.properties?.email_otp) {
         // Pay-first applicants get one terminal email confirming they're
         // paid up and can log in — not the generic invite, which says
         // nothing about payment status and previously left step 7's (now
         // skipped) payment-request email as the only mention of billing.
         const inviteContent = isPaidFirstBoothApplication
-          ? paidBoothWelcomeEmail(
+          ? await paidBoothWelcomeEmail(
               app.applicant_name ?? "there",
-              resetData.properties.action_link,
+              resetData.properties.email_otp,
+              app.applicant_email!,
               paidBoothLabel,
               paidConferenceLabel
             )
-          : await accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
+          : await accountInviteEmail(
+              app.applicant_name ?? "there",
+              resetData.properties.email_otp,
+              app.applicant_email!
+            );
         await sendEmail({
           to: app.applicant_email!,
           subject: inviteContent.subject,
@@ -981,10 +1002,11 @@ export async function mergeApplicationIntoOrganization(
           type: "recovery",
           email: app.applicant_email!,
         });
-        if (resetData?.properties?.action_link) {
+        if (resetData?.properties?.email_otp) {
           const inviteContent = await accountInviteEmail(
             app.applicant_name ?? "there",
-            resetData.properties.action_link
+            resetData.properties.email_otp,
+            app.applicant_email!
           );
           await sendEmail({
             to: app.applicant_email!,
@@ -1319,15 +1341,20 @@ export async function resendApplicationInvite(
       type: "recovery",
       email: app.applicant_email,
     });
-    if (resetData?.properties?.action_link) {
+    if (resetData?.properties?.email_otp) {
       const inviteContent = isPaidFirstBoothApplication
-        ? paidBoothWelcomeEmail(
+        ? await paidBoothWelcomeEmail(
             app.applicant_name ?? "there",
-            resetData.properties.action_link,
+            resetData.properties.email_otp,
+            app.applicant_email,
             paidBoothLabel,
             paidConferenceLabel
           )
-        : await accountInviteEmail(app.applicant_name ?? "there", resetData.properties.action_link);
+        : await accountInviteEmail(
+            app.applicant_name ?? "there",
+            resetData.properties.email_otp,
+            app.applicant_email
+          );
       await sendEmail({
         to: app.applicant_email,
         subject: inviteContent.subject,
@@ -1346,12 +1373,22 @@ export async function resendApplicationInvite(
         .from("invoices")
         .select("id, stripe_invoice_id, status")
         .eq("organization_id", app.organization_id)
-        .in("status", ["pending", "sent", "overdue", "pending_settlement"])
+        .in("status", Array.from(UNPAID_INVOICE_STATUSES))
         .order("created_at", { ascending: false })
         .limit(1)
         .maybeSingle();
 
-      const paymentUrl = invoice?.stripe_invoice_id
+      if (!invoice) {
+        // Nothing outstanding — skip the payment nudge entirely. This used to
+        // fall through to /account/billing whenever the lookup missed, which
+        // meant an org that had already PAID got a "[Reminder] complete your
+        // payment" email every time an admin resent their invite. The lookup
+        // misses for paid orgs by design, so the fallback fired precisely in
+        // the case where it was most wrong. The invite still goes out above.
+        return { success: sentInvite, error: sentInvite ? undefined : "Failed to send invite" };
+      }
+
+      const paymentUrl = invoice.stripe_invoice_id
         ? `https://invoice.stripe.com/i/${invoice.stripe_invoice_id}`
         : `${process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app"}/account/billing`;
 

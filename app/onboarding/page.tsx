@@ -15,6 +15,12 @@ export default async function OnboardingPage() {
     redirect("/login");
   }
 
+  // Every "not eligible for onboarding" exit below goes to /me, the signed-in
+  // landing page. These used to point at /dashboard, which is not a route in
+  // this app — so anyone who didn't qualify was redirected straight into a
+  // 404. That matters now that /reset-password routes new accounts through
+  // here on purpose.
+
   // Find the user's organization (they should have exactly one as org_admin)
   const orgMembership = auth.organizations.find(
     (o) => o.role === "org_admin"
@@ -24,13 +30,13 @@ export default async function OnboardingPage() {
   const isAdmin = isGlobalAdmin(auth.globalRole);
 
   if (!orgMembership && !isAdmin) {
-    redirect("/dashboard");
+    redirect("/me");
   }
 
   const orgId = orgMembership?.organization_id;
 
   if (!orgId && !isAdmin) {
-    redirect("/dashboard");
+    redirect("/me");
   }
 
   // Fetch org data for the wizard
@@ -51,12 +57,12 @@ export default async function OnboardingPage() {
   }
 
   if (!org) {
-    redirect("/dashboard");
+    redirect("/me");
   }
 
   // If onboarding already completed and no reset required, redirect
   if (org.onboarding_completed_at && !org.onboarding_reset_required) {
-    redirect("/dashboard");
+    redirect("/me");
   }
 
   return (

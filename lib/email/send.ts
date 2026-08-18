@@ -10,6 +10,47 @@ async function resolveFromAddress(): Promise<string> {
   return `${identity.clientName} <noreply@${domain}>`;
 }
 
+// Same source + fallback as lib/email/layout.ts — kept consistent rather than
+// resolved from platform_config, which carries a mail domain (clientDomain)
+// but no app URL.
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
+
+/**
+ * Shared "enter this code to set your password" block for account invites.
+ *
+ * Deliberately a 6-digit code and NOT a magic link: single-use links get
+ * pre-clicked and burned by Exchange/ATP Safe Links before the human ever
+ * sees them, and they break when the invite is opened on a different device
+ * than it completes on. That's the same failure that moved password resets
+ * off links in June 2026 — invites kept the broken pattern until now, and
+ * every one of the 10 people ever sent one failed to log in.
+ *
+ * The code expires (Supabase OTP expiry, ~1h by default), which is short for
+ * an invite someone may not read same-day. That's why the self-serve recovery
+ * line below is not optional: it's what makes the flow survive expiry without
+ * an admin having to re-issue anything.
+ */
+function accountSetupBlock(code: string, email: string): string {
+  const resetUrl = `${APP_URL}/reset-password?email=${encodeURIComponent(email)}`;
+  return `
+        <p>Your 6-digit setup code:</p>
+        <p style="margin: 16px 0;">
+          <span style="display: inline-block; font-family: monospace; font-size: 32px; letter-spacing: 8px; font-weight: bold; color: #111827; background: #F3F4F6; border: 1px solid #E5E7EB; border-radius: 8px; padding: 12px 20px;">${code}</span>
+        </p>
+        <p style="margin: 24px 0;">
+          <a href="${resetUrl}"
+             style="background-color: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
+            Set Up Your Account
+          </a>
+        </p>
+        <p style="font-size: 13px; color: #6B7280;">
+          Enter the code on that page to choose your password. If the code has
+          already expired, request a fresh one any time at
+          <a href="${APP_URL}/forgot-password">${APP_URL}/forgot-password</a> —
+          no need to wait for another invite.
+        </p>`;
+}
+
 interface SendEmailOptions {
   to: string;
   subject: string;
@@ -256,7 +297,8 @@ export async function applicationRejectedEmail(
 
 export async function accountInviteEmail(
   applicantName: string,
-  inviteUrl: string
+  code: string,
+  email: string
 ): Promise<{ subject: string; html: string }> {
   const identity = await getPlatformIdentity();
   return {
@@ -265,13 +307,8 @@ export async function accountInviteEmail(
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
         <h2>Welcome to ${identity.clientName}</h2>
         <p>Hi ${applicantName},</p>
-        <p>Your account has been created. Click below to set your password and get started:</p>
-        <p style="margin: 24px 0;">
-          <a href="${inviteUrl}"
-             style="background-color: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
-            Set Up Your Account
-          </a>
-        </p>
+        <p>Your account has been created.</p>
+${accountSetupBlock(code, email)}
       </div>
     `,
   };
@@ -285,27 +322,23 @@ export async function accountInviteEmail(
  * and start onboarding" instead of a generic invite plus a separate (and
  * incorrect) payment request.
  */
-export function paidBoothWelcomeEmail(
+export async function paidBoothWelcomeEmail(
   applicantName: string,
-  inviteUrl: string,
+  code: string,
+  email: string,
   boothLabel: string | null,
   conferenceLabel: string | null
-): { subject: string; html: string } {
+): Promise<{ subject: string; html: string }> {
+  const identity = await getPlatformIdentity();
   const purchase = [boothLabel, conferenceLabel].filter(Boolean).join(" at ");
   return {
-    subject: "You're all set — Campus Stores Canada",
+    subject: `You're all set — ${identity.clientName}`,
     html: `
       <div style="font-family: sans-serif; max-width: 600px; margin: 0 auto;">
-        <h2>Welcome to Campus Stores Canada</h2>
+        <h2>Welcome to ${identity.clientName}</h2>
         <p>Hi ${applicantName},</p>
         <p>Your partnership application has been approved, and your payment${purchase ? ` for ${purchase}` : ""} is already on file — there's nothing more to pay.</p>
-        <p>Click below to set your password and get started:</p>
-        <p style="margin: 24px 0;">
-          <a href="${inviteUrl}"
-             style="background-color: #2563eb; color: #fff; padding: 12px 24px; border-radius: 6px; text-decoration: none; display: inline-block;">
-            Set Up Your Account
-          </a>
-        </p>
+${accountSetupBlock(code, email)}
       </div>
     `,
   };

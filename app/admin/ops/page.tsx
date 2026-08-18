@@ -137,6 +137,17 @@ type PendingApplicationRow = {
   applicant_name: string | null;
   status: string;
   created_at: string | null;
+  organization_id: string | null;
+  paid_at: string | null;
+  paid_booth_entity_id: string | null;
+  paid_conference_id: string | null;
+};
+
+/** What we can actually prove about an approved application's money. */
+type ApplicationPaymentState = {
+  label: string;
+  tone: "paid" | "owing" | "unknown";
+  onboarded: boolean;
 };
 
 type PaymentFailureRow = {
@@ -447,7 +458,9 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       .limit(10),
     adminClient
       .from("signup_applications")
-      .select("id, application_type, applicant_name, status, created_at")
+      .select(
+        "id, application_type, applicant_name, status, created_at, organization_id, paid_at, paid_booth_entity_id, paid_conference_id"
+      )
       .in("status", ["pending", "pending_review", "pending_verification", "approved"])
       .order("created_at", { ascending: false })
       .limit(12),
@@ -734,6 +747,111 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
   const allOpsAlerts = (opsAlertsRes.data ?? []) as OpsAlertRow[];
   const auditLogsAll = (auditLogRes.data ?? []) as AuditLogRow[];
   const pendingApplications = (pendingAppsRes.data ?? []) as PendingApplicationRow[];
+
+  // ── Payment state for approved applications ──────────────────────────────
+  //
+  // This badge used to read a flat "Awaiting payment/onboarding" for every
+  // approved application, which was wrong for most of them: money reaches this
+  // system by THREE different routes, and only one of them writes an `invoices`
+  // row.
+  //
+  //   1. Pre-org booth purchase — the buyer paid for a booth (with partnership
+  //      dues bundled in as a line item) before an org or account existed.
+  //      Lives in `prospective_booth_payments`, exported to QBO as a sales
+  //      receipt; it never creates an invoice at all. Flagged on the
+  //      application itself by paid_at + paid_booth_entity_id + paid_conference_id.
+  //   2. Ordinary dues invoice — the `invoices` table.
+  //   3. In-cart renewal — dues folded into a conference checkout. This one
+  //      DOES settle back into `invoices` (activateMembershipRenewal voids the
+  //      outstanding invoice on payment), but we check conference_orders too so
+  //      the badge is right even if that reconciliation ever lags.
+  //
+  // Anything we can't prove either way is labelled honestly rather than being
+  // defaulted to "awaiting payment".
+  const approvedApps = pendingApplications.filter((a) => a.status === "approved");
+  const approvedOrgIds = [
+    ...new Set(approvedApps.map((a) => a.organization_id).filter((id): id is string => Boolean(id))),
+  ];
+
+  const paymentStateByAppId = new Map<string, ApplicationPaymentState>();
+
+  if (approvedApps.length > 0) {
+    const [orgInvoicesRes, orgOrdersRes, orgRowsRes] = await Promise.all([
+      approvedOrgIds.length
+        ? adminClient
+            .from("invoices")
+            .select("organization_id, status")
+            .in("organization_id", approvedOrgIds)
+        : Promise.resolve({ data: [] }),
+      approvedOrgIds.length
+        ? adminClient
+            .from("conference_orders")
+            .select("organization_id, paid_at")
+            .in("organization_id", approvedOrgIds)
+            .not("paid_at", "is", null)
+        : Promise.resolve({ data: [] }),
+      approvedOrgIds.length
+        ? adminClient
+            .from("organizations")
+            .select("id, onboarding_completed_at")
+            .in("id", approvedOrgIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+
+    const UNPAID = new Set(["invoiced", "pending_settlement", "draft"]);
+    const owingOrgs = new Set<string>();
+    const paidInvoiceOrgs = new Set<string>();
+    for (const inv of (orgInvoicesRes.data ?? []) as { organization_id: string; status: string }[]) {
+      if (UNPAID.has(inv.status)) owingOrgs.add(inv.organization_id);
+      if (inv.status === "paid") paidInvoiceOrgs.add(inv.organization_id);
+    }
+
+    const paidOrderOrgs = new Set(
+      ((orgOrdersRes.data ?? []) as { organization_id: string }[]).map((o) => o.organization_id)
+    );
+
+    const onboardedOrgs = new Set(
+      ((orgRowsRes.data ?? []) as { id: string; onboarding_completed_at: string | null }[])
+        .filter((o) => o.onboarding_completed_at)
+        .map((o) => o.id)
+    );
+
+    for (const app of approvedApps) {
+      const orgId = app.organization_id;
+      const paidPreOrgBooth = Boolean(
+        app.paid_at && app.paid_booth_entity_id && app.paid_conference_id
+      );
+
+      let label: string;
+      let tone: ApplicationPaymentState["tone"];
+
+      if (paidPreOrgBooth) {
+        label = "Paid — booth + dues";
+        tone = "paid";
+      } else if (orgId && owingOrgs.has(orgId)) {
+        label = "Awaiting payment";
+        tone = "owing";
+      } else if (orgId && (paidInvoiceOrgs.has(orgId) || paidOrderOrgs.has(orgId))) {
+        label = "Paid";
+        tone = "paid";
+      } else {
+        label = "No charge on file";
+        tone = "unknown";
+      }
+
+      paymentStateByAppId.set(app.id, {
+        label,
+        tone,
+        onboarded: Boolean(orgId && onboardedOrgs.has(orgId)),
+      });
+    }
+  }
+
+  const PAYMENT_TONE_CLASS: Record<ApplicationPaymentState["tone"], string> = {
+    paid: "bg-emerald-50 text-emerald-700",
+    owing: "bg-amber-50 text-amber-800",
+    unknown: "bg-gray-100 text-gray-600",
+  };
   const paymentFailures = (failedInvoicesRes.data ?? []) as PaymentFailureRow[];
   const qbReconPendingRows = (qboReconPendingRes.data ?? []) as QBReconPendingRow[];
   const qboExportFailedRows = (qboExportFailedRes.data ?? []) as QBExportFailureRow[];
@@ -1847,9 +1965,26 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                     </div>
                   ) : null}
                   {row.status === "approved" ? (
-                    <div className="mt-2 flex flex-wrap gap-2">
-                      <span className="rounded-md bg-blue-50 px-2 py-1 text-xs text-blue-700">
-                        Awaiting payment/onboarding
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <span
+                        className={`rounded-md px-2 py-1 text-xs ${
+                          PAYMENT_TONE_CLASS[
+                            paymentStateByAppId.get(row.id)?.tone ?? "unknown"
+                          ]
+                        }`}
+                      >
+                        {paymentStateByAppId.get(row.id)?.label ?? "No charge on file"}
+                      </span>
+                      <span
+                        className={`rounded-md px-2 py-1 text-xs ${
+                          paymentStateByAppId.get(row.id)?.onboarded
+                            ? "bg-emerald-50 text-emerald-700"
+                            : "bg-blue-50 text-blue-700"
+                        }`}
+                      >
+                        {paymentStateByAppId.get(row.id)?.onboarded
+                          ? "Onboarded"
+                          : "Not onboarded"}
                       </span>
                       <form
                         action={async () => {
