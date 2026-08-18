@@ -6,7 +6,11 @@ import PartnershipPricingCard from "@/components/partnership/PartnershipPricingC
 import RenewalTerms from "@/components/pricing/RenewalTerms";
 import { getPartnersPageData, getMembersPageData } from "@/lib/homepage";
 import { getActiveConferenceInstance } from "@/lib/actions/conference-availability";
-import { getBillingConfig, getRenewalConfig } from "@/lib/policy/engine";
+import {
+  getBillingConfig,
+  getRenewalConfig,
+  getPartnershipRateDollars,
+} from "@/lib/policy/engine";
 import { effectiveProrationDiscountPct } from "@/lib/policy/proration";
 
 export const metadata: Metadata = {
@@ -16,14 +20,21 @@ export const metadata: Metadata = {
 };
 
 export default async function PartnershipPage() {
-  const [{ mapOrgs: partnerOrgs }, { mapOrgs: memberOrgs }, activeConference, billing, renewal] =
-    await Promise.all([
-      getPartnersPageData(),
-      getMembersPageData(),
-      getActiveConferenceInstance(),
-      getBillingConfig(),
-      getRenewalConfig(),
-    ]);
+  const [
+    { mapOrgs: partnerOrgs },
+    { mapOrgs: memberOrgs },
+    activeConference,
+    billing,
+    renewal,
+    partnershipRateDollars,
+  ] = await Promise.all([
+    getPartnersPageData(),
+    getMembersPageData(),
+    getActiveConferenceInstance(),
+    getBillingConfig(),
+    getRenewalConfig(),
+    getPartnershipRateDollars(),
+  ]);
 
   const discountPct = effectiveProrationDiscountPct(
     billing.proration_rules,
@@ -63,7 +74,7 @@ export default async function PartnershipPage() {
 
             <div className="w-full max-w-md lg:shrink-0">
               <PartnershipPricingCard
-                vendorRate={billing.partnership_rate}
+                vendorRate={partnershipRateDollars}
                 discountPct={discountPct}
               />
               <RenewalTerms cycleStartMonthDay={renewal.cycle_start_month_day} />

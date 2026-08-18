@@ -1,4 +1,4 @@
-import { getBillingConfig } from "@/lib/policy/engine";
+import { getPartnershipRateDollars } from "@/lib/policy/engine";
 import { getBoothTierAvailability } from "@/lib/actions/conference-availability";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
@@ -114,8 +114,7 @@ export default async function SponsorshipLadder({
    *  thank-you instead of re-selling something they've already bought. */
   partnerAlreadyRenewed?: boolean;
 }) {
-  const billing = await getBillingConfig();
-  const vendorRate = billing.partnership_rate;
+  const vendorRate = await getPartnershipRateDollars();
 
   const vendorTier: Tier = {
     name: "Vendor",

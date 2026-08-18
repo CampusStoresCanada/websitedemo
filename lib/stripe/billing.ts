@@ -6,7 +6,6 @@ import { getBillingConfig, getEffectivePolicy, getRenewalConfig, getProgramsConf
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
 import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
-import type { MembershipProgramDef } from "@/lib/policy/types";
 import type {
   Invoice,
   PaymentMethod,
@@ -138,14 +137,14 @@ export async function applyProration(
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * The flat Vendor Partner annual rate, in cents, from policy.
- * Shared by the invoice path here and per-org cart pricing in
- * lib/actions/conference-commerce.ts, so both quote the same number.
+ * The flat Vendor Partner annual rate, in cents.
+ *
+ * Re-exported from lib/policy/engine.ts so existing importers keep working;
+ * the rate itself now comes from `programs.definitions`, not from
+ * `billing.partnership_rate`. See getPartnershipRateCents there for why the
+ * two must not both be live.
  */
-export async function getPartnershipRateCents(): Promise<number> {
-  const billing = await getBillingConfig();
-  return Math.round(billing.partnership_rate * 100);
-}
+export { getPartnershipRateCents } from "@/lib/policy/engine";
 
 /**
  * Create an invoice for an org, priced according to its membership

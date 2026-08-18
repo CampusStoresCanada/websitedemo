@@ -21,6 +21,26 @@ interface PricingModelSummary {
   partnershipRate: number;
 }
 
+/**
+ * Dollars, resolved from this policy set's own values — the seeded program if
+ * present, otherwise the bootstrap key. Mirrors getProgramsConfig()'s fallback
+ * so the preview and the live resolver can't disagree.
+ */
+function resolvePartnershipRateDollars(map: Map<string, unknown>): number {
+  const programs = map.get("programs.definitions");
+  if (Array.isArray(programs)) {
+    const partner = (programs as Array<Record<string, unknown>>).find((p) => {
+      const billing = p.billing as { mode?: string } | undefined;
+      return p.permissionLevel === "partner" && billing?.mode === "flat_rate";
+    });
+    const rateCents = (partner?.billing as { rateCents?: number } | undefined)?.rateCents;
+    if (typeof rateCents === "number") return rateCents / 100;
+  }
+
+  const raw = map.get("billing.partnership_rate");
+  return typeof raw === "number" ? raw : Number(raw ?? 0);
+}
+
 async function loadPricingModelSummary(
   policySetId: string
 ): Promise<PricingModelSummary> {
@@ -37,6 +57,7 @@ async function loadPricingModelSummary(
       "billing.manual_override_allowed",
       "billing.override_persistence",
       "billing.partnership_rate",
+      "programs.definitions",
     ]);
 
   if (error) {
@@ -53,10 +74,11 @@ async function loadPricingModelSummary(
     roundingRule: String(map.get("billing.rounding_rule") ?? "nearest_dollar"),
     manualOverrideAllowed: Boolean(map.get("billing.manual_override_allowed") ?? true),
     overridePersistence: String(map.get("billing.override_persistence") ?? "cycle_only"),
-    partnershipRate:
-      typeof map.get("billing.partnership_rate") === "number"
-        ? (map.get("billing.partnership_rate") as number)
-        : Number(map.get("billing.partnership_rate") ?? 0),
+    // Preview the rate this draft would actually charge. Once
+    // programs.definitions is seeded the partner program owns its rate, so
+    // previewing billing.partnership_rate would show a number the draft no
+    // longer bills — see getPartnershipRateCents in lib/policy/engine.ts.
+    partnershipRate: resolvePartnershipRateDollars(map),
   };
 }
 

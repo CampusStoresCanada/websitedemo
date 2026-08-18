@@ -373,6 +373,53 @@ export async function getProgramsConfig(): Promise<MembershipProgramDef[]> {
 }
 
 /**
+ * The partner-track flat annual rate, in cents, resolved from
+ * `programs.definitions`.
+ *
+ * This is the ONE source for that number. It used to be read straight off
+ * `billing.partnership_rate` by five unrelated call sites — invoice-adjacent
+ * cart pricing, the pre-org booth checkout, renewal progress, the public
+ * partnership page and the sponsorship ladder — none of which went through
+ * the program config that `createProgramInvoice` already prices from. Seeding
+ * a program rate while those readers stayed on the old key would have split
+ * the price in two, on paths that take real money.
+ *
+ * Behaviour is unchanged while `programs.definitions` is unseeded, because
+ * getProgramsConfig() falls back to defaultMembershipPrograms(), which derives
+ * the same value from `billing.partnership_rate`. Once seeded, every reader
+ * follows the program instead — and `billing.partnership_rate` becomes
+ * bootstrap-only.
+ *
+ * Throws rather than returning 0 when no flat-rate partner program exists: a
+ * silent $0 invoice is far worse than a loud failure.
+ */
+export async function getPartnershipRateCents(): Promise<number> {
+  const programs = await getProgramsConfig()
+
+  // Every caller means "the partner-track flat rate". That is unambiguous with
+  // a single flat-rate partner program. A deployment defining several will
+  // need the program passed in explicitly — see Phase 2/3 of
+  // ~/.claude/plans/membership-terms-and-programs.md
+  const partnerProgram = programs.find(
+    (p) => p.permissionLevel === 'partner' && p.billing.mode === 'flat_rate'
+  )
+
+  if (!partnerProgram || partnerProgram.billing.mode !== 'flat_rate') {
+    throw new Error(
+      'No flat-rate partner program is configured in programs.definitions — ' +
+        'cannot resolve a partnership rate'
+    )
+  }
+
+  return partnerProgram.billing.rateCents
+}
+
+/** Same value in whole dollars, for display surfaces that render `$${rate}`. */
+export async function getPartnershipRateDollars(): Promise<number> {
+  return (await getPartnershipRateCents()) / 100
+}
+
+/**
  * Resolve an org's conference/booth purchase-eligibility tier — the single
  * source of truth for what used to be two verbatim-duplicated
  * `orgTypeToTier()` functions (lib/actions/conference-commerce.ts and
