@@ -4,10 +4,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { CONFERENCE_STATUS_LABELS, type ConferenceStatus } from "@/lib/constants/conference";
 import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
 import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
+import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
+import { getBoardDashboardStats } from "@/lib/board/dashboard-stats";
+import { getDashboardWidgetLayout } from "@/lib/admin/dashboard-widgets";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
 import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
+import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
+import { BoardWidget } from "@/components/admin/BoardWidget";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -157,6 +163,9 @@ export default async function AdminConsolePage() {
     driveSettingsResult,
     financials,
     renewalProgress,
+    conferenceStats,
+    widgetLayout,
+    boardStats,
   ] = await Promise.all([
     // Current conference
     db.from("conference_instances")
@@ -224,6 +233,15 @@ export default async function AdminConsolePage() {
 
     // Renewal-season progress widget — null outside a season
     getRenewalProgressData(),
+
+    // Conference sales widget — null when no live conference
+    getConferenceDashboardStats(),
+
+    // Widget order / visibility, per role
+    getDashboardWidgetLayout(auth.ok ? auth.ctx.globalRole : "admin"),
+
+    // Board governance health widget
+    getBoardDashboardStats(),
   ]);
 
   const conf         = conferenceResult.data;
@@ -243,8 +261,8 @@ export default async function AdminConsolePage() {
   }
 
   // ── Membership stats ─────────────────────────────────────────────
-  const memberOrgs  = allOrgs.filter((o) => o.type === "member");
-  const partnerOrgs = allOrgs.filter((o) => o.type === "partner");
+  const memberOrgs  = allOrgs.filter((o) => o.type === ORG_TYPE.member);
+  const partnerOrgs = allOrgs.filter((o) => o.type === ORG_TYPE.vendorPartner);
 
   const countByStatus = (orgs: typeof allOrgs, status: string) =>
     orgs.filter((o) => o.membership_status === status).length;
@@ -368,8 +386,25 @@ export default async function AdminConsolePage() {
         </Link>
       </div>
 
-      {/* ── Membership renewals (glanceable, season-only) ─────────── */}
-      {renewalProgress && <MembershipRenewalsWidget data={renewalProgress} />}
+      {/* ── Glanceable widgets ───────────────────────────────────── */}
+      <div className="mb-8 flex flex-wrap items-start justify-between gap-6">
+        {widgetLayout.map((key) => {
+          if (key === "membership") {
+            return renewalProgress
+              ? <MembershipRenewalsWidget key={key} data={renewalProgress} />
+              : null;
+          }
+          if (key === "conference") {
+            return conferenceStats
+              ? <ConferenceWidget key={key} data={conferenceStats} />
+              : null;
+          }
+          if (key === "board") {
+            return <BoardWidget key={key} data={boardStats} />;
+          }
+          return null;
+        })}
+      </div>
 
       {/* ── Conference quick access ─────────────────────────────── */}
       {conf && (

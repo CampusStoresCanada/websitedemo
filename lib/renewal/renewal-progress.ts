@@ -2,10 +2,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getPartnershipRateCents } from "@/lib/stripe/billing";
 import { parseUTC } from "@/lib/utils";
 import { getCurrentRenewalSeason } from "./season";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 
-export type RenewalOrgType = "Member" | "Vendor Partner";
+export type RenewalOrgType = typeof ORG_TYPE.member | typeof ORG_TYPE.vendorPartner;
 
-const ORG_TYPES: RenewalOrgType[] = ["Member", "Vendor Partner"];
+const ORG_TYPES: RenewalOrgType[] = [ORG_TYPE.member, ORG_TYPE.vendorPartner];
 
 export interface RenewalTypeProgress {
   orgType: RenewalOrgType;
