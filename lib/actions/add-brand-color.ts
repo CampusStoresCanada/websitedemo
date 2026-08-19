@@ -2,6 +2,7 @@
 
 import { revalidatePath, revalidateTag } from "next/cache";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface AddBrandColorParams {
   organizationId: string;
@@ -26,7 +27,11 @@ export async function addBrandColor({
   if (!auth.ok) {
     return { success: false, error: auth.error };
   }
-  const supabase = auth.ctx.supabase;
+  // Service-role client, not auth.ctx.supabase: `authenticated` only holds
+  // SELECT on brand_colors, so a user-scoped insert fails with "permission
+  // denied for table brand_colors" for org admins. Authorization is the
+  // guard above, same as update-field.ts.
+  const supabase = createAdminClient();
 
   // Normalize hex value (ensure it has #)
   const normalizedHex = hex.startsWith("#") ? hex : `#${hex}`;

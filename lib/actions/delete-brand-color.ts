@@ -3,6 +3,7 @@
 import { revalidatePath, revalidateTag } from "next/cache";
 import { createClient } from "@/lib/supabase/server";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 interface DeleteBrandColorParams {
   colorId: string;
@@ -34,8 +35,13 @@ export async function deleteBrandColor({
     return { success: false, error: auth.error };
   }
 
-  // Delete the brand color
-  const { error: deleteError } = await auth.ctx.supabase
+  // Delete the brand color.
+  // The write goes through the service-role client, not auth.ctx.supabase:
+  // `authenticated` only holds SELECT on brand_colors, so a user-scoped
+  // delete fails with "permission denied for table brand_colors" for org
+  // admins. Authorization is the guard above, same as update-field.ts.
+  const adminClient = createAdminClient();
+  const { error: deleteError } = await adminClient
     .from("brand_colors")
     .delete()
     .eq("id", colorId);
