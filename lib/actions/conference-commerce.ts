@@ -707,6 +707,39 @@ export async function addOfferToCart(params: {
     // slip past the cap.
     let boothCartItemId!: string;
     if (offerRow.kind === "booth") {
+      // A "pay first, apply second" prospect holds their booth from the
+      // moment Stripe confirms until approval actually mints it. Until that
+      // mint lands there is no entity_purchases row, so the inventory check
+      // above sees the booth as unsold and reserve_booth_cart_item (which
+      // only looks at other orgs' cart_items) has nothing to conflict on —
+      // leaving a live, fully-paid booth re-sellable for the whole review
+      // window. Block on the payment record itself, which is the only
+      // durable evidence of the hold during that gap.
+      // Scoped to the gap only: a prospect row stays "linked" forever after
+      // approval, so once the mint has landed the booth is genuinely sold and
+      // must fall through to the inventory check below for the accurate
+      // "Sold out." — not this pending-review message.
+      const [{ data: prospectHold }, { count: mintedCount }] = await Promise.all([
+        adminClient
+          .from("prospective_booth_payments")
+          .select("company_name")
+          .eq("conference_id", params.conferenceId)
+          .eq("booth_entity_id", params.offerEntityId)
+          .in("status", ["paid", "linked"])
+          .maybeSingle(),
+        adminClient
+          .from("entity_purchases")
+          .select("id", { count: "exact", head: true })
+          .eq("offer_entity_id", params.offerEntityId),
+      ]);
+      if (prospectHold && !mintedCount) {
+        return {
+          success: false,
+          code: "BOOTH_RESERVED",
+          error: `This booth has already been purchased by ${prospectHold.company_name ?? "another exhibitor"} and is pending their application review.`,
+        };
+      }
+
       const { data: reserveResult, error: reserveError } = await adminClient.rpc("reserve_booth_cart_item", {
         p_conference_id: params.conferenceId,
         p_organization_id: params.organizationId,

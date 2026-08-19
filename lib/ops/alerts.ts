@@ -49,6 +49,10 @@ const PERIODIC_RULE_KEYS = new Set([
   "retention_overdue",
   "qbo_export_backlog",
   "orgs_missing_admin",
+  "board_meeting_not_closed_out",
+  "board_no_upcoming_meeting",
+  "board_action_item_overdue",
+  "board_minutes_overdue",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:"];
 
@@ -835,6 +839,167 @@ export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<vo
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────
+// Board process rules
+//
+// These watch the *process*, not the plumbing — the board's existing alerts
+// (board_docx_export_errors, onedrive_sync_failed) only fire when a job
+// breaks. These fire when the cadence slips: a meeting that never got closed
+// out, no next meeting on the books, an action item past due, minutes never
+// posted.
+//
+// To add another board rule: write an `evaluateBoardX()` returning a
+// CandidateAlert or null, add its rule key to PERIODIC_RULE_KEYS above, and
+// add the call to the array in evaluateCandidates(). Nothing else is wired by
+// hand — the create/resolve sweep picks it up from there.
+// ─────────────────────────────────────────────────────────────────────
+
+/** Board settings live in app_settings alongside the other integration config. */
+async function getBoardSettingNumber(key: string, fallback: number): Promise<number> {
+  const db = createAdminClient();
+  const { data } = await db.from("app_settings").select("value").eq("key", key).maybeSingle();
+  const parsed = Number(String(data?.value ?? "").replace(/"/g, "").trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function todayString(): string {
+  return new Date().toISOString().slice(0, 10);
+}
+
+/**
+ * A meeting whose date has passed but is still "upcoming" — nobody closed it
+ * out. Deliberately an alert rather than an auto-transition to "completed":
+ * silently completing a meeting that has no minutes is exactly the drift this
+ * is meant to catch.
+ */
+async function evaluateBoardMeetingNotClosedOut(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+  const today = todayString();
+
+  const { data, error } = await db
+    .from("board_meetings")
+    .select("id, title, meeting_date")
+    .eq("status", "upcoming")
+    .lt("meeting_date", today)
+    .order("meeting_date", { ascending: true });
+
+  if (error) throw new Error(`Failed to evaluate board meeting closeout: ${error.message}`);
+
+  const stale = data ?? [];
+  if (stale.length === 0) return null;
+
+  return {
+    ruleKey: "board_meeting_not_closed_out",
+    severity: "warning",
+    message:
+      stale.length === 1
+        ? `Board meeting "${stale[0].title}" (${stale[0].meeting_date}) has passed but is still marked upcoming.`
+        : `${stale.length} board meetings have passed but are still marked upcoming.`,
+    details: {
+      count: stale.length,
+      meetings: stale.map((m) => ({ id: m.id, title: m.title, meetingDate: m.meeting_date })),
+    },
+  };
+}
+
+/** No future meeting on the books — the rule that enforces the monthly cadence. */
+async function evaluateBoardNoUpcomingMeeting(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("board_meetings")
+    .select("id")
+    .eq("status", "upcoming")
+    .gte("meeting_date", todayString())
+    .limit(1);
+
+  if (error) throw new Error(`Failed to evaluate upcoming board meetings: ${error.message}`);
+  if ((data ?? []).length > 0) return null;
+
+  return {
+    ruleKey: "board_no_upcoming_meeting",
+    severity: "warning",
+    message: "No upcoming board meeting is scheduled.",
+    details: {},
+  };
+}
+
+/** Action items past their due date and still not done. */
+async function evaluateBoardActionItemOverdue(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("board_action_items")
+    .select("id, title, due_date, status, assignees")
+    .in("status", ["open", "in_progress"])
+    .not("due_date", "is", null)
+    .lt("due_date", todayString())
+    .order("due_date", { ascending: true });
+
+  if (error) throw new Error(`Failed to evaluate board action items: ${error.message}`);
+
+  const overdue = data ?? [];
+  if (overdue.length === 0) return null;
+
+  return {
+    ruleKey: "board_action_item_overdue",
+    severity: "warning",
+    message:
+      overdue.length === 1
+        ? `Board action item "${overdue[0].title}" was due ${overdue[0].due_date} and is still open.`
+        : `${overdue.length} board action items are past due.`,
+    details: {
+      count: overdue.length,
+      oldestDueDate: overdue[0].due_date,
+      items: overdue.map((i) => ({ id: i.id, title: i.title, dueDate: i.due_date, assignees: i.assignees })),
+    },
+  };
+}
+
+/**
+ * Meetings that have happened but still have no minutes past the grace period.
+ *
+ * Keyed off the meeting *date*, not `status = 'completed'`. Status is manually
+ * maintained and demonstrably isn't kept up (there are meetings with full
+ * minutes still sitting at "upcoming"), so a status-gated rule would go quiet
+ * exactly when the process is slipping. Cancelled meetings are excluded —
+ * they're the one status transition that does get set deliberately.
+ */
+async function evaluateBoardMinutesOverdue(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+  const graceDays = await getBoardSettingNumber("board_minutes_due_days", 14);
+
+  const cutoff = new Date();
+  cutoff.setUTCDate(cutoff.getUTCDate() - graceDays);
+  const cutoffDate = cutoff.toISOString().slice(0, 10);
+
+  const { data, error } = await db
+    .from("board_meetings")
+    .select("id, title, meeting_date, minutes_html")
+    .neq("status", "cancelled")
+    .lt("meeting_date", cutoffDate)
+    .order("meeting_date", { ascending: true });
+
+  if (error) throw new Error(`Failed to evaluate board minutes: ${error.message}`);
+
+  const missing = (data ?? []).filter((m) => !m.minutes_html || m.minutes_html.trim() === "");
+  if (missing.length === 0) return null;
+
+  return {
+    ruleKey: "board_minutes_overdue",
+    severity: "warning",
+    message:
+      missing.length === 1
+        ? `Minutes for "${missing[0].title}" (${missing[0].meeting_date}) are still not posted after ${graceDays} days.`
+        : `${missing.length} completed board meetings have no minutes posted after ${graceDays} days.`,
+    details: {
+      count: missing.length,
+      graceDays,
+      meetings: missing.map((m) => ({ id: m.id, title: m.title, meetingDate: m.meeting_date })),
+    },
+  };
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -850,6 +1015,10 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateRetentionOverdue(),
     evaluateQBExportBacklog(),
     evaluateOrgsMissingAdmin(),
+    evaluateBoardMeetingNotClosedOut(),
+    evaluateBoardNoUpcomingMeeting(),
+    evaluateBoardActionItemOverdue(),
+    evaluateBoardMinutesOverdue(),
   ]);
 
   return checks.filter((item): item is CandidateAlert => Boolean(item));

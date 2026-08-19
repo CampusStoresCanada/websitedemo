@@ -647,10 +647,17 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
     // mints — otherwise the map shows it available the whole time someone's
     // board review is pending, contradicting the "booth is reserved" promise
     // on the post-payment success page.
+    //
+    // Must include "linked", not just "paid": submitApplication flips the row
+    // paid → linked the moment the prospect submits /apply/partner, which is
+    // *earlier* than minting (that waits on approval). Matching only "paid"
+    // dropped the booth out of this reserved set for the entire review
+    // window while entity_balances was still empty, so it fell back to
+    // "available" and could be sold a second time on top of a live payment.
     db.from("prospective_booth_payments")
       .select("booth_entity_id, company_name")
       .eq("conference_id", conferenceId)
-      .eq("status", "paid"),
+      .in("status", ["paid", "linked"]),
     db.from("conference_instances").select("floor_plan_url").eq("id", conferenceId).maybeSingle(),
     // instance_of refs so we know which type each booth belongs to.
     db.from("conference_entity_refs").select("from_entity_id, to_entity_id")

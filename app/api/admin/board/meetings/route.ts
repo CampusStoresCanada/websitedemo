@@ -1,10 +1,9 @@
 /**
- * POST /api/admin/board/meetings — create a new board meeting + Notion page + linked event
+ * POST /api/admin/board/meetings — create a new board meeting + linked event
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createBoardMeetingPage } from "@/lib/notion/board";
 
 function generateSlug(title: string, startsAt: string): string {
   const date = new Date(startsAt).toISOString().slice(0, 10);
@@ -51,18 +50,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "A meeting already exists for that date" }, { status: 409 });
   }
 
-  // Create Notion page (best-effort — don't fail the whole thing if Notion is down)
-  let notionPageId:  string | null = null;
-  let notionPageUrl: string | null = null;
-
-  try {
-    const page = await createBoardMeetingPage(meetingDate, meetingType, title);
-    notionPageId  = page.id;
-    notionPageUrl = page.url;
-  } catch (err) {
-    console.warn("[createBoardMeeting] Notion page creation failed:", err);
-  }
-
   const typeLabel =
     meetingType === "agm"     ? "AGM" :
     meetingType === "special" ? "Special Meeting" :
@@ -76,10 +63,8 @@ export async function POST(req: NextRequest) {
       title:          title ?? `CSC ${typeLabel} — ${meetingDate}`,
       status:         "upcoming",
       notes:          notes ?? null,
-      notion_page_id:  notionPageId,
-      notion_page_url: notionPageUrl,
     })
-    .select("id, meeting_date, meeting_type, title, status, notion_page_url")
+    .select("id, meeting_date, meeting_type, title, status")
     .single();
 
   if (error || !meeting) {

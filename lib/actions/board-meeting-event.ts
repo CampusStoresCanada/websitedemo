@@ -3,7 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { createBoardMeetingPage } from "@/lib/notion/board";
 
 const BUCKET = "board-documents";
 const MAX_BYTES = 52428800; // 50 MB (matches bucket limit)
@@ -102,18 +101,6 @@ export async function upsertBoardMeetingForEvent(
     return { meetingId: existing.id };
   }
 
-  // Create Notion page for the scratchpad (best-effort — don't fail if Notion is down)
-  let notionPageId:  string | null = null;
-  let notionPageUrl: string | null = null;
-
-  try {
-    const page = await createBoardMeetingPage(meetingDate, meetingType, title);
-    notionPageId  = page.id;
-    notionPageUrl = page.url;
-  } catch (err) {
-    console.warn("[upsertBoardMeetingForEvent] Notion page creation failed:", err);
-  }
-
   const { data: created, error } = await db
     .from("board_meetings")
     .insert({
@@ -123,8 +110,6 @@ export async function upsertBoardMeetingForEvent(
       title,
       status: "upcoming",
       created_by: auth.ctx.userId,
-      notion_page_id:  notionPageId,
-      notion_page_url: notionPageUrl,
     })
     .select("id")
     .single();

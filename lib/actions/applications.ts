@@ -1150,16 +1150,37 @@ export async function saveOnboardingStep(
         .eq("id", orgId);
       break;
 
-    case 4: // Members: purchasing profile
+    case 4: {
+      // Members: purchasing profile. The wizard only collects a subset of
+      // procurement_info — the profile editor owns the rest (category_buyers,
+      // store_services, structured key_dates). Merge rather than replace, or
+      // re-running onboarding silently wipes everything the editor wrote.
+      const { data: current } = await db
+        .from("organizations")
+        .select("procurement_info")
+        .eq("id", orgId)
+        .maybeSingle();
+      const existing = (current?.procurement_info as Record<string, unknown> | null) ?? {};
+      const incoming = JSON.parse(JSON.stringify(data)) as Record<string, unknown>;
+      const merged = {
+        ...existing,
+        ...incoming,
+        buying_cycle: {
+          ...((existing.buying_cycle as Record<string, unknown> | undefined) ?? {}),
+          ...((incoming.buying_cycle as Record<string, unknown> | undefined) ?? {}),
+        },
+      };
+
       await db
         .from("organizations")
         .update({
-          procurement_info: JSON.parse(JSON.stringify(data)),
+          procurement_info: JSON.parse(JSON.stringify(merged)),
           onboarding_step: Math.max(step, 4),
           updated_at: new Date().toISOString(),
         })
         .eq("id", orgId);
       break;
+    }
 
     case 5: // Partners: sales profile
       await db

@@ -199,7 +199,13 @@ export async function processCircleSyncQueue(): Promise<QueueResult> {
       const backoffMs = Math.pow(attempts, 2) * 30_000;
       const nextRetry = new Date(Date.now() + backoffMs).toISOString();
 
-      const newStatus = attempts >= (item.max_attempts ?? 3) ? "failed" : "failed";
+      // Both branches used to read "failed", so an item with retries still
+      // left reported as failed. The attempts < max gate in the fetch query is
+      // what actually governs retry, so this was cosmetic — but it made the
+      // queue lie about its own state, which is how a permanently-dead backlog
+      // and a still-retrying one became indistinguishable.
+      const newStatus =
+        attempts >= (item.max_attempts ?? 3) ? "failed" : "pending";
 
       await adminClient
         .from("circle_sync_queue")
@@ -461,7 +467,23 @@ export async function enqueueOrgCircleAccessSync(
             color: "#ffffff",
             display_format: "label",
             is_background_enabled: false,
-            ...(org.logo_url ? { custom_emoji_url: org.logo_url } : {}),
+            // Without this the tag is created with display_locations = null and
+            // renders nowhere. Every one of the 164 curated tags has all three
+            // set; the only tags missing it were the ones this code made.
+            display_locations: {
+              post_bio: true,
+              profile_page: true,
+              member_directory: true,
+            },
+            // NOTE: a tag's image CANNOT be set through the Admin API. This
+            // used to pass `custom_emoji_url: org.logo_url`, which is a
+            // READ-ONLY response field — Circle returns 200 and silently drops
+            // it, which is why every tag created here has no logo. The
+            // documented writable field `custom_emoji` is also inert: even a
+            // plain unicode emoji (`{emoji_type:"emoji", emoji:"🧢"}`) reads
+            // back null after a 200. Logos are set in the Circle admin UI only,
+            // by hand, per org. Do not re-add a logo line here believing it
+            // works — it will look like it succeeded. See project-circle-tag-logos.
           });
           (org as Record<string, unknown>).circle_tag_id = String(tag.id);
           await adminClient
