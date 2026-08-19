@@ -1,10 +1,16 @@
 /**
  * PATCH /api/admin/board/meetings/[id]/content
  * Saves agenda_html or minutes_html for a board meeting.
+ *
+ * Minutes are normalised on the way in: bare names in ACTION lines ("S. Thomas")
+ * are rewritten to canonical mentions ("@Stephen Thomas") so the stored minutes
+ * and anything minted from them agree on who is who. Ambiguous names are left
+ * exactly as written. See docs/BOARD_ACTION_ITEM_MINT.md.
  */
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { rewriteMentions, type DirectoryEntry } from "@/lib/board/action-mint";
 
 export async function PATCH(
   req: NextRequest,
@@ -24,9 +30,24 @@ export async function PATCH(
   const updatedAt = docType === "agenda" ? "agenda_updated_at" : "minutes_updated_at";
 
   const db = createAdminClient();
+
+  let content = html || null;
+  if (docType === "minutes" && content) {
+    const { data: profiles } = await db
+      .from("profiles")
+      .select("id, display_name")
+      .in("global_role", ["admin", "super_admin"]);
+
+    const directory: DirectoryEntry[] = (profiles ?? [])
+      .filter((p) => p.display_name)
+      .map((p) => ({ id: p.id, displayName: p.display_name as string }));
+
+    if (directory.length > 0) content = rewriteMentions(content, directory);
+  }
+
   const { error } = await db
     .from("board_meetings")
-    .update({ [col]: html || null, [updatedAt]: new Date().toISOString() })
+    .update({ [col]: content, [updatedAt]: new Date().toISOString() })
     .eq("id", id);
 
   if (error) {
