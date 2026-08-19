@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { EXPECTED_BOARD_SIZE } from "@/lib/board/vote-roster";
 
 type Severity = "info" | "warning" | "critical";
 
@@ -53,6 +54,10 @@ const PERIODIC_RULE_KEYS = new Set([
   "board_no_upcoming_meeting",
   "board_action_item_overdue",
   "board_minutes_overdue",
+  "board_vote_awaiting_execution",
+  "board_vote_lapsed_unresolved",
+  "board_vote_not_closed",
+  "board_roster_size_mismatch",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:"];
 
@@ -924,6 +929,168 @@ async function evaluateBoardNoUpcomingMeeting(): Promise<CandidateAlert | null> 
   };
 }
 
+/**
+ * Applications whose vote lapsed and which are now stuck.
+ *
+ * A lapse is not a rejection — it means the deadline passed without 5 in
+ * favour and without 5 against, so the applicant is meant to carry to the next
+ * board meeting. But nothing automatic moves them there: `findApplicationsNeedingVote`
+ * skips any application that already has a vote row, so a lapsed applicant
+ * never gets a second vote, and there is no "your application lapsed" email.
+ * Left alone they sit in pending_review indefinitely, having heard nothing —
+ * and partner applicants have usually already paid for a booth.
+ *
+ * This alert is the tripwire until that path is built.
+ */
+async function evaluateBoardVoteLapsed(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data: lapsed, error } = await db
+    .from("board_votes")
+    .select("id, application_id, decided_at")
+    .eq("status", "lapsed")
+    .order("decided_at", { ascending: true });
+
+  if (error || !lapsed?.length) return null;
+
+  // Only those still awaiting review — a human may already have handled it.
+  const { data: apps } = await db
+    .from("signup_applications")
+    .select("id, applicant_name, application_data, paid_amount_cents")
+    .in(
+      "id",
+      lapsed.map((v) => v.application_id as string)
+    )
+    .eq("status", "pending_review");
+
+  if (!apps?.length) return null;
+
+  const stuck = apps.map((app) => {
+    const data = app.application_data as Record<string, unknown> | null;
+    return {
+      applicationId: app.id as string,
+      name:
+        ((data?.company_name as string) || (app.applicant_name as string) || "Unnamed applicant").trim(),
+      paidCents: (app.paid_amount_cents as number) ?? null,
+    };
+  });
+
+  const paid = stuck.filter((s) => s.paidCents);
+
+  return {
+    ruleKey: "board_vote_lapsed_unresolved",
+    severity: paid.length ? "critical" : "warning",
+    message:
+      (stuck.length === 1
+        ? `${stuck[0].name}'s board vote lapsed and the application is still awaiting review.`
+        : `${stuck.length} applications had their board vote lapse and are still awaiting review.`) +
+      ` They have not been told anything and will not be re-voted automatically — put them on the next board meeting agenda.` +
+      (paid.length ? ` ${paid.length} of them have already paid.` : ""),
+    details: {
+      count: stuck.length,
+      paidCount: paid.length,
+      oldestDecidedAt: lapsed[0].decided_at,
+      applications: stuck,
+    },
+  };
+}
+
+/**
+ * Board votes that carried but whose approval nobody has executed yet.
+ *
+ * Butler never approves an application itself — approveApplication() creates
+ * the org, provisions logins, grants Circle access and sends invites, so a
+ * human presses that button. This is the alert that stops a carried vote from
+ * sitting unexecuted while the applicant waits.
+ */
+async function evaluateBoardVoteAwaitingExecution(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("board_votes")
+    .select("id, application_id, decided_at")
+    .eq("status", "carried")
+    .is("executed_at", null)
+    .order("decided_at", { ascending: true });
+
+  if (error || !data?.length) return null;
+
+  return {
+    ruleKey: "board_vote_awaiting_execution",
+    severity: "warning",
+    message:
+      data.length === 1
+        ? `A board vote carried on ${data[0].decided_at?.slice(0, 10)} but the approval has not been executed yet.`
+        : `${data.length} carried board votes are waiting for their approval to be executed.`,
+    details: {
+      count: data.length,
+      oldestDecidedAt: data[0].decided_at,
+      voteIds: data.map((v) => v.id),
+      applicationIds: data.map((v) => v.application_id),
+    },
+  };
+}
+
+/**
+ * Votes that ran past their deadline without the cron closing them.
+ *
+ * Means the hourly job is not running, or is erroring before it reaches the
+ * close step — either way the board is looking at a post whose buttons no
+ * longer do anything.
+ */
+async function evaluateBoardVoteNotClosed(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  // One hour of slack so this never fires on the gap between deadline and cron.
+  const cutoff = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+
+  const { data, error } = await db
+    .from("board_votes")
+    .select("id, closes_at")
+    .eq("status", "open")
+    .lt("closes_at", cutoff)
+    .order("closes_at", { ascending: true });
+
+  if (error || !data?.length) return null;
+
+  return {
+    ruleKey: "board_vote_not_closed",
+    severity: "critical",
+    message:
+      `${data.length} board vote${data.length === 1 ? "" : "s"} passed the voting deadline over an hour ago ` +
+      `and ${data.length === 1 ? "was" : "were"} never tallied — check /api/cron/board-votes.`,
+    details: {
+      count: data.length,
+      oldestClosesAt: data[0].closes_at,
+      voteIds: data.map((v) => v.id),
+    },
+  };
+}
+
+/**
+ * The director roster no longer matches the bylaw board size.
+ *
+ * The 5-of-9 threshold is a constant, not a count. If the roster drifts, a
+ * majority silently starts meaning something different, so voting is suspended
+ * until this is reconciled.
+ */
+async function evaluateBoardRosterSize(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data, error } = await db.from("profiles").select("id").eq("global_role", "admin");
+  if (error || !data) return null;
+  if (data.length === EXPECTED_BOARD_SIZE) return null;
+
+  return {
+    ruleKey: "board_roster_size_mismatch",
+    severity: "critical",
+    message:
+      `The board roster has ${data.length} directors (profiles.global_role='admin') but the bylaws fix it at ` +
+      `${EXPECTED_BOARD_SIZE}. New partner votes are suspended until these agree — a wrong denominator changes what a majority means.`,
+    details: { found: data.length, expected: EXPECTED_BOARD_SIZE },
+  };
+}
+
 /** Action items past their due date and still not done. */
 async function evaluateBoardActionItemOverdue(): Promise<CandidateAlert | null> {
   const db = createAdminClient();
@@ -1019,6 +1186,10 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBoardNoUpcomingMeeting(),
     evaluateBoardActionItemOverdue(),
     evaluateBoardMinutesOverdue(),
+    evaluateBoardVoteAwaitingExecution(),
+    evaluateBoardVoteLapsed(),
+    evaluateBoardVoteNotClosed(),
+    evaluateBoardRosterSize(),
   ]);
 
   return checks.filter((item): item is CandidateAlert => Boolean(item));

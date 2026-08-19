@@ -1055,14 +1055,18 @@ export type Database = {
           description: string
           due_date: string | null
           due_date_original: string | null
+          escalated_at: string | null
+          held_at: string | null
           id: string
           meeting_id: string
           pre_meeting_reminder_sent_at: string | null
+          priority: string | null
           quality_flags: string[]
           reminder_sent_at: string | null
           sort_order: number
           source: string
           source_excerpt: string | null
+          started_at: string | null
           status: string
           title: string
         }
@@ -1074,14 +1078,18 @@ export type Database = {
           description: string
           due_date?: string | null
           due_date_original?: string | null
+          escalated_at?: string | null
+          held_at?: string | null
           id?: string
           meeting_id: string
           pre_meeting_reminder_sent_at?: string | null
+          priority?: string | null
           quality_flags?: string[]
           reminder_sent_at?: string | null
           sort_order?: number
           source?: string
           source_excerpt?: string | null
+          started_at?: string | null
           status?: string
           title: string
         }
@@ -1093,14 +1101,18 @@ export type Database = {
           description?: string
           due_date?: string | null
           due_date_original?: string | null
+          escalated_at?: string | null
+          held_at?: string | null
           id?: string
           meeting_id?: string
           pre_meeting_reminder_sent_at?: string | null
+          priority?: string | null
           quality_flags?: string[]
           reminder_sent_at?: string | null
           sort_order?: number
           source?: string
           source_excerpt?: string | null
+          started_at?: string | null
           status?: string
           title?: string
         }

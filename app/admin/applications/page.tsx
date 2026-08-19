@@ -2,6 +2,7 @@ import { createClient } from "@/lib/supabase/server";
 import { getServerAuthState } from "@/lib/auth/server";
 import { ApplicationsReview } from "@/components/admin/ApplicationsReview";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import { getVoteSummaries } from "@/lib/board/vote-service";
 
 export const metadata = { title: "Applications | Admin" };
 
@@ -15,6 +16,10 @@ export default async function ApplicationsAdminPage() {
     getServerAuthState(),
   ]);
 
+  // Board-vote standing for every application shown, so staff can see whether
+  // the board has spoken before approving.
+  const voteSummaries = await getVoteSummaries((applications ?? []).map((a) => a.id as string));
+
   return (
     <main>
       <AdminPageHeader
@@ -24,6 +29,7 @@ export default async function ApplicationsAdminPage() {
       <ApplicationsReview
         initialApplications={applications ?? []}
         isSuperAdmin={authState.globalRole === "super_admin"}
+        voteSummaries={Object.fromEntries(voteSummaries)}
       />
     </main>
   );

@@ -39,6 +39,7 @@ import {
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
 import { enqueueCircleSync } from "@/lib/circle/sync";
+import { markVoteExecuted } from "@/lib/board/vote-service";
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -556,6 +557,11 @@ export async function approveApplication(
       updated_at: new Date().toISOString(),
     })
     .eq("id", applicationId);
+
+  // Close the loop on a board vote, if one carried for this application. No-op
+  // when there wasn't one, so approvals that never went to the board (or that
+  // predate the vote system) are unaffected.
+  await markVoteExecuted(applicationId, userId);
 
   // 2. Create contact record for primary contact
   const knownPerson = await ensureKnownPerson({

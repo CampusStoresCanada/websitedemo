@@ -493,6 +493,61 @@ export class CircleAdminClient {
     await this.request<void>("DELETE", `/events/${id}`);
   }
 
+  // ---- Basic posts + comments ---------------------------------------------
+
+  /**
+   * Creates a basic post. Pass `user_email` to attribute it to a specific
+   * member — that is how Butler Ghost authors its own posts.
+   *
+   * ⚠️ Circle silently discards node types it does not support in
+   * `tiptap_body`, returning HTTP 200 with the node missing from the rendered
+   * HTML (`poll` behaves exactly this way — see lib/board/vote-post.ts).
+   * Verify anything new by reading the post back and checking `body.body`.
+   */
+  async createPost(payload: {
+    space_id: number;
+    name: string;
+    tiptap_body?: Record<string, unknown>;
+    body_html?: string;
+    status?: "draft" | "published" | "scheduled";
+    user_email?: string;
+    skip_notifications?: boolean;
+    is_comments_enabled?: boolean;
+  }): Promise<CirclePost> {
+    const result = await this.request<{ post?: CirclePost } & CirclePost>("POST", "/posts", {
+      body: payload as unknown as Record<string, unknown>,
+    });
+    return (result.post ?? result) as CirclePost;
+  }
+
+  async getPost(id: number): Promise<CirclePost> {
+    return this.request<CirclePost>("GET", `/posts/${id}`);
+  }
+
+  async destroyPost(id: number): Promise<void> {
+    await this.request<void>("DELETE", `/posts/${id}`);
+  }
+
+  /**
+   * Adds a comment to a post. Circle's comment endpoint takes HTML, not tiptap.
+   * Butler uses this for the "closes tomorrow" reminder and the closing tally —
+   * one API call that rides Circle's own notifications to everyone following
+   * the post, instead of nine direct messages.
+   */
+  async createComment(payload: {
+    post_id: number;
+    body: string;
+    user_email?: string;
+    skip_notifications?: boolean;
+  }): Promise<{ id: number }> {
+    const result = await this.request<{ comment?: { id: number }; id?: number }>(
+      "POST",
+      "/comments",
+      { body: payload as unknown as Record<string, unknown> }
+    );
+    return { id: result.comment?.id ?? result.id ?? 0 };
+  }
+
   // ---- Event attendees ----------------------------------------------------
 
   async listEventAttendees(
