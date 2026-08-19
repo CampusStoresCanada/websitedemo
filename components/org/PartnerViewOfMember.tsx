@@ -34,6 +34,7 @@ export default function PartnerViewOfMember({
   const hasData = hasProcurementInfo(procurementInfo);
   const categoryBuyers = procurementInfo?.category_buyers ?? [];
   const preferredCerts = procurementInfo?.preferred_certifications ?? [];
+  const requirementsNotes = procurementInfo?.requirements_notes?.trim() ?? "";
   const sourcingProvinces = procurementInfo?.sourcing_provinces ?? [];
   const buyingCycle = procurementInfo?.buying_cycle;
   const keyDates = normalizeKeyDates(buyingCycle?.key_dates);
@@ -173,7 +174,7 @@ export default function PartnerViewOfMember({
           <div className="space-y-10">
 
             {/* Vendor certification preferences — partners only */}
-            {preferredCerts.length > 0 && vis.certifications && (
+            {(preferredCerts.length > 0 || requirementsNotes) && vis.certifications && (
               <ProtectedSection
                 requiredPermission="partner"
                 bannerMessage="Partner members can view vendor certification preferences."
@@ -184,16 +185,23 @@ export default function PartnerViewOfMember({
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
                     Vendor Preferences
                   </h3>
-                  <div className="flex flex-wrap gap-2">
-                    {preferredCerts.map((cert) => (
-                      <span
-                        key={cert}
-                        className="px-3 py-1 bg-green-50 text-green-700 text-sm rounded-full border border-green-100"
-                      >
-                        <BlurredValue placeholderWidth={10}>{cert}</BlurredValue>
-                      </span>
-                    ))}
-                  </div>
+                  {preferredCerts.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {preferredCerts.map((cert) => (
+                        <span
+                          key={cert}
+                          className="px-3 py-1 bg-green-50 text-green-700 text-sm rounded-full border border-green-100"
+                        >
+                          <BlurredValue placeholderWidth={10}>{cert}</BlurredValue>
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {requirementsNotes && (
+                    <p className="mt-3 text-sm">
+                      <BlurredValue placeholderWidth={28}>{requirementsNotes}</BlurredValue>
+                    </p>
+                  )}
                 </div>
               </ProtectedSection>
             )}
@@ -242,6 +250,14 @@ export default function PartnerViewOfMember({
                           <span className="text-xs uppercase text-gray-400">Fiscal Year Starts</span>
                           <p className="font-medium text-[#1A1A1A]">
                             <BlurredValue placeholderWidth={10}>{buyingCycle.fiscal_year_start}</BlurredValue>
+                          </p>
+                        </div>
+                      )}
+                      {buyingCycle.rfp_window && (
+                        <div>
+                          <span className="text-xs uppercase text-gray-400">RFP Window</span>
+                          <p className="font-medium text-[#1A1A1A]">
+                            <BlurredValue placeholderWidth={12}>{buyingCycle.rfp_window}</BlurredValue>
                           </p>
                         </div>
                       )}

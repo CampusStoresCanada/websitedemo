@@ -126,6 +126,7 @@ function ViewMode({
     preferred_certifications = [],
     sourcing_provinces = [],
     store_services = [],
+    requirements_notes,
     buying_cycle,
   } = procurementInfo;
   const contactById = Object.fromEntries(contacts.map((c) => [c.id, c]));
@@ -187,14 +188,19 @@ function ViewMode({
         </div>
       )}
 
-      {preferred_certifications.length > 0 && (
+      {(preferred_certifications.length > 0 || requirements_notes?.trim()) && (
         <div>
           <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">Vendor Preferences</h3>
-          <div className="flex flex-wrap gap-2">
-            {preferred_certifications.map((cert) => (
-              <span key={cert} className="px-3 py-1 bg-green-50 text-green-700 text-sm rounded-full border border-green-100">{cert}</span>
-            ))}
-          </div>
+          {preferred_certifications.length > 0 && (
+            <div className="flex flex-wrap gap-2">
+              {preferred_certifications.map((cert) => (
+                <span key={cert} className="px-3 py-1 bg-green-50 text-green-700 text-sm rounded-full border border-green-100">{cert}</span>
+              ))}
+            </div>
+          )}
+          {requirements_notes?.trim() && (
+            <p className="mt-3 text-sm text-gray-700 whitespace-pre-line">{requirements_notes.trim()}</p>
+          )}
         </div>
       )}
 
@@ -217,6 +223,12 @@ function ViewMode({
               <div>
                 <span className="text-xs uppercase text-gray-400">Fiscal Year Starts</span>
                 <p className="font-medium text-[#1A1A1A]">{buying_cycle.fiscal_year_start}</p>
+              </div>
+            )}
+            {buying_cycle.rfp_window && (
+              <div>
+                <span className="text-xs uppercase text-gray-400">RFP Window</span>
+                <p className="font-medium text-[#1A1A1A]">{buying_cycle.rfp_window}</p>
               </div>
             )}
             {keyDates.length > 0 && (
@@ -323,7 +335,9 @@ function EditMode({
   const toggleVis = (key: keyof ProcurementVisibility) =>
     setVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  const [requirementsNotes, setRequirementsNotes] = useState(initialData?.requirements_notes ?? "");
   const [fiscalYearStart, setFiscalYearStart] = useState(initialData?.buying_cycle?.fiscal_year_start ?? "");
+  const [rfpWindow, setRfpWindow] = useState(initialData?.buying_cycle?.rfp_window ?? "");
   const [keyDates, setKeyDates] = useState<KeyDate[]>(
     normalizeKeyDates(initialData?.buying_cycle?.key_dates)
   );
@@ -410,6 +424,7 @@ function EditMode({
     const validKeyDates = keyDates.filter((kd) => kd.title.trim() && kd.date);
     const buying_cycle = {
       fiscal_year_start: fiscalYearStart || undefined,
+      rfp_window: rfpWindow.trim() || undefined,
       key_dates: validKeyDates.length > 0 ? validKeyDates : undefined,
       // Always written as a string — saving here is also what retires a legacy
       // free-text key_dates, since key_dates now only ever holds KeyDate[].
@@ -421,6 +436,7 @@ function EditMode({
       preferred_certifications: preferredCerts.size > 0 ? [...preferredCerts] : undefined,
       sourcing_provinces: sourcingProvinces.size > 0 ? [...sourcingProvinces] : undefined,
       store_services: storeServices.size > 0 ? [...storeServices] : undefined,
+      requirements_notes: requirementsNotes.trim() || undefined,
       buying_cycle: Object.values(buying_cycle).some(Boolean) ? buying_cycle : undefined,
       ...visibility,
     };
@@ -622,6 +638,22 @@ function EditMode({
                 );
               })}
             </div>
+
+            <div className="mt-6">
+              <label className="block text-sm font-medium text-[#1A1A1A] mb-2">
+                Other requirements
+                <span className="ml-2 font-normal text-xs text-gray-400">
+                  Buy-local policies, supplier codes, insurance minimums, certifications not listed above
+                </span>
+              </label>
+              <textarea
+                value={requirementsNotes}
+                onChange={(e) => setRequirementsNotes(e.target.value)}
+                rows={3}
+                placeholder="e.g., Vendors must carry $2M liability insurance."
+                className={inputCls}
+              />
+            </div>
           </div>
 
           {/* ── Sourcing province preferences ── */}
@@ -669,13 +701,23 @@ function EditMode({
               />
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-1 gap-6 max-w-xs mb-8">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-6 max-w-xl mb-8">
               <div>
                 <label className="block text-sm font-medium text-[#1A1A1A] mb-2">Fiscal Year Start</label>
                 <select value={fiscalYearStart} onChange={(e) => setFiscalYearStart(e.target.value)} className={inputCls}>
                   <option value="">Select month</option>
                   {MONTHS.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-[#1A1A1A] mb-2">RFP Window</label>
+                <input
+                  type="text"
+                  value={rfpWindow}
+                  onChange={(e) => setRfpWindow(e.target.value)}
+                  placeholder="e.g., February - April"
+                  className={inputCls}
+                />
               </div>
             </div>
 

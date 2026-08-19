@@ -116,6 +116,8 @@ export interface BuyingCycle {
   key_dates?: KeyDate[] | string;
   /** Free-text buying-cycle notes — what the onboarding wizard actually collects. */
   key_dates_notes?: string;
+  /** When RFPs typically go out, e.g. "February - April". Free text by design — it's a season, not a date. */
+  rfp_window?: string;
 }
 
 /**
@@ -159,6 +161,14 @@ export interface ProcurementInfo extends ProcurementVisibility {
    * Values come from STORE_SERVICES.
    */
   store_services?: string[];
+
+  /**
+   * Free-text vendor requirements that don't fit the structured fields —
+   * buy-local policies, supplier codes of conduct, insurance minimums, and
+   * certifications outside the CERTIFICATIONS catalogue. Shown alongside
+   * preferred_certifications and governed by the same visibility flag.
+   */
+  requirements_notes?: string;
 
   /** Buying cycle and RFP timeline */
   buying_cycle?: BuyingCycle;
@@ -215,6 +225,7 @@ export function hasBuyingCycleContent(cycle: BuyingCycle | null | undefined): bo
   if (!cycle) return false;
   return !!(
     cycle.fiscal_year_start ||
+    cycle.rfp_window ||
     normalizeKeyDates(cycle.key_dates).length > 0 ||
     buyingCycleNotes(cycle)
   );
@@ -229,7 +240,9 @@ export function hasProcurementInfo(info: ProcurementInfo | null | undefined): bo
     (info.category_buyers && info.category_buyers.length > 0) ||
     (info.preferred_certifications && info.preferred_certifications.length > 0) ||
     (info.sourcing_provinces && info.sourcing_provinces.length > 0) ||
-    info.buying_cycle
+    (info.store_services && info.store_services.length > 0) ||
+    info.requirements_notes?.trim() ||
+    hasBuyingCycleContent(info.buying_cycle)
   );
 }
 

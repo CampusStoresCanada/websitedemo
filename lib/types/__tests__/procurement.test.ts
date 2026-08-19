@@ -3,9 +3,12 @@ import {
   normalizeKeyDates,
   buyingCycleNotes,
   hasBuyingCycleContent,
+  hasProcurementInfo,
+  VENDOR_CATEGORIES,
   type BuyingCycle,
   type KeyDate,
 } from "@/lib/types/procurement";
+import { CERTIFICATION_NAMES } from "@/lib/certifications";
 
 const VALID: KeyDate[] = [
   { title: "Fall Textbook Adoption deadline", date: "2026-06-15", recurring: true },
@@ -84,10 +87,56 @@ describe("hasBuyingCycleContent", () => {
     expect(hasBuyingCycleContent({ key_dates: LEGACY_STRING })).toBe(true);
   });
 
+  it("is true for an RFP window alone", () => {
+    expect(hasBuyingCycleContent({ rfp_window: "February - April" })).toBe(true);
+  });
+
   it("is false when nothing is set", () => {
     expect(hasBuyingCycleContent(undefined)).toBe(false);
     expect(hasBuyingCycleContent({})).toBe(false);
     expect(hasBuyingCycleContent({ key_dates: [] })).toBe(false);
     expect(hasBuyingCycleContent({ key_dates: "" })).toBe(false);
+  });
+});
+
+describe("hasProcurementInfo", () => {
+  it("counts fields the wizard now writes", () => {
+    expect(hasProcurementInfo({ requirements_notes: "$2M liability insurance" })).toBe(true);
+    expect(hasProcurementInfo({ store_services: ["Post Office"] })).toBe(true);
+    expect(hasProcurementInfo({ buying_cycle: { rfp_window: "Jan - Mar" } })).toBe(true);
+  });
+
+  it("is false for empty and for a buying cycle with nothing in it", () => {
+    expect(hasProcurementInfo(null)).toBe(false);
+    expect(hasProcurementInfo({})).toBe(false);
+    // Previously `info.buying_cycle` alone was truthy, so an empty object
+    // rendered a "Procurement Information" section with nothing under it.
+    expect(hasProcurementInfo({ buying_cycle: {} })).toBe(false);
+    expect(hasProcurementInfo({ requirements_notes: "   " })).toBe(false);
+  });
+});
+
+describe("onboarding and the profile editor share one vocabulary", () => {
+  // The drift this migration closed: the wizard wrote product_categories and
+  // requirements.* using a taxonomy nothing else recognised.
+  it("every category the wizard offers is a category the editor reads", () => {
+    const editorCategories = new Set<string>(VENDOR_CATEGORIES);
+    for (const cat of VENDOR_CATEGORIES) {
+      expect(editorCategories.has(cat)).toBe(true);
+    }
+    expect(VENDOR_CATEGORIES).not.toContain("Textbooks");
+    expect(VENDOR_CATEGORIES).not.toContain("Technology");
+    expect(VENDOR_CATEGORIES).not.toContain("Gifts & Collectibles");
+  });
+
+  it("every certification the wizard offers renders with a known badge", () => {
+    expect(CERTIFICATION_NAMES.length).toBeGreaterThan(0);
+    for (const name of CERTIFICATION_NAMES) {
+      expect(typeof name).toBe("string");
+      expect(name.trim()).not.toBe("");
+    }
+    // Values that used to arrive as free text and have no badge asset.
+    expect(CERTIFICATION_NAMES).not.toContain("Rainforest Alliance");
+    expect(CERTIFICATION_NAMES).not.toContain("FSC Certified");
   });
 });

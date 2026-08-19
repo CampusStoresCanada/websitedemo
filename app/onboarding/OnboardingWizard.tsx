@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import { saveOnboardingStep, completeOnboarding } from "@/lib/actions/applications";
 import { PROVINCES } from "@/lib/constants/provinces";
 import { VENDOR_CATEGORIES as PRODUCT_CATEGORIES, buyingCycleNotes } from "@/lib/types/procurement";
-import type { BuyingCycle } from "@/lib/types/procurement";
+import type { ProcurementInfo, CategoryBuyer } from "@/lib/types/procurement";
+import { CERTIFICATION_NAMES } from "@/lib/certifications";
 import {
   PARTNER_PRIMARY_CATEGORIES,
   PARTNER_SECONDARY_CATEGORIES,
@@ -604,31 +605,26 @@ function Step4PurchasingProfile({
   onSave: (data: Record<string, unknown>) => void;
   onBack: () => void;
 }) {
-  const existing = (org.procurement_info as Record<string, unknown>) || {};
+  // This step writes the same ProcurementInfo shape the profile editor reads.
+  // It used to write a parallel vocabulary (product_categories, requirements.*)
+  // that no reader ever consumed, so onboarding answers silently went nowhere.
+  const existing = (org.procurement_info as ProcurementInfo) || {};
+  const existingBuyers = existing.category_buyers ?? [];
   const [categories, setCategories] = useState<string[]>(
-    (existing.product_categories as string[]) || []
+    existingBuyers.map((b) => b.category)
   );
-  const [buyLocal, setBuyLocal] = useState(
-    ((existing.requirements as Record<string, unknown>)?.buy_local as boolean) || false
+  const [certs, setCerts] = useState<Set<string>>(
+    () => new Set(existing.preferred_certifications ?? [])
   );
-  const [indigenousOwned, setIndigenousOwned] = useState(
-    ((existing.requirements as Record<string, unknown>)?.indigenous_owned as boolean) || false
-  );
-  const [sustainability, setSustainability] = useState(
-    ((existing.requirements as Record<string, unknown>)?.sustainability_certs as string[])?.join(", ") || ""
-  );
+  const [requirementsNotes, setRequirementsNotes] = useState(existing.requirements_notes ?? "");
   const [fiscalYearStart, setFiscalYearStart] = useState(
-    ((existing.buying_cycle as Record<string, unknown>)?.fiscal_year_start as string) || ""
+    existing.buying_cycle?.fiscal_year_start ?? ""
   );
-  const [rfpWindow, setRfpWindow] = useState(
-    ((existing.buying_cycle as Record<string, unknown>)?.rfp_window as string) || ""
-  );
+  const [rfpWindow, setRfpWindow] = useState(existing.buying_cycle?.rfp_window ?? "");
   // Free text, and stored as free text. It goes to buying_cycle.key_dates_notes —
   // key_dates itself is the structured KeyDate[] the profile editor owns, and
   // writing a string there is what used to crash the org page on render.
-  const [keyDates, setKeyDates] = useState(() =>
-    buyingCycleNotes(existing.buying_cycle as BuyingCycle | undefined)
-  );
+  const [keyDates, setKeyDates] = useState(() => buyingCycleNotes(existing.buying_cycle));
 
   function toggleCategory(cat: string) {
     setCategories((prev) =>
@@ -638,16 +634,17 @@ function Step4PurchasingProfile({
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    // Preserve buyer assignments the profile editor made — onboarding picks the
+    // categories, but it never knows who buys for them.
+    const buyersByCategory = new Map(existingBuyers.map((b) => [b.category, b]));
+    const category_buyers: CategoryBuyer[] = categories.map(
+      (category) => buyersByCategory.get(category) ?? { category, contact_ids: [] }
+    );
+
     onSave({
-      product_categories: categories,
-      requirements: {
-        buy_local: buyLocal,
-        indigenous_owned: indigenousOwned,
-        sustainability_certs: sustainability
-          .split(",")
-          .map((s) => s.trim())
-          .filter(Boolean),
-      },
+      category_buyers,
+      preferred_certifications: [...certs],
+      requirements_notes: requirementsNotes.trim(),
       buying_cycle: {
         fiscal_year_start: fiscalYearStart,
         rfp_window: rfpWindow.trim(),
@@ -710,40 +707,52 @@ function Step4PurchasingProfile({
       </div>
 
       <div className="border-t border-gray-200 pt-4">
-        <p className={labelClass}>Procurement requirements</p>
-        <div className="space-y-2 mt-1">
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={buyLocal}
-              onChange={(e) => setBuyLocal(e.target.checked)}
-              className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
-            />
-            Buy-local policies apply
-          </label>
-          <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={indigenousOwned}
-              onChange={(e) => setIndigenousOwned(e.target.checked)}
-              className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
-            />
-            Indigenous-owned vendor preferences
-          </label>
+        <p className={labelClass}>Vendor preferences</p>
+        <p className="text-xs text-gray-500 mb-2">
+          Certifications your store prioritizes when choosing vendors.
+        </p>
+        <div className="flex flex-wrap gap-2 mt-1">
+          {CERTIFICATION_NAMES.map((cert) => {
+            const selected = certs.has(cert);
+            return (
+              <button
+                key={cert}
+                type="button"
+                onClick={() =>
+                  setCerts((prev) => {
+                    const next = new Set(prev);
+                    if (next.has(cert)) next.delete(cert);
+                    else next.add(cert);
+                    return next;
+                  })
+                }
+                className={`px-3 py-1.5 rounded-full border text-xs transition-colors ${
+                  selected
+                    ? "border-[#EE2A2E] bg-red-50 text-[#EE2A2E] font-medium"
+                    : "border-gray-200 text-gray-600 hover:border-gray-300"
+                }`}
+              >
+                {cert}
+              </button>
+            );
+          })}
         </div>
       </div>
 
       <div>
-        <label htmlFor="ob-sustain" className={labelClass}>
-          Sustainability certifications <span className="text-xs text-gray-400 font-normal">(comma-separated)</span>
+        <label htmlFor="ob-requirements" className={labelClass}>
+          Other requirements{" "}
+          <span className="text-xs text-gray-400 font-normal">
+            buy-local policies, supplier codes, insurance minimums, other certifications
+          </span>
         </label>
-        <input
-          id="ob-sustain"
-          type="text"
-          value={sustainability}
-          onChange={(e) => setSustainability(e.target.value)}
+        <textarea
+          id="ob-requirements"
+          rows={3}
+          value={requirementsNotes}
+          onChange={(e) => setRequirementsNotes(e.target.value)}
           className={inputClass}
-          placeholder="Fair Trade, B Corp, FSC…"
+          placeholder="e.g., Vendors must carry $2M liability insurance."
         />
       </div>
 
