@@ -6,7 +6,29 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { CircleAdminClient } from "./client";
 import { mintMemberToken } from "./headless-auth";
 import { CircleMemberClient } from "./member-proxy";
+import { CircleApiError } from "./types";
 import type { CircleMember, CircleMemberInput, CircleSyncQueueItem } from "./types";
+
+/**
+ * Removing something that is already absent is a no-op, not a failure.
+ *
+ * Circle 404s when the (tag, member) or (group, member) association does not
+ * exist — because the person was never tagged/added, or was already removed,
+ * or never had a Circle account at all. Letting that throw burns all 3 retry
+ * attempts and parks the job as "failed", which buries real failures in noise.
+ * Any other error still propagates.
+ */
+async function ignoreMissing(op: () => Promise<void>, what: string): Promise<void> {
+  try {
+    await op();
+  } catch (err) {
+    if (err instanceof CircleApiError && err.status === 404) {
+      console.log(`[circle/operations] ${what} — already absent in Circle, treating as done`);
+      return;
+    }
+    throw err;
+  }
+}
 
 /**
  * Execute a single sync queue item against the Circle API.
@@ -164,7 +186,10 @@ async function handleRemoveTag(
 
   // Prefer direct tagId
   if (payload.tagId) {
-    await client.removeTagFromMember(Number(payload.tagId), email);
+    await ignoreMissing(
+      () => client.removeTagFromMember(Number(payload.tagId), email),
+      `remove_tag ${payload.tagId} from ${email}`
+    );
     return;
   }
 
@@ -175,7 +200,10 @@ async function handleRemoveTag(
   const tags = await client.listTags();
   const tag = tags.find((t) => t.name.toLowerCase() === tagName.toLowerCase());
   if (!tag) return; // tag doesn't exist — nothing to remove
-  await client.removeTagFromMember(tag.id, email);
+  await ignoreMissing(
+    () => client.removeTagFromMember(tag.id, email),
+    `remove_tag ${tag.id} from ${email}`
+  );
 }
 
 async function handleAddToSpace(
@@ -232,7 +260,10 @@ async function handleRemoveFromAccessGroup(
 
   if (!groupId || !email) return;
 
-  await client.removeMemberFromAccessGroup(groupId, email);
+  await ignoreMissing(
+    () => client.removeMemberFromAccessGroup(groupId, email),
+    `remove_from_access_group ${groupId} for ${email}`
+  );
 }
 
 async function handleSendDm(
