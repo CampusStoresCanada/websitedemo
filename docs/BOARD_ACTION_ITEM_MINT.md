@@ -74,16 +74,21 @@ Three independent tests. Each proposed item passes or fails each one.
 | # | Test | Passes when | Fails when |
 |---|---|---|---|
 | 1 | **One named human** | Resolves to exactly one profile | "Board", "All Board Members", unresolved, or empty |
-| 2 | **A completable verb** | The lead verb denotes an act that ends | The lead verb is continuous or stative |
+| 2 | **A completable verb** | *Any* verb in the item denotes an act that ends | *No* completable verb appears anywhere |
 | 3 | **A finish line** | A date, or a named deliverable | No date and no observable output |
 
 ### Verb lists
 
-**Fail (continuous / stative)** — `continue`, `maintain`, `monitor`, `oversee`, `support`, `promote`, `explore`, `revisit`, `consider`, `prioritize`, `ensure`, `keep`, `be aware`, `look at`, `work on`, `discuss`
+**Fail (continuous / stative)** — `continue`, `maintain`, `monitor`, `oversee`, `support`, `promote`, `explore`, `revisit`, `consider`, `prioritize`, `ensure`, `keep`, `be aware`, `look at`, `work on`, `discuss`, `review`
 
 **Pass (completable)** — `send`, `call`, `draft`, `write`, `confirm`, `remove`, `add`, `invite`, `book`, `sign`, `publish`, `create`, `deliver`, `present`, `report back`, `bring back`, `circulate`, `schedule`
 
-The lists are a starting point and will be argued about. That is intended; see §10.
+**The test is "any", not "lead".** `discuss` and `review` are on the fail list by decision, but a compound item must not be condemned by its opening word:
+
+- *"review the draft policy and report back by the 30th"* — `review` fails, `report back` passes → **action**
+- *"review our approach to advocacy"* — no completable verb anywhere → **intention**
+
+Scoring on the lead verb alone would misclassify the first of those, which is a real and common shape in these minutes. Scoring on "any" keeps `review` on the fail list without punishing items that also say what arrives and when.
 
 ### Finish line
 
@@ -120,7 +125,11 @@ ALTER TABLE board_action_items ADD CONSTRAINT board_action_items_status_check
   CHECK (status IN ('open','in_progress','complete','deferred','intention'));
 ```
 
-An intention can be promoted to an action later — by a human giving it an owner, a verb, and a finish line. That promotion is the moment the board actually decides something, and it should be logged.
+**Intentions are public and labelled.** They appear on the board-facing meeting record alongside real action items, marked with what they are missing. An item with no owner and no due date is a wish, and the record should say so plainly.
+
+The label is factual, not editorial: **`No owner · No due date`**, not "wish" or any other adjective. The arithmetic in §9 is what lands — a category with a zero percent completion rate over fourteen months is unarguable, whereas a pointed word invites a conversation about tone instead of about the item. Let the record be flat and let the reader draw the conclusion.
+
+**Promotion is clerical and never notifies.** An intention becomes an action when a human gives it an owner and a finish line. The status change itself is not news to anybody — "this is no longer malformed" is not worth a DM. The notification fires on **assignment**, because that is the moment a named person acquires an obligation. In practice the two coincide, since promotion requires an owner; the distinction matters because it means the trigger lives on the assignment, not on the status transition, and a clerical re-grade of an already-owned item stays silent.
 
 ---
 
@@ -193,13 +202,31 @@ Neither is an opinion about how the board works. Both are arithmetic over the bo
 
 ---
 
-## 10. Open questions
+## 10. Decisions and remaining questions
 
-1. **The verb lists are a judgement call.** `discuss` and `review` are the contentious ones — "review the draft policy and report back" is a real task; "review our approach to advocacy" is not. Options: keep them on the fail list and let the finish-line test rescue the good ones, or drop them and rely on tests 1 and 3.
-2. **The eight existing collective items.** Mint as intentions against their original meetings, or leave them out entirely and let them die with the spreadsheet? They are the evidence in §9, which argues for importing them.
-3. **Who sees intentions?** Admin-only, or on the board-facing meeting record? Visible is more honest and makes the case faster; it may also read as public criticism of the board's habits.
-4. **Promotion logging.** When an intention becomes an action, is that an `board_action_item_updates` row, or does it warrant its own audit action?
-5. **Pre-April 2026 minutes** are not in the system, so nothing before then can be minted. Confirmed out of scope.
+**Settled 2026-08-19:**
+
+1. **`discuss` and `review` stay on the fail list.** Test 2 scores on "any completable verb", not the lead verb, so compound items that name a deliverable still pass (§3).
+2. **Intentions are public and labelled**, on the board-facing meeting record. Label is factual (`No owner · No due date`); the zero-completion figure does the persuading (§4).
+3. **Promotion does not notify.** Assignment notifies (§4).
+4. **Still-open pre-April items are imported**, anchored as described below.
+
+### Importing the pre-April backlog
+
+`meeting_id` is `NOT NULL`, and the meetings those items were raised at do not exist in the system. Rather than fabricate nine historical meeting rows — which would immediately trip `board_minutes_overdue` for every one of them — anchor them to the earliest real meeting (27 April 2026) and mark the true origin:
+
+- `source = 'backfill'`
+- `source_excerpt` carries the original spreadsheet row, including its stated date
+- the UI renders provenance from `source_excerpt`, not from `meeting_id`: *"carried in from the action-items spreadsheet, originally raised 27 Nov 2025"*
+
+This fabricates no meetings, tells the truth about age, and keeps the eight collective items visible — which matters, because they are the evidence in §9. Only items still open are imported; anything marked COMPLETE stays in the spreadsheet as history.
+
+All backfilled rows are stamped per §7 and are therefore silent.
+
+**Still open:**
+
+5. **Promotion logging** — is an intention→action promotion a `board_action_item_updates` row, or its own audit action? Leaning update row; it is the same shape as any other progress note.
+6. **Ongoing/standing work** still has no representation. Items like *"announce new members in Circle consistently"* have no finish line and will grade as intentions forever, which is not wrong but is not useful either. Deferred — needs its own conversation about whether standing duties belong in this system at all.
 
 ---
 
@@ -213,4 +240,5 @@ Neither is an opinion about how the board works. Both are arithmetic over the bo
 | Progress narrative overwritten on each edit | Append-only update log |
 | Revised dates erase the original | `due_date_original` preserved |
 | An item lives at one meeting | Carried forward until closed |
-| Un-ownable items indistinguishable from real tasks | Graded, routed, and counted |
+| Un-ownable items indistinguishable from real tasks | Graded, routed, publicly labelled, and counted |
+| Pre-April backlog stranded in a spreadsheet | Still-open items imported, provenance preserved |
