@@ -15,6 +15,7 @@ import PullFinancialsButton from "@/components/admin/board/PullFinancialsButton"
 import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
 import MeetingTabs from "@/components/admin/board/MeetingTabs";
 import ActionItemsPanel from "@/components/admin/board/ActionItemsPanel";
+import MintFromMinutesPanel from "@/components/admin/board/MintFromMinutesPanel";
 import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEditor";
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
 import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
@@ -214,12 +215,31 @@ export default async function MeetingDetailPage({
 
       {/* ── Action Items tab ── */}
       {activeTab === "actions" && (
-        <ActionItemsPanel
-          meetingId={meeting.id}
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          items={actionItems as any}
-          isSA={isSA}
-        />
+        <div className="space-y-8">
+          <ActionItemsPanel
+            meetingId={meeting.id}
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            items={actionItems as any}
+            isSA={isSA}
+          />
+
+          {/* Mint from the minutes — proposals only, nothing is created
+              until a human confirms. Super-admin because it writes items. */}
+          {isSA && (
+            <section>
+              <h2 className="mb-1 text-sm font-semibold text-gray-900">
+                Mint from minutes
+              </h2>
+              <p className="mb-3 text-xs text-gray-500">
+                Action items are read from the <code>ACTION:</code> lines in the
+                minutes and graded. Anything without a named owner, a completable
+                verb and a finish line is recorded as an intention — visible and
+                counted, but it never notifies anyone.
+              </p>
+              <MintFromMinutesPanel meetingId={meeting.id} />
+            </section>
+          )}
+        </div>
       )}
     </main>
   );

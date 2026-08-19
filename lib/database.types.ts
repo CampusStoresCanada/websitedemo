@@ -1007,6 +1007,45 @@ export type Database = {
           },
         ]
       }
+      board_action_item_updates: {
+        Row: {
+          author_id: string | null
+          created_at: string
+          id: string
+          item_id: string
+          note: string
+        }
+        Insert: {
+          author_id?: string | null
+          created_at?: string
+          id?: string
+          item_id: string
+          note: string
+        }
+        Update: {
+          author_id?: string | null
+          created_at?: string
+          id?: string
+          item_id?: string
+          note?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_action_item_updates_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_action_item_updates_item_id_fkey"
+            columns: ["item_id"]
+            isOneToOne: false
+            referencedRelation: "board_action_items"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       board_action_items: {
         Row: {
           assigned_to: string | null
@@ -1015,11 +1054,15 @@ export type Database = {
           created_at: string
           description: string
           due_date: string | null
+          due_date_original: string | null
           id: string
           meeting_id: string
           pre_meeting_reminder_sent_at: string | null
+          quality_flags: string[]
           reminder_sent_at: string | null
           sort_order: number
+          source: string
+          source_excerpt: string | null
           status: string
           title: string
         }
@@ -1030,11 +1073,15 @@ export type Database = {
           created_at?: string
           description: string
           due_date?: string | null
+          due_date_original?: string | null
           id?: string
           meeting_id: string
           pre_meeting_reminder_sent_at?: string | null
+          quality_flags?: string[]
           reminder_sent_at?: string | null
           sort_order?: number
+          source?: string
+          source_excerpt?: string | null
           status?: string
           title: string
         }
@@ -1045,11 +1092,15 @@ export type Database = {
           created_at?: string
           description?: string
           due_date?: string | null
+          due_date_original?: string | null
           id?: string
           meeting_id?: string
           pre_meeting_reminder_sent_at?: string | null
+          quality_flags?: string[]
           reminder_sent_at?: string | null
           sort_order?: number
+          source?: string
+          source_excerpt?: string | null
           status?: string
           title?: string
         }
@@ -1242,6 +1293,123 @@ export type Database = {
             columns: ["meeting_id"]
             isOneToOne: false
             referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_vote_ballots: {
+        Row: {
+          cast_at: string
+          changed_at: string | null
+          choice: string
+          director_profile_id: string
+          id: string
+          source: string
+          vote_id: string
+        }
+        Insert: {
+          cast_at?: string
+          changed_at?: string | null
+          choice: string
+          director_profile_id: string
+          id?: string
+          source?: string
+          vote_id: string
+        }
+        Update: {
+          cast_at?: string
+          changed_at?: string | null
+          choice?: string
+          director_profile_id?: string
+          id?: string
+          source?: string
+          vote_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_vote_ballots_director_profile_id_fkey"
+            columns: ["director_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_vote_ballots_vote_id_fkey"
+            columns: ["vote_id"]
+            isOneToOne: false
+            referencedRelation: "board_votes"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_votes: {
+        Row: {
+          application_id: string
+          board_size: number
+          circle_post_id: number | null
+          circle_post_url: string | null
+          closes_at: string
+          created_at: string
+          decided_at: string | null
+          executed_at: string | null
+          executed_by: string | null
+          id: string
+          opened_at: string
+          public_token: string
+          reminder_sent_at: string | null
+          status: string
+          threshold: number
+          updated_at: string
+        }
+        Insert: {
+          application_id: string
+          board_size?: number
+          circle_post_id?: number | null
+          circle_post_url?: string | null
+          closes_at: string
+          created_at?: string
+          decided_at?: string | null
+          executed_at?: string | null
+          executed_by?: string | null
+          id?: string
+          opened_at?: string
+          public_token: string
+          reminder_sent_at?: string | null
+          status?: string
+          threshold?: number
+          updated_at?: string
+        }
+        Update: {
+          application_id?: string
+          board_size?: number
+          circle_post_id?: number | null
+          circle_post_url?: string | null
+          closes_at?: string
+          created_at?: string
+          decided_at?: string | null
+          executed_at?: string | null
+          executed_by?: string | null
+          id?: string
+          opened_at?: string
+          public_token?: string
+          reminder_sent_at?: string | null
+          status?: string
+          threshold?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_votes_application_id_fkey"
+            columns: ["application_id"]
+            isOneToOne: false
+            referencedRelation: "signup_applications"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_votes_executed_by_fkey"
+            columns: ["executed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
