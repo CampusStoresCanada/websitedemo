@@ -152,7 +152,13 @@ export class CircleAdminClient {
         records: CircleMember[];
         has_next_page: boolean;
       }>("GET", "/community_members", {
-        params: { per_page: 100, page },
+        // status defaults to "active" (profile_confirmed_at set) — WITHOUT this
+        // param the list returns only ~271 of ~512 members and is completely
+        // blind to everyone who was invited but never completed profile setup
+        // (Circle admin UI: Audience -> Manage -> Invited; 241 people as of
+        // 2026-08-18). That blindness is why link_member kept missing existing
+        // members and falling through to create.
+        params: { per_page: 100, page, status: "all" },
       });
       const records = result.records ?? [];
       for (const m of records) {
@@ -205,8 +211,8 @@ export class CircleAdminClient {
   }
 
   /**
-   * Add a tag to a member. Uses POST to the tagged_members sub-resource
-   * of the member_tag. The Circle API expects the member's email.
+   * Create a new member tag. (This comment previously described
+   * addTagToMember — and described it wrongly; see that method.)
    */
   async createTag(data: {
     name: string;
@@ -239,21 +245,38 @@ export class CircleAdminClient {
     await this.request<void>("DELETE", `/member_tags/${tagId}`);
   }
 
+  /**
+   * Tag a member.
+   *
+   * `tagged_members` is a TOP-LEVEL collection, not a sub-resource of
+   * `member_tags` — its records carry their own id plus `member_tag_id` and
+   * `user_email` as fields. The nested path this used to call
+   * (`POST /member_tags/{id}/tagged_members`) does not exist, and 404'd on
+   * every call from 2026-03 to 2026-08: 237 queued, 237 failed, 0 ever
+   * succeeded — across every tag id, including tags verified to exist with
+   * members already on them. It was never a deleted-tag or missing-member
+   * problem; the path was simply wrong.
+   *
+   * Note the parameter names: `member_tag_id`/`user_email`, NOT `tag_id`/`email`.
+   */
   async addTagToMember(tagId: number, email: string): Promise<void> {
-    await this.request<void>("POST", `/member_tags/${tagId}/tagged_members`, {
-      body: { email },
+    await this.request<void>("POST", "/tagged_members", {
+      body: { member_tag_id: tagId, user_email: email },
     });
   }
 
   /**
-   * Remove a tag from a member. Uses DELETE to the tagged_members sub-resource.
+   * Untag a member. Identified by the (tag, member) pair rather than by the
+   * tagged_member record id, so no lookup step is needed.
+   *
+   * Sent as query params, not a body: DELETE request bodies are not reliably
+   * read by servers. Same wrong-path bug as addTagToMember — remove_tag was
+   * 16 failed / 0 completed for the identical reason.
    */
   async removeTagFromMember(tagId: number, email: string): Promise<void> {
-    await this.request<void>(
-      "DELETE",
-      `/member_tags/${tagId}/tagged_members`,
-      { body: { email } }
-    );
+    await this.request<void>("DELETE", "/tagged_members", {
+      params: { member_tag_id: tagId, user_email: email },
+    });
   }
 
   // ---- Spaces -------------------------------------------------------------
