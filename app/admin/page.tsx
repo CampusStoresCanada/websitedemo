@@ -6,6 +6,7 @@ import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
 import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
 import { getBoardDashboardStats } from "@/lib/board/dashboard-stats";
+import { getBoardChecklist } from "@/lib/board/checklist";
 import { getDashboardWidgetLayout } from "@/lib/admin/dashboard-widgets";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
@@ -14,6 +15,7 @@ import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
 import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
 import { BoardWidget } from "@/components/admin/BoardWidget";
+import { BoardChecklist } from "@/components/admin/board/BoardChecklist";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -166,6 +168,7 @@ export default async function AdminConsolePage() {
     conferenceStats,
     widgetLayout,
     boardStats,
+    boardChecklist,
   ] = await Promise.all([
     // Current conference
     db.from("conference_instances")
@@ -242,6 +245,9 @@ export default async function AdminConsolePage() {
 
     // Board governance health widget
     getBoardDashboardStats(),
+
+    // Board action-item checklist
+    getBoardChecklist(auth.ok ? auth.ctx.userId : null),
   ]);
 
   const conf         = conferenceResult.data;
@@ -405,6 +411,13 @@ export default async function AdminConsolePage() {
           return null;
         })}
       </div>
+
+      {/* ── Board action items — full width, it is a list not a tile ── */}
+      {widgetLayout.includes("board_checklist") && boardChecklist.rows.length > 0 && (
+        <div className="mb-8">
+          <BoardChecklist data={boardChecklist} />
+        </div>
+      )}
 
       {/* ── Conference quick access ─────────────────────────────── */}
       {conf && (

@@ -10,6 +10,7 @@ import {
 } from "@/lib/actions/applications";
 import type { DuplicateOrgMatch } from "@/lib/actions/applications";
 import { parseUTC } from "@/lib/utils";
+import { BoardVoteStatus, type BoardVoteSummary } from "@/components/admin/BoardVoteStatus";
 import type { Json } from "@/lib/database.types";
 
 interface Application {
@@ -55,9 +56,12 @@ const STATUS_BADGES: Record<string, { label: string; className: string }> = {
 export function ApplicationsReview({
   initialApplications,
   isSuperAdmin = false,
+  voteSummaries = {},
 }: {
   initialApplications: Application[];
   isSuperAdmin?: boolean;
+  /** Board-vote standing keyed by application id. Empty for member applications. */
+  voteSummaries?: Record<string, BoardVoteSummary>;
 }) {
   const router = useRouter();
   const [applications, setApplications] = useState(initialApplications);
@@ -285,6 +289,7 @@ export function ApplicationsReview({
                           }
                           isFastTrackConfirming={fastTrackConfirmId === app.id}
                           isSuperAdmin={isSuperAdmin}
+                          boardVote={voteSummaries[app.id] ?? null}
                           onApprove={() => handleApprove(app.id)}
                           onConfirmApproveAnyway={() => handleApprove(app.id, true)}
                           onCancelDuplicateWarning={() => setDuplicateWarning(null)}
@@ -379,6 +384,7 @@ function ExpandedView({
   duplicateWarning,
   isFastTrackConfirming,
   isSuperAdmin,
+  boardVote,
   onApprove,
   onConfirmApproveAnyway,
   onCancelDuplicateWarning,
@@ -401,6 +407,7 @@ function ExpandedView({
   duplicateWarning: DuplicateOrgMatch[] | null;
   isFastTrackConfirming: boolean;
   isSuperAdmin: boolean;
+  boardVote: BoardVoteSummary | null;
   onApprove: () => void;
   onConfirmApproveAnyway: () => void;
   onCancelDuplicateWarning: () => void;
@@ -540,6 +547,9 @@ function ExpandedView({
           )}
         </div>
       )}
+
+      {/* Where the board vote stands. Partner applications only. */}
+      {boardVote && <BoardVoteStatus vote={boardVote} />}
 
       {/* Duplicate organization / duplicate charge warning */}
       {canAct && duplicateWarning && duplicateWarning.length > 0 && (

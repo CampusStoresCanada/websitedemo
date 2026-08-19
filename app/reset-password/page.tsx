@@ -69,15 +69,23 @@ function ResetPasswordContent() {
     setSuccess(true);
     setIsLoading(false);
 
-    // Land on /onboarding rather than the public homepage. A first-time org
-    // admin arriving from an invite has just set their password and would
-    // otherwise be dropped on the marketing site with nothing telling them
-    // the wizard exists — nothing else in the app links to it. /onboarding
+    // If the user was sent here from a deep link they couldn't reach — a board
+    // vote button being the case that matters — return them to it. They set out
+    // to do one specific thing and the password was in the way; finishing that
+    // thing is the whole point.
+    //
+    // Otherwise land on /onboarding rather than the public homepage. A
+    // first-time org admin arriving from an invite has just set their password
+    // and would otherwise be dropped on the marketing site with nothing telling
+    // them the wizard exists — nothing else in the app links to it. /onboarding
     // triages on its own: anyone who has already onboarded, or who isn't an
     // org admin, is bounced to /me, so an ordinary password reset still ends
     // up somewhere sensible.
+    const rawNext = searchParams.get("next");
+    const destination = rawNext && rawNext.startsWith("/") ? rawNext : "/onboarding";
+
     setTimeout(() => {
-      router.push("/onboarding");
+      router.push(destination);
       router.refresh();
     }, 2000);
   };

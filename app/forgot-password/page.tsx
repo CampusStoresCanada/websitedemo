@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { initiateAccountRecovery } from "@/lib/actions/account-recovery";
 
 export default function ForgotPasswordPage() {
@@ -11,6 +11,14 @@ export default function ForgotPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [notRecognized, setNotRecognized] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
+
+  // Where the user was headed before they hit the login wall. Carried through
+  // the reset so someone who arrives from a board-vote button (or any other
+  // deep link) is returned to it rather than dropped on /onboarding having
+  // forgotten what they were doing. Only same-site paths are honoured.
+  const rawNext = searchParams.get("next");
+  const nextPath = rawNext && rawNext.startsWith("/") ? rawNext : null;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -40,7 +48,10 @@ export default function ForgotPasswordPage() {
       return;
     }
 
-    router.push(`/reset-password?email=${encodeURIComponent(email)}`);
+    router.push(
+      `/reset-password?email=${encodeURIComponent(email)}` +
+        (nextPath ? `&next=${encodeURIComponent(nextPath)}` : "")
+    );
   };
 
   return (
