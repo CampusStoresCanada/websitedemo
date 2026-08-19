@@ -242,3 +242,138 @@ All backfilled rows are stamped per §7 and are therefore silent.
 | An item lives at one meeting | Carried forward until closed |
 | Un-ownable items indistinguishable from real tasks | Graded, routed, publicly labelled, and counted |
 | Pre-April backlog stranded in a spreadsheet | Still-open items imported, provenance preserved |
+
+---
+
+## 11. Sorting and the checklist widget
+
+The widget is a checklist, not a dashboard. The goal is to get items **cleared**,
+not to get them read, so the ordering question is "what should this person tick
+next" rather than "what is most important in the abstract".
+
+### 11.1 Tiers are lexicographic
+
+Urgency and age must never compete inside one number — that is how a
+million-year-old item that should never have been raised outranks something due
+on Friday. Items sort into bands first, and **nothing ages into a higher band.**
+
+| Tier | Contents | Sorted by |
+|---|---|---|
+| 1 · Running out | Dated, due within the urgency window | Soonest first, priority breaks ties |
+| 2 · Live work | Dated with runway, or in progress | priority × urgency × ageBoost |
+| 3 · Undated / stalled | No date, not started | priority × ageBoost |
+| 4 · Held | On hold | Hold date; **does not age** |
+| 5 · Unclaimed | Intentions, no owner | Adoptability: shortest and clearest first |
+
+Held items do not age. On Hold carries a stated reason; aging it punishes
+honesty and teaches people to leave work quietly rotting in Not Started instead.
+
+Tier 5 sorts differently on purpose. Nobody owns these, so nothing is late and
+urgency is meaningless — they compete on how easy they are to adopt. The
+volunteer should get a win, so short and well-formed comes first. "Do this one?"
+lands very differently when the suggestion is a twenty-minute job than when it
+is "explore reviving CRAM".
+
+### 11.2 The saturating age curve
+
+```
+ageBoost(days) = 1 + AGE_CEILING × (1 − e^(−days / AGE_TAU))
+```
+
+Defaults `AGE_CEILING = 0.5`, `AGE_TAU = 60` days:
+
+| Days open | 0 | 7 | 30 | 60 | 90 | 114 | 365 | ∞ |
+|---|---|---|---|---|---|---|---|---|
+| Multiplier | 1.00 | 1.06 | 1.20 | 1.32 | 1.39 | 1.43 | 1.50 | 1.50 |
+
+Linear aging is unbounded and reproduces the zombie problem. A hard cap creates
+a cliff where every old item collapses to an identical score with no ordering
+left. The exponential keeps moving — just less and less — and, crucially,
+**earns most of its boost in the first month**, which is when a nudge can still
+work. Past that, aging has said all it usefully can and escalation takes over.
+
+### 11.3 Escalation: age produces a verdict, not a bigger number
+
+An item open across `ESCALATION_MEETINGS` board meetings (default 3) with no
+movement is not urgent. It is **doubtful**. The honest response is not "do this
+today" but *"this has been open across four meetings — is it still real?"*, and
+the place that question gets answered is the agenda.
+
+Escalation therefore sets a flag that is **orthogonal to sort position**. The
+item does not climb the list; it gets tabled. Deciding an item is no longer real
+is a completion too — clearing the list by killing something still clears it.
+
+### 11.4 Row states
+
+The bar is a countdown, not a percentage. It fills as runway disappears, so a
+full bar means out of time, not nearly done.
+
+| State | Status value | Bar |
+|---|---|---|
+| Not started | `open` | Empty |
+| In Progress | `in_progress` | Fills from `started_at` toward `due_date` |
+| On Hold | `deferred` | Frozen at its fill, 50% saturation |
+| Completed | `complete` | Grey, pill filled |
+
+Two mechanics this implies:
+
+- **Starting stamps `started_at`.** A countdown needs a start as well as an end;
+  without it, "60% full" means nothing. This also puts the demand for a due date
+  at the natural moment — you picked it up, so say when.
+- **Holding banks the remaining time.** `held_at` freezes the fill. On resume,
+  `due_date` advances by exactly the held duration, so a hold cannot be used to
+  quietly buy a month, and the bar resumes where it paused.
+
+Undated items render the due date as **Open** (no date yet) or **Ongoing**
+(standing work — the parser's vague-timing flag already tells these apart).
+Never blank; blank reads as broken, and both of these are true statements.
+
+### 11.5 Claiming — where malformed work gets repaired
+
+An intention has no owner by definition. Claiming one is therefore the exact
+moment the missing pieces must be supplied, and the claim dialog requires them:
+an owner (the claimant), a completable phrasing, and a finish line.
+
+You cannot claim "continue to promote CSC membership" into being a task without
+fixing it first. The unowned pile stops being a graveyard and becomes the one
+place malformed work gets repaired — by a volunteer, at the moment they are most
+willing, with nobody being told off in a meeting.
+
+### 11.6 Stats
+
+The third tab. Not a dashboard — the answer to "is any of this working", and the
+home for the countable badness that §9 argues is the whole theory of change.
+
+**Completion by assignment** — the finding that carries the argument:
+
+| Assignment | Raised | Completed | Rate |
+|---|---|---|---|
+| Named owner | 29 | 7 | 24% |
+| No named owner | 5 | 0 | **0%** |
+
+**Raised vs cleared, per meeting** — whether the backlog is accumulating:
+
+| Meeting | Actions | Intentions | Cleared |
+|---|---|---|---|
+| 2026-04-27 | 23 | 5 | 3 |
+| 2026-05-28 | 3 | 0 | 1 |
+| 2026-06-23 | 3 | 0 | 3 |
+
+April raised 28 items and cleared 3. June raised 3 and cleared 3. The meeting
+that raised fewer, better-formed items cleared all of them.
+
+**Also here:** the aging distribution, the escalation queue ("is this really even
+a thing?"), and median time from raised to cleared. All of it is arithmetic over
+the board's own record, which is what makes it usable in a room.
+
+### 11.7 Constants
+
+All exposed as policy values so weights are tunable without a deploy:
+
+| Key | Default | Meaning |
+|---|---|---|
+| `board_age_ceiling` | 0.5 | Most that age can ever be worth |
+| `board_age_tau_days` | 60 | How fast it gets there |
+| `board_urgency_window_days` | 7 | Tier 1 boundary |
+| `board_escalation_meetings` | 3 | Meetings open before an item is tabled |
+| `board_priority_weights` | high 3, medium 2, low 1, unset 1.5 | Unset sits mid so it is neither buried nor rewarded |
