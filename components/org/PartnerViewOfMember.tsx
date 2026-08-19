@@ -3,7 +3,12 @@
 import type { Organization } from "@/lib/types/db";
 import type { VisibleOrganization, VisibleContact } from "@/lib/visibility/data";
 import type { ProcurementInfo, KeyDate } from "@/lib/types/procurement";
-import { hasProcurementInfo } from "@/lib/types/procurement";
+import {
+  hasProcurementInfo,
+  hasBuyingCycleContent,
+  normalizeKeyDates,
+  buyingCycleNotes,
+} from "@/lib/types/procurement";
 import { ProtectedSection, BlurredValue } from "@/components/ui/GreyBlur";
 import BlurredField from "@/components/ui/BlurredField";
 
@@ -31,6 +36,8 @@ export default function PartnerViewOfMember({
   const preferredCerts = procurementInfo?.preferred_certifications ?? [];
   const sourcingProvinces = procurementInfo?.sourcing_provinces ?? [];
   const buyingCycle = procurementInfo?.buying_cycle;
+  const keyDates = normalizeKeyDates(buyingCycle?.key_dates);
+  const cycleNotes = buyingCycleNotes(buyingCycle);
 
   const storeServices = procurementInfo?.store_services ?? [];
   const contactById = Object.fromEntries(contacts.map((c) => [c.id, c]));
@@ -218,8 +225,7 @@ export default function PartnerViewOfMember({
             )}
 
             {/* Buying cycle — partners only */}
-            {vis.buyingCycle && buyingCycle &&
-              (buyingCycle.fiscal_year_start || (buyingCycle.key_dates && buyingCycle.key_dates.length > 0)) && (
+            {vis.buyingCycle && buyingCycle && hasBuyingCycleContent(buyingCycle) && (
                 <ProtectedSection
                   requiredPermission="partner"
                   bannerMessage="Partner members can view RFP timelines and buying cycles."
@@ -239,11 +245,11 @@ export default function PartnerViewOfMember({
                           </p>
                         </div>
                       )}
-                      {buyingCycle.key_dates && buyingCycle.key_dates.length > 0 && (
+                      {keyDates.length > 0 && (
                         <div>
                           <span className="text-xs uppercase text-gray-400">Key Dates</span>
                           <div className="mt-1 space-y-1">
-                            {buyingCycle.key_dates.map((kd: KeyDate, i: number) => (
+                            {keyDates.map((kd: KeyDate, i: number) => (
                               <div key={i} className="flex items-center gap-3 text-sm">
                                 <BlurredValue placeholderWidth={12}>{kd.title}</BlurredValue>
                                 <span className="text-gray-400">·</span>
@@ -254,6 +260,14 @@ export default function PartnerViewOfMember({
                               </div>
                             ))}
                           </div>
+                        </div>
+                      )}
+                      {cycleNotes && (
+                        <div>
+                          <span className="text-xs uppercase text-gray-400">Notes</span>
+                          <p className="text-sm">
+                            <BlurredValue placeholderWidth={24}>{cycleNotes}</BlurredValue>
+                          </p>
                         </div>
                       )}
                     </div>

@@ -11,6 +11,9 @@ import {
   CANADIAN_PROVINCES,
   CERTIFICATION_NAMES,
   hasProcurementInfo,
+  hasBuyingCycleContent,
+  normalizeKeyDates,
+  buyingCycleNotes,
 } from "@/lib/types/procurement";
 import { CERTIFICATION_BY_NAME, CANCOLL_CERT } from "@/lib/certifications";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
@@ -126,6 +129,8 @@ function ViewMode({
     buying_cycle,
   } = procurementInfo;
   const contactById = Object.fromEntries(contacts.map((c) => [c.id, c]));
+  const keyDates = normalizeKeyDates(buying_cycle?.key_dates);
+  const cycleNotes = buyingCycleNotes(buying_cycle);
 
   return (
     <div className="space-y-10">
@@ -204,7 +209,7 @@ function ViewMode({
         </div>
       )}
 
-      {buying_cycle && (buying_cycle.fiscal_year_start || (buying_cycle.key_dates && buying_cycle.key_dates.length > 0)) && (
+      {hasBuyingCycleContent(buying_cycle) && buying_cycle && (
         <div>
           <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">Buying Cycle</h3>
           <div className="bg-gray-50 rounded-xl p-5 space-y-3">
@@ -214,11 +219,11 @@ function ViewMode({
                 <p className="font-medium text-[#1A1A1A]">{buying_cycle.fiscal_year_start}</p>
               </div>
             )}
-            {buying_cycle.key_dates && buying_cycle.key_dates.length > 0 && (
+            {keyDates.length > 0 && (
               <div>
                 <span className="text-xs uppercase text-gray-400">Key Dates</span>
                 <div className="mt-1 space-y-1">
-                  {buying_cycle.key_dates.map((kd, i) => (
+                  {keyDates.map((kd, i) => (
                     <div key={i} className="flex items-center gap-3 text-sm">
                       <span className="font-medium text-[#1A1A1A]">{kd.title}</span>
                       <span className="text-gray-500">{formatDate(kd.date)}</span>
@@ -226,6 +231,12 @@ function ViewMode({
                     </div>
                   ))}
                 </div>
+              </div>
+            )}
+            {cycleNotes && (
+              <div>
+                <span className="text-xs uppercase text-gray-400">Notes</span>
+                <p className="text-sm text-[#1A1A1A] whitespace-pre-line">{cycleNotes}</p>
               </div>
             )}
           </div>
@@ -313,7 +324,10 @@ function EditMode({
     setVisibility((prev) => ({ ...prev, [key]: !prev[key] }));
 
   const [fiscalYearStart, setFiscalYearStart] = useState(initialData?.buying_cycle?.fiscal_year_start ?? "");
-  const [keyDates, setKeyDates] = useState<KeyDate[]>(initialData?.buying_cycle?.key_dates ?? []);
+  const [keyDates, setKeyDates] = useState<KeyDate[]>(
+    normalizeKeyDates(initialData?.buying_cycle?.key_dates)
+  );
+  const [cycleNotes, setCycleNotes] = useState(buyingCycleNotes(initialData?.buying_cycle));
 
   // ── Category helpers ──
   const toggleCategory = (cat: string) => {
@@ -397,6 +411,9 @@ function EditMode({
     const buying_cycle = {
       fiscal_year_start: fiscalYearStart || undefined,
       key_dates: validKeyDates.length > 0 ? validKeyDates : undefined,
+      // Always written as a string — saving here is also what retires a legacy
+      // free-text key_dates, since key_dates now only ever holds KeyDate[].
+      key_dates_notes: cycleNotes.trim() || undefined,
     };
 
     const newData: ProcurementInfo = {
@@ -676,7 +693,7 @@ function EditMode({
                 </button>
               </div>
 
-              {keyDates.length === 0 && (
+              {keyDates.length === 0 && !cycleNotes && (
                 <p className="text-xs text-gray-400 italic">No key dates added yet.</p>
               )}
 
@@ -714,6 +731,22 @@ function EditMode({
                     </button>
                   </div>
                 ))}
+              </div>
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-[#1A1A1A] mb-2">
+                  Notes
+                  <span className="ml-2 font-normal text-xs text-gray-400">
+                    Anything that doesn&apos;t fit a single date — lead times, RFP windows
+                  </span>
+                </label>
+                <textarea
+                  value={cycleNotes}
+                  onChange={(e) => setCycleNotes(e.target.value)}
+                  rows={3}
+                  placeholder="e.g., Textbook orders need 10 weeks lead time."
+                  className={inputCls}
+                />
               </div>
             </div>
           </div>

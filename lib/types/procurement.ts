@@ -104,8 +104,18 @@ export interface KeyDate {
 export interface BuyingCycle {
   /** Month when fiscal year starts (e.g., "April") */
   fiscal_year_start?: string;
-  /** Structured list of key dates */
-  key_dates?: KeyDate[];
+  /**
+   * Structured list of key dates.
+   *
+   * The union with `string` is not aspirational — the onboarding wizard wrote a
+   * free-text string here for years while every reader assumed KeyDate[]. A
+   * non-empty string sails through the usual `key_dates.length > 0` guard and
+   * then throws on `.map`, taking the whole profile page down. Never read this
+   * field directly: go through normalizeKeyDates() and buyingCycleNotes().
+   */
+  key_dates?: KeyDate[] | string;
+  /** Free-text buying-cycle notes — what the onboarding wizard actually collects. */
+  key_dates_notes?: string;
 }
 
 /**
@@ -170,6 +180,45 @@ export const CANADIAN_PROVINCES = [
   "Nunavut",
   "Yukon",
 ] as const;
+
+/**
+ * Coerce whatever is sitting in buying_cycle.key_dates into a real KeyDate[].
+ *
+ * Legacy rows hold a free-text string; malformed entries can also survive a
+ * hand-edited JSONB blob. Anything that isn't a usable KeyDate is dropped here
+ * rather than left to explode inside a render.
+ */
+export function normalizeKeyDates(value: BuyingCycle["key_dates"]): KeyDate[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(
+    (kd): kd is KeyDate =>
+      !!kd && typeof kd === "object" && typeof kd.title === "string" && typeof kd.date === "string"
+  );
+}
+
+/**
+ * The free-text buying-cycle note, if any — reading legacy string key_dates as
+ * the note it always was, so onboarding answers still render after the fix.
+ */
+export function buyingCycleNotes(cycle: BuyingCycle | null | undefined): string {
+  if (!cycle) return "";
+  const notes = cycle.key_dates_notes;
+  if (typeof notes === "string" && notes.trim()) return notes.trim();
+  if (typeof cycle.key_dates === "string") return cycle.key_dates.trim();
+  return "";
+}
+
+/**
+ * Returns true if the buying cycle has anything to show.
+ */
+export function hasBuyingCycleContent(cycle: BuyingCycle | null | undefined): boolean {
+  if (!cycle) return false;
+  return !!(
+    cycle.fiscal_year_start ||
+    normalizeKeyDates(cycle.key_dates).length > 0 ||
+    buyingCycleNotes(cycle)
+  );
+}
 
 /**
  * Returns true if the procurement info has any data worth displaying.

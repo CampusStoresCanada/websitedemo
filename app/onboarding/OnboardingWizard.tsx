@@ -4,7 +4,8 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { saveOnboardingStep, completeOnboarding } from "@/lib/actions/applications";
 import { PROVINCES } from "@/lib/constants/provinces";
-import { VENDOR_CATEGORIES as PRODUCT_CATEGORIES } from "@/lib/types/procurement";
+import { VENDOR_CATEGORIES as PRODUCT_CATEGORIES, buyingCycleNotes } from "@/lib/types/procurement";
+import type { BuyingCycle } from "@/lib/types/procurement";
 import {
   PARTNER_PRIMARY_CATEGORIES,
   PARTNER_SECONDARY_CATEGORIES,
@@ -622,8 +623,11 @@ function Step4PurchasingProfile({
   const [rfpWindow, setRfpWindow] = useState(
     ((existing.buying_cycle as Record<string, unknown>)?.rfp_window as string) || ""
   );
-  const [keyDates, setKeyDates] = useState(
-    ((existing.buying_cycle as Record<string, unknown>)?.key_dates as string) || ""
+  // Free text, and stored as free text. It goes to buying_cycle.key_dates_notes —
+  // key_dates itself is the structured KeyDate[] the profile editor owns, and
+  // writing a string there is what used to crash the org page on render.
+  const [keyDates, setKeyDates] = useState(() =>
+    buyingCycleNotes(existing.buying_cycle as BuyingCycle | undefined)
   );
 
   function toggleCategory(cat: string) {
@@ -647,7 +651,7 @@ function Step4PurchasingProfile({
       buying_cycle: {
         fiscal_year_start: fiscalYearStart,
         rfp_window: rfpWindow.trim(),
-        key_dates: keyDates.trim(),
+        key_dates_notes: keyDates.trim(),
       },
     });
   }
