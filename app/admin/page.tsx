@@ -5,7 +5,6 @@ import { CONFERENCE_STATUS_LABELS, type ConferenceStatus } from "@/lib/constants
 import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
 import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
-import { getBoardDashboardStats } from "@/lib/board/dashboard-stats";
 import { getBoardChecklist } from "@/lib/board/checklist";
 import { getDashboardWidgetLayout } from "@/lib/admin/dashboard-widgets";
 import { ORG_TYPE } from "@/lib/constants/org-types";
@@ -14,7 +13,6 @@ import SyncNowButton from "@/components/admin/board/SyncNowButton";
 import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
 import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
-import { BoardWidget } from "@/components/admin/BoardWidget";
 import { BoardChecklist } from "@/components/admin/board/BoardChecklist";
 
 export const metadata = {
@@ -167,7 +165,6 @@ export default async function AdminConsolePage() {
     renewalProgress,
     conferenceStats,
     widgetLayout,
-    boardStats,
     boardChecklist,
   ] = await Promise.all([
     // Current conference
@@ -242,9 +239,6 @@ export default async function AdminConsolePage() {
 
     // Widget order / visibility, per role
     getDashboardWidgetLayout(auth.ok ? auth.ctx.globalRole : "admin"),
-
-    // Board governance health widget
-    getBoardDashboardStats(),
 
     // Board action-item checklist
     getBoardChecklist(auth.ok ? auth.ctx.userId : null),
@@ -392,12 +386,20 @@ export default async function AdminConsolePage() {
         </Link>
       </div>
 
-      {/* ── Glanceable widgets ───────────────────────────────────── */}
-      <div className="mb-8 flex flex-wrap items-start justify-between gap-6">
+      {/* ── Widgets, in configured order ─────────────────────────────
+           The checklist is a list rather than a tile, so it claims the full
+           row and the cards flow around it. Order comes from
+           dashboard_widget_config. */}
+      <div className="mb-8 flex flex-wrap items-start gap-6">
         {widgetLayout.map((key) => {
           if (key === "membership") {
             return renewalProgress
               ? <MembershipRenewalsWidget key={key} data={renewalProgress} />
+              : null;
+          }
+          if (key === "board_checklist") {
+            return boardChecklist.rows.length > 0
+              ? <div key={key} className="w-full"><BoardChecklist data={boardChecklist} /></div>
               : null;
           }
           if (key === "conference") {
@@ -405,19 +407,9 @@ export default async function AdminConsolePage() {
               ? <ConferenceWidget key={key} data={conferenceStats} />
               : null;
           }
-          if (key === "board") {
-            return <BoardWidget key={key} data={boardStats} />;
-          }
           return null;
         })}
       </div>
-
-      {/* ── Board action items — full width, it is a list not a tile ── */}
-      {widgetLayout.includes("board_checklist") && boardChecklist.rows.length > 0 && (
-        <div className="mb-8">
-          <BoardChecklist data={boardChecklist} />
-        </div>
-      )}
 
       {/* ── Conference quick access ─────────────────────────────── */}
       {conf && (

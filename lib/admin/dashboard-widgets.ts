@@ -12,9 +12,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export const DASHBOARD_WIDGETS = [
   { key: "membership", label: "Membership Renewals" },
-  { key: "conference", label: "The Conference" },
-  { key: "board", label: "The Board" },
   { key: "board_checklist", label: "Board Action Items" },
+  { key: "conference", label: "The Conference" },
 ] as const;
 
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGETS)[number]["key"];
