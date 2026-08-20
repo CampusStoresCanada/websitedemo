@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { BoardChecklistData, ChecklistRow } from "@/lib/board/checklist";
 
@@ -60,7 +61,7 @@ function StateBar({ row }: { row: ChecklistRow }) {
       // White rather than the row's own grey: an empty track has to be
       // visible, or "Not started" looks like a rendering fault and nobody
       // realises the bar is the control for changing state.
-      style={{ width: 82, height: 18, background: done ? MUTED : "#fff", opacity: held ? 0.5 : 1 }}
+      style={{ width: 56, height: 16, background: done ? MUTED : "#fff", opacity: held ? 0.5 : 1 }}
       aria-hidden="true"
     >
       {!done && fill > 0 && (
@@ -78,6 +79,136 @@ function StateBar({ row }: { row: ChecklistRow }) {
         </span>
       )}
     </div>
+  );
+}
+
+
+// ── Due-date picker ────────────────────────────────────────────────────
+// A native date input cannot mark specific days, and the whole point is to
+// see when the board actually sits — most due dates should land on or before
+// a meeting, not on an arbitrary Tuesday.
+
+const DOW = ["S", "M", "T", "W", "T", "F", "S"];
+
+function DueDatePicker({
+  value,
+  meetingDates,
+  anchor,
+  onPick,
+  onClose,
+}: {
+  value: string | null;
+  meetingDates: string[];
+  anchor: DOMRect;
+  onPick: (date: string | null) => void;
+  onClose: () => void;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const initial = value ?? meetingDates.find((d) => d >= today) ?? today;
+  const [cursor, setCursor] = useState(() => {
+    const [y, m] = initial.split("-").map(Number);
+    return { year: y, month: m - 1 };
+  });
+
+  const meetingSet = useMemo(() => new Set(meetingDates), [meetingDates]);
+  const nextMeeting = meetingDates.find((d) => d >= today) ?? null;
+
+  const firstOfMonth = new Date(Date.UTC(cursor.year, cursor.month, 1));
+  const daysInMonth = new Date(Date.UTC(cursor.year, cursor.month + 1, 0)).getUTCDate();
+  const leadingBlanks = firstOfMonth.getUTCDay();
+  const monthLabel = firstOfMonth.toLocaleDateString("en-CA", { month: "long", year: "numeric", timeZone: "UTC" });
+
+  const iso = (day: number) =>
+    `${cursor.year}-${String(cursor.month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+
+  function shiftMonth(delta: number) {
+    setCursor((c) => {
+      const d = new Date(Date.UTC(c.year, c.month + delta, 1));
+      return { year: d.getUTCFullYear(), month: d.getUTCMonth() };
+    });
+  }
+
+  // The checklist scrolls, so an absolutely-positioned popover would be
+  // clipped by its container. Portal it out and place it from the trigger.
+  const WIDTH = 248;
+  const HEIGHT = 300;
+  const left = Math.max(8, Math.min(anchor.left - WIDTH + anchor.width, window.innerWidth - WIDTH - 8));
+  const openUpward = anchor.bottom + HEIGHT > window.innerHeight;
+  const top = openUpward ? Math.max(8, anchor.top - HEIGHT - 6) : anchor.bottom + 6;
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden="true" />
+      <div
+        className="fixed z-50 w-[248px] rounded-xl bg-white p-3 shadow-xl"
+        style={{ border: "1px solid #d8d8d8", left, top }}
+        onClick={(e) => e.stopPropagation()}
+      >
+      <div className="mb-2 flex items-center justify-between">
+        <button type="button" onClick={() => shiftMonth(-1)} aria-label="Previous month" className="px-1.5 text-gray-500 hover:text-gray-900">‹</button>
+        <span className="text-[12px] font-semibold" style={{ color: NAVY }}>{monthLabel}</span>
+        <button type="button" onClick={() => shiftMonth(1)} aria-label="Next month" className="px-1.5 text-gray-500 hover:text-gray-900">›</button>
+      </div>
+
+      <div className="grid grid-cols-7 gap-0.5 text-center">
+        {DOW.map((d, i) => (
+          <span key={i} className="pb-1 text-[10px] font-medium" style={{ color: MUTED }}>{d}</span>
+        ))}
+        {Array.from({ length: leadingBlanks }).map((_, i) => <span key={`b${i}`} />)}
+        {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+          const date = iso(day);
+          const isMeeting = meetingSet.has(date);
+          const isSelected = value === date;
+          const isToday = date === today;
+          return (
+            <button
+              key={day}
+              type="button"
+              onClick={() => onPick(date)}
+              title={isMeeting ? "Board meeting" : undefined}
+              className="relative flex h-7 items-center justify-center rounded text-[11px]"
+              style={{
+                background: isSelected ? NAVY : isMeeting ? "#dbe4f0" : "transparent",
+                color: isSelected ? "#fff" : isMeeting ? NAVY : "#333",
+                fontWeight: isMeeting || isSelected ? 700 : 400,
+                outline: isToday && !isSelected ? `1px solid ${MUTED}` : undefined,
+              }}
+            >
+              {day}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="mt-2 flex items-center justify-between border-t pt-2" style={{ borderColor: "#eee" }}>
+        {nextMeeting ? (
+          <button
+            type="button"
+            onClick={() => onPick(nextMeeting)}
+            className="text-[11px] font-medium"
+            style={{ color: NAVY }}
+          >
+            Next meeting · {nextMeeting.slice(5)}
+          </button>
+        ) : <span />}
+        <span className="flex gap-2">
+          {value && (
+            <button type="button" onClick={() => onPick(null)} className="text-[11px]" style={{ color: MUTED }}>
+              Clear
+            </button>
+          )}
+          <button type="button" onClick={onClose} className="text-[11px]" style={{ color: MUTED }}>
+            Close
+          </button>
+        </span>
+      </div>
+
+        <p className="mt-1.5 text-[10px]" style={{ color: MUTED }}>
+          Shaded days are board meetings.
+        </p>
+      </div>
+    </>,
+    document.body
   );
 }
 
@@ -100,16 +231,19 @@ function Row({
   const p = PRIORITY_STYLE[row.priority ?? "unset"];
   const isMine = data.viewerId ? row.assignees.includes(data.viewerId) : false;
   const [menuOpen, setMenuOpen] = useState(false);
+  const [dateOpen, setDateOpen] = useState(false);
+  const [anchor, setAnchor] = useState<DOMRect | null>(null);
+  const dateBtn = useRef<HTMLButtonElement>(null);
 
   const secondary =
     row.assigneeNames.length > 0 ? row.assigneeNames.join(", ") : "Unassigned";
 
   return (
     <div
-      className="grid items-center gap-3 rounded-2xl px-4 py-3"
+      className="grid items-center gap-2 rounded-2xl px-3 py-2.5"
       style={{
         background: ROW,
-        gridTemplateColumns: "24px minmax(0,1fr) 104px 82px 92px 32px",
+        gridTemplateColumns: "22px minmax(0,1fr) 62px 56px 72px 26px",
         opacity: busy ? 0.55 : 1,
       }}
     >
@@ -168,17 +302,32 @@ function Row({
         </p>
       </div>
 
-      {/* Due date — never blank */}
-      <label className="relative cursor-pointer text-[12px] font-medium" style={{ color: done ? MUTED : "#111" }}>
-        {row.dueDateLabel}
-        <input
-          type="date"
-          value={row.dueDate ?? ""}
-          onChange={(e) => onPatch(row.id, { dueDate: e.target.value || null })}
-          className="absolute inset-0 cursor-pointer opacity-0"
+      {/* Due date — never blank, and the picker shows when the board sits */}
+      <div className="relative">
+        <button
+          ref={dateBtn}
+          type="button"
+          onClick={() => {
+            setAnchor(dateBtn.current?.getBoundingClientRect() ?? null);
+            setDateOpen((v) => !v);
+          }}
+          className="w-full truncate text-left text-[12px] font-medium hover:underline"
+          style={{ color: done ? MUTED : "#111" }}
           aria-label={`Due date for ${row.title}`}
-        />
-      </label>
+          aria-expanded={dateOpen}
+        >
+          {row.dueDateLabel}
+        </button>
+        {dateOpen && anchor && (
+          <DueDatePicker
+            value={row.dueDate}
+            anchor={anchor}
+            meetingDates={data.meetingDates}
+            onPick={(d) => { setDateOpen(false); onPatch(row.id, { dueDate: d }); }}
+            onClose={() => setDateOpen(false)}
+          />
+        )}
+      </div>
 
       {/* State — click the bar to change it */}
       <label className="relative cursor-pointer" title={STATE_LABEL[row.status]}>
@@ -199,7 +348,7 @@ function Row({
       {/* Importance */}
       <label className="relative cursor-pointer">
         <span
-          className="flex h-[18px] w-[82px] items-center justify-center rounded-full text-[11px] font-medium"
+          className="flex h-[16px] w-[72px] items-center justify-center rounded-full text-[10px] font-medium"
           style={{ background: done ? TRACK : p.bg, color: done ? "#666" : p.fg }}
         >
           {done ? "Low" : p.label}
@@ -385,7 +534,7 @@ export function BoardChecklist({ data }: { data: BoardChecklistData }) {
   );
 
   return (
-    <div className="rounded-[22px] p-5" style={{ background: CARD }}>
+    <div className="flex flex-col rounded-[22px] p-4" style={{ background: CARD, height: 310 }}>
       <div className="mb-4 flex items-center gap-6">
         <TabButton id="mine" label={`My tasks (${mine.length})`} />
         <TabButton id="all" label={`All tasks (${data.rows.length})`} />
@@ -399,9 +548,9 @@ export function BoardChecklist({ data }: { data: BoardChecklistData }) {
       )}
 
       {tab === "stats" ? (
-        <Stats data={data} />
+        <div className="min-h-0 flex-1 overflow-y-auto"><Stats data={data} /></div>
       ) : (
-        <div className="space-y-2">
+        <div className="min-h-0 flex-1 space-y-1.5 overflow-y-auto pr-1">
           {showAdoption && (
             <p className="px-1 pb-1 text-[13px]" style={{ color: NAVY }}>
               Your list is clear. Do one of these?
