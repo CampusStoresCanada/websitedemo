@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isSpotlightExcluded } from "@/lib/membership/spotlight-exclusions";
 import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import type { HomeConferencePin } from "@/lib/homepage";
 import type { ViewerContext } from "@/lib/visibility/viewer";
@@ -216,15 +217,17 @@ async function fetchConferencePin(viewer: ViewerContext): Promise<HomeConference
 // Newest member/partner
 // ---------------------------------------------------------------------------
 
-const NEWEST_ORG_WINDOW_DAYS = 90;
+export const NEWEST_ORG_WINDOW_DAYS = 90;
+
+/** Civil timezone used to decide which calendar day an activation fell on. */
+const JOIN_DATE_TIMEZONE = "America/Toronto";
 
 /**
- * A recently-joined org for the homepage spotlight slide. Deliberately
- * narrow: only ever populated for an org that joined within the last 90
- * days, and only from `membership_started_at` (a real join date) — never
- * `created_at` (a bulk-import timestamp shared by dozens of orgs, not a
- * real join date; falling back to it would misrepresent long-standing orgs
- * as new).
+ * A recently-joined org for the homepage spotlight slide.
+ *
+ * Sourced from `membership_state_log` — see fetchRecentFirstActivations() for
+ * why, and why `organizations.membership_started_at` is the wrong column
+ * despite the tempting name.
  */
 export interface HomeNewestOrgSlide {
   id: string;
@@ -235,39 +238,178 @@ export interface HomeNewestOrgSlide {
   province: string | null;
   latitude: number | null;
   longitude: number | null;
-  membershipStartedAt: string;
+  /** YYYY-MM-DD, the day they became active. Date-only: the UI appends a time. */
+  joinedOn: string;
+}
+
+export interface FirstActivation {
+  organizationId: string;
+  /** YYYY-MM-DD in the association's civil timezone. */
+  activatedOn: string;
+}
+
+/** A timestamptz → the calendar day it fell on in Canada, as YYYY-MM-DD. */
+function toCivilDate(timestamp: string): string {
+  // en-CA formats as YYYY-MM-DD, which is exactly what the UI expects.
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: JOIN_DATE_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date(timestamp));
+}
+
+/**
+ * Orgs that became active for the FIRST time inside the window, newest first.
+ *
+ * Reads `membership_state_log` rather than `organizations.membership_started_at`
+ * for two reasons, both learned the hard way:
+ *
+ *  1. `membership_started_at` is not written by the activation path. It is
+ *     populated for only 19 of 71 active partners and 3 of 52 active members,
+ *     which is why this slide rendered nothing between Oct 2025 and Aug 2026.
+ *
+ *  2. It answers a different question. For a returning partner it correctly
+ *     holds the date they *first* joined years ago — Niagara River Trading
+ *     reads 2021 while having been reactivated in Aug 2026. That is right for
+ *     "when did they join" and wrong for "are they newly arrived."
+ *
+ * `approved → active` is a first activation. A returning org comes back via
+ * `canceled → active` (or grace/locked) and is deliberately excluded: being
+ * introduced to the membership as brand new is wrong, and a bit insulting, for
+ * someone who has been around for years.
+ *
+ * NOTE: `membership_state_log` only begins 2026-08-10. There is no history
+ * before that, so this necessarily returns nothing for older orgs.
+ */
+export async function fetchRecentFirstActivations(
+  windowDays: number = NEWEST_ORG_WINDOW_DAYS,
+  limit = 25
+): Promise<FirstActivation[]> {
+  const cutoff = new Date(Date.now() - windowDays * 24 * 60 * 60 * 1000).toISOString();
+  const db = createAdminClient();
+
+  const { data, error } = await db
+    .from("membership_state_log")
+    .select("organization_id, created_at")
+    .eq("to_status", "active")
+    .eq("from_status", "approved")
+    .gte("created_at", cutoff)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error || !data) return [];
+
+  // An org should only ever log one approved → active, but collapse duplicates
+  // defensively and keep the most recent.
+  const seen = new Set<string>();
+  const candidates: Array<{ organizationId: string; activatedAt: string }> = [];
+  for (const row of data) {
+    const organizationId = row.organization_id as string | null;
+    if (!organizationId || seen.has(organizationId)) continue;
+    seen.add(organizationId);
+    // Held out of the automated spotlight — being introduced by hand instead.
+    // Filtering here means every spotlight surface inherits it: the hero
+    // slide, the derived badge, and the announcement drafter.
+    if (isSpotlightExcluded(organizationId)) continue;
+    candidates.push({ organizationId, activatedAt: row.created_at as string });
+  }
+
+  if (!candidates.length) return [];
+
+  const ids = candidates.map((c) => c.organizationId);
+
+  // `approved → active` alone is NOT proof of newness. A returning partner
+  // coming back from `canceled` passes through `approved` on the way, so the
+  // final hop looks identical to a first activation. FIEL did exactly this in
+  // Aug 2026 — a partner since 2024, reactivated via canceled → approved →
+  // active, which the naive rule would have introduced as brand new.
+  //
+  // Two independent disqualifiers, either of which is enough:
+  //   1. any EARLIER log entry showing a lapse or a return, and
+  //   2. a membership_started_at that predates this activation.
+  // The second is sparse (set on only ~a quarter of orgs) so it cannot be
+  // relied on alone, but where present it is meaningful.
+  const [{ data: history }, { data: orgs }] = await Promise.all([
+    db
+      .from("membership_state_log")
+      .select("organization_id, from_status, to_status, created_at")
+      .in("organization_id", ids),
+    db.from("organizations").select("id, membership_started_at").in("id", ids),
+  ]);
+
+  const LAPSED = new Set(["canceled", "grace", "locked"]);
+  const startedAtById = new Map(
+    (orgs ?? []).map((o) => [o.id as string, (o.membership_started_at as string) ?? null])
+  );
+
+  const out: FirstActivation[] = [];
+  for (const candidate of candidates) {
+    const activatedMs = new Date(candidate.activatedAt).getTime();
+
+    const hasPriorLapse = (history ?? []).some(
+      (h) =>
+        h.organization_id === candidate.organizationId &&
+        new Date(h.created_at as string).getTime() < activatedMs &&
+        (LAPSED.has(h.from_status as string) || LAPSED.has(h.to_status as string))
+    );
+    if (hasPriorLapse) continue;
+
+    const startedAt = startedAtById.get(candidate.organizationId);
+    if (startedAt) {
+      const graceMs = 7 * 24 * 60 * 60 * 1000;
+      if (new Date(startedAt).getTime() < activatedMs - graceMs) continue;
+    }
+
+    out.push({
+      organizationId: candidate.organizationId,
+      activatedOn: toCivilDate(candidate.activatedAt),
+    });
+  }
+
+  return out;
 }
 
 export async function fetchNewestOrgSlide(): Promise<HomeNewestOrgSlide | null> {
-  const cutoff = new Date(Date.now() - NEWEST_ORG_WINDOW_DAYS * 24 * 60 * 60 * 1000)
-    .toISOString()
-    .slice(0, 10);
+  const activations = await fetchRecentFirstActivations();
+  if (!activations.length) return null;
 
   const db = createAdminClient();
-  const { data } = await db
+  const { data: orgs } = await db
     .from("organizations")
-    .select("id, slug, name, type, city, province, latitude, longitude, membership_started_at")
+    .select("id, slug, name, type, city, province, latitude, longitude")
+    .in(
+      "id",
+      activations.map((a) => a.organizationId)
+    )
     .eq("membership_status", "active")
     .is("archived_at", null)
-    .eq("is_test", false)
-    .gte("membership_started_at", cutoff)
-    .order("membership_started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .eq("is_test", false);
 
-  if (!data || !data.membership_started_at) return null;
+  if (!orgs?.length) return null;
 
-  return {
-    id: data.id,
-    slug: data.slug,
-    name: data.name,
-    type: data.type,
-    city: data.city ?? null,
-    province: data.province ?? null,
-    latitude: typeof data.latitude === "number" ? data.latitude : null,
-    longitude: typeof data.longitude === "number" ? data.longitude : null,
-    membershipStartedAt: data.membership_started_at,
-  };
+  const byId = new Map(orgs.map((o) => [o.id as string, o]));
+
+  // activations is already newest-first; take the first that is still a
+  // listable org (one could have been archived or cancelled since activating).
+  for (const activation of activations) {
+    const org = byId.get(activation.organizationId);
+    if (!org) continue;
+
+    return {
+      id: org.id,
+      slug: org.slug,
+      name: org.name,
+      type: org.type,
+      city: org.city ?? null,
+      province: org.province ?? null,
+      latitude: typeof org.latitude === "number" ? org.latitude : null,
+      longitude: typeof org.longitude === "number" ? org.longitude : null,
+      joinedOn: activation.activatedOn,
+    };
+  }
+
+  return null;
 }
 
 // ---------------------------------------------------------------------------

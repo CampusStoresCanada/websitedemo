@@ -16,6 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
+import { isBusinessDay, BOARD_TIMEZONE } from "@/lib/board/vote-schedule";
 import {
   findApplicationsNeedingVote,
   findVotesToRemind,
@@ -37,7 +38,24 @@ export async function GET(req: NextRequest) {
   const reminded: string[] = [];
   const closed: Array<{ voteId: string; status: string; tally: string }> = [];
 
-  for (const applicationId of await findApplicationsNeedingVote()) {
+  // Board votes are "timely" and exempt from the ambient caps, but not from
+  // the business-day rule: a vote posted on Saturday still gets its three full
+  // business days, it just lands in a dead inbox and burns a weekend of the
+  // board's attention. Applications wait until Monday.
+  const today = new Intl.DateTimeFormat("en-CA", {
+    timeZone: BOARD_TIMEZONE,
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  })
+    .formatToParts(new Date())
+    .reduce<Record<string, number>>((acc, p) => {
+      if (p.type !== "literal") acc[p.type] = Number(p.value);
+      return acc;
+    }, {});
+  const openingAllowed = isBusinessDay(today.year, today.month, today.day);
+
+  for (const applicationId of openingAllowed ? await findApplicationsNeedingVote() : []) {
     const result = await openVoteForApplication(applicationId);
     opened.push(
       result.ok
@@ -63,6 +81,7 @@ export async function GET(req: NextRequest) {
 
   return NextResponse.json({
     ok: true,
+    openingAllowed,
     opened: opened.length,
     reminded: reminded.length,
     closed: closed.length,

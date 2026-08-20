@@ -4999,6 +4999,88 @@ export type Database = {
           },
         ]
       }
+      ghost_announcements: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          body_tiptap: Json | null
+          circle_post_id: number | null
+          circle_post_url: string | null
+          circle_space_id: number | null
+          created_at: string
+          email_campaign_id: string | null
+          id: string
+          kind: string
+          organization_id: string
+          published_at: string | null
+          skip_reason: string | null
+          status: string
+          summary_text: string | null
+          title: string | null
+          updated_at: string
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body_tiptap?: Json | null
+          circle_post_id?: number | null
+          circle_post_url?: string | null
+          circle_space_id?: number | null
+          created_at?: string
+          email_campaign_id?: string | null
+          id?: string
+          kind?: string
+          organization_id: string
+          published_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          summary_text?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          body_tiptap?: Json | null
+          circle_post_id?: number | null
+          circle_post_url?: string | null
+          circle_space_id?: number | null
+          created_at?: string
+          email_campaign_id?: string | null
+          id?: string
+          kind?: string
+          organization_id?: string
+          published_at?: string | null
+          skip_reason?: string | null
+          status?: string
+          summary_text?: string | null
+          title?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ghost_announcements_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ghost_announcements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ghost_announcements_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       hero_area_config: {
         Row: {
           cycle_interval_ms: number
@@ -10480,6 +10562,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      db_access_drift: { Args: never; Returns: Json }
       ensure_conference_badge_token_for_person: {
         Args: {
           p_actor_id?: string
