@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import { useRouter } from "next/navigation";
 import type { BoardChecklistData, ChecklistRow } from "@/lib/board/checklist";
+import { RECURRENCES, RECURRENCE_LABELS, type Recurrence } from "@/lib/board/recurrence";
 
 /**
  * The board action-item checklist.
@@ -285,6 +286,15 @@ function Row({
               <path d="M9 1.5h3.5V5M12.2 1.8 6.5 7.5" />
             </svg>
           </button>
+          {row.recurrence && (
+            <span
+              className="shrink-0 text-[11px]"
+              style={{ color: MUTED }}
+              title={`Repeats: ${RECURRENCE_LABELS[row.recurrence as Recurrence] ?? row.recurrence}`}
+            >
+              ↻
+            </span>
+          )}
           {row.escalated && !done && (
             <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "#fbe8d6", color: "#9a4e08" }}>
               {row.daysOpen}d — still real?
@@ -410,6 +420,31 @@ function Row({
             >
               Put on hold
             </button>
+
+            <div className="my-1 border-t" style={{ borderColor: "#eee" }} />
+            <p className="px-3 pb-1 pt-0.5 text-[10px] uppercase tracking-wide" style={{ color: MUTED }}>
+              Repeats
+            </p>
+            {RECURRENCES.map((r) => (
+              <button
+                key={r}
+                type="button"
+                onClick={() => { setMenuOpen(false); onPatch(row.id, { recurrence: r }); }}
+                className="block w-full px-3 py-1.5 text-left text-xs hover:bg-gray-100"
+                style={{ color: row.recurrence === r ? NAVY : "#374151", fontWeight: row.recurrence === r ? 600 : 400 }}
+              >
+                {RECURRENCE_LABELS[r]}
+              </button>
+            ))}
+            {row.recurrence && (
+              <button
+                type="button"
+                onClick={() => { setMenuOpen(false); onPatch(row.id, { recurrence: null }); }}
+                className="block w-full px-3 py-1.5 text-left text-xs text-gray-500 hover:bg-gray-100"
+              >
+                Don&apos;t repeat
+              </button>
+            )}
           </div>
         )}
       </div>

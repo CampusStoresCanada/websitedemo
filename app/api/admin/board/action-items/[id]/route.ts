@@ -9,6 +9,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { nextOccurrence, isRecurrence } from "@/lib/board/recurrence";
 
 const STATUSES = ["open", "in_progress", "complete", "deferred", "intention"];
 const PRIORITIES = ["high", "medium", "low"];
@@ -23,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: current } = await db
     .from("board_action_items")
-    .select("id, status, assignees, due_date, started_at, held_at")
+    .select("id, meeting_id, title, description, status, priority, assignees, due_date, started_at, held_at, recurrence, series_id, sort_order")
     .eq("id", id)
     .maybeSingle();
 
@@ -65,6 +66,13 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
         }
       }
     }
+  }
+
+  if (body.recurrence !== undefined) {
+    if (body.recurrence !== null && !isRecurrence(body.recurrence)) {
+      return NextResponse.json({ error: "Invalid recurrence" }, { status: 400 });
+    }
+    patch.recurrence = body.recurrence;
   }
 
   if (body.priority !== undefined) {
@@ -121,7 +129,63 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  return NextResponse.json({ ok: true, applied: patch });
+  // ── Recurrence ──────────────────────────────────────────────────────
+  // Completion is the trigger, never a clock. A series can therefore only
+  // ever have one open instance: if the work stops happening the series
+  // quietly stops, rather than piling up a year of unread copies.
+  let spawned: { id: string; dueDate: string } | null = null;
+  const becameComplete = patch.status === "complete" && current.status !== "complete";
+  const recurrence = (patch.recurrence ?? current.recurrence) as string | null;
+
+  if (becameComplete && isRecurrence(recurrence)) {
+    const today = new Date().toISOString().slice(0, 10);
+    const { data: meetings } = await db
+      .from("board_meetings")
+      .select("meeting_date")
+      .neq("status", "cancelled")
+      .order("meeting_date");
+
+    const nextDue = nextOccurrence(
+      recurrence,
+      (patch.due_date as string) ?? current.due_date ?? today,
+      (meetings ?? []).map((m) => m.meeting_date),
+      today
+    );
+
+    // Null means the calendar has run out — better to end the series than to
+    // invent a date the board never agreed to.
+    if (nextDue) {
+      const { data: created } = await db
+        .from("board_action_items")
+        .insert({
+          meeting_id: current.meeting_id,
+          title: current.title,
+          description: current.description ?? "",
+          assignees: current.assignees ?? [],
+          priority: current.priority,
+          due_date: nextDue,
+          due_date_original: nextDue,
+          status: "open",
+          recurrence,
+          // The first instance's own id roots the series.
+          series_id: current.series_id ?? current.id,
+          sort_order: current.sort_order ?? 0,
+          source: "manual",
+          // Deliberately unstamped: this is genuine new work with a real date,
+          // so the ordinary due-date reminder should fire as it approaches.
+        })
+        .select("id, due_date")
+        .single();
+
+      if (created) spawned = { id: created.id, dueDate: created.due_date as string };
+
+      if (!current.series_id) {
+        await db.from("board_action_items").update({ series_id: current.id }).eq("id", current.id);
+      }
+    }
+  }
+
+  return NextResponse.json({ ok: true, applied: patch, spawned });
 }
 
 export async function DELETE(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {

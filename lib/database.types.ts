@@ -1062,7 +1062,9 @@ export type Database = {
           pre_meeting_reminder_sent_at: string | null
           priority: string | null
           quality_flags: string[]
+          recurrence: string | null
           reminder_sent_at: string | null
+          series_id: string | null
           sort_order: number
           source: string
           source_excerpt: string | null
@@ -1085,7 +1087,9 @@ export type Database = {
           pre_meeting_reminder_sent_at?: string | null
           priority?: string | null
           quality_flags?: string[]
+          recurrence?: string | null
           reminder_sent_at?: string | null
+          series_id?: string | null
           sort_order?: number
           source?: string
           source_excerpt?: string | null
@@ -1108,7 +1112,9 @@ export type Database = {
           pre_meeting_reminder_sent_at?: string | null
           priority?: string | null
           quality_flags?: string[]
+          recurrence?: string | null
           reminder_sent_at?: string | null
+          series_id?: string | null
           sort_order?: number
           source?: string
           source_excerpt?: string | null

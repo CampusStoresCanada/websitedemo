@@ -226,7 +226,7 @@ All backfilled rows are stamped per §7 and are therefore silent.
 **Still open:**
 
 5. **Promotion logging** — is an intention→action promotion a `board_action_item_updates` row, or its own audit action? Leaning update row; it is the same shape as any other progress note.
-6. **Ongoing/standing work** still has no representation. Items like *"announce new members in Circle consistently"* have no finish line and will grade as intentions forever, which is not wrong but is not useful either. Deferred — needs its own conversation about whether standing duties belong in this system at all.
+6. ~~**Ongoing/standing work** has no representation.~~ **Resolved** — see §11.8.
 
 ---
 
@@ -377,3 +377,41 @@ All exposed as policy values so weights are tunable without a deploy:
 | `board_urgency_window_days` | 7 | Tier 1 boundary |
 | `board_escalation_meetings` | 3 | Meetings open before an item is tabled |
 | `board_priority_weights` | high 3, medium 2, low 1, unset 1.5 | Unset sits mid so it is neither buried nor rewarded |
+
+### 11.8 Recurring series
+
+Standing work — *"announce new members in Circle consistently"*, *"provide the
+Board with monthly updates on renewals"* — has no finish line, so it grades as
+an intention forever. That is honest but useless. Recurrence converts it into
+something finishable **repeatedly**: do X, due the 27th, and again next meeting.
+
+**Completion-triggered, never clock-triggered.** The next instance appears when
+the current one is ticked. This matters because recurrence multiplies whatever
+it is fed: put a task nobody does on a monthly timer and a year of neglect
+produces twelve zombies instead of one — the same amplification argument that
+kept push notifications off the table.
+
+With completion as the trigger:
+
+- a series can only ever have one open instance, so it cannot pile up
+- if the work stops happening the series quietly stops, and that silence is the
+  signal
+- no cron is required at all
+
+The apparent objection — "if I never complete it, it never recurs" — is not
+one. The open instance sits there aging and the escalation flag catches it at
+three meetings, which is a better outcome than twelve unread copies.
+
+| Cadence | Next due date |
+|---|---|
+| `each_meeting` | The next real board meeting after this one |
+| `monthly` | Same day next month, clamped for short months |
+| `quarterly` | Same day in three months |
+
+`each_meeting` reads the actual calendar rather than approximating four weeks —
+the board's series is last-Thursday but December is deliberately pulled forward,
+so an interval would drift off the real meetings. When the calendar runs out the
+series ends rather than inventing a date the board never agreed to.
+
+The spawned instance is left **unstamped**, unlike a backfill: it is genuine new
+work with a real due date, so the ordinary reminder should fire as it approaches.
