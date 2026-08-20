@@ -29,9 +29,12 @@ export async function updateProcurementInfo(
         .maybeSingle();
       if (!membership) return { success: false, error: "Not a member of this organization" };
     }
-    const auth = adminAuth.ok ? adminAuth : await requireAuthenticated();
-    if (!auth.ok) return { success: false, error: auth.error };
-    const supabase = auth.ctx.supabase;
+    // Service-role client, not auth.ctx.supabase: 20260723210000 dropped the
+    // open UPDATE policy on organizations and left `authenticated` with the
+    // GRANT but no policy, so every session-client write here matched zero
+    // rows under RLS and still reported success — the save silently did
+    // nothing. Authorization is enforced above, same as add/delete-brand-color.
+    const supabase = createAdminClient();
 
     // Update the organization's procurement_info field
     const { error } = await supabase

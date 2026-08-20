@@ -1,6 +1,6 @@
 "use server";
 
-import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import {
   canManageOrganization,
   isGlobalAdmin,
@@ -454,8 +454,13 @@ export async function saveBenchmarkingField(
       return { success: false, error: auth.error };
     }
 
-    // 4. Write the validated, clean value
-    const supabase = await createClient();
+    // 4. Write the validated, clean value.
+    // Service-role client, not the session client: `benchmarking` grants
+    // `authenticated` SELECT only, so its org_admin INSERT/UPDATE policies are
+    // dead letters — every write failed with "permission denied for table
+    // benchmarking" before RLS was ever consulted. Same shape as the
+    // brand_colors fix; authorization stays in verifyBenchmarkingAccess above.
+    const supabase = createAdminClient();
     const { error: updateError } = await supabase
       .from("benchmarking")
       .update({
@@ -511,8 +516,8 @@ export async function saveBenchmarkingFields(
       return { success: false, error: auth.error };
     }
 
-    // 3. Write all validated values
-    const supabase = await createClient();
+    // 3. Write all validated values (service-role client — see saveBenchmarkingField)
+    const supabase = createAdminClient();
     const { error: updateError } = await supabase
       .from("benchmarking")
       .update({
@@ -545,7 +550,9 @@ export async function submitBenchmarkingSurvey(
     if (!auth.authorized || !auth.row || !auth.userId) {
       return { success: false, error: auth.error };
     }
-    const supabase = await createClient();
+    // Service-role client — see saveBenchmarkingField. Also covers the
+    // organizations.fte sync below, which RLS blocks for `authenticated` too.
+    const supabase = createAdminClient();
     const userId = auth.userId;
 
     const { data: submitted, error: updateError } = await supabase
@@ -638,7 +645,9 @@ export async function amendBenchmarkingSurvey(
       return { success: false, error: "You don't have permission" };
     }
 
-    const { error: updateError } = await supabase
+    // Service-role client for the write only — see saveBenchmarkingField.
+    // The reads above stay on the session client (SELECT is granted).
+    const { error: updateError } = await createAdminClient()
       .from("benchmarking")
       .update({
         status: "draft",
