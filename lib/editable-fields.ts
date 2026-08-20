@@ -26,8 +26,6 @@ export const EDITABLE_COLUMNS = {
     "hero_image_url",
     "banner_url",
     "product_overlay_url",
-    "action_link_text",
-    "action_link_url",
     "primary_category",
     "highlight_product_name",
     "highlight_product_description",
@@ -79,16 +77,20 @@ export const TIER2_FIELDS = new Set<string>([
   "organizations.hero_image_url",
   "organizations.banner_url",
   "organizations.product_overlay_url",
-  "organizations.action_link_text",
-  "organizations.action_link_url",
 ]);
 
 export const TIER2_TABLES = new Set<EditableTable>(["site_content"]);
 
+// organizations.action_link_url / action_link_text were allowlisted here (and
+// flagged super_admin-only-approval) for a CTA feature that was never built:
+// no component renders either column, and all 210 org rows hold NULL. Removed
+// rather than left standing — this allowlist is a security boundary, and a
+// writable field nothing displays is only a liability. Re-add both, in all
+// three sets, if the CTA ships. They remain in lib/visibility/defaults.ts's
+// public_allowlist, which is only about masking and costs nothing.
+
 /** Fields that only a super_admin can approve (not regular admin). */
 export const SUPER_ADMIN_ONLY_APPROVAL = new Set<string>([
-  "organizations.action_link_url",
-  "organizations.action_link_text",
   "site_content.cta_url",
   "site_content.cta_text",
   // slot → contact assignment: super_admin writes directly via assignSlotContact()

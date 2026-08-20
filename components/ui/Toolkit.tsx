@@ -1470,12 +1470,13 @@ function FieldEditPopover({
   onClose,
   onSuccess,
 }: {
-  selectedElement: { text: string; field: string; entityId: string; rect: DOMRect };
+  selectedElement: { text: string; field: string; entityId: string; rect: DOMRect; organizationId?: string };
   onClose: () => void;
   onSuccess: () => void;
 }) {
   // Parse field into table and column up front (used for multiline detection)
   const [table, column] = selectedElement.field.split('.') as [string, string];
+  const pathname = usePathname();
 
   // Strip display formatting from the initial value so the input shows a clean,
   // editable value. formatNumber() adds commas; square_footage appends " sq ft".
@@ -1530,11 +1531,24 @@ function FieldEditPopover({
         ? asNum
         : (value || null);
 
+      // Attribute the edit to its org when there is one, using the same rule
+      // the selection overlay used to decide this element was editable at all
+      // (getOrganizationIdForElement). Every other updateField call site already
+      // passes orgId; omitting it here made every inline edit look like an
+      // off-org-page edit, so Tier 2 fields were routed to the approval queue
+      // instead of writing, and revalidation fell back to busting the whole
+      // layout cache rather than this one path.
+      const orgId =
+        selectedElement.organizationId ??
+        (table === "organizations" ? selectedElement.entityId : undefined);
+
       const result = await updateField({
         table: table as "organizations" | "contacts" | "brand_colors" | "benchmarking",
         column,
         entityId: selectedElement.entityId,
         newValue: coercedValue,
+        orgId,
+        pageHref: pathname,
       });
 
       if (result.success) {
