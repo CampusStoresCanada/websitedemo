@@ -32,6 +32,7 @@ export interface ChecklistRow {
   tier: ScoredItem["tier"];
   escalated: boolean;
   updateCount: number;
+  recurrence: string | null;
 }
 
 export interface ChecklistStats {
@@ -65,7 +66,7 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
     db
       .from("board_action_items")
       .select(
-        "id, title, description, status, priority, due_date, started_at, held_at, assignees, quality_flags, meeting_id"
+        "id, title, description, status, priority, due_date, started_at, held_at, assignees, quality_flags, meeting_id, recurrence"
       ),
     db.from("board_meetings").select("id, meeting_date").neq("status", "cancelled").order("meeting_date"),
     db.from("profiles").select("id, display_name").in("global_role", ["admin", "super_admin"]).order("display_name"),
@@ -135,6 +136,7 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
       tier: s.tier,
       escalated: s.escalated,
       updateCount: updateCounts.get(r.id) ?? 0,
+      recurrence: r.recurrence ?? null,
     };
   });
 
