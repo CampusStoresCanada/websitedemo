@@ -1,6 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { EXPECTED_BOARD_SIZE } from "@/lib/board/vote-roster";
+import {
+  diffDbAccessDrift,
+  type DbAccessDriftReport,
+} from "@/lib/ops/db-access-baseline";
 
 type Severity = "info" | "warning" | "critical";
 
@@ -59,7 +63,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "board_vote_not_closed",
   "board_roster_size_mismatch",
 ]);
-const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:"];
+const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:", "db_access_drift:"];
 
 function isPeriodicRuleKey(ruleKey: string): boolean {
   return (
@@ -1167,6 +1171,73 @@ async function evaluateBoardMinutesOverdue(): Promise<CandidateAlert | null> {
   };
 }
 
+/**
+ * A table's GRANTs and its RLS policies have started disagreeing.
+ *
+ * Postgres enforces both gates independently and has no notion of them being
+ * inconsistent, so neither failure mode raises anything on its own — one is
+ * silent, the other is loud but only at the moment somebody tries a write that
+ * nothing in the app currently makes. This is the only place that opinion gets
+ * formed. See supabase/migrations/20260820140000_db_access_drift_audit.sql.
+ *
+ * Returns an alert per affected table rather than one summary alert: a single
+ * open alert would freeze its message at creation (see
+ * [[feedback_ops_alert_message_goes_stale]]), so a second table drifting a week
+ * later would never be mentioned anywhere.
+ */
+async function evaluateDbAccessDrift(): Promise<CandidateAlert[]> {
+  const db = createAdminClient() as unknown as {
+    rpc: (fn: string) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+
+  const { data, error } = await db.rpc("db_access_drift");
+
+  if (error || !data) {
+    // Don't silently swallow this — a rule that can't run is indistinguishable
+    // from a rule that found nothing, which is the exact class of bug it exists
+    // to catch.
+    return [
+      {
+        ruleKey: "db_access_drift:audit_unavailable",
+        severity: "warning",
+        message:
+          "The database access-drift audit could not run, so GRANT/policy drift is currently unmonitored.",
+        details: { error: error?.message ?? "db_access_drift() returned no data" },
+      },
+    ];
+  }
+
+  const report = data as DbAccessDriftReport;
+
+  return diffDbAccessDrift(report).map((finding): CandidateAlert => {
+    if (finding.kind === "default_acl") {
+      return {
+        ruleKey: "db_access_drift:default_acl",
+        severity: "critical",
+        message:
+          "The public schema's DEFAULT privileges changed. Every table created from now on gets a different set of grants, which silently changes whether its RLS policies are ever evaluated. This cannot happen through a migration in this repo — it was changed in the Supabase console or SQL editor.",
+        details: { live: report.default_acl },
+      };
+    }
+
+    if (finding.kind === "anon_writable") {
+      return {
+        ruleKey: `db_access_drift:anon_writable:${finding.table}`,
+        severity: "critical",
+        message: `Table "${finding.table}" is now writable with the anon key — it has an anon write GRANT and an unconditional RLS policy. The anon key ships in the browser bundle, so this is open to anyone on the internet.`,
+        details: { table: finding.table, kind: "anon_writable" },
+      };
+    }
+
+    return {
+      ruleKey: `db_access_drift:silent_noop:${finding.table}`,
+      severity: "warning",
+      message: `Writes to "${finding.table}" (${finding.commands}) through the session client now match zero rows and report success anyway — \`authenticated\` holds the GRANT but no RLS policy allows the row. Write through createAdminClient() behind an app-layer auth check, or add a scoped policy.`,
+      details: { table: finding.table, commands: finding.commands, kind: "silent_noop" },
+    };
+  });
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -1192,7 +1263,14 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBoardRosterSize(),
   ]);
 
-  return checks.filter((item): item is CandidateAlert => Boolean(item));
+  // Flattened separately: every other check yields at most one candidate, but
+  // access drift yields one per affected table.
+  const driftChecks = await evaluateDbAccessDrift();
+
+  return [
+    ...checks.filter((item): item is CandidateAlert => Boolean(item)),
+    ...driftChecks,
+  ];
 }
 
 export async function evaluateOpsAlerts(): Promise<{
