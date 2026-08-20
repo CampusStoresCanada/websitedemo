@@ -16,9 +16,12 @@
  *  The anon key ships in the browser bundle, so this means the public internet.
  *  These are open doors we deliberately deferred rather than fixed. */
 export const BASELINE_ANON_WRITABLE: readonly string[] = [
-  "shipments", // INSERT + UPDATE, `true` policies. 42 rows.
-  "survey_invitations", // UPDATE, `true` policy. 232 rows.
-  "survey_responses", // INSERT + UPDATE, `true` policies. 84 rows.
+  // Empty, and worth keeping that way. The three that were here — shipments,
+  // survey_invitations, survey_responses — were closed by 20260820203850:
+  // retired token-link features whose policies were all `using (true)`, with
+  // read exposure worse than the writes. Anything appearing here again is a
+  // table the public internet can write to, and should be treated as an
+  // incident rather than a baseline entry.
 ];
 
 /** Tables where `authenticated` holds a write GRANT with no matching RLS policy.
@@ -28,7 +31,8 @@ export const BASELINE_ANON_WRITABLE: readonly string[] = [
 export const BASELINE_SILENT_NOOP: Readonly<Record<string, string>> = {
   contacts: "INSERT UPDATE DELETE",
   organizations: "INSERT UPDATE DELETE",
-  shipments: "DELETE",
+  // shipments left this list via 20260820203850 — revoking its `authenticated`
+  // grants removed the GRANT half of the disagreement outright.
   qbo_conference_receipt_queue: "INSERT UPDATE",
   qbo_conference_refund_queue: "INSERT UPDATE",
   qbo_membership_refund_queue: "INSERT UPDATE",
@@ -91,8 +95,8 @@ export function diffDbAccessDrift(report: DbAccessDriftReport): DbAccessDriftFin
   for (const [table, commands] of Object.entries(report.silent_noop ?? {})) {
     const known = BASELINE_SILENT_NOOP[table];
     // A table already in the baseline still counts as new drift if it has
-    // gained a command since — e.g. shipments going from DELETE to DELETE
-    // UPDATE means a fresh write path just became a silent no-op.
+    // gained a command since — a qbo queue going from "INSERT UPDATE" to
+    // "INSERT UPDATE DELETE" means a fresh write path just started vanishing.
     if (known === undefined || commands !== known) {
       findings.push({ kind: "silent_noop", table, commands });
     }

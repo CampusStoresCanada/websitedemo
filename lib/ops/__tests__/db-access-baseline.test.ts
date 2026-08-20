@@ -42,16 +42,23 @@ describe("diffDbAccessDrift", () => {
   });
 
   it("flags a baselined table that gains a new silent command", () => {
-    // shipments is baselined at DELETE. Gaining UPDATE means a fresh write path
-    // just started vanishing, which is exactly what we want to hear about.
+    // qbo_misc_receipt_queue is baselined at "INSERT UPDATE". Gaining DELETE
+    // means a fresh write path just started vanishing, which is exactly what we
+    // want to hear about — a table already on the list is not a free pass.
     const findings = diffDbAccessDrift(
       baselineReport({
-        silent_noop: { ...BASELINE_SILENT_NOOP, shipments: "UPDATE DELETE" },
+        silent_noop: { ...BASELINE_SILENT_NOOP, qbo_misc_receipt_queue: "INSERT UPDATE DELETE" },
       })
     );
     expect(findings).toEqual([
-      { kind: "silent_noop", table: "shipments", commands: "UPDATE DELETE" },
+      { kind: "silent_noop", table: "qbo_misc_receipt_queue", commands: "INSERT UPDATE DELETE" },
     ]);
+  });
+
+  it("treats any anon-writable table as new, now that the baseline is empty", () => {
+    expect(BASELINE_ANON_WRITABLE).toHaveLength(0);
+    const findings = diffDbAccessDrift(baselineReport({ anon_writable: ["shipments"] }));
+    expect(findings).toEqual([{ kind: "anon_writable", table: "shipments", commands: null }]);
   });
 
   it("flags any change to the schema default ACL", () => {
