@@ -387,8 +387,9 @@ export default async function AdminConsolePage() {
       </div>
 
       {/* ── Widgets, in configured order ─────────────────────────────
-           The checklist is a list rather than a tile, so it claims the full
-           row and the cards flow around it. Order comes from
+           One row across: the two cards keep their fixed size and the
+           checklist takes the remaining width, scrolling vertically inside a
+           card-height box rather than growing the page. Order comes from
            dashboard_widget_config. */}
       <div className="mb-8 flex flex-wrap items-start gap-6">
         {widgetLayout.map((key) => {
@@ -399,7 +400,7 @@ export default async function AdminConsolePage() {
           }
           if (key === "board_checklist") {
             return boardChecklist.rows.length > 0
-              ? <div key={key} className="w-full"><BoardChecklist data={boardChecklist} /></div>
+              ? <div key={key} className="min-w-[420px] flex-1"><BoardChecklist data={boardChecklist} /></div>
               : null;
           }
           if (key === "conference") {
