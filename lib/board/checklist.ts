@@ -33,11 +33,12 @@ export interface ChecklistRow {
   escalated: boolean;
   updateCount: number;
   recurrence: string | null;
+  droppedReason: string | null;
 }
 
 export interface ChecklistStats {
-  byAssignment: { label: string; raised: number; completed: number; pct: number }[];
-  perMeeting: { meetingDate: string; actions: number; intentions: number; cleared: number }[];
+  byAssignment: { label: string; raised: number; completed: number; dropped: number; pct: number }[];
+  perMeeting: { meetingDate: string; actions: number; intentions: number; cleared: number; dropped: number }[];
   ageBands: { band: string; count: number }[];
   escalatedCount: number;
   oldestOpenDays: number;
@@ -66,7 +67,7 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
     db
       .from("board_action_items")
       .select(
-        "id, title, description, status, priority, due_date, started_at, held_at, assignees, quality_flags, meeting_id, recurrence"
+        "id, title, description, status, priority, due_date, started_at, held_at, escalated_at, assignees, quality_flags, meeting_id, recurrence, dropped_reason"
       ),
     db.from("board_meetings").select("id, meeting_date").neq("status", "cancelled").order("meeting_date"),
     db.from("profiles").select("id, display_name").in("global_role", ["admin", "super_admin"]).order("display_name"),
@@ -101,11 +102,12 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
     assigneeCount: (r.assignees ?? []).length,
     titleLength: (r.title ?? "").length,
     qualityFlagCount: (r.quality_flags ?? []).length,
+    escalationAckedOn: r.escalated_at ? r.escalated_at.slice(0, 10) : null,
   }));
 
   const policy: SortPolicy = DEFAULT_SORT_POLICY;
   const scored = sortActionItems(
-    sortable.filter((s) => s.status !== "complete"),
+    sortable.filter((s) => s.status !== "complete" && s.status !== "dropped"),
     today,
     meetingDates,
     policy
@@ -137,6 +139,7 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
       escalated: s.escalated,
       updateCount: updateCounts.get(r.id) ?? 0,
       recurrence: r.recurrence ?? null,
+      droppedReason: r.dropped_reason ?? null,
     };
   });
 
@@ -146,23 +149,29 @@ export async function getBoardChecklist(viewerId: string | null): Promise<BoardC
   const named = raw.filter((r) => (r.assignees ?? []).length > 0 && r.status !== "intention");
   const unnamed = raw.filter((r) => (r.assignees ?? []).length === 0 || r.status === "intention");
 
+  // Dropped items stay in the denominator on purpose. Removing them would let
+  // the completion rate be improved by closing things, which is exactly the
+  // gaming this number exists to resist.
   const rate = (set: typeof raw) => {
     const completed = set.filter((r) => r.status === "complete").length;
+    const dropped = set.filter((r) => r.status === "dropped").length;
     return {
       raised: set.length,
       completed,
+      dropped,
       pct: set.length ? Math.round((completed / set.length) * 1000) / 10 : 0,
     };
   };
 
-  const perMeetingMap = new Map<string, { actions: number; intentions: number; cleared: number }>();
+  const perMeetingMap = new Map<string, { actions: number; intentions: number; cleared: number; dropped: number }>();
   for (const r of raw) {
     const date = meetingDateById.get(r.meeting_id);
     if (!date) continue;
-    const entry = perMeetingMap.get(date) ?? { actions: 0, intentions: 0, cleared: 0 };
+    const entry = perMeetingMap.get(date) ?? { actions: 0, intentions: 0, cleared: 0, dropped: 0 };
     if (r.status === "intention") entry.intentions += 1;
     else entry.actions += 1;
     if (r.status === "complete") entry.cleared += 1;
+    if (r.status === "dropped") entry.dropped += 1;
     perMeetingMap.set(date, entry);
   }
 

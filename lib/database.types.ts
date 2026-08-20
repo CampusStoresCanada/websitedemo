@@ -1053,6 +1053,8 @@ export type Database = {
           complete_token: string
           created_at: string
           description: string
+          dropped_at: string | null
+          dropped_reason: string | null
           due_date: string | null
           due_date_original: string | null
           escalated_at: string | null
@@ -1078,6 +1080,8 @@ export type Database = {
           complete_token?: string
           created_at?: string
           description: string
+          dropped_at?: string | null
+          dropped_reason?: string | null
           due_date?: string | null
           due_date_original?: string | null
           escalated_at?: string | null
@@ -1103,6 +1107,8 @@ export type Database = {
           complete_token?: string
           created_at?: string
           description?: string
+          dropped_at?: string | null
+          dropped_reason?: string | null
           due_date?: string | null
           due_date_original?: string | null
           escalated_at?: string | null

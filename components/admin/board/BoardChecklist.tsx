@@ -37,6 +37,7 @@ const STATE_LABEL: Record<ChecklistRow["status"], string> = {
   deferred: "On hold",
   complete: "Complete",
   intention: "Unclaimed",
+  dropped: "Closed",
 };
 
 const FLAG_LABEL: Record<string, string> = {
@@ -306,6 +307,107 @@ function AssigneePicker({
   );
 }
 
+
+// ── "Still real?" ──────────────────────────────────────────────────────
+// The badge asks a question, so both answers must exist. Ticking a dead item
+// complete would be a lie that inflates the very number the Stats tab exists
+// to make credible, so closing it is its own outcome — and it costs a reason,
+// because the reason is the record.
+
+function StillRealPrompt({
+  row,
+  anchor,
+  onKeep,
+  onDrop,
+  onClose,
+}: {
+  row: ChecklistRow;
+  anchor: DOMRect;
+  onKeep: () => void;
+  onDrop: (reason: string) => void;
+  onClose: () => void;
+}) {
+  const [reason, setReason] = useState("");
+  const [closing, setClosing] = useState(false);
+
+  const WIDTH = 288;
+  const HEIGHT = closing ? 220 : 150;
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - WIDTH - 8));
+  const top = anchor.bottom + HEIGHT > window.innerHeight
+    ? Math.max(8, anchor.top - HEIGHT - 6)
+    : anchor.bottom + 6;
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden="true" />
+      <div
+        className="fixed z-50 rounded-xl bg-white p-3 shadow-xl"
+        style={{ border: "1px solid #d8d8d8", left, top, width: WIDTH }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <p className="mb-1 text-[12px] font-semibold" style={{ color: NAVY }}>
+          Open {row.daysOpen} days. Is this still real?
+        </p>
+        <p className="mb-2.5 text-[11px]" style={{ color: MUTED }}>
+          Raised {row.raisedOn}, across three or more meetings.
+        </p>
+
+        {!closing ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              onClick={onKeep}
+              className="flex-1 rounded-md px-2 py-1.5 text-[12px] font-medium text-white"
+              style={{ background: NAVY }}
+            >
+              Yes, still real
+            </button>
+            <button
+              type="button"
+              onClick={() => setClosing(true)}
+              className="flex-1 rounded-md border px-2 py-1.5 text-[12px] font-medium"
+              style={{ borderColor: "#d8d8d8", color: "#a3282b" }}
+            >
+              No — close it
+            </button>
+          </div>
+        ) : (
+          <>
+            <textarea
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              rows={3}
+              autoFocus
+              placeholder="Why is this no longer real? Superseded, decided against, absorbed elsewhere…"
+              className="w-full rounded-md border px-2 py-1.5 text-[12px] focus:outline-none"
+              style={{ borderColor: "#d8d8d8" }}
+            />
+            <p className="mt-1 text-[10px]" style={{ color: MUTED }}>
+              Closed without completing. It stays on the record and is counted
+              separately from work that got done.
+            </p>
+            <div className="mt-2 flex justify-end gap-2">
+              <button type="button" onClick={() => setClosing(false)} className="text-[12px]" style={{ color: MUTED }}>
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => onDrop(reason)}
+                disabled={!reason.trim()}
+                className="rounded-md px-2.5 py-1.5 text-[12px] font-medium text-white disabled:opacity-40"
+                style={{ background: "#a3282b" }}
+              >
+                Close it
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </>,
+    document.body
+  );
+}
+
 // ── Row ────────────────────────────────────────────────────────────────
 
 function Row({
@@ -330,6 +432,8 @@ function Row({
   const dateBtn = useRef<HTMLButtonElement>(null);
   const [ownerOpen, setOwnerOpen] = useState(false);
   const ownerBtn = useRef<HTMLButtonElement>(null);
+  const [realOpen, setRealOpen] = useState(false);
+  const realBtn = useRef<HTMLButtonElement>(null);
 
   const secondary =
     row.assigneeNames.length > 0 ? row.assigneeNames.join(", ") : "Unassigned — pick an owner";
@@ -391,9 +495,19 @@ function Row({
             </span>
           )}
           {row.escalated && !done && (
-            <span className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold" style={{ background: "#fbe8d6", color: "#9a4e08" }}>
+            <button
+              ref={realBtn}
+              type="button"
+              onClick={() => {
+                setAnchor(realBtn.current?.getBoundingClientRect() ?? null);
+                setRealOpen((v) => !v);
+              }}
+              className="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-semibold hover:brightness-95"
+              style={{ background: "#fbe8d6", color: "#9a4e08" }}
+              aria-label={`${row.title} has been open ${row.daysOpen} days — is it still real?`}
+            >
               {row.daysOpen}d — still real?
-            </span>
+            </button>
           )}
         </div>
         <p className="truncate text-[12px]" style={{ color: done ? MUTED : "#333" }}>
@@ -436,6 +550,15 @@ function Row({
         >
           {row.dueDateLabel}
         </button>
+        {realOpen && anchor && (
+          <StillRealPrompt
+            row={row}
+            anchor={anchor}
+            onKeep={() => { setRealOpen(false); onPatch(row.id, { stillReal: true }); }}
+            onDrop={(reason) => { setRealOpen(false); onPatch(row.id, { drop: true, reason }); }}
+            onClose={() => setRealOpen(false)}
+          />
+        )}
         {ownerOpen && anchor && (
           <AssigneePicker
             selected={row.assignees}
@@ -585,7 +708,10 @@ function Stats({ data }: { data: BoardChecklistData }) {
             <div key={r.label} className="flex items-center justify-between px-4 py-2.5 text-[13px]">
               <span>{r.label}</span>
               <span className="flex items-center gap-4">
-                <span style={{ color: MUTED }}>{r.completed} of {r.raised} cleared</span>
+                <span style={{ color: MUTED }}>
+                  {r.completed} of {r.raised} done
+                  {r.dropped > 0 && ` · ${r.dropped} closed unfinished`}
+                </span>
                 <strong style={{ color: r.pct === 0 ? "#a3282b" : NAVY, minWidth: 44, textAlign: "right" }}>
                   {r.pct}%
                 </strong>
@@ -606,7 +732,8 @@ function Stats({ data }: { data: BoardChecklistData }) {
               <span className="flex items-center gap-4" style={{ color: MUTED }}>
                 <span>{m.actions} actions</span>
                 <span>{m.intentions} intentions</span>
-                <strong style={{ color: NAVY }}>{m.cleared} cleared</strong>
+                <strong style={{ color: NAVY }}>{m.cleared} done</strong>
+                {m.dropped > 0 && <span style={{ color: "#a3282b" }}>{m.dropped} closed</span>}
               </span>
             </div>
           ))}

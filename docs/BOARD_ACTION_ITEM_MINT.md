@@ -415,3 +415,36 @@ series ends rather than inventing a date the board never agreed to.
 
 The spawned instance is left **unstamped**, unlike a backfill: it is genuine new
 work with a real due date, so the ordinary reminder should fire as it approaches.
+
+### 11.9 Closing something that is not real
+
+"Still real?" was a question the system could not accept a *no* to. An item
+that is dead but unfinished had nowhere honest to go: **complete** is a lie
+that inflates the very completion rate §11.6 exists to make credible, **on
+hold** promises a return, **intention** means malformed rather than abandoned,
+and **delete** erases the record that is the whole point.
+
+So there is a fourth ending — `dropped` — and it **costs a reason**, because
+the reason is the record. The reason is written to `dropped_reason` and also
+appended to the progress log, so the item's own history says why it ended.
+
+Dropped items stay in the denominator of the completion rate on purpose.
+Removing them would mean the rate could be improved by closing things, which
+is exactly the gaming the number exists to resist. Stats therefore reads
+"7 of 29 done · 4 closed unfinished" rather than folding the two together —
+and the closed count is itself a measure of how much of what the board raises
+never mattered.
+
+**Two escalation corrections found in use:**
+
+- `meetingDates` carries the whole calendar, including *future* sittings, so
+  counting every meeting after the raise date made a brand-new item look like
+  it had already survived four. Every item escalated on day one. Only meetings
+  that have actually happened count.
+- Three meetings can be scheduled close together, so there is now a floor in
+  real time as well: `board_escalation_min_days`, default 90. Nothing raised
+  this month gets asked whether it is still real.
+
+Answering **yes, still real** stamps `escalated_at`, which restarts the clock.
+Without that the badge nags forever after the first honest answer, and people
+stop reading it — which costs more than the reminder is worth.
