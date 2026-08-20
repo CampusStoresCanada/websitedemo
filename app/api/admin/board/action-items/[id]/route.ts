@@ -11,7 +11,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { nextOccurrence, isRecurrence } from "@/lib/board/recurrence";
 
-const STATUSES = ["open", "in_progress", "complete", "deferred", "intention"];
+const STATUSES = ["open", "in_progress", "complete", "deferred", "intention", "dropped"];
 const PRIORITIES = ["high", "medium", "low"];
 
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: current } = await db
     .from("board_action_items")
-    .select("id, meeting_id, title, description, status, priority, assignees, quality_flags, due_date, started_at, held_at, recurrence, series_id, sort_order")
+    .select("id, meeting_id, title, description, status, priority, assignees, quality_flags, due_date, started_at, held_at, escalated_at, recurrence, series_id, sort_order")
     .eq("id", id)
     .maybeSingle();
 
@@ -122,6 +122,27 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     patch.quality_flags = [];
   }
 
+  // ── Answering "still real?" ─────────────────────────────────────────
+  // The badge asks a question, so both answers have to exist. Yes restarts
+  // the escalation clock; no closes the item honestly rather than forcing
+  // someone to tick "complete" on work that never happened.
+  if (body.stillReal === true) {
+    patch.escalated_at = nowIso;
+  }
+
+  if (body.drop === true) {
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    if (!reason) {
+      return NextResponse.json(
+        { error: "Say why it is being closed — that reason is the record." },
+        { status: 400 }
+      );
+    }
+    patch.status = "dropped";
+    patch.dropped_at = nowIso;
+    patch.dropped_reason = reason;
+  }
+
   // ── Repairing an intention ──────────────────────────────────────────
   // An intention is malformed work. Whatever edit just happened, re-check
   // whether it is now well formed: an owner and a finish line promote it.
@@ -149,6 +170,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   }
 
   const { error } = await db.from("board_action_items").update(patch).eq("id", id);
+
+  if (!error && body.drop === true) {
+    await db.from("board_action_item_updates").insert({
+      item_id: id,
+      note: `Closed without completing: ${patch.dropped_reason}`,
+      author_id: auth.ctx.userId,
+    });
+  }
+
   if (error) {
     console.error("[action-items PATCH]", error);
     return NextResponse.json({ error: error.message }, { status: 500 });

@@ -143,19 +143,48 @@ describe("runway and holding", () => {
 });
 
 describe("escalation is a flag, not a boost", () => {
-  const meetings = ["2026-05-28", "2026-06-23", "2026-07-30", "2026-08-27"];
+  // The real calendar, past AND future — future sittings must not count.
+  const meetings = ["2026-05-28", "2026-06-23", "2026-07-30", "2026-08-27",
+                    "2026-09-24", "2026-10-29", "2026-11-26", "2026-12-17"];
 
   it("fires once an item has survived enough meetings", () => {
-    expect(isEscalated(item({ raisedOn: "2026-04-27" }), meetings, DEFAULT_SORT_POLICY)).toBe(true);
+    expect(isEscalated(item({ raisedOn: "2026-04-27" }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(true);
+  });
+
+  it("never fires on a brand-new item, however many meetings are scheduled ahead", () => {
+    // The regression: meetingDates carries future sittings, so counting every
+    // meeting after the raise date made a day-old item look three meetings old.
+    expect(isEscalated(item({ raisedOn: TODAY }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
+  });
+
+  it("respects the 90-day floor even after three meetings", () => {
+    // Meetings can sit close together; nothing raised weeks ago should be
+    // asked whether it is still real.
+    const dense = ["2026-06-05", "2026-06-19", "2026-07-03"];
+    expect(isEscalated(item({ raisedOn: "2026-06-01" }), dense, DEFAULT_SORT_POLICY, "2026-07-10")).toBe(false);
   });
 
   it("does not fire on a recent item", () => {
-    expect(isEscalated(item({ raisedOn: "2026-07-30" }), meetings, DEFAULT_SORT_POLICY)).toBe(false);
+    expect(isEscalated(item({ raisedOn: "2026-07-30" }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
+  });
+
+  it("does not fire on dropped work", () => {
+    expect(isEscalated(item({ raisedOn: "2026-04-27", status: "dropped" }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
+  });
+
+  it("stops nagging once someone confirms it is still real", () => {
+    const acked = item({ raisedOn: "2026-04-27", escalationAckedOn: "2026-07-30" });
+    expect(isEscalated(acked, meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
+  });
+
+  it("resumes nagging after enough further meetings pass", () => {
+    const longAgo = item({ raisedOn: "2026-04-27", escalationAckedOn: "2026-05-01" });
+    expect(isEscalated(longAgo, meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(true);
   });
 
   it("does not fire on held or completed work", () => {
-    expect(isEscalated(item({ raisedOn: "2026-04-27", status: "deferred" }), meetings, DEFAULT_SORT_POLICY)).toBe(false);
-    expect(isEscalated(item({ raisedOn: "2026-04-27", status: "complete" }), meetings, DEFAULT_SORT_POLICY)).toBe(false);
+    expect(isEscalated(item({ raisedOn: "2026-04-27", status: "deferred" }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
+    expect(isEscalated(item({ raisedOn: "2026-04-27", status: "complete" }), meetings, DEFAULT_SORT_POLICY, TODAY)).toBe(false);
   });
 
   it("still does not let an escalated item climb past live work", () => {

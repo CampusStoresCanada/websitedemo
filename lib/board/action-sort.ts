@@ -9,7 +9,13 @@
  * app_settings without this module knowing about the database.
  */
 
-export type ActionStatus = "open" | "in_progress" | "complete" | "deferred" | "intention";
+export type ActionStatus =
+  | "open"
+  | "in_progress"
+  | "complete"
+  | "deferred"
+  | "intention"
+  | "dropped";
 export type Priority = "high" | "medium" | "low";
 
 export interface SortableItem {
@@ -22,6 +28,8 @@ export interface SortableItem {
   heldAt: string | null;
   /** Date of the meeting that raised it — the clock for aging. */
   raisedOn: string;
+  /** When someone last confirmed it is still real; restarts escalation. */
+  escalationAckedOn?: string | null;
   assigneeCount: number;
   /** Used only for tier 5 adoptability. */
   titleLength: number;
@@ -33,6 +41,8 @@ export interface SortPolicy {
   ageTauDays: number;
   urgencyWindowDays: number;
   escalationMeetings: number;
+  /** Floor before escalation can fire at all, regardless of meeting count. */
+  escalationMinDays: number;
   priorityWeights: Record<"high" | "medium" | "low" | "unset", number>;
 }
 
@@ -41,6 +51,7 @@ export const DEFAULT_SORT_POLICY: SortPolicy = {
   ageTauDays: 60,
   urgencyWindowDays: 7,
   escalationMeetings: 3,
+  escalationMinDays: 90,
   // Unset sits between medium and high on purpose: an ungraded item should be
   // neither buried nor rewarded for having no grade.
   priorityWeights: { high: 3, medium: 2, low: 1, unset: 1.5 },
@@ -134,11 +145,31 @@ export interface ScoredItem {
  */
 export function isEscalated(
   item: SortableItem,
-  meetingDatesSince: string[],
-  policy: SortPolicy
+  meetingDates: string[],
+  policy: SortPolicy,
+  today: string
 ): boolean {
-  if (item.status === "complete" || item.status === "deferred") return false;
-  const meetingsElapsed = meetingDatesSince.filter((d) => d > item.raisedOn).length;
+  if (item.status === "complete" || item.status === "deferred" || item.status === "dropped") {
+    return false;
+  }
+
+  // Confirming an item is still real restarts the clock. Without that the
+  // badge nags forever after the first honest answer, and people stop reading
+  // it — which costs more than the reminder is worth.
+  const since = item.escalationAckedOn && item.escalationAckedOn > item.raisedOn
+    ? item.escalationAckedOn
+    : item.raisedOn;
+
+  // A floor in real time as well as meetings. Three meetings can be scheduled
+  // close together, and nothing raised this month deserves to be asked
+  // whether it is still real.
+  if (daysBetween(since, today) < policy.escalationMinDays) return false;
+
+  // Only meetings that have actually happened count. `meetingDates` carries
+  // the whole calendar including future sittings, so counting everything
+  // after the raise date made a brand-new item look like it had survived four
+  // meetings — every item escalated on day one.
+  const meetingsElapsed = meetingDates.filter((d) => d > since && d <= today).length;
   return meetingsElapsed >= policy.escalationMeetings;
 }
 
@@ -193,7 +224,7 @@ export function sortActionItems(
   return items
     .map((item) => ({
       ...scoreItem(item, today, policy),
-      escalated: isEscalated(item, meetingDates, policy),
+      escalated: isEscalated(item, meetingDates, policy, today),
     }))
     .sort((a, b) =>
       a.tierIndex !== b.tierIndex
