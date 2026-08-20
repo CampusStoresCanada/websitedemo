@@ -106,7 +106,7 @@ export default function LoginForm() {
         </button>
         <div className="text-center">
           <Link
-            href={rawNext ? `/forgot-password?next=${encodeURIComponent(nextPath)}` : "/forgot-password"}
+            href="/forgot-password"
             className="text-sm text-gray-500 hover:text-[#EE2A2E] transition-colors"
           >
             Forgot your password?
