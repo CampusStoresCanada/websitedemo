@@ -58,6 +58,7 @@ const NAV_GROUPS: NavGroup[] = [
     heading: "Communications",
     items: [
       { href: "/admin/comms", label: "Campaigns", matchPrefix: "/admin/comms" },
+      { href: "/admin/comms/asks", label: "Partner Asks", matchPrefix: "/admin/comms/asks" },
       { href: "/admin/events", label: "Events", matchPrefix: "/admin/events" },
     ],
   },
@@ -93,6 +94,23 @@ function isActive(pathname: string, item: NavItem): boolean {
   return pathname === item.href;
 }
 
+/**
+ * Longest-prefix wins within a group.
+ *
+ * Without this, a nested item highlights its parent too: "Partner Asks"
+ * (/admin/comms/asks) also satisfies "Campaigns" (/admin/comms), lighting up
+ * both. Picking the most specific match keeps exactly one item active.
+ */
+function activeHref(pathname: string, items: NavItem[]): string | null {
+  let best: NavItem | null = null;
+  for (const item of items) {
+    if (!isActive(pathname, item)) continue;
+    const len = (item.matchPrefix ?? item.href).length;
+    if (!best || len > (best.matchPrefix ?? best.href).length) best = item;
+  }
+  return best?.href ?? null;
+}
+
 interface AdminSidebarProps {
   globalRole?: AdminRole;
 }
@@ -117,7 +135,7 @@ export default function AdminSidebar({ globalRole = "admin" }: AdminSidebarProps
               </h3>
               <ul className="mt-1 space-y-0.5">
                 {visibleItems.map((item) => {
-                  const active = isActive(pathname, item);
+                  const active = item.href === activeHref(pathname, visibleItems);
                   return (
                     <li key={item.href}>
                       <Link
