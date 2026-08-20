@@ -416,7 +416,7 @@ export default function MapAttract({
                 {[activeSpecial.city, activeSpecial.province].filter(Boolean).join(", ") || activeSpecial.type}
               </p>
               <div className="mt-3 rounded-xl border border-gray-200 bg-gray-50 p-3 space-y-1">
-                <p className="text-sm text-gray-700">Joined {formatJoinDate(activeSpecial.membershipStartedAt)}</p>
+                <p className="text-sm text-gray-700">Joined {formatJoinDate(activeSpecial.joinedOn)}</p>
               </div>
             </>
           )}

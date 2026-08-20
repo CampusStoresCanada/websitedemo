@@ -107,6 +107,10 @@
     {
       "path": "/api/cron/board-votes",
       "schedule": "0 * * * *"
+    },
+    {
+      "path": "/api/cron/ghost-announcements",
+      "schedule": "*/15 * * * *"
     }
   ]
 }
