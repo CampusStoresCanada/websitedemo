@@ -213,6 +213,99 @@ function DueDatePicker({
   );
 }
 
+
+// ── Assignee picker ────────────────────────────────────────────────────
+// The assignee line is the control, same as every other field on the row.
+// Portalled for the same reason the calendar is: the checklist scrolls.
+
+function AssigneePicker({
+  selected,
+  directory,
+  viewerId,
+  anchor,
+  onChange,
+  onClose,
+}: {
+  selected: string[];
+  directory: { id: string; displayName: string }[];
+  viewerId: string | null;
+  anchor: DOMRect;
+  onChange: (ids: string[]) => void;
+  onClose: () => void;
+}) {
+  const WIDTH = 224;
+  const HEIGHT = 300;
+  const left = Math.max(8, Math.min(anchor.left, window.innerWidth - WIDTH - 8));
+  const top = anchor.bottom + HEIGHT > window.innerHeight
+    ? Math.max(8, anchor.top - HEIGHT - 6)
+    : anchor.bottom + 6;
+
+  function toggle(id: string) {
+    onChange(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  }
+
+  return createPortal(
+    <>
+      <div className="fixed inset-0 z-40" onClick={onClose} aria-hidden="true" />
+      <div
+        className="fixed z-50 w-[224px] rounded-xl bg-white p-2 shadow-xl"
+        style={{ border: "1px solid #d8d8d8", left, top, maxHeight: HEIGHT, overflowY: "auto" }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {viewerId && !selected.includes(viewerId) && (
+          <>
+            <button
+              type="button"
+              onClick={() => { onChange([...selected, viewerId]); onClose(); }}
+              className="mb-1 block w-full rounded px-2 py-1.5 text-left text-xs font-semibold hover:bg-gray-100"
+              style={{ color: NAVY }}
+            >
+              Claim for myself
+            </button>
+            <div className="mb-1 border-t" style={{ borderColor: "#eee" }} />
+          </>
+        )}
+
+        {directory.map((d) => {
+          const on = selected.includes(d.id);
+          return (
+            <button
+              key={d.id}
+              type="button"
+              onClick={() => toggle(d.id)}
+              className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-xs hover:bg-gray-100"
+              style={{ color: on ? NAVY : "#374151", fontWeight: on ? 600 : 400 }}
+            >
+              <span
+                className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-[3px] border"
+                style={{ borderColor: on ? NAVY : "#bbb", background: on ? NAVY : "#fff", color: "#fff", fontSize: 9 }}
+              >
+                {on ? "✓" : ""}
+              </span>
+              {d.displayName}
+            </button>
+          );
+        })}
+
+        {selected.length > 0 && (
+          <>
+            <div className="my-1 border-t" style={{ borderColor: "#eee" }} />
+            <button
+              type="button"
+              onClick={() => { onChange([]); onClose(); }}
+              className="block w-full rounded px-2 py-1.5 text-left text-xs hover:bg-gray-100"
+              style={{ color: MUTED }}
+            >
+              Leave unassigned
+            </button>
+          </>
+        )}
+      </div>
+    </>,
+    document.body
+  );
+}
+
 // ── Row ────────────────────────────────────────────────────────────────
 
 function Row({
@@ -235,9 +328,11 @@ function Row({
   const [dateOpen, setDateOpen] = useState(false);
   const [anchor, setAnchor] = useState<DOMRect | null>(null);
   const dateBtn = useRef<HTMLButtonElement>(null);
+  const [ownerOpen, setOwnerOpen] = useState(false);
+  const ownerBtn = useRef<HTMLButtonElement>(null);
 
   const secondary =
-    row.assigneeNames.length > 0 ? row.assigneeNames.join(", ") : "Unassigned";
+    row.assigneeNames.length > 0 ? row.assigneeNames.join(", ") : "Unassigned — pick an owner";
 
   return (
     <div
@@ -302,7 +397,20 @@ function Row({
           )}
         </div>
         <p className="truncate text-[12px]" style={{ color: done ? MUTED : "#333" }}>
-          {secondary}
+          <button
+            ref={ownerBtn}
+            type="button"
+            onClick={() => {
+              setAnchor(ownerBtn.current?.getBoundingClientRect() ?? null);
+              setOwnerOpen((v) => !v);
+            }}
+            className="hover:underline"
+            style={{ color: row.assignees.length === 0 ? "#9a4e08" : "inherit", fontWeight: row.assignees.length === 0 ? 600 : 400 }}
+            aria-label={`Assign ${row.title}`}
+            aria-expanded={ownerOpen}
+          >
+            {secondary}
+          </button>
           {row.qualityFlags.length > 0 && (
             <span style={{ color: "#9a4e08" }}>
               {" · "}
@@ -328,6 +436,16 @@ function Row({
         >
           {row.dueDateLabel}
         </button>
+        {ownerOpen && anchor && (
+          <AssigneePicker
+            selected={row.assignees}
+            directory={data.directory}
+            viewerId={data.viewerId}
+            anchor={anchor}
+            onChange={(ids) => onPatch(row.id, { assignees: ids })}
+            onClose={() => setOwnerOpen(false)}
+          />
+        )}
         {dateOpen && anchor && (
           <DueDatePicker
             value={row.dueDate}

@@ -24,7 +24,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   const { data: current } = await db
     .from("board_action_items")
-    .select("id, meeting_id, title, description, status, priority, assignees, due_date, started_at, held_at, recurrence, series_id, sort_order")
+    .select("id, meeting_id, title, description, status, priority, assignees, quality_flags, due_date, started_at, held_at, recurrence, series_id, sort_order")
     .eq("id", id)
     .maybeSingle();
 
@@ -91,7 +91,10 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
 
   if (body.description !== undefined) patch.description = body.description;
   if (body.title !== undefined) patch.title = body.title;
-  if (body.assignees !== undefined) patch.assignees = body.assignees;
+  if (body.assignees !== undefined) {
+    patch.assignees = body.assignees;
+
+  }
 
   // ── Claim / relinquish ──────────────────────────────────────────────
   const assignees = (current.assignees ?? []) as string[];
@@ -117,6 +120,28 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     }
     patch.status = "open";
     patch.quality_flags = [];
+  }
+
+  // ── Repairing an intention ──────────────────────────────────────────
+  // An intention is malformed work. Whatever edit just happened, re-check
+  // whether it is now well formed: an owner and a finish line promote it.
+  // Evaluated here rather than inside one field's branch, so "assign, then
+  // set a date" works as well as doing it the other way round.
+  if (current.status === "intention" && patch.status === undefined) {
+    const owners = (patch.assignees ?? current.assignees ?? []) as string[];
+    const due = patch.due_date !== undefined ? patch.due_date : current.due_date;
+    const remaining = ((current.quality_flags ?? []) as string[]).filter(
+      (f) =>
+        !(owners.length > 0 && (f === "no_owner" || f === "owner_unresolved")) &&
+        !(due && f === "no_finish_line")
+    );
+
+    if (owners.length > 0 && due) {
+      patch.status = "open";
+      patch.quality_flags = [];
+    } else {
+      patch.quality_flags = remaining;
+    }
   }
 
   if (Object.keys(patch).length === 0) {
