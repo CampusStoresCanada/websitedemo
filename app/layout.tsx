@@ -47,16 +47,16 @@ export default async function RootLayout({
       serverAuth.globalRole === "super_admin" ||
       serverAuth.globalRole === "admin" ||
       serverAuth.permissionState === "org_admin",
-    isBenchmarkingReviewer: serverAuth.profile?.is_benchmarking_reviewer ?? false,
-    isBenchmarkingContentReviewer:
-      serverAuth.profile?.is_benchmarking_content_reviewer ?? false,
+    isBenchmarkingReviewer: serverAuth.isBenchmarkingReviewer,
+    isBenchmarkingContentReviewer: serverAuth.isBenchmarkingContentReviewer,
     isCancollMember: serverAuth.organizations.some(
-      (uo) => uo.organization?.is_cancoll_member === true
+      (uo) => uo.organization?.is_cancoll_member === true,
     ),
   };
 
   // True for any user who has a qualifying persona (all 4 journeys)
-  const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
+  const serverHasOnboarding =
+    serverAuth.user != null && serverAuth.organizations.length > 0;
 
   return (
     <html lang="en">
@@ -64,19 +64,40 @@ export default async function RootLayout({
         <link rel="stylesheet" href="https://use.typekit.net/uxh8ckq.css" />
       </head>
       <body className="antialiased">
-        <AuthProvider key={serverAuth.user?.id ?? "anon"} initialAuth={initialAuth}>
+        <AuthProvider
+          key={serverAuth.user?.id ?? "anon"}
+          initialAuth={initialAuth}
+        >
           <ToolkitProvider>
-            <Suspense><Header identity={identity} /></Suspense>
+            <Suspense>
+              <Header identity={identity} />
+            </Suspense>
             <OnboardingGate serverHasOnboarding={serverHasOnboarding}>
               <main className="min-h-screen">{children}</main>
               <Footer />
               {process.env.NODE_ENV === "development" ? <DevPanel /> : null}
-              <Toolkit googleMapsApiKey={process.env.GOOGLE_MAPS_API_KEY ?? process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ?? null} />
-              <Suspense><FlagReviewPanel /></Suspense>
-              <Suspense><ExplainContextPanel /></Suspense>
-              <Suspense><InternalSharePanel /></Suspense>
-              <Suspense><PublicHighlightHandler /></Suspense>
-              <Suspense><BookmarkJumpHandler /></Suspense>
+              <Toolkit
+                googleMapsApiKey={
+                  process.env.GOOGLE_MAPS_API_KEY ??
+                  process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY ??
+                  null
+                }
+              />
+              <Suspense>
+                <FlagReviewPanel />
+              </Suspense>
+              <Suspense>
+                <ExplainContextPanel />
+              </Suspense>
+              <Suspense>
+                <InternalSharePanel />
+              </Suspense>
+              <Suspense>
+                <PublicHighlightHandler />
+              </Suspense>
+              <Suspense>
+                <BookmarkJumpHandler />
+              </Suspense>
             </OnboardingGate>
           </ToolkitProvider>
         </AuthProvider>

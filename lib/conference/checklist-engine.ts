@@ -47,6 +47,7 @@ function getTaskCta(
     case "self_reported":
       // The org's conference page is where the tick-off list lives.
       return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
+
   }
 }
 

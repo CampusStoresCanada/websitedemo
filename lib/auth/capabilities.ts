@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Capability } from "./capability-names";
 
 /**
  * Capability grants — narrow, time-boxed, attributed permissions.
@@ -8,20 +9,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * grants dissolve on their own. Anything that should be permanent belongs in
  * `profiles.global_role`, not here.
  *
- * Naming is dotted and specific — `benchmarking.content_review`, never
- * `benchmarking.admin`. If a capability needs a comment to explain what it
- * covers, it is too broad; split it.
+ * The names themselves live in ./capability-names so client components can
+ * import them without dragging in this server-only module.
  */
-export const CAPABILITIES = {
-  /** Store directors reviewing question wording and authoring worked examples. */
-  BENCHMARKING_CONTENT_REVIEW: "benchmarking.content_review",
-  /** Board committee resolving delta flags and verifying submissions. */
-  BENCHMARKING_QA_VERIFY: "benchmarking.qa_verify",
-  /** Regional reps confirming the right respondent per member store. */
-  BENCHMARKING_RECIPIENT_CONFIRM: "benchmarking.recipient_confirm",
-} as const;
-
-export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
+export { CAPABILITIES } from "./capability-names";
+export type { Capability } from "./capability-names";
 
 export interface CapabilityGrant {
   id: string;

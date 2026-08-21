@@ -391,7 +391,8 @@ export function AuthProvider({
 
   const fetchUserData = useCallback(
     async (userId: string) => {
-      const [profileResult, orgsResult] = await Promise.all([
+      const nowIso = new Date().toISOString();
+      const [profileResult, orgsResult, grantsResult] = await Promise.all([
         supabase.from("profiles").select("*").eq("id", userId).single(),
         supabase
           .from("user_organizations")
@@ -408,6 +409,13 @@ export function AuthProvider({
           )
           .eq("user_id", userId)
           .eq("status", "active"),
+        supabase
+          .from("capability_grants")
+          .select("capability")
+          .eq("subject_id", userId)
+          .is("revoked_at", null)
+          .lte("starts_at", nowIso)
+          .gt("ends_at", nowIso),
       ]);
 
       if (profileResult.error || orgsResult.error) {
@@ -513,10 +521,17 @@ export function AuthProvider({
       setGlobalRole(role);
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
-      setIsBenchmarkingReviewer(userProfile?.is_benchmarking_reviewer ?? false);
-      setIsBenchmarkingContentReviewer(
-        userProfile?.is_benchmarking_content_reviewer ?? false,
+      const heldCapabilities = new Set(
+        ((grantsResult.data ?? []) as { capability: string }[]).map(
+          (g) => g.capability,
+        ),
       );
+      const holdsQaVerify = heldCapabilities.has("benchmarking.qa_verify");
+      const holdsContentReview = heldCapabilities.has(
+        "benchmarking.content_review",
+      );
+      setIsBenchmarkingReviewer(holdsQaVerify);
+      setIsBenchmarkingContentReviewer(holdsContentReview);
       setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
       setReauthMessage(null);
@@ -529,9 +544,8 @@ export function AuthProvider({
         permissionState: resolvedPermissionState,
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
-        isBenchmarkingReviewer: userProfile?.is_benchmarking_reviewer ?? false,
-        isBenchmarkingContentReviewer:
-          userProfile?.is_benchmarking_content_reviewer ?? false,
+        isBenchmarkingReviewer: holdsQaVerify,
+        isBenchmarkingContentReviewer: holdsContentReview,
         isCancollMember: hasCANCOLL,
       };
 

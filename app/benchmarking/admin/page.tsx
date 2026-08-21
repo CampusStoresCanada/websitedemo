@@ -4,7 +4,6 @@ import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import SurveyManagementCard from "@/components/benchmarking/admin/SurveyManagementCard";
 import ResponseRateCard from "@/components/benchmarking/admin/ResponseRateCard";
-import ReviewerManagement from "@/components/benchmarking/admin/ReviewerManagement";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -76,19 +75,17 @@ export default async function BenchmarkingAdminPage() {
     pendingFlagCount = count ?? 0;
   }
 
-  // Fetch current reviewers — two distinct groups, two distinct jobs
+  // Who currently holds benchmarking capabilities. Granting happens in
+  // /admin/access, where a grant carries an end date and a reason.
+  const nowIso = new Date().toISOString();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: reviewers } = (await (supabase as any)
-    .from("profiles")
-    .select("id, display_name, global_role")
-    .eq("is_benchmarking_reviewer", true)
-    .order("display_name")) as { data: any[] | null };
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contentReviewers } = (await (supabase as any)
-    .from("profiles")
-    .select("id, display_name, global_role")
-    .eq("is_benchmarking_content_reviewer", true)
+  const { data: benchmarkingGrants } = (await (supabase as any)
+    .from("capability_contributions")
+    .select("display_name, capability, reason, ends_at")
+    .like("capability", "benchmarking.%")
+    .lte("starts_at", nowIso)
+    .gt("ends_at", nowIso)
+    .is("revoked_at", null)
     .order("display_name")) as { data: any[] | null };
 
   return (
@@ -158,19 +155,51 @@ export default async function BenchmarkingAdminPage() {
           </div>
         )}
 
-        {/* Reviewer Management — admin only */}
-        <ReviewerManagement
-          currentReviewers={(reviewers ?? []).map((r) => ({
-            id: r.id,
-            displayName: r.display_name ?? "Unknown",
-            globalRole: r.global_role,
-          }))}
-          currentContentReviewers={(contentReviewers ?? []).map((r) => ({
-            id: r.id,
-            displayName: r.display_name ?? "Unknown",
-            globalRole: r.global_role,
-          }))}
-        />
+        {/* Who holds benchmarking capabilities right now */}
+        <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
+          <div className="flex items-baseline justify-between mb-1">
+            <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+              Committee Access
+            </h3>
+            <Link
+              href="/admin/access"
+              className="text-xs font-medium text-gray-600 hover:text-gray-900 underline underline-offset-2"
+            >
+              Manage grants
+            </Link>
+          </div>
+          <p className="text-xs text-gray-500 mb-4">
+            Everyone holding a benchmarking capability right now. Each grant has
+            an end date and dissolves on its own.
+          </p>
+          {(benchmarkingGrants ?? []).length === 0 ? (
+            <p className="text-sm text-gray-500">Nobody currently holds one.</p>
+          ) : (
+            <ul className="space-y-2">
+              {(benchmarkingGrants ?? []).map((g, i) => (
+                <li
+                  key={i}
+                  className="flex items-start justify-between gap-3 p-3 bg-gray-50 rounded-lg"
+                >
+                  <div>
+                    <span className="text-sm font-medium text-gray-900">
+                      {g.display_name ?? "Unknown"}
+                    </span>
+                    <p className="text-xs text-gray-500">{g.reason}</p>
+                  </div>
+                  <span className="text-[11px] text-gray-400 shrink-0">
+                    until{" "}
+                    {new Date(g.ends_at).toLocaleDateString("en-CA", {
+                      timeZone: "America/Edmonton",
+                      month: "short",
+                      day: "numeric",
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
       </div>
     </div>
   );

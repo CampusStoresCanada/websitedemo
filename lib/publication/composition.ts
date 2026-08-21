@@ -32,6 +32,14 @@ export type PublicationSource =
   | { kind: "organizations"; orgType: string };
 
 export type PublicationSelection = {
+  /**
+   * Scope to specific organizations. Unlike the filters below this is not an
+   * editorial exclusion — it narrows what the publication IS, so the excluded
+   * entries are never counted as dropped. A single-org proof and the full
+   * directory are the same publication at different scopes, which is what lets
+   * an exhibitor see their own entry rendered by the exact code that prints it.
+   */
+  orgIds?: string[];
   /** Restrict to these NACS departments. Empty/absent = all. */
   departments?: string[];
   /**
@@ -79,6 +87,24 @@ export function conferenceDirectory(conferenceId: string, title: string): Public
       { type: "listings", title: "Exhibitors", groupBy: "category" },
       { type: "booth_index", title: "By Booth Number" },
     ],
+  };
+}
+
+/**
+ * One exhibitor's own listing, rendered by the same code that prints the book.
+ *
+ * The point is fidelity, not a preview widget: an approval means nothing if the
+ * thing approved was drawn by different code than the thing printed. Same
+ * composer, same renderer, same stylesheet — just scoped to one org and without
+ * the indexes, which say nothing about a single entry.
+ */
+export function orgListingProof(conferenceId: string, orgId: string, title: string): Publication {
+  return {
+    id: `listing-proof-${orgId}`,
+    title,
+    source: { kind: "conference", conferenceId },
+    selection: { orgIds: [orgId] },
+    sections: [{ type: "listings", title: "Your listing", groupBy: "name" }],
   };
 }
 
@@ -192,7 +218,13 @@ export function composePublication(
   surfaces: SurfaceForPublication[] = [],
   placements: PlacedThing[] = []
 ): ComposedPublication {
-  const composed: ComposedEntry[] = entries.map((e) => {
+  // Scope first, so `totalCandidates` describes this publication rather than
+  // reporting every org in the database as "excluded".
+  const scoped = publication.selection.orgIds?.length
+    ? entries.filter((e) => publication.selection.orgIds!.includes(e.orgId))
+    : entries;
+
+  const composed: ComposedEntry[] = scoped.map((e) => {
     const cats = parseOrgCategories(e.rawCategories);
     return { ...e, departments: cats.departments, classes: cats.classes, unrecognizedCategories: cats.unrecognized };
   });
@@ -249,7 +281,7 @@ export function composePublication(
     sections,
     entries: kept,
     notes: {
-      totalCandidates: entries.length,
+      totalCandidates: scoped.length,
       excludedByDepartment,
       excludedAsNotPrintReady,
       uncategorized: kept.filter((e) => e.departments.length === 0).map((e) => e.orgName),

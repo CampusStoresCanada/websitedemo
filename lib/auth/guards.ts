@@ -173,16 +173,13 @@ async function loadAuthContext(
   const organizations = snapshot.organizations ?? [];
   const globalRole =
     (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
-  // Grants first — the profile booleans are the retired path, kept only so an
-  // in-flight session does not lose access mid-cutover. Remove once nothing
-  // depends on them.
   const capabilities = snapshot.capabilities ?? [];
-  const isBenchmarkingReviewer =
-    capabilities.includes("benchmarking.qa_verify") ||
-    snapshot.profile?.is_benchmarking_reviewer === true;
-  const isBenchmarkingContentReviewer =
-    capabilities.includes("benchmarking.content_review") ||
-    snapshot.profile?.is_benchmarking_content_reviewer === true;
+  const isBenchmarkingReviewer = capabilities.includes(
+    "benchmarking.qa_verify",
+  );
+  const isBenchmarkingContentReviewer = capabilities.includes(
+    "benchmarking.content_review",
+  );
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
     .filter((uo) => uo.role === "org_admin")

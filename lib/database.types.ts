@@ -1708,8 +1708,10 @@ export type Database = {
       }
       capability_grants: {
         Row: {
+          can_delegate: boolean
           capability: string
           created_at: string
+          delegated_from: string | null
           ends_at: string
           granted_by: string | null
           id: string
@@ -1724,8 +1726,10 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          can_delegate?: boolean
           capability: string
           created_at?: string
+          delegated_from?: string | null
           ends_at: string
           granted_by?: string | null
           id?: string
@@ -1740,8 +1744,10 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          can_delegate?: boolean
           capability?: string
           created_at?: string
+          delegated_from?: string | null
           ends_at?: string
           granted_by?: string | null
           id?: string
@@ -8589,8 +8595,6 @@ export type Database = {
           display_name: string | null
           global_role: string
           id: string
-          is_benchmarking_content_reviewer: boolean
-          is_benchmarking_reviewer: boolean
           updated_at: string | null
         }
         Insert: {
@@ -8599,8 +8603,6 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id: string
-          is_benchmarking_content_reviewer?: boolean
-          is_benchmarking_reviewer?: boolean
           updated_at?: string | null
         }
         Update: {
@@ -8609,8 +8611,6 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id?: string
-          is_benchmarking_content_reviewer?: boolean
-          is_benchmarking_reviewer?: boolean
           updated_at?: string | null
         }
         Relationships: []
@@ -11664,6 +11664,13 @@ export type Database = {
       }
     }
     Functions: {
+      max_delegable_until: {
+        Args: {
+          p_subject: string
+          p_child_capability: string
+        }
+        Returns: string
+      }
       has_capability: {
         Args: {
           p_subject: string

@@ -200,6 +200,12 @@ export default async function OrgConferencePage({
           <TaskChecklist tasks={orgTasks} onAnswer={handleOrgTaskAnswer}
             emptyLabel="Nothing outstanding for your company." />
         </div>
+        <p className="mt-3 text-sm">
+          <Link href={`/org/${slug}/conference/${conferenceId}/listing`}
+            className="font-medium text-[#163D6D] hover:underline">
+            See your printed directory listing &rarr;
+          </Link>
+        </p>
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">

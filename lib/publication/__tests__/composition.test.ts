@@ -186,3 +186,30 @@ describe("composePublication — map placements", () => {
     expect(s.surfaces[0].placements.map((p) => p.label)).toEqual(["7", "20", "101"]);
   });
 });
+
+describe("orgListingProof", () => {
+  it("scopes to one org and renders through the same composer", async () => {
+    const { orgListingProof } = await import("../composition");
+    const p = orgListingProof("conf-1", "A", "Acme — CSC 2027");
+    const r = composePublication(p, [entry("A", "Apparel", ["101"]), entry("B", "Books", ["202"])]);
+    expect(r.entries.map((e) => e.orgName)).toEqual(["A"]);
+    // Only the listing — indexes say nothing about a single entry.
+    expect(r.sections.map((s) => s.type)).toEqual(["listings"]);
+  });
+
+  it("does not report other orgs as excluded — scope is not an exclusion", () => {
+    // A single-org proof must not claim it dropped 29 exhibitors.
+    const p = pub({ selection: { orgIds: ["A"] } });
+    const r = composePublication(p, [entry("A", "Apparel"), entry("B", "Books"), entry("C", "Books")]);
+    expect(r.notes.totalCandidates).toBe(1);
+    expect(r.notes.excludedByDepartment).toBe(0);
+    expect(r.notes.excludedAsNotPrintReady).toBe(0);
+  });
+
+  it("still reports gaps within the scoped org", () => {
+    const p = pub({ selection: { orgIds: ["Sock Rocket"] } });
+    const r = composePublication(p, [entry("Sock Rocket", "General Merchandise")]);
+    expect(r.notes.uncategorized).toEqual(["Sock Rocket"]);
+    expect(r.notes.unrecognizedCategories).toEqual(["General Merchandise"]);
+  });
+});

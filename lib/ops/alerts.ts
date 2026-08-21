@@ -62,8 +62,12 @@ const PERIODIC_RULE_KEYS = new Set([
   "board_vote_lapsed_unresolved",
   "board_vote_not_closed",
   "board_roster_size_mismatch",
+  "benchmarking_no_committee_lead",
 ]);
-const PERIODIC_RULE_KEY_PREFIXES = ["job_consecutive_failures:", "db_access_drift:"];
+const PERIODIC_RULE_KEY_PREFIXES = [
+  "job_consecutive_failures:",
+  "db_access_drift:",
+];
 
 function isPeriodicRuleKey(ruleKey: string): boolean {
   return (
@@ -75,7 +79,9 @@ function isPeriodicRuleKey(ruleKey: string): boolean {
 async function insertAlert(candidate: CandidateAlert): Promise<void> {
   const db = createAdminClient() as unknown as {
     from: (table: string) => {
-      insert: (values: Record<string, unknown>) => Promise<{ error: { message: string } | null }>;
+      insert: (
+        values: Record<string, unknown>,
+      ) => Promise<{ error: { message: string } | null }>;
     };
   };
 
@@ -89,7 +95,9 @@ async function insertAlert(candidate: CandidateAlert): Promise<void> {
   });
 
   if (error) {
-    throw new Error(`Failed to insert ops alert (${candidate.ruleKey}): ${error.message}`);
+    throw new Error(
+      `Failed to insert ops alert (${candidate.ruleKey}): ${error.message}`,
+    );
   }
 
   await logAuditEventSafe({
@@ -108,7 +116,10 @@ async function resolveAlert(alertId: string, ruleKey: string): Promise<void> {
   const db = createAdminClient() as unknown as {
     from: (table: string) => {
       update: (values: Record<string, unknown>) => {
-        eq: (column: string, value: string) => Promise<{ error: { message: string } | null }>;
+        eq: (
+          column: string,
+          value: string,
+        ) => Promise<{ error: { message: string } | null }>;
       };
     };
   };
@@ -127,7 +138,9 @@ async function resolveAlert(alertId: string, ruleKey: string): Promise<void> {
     .eq("id", alertId);
 
   if (error) {
-    throw new Error(`Failed to resolve ops alert (${ruleKey}): ${error.message}`);
+    throw new Error(
+      `Failed to resolve ops alert (${ruleKey}): ${error.message}`,
+    );
   }
 
   await logAuditEventSafe({
@@ -165,7 +178,9 @@ async function evaluateConsecutiveRenewalFailures(): Promise<CandidateAlert | nu
 
   for (const [jobType, latestThree] of byType.entries()) {
     if (latestThree.length < 3) continue;
-    const consecutiveFailures = latestThree.every((row) => row.status === "failed");
+    const consecutiveFailures = latestThree.every(
+      (row) => row.status === "failed",
+    );
     if (!consecutiveFailures) continue;
 
     return {
@@ -222,7 +237,9 @@ async function evaluateBillingFailureRate(): Promise<CandidateAlert | null> {
     .maybeSingle();
 
   if (error) {
-    throw new Error(`Failed to evaluate billing failure rate: ${error.message}`);
+    throw new Error(
+      `Failed to evaluate billing failure rate: ${error.message}`,
+    );
   }
 
   if (!data) return null;
@@ -270,7 +287,9 @@ async function evaluateCircleBacklog(): Promise<CandidateAlert | null> {
     throw new Error(`Failed to evaluate circle backlog: ${countError.message}`);
   }
   if (oldestRes.error) {
-    throw new Error(`Failed to evaluate circle backlog oldest item: ${oldestRes.error.message}`);
+    throw new Error(
+      `Failed to evaluate circle backlog oldest item: ${oldestRes.error.message}`,
+    );
   }
 
   const pendingCount = count ?? 0;
@@ -278,7 +297,10 @@ async function evaluateCircleBacklog(): Promise<CandidateAlert | null> {
     return null;
   }
 
-  const ageHours = hoursBetween(oldestRes.data.created_at, new Date().toISOString());
+  const ageHours = hoursBetween(
+    oldestRes.data.created_at,
+    new Date().toISOString(),
+  );
   if (ageHours < 1) {
     return null;
   }
@@ -313,11 +335,13 @@ async function evaluateWebhookBacklog(): Promise<CandidateAlert | null> {
   ]);
 
   if (stripeRes.error) {
-    throw new Error(`Failed to evaluate Stripe webhook backlog: ${stripeRes.error.message}`);
+    throw new Error(
+      `Failed to evaluate Stripe webhook backlog: ${stripeRes.error.message}`,
+    );
   }
   if (conferenceRes.error) {
     throw new Error(
-      `Failed to evaluate conference webhook backlog: ${conferenceRes.error.message}`
+      `Failed to evaluate conference webhook backlog: ${conferenceRes.error.message}`,
     );
   }
 
@@ -354,10 +378,14 @@ async function evaluateSwapStaleConflicts(): Promise<CandidateAlert | null> {
     .gte("created_at", sinceIso);
 
   if (error) {
-    throw new Error(`Failed to evaluate swap stale conflicts: ${error.message}`);
+    throw new Error(
+      `Failed to evaluate swap stale conflicts: ${error.message}`,
+    );
   }
 
-  const rows = (data ?? []) as Array<{ details?: Record<string, unknown> | null }>;
+  const rows = (data ?? []) as Array<{
+    details?: Record<string, unknown> | null;
+  }>;
   if (rows.length === 0) return null;
 
   let staleCount = 0;
@@ -405,10 +433,14 @@ async function evaluateAuthGuardDenySpike(): Promise<CandidateAlert | null> {
   ]);
 
   if (deniedRes.error) {
-    throw new Error(`Failed to evaluate auth guard deny spike: ${deniedRes.error.message}`);
+    throw new Error(
+      `Failed to evaluate auth guard deny spike: ${deniedRes.error.message}`,
+    );
   }
   if (errorRes.error) {
-    throw new Error(`Failed to evaluate auth guard error spike: ${errorRes.error.message}`);
+    throw new Error(
+      `Failed to evaluate auth guard error spike: ${errorRes.error.message}`,
+    );
   }
 
   const denied = deniedRes.count ?? 0;
@@ -440,7 +472,9 @@ async function evaluateLoginRedirectLoop(): Promise<CandidateAlert | null> {
     .gte("created_at", sinceIso);
 
   if (error) {
-    throw new Error(`Failed to evaluate login redirect loops: ${error.message}`);
+    throw new Error(
+      `Failed to evaluate login redirect loops: ${error.message}`,
+    );
   }
 
   const loopCount = count ?? 0;
@@ -468,7 +502,9 @@ async function evaluateBootstrapRecoveryFailure(): Promise<CandidateAlert | null
     .gte("created_at", sinceIso);
 
   if (error) {
-    throw new Error(`Failed to evaluate bootstrap recovery failures: ${error.message}`);
+    throw new Error(
+      `Failed to evaluate bootstrap recovery failures: ${error.message}`,
+    );
   }
 
   const failureCount = count ?? 0;
@@ -497,14 +533,18 @@ async function evaluateLegalAcceptanceGap(): Promise<CandidateAlert | null> {
     .maybeSingle();
 
   if (conferenceError) {
-    throw new Error(`Failed to evaluate legal acceptance gap: ${conferenceError.message}`);
+    throw new Error(
+      `Failed to evaluate legal acceptance gap: ${conferenceError.message}`,
+    );
   }
   if (!conference) return null;
 
   if (!conference.start_date) return null;
   const now = new Date();
   const start = new Date(`${conference.start_date}T00:00:00Z`);
-  const daysUntil = Math.floor((start.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
+  const daysUntil = Math.floor(
+    (start.getTime() - now.getTime()) / (1000 * 60 * 60 * 24),
+  );
   if (daysUntil > 30) return null;
 
   const [legalRes, regsRes] = await Promise.all([
@@ -526,7 +566,9 @@ async function evaluateLegalAcceptanceGap(): Promise<CandidateAlert | null> {
     throw new Error(`Failed to load legal versions: ${legalRes.error.message}`);
   }
   if (regsRes.error) {
-    throw new Error(`Failed to load conference registrations: ${regsRes.error.message}`);
+    throw new Error(
+      `Failed to load conference registrations: ${regsRes.error.message}`,
+    );
   }
 
   const latestByType = new Map<string, { id: string; document_type: string }>();
@@ -551,13 +593,16 @@ async function evaluateLegalAcceptanceGap(): Promise<CandidateAlert | null> {
     .in("legal_version_id", legalVersionIds);
 
   if (acceptanceError) {
-    throw new Error(`Failed to load legal acceptances: ${acceptanceError.message}`);
+    throw new Error(
+      `Failed to load legal acceptances: ${acceptanceError.message}`,
+    );
   }
 
   const acceptedByVersion = new Map<string, Set<string>>();
   for (const row of acceptanceRows ?? []) {
     if (!requiredUsers.has(row.user_id)) continue;
-    const set = acceptedByVersion.get(row.legal_version_id) ?? new Set<string>();
+    const set =
+      acceptedByVersion.get(row.legal_version_id) ?? new Set<string>();
     set.add(row.user_id);
     acceptedByVersion.set(row.legal_version_id, set);
   }
@@ -603,24 +648,28 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
     .limit(20);
 
   if (conferenceError) {
-    throw new Error(`Failed to evaluate retention overdue: ${conferenceError.message}`);
+    throw new Error(
+      `Failed to evaluate retention overdue: ${conferenceError.message}`,
+    );
   }
   const conferenceRows = conferences ?? [];
   if (conferenceRows.length === 0) return null;
 
-  const dueConferences = conferenceRows.map((conference) => {
-    const cutoffAt = new Date(
-      Date.UTC(conference.year, 2, 1, 0, 0, 0, 0)
-    ).toISOString();
-    const cutoffMs = new Date(cutoffAt).getTime();
-    const overdueHours = (now.getTime() - cutoffMs) / (1000 * 60 * 60);
-    return {
-      conference,
-      cutoffAt,
-      overdueHours,
-      isDue: overdueHours >= 0,
-    };
-  }).filter((row) => row.isDue);
+  const dueConferences = conferenceRows
+    .map((conference) => {
+      const cutoffAt = new Date(
+        Date.UTC(conference.year, 2, 1, 0, 0, 0, 0),
+      ).toISOString();
+      const cutoffMs = new Date(cutoffAt).getTime();
+      const overdueHours = (now.getTime() - cutoffMs) / (1000 * 60 * 60);
+      return {
+        conference,
+        cutoffAt,
+        overdueHours,
+        isDue: overdueHours >= 0,
+      };
+    })
+    .filter((row) => row.isDue);
 
   if (dueConferences.length === 0) return null;
 
@@ -629,12 +678,14 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
     .select("conference_id, status, executed_at, cutoff_at, error_details")
     .in(
       "conference_id",
-      dueConferences.map((row) => row.conference.id)
+      dueConferences.map((row) => row.conference.id),
     )
     .order("executed_at", { ascending: false });
 
   if (runsError) {
-    throw new Error(`Failed to evaluate retention run telemetry: ${runsError.message}`);
+    throw new Error(
+      `Failed to evaluate retention run telemetry: ${runsError.message}`,
+    );
   }
 
   const runsByConference = new Map<
@@ -674,7 +725,7 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
     const conferenceId = row.conference.id;
     const conferenceRuns = runsByConference.get(conferenceId) ?? [];
     const completedForCutoff = conferenceRuns.find(
-      (run) => run.status === "completed" && run.cutoff_at === row.cutoffAt
+      (run) => run.status === "completed" && run.cutoff_at === row.cutoffAt,
     );
     if (completedForCutoff) continue;
 
@@ -695,7 +746,8 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
 
   const hasFailed = overdue.some((row) => row.latestStatus === "failed");
   const maxOverdueHours = Math.max(...overdue.map((row) => row.overdueHours));
-  const severity: Severity = hasFailed || maxOverdueHours >= 24 ? "critical" : "warning";
+  const severity: Severity =
+    hasFailed || maxOverdueHours >= 24 ? "critical" : "warning";
 
   return {
     ruleKey: "retention_overdue",
@@ -714,8 +766,14 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
 async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
   const db = createAdminClient() as unknown as {
     from: (table: string) => {
-      select: (columns: string, opts?: { count?: "exact"; head?: boolean }) => {
-        eq: (column: string, value: unknown) => Promise<{
+      select: (
+        columns: string,
+        opts?: { count?: "exact"; head?: boolean },
+      ) => {
+        eq: (
+          column: string,
+          value: unknown,
+        ) => Promise<{
           data: unknown[] | null;
           count: number | null;
           error: { message: string } | null;
@@ -764,7 +822,9 @@ async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
     .in("membership_status", ["active", "reactivated"]);
 
   if (orgsError) {
-    throw new Error(`Failed to evaluate orgs missing admin: ${orgsError.message}`);
+    throw new Error(
+      `Failed to evaluate orgs missing admin: ${orgsError.message}`,
+    );
   }
   const orgRows = orgs ?? [];
   if (orgRows.length === 0) return null;
@@ -774,10 +834,15 @@ async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
     .select("organization_id")
     .eq("role", "org_admin")
     .eq("status", "active")
-    .in("organization_id", orgRows.map((o) => o.id));
+    .in(
+      "organization_id",
+      orgRows.map((o) => o.id),
+    );
 
   if (adminError) {
-    throw new Error(`Failed to evaluate org_admin coverage: ${adminError.message}`);
+    throw new Error(
+      `Failed to evaluate org_admin coverage: ${adminError.message}`,
+    );
   }
 
   const orgsWithAdmin = new Set((admins ?? []).map((a) => a.organization_id));
@@ -787,14 +852,21 @@ async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
   const { data: contacts, error: contactError } = await db
     .from("contacts")
     .select("organization_id")
-    .in("organization_id", missingAdmin.map((o) => o.id))
+    .in(
+      "organization_id",
+      missingAdmin.map((o) => o.id),
+    )
     .is("archived_at", null);
 
   if (contactError) {
-    throw new Error(`Failed to evaluate contact coverage: ${contactError.message}`);
+    throw new Error(
+      `Failed to evaluate contact coverage: ${contactError.message}`,
+    );
   }
 
-  const orgsWithContact = new Set((contacts ?? []).map((c) => c.organization_id));
+  const orgsWithContact = new Set(
+    (contacts ?? []).map((c) => c.organization_id),
+  );
   const readyToPromote = missingAdmin.filter((o) => orgsWithContact.has(o.id));
   const needsOutreach = missingAdmin.filter((o) => !orgsWithContact.has(o.id));
 
@@ -806,8 +878,16 @@ async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
       totalMissingAdmin: missingAdmin.length,
       readyToPromoteCount: readyToPromote.length,
       needsOutreachCount: needsOutreach.length,
-      readyToPromote: readyToPromote.map((o) => ({ id: o.id, name: o.name, type: o.type })),
-      needsOutreach: needsOutreach.map((o) => ({ id: o.id, name: o.name, type: o.type })),
+      readyToPromote: readyToPromote.map((o) => ({
+        id: o.id,
+        name: o.name,
+        type: o.type,
+      })),
+      needsOutreach: needsOutreach.map((o) => ({
+        id: o.id,
+        name: o.name,
+        type: o.type,
+      })),
     },
   };
 }
@@ -817,13 +897,21 @@ async function evaluateOrgsMissingAdmin(): Promise<CandidateAlert | null> {
  * only if no open/acknowledged alert with the same rule_key already exists.
  * Wrapped to never throw — alert infrastructure failure must not mask the caller's error.
  */
-export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<void> {
+export async function raiseAlertIfNotOpen(
+  candidate: CandidateAlert,
+): Promise<void> {
   try {
     const readDb = createAdminClient() as unknown as {
       from: (table: string) => {
         select: (columns: string) => {
-          eq: (col: string, val: string) => {
-            neq: (col: string, val: string) => Promise<{
+          eq: (
+            col: string,
+            val: string,
+          ) => {
+            neq: (
+              col: string,
+              val: string,
+            ) => Promise<{
               data: unknown[] | null;
               error: { message: string } | null;
             }>;
@@ -844,7 +932,9 @@ export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<vo
     await insertAlert(candidate);
   } catch {
     // Best-effort — do not let alert infrastructure failure mask the caller's error.
-    console.error(`[ops] raiseAlertIfNotOpen failed for rule_key=${candidate.ruleKey}`);
+    console.error(
+      `[ops] raiseAlertIfNotOpen failed for rule_key=${candidate.ruleKey}`,
+    );
   }
 }
 
@@ -864,10 +954,21 @@ export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<vo
 // ─────────────────────────────────────────────────────────────────────
 
 /** Board settings live in app_settings alongside the other integration config. */
-async function getBoardSettingNumber(key: string, fallback: number): Promise<number> {
+async function getBoardSettingNumber(
+  key: string,
+  fallback: number,
+): Promise<number> {
   const db = createAdminClient();
-  const { data } = await db.from("app_settings").select("value").eq("key", key).maybeSingle();
-  const parsed = Number(String(data?.value ?? "").replace(/"/g, "").trim());
+  const { data } = await db
+    .from("app_settings")
+    .select("value")
+    .eq("key", key)
+    .maybeSingle();
+  const parsed = Number(
+    String(data?.value ?? "")
+      .replace(/"/g, "")
+      .trim(),
+  );
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
@@ -892,7 +993,10 @@ async function evaluateBoardMeetingNotClosedOut(): Promise<CandidateAlert | null
     .lt("meeting_date", today)
     .order("meeting_date", { ascending: true });
 
-  if (error) throw new Error(`Failed to evaluate board meeting closeout: ${error.message}`);
+  if (error)
+    throw new Error(
+      `Failed to evaluate board meeting closeout: ${error.message}`,
+    );
 
   const stale = data ?? [];
   if (stale.length === 0) return null;
@@ -906,7 +1010,81 @@ async function evaluateBoardMeetingNotClosedOut(): Promise<CandidateAlert | null
         : `${stale.length} board meetings have passed but are still marked upcoming.`,
     details: {
       count: stale.length,
-      meetings: stale.map((m) => ({ id: m.id, title: m.title, meetingDate: m.meeting_date })),
+      meetings: stale.map((m) => ({
+        id: m.id,
+        title: m.title,
+        meetingDate: m.meeting_date,
+      })),
+    },
+  };
+}
+
+/**
+ * A benchmarking survey is coming up and nobody holds the committee lead.
+ *
+ * This is the ED's cue. The lead is the person who then hands out question
+ * review, QA verification and recipient confirmation — so until someone holds
+ * it, none of that work can start and nobody is chasing it. Fires from six
+ * weeks before the survey opens, and auto-resolves the moment a lead is
+ * appointed.
+ */
+async function evaluateBenchmarkingNoCommitteeLead(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  const { data: surveys, error: surveyError } = await db
+    .from("benchmarking_surveys")
+    .select("id, title, fiscal_year, opens_at, status")
+    .in("status", ["draft", "open"])
+    .not("opens_at", "is", null)
+    .order("opens_at", { ascending: true })
+    .limit(1);
+
+  if (surveyError) {
+    throw new Error(
+      `Failed to read benchmarking surveys: ${surveyError.message}`,
+    );
+  }
+
+  const survey = (surveys ?? [])[0];
+  if (!survey?.opens_at) return null;
+
+  const opensAt = new Date(survey.opens_at as string);
+  const daysUntilOpen = Math.ceil(
+    (opensAt.getTime() - Date.now()) / 86_400_000,
+  );
+  // Only nag inside the window where it is still actionable.
+  if (daysUntilOpen > 42) return null;
+
+  const nowIso = new Date().toISOString();
+  const { data: leads, error: leadError } = await db
+    .from("capability_grants")
+    .select("id")
+    .eq("capability", "benchmarking.committee_lead")
+    .is("revoked_at", null)
+    .lte("starts_at", nowIso)
+    .gt("ends_at", nowIso)
+    .limit(1);
+
+  if (leadError) {
+    throw new Error(
+      `Failed to read committee lead grants: ${leadError.message}`,
+    );
+  }
+  if ((leads ?? []).length > 0) return null;
+
+  return {
+    ruleKey: "benchmarking_no_committee_lead",
+    severity: daysUntilOpen <= 14 ? "critical" : "warning",
+    message:
+      daysUntilOpen >= 0
+        ? `No benchmarking committee lead appointed — ${survey.title} opens in ${daysUntilOpen} day${daysUntilOpen === 1 ? "" : "s"}.`
+        : `No benchmarking committee lead appointed — ${survey.title} is already open.`,
+    details: {
+      surveyId: survey.id,
+      fiscalYear: survey.fiscal_year,
+      opensAt: survey.opens_at,
+      daysUntilOpen,
+      appointAt: "/admin/access",
     },
   };
 }
@@ -922,7 +1100,10 @@ async function evaluateBoardNoUpcomingMeeting(): Promise<CandidateAlert | null> 
     .gte("meeting_date", todayString())
     .limit(1);
 
-  if (error) throw new Error(`Failed to evaluate upcoming board meetings: ${error.message}`);
+  if (error)
+    throw new Error(
+      `Failed to evaluate upcoming board meetings: ${error.message}`,
+    );
   if ((data ?? []).length > 0) return null;
 
   return {
@@ -963,7 +1144,7 @@ async function evaluateBoardVoteLapsed(): Promise<CandidateAlert | null> {
     .select("id, applicant_name, application_data, paid_amount_cents")
     .in(
       "id",
-      lapsed.map((v) => v.application_id as string)
+      lapsed.map((v) => v.application_id as string),
     )
     .eq("status", "pending_review");
 
@@ -973,8 +1154,11 @@ async function evaluateBoardVoteLapsed(): Promise<CandidateAlert | null> {
     const data = app.application_data as Record<string, unknown> | null;
     return {
       applicationId: app.id as string,
-      name:
-        ((data?.company_name as string) || (app.applicant_name as string) || "Unnamed applicant").trim(),
+      name: (
+        (data?.company_name as string) ||
+        (app.applicant_name as string) ||
+        "Unnamed applicant"
+      ).trim(),
       paidCents: (app.paid_amount_cents as number) ?? null,
     };
   });
@@ -1081,7 +1265,10 @@ async function evaluateBoardVoteNotClosed(): Promise<CandidateAlert | null> {
 async function evaluateBoardRosterSize(): Promise<CandidateAlert | null> {
   const db = createAdminClient();
 
-  const { data, error } = await db.from("profiles").select("id").eq("global_role", "admin");
+  const { data, error } = await db
+    .from("profiles")
+    .select("id")
+    .eq("global_role", "admin");
   if (error || !data) return null;
   if (data.length === EXPECTED_BOARD_SIZE) return null;
 
@@ -1107,7 +1294,8 @@ async function evaluateBoardActionItemOverdue(): Promise<CandidateAlert | null> 
     .lt("due_date", todayString())
     .order("due_date", { ascending: true });
 
-  if (error) throw new Error(`Failed to evaluate board action items: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to evaluate board action items: ${error.message}`);
 
   const overdue = data ?? [];
   if (overdue.length === 0) return null;
@@ -1122,7 +1310,12 @@ async function evaluateBoardActionItemOverdue(): Promise<CandidateAlert | null> 
     details: {
       count: overdue.length,
       oldestDueDate: overdue[0].due_date,
-      items: overdue.map((i) => ({ id: i.id, title: i.title, dueDate: i.due_date, assignees: i.assignees })),
+      items: overdue.map((i) => ({
+        id: i.id,
+        title: i.title,
+        dueDate: i.due_date,
+        assignees: i.assignees,
+      })),
     },
   };
 }
@@ -1151,9 +1344,12 @@ async function evaluateBoardMinutesOverdue(): Promise<CandidateAlert | null> {
     .lt("meeting_date", cutoffDate)
     .order("meeting_date", { ascending: true });
 
-  if (error) throw new Error(`Failed to evaluate board minutes: ${error.message}`);
+  if (error)
+    throw new Error(`Failed to evaluate board minutes: ${error.message}`);
 
-  const missing = (data ?? []).filter((m) => !m.minutes_html || m.minutes_html.trim() === "");
+  const missing = (data ?? []).filter(
+    (m) => !m.minutes_html || m.minutes_html.trim() === "",
+  );
   if (missing.length === 0) return null;
 
   return {
@@ -1166,7 +1362,11 @@ async function evaluateBoardMinutesOverdue(): Promise<CandidateAlert | null> {
     details: {
       count: missing.length,
       graceDays,
-      meetings: missing.map((m) => ({ id: m.id, title: m.title, meetingDate: m.meeting_date })),
+      meetings: missing.map((m) => ({
+        id: m.id,
+        title: m.title,
+        meetingDate: m.meeting_date,
+      })),
     },
   };
 }
@@ -1187,7 +1387,9 @@ async function evaluateBoardMinutesOverdue(): Promise<CandidateAlert | null> {
  */
 async function evaluateDbAccessDrift(): Promise<CandidateAlert[]> {
   const db = createAdminClient() as unknown as {
-    rpc: (fn: string) => Promise<{ data: unknown; error: { message: string } | null }>;
+    rpc: (
+      fn: string,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
   };
 
   const { data, error } = await db.rpc("db_access_drift");
@@ -1202,7 +1404,9 @@ async function evaluateDbAccessDrift(): Promise<CandidateAlert[]> {
         severity: "warning",
         message:
           "The database access-drift audit could not run, so GRANT/policy drift is currently unmonitored.",
-        details: { error: error?.message ?? "db_access_drift() returned no data" },
+        details: {
+          error: error?.message ?? "db_access_drift() returned no data",
+        },
       },
     ];
   }
@@ -1233,7 +1437,11 @@ async function evaluateDbAccessDrift(): Promise<CandidateAlert[]> {
       ruleKey: `db_access_drift:silent_noop:${finding.table}`,
       severity: "warning",
       message: `Writes to "${finding.table}" (${finding.commands}) through the session client now match zero rows and report success anyway — \`authenticated\` holds the GRANT but no RLS policy allows the row. Write through createAdminClient() behind an app-layer auth check, or add a scoped policy.`,
-      details: { table: finding.table, commands: finding.commands, kind: "silent_noop" },
+      details: {
+        table: finding.table,
+        commands: finding.commands,
+        kind: "silent_noop",
+      },
     };
   });
 }
@@ -1255,6 +1463,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateOrgsMissingAdmin(),
     evaluateBoardMeetingNotClosedOut(),
     evaluateBoardNoUpcomingMeeting(),
+    evaluateBenchmarkingNoCommitteeLead(),
     evaluateBoardActionItemOverdue(),
     evaluateBoardMinutesOverdue(),
     evaluateBoardVoteAwaitingExecution(),
@@ -1282,15 +1491,32 @@ export async function evaluateOpsAlerts(): Promise<{
 }> {
   try {
     const candidates = await evaluateCandidates();
-    const activeRuleKeys = new Set(candidates.map((candidate) => candidate.ruleKey));
+    const activeRuleKeys = new Set(
+      candidates.map((candidate) => candidate.ruleKey),
+    );
 
     const db = createAdminClient() as unknown as {
       from: (table: string) => {
         select: (columns: string) => {
-          in: (column: string, values: string[]) => {
-            neq: (column: string, value: string) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+          in: (
+            column: string,
+            values: string[],
+          ) => {
+            neq: (
+              column: string,
+              value: string,
+            ) => Promise<{
+              data: unknown[] | null;
+              error: { message: string } | null;
+            }>;
           };
-          neq: (column: string, value: string) => Promise<{ data: unknown[] | null; error: { message: string } | null }>;
+          neq: (
+            column: string,
+            value: string,
+          ) => Promise<{
+            data: unknown[] | null;
+            error: { message: string } | null;
+          }>;
         };
       };
     };
@@ -1301,7 +1527,9 @@ export async function evaluateOpsAlerts(): Promise<{
       .neq("status", "resolved");
 
     if (existingRes.error) {
-      throw new Error(`Failed to load existing ops alerts: ${existingRes.error.message}`);
+      throw new Error(
+        `Failed to load existing ops alerts: ${existingRes.error.message}`,
+      );
     }
 
     const existing = (existingRes.data ?? []) as OpsAlertRow[];
@@ -1314,7 +1542,8 @@ export async function evaluateOpsAlerts(): Promise<{
 
     let createdCount = 0;
     for (const candidate of candidates) {
-      const alreadyOpen = (existingByRule.get(candidate.ruleKey) ?? []).length > 0;
+      const alreadyOpen =
+        (existingByRule.get(candidate.ruleKey) ?? []).length > 0;
       if (alreadyOpen) continue;
       await insertAlert(candidate);
       createdCount += 1;
@@ -1342,7 +1571,10 @@ export async function evaluateOpsAlerts(): Promise<{
       activeRuleKeys: [],
       createdCount: 0,
       resolvedCount: 0,
-      error: error instanceof Error ? error.message : "Unknown alert evaluation error",
+      error:
+        error instanceof Error
+          ? error.message
+          : "Unknown alert evaluation error",
     };
   }
 }

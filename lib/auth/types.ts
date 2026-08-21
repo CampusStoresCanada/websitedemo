@@ -38,8 +38,6 @@ export interface UserProfile {
   display_name: string | null;
   avatar_url: string | null;
   global_role: GlobalRole;
-  is_benchmarking_reviewer: boolean;
-  is_benchmarking_content_reviewer: boolean;
   created_at: string;
   updated_at: string;
 }

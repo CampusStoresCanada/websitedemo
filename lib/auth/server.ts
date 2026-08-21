@@ -11,7 +11,9 @@ import type {
   UserProfile,
 } from "./types";
 
-const ENCRYPTION_SECRET = process.env.CONTENT_ENCRYPTION_SECRET || "csc-demo-secret-change-in-production";
+const ENCRYPTION_SECRET =
+  process.env.CONTENT_ENCRYPTION_SECRET ||
+  "csc-demo-secret-change-in-production";
 
 export interface ServerAuthState {
   user: { id: string; email: string | undefined } | null;
@@ -25,6 +27,10 @@ export interface ServerAuthState {
   programs: MembershipProgramDef[];
   encryptionKey: CryptoKey | null;
   encryptionKeyBase64: string | null;
+  /** Capabilities held right now via unexpired, unrevoked grants. */
+  capabilities: string[];
+  isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
 }
 
 /**
@@ -34,7 +40,10 @@ export interface ServerAuthState {
  * instead of querying directly — cheap even if called more than once per request.
  */
 export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
-  const [snapshot, programs] = await Promise.all([getIdentitySnapshot(), getProgramsConfig()]);
+  const [snapshot, programs] = await Promise.all([
+    getIdentitySnapshot(),
+    getProgramsConfig(),
+  ]);
 
   if (snapshot.status === "anonymous") {
     return {
@@ -46,16 +55,29 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
       programs,
       encryptionKey: null,
       encryptionKeyBase64: null,
+      capabilities: [],
+      isBenchmarkingReviewer: false,
+      isBenchmarkingContentReviewer: false,
     };
   }
 
   const profile = snapshot.profileError ? null : snapshot.profile;
-  const organizations = snapshot.orgsError ? [] : (snapshot.organizations ?? []);
+  const organizations = snapshot.orgsError
+    ? []
+    : (snapshot.organizations ?? []);
   const globalRole: GlobalRole = profile?.global_role || "user";
-  const permissionState = derivePermissionState(globalRole, organizations, programs);
+  const permissionState = derivePermissionState(
+    globalRole,
+    organizations,
+    programs,
+  );
+  const capabilities = snapshot.capabilities ?? [];
 
   // Generate encryption key for this session
-  const encryptionKey = await generateSessionKey(snapshot.userId, ENCRYPTION_SECRET);
+  const encryptionKey = await generateSessionKey(
+    snapshot.userId,
+    ENCRYPTION_SECRET,
+  );
   const encryptionKeyBase64 = await exportKeyToBase64(encryptionKey);
 
   return {
@@ -67,5 +89,10 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
     programs,
     encryptionKey,
     encryptionKeyBase64,
+    capabilities,
+    isBenchmarkingReviewer: capabilities.includes("benchmarking.qa_verify"),
+    isBenchmarkingContentReviewer: capabilities.includes(
+      "benchmarking.content_review",
+    ),
   };
 });

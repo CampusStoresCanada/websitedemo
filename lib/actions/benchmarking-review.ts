@@ -1,7 +1,6 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
@@ -33,14 +32,7 @@ async function verifyContentReviewer(): Promise<ReviewAccess> {
   const admin = isGlobalAdmin(globalRole);
   if (admin) return { ok: true, userId, isAdmin: true };
 
-  const supabase = await createClient();
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("is_benchmarking_content_reviewer")
-    .eq("id", userId)
-    .maybeSingle();
-
-  if (profile?.is_benchmarking_content_reviewer !== true) {
+  if (!auth.ctx.isBenchmarkingContentReviewer) {
     return { ok: false, error: "Content reviewer access required" };
   }
   return { ok: true, userId, isAdmin: false };

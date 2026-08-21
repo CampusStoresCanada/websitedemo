@@ -21,7 +21,9 @@ import {
   requestWithdrawalAction,
   sendCallForNominationsAction,
   chaseIncompleteAction,
+  mintElectionActionItemsAction,
 } from "@/lib/actions/elections";
+import { ELECTION_TASKS } from "@/lib/elections/action-items";
 
 export const metadata = { title: "Election | Admin | Campus Stores Canada" };
 export const dynamic = "force-dynamic";
@@ -90,6 +92,11 @@ export default async function ElectionReviewPage({
     await chaseIncompleteAction(slug);
   }
 
+  async function mintTasks() {
+    "use server";
+    await mintElectionActionItemsAction(slug);
+  }
+
   const closing =
     daysUntilNominationsClose > 0
       ? `${daysUntilNominationsClose} day${daysUntilNominationsClose === 1 ? "" : "s"} left`
@@ -139,6 +146,25 @@ export default async function ElectionReviewPage({
           each becomes eligible the day it pays. This number is re-checked every time this page loads.
         </div>
       )}
+
+      {/* The election's obligations belong on the board's own list, assigned to
+          whoever holds each office — not in anyone's private notes. */}
+      <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+        <h2 className="text-sm font-semibold text-gray-900">Board action items</h2>
+        <p className="mt-1 text-xs text-gray-500">
+          {ELECTION_TASKS.length} obligations across the cycle, each assigned to the officer who
+          holds it and raised at the last board meeting before it is due. Safe to press again —
+          it adds only what is missing.
+        </p>
+        <form action={mintTasks} className="mt-3">
+          <button
+            type="submit"
+            className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Create or refresh the election&apos;s action items
+          </button>
+        </form>
+      </section>
 
       {/* Outbound mail. Both are buttons a person presses, not crons: the
           by-law fixes the earliest date, not the latest, and someone should be

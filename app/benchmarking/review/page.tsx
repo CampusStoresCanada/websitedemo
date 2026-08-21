@@ -18,13 +18,11 @@ export default async function BenchmarkingReviewPage() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name, is_benchmarking_content_reviewer")
+    .select("display_name")
     .eq("id", userId)
     .maybeSingle();
 
-  const isContentReviewer =
-    (profile as { is_benchmarking_content_reviewer?: boolean } | null)
-      ?.is_benchmarking_content_reviewer === true;
+  const isContentReviewer = auth.ctx.isBenchmarkingContentReviewer;
 
   if (!isContentReviewer && !admin) redirect("/benchmarking");
 

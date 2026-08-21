@@ -195,13 +195,18 @@ export async function loadPersonalTasks(
 export async function loadOrgTasks(
   db: AdminClient,
   conferenceId: string,
-  organizationId: string
+  organizationId: string,
+  /** Narrow to one checklist — used by surfaces that own a single topic, like
+   *  the listing proof showing only its own approval. */
+  checklistId?: string
 ): Promise<PersonalTask[]> {
-  const { data: checklists } = await db
+  let q = db
     .from("conference_checklists")
     .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
+  if (checklistId) q = q.eq("id", checklistId);
+  const { data: checklists } = await q;
 
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;

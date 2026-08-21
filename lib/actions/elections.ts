@@ -301,3 +301,40 @@ export async function mintElectionActionItemsAction(slug: string): Promise<Actio
   revalidatePath(`/admin/elections/${slug}`);
   return { ok: true };
 }
+
+
+/**
+ * Open an election cycle. The human "yes, start the thing."
+ *
+ * Deliberately not automatic. Opening an election is a governance act with a
+ * date on it, and the seat count has to be confirmed against the term register
+ * by someone who has looked — the four/five alternation is not reliable once a
+ * seat has been filled mid-term by appointment.
+ */
+export async function startElectionCycleAction(formData: FormData): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the board or association staff can open an election." };
+
+  const cycleYear = Number(formData.get("cycleYear"));
+  const seatsAvailable = Number(formData.get("seatsAvailable"));
+  const agmOverride = String(formData.get("agmDateOverride") ?? "").trim() || null;
+
+  if (!Number.isInteger(cycleYear) || cycleYear < 2000)
+    return { ok: false, error: "Enter the year the AGM falls in." };
+  if (!Number.isInteger(seatsAvailable) || seatsAvailable < 1)
+    return { ok: false, error: "Enter how many seats are up for election." };
+
+  const { startElectionCycle } = await import("@/lib/elections/cycle");
+  const result = await startElectionCycle({
+    cycleYear,
+    seatsAvailable,
+    startedByProfileId: auth.user.id,
+    agmDateOverride: agmOverride,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath("/admin/elections");
+  return { ok: true };
+}
