@@ -2,7 +2,9 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import type { Metadata } from "next";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { headers } from "next/headers";
 import { parseOrgCategories } from "@/lib/publication/categories";
+import { recordDirectoryScan } from "@/lib/publication/scan-tracking";
 
 export const dynamic = "force-dynamic";
 
@@ -80,12 +82,32 @@ export async function generateMetadata({ params }: { params: Promise<{ code: str
     : { title: "Not found" };
 }
 
-export default async function ExhibitorCardPage({ params }: { params: Promise<{ code: string }> }) {
+export default async function ExhibitorCardPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ code: string }>;
+  searchParams: Promise<{ s?: string }>;
+}) {
   const { code } = await params;
   const found = await loadByCode(code);
   if (!found) notFound();
 
   const { org, people, booths } = found;
+
+  // The printed QR encodes ?s=p, so a real scan off paper is distinguishable
+  // from someone following a shared link — which is the actual question when
+  // judging whether the print run earned its place. Awaited rather than
+  // fire-and-forget: this runs during render, and a floating promise in a
+  // serverless function can be killed before it lands. recordDirectoryScan
+  // never throws, so the page renders regardless.
+  const { s } = await searchParams;
+  await recordDirectoryScan({
+    organizationId: org.id,
+    publicCode: code.toUpperCase(),
+    userAgent: (await headers()).get("user-agent"),
+    source: s === "p" ? "print" : "link",
+  });
   const cats = parseOrgCategories(org.primary_category);
 
   return (

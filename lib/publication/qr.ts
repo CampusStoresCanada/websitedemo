@@ -24,9 +24,16 @@ import QRCode from "qrcode";
  */
 const ERROR_CORRECTION = "M" as const;
 
-/** Public URL a printed code resolves to. */
-export function exhibitorCodeUrl(baseUrl: string, publicCode: string): string {
-  return `${baseUrl.replace(/\/$/, "")}/e/${publicCode}`;
+/**
+ * Public URL a printed code resolves to.
+ *
+ * `?s=p` marks it as coming off paper. Four extra characters cost almost
+ * nothing in QR density and buy the one number that matters when deciding
+ * whether to print again: how many people scanned the book, as opposed to
+ * clicking a link someone shared.
+ */
+export function exhibitorCodeUrl(baseUrl: string, publicCode: string, fromPrint = true): string {
+  return `${baseUrl.replace(/\/$/, "")}/e/${publicCode}${fromPrint ? "?s=p" : ""}`;
 }
 
 /**

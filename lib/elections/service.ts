@@ -33,6 +33,12 @@ import {
 } from "./nomination";
 import { deriveSchedule, phaseOn, type ElectionSchedule } from "./schedule";
 import {
+  buildNominatingCommitteeReport,
+  type ReportDirector,
+  type ReportCandidate,
+} from "./documents/nominating-committee-report";
+import {
+  resolveRegion,
   buildRepresentationSnapshot,
   type OrgProfile,
   type RepresentationSnapshot,
@@ -2195,4 +2201,111 @@ export async function sendProxyForm(
     .eq("id", election.id);
 
   return ok({ ...summarizeOutcomes(outcomes), wasLate: state.proxy.overdue });
+}
+
+// ---------------------------------------------------------------------------
+// Documents
+// ---------------------------------------------------------------------------
+
+/**
+ * Officers the board elects each year (By-Law Part VI S1). Past President is not
+ * elected — it is held by the previous President — and the Executive Director is
+ * staff, so neither appears in the report's list.
+ */
+const ELECTED_OFFICER_TITLES = ["President", "Vice President", "Secretary", "Treasurer"];
+
+/**
+ * Assemble the Nominating Committee Report from the term register and the
+ * nominations. Everything factual in the document comes from here; the committee
+ * edits prose, not a roster.
+ */
+export async function getNominatingCommitteeReport(
+  slug: string,
+  options: { reportDate?: string } = {}
+): Promise<ReturnType<typeof buildNominatingCommitteeReport> | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const { data: body } = await db
+    .from("governance_bodies")
+    .select("seat_count, min_seat_count")
+    .eq("id", election.bodyId)
+    .maybeSingle();
+
+  // A term ending in the cycle year is up for election; anything later continues.
+  const { data: terms } = await db
+    .from("governance_role_assignments")
+    .select(
+      "term_end, person_profile_id, organization_id, profiles:person_profile_id(display_name), organizations:organization_id(name, province)"
+    )
+    .eq("body_id", election.bodyId)
+    .eq("role_key", "director")
+    .not("term_end", "is", null);
+
+  const toDirector = (row: {
+    profiles: { display_name: string } | null;
+    organizations: { name: string; province: string | null } | null;
+  }): ReportDirector => ({
+    name: row.profiles?.display_name ?? "Unnamed director",
+    institution: row.organizations?.name ?? "Institution not recorded",
+    region:
+      resolveRegion(row.organizations?.province ?? null) === "western"
+        ? "Western Region"
+        : resolveRegion(row.organizations?.province ?? null) === "eastern"
+          ? "Eastern Region"
+          : "Region not recorded",
+  });
+
+  const continuing: ReportDirector[] = [];
+  const completing: ReportDirector[] = [];
+  for (const t of terms ?? []) {
+    const endYear = Number((t.term_end as string).slice(0, 4));
+    const d = toDirector(t as Parameters<typeof toDirector>[0]);
+    if (endYear === election.cycleYear) completing.push(d);
+    else if (endYear > election.cycleYear) continuing.push(d);
+  }
+
+  // Candidates are whoever would reach the ballot as things stand. Before the
+  // close that is the live completeness check; after it, the frozen field.
+  const nominations = await listNominations(slug);
+  const standing = nominations.filter(
+    (n) => n.status === "validated" || n.completeness.complete
+  );
+
+  const incumbentNames = new Set(completing.map((d) => d.name));
+  const candidates: ReportCandidate[] = [];
+  for (const n of standing) {
+    const { data: org } = await db
+      .from("organizations")
+      .select("province")
+      .eq("id", n.nomineeOrganizationId)
+      .maybeSingle();
+    const region = resolveRegion((org?.province as string) ?? null);
+    candidates.push({
+      name: n.nomineeName,
+      institution: n.organizationName,
+      region:
+        region === "western"
+          ? "Western Region"
+          : region === "eastern"
+            ? "Eastern Region"
+            : "Region not recorded",
+      isIncumbent: incumbentNames.has(n.nomineeName),
+    });
+  }
+
+  return buildNominatingCommitteeReport({
+    cycleYear: election.cycleYear,
+    reportDate: options.reportDate ?? today(),
+    boardMinSeats: (body?.min_seat_count as number) ?? (body?.seat_count as number) ?? election.seatsAvailable,
+    boardMaxSeats: (body?.seat_count as number) ?? election.seatsAvailable,
+    seatsAvailable: election.seatsAvailable,
+    nominationsCloseOn: election.schedule.nominationsCloseAt,
+    nominationFormName: `${election.cycleYear} Board Nomination Form`,
+    continuing,
+    completing,
+    candidates,
+    officerTitles: ELECTED_OFFICER_TITLES,
+  });
 }

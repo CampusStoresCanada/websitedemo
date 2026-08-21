@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { createAdminClient } from "@/lib/supabase/admin";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
 
 export const metadata = {
@@ -72,17 +73,29 @@ export default async function RecipientsPage() {
   };
   const orgById = new Map((orgs ?? []).map((o) => [o.id, o]));
 
+  // Access was already decided above (rep or admin). Read with the service
+  // role from here, matching app/api/search/mentions/route.ts — the house
+  // pattern is guard-at-the-route, not RLS. Reading contacts on the session
+  // client returns only your own org's rows, silently, and the page would
+  // tell a rep "nobody on file" for all 52 stores.
+  const db = createAdminClient();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: contacts } = (await (supabase as any)
+  const { data: contacts } = (await (db as any)
     .from("contacts")
     .select(
-      "id, name, role_title, work_email, email, is_primary, organization_id, last_contact_date",
+      "id, name, role_title, work_email, email, is_primary, organization_id, last_contact_date, hidden",
     )
     .in(
       "organization_id",
       orgIds.length ? orgIds : ["00000000-0000-0000-0000-000000000000"],
     )
-    .is("archived_at", null)) as { data: any[] | null };
+    .is("archived_at", null)
+    // Reading service-side skips lib/visibility masking, so honour the one
+    // signal that is a person saying "do not show me" rather than an org
+    // choosing what appears in the public directory. A rep has no reason to
+    // be offered someone flagged hidden.
+    .or("hidden.is.null,hidden.eq.false")) as { data: any[] | null };
 
   const contactsByOrg = new Map<string, any[]>();
   for (const c of contacts ?? []) {

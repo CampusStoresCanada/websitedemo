@@ -33,13 +33,33 @@ describe("AGM date resolution", () => {
 describe("the CSC 2026-27 cycle", () => {
   const schedule = deriveSchedule("2027-01-21", CSC_ELECTIONS_CONFIG);
 
+  it("keeps the ballot clear of the holiday shutdown", () => {
+    // The by-law minimums (60/30) would run the ballot to Dec 22, into a period
+    // when campus stores are closed. Running EARLIER than a minimum is
+    // compliant; the deadline would have collected out-of-office replies.
+    expect(schedule.ballotsCloseAt < "2026-12-18").toBe(true);
+  });
+
+  it("still satisfies every by-law minimum", () => {
+    // "no fewer than 120 days", "no less than 60 days", "no less than 30 days"
+    const days = (from: string) =>
+      Math.round(
+        (Date.parse("2027-01-21T00:00:00Z") - Date.parse(`${from}T00:00:00Z`)) / 86_400_000
+      );
+    expect(days(schedule.nominationsOpenAt)).toBeGreaterThanOrEqual(120);
+    expect(days(schedule.ballotsOpenAt)).toBeGreaterThanOrEqual(60);
+    expect(days(schedule.ballotsCloseAt)).toBeGreaterThanOrEqual(30);
+    // The 90-day nomination close is a member RIGHT and must not move earlier.
+    expect(days(schedule.nominationsCloseAt)).toBe(90);
+  });
+
   it("derives the four by-law countbacks", () => {
     expect(schedule).toEqual({
       agmDate: "2027-01-21",
       nominationsOpenAt: "2026-09-23", // 120 days
       nominationsCloseAt: "2026-10-23", // 90 days
-      ballotsOpenAt: "2026-11-22", // 60 days
-      ballotsCloseAt: "2026-12-22", // 30 days
+      ballotsOpenAt: "2026-11-18", // 64 days — ahead of the 60-day minimum
+      ballotsCloseAt: "2026-12-07", // 45 days — ahead of the 30-day minimum
     });
   });
 

@@ -20,6 +20,11 @@
  * Pure. No DB, no clock beyond what the caller passes in.
  */
 
+export interface BlackoutRange {
+  from: string;
+  to: string;
+}
+
 export interface NoticeWindow {
   /** Earliest a notice may be given — 35 days before by default. */
   opensOn: string;
@@ -33,12 +38,34 @@ export interface NoticeWindow {
    */
   combinedFrom: string | null;
   combinedTo: string | null;
+  /** The correspondence blackout overlapping this window, if any. */
+  blackout: BlackoutRange | null;
+  /** Days in the window on which a notice would actually be read. */
+  usableDays: string[];
+  /**
+   * The day to aim for — the first usable one. The by-law's closing date is the
+   * legal backstop, not the target; treating it as the target is how a notice
+   * ends up sent into an empty building.
+   */
+  recommendedOn: string | null;
 }
 
 export interface NoticeConfig {
   electronicNoticeEarliestDays: number;
   electronicNoticeLatestDays: number;
   proxyFormDaysBefore: number;
+  /**
+   * The stretch of the year when correspondence to campus stores reaches nobody
+   * — from the third Friday of December to the first Monday of the new year.
+   * Institutions close, and notice sent into it is legally given and practically
+   * unread.
+   *
+   * This does NOT move the by-law window, which is fixed relative to the meeting
+   * and cannot be shifted without moving the meeting. It exists so the window's
+   * USABLE days can be counted and the opening edge recommended, rather than the
+   * closing edge being treated as the target because it is the legal deadline.
+   */
+  blackout: { fromMonth: number; fromWeekday: number; fromOccurrence: number; toMonth: number; toWeekday: number; toOccurrence: number } | null;
 }
 
 /** By-Law Part VII S4(b) and S7(b). */
@@ -46,7 +73,24 @@ export const CSC_NOTICE_CONFIG: NoticeConfig = {
   electronicNoticeEarliestDays: 35,
   electronicNoticeLatestDays: 21,
   proxyFormDaysBefore: 30,
+  // Third Friday of December through the first Monday of January.
+  blackout: {
+    fromMonth: 12, fromWeekday: 5, fromOccurrence: 3,
+    toMonth: 1, toWeekday: 1, toOccurrence: 1,
+  },
 };
+
+/** nth weekday of a month, as YYYY-MM-DD. */
+function nthWeekday(year: number, month: number, weekday: number, occurrence: number): string {
+  const matches: Date[] = [];
+  const probe = new Date(Date.UTC(year, month - 1, 1));
+  while (probe.getUTCMonth() === month - 1) {
+    const iso = probe.getUTCDay() === 0 ? 7 : probe.getUTCDay();
+    if (iso === weekday) matches.push(new Date(probe));
+    probe.setUTCDate(probe.getUTCDate() + 1);
+  }
+  return toISODate(matches[occurrence - 1] ?? matches[matches.length - 1]);
+}
 
 function parseISODate(iso: string): Date {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
@@ -72,12 +116,31 @@ export function resolveNoticeWindow(
   const combinedFrom = proxyDueOn >= opensOn ? opensOn : null;
   const combinedTo = proxyDueOn <= closesOn ? proxyDueOn : null;
 
+  // The blackout is anchored on the year the window falls in, not the meeting's.
+  let blackout: BlackoutRange | null = null;
+  if (config.blackout) {
+    const windowYear = Number(opensOn.slice(0, 4));
+    const b = config.blackout;
+    const from = nthWeekday(windowYear, b.fromMonth, b.fromWeekday, b.fromOccurrence);
+    const toYear = b.toMonth < b.fromMonth ? windowYear + 1 : windowYear;
+    blackout = { from, to: nthWeekday(toYear, b.toMonth, b.toWeekday, b.toOccurrence) };
+  }
+
+  const usableDays: string[] = [];
+  for (let d = parseISODate(opensOn); toISODate(d) <= closesOn; d.setUTCDate(d.getUTCDate() + 1)) {
+    const iso = toISODate(d);
+    if (!blackout || iso < blackout.from || iso > blackout.to) usableDays.push(iso);
+  }
+
   return {
     opensOn,
     closesOn,
     proxyDueOn,
     combinedFrom: combinedFrom && combinedTo ? combinedFrom : null,
     combinedTo: combinedFrom && combinedTo ? combinedTo : null,
+    blackout,
+    usableDays,
+    recommendedOn: usableDays[0] ?? null,
   };
 }
 
@@ -135,18 +198,24 @@ export function evaluateNoticeWindow(
         `Take advice before proceeding; moving the meeting may be the cleaner course.`,
     };
 
-  // Inside the window. Flag the tail, because the last days fall over the
-  // holidays for a January AGM and there is no board meeting left to catch it.
-  const closing = daysLeftInWindow <= 5;
+  // Inside the window. "Closing" is measured against the last day anyone will
+  // READ it, not the last day it may legally be sent — for a January meeting
+  // those are two very different dates.
+  const lastUsable = window.usableDays[window.usableDays.length - 1] ?? window.closesOn;
+  const inBlackout = !!window.blackout && onDate >= window.blackout.from && onDate <= window.blackout.to;
+  const closing = onDate >= lastUsable || daysLeftInWindow <= 5;
+
   return {
     code: closing ? "ok_but_closing" : "ok",
     canSend: true,
     daysUntilAgm,
     daysLeftInWindow,
     window,
-    message: closing
-      ? `${daysLeftInWindow} day${daysLeftInWindow === 1 ? "" : "s"} left — notice must be given by ${window.closesOn}. After that the meeting is improperly called.`
-      : `Within the window. Notice must be given by ${window.closesOn}.`,
+    message: inBlackout
+      ? `Legally still open until ${window.closesOn}, but campus stores are closed until ${window.blackout!.to} — this notice will be given and not read. Send it, then follow up in the new year.`
+      : closing
+        ? `Last usable day is ${lastUsable} (institutions close ${window.blackout?.from ?? "—"}). The legal deadline is ${window.closesOn}, but notice given after ${lastUsable} reaches nobody.`
+        : `Within the window. Aim for ${window.recommendedOn} — the by-law deadline is ${window.closesOn}, but institutions close ${window.blackout?.from ?? "—"}.`,
   };
 }
 

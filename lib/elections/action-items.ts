@@ -26,9 +26,16 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { resolveNoticeWindow } from "./agm-notice";
 import type { Election } from "./service";
 
-/** Last day notice of the AGM may be given — By-Law Part VII S4(b). */
-function noticeWindowCloses(election: Election): string {
-  return resolveNoticeWindow(election.schedule.agmDate).closesOn;
+/**
+ * When notice of the AGM should GO OUT — the first day in the window on which
+ * anyone will read it, not the last day it may legally be sent.
+ *
+ * Those are different dates for a January meeting, and dating the task to the
+ * legal deadline is how a notice ends up correctly given into an empty building.
+ */
+function noticeShouldGoOut(election: Election): string {
+  const w = resolveNoticeWindow(election.schedule.agmDate);
+  return w.recommendedOn ?? w.closesOn;
 }
 
 /** By-Law Part VII S7(b) — the proxy form deadline. */
@@ -130,8 +137,8 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "agm_notice",
     title: "Give notice of the {year} annual general meeting",
     description:
-      "By-Law Part VII S4(b): notice of the time and place must reach every member entitled to vote, by electronic means, during a period of 21 to 35 days before the meeting.\n\nThis is a WINDOW, not a deadline — too early is as defective as too late. Miss the 21-day floor and notice was not given as the by-laws require, which leaves the meeting improperly called and everything decided at it open to challenge, including the election of directors.\n\nFor a January meeting the window falls over the holidays and the last board meeting of the year sits at its opening edge. There is no later meeting to catch a miss, so this is best done at that meeting or in the days immediately after it. The election screen will not let notice go out on the wrong side of the window.\n\nSending it also sends the proxy form where the dates allow, which discharges both obligations in one go.",
-    dueOn: (e) => noticeWindowCloses(e),
+      "By-Law Part VII S4(b): notice of the time and place must reach every member entitled to vote, by electronic means, during a period of 21 to 35 days before the meeting.\n\nThis is a WINDOW, not a deadline — too early is as defective as too late. Miss the 21-day floor and notice was not given as the by-laws require, which leaves the meeting improperly called and everything decided at it open to challenge, including the election of directors.\n\nThe due date on this item is the day the window OPENS, not the day it closes, and that is deliberate. Campus stores close from the third Friday of December until the new year, so for a January meeting almost the whole window falls into a period when notice is legally given and read by nobody. Send it on the opening day — which is this board meeting — and the membership actually sees it.\n\nUnlike the ballot dates, this window cannot be moved earlier: it is fixed relative to the meeting. The election screen shows how many usable days remain and will not let notice go out on the wrong side of the window.\n\nSending it also sends the proxy form where the dates allow, which discharges both obligations in one go.",
+    dueOn: (e) => noticeShouldGoOut(e),
     owners: ["executive_director"],
   },
   {

@@ -4,6 +4,8 @@ import { exhibitorCodeUrl, qrSvg } from "../qr";
 describe("exhibitorCodeUrl", () => {
   it("builds the permanent /e/<code> URL", () => {
     expect(exhibitorCodeUrl("https://campusstores.ca", "508C5511"))
+      .toBe("https://campusstores.ca/e/508C5511?s=p");
+    expect(exhibitorCodeUrl("https://campusstores.ca", "508C5511", false))
       .toBe("https://campusstores.ca/e/508C5511");
   });
 
@@ -11,7 +13,7 @@ describe("exhibitorCodeUrl", () => {
     // A double slash still resolves, but it prints into the QR and makes the
     // code denser for no reason.
     expect(exhibitorCodeUrl("https://campusstores.ca/", "508C5511"))
-      .toBe("https://campusstores.ca/e/508C5511");
+      .toBe("https://campusstores.ca/e/508C5511?s=p");
   });
 });
 

@@ -906,70 +906,6 @@ export type Database = {
           },
         ]
       }
-      benchmarking_recipients: {
-        Row: {
-          assigned_to: string | null
-          confirmed_at: string | null
-          confirmed_by: string | null
-          contact_id: string | null
-          created_at: string
-          id: string
-          note: string | null
-          organization_id: string
-          status: string
-          survey_id: string
-          updated_at: string
-        }
-        Insert: {
-          assigned_to?: string | null
-          confirmed_at?: string | null
-          confirmed_by?: string | null
-          contact_id?: string | null
-          created_at?: string
-          id?: string
-          note?: string | null
-          organization_id: string
-          status?: string
-          survey_id: string
-          updated_at?: string
-        }
-        Update: {
-          assigned_to?: string | null
-          confirmed_at?: string | null
-          confirmed_by?: string | null
-          contact_id?: string | null
-          created_at?: string
-          id?: string
-          note?: string | null
-          organization_id?: string
-          status?: string
-          survey_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "benchmarking_recipients_organization_id_fkey"
-            columns: ["organization_id"]
-            isOneToOne: false
-            referencedRelation: "organizations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
-            columns: ["contact_id"]
-            isOneToOne: false
-            referencedRelation: "contacts"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "benchmarking_recipients_survey_id_fkey"
-            columns: ["survey_id"]
-            isOneToOne: false
-            referencedRelation: "benchmarking_surveys"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       benchmarking_field_reviews: {
         Row: {
           comment: string | null
@@ -1039,6 +975,112 @@ export type Database = {
           },
           {
             foreignKeyName: "benchmarking_field_reviews_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_recipients: {
+        Row: {
+          assigned_to: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          contact_id: string | null
+          created_at: string
+          id: string
+          note: string | null
+          organization_id: string
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id: string
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id?: string
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_recipients_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_confirmed_by_fkey"
+            columns: ["confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_survey_id_fkey"
             columns: ["survey_id"]
             isOneToOne: false
             referencedRelation: "benchmarking_surveys"
@@ -4711,6 +4753,48 @@ export type Database = {
           },
         ]
       }
+      directory_scan_events: {
+        Row: {
+          device: string
+          id: string
+          occurred_at: string
+          organization_id: string
+          public_code: string
+          source: string
+        }
+        Insert: {
+          device?: string
+          id?: string
+          occurred_at?: string
+          organization_id: string
+          public_code: string
+          source?: string
+        }
+        Update: {
+          device?: string
+          id?: string
+          occurred_at?: string
+          organization_id?: string
+          public_code?: string
+          source?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "directory_scan_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "directory_scan_events_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       election_ballot_selections: {
         Row: {
           ballot_id: string
@@ -5960,6 +6044,7 @@ export type Database = {
           id: string
           key: string
           max_consecutive_terms: number | null
+          min_seat_count: number | null
           name: string
           seat_count: number | null
           term_length_years: number | null
@@ -5970,6 +6055,7 @@ export type Database = {
           id?: string
           key: string
           max_consecutive_terms?: number | null
+          min_seat_count?: number | null
           name: string
           seat_count?: number | null
           term_length_years?: number | null
@@ -5980,6 +6066,7 @@ export type Database = {
           id?: string
           key?: string
           max_consecutive_terms?: number | null
+          min_seat_count?: number | null
           name?: string
           seat_count?: number | null
           term_length_years?: number | null
@@ -7660,6 +7747,7 @@ export type Database = {
           product_overlay_url: string | null
           profile_visibility: string | null
           province: string | null
+          public_code: string | null
           purolator_account: string | null
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
@@ -7767,6 +7855,7 @@ export type Database = {
           product_overlay_url?: string | null
           profile_visibility?: string | null
           province?: string | null
+          public_code?: string | null
           purolator_account?: string | null
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
@@ -7874,6 +7963,7 @@ export type Database = {
           product_overlay_url?: string | null
           profile_visibility?: string | null
           province?: string | null
+          public_code?: string | null
           purolator_account?: string | null
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
@@ -11891,6 +11981,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      csc_region: { Args: { p_province: string }; Returns: string }
       db_access_drift: { Args: never; Returns: Json }
       ensure_conference_badge_token_for_person: {
         Args: {
@@ -12007,6 +12098,7 @@ export type Database = {
           product_overlay_url: string | null
           profile_visibility: string | null
           province: string | null
+          public_code: string | null
           purolator_account: string | null
           qbo_invoice_id: string | null
           qbo_updated_at: string | null

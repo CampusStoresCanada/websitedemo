@@ -160,11 +160,28 @@ export interface ElectionsConfig {
  *    field comment.
  */
 export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
+  // The by-law countbacks are MINIMUMS, not fixed dates: Part V S2(a)/(b) say
+  // "no fewer than 120 days", S3(a) "no less than 60 days", S3(c) "no less than
+  // 30 days". Running earlier than the minimum is compliant; running later is
+  // not. The only true fixture is the 90-day nomination close, which is a member
+  // RIGHT to nominate up to that date and so must not be brought forward.
+  //
+  // These sit ahead of the minimums on purpose. Campus stores close from the
+  // third Friday of December to the first Monday of January, and a ballot whose
+  // deadline lands in that stretch collects out-of-office replies rather than
+  // votes. At 60/30 the 2027 ballot would have run Nov 22 – Dec 22 and died in
+  // the holidays; at 64/45 it runs Nov 18 – Dec 7 and closes clear of them.
+  // This mirrors what the association already does by instinct — the 2026 ballot
+  // ran Nov 12–28 for a January 15 meeting.
+  //
+  // Notice of the meeting cannot be moved this way: Part VII S4(b) is a window
+  // fixed relative to the meeting. See lib/elections/agm-notice.ts, which counts
+  // the window's usable days instead and recommends its opening edge.
   schedule: {
     nominationsOpenDaysBefore: 120,
     nominationsCloseDaysBefore: 90,
-    ballotsOpenDaysBefore: 60,
-    ballotsCloseDaysBefore: 30,
+    ballotsOpenDaysBefore: 64,
+    ballotsCloseDaysBefore: 45,
   },
   // Third Thursday of January. weekday 4 = Thursday (ISO: Mon=1).
   // Moved from Wednesday for 2027 on the Executive Director's conflict; the
