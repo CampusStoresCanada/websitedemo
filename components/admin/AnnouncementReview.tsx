@@ -204,8 +204,20 @@ export default function AnnouncementReview({ initial }: { initial: AnnouncementR
                     <dl className="mt-3 space-y-1 text-sm text-gray-700">
                       {row.category && (
                         <div>
-                          <dt className="inline font-semibold">Category: </dt>
-                          <dd className="inline">{row.category}</dd>
+                          {(() => {
+                            // Mirrors the post exactly: bold parent, then the
+                            // subcategories that actually tell a member something.
+                            const [primary, ...rest] = row.category
+                              .split(",")
+                              .map((c) => c.trim())
+                              .filter(Boolean);
+                            return (
+                              <>
+                                <dt className="inline font-semibold">{primary}</dt>
+                                {rest.length > 0 && <dd className="inline">: {rest.join(", ")}</dd>}
+                              </>
+                            );
+                          })()}
                         </div>
                       )}
                       {row.location && (

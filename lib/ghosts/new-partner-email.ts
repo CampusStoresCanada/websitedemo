@@ -43,7 +43,17 @@ export function buildAnnouncementEmail(input: AnnouncementEmailInput): {
   bodyHtml: string;
 } {
   const profileUrl = `${APP_URL.replace(/\/+$/, "")}/org/${input.organizationSlug}`;
-  const facts = [input.category, input.location].filter(Boolean).join(" · ");
+  // "<strong>General Merchandise</strong>: Apparel & Spirit Wear, …" — the
+  // parent bolded so it reads as the heading for the specifics after it.
+  const [primaryCategory, ...secondaryCategories] = (input.category ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
+  const categoryHtml = primaryCategory
+    ? `<strong>${escapeHtml(primaryCategory)}</strong>${
+        secondaryCategories.length ? `: ${escapeHtml(secondaryCategories.join(", "))}` : ""
+      }`
+    : "";
 
   // Trimmed to a couple of sentences — the full write-up lives on the post and
   // the profile, and a long email just delays the click.
@@ -52,7 +62,8 @@ export function buildAnnouncementEmail(input: AnnouncementEmailInput): {
   const bodyHtml = `
 <p>${escapeHtml(input.organizationName)} has joined Campus Stores Canada as a Vendor Partner.</p>
 ${shortSummary ? `<p>${escapeHtml(shortSummary)}</p>` : ""}
-${facts ? `<p><strong>${escapeHtml(facts)}</strong></p>` : ""}
+${categoryHtml ? `<p>${categoryHtml}</p>` : ""}
+${input.location ? `<p>${escapeHtml(input.location)}</p>` : ""}
 ${
   input.website?.trim()
     ? `<p><a href="${ensureAbsoluteUrl(input.website)}">${escapeHtml(displayUrl(input.website))}</a></p>`

@@ -6,7 +6,7 @@ const base = {
   organizationSlug: "sock-rocket",
   summaryText:
     "Sock Rocket is a Canadian social enterprise based in Calgary. They donate three pairs for every pair sold. Over 900,000 pairs have gone to Canadians in need. They work with Air Canada and TD Bank.",
-  category: "General Merchandise",
+  category: "General Merchandise, Apparel & Spirit Wear, Gifts & Collectibles",
   location: "Calgary, AB",
   circlePostUrl: "https://memberspace.campusstores.ca/c/announcements/welcome-sock-rocket",
   website: "sockrocket.ca",
@@ -30,6 +30,17 @@ describe("buildAnnouncementEmail", () => {
     // The third and fourth sentences are left for the post and the profile.
     expect(body).not.toContain("Over 900,000 pairs");
     expect(body).not.toContain("Air Canada");
+  });
+
+  it("bolds the parent category and lists the subcategories after it", () => {
+    const body = buildAnnouncementEmail(base).bodyHtml;
+    expect(body).toContain("<strong>General Merchandise</strong>: Apparel &amp; Spirit Wear, Gifts &amp; Collectibles");
+  });
+
+  it("bolds a lone category with no trailing colon", () => {
+    const body = buildAnnouncementEmail({ ...base, category: "Course Materials" }).bodyHtml;
+    expect(body).toContain("<strong>Course Materials</strong>");
+    expect(body).not.toContain("Course Materials</strong>:");
   });
 
   it("links the partner's own website, with a scheme forced on", () => {

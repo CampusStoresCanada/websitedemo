@@ -143,12 +143,14 @@ export function buildNewPartnerPost(input: NewPartnerPostInput): NewPartnerPost 
 
   const details: (PMNode | null)[] = [
     (() => {
-      const categories = splitCategories(org.primaryCategory);
-      if (!categories.length) return null;
-      return field(
-        categories.length > 1 ? "Categories" : "Category",
-        text(categories.join(", "))
-      );
+      // "**General Merchandise**: Apparel & Spirit Wear, Gifts & Collectibles".
+      // The parent is bolded and acts as the label — a member scanning the post
+      // sees which corner of the industry this is before reading the specifics.
+      const [primary, ...secondary] = splitCategories(org.primaryCategory);
+      if (!primary) return null;
+      return secondary.length
+        ? para(text(`${primary}: `, true), text(secondary.join(", ")))
+        : para(text(primary, true));
     })(),
     formatLocation(org.city, org.province)
       ? field("Based in", text(formatLocation(org.city, org.province)))
