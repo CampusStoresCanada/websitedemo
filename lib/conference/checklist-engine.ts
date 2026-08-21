@@ -4,6 +4,7 @@ import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
 import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
 import { computeOrgLegalCompleteness } from "./legal-acceptance";
+import { loadDirectoryCompleteness } from "@/lib/publication/completeness-loader";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -91,6 +92,28 @@ const CHECKS: Record<
   async legal_document_accepted(db, organizationId, conferenceId) {
     return computeOrgLegalCompleteness(db, conferenceId, organizationId);
   },
+
+  /**
+   * Everything the printed directory needs from this org's profile.
+   *
+   * "Done" is the required tier of PUBLICATION_FIELDS — logo, description,
+   * categories, at least one contact — read straight off `organizations`, the
+   * same derivation the gap report and the print-readiness gate use. It is
+   * deliberately not the enhanced tier: a listing missing a hero image still
+   * prints, so blocking on one would cry wolf.
+   *
+   * This is the check that reaches the orgs nothing else can. Onboarding
+   * nudges need a `user_onboarding_progress` journey, which only exists after
+   * someone logs in — 29 of 78 partners. Checklist reminders resolve through
+   * `org_admins`, which needs only a provisioned account: 76 of 78, and 30 of
+   * 30 exhibitors.
+   */
+  async directory_profile_complete(db, organizationId) {
+    const rows = await loadDirectoryCompleteness({ orgIds: [organizationId] });
+    // No row means the org isn't in the directory population at all — nothing
+    // to chase, so never block them on it.
+    return rows.length === 0 ? true : rows[0].isPrintReady;
+  },
 };
 
 /**
@@ -117,6 +140,9 @@ function getTaskCta(
       return { label: "View your account", url: `${appUrl}/org/${ctx.orgSlug}` };
     case "legal_document_accepted":
       return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
+    case "directory_profile_complete":
+      // Straight to the org's own page, where every field this checks is edited.
+      return { label: "Update your listing", url: `${appUrl}/org/${ctx.orgSlug}` };
   }
 }
 

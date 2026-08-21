@@ -46,6 +46,7 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   travel_info_submitted: "Travel info submitted (per org, all attendees)",
   payment_complete: "Payment complete",
   legal_document_accepted: "Legal document accepted (per org, all attendees)",
+  directory_profile_complete: "Directory listing ready (logo, description, categories, contacts)",
 };
 
 const ENTITY_SCOPED = new Set<CheckType>(["seat_assigned", "entity_purchased"]);

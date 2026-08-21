@@ -10,5 +10,6 @@ export const CHECK_TYPES = [
   "travel_info_submitted",
   "payment_complete",
   "legal_document_accepted",
+  "directory_profile_complete",
 ] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
