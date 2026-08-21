@@ -13,6 +13,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import {
   requiredPolicyEntityIds,
   type PolicyTargeting,
@@ -159,7 +160,14 @@ export async function computeOrgLegalCompleteness(
   if (!people || people.length === 0) return false; // nobody registered yet — not complete
 
   const { data: org } = await db.from("organizations").select("type").eq("id", organizationId).maybeSingle();
-  const audienceSourceRoles = org?.type === "vendor_partner" ? ["partner"] : ["member"];
+  // `organizations.type` is capitalised and human-readable — "Vendor Partner",
+  // "Member", "Non-Member". A snake_case literal here silently never matched, so
+  // every vendor partner was evaluated against MEMBER-targeted policies and asked
+  // to accept the wrong documents. Resolve through the configured programs
+  // instead of comparing strings, so the mapping stays correct if the org types
+  // are ever renamed or a third program is added.
+  const programs = await getProgramsConfig();
+  const audienceSourceRoles = [resolveConferenceTier(org?.type, programs)];
 
   for (const person of people) {
     if (!person.user_id) return false; // no account yet — can't have accepted anything
