@@ -14,3 +14,11 @@ export const CHECK_TYPES = [
   "self_reported",
 ] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
+
+/**
+ * Who answers a task. "Org admins answer for the company, people answer for
+ * themselves." The reminder engine processes `org` tasks only — it is
+ * org-scoped throughout — while `person` tasks render on /me/conference.
+ */
+export const TASK_AUDIENCES = ["org", "person"] as const;
+export type TaskAudience = (typeof TASK_AUDIENCES)[number];

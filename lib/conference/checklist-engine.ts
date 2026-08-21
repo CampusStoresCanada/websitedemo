@@ -299,6 +299,10 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
         .select("id, name, description, check_type, check_entity_id")
         .eq("checklist_id", checklist.id)
         .eq("active", true)
+        // Org tasks only. This engine resolves recipients to org admins, so a
+        // person-audience task here would email one admin about every
+        // attendee's hotel booking. Those render on /me/conference instead.
+        .eq("audience", "org")
         .order("sort_order", { ascending: true });
 
       const recipients: { email: string; name: string | null; variableOverrides: Record<string, string> }[] = [];
