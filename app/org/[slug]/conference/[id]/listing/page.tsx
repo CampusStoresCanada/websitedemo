@@ -115,7 +115,11 @@ export default async function OrgListingProofPage({
 
           {missingEnhanced.length > 0 ? (
             <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <p className="font-semibold">It will print, but it&rsquo;s thin</p>
+              {/* Don't promise it will print while the red banner above says it
+                  won't. When both apply, this one is the lesser problem. */}
+              <p className="font-semibold">
+                {missingRequired.length > 0 ? "It\u2019s also thin" : "It will print, but it\u2019s thin"}
+              </p>
               <p className="mt-0.5">
                 No {missingEnhanced.map((k) => PUBLICATION_FIELD_BY_KEY[k].label.toLowerCase()).join(", ")}.
                 These are what members read after your name.
