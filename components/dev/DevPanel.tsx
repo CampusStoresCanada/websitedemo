@@ -24,12 +24,20 @@ const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
     { value: "super_admin", label: "Super Admin" },
   ];
 
+/**
+ * Quick-login personas for local development. Rendered only when
+ * NODE_ENV === "development" (see app/layout.tsx).
+ *
+ * ⚠️ Purpose-built test accounts only, plus the one real account whose owner
+ * maintains this file. Other people's real logins were removed 2026-08-21:
+ * this file is tracked in git, so anything added here travels with every
+ * clone, worktree and agent session, and stays in history afterwards.
+ *
+ * Need a persona that isn't here? Create a dedicated test account against a
+ * test org rather than borrowing a real member's.
+ */
 const TEST_ACCOUNTS = [
   { email: "google@campusstores.ca", password: "Bl00p!Bl00p!", label: "Super Admin (Steve)" },
-  { email: "daviess@algonquincollege.com", password: "CSCBoard2026!", label: "Admin (Shawn)" },
-  { email: "adam.hustwitt@nscc.ca", password: "CSCMember2026!", label: "Org Admin — Member" },
-  { email: "maria.sucher@vitalsource.com", password: "CSCMember2026!", label: "Org Admin — Partner (VitalSource)" },
-  { email: "acain01@uoguelph.ca", password: "CSCUser2026!", label: "Member User" },
   { email: "test.public.tier@example.com", password: "CSCTestPublic2026!", label: "Test Org — Public Tier (Non-Member)" },
   { email: "test.partner@example.com", password: "CSCTestPartner2026!", label: "Test Org — Partner" },
   { email: "test.member@example.com", password: "CSCTestMember2026!", label: "Test Org — Member" },
