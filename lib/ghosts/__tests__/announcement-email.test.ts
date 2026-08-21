@@ -9,6 +9,7 @@ const base = {
   category: "General Merchandise",
   location: "Calgary, AB",
   circlePostUrl: "https://memberspace.campusstores.ca/c/announcements/welcome-sock-rocket",
+  website: "sockrocket.ca",
 };
 
 describe("buildAnnouncementEmail", () => {
@@ -29,6 +30,19 @@ describe("buildAnnouncementEmail", () => {
     // The third and fourth sentences are left for the post and the profile.
     expect(body).not.toContain("Over 900,000 pairs");
     expect(body).not.toContain("Air Canada");
+  });
+
+  it("links the partner's own website, with a scheme forced on", () => {
+    const body = buildAnnouncementEmail(base).bodyHtml;
+    // A bare domain in an href would be a relative link going nowhere.
+    expect(body).toContain('href="https://sockrocket.ca"');
+    expect(body).toContain(">sockrocket.ca<");
+  });
+
+  it("omits the website line when there isn't one", () => {
+    const body = buildAnnouncementEmail({ ...base, website: null }).bodyHtml;
+    expect(body).not.toContain("sockrocket.ca");
+    expect(body).toContain("See their profile");
   });
 
   it("links to the profile", () => {

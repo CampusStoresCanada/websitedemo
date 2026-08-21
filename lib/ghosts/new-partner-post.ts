@@ -52,10 +52,39 @@ const cta = (label: string, url: string): PMNode => ({
 const field = (label: string, ...value: PMNode[]): PMNode | null =>
   value.length ? para(text(`${label}: `, true), ...value) : null;
 
+/**
+ * A URL safe to put in an href.
+ *
+ * 30 of 75 partner websites are stored as bare domains ("lifestylemarket.ca"),
+ * and a bare domain in an href is a RELATIVE link — it resolves against
+ * whatever page it is on and goes nowhere. Anything without a scheme gets
+ * https:// prepended.
+ */
+export function ensureAbsoluteUrl(raw: string | null | undefined): string {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
 /** Display form of a URL — no protocol, no trailing slash. */
 export function displayUrl(raw: string | null | undefined): string {
   if (!raw) return "";
   return raw.trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
+/**
+ * The org's categories, split out of the flat comma-separated string the
+ * profile stores.
+ *
+ * "General Merchandise" on its own is close to useless to a member — it covers
+ * a huge share of the industry — so the subcategories matter more than the
+ * parent does.
+ */
+export function splitCategories(raw: string | null | undefined): string[] {
+  return (raw ?? "")
+    .split(",")
+    .map((c) => c.trim())
+    .filter(Boolean);
 }
 
 /** "Calgary, AB" — skips whichever half is missing. */
@@ -113,12 +142,19 @@ export function buildNewPartnerPost(input: NewPartnerPostInput): NewPartnerPost 
   }
 
   const details: (PMNode | null)[] = [
-    org.primaryCategory?.trim() ? field("Category", text(org.primaryCategory.trim())) : null,
+    (() => {
+      const categories = splitCategories(org.primaryCategory);
+      if (!categories.length) return null;
+      return field(
+        categories.length > 1 ? "Categories" : "Category",
+        text(categories.join(", "))
+      );
+    })(),
     formatLocation(org.city, org.province)
       ? field("Based in", text(formatLocation(org.city, org.province)))
       : null,
     org.website?.trim()
-      ? field("Website", link(displayUrl(org.website), org.website.trim()))
+      ? field("Website", link(displayUrl(org.website), ensureAbsoluteUrl(org.website)))
       : null,
   ];
   content.push(...(details.filter(Boolean) as PMNode[]));

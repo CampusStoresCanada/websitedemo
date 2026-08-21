@@ -217,7 +217,16 @@ export default function AnnouncementReview({ initial }: { initial: AnnouncementR
                       {row.website && (
                         <div>
                           <dt className="inline font-semibold">Website: </dt>
-                          <dd className="inline">{row.website}</dd>
+                          <dd className="inline">
+                            <a
+                              href={row.websiteHref ?? undefined}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-[#B92026] underline"
+                            >
+                              {row.website}
+                            </a>
+                          </dd>
                         </div>
                       )}
                     </dl>

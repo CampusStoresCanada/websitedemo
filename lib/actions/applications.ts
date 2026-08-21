@@ -196,6 +196,42 @@ async function findDuplicateOrganizations(
   return Array.from(byId.values());
 }
 
+/**
+ * The org's category string, built from the application's primary AND
+ * secondary selections.
+ *
+ * `organizations.primary_category` is a flat comma-separated list mixing the
+ * parent category with its subcategories — that is what the partner profile
+ * parses and groups. Writing only `primary_category` threw away every
+ * subcategory the applicant chose: all six partners approved before
+ * 2026-08-20 landed with just "General Merchandise" or "Course Materials",
+ * having each selected between one and four subcategories on the form.
+ *
+ * That matters to members. "General Merchandise" spans a huge share of the
+ * industry; "Apparel & Spirit Wear, Gifts & Collectibles" is the part that
+ * tells them whether to care.
+ */
+function buildOrgCategoryString(appData: Record<string, unknown>): string | null {
+  const primary = (appData.primary_category as string)?.trim();
+  const secondary = Array.isArray(appData.secondary_categories)
+    ? (appData.secondary_categories as unknown[])
+        .map((c) => String(c ?? "").trim())
+        .filter(Boolean)
+    : [];
+
+  const all = [primary, ...secondary].filter(Boolean) as string[];
+  // De-duplicate while preserving order — a form could send the parent twice.
+  const seen = new Set<string>();
+  const unique = all.filter((c) => {
+    const key = c.toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+
+  return unique.length ? unique.join(", ") : null;
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Submit Application (public, no auth)
 // ─────────────────────────────────────────────────────────────────
@@ -518,7 +554,7 @@ export async function approveApplication(
       phone: (appData.phone as string) || (appData.contact_phone as string) || null,
       street_address: (appData.street_address as string) || null,
       postal_code: (appData.postal_code as string) || null,
-      primary_category: (appData.primary_category as string) || null,
+      primary_category: buildOrgCategoryString(appData),
       company_description: (appData.company_description as string) || null,
       tenant_id: "29300837-1d49-45b4-bd09-1c4525c409d1", // the org default tenant
       updated_at: new Date().toISOString(),
@@ -850,7 +886,7 @@ export async function mergeApplicationIntoOrganization(
   setIfPresent("phone", (appData.phone as string) || (appData.contact_phone as string));
   setIfPresent("street_address", appData.street_address as string);
   setIfPresent("postal_code", appData.postal_code as string);
-  setIfPresent("primary_category", appData.primary_category as string);
+  setIfPresent("primary_category", buildOrgCategoryString(appData) ?? "");
   setIfPresent("company_description", appData.company_description as string);
   setIfPresent("email", app.applicant_email as string);
 

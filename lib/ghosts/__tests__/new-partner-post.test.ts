@@ -3,6 +3,8 @@ import {
   buildNewPartnerPost,
   displayUrl,
   formatLocation,
+  ensureAbsoluteUrl,
+  splitCategories,
   type NewPartnerPostInput,
 } from "@/lib/ghosts/new-partner-post";
 
@@ -13,7 +15,7 @@ const SOCK_ROCKET: NewPartnerPostInput["organization"] = {
   website: "https://sockrocket.ca/",
   city: "Calgary",
   province: "Alberta",
-  primaryCategory: "General Merchandise",
+  primaryCategory: "General Merchandise, Apparel & Spirit Wear, Gifts & Collectibles",
   websiteSummary:
     "Sock Rocket is a Canadian social enterprise based in Calgary that donates three pairs of socks for every pair sold.",
   companyDescription:
@@ -109,11 +111,26 @@ describe("buildNewPartnerPost", () => {
     expect(nodeTypes(post).filter((t) => t === "cta")).toHaveLength(1);
   });
 
-  it("includes category, location and website", () => {
+  it("includes categories, location and website", () => {
     const body = plainText(buildNewPartnerPost(make()));
-    expect(body).toContain("General Merchandise");
     expect(body).toContain("Calgary, AB");
     expect(body).toContain("sockrocket.ca");
+  });
+
+  it("shows every subcategory, not just the parent", () => {
+    // "General Merchandise" alone covers a huge share of the industry; the
+    // subcategories are what tell a member whether to care.
+    const body = plainText(buildNewPartnerPost(make()));
+    expect(body).toContain("Categories");
+    expect(body).toContain("General Merchandise, Apparel & Spirit Wear, Gifts & Collectibles");
+  });
+
+  it("uses the singular label when there is only one category", () => {
+    const input = make();
+    input.organization = { ...SOCK_ROCKET, primaryCategory: "Course Materials" };
+    const body = plainText(buildNewPartnerPost(input));
+    expect(body).toContain("Category");
+    expect(body).not.toContain("Categories");
   });
 
   it("links through to the profile with a single CTA", () => {
@@ -150,5 +167,56 @@ describe("buildNewPartnerPost", () => {
     );
     expect(post.title).toBe("Welcome, Minimal Co");
     expect(nodeTypes(post).filter((t) => t === "cta")).toHaveLength(1);
+  });
+});
+
+
+describe("ensureAbsoluteUrl", () => {
+  it("leaves an absolute URL alone", () => {
+    expect(ensureAbsoluteUrl("https://sockrocket.ca/")).toBe("https://sockrocket.ca/");
+    expect(ensureAbsoluteUrl("http://example.com")).toBe("http://example.com");
+  });
+
+  it("rescues a bare domain, which would otherwise be a relative link", () => {
+    // 30 of 75 partner websites are stored like this. Left alone, the href
+    // resolves against campusstores.ca and goes nowhere.
+    expect(ensureAbsoluteUrl("lifestylemarket.ca")).toBe("https://lifestylemarket.ca");
+    expect(ensureAbsoluteUrl("www.thesomcangroup.com")).toBe("https://www.thesomcangroup.com");
+  });
+
+  it("returns empty for nothing", () => {
+    expect(ensureAbsoluteUrl(null)).toBe("");
+    expect(ensureAbsoluteUrl("   ")).toBe("");
+  });
+});
+
+describe("the website link is always absolute", () => {
+  it("prepends a scheme to a bare domain in the href, but not the label", () => {
+    const input = make();
+    input.organization = { ...SOCK_ROCKET, website: "sockrocket.ca" };
+    const post = buildNewPartnerPost(input);
+
+    const json = JSON.stringify(post.tiptap_body);
+    expect(json).toContain('"href":"https://sockrocket.ca"');
+    // The visible text stays clean — no protocol shown to the reader.
+    expect(plainText(post)).toContain("sockrocket.ca");
+  });
+});
+
+describe("splitCategories", () => {
+  it("splits the flat comma-separated string the profile stores", () => {
+    expect(splitCategories("Apparel, Men's / Unisex, Women's")).toEqual([
+      "Apparel",
+      "Men's / Unisex",
+      "Women's",
+    ]);
+  });
+
+  it("drops empties and stray whitespace", () => {
+    expect(splitCategories("Apparel, , Youth ,")).toEqual(["Apparel", "Youth"]);
+  });
+
+  it("copes with null", () => {
+    expect(splitCategories(null)).toEqual([]);
   });
 });
