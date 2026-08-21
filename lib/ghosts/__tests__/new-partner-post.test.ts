@@ -117,20 +117,26 @@ describe("buildNewPartnerPost", () => {
     expect(body).toContain("sockrocket.ca");
   });
 
-  it("shows every subcategory, not just the parent", () => {
+  it("bolds the parent category and lists the subcategories after it", () => {
     // "General Merchandise" alone covers a huge share of the industry; the
     // subcategories are what tell a member whether to care.
-    const body = plainText(buildNewPartnerPost(make()));
-    expect(body).toContain("Categories");
-    expect(body).toContain("General Merchandise, Apparel & Spirit Wear, Gifts & Collectibles");
+    const post = buildNewPartnerPost(make());
+    const json = JSON.stringify(post.tiptap_body);
+
+    // Parent is bold and acts as the label.
+    expect(json).toContain('{"type":"text","text":"General Merchandise: ","marks":[{"type":"bold"}]}');
+    // Subcategories follow, unbolded.
+    expect(json).toContain('{"type":"text","text":"Apparel & Spirit Wear, Gifts & Collectibles"}');
+    // No redundant "Categories:" label any more.
+    expect(plainText(post)).not.toContain("Categories:");
   });
 
-  it("uses the singular label when there is only one category", () => {
+  it("drops the colon when there are no subcategories", () => {
     const input = make();
     input.organization = { ...SOCK_ROCKET, primaryCategory: "Course Materials" };
-    const body = plainText(buildNewPartnerPost(input));
-    expect(body).toContain("Category");
-    expect(body).not.toContain("Categories");
+    const json = JSON.stringify(buildNewPartnerPost(input).tiptap_body);
+    expect(json).toContain('{"type":"text","text":"Course Materials","marks":[{"type":"bold"}]}');
+    expect(json).not.toContain("Course Materials: ");
   });
 
   it("links through to the profile with a single CTA", () => {
