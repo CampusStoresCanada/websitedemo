@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# wip — what is actually unshipped, compared to origin/main (not to HEAD).
+#
+# `git status` compares the working tree to HEAD. When HEAD is behind
+# origin/main, files that are byte-identical to production still show as
+# "M", and real work hides among them. This compares to origin/main
+# instead, which is the only question that matters before committing.
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 1
+
+git fetch origin --quiet 2>/dev/null
+BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+AHEAD=$(git rev-list --count origin/main..HEAD 2>/dev/null || echo 0)
+
+echo "branch $(git rev-parse --abbrev-ref HEAD)  ·  ${AHEAD} ahead / ${BEHIND} behind origin/main"
+if [ "$BEHIND" -gt 5 ]; then
+  echo "⚠  ${BEHIND} commits behind — merge origin/main before judging anything below."
+fi
+echo
+
+real=0; noise=0; new=0
+REAL=""; NOISE=""; NEW=""
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  if ! git cat-file -e "origin/main:$f" 2>/dev/null; then
+    NEW="${NEW}\n  $f"; new=$((new+1))
+  elif git diff --quiet origin/main -- "$f" 2>/dev/null; then
+    NOISE="${NOISE}\n  $f"; noise=$((noise+1))
+  else
+    REAL="${REAL}\n  $f"; real=$((real+1))
+  fi
+done < <(git status --porcelain | grep -v '^??' | awk '{print $NF}')
+
+UNTRACKED=$(git status --porcelain | grep '^??' | awk '{print $NF}')
+un=$(echo "$UNTRACKED" | grep -c . || true)
+
+echo "UNSHIPPED — differs from origin/main  (${real})"; [ "$real" -gt 0 ] && echo -e "${REAL}" | tail -n +2
+echo
+echo "NEW — not on origin/main yet  (${new})"; [ "$new" -gt 0 ] && echo -e "${NEW}" | tail -n +2
+echo
+echo "UNTRACKED  (${un})"; [ -n "$UNTRACKED" ] && echo "$UNTRACKED" | sed 's/^/  /'
+echo
+if [ "$noise" -gt 0 ]; then
+  echo "ALREADY ON MAIN — ignore, stale-HEAD noise  (${noise})"
+  echo "  (these show as modified in git status but match production byte for byte)"
+fi
