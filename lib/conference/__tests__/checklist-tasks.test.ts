@@ -76,6 +76,28 @@ describe("loadPersonalTasks", () => {
     expect(await load(stubDb({ tasks: [{ ...HOTEL_TASK, active: false }] }))).toEqual([]);
   });
 
+  it("puts the soonest deadline first, whatever checklist it came from", async () => {
+    // Tasks arrive from several checklists at once. Ordering by sort_order
+    // alone interleaves them into an order that reads as arbitrary.
+    const later = { ...HOTEL_TASK, id: "t2", name: "Later thing", sort_order: 0 };
+    const db = {
+      from(table: string) {
+        if (table === "conference_checklists") {
+          return { select: () => ({ eq: () => ({ eq: () => Promise.resolve({ data: [
+            { id: "c1", deadline_at: "2027-01-08T00:00:00Z", conference_checklist_tasks: [HOTEL_TASK] },
+            { id: "c2", deadline_at: "2026-11-01T00:00:00Z", conference_checklist_tasks: [later] },
+          ] }) }) }) };
+        }
+        if (table === "conference_people") {
+          return { select: () => ({ eq: () => ({ maybeSingle: () => Promise.resolve({ data: {} }) }) }) };
+        }
+        return { select: () => ({ eq: () => ({ in: () => Promise.resolve({ data: [] }) }) }) };
+      },
+    };
+    const tasks = await load(db);
+    expect(tasks.map((t) => t.name)).toEqual(["Later thing", "Book your hotel room"]);
+  });
+
   it("carries the checklist deadline onto each task", async () => {
     const [t] = await load(stubDb({}));
     expect(t.deadline).toBe("2027-01-08T00:00:00Z");

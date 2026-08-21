@@ -104,6 +104,26 @@ async function writeAnswer(
   return { success: true };
 }
 
+
+/**
+ * Soonest deadline first, then the checklist's own order.
+ *
+ * Tasks come from several checklists at once — the directory closes in
+ * November, exhibitor services in January — so ordering by `sort_order` alone
+ * interleaves them into an order that looks arbitrary to a reader. What's due
+ * next should be at the top. Undated tasks sink to the bottom rather than
+ * jumping ahead of real deadlines.
+ */
+function byDeadlineThenOrder(
+  a: { deadline: string | null; task: { sort_order: number } },
+  b: { deadline: string | null; task: { sort_order: number } }
+): number {
+  const at = a.deadline ? Date.parse(a.deadline) : Number.POSITIVE_INFINITY;
+  const bt = b.deadline ? Date.parse(b.deadline) : Number.POSITIVE_INFINITY;
+  if (at !== bt) return at - bt;
+  return a.task.sort_order - b.task.sort_order;
+}
+
 /** Tasks this person is being asked about, with their current state. */
 export async function loadPersonalTasks(
   db: AdminClient,
@@ -140,7 +160,7 @@ export async function loadPersonalTasks(
   const personFields = (person ?? {}) as Record<string, unknown>;
 
   return rows
-    .sort((a, b) => a.task.sort_order - b.task.sort_order)
+    .sort(byDeadlineThenOrder)
     .map(({ task, deadline }): PersonalTask => {
       const derivedField = DERIVED_FROM_FIELD[task.name];
       const derivedValue = derivedField ? personFields[derivedField] : null;
@@ -207,7 +227,7 @@ export async function loadOrgTasks(
 
   return Promise.all(
     rows
-      .sort((a, b) => a.task.sort_order - b.task.sort_order)
+      .sort(byDeadlineThenOrder)
       .map(async ({ task, deadline }): Promise<PersonalTask> => {
         if (task.check_type === "self_reported") {
           const ack = ackByTask.get(task.id);
