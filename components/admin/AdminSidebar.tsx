@@ -59,6 +59,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/comms", label: "Campaigns", matchPrefix: "/admin/comms" },
       { href: "/admin/comms/asks", label: "Partner Asks", matchPrefix: "/admin/comms/asks" },
+      { href: "/admin/comms/announcements", label: "New Partners", matchPrefix: "/admin/comms/announcements" },
       { href: "/admin/events", label: "Events", matchPrefix: "/admin/events" },
     ],
   },
