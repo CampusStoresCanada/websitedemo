@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/guards";
 
 /**
  * GET /api/admin/comms/conditions/checklist-tasks — options for the
@@ -8,6 +9,9 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * same task name (e.g. "Assign your seats") can recur across checklists.
  */
 export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const db = createAdminClient();
   const { data, error } = await db
     .from("conference_checklist_tasks")

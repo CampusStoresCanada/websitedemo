@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findQBCustomer } from "@/lib/quickbooks/client";
+import { requireAdmin } from "@/lib/auth/guards";
 
 // Dev/admin-only: verify QB connection is working
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   if (process.env.NODE_ENV !== "development") {
     return NextResponse.json({ error: "Not available in production" }, { status: 403 });
   }

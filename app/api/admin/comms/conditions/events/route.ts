@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAdmin } from "@/lib/auth/guards";
 
 /**
  * GET /api/admin/comms/conditions/events — options for the "which event"
  * reference picker when a condition's subject is Event Registration.
  */
 export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const db = createAdminClient();
   const { data, error } = await db
     .from("events")

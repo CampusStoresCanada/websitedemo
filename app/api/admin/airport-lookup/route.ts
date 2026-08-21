@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { requireAdmin } from "@/lib/auth/guards";
 
 type AirportLookupResult = {
   code: string;
@@ -44,6 +45,9 @@ function extractIataCode(value: string): string | null {
 }
 
 export async function GET(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const token = process.env.NEXT_PUBLIC_MAPBOX_TOKEN;
   if (!token) {
     return NextResponse.json({ success: false, error: "Mapbox token not configured." }, { status: 500 });
