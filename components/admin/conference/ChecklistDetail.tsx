@@ -47,8 +47,12 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   payment_complete: "Payment complete",
   legal_document_accepted: "Legal document accepted (per org, all attendees)",
   directory_profile_complete: "Directory listing ready (logo, description, categories, contacts)",
+  self_reported: "Self-reported — the org ticks it off (Stronco, Encore, anything off-site)",
 };
 
+// `self_reported` binds check_entity_id to the TASK's own id rather than a
+// catalog entity — the acknowledgement is "this task, this org", so there is
+// nothing else for it to point at.
 const ENTITY_SCOPED = new Set<CheckType>(["seat_assigned", "entity_purchased"]);
 
 type TaskFormState = { mode: "add" } | { mode: "edit"; id: string } | null;

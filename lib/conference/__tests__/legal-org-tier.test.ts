@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { resolveConferenceTier } from "@/lib/policy/engine";
+import type { MembershipProgramDef } from "@/lib/policy/types";
 
 /**
  * Regression guard for a bug that shipped silently: computeOrgLegalCompleteness
@@ -11,11 +12,11 @@ import { resolveConferenceTier } from "@/lib/policy/engine";
  *
  * Nothing failed loudly: the wrong document set is still a valid document set.
  */
-const PROGRAMS = [
-  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member",
+const PROGRAMS: MembershipProgramDef[] = [
+  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member" as const,
     orgAdminElevates: true, conferenceTier: "member", invoiceType: "membership",
     billing: { mode: "metric_engine" as const } },
-  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner",
+  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner" as const,
     orgAdminElevates: false, conferenceTier: "partner", invoiceType: "partnership",
     billing: { mode: "flat_rate" as const, rateCents: 0 } },
 ];

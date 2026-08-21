@@ -109,7 +109,7 @@ export async function resolveConditionSubjectRows(
       if (!referenceId) return rows;
       const { data: task } = await supabase
         .from("conference_checklist_tasks")
-        .select("check_type, check_entity_id, checklist:conference_checklists(conference_id)")
+        .select("id, check_type, check_entity_id, checklist:conference_checklists(conference_id)")
         .eq("id", referenceId)
         .maybeSingle();
       if (!task) return rows;
@@ -131,7 +131,8 @@ export async function resolveConditionSubjectRows(
                   task.check_type as CheckType,
                   orgId,
                   checklist.conference_id,
-                  task.check_entity_id
+                  task.check_entity_id,
+                  task.id
                 ),
               ] as const
           )

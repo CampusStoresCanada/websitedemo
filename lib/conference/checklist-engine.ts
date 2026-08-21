@@ -16,11 +16,18 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * needed, the underlying capture has to exist first, then a check type gets
  * added here.
  */
-const CHECKS: Record<
-  CheckType,
-  (db: AdminClient, organizationId: string, conferenceId: string, entityId: string | null) => Promise<boolean>
-> = {
-  async seat_assigned(db, organizationId, conferenceId, entityId) {
+type CheckArgs = {
+  db: AdminClient;
+  organizationId: string;
+  conferenceId: string;
+  /** The task's `check_entity_id` — FK'd to conference_entities, so a catalog thing. */
+  entityId: string | null;
+  /** The task's own id. `self_reported` keys its acknowledgement on this. */
+  taskId: string;
+};
+
+const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = {
+  async seat_assigned({ db, organizationId, conferenceId, entityId }) {
     if (!entityId) return true; // malformed task — never blocks, but shouldn't happen (form requires it)
     const { data } = await db
       .from("entity_balance_seats")
@@ -59,7 +66,7 @@ const CHECKS: Record<
     return data.every((s) => s.holder_person_id !== null);
   },
 
-  async entity_purchased(db, organizationId, _conferenceId, entityId) {
+  async entity_purchased({ db, organizationId, entityId }) {
     if (!entityId) return true;
     const { count } = await db
       .from("entity_balances")
@@ -69,7 +76,7 @@ const CHECKS: Record<
     return (count ?? 0) > 0;
   },
 
-  async travel_info_submitted(db, organizationId, conferenceId) {
+  async travel_info_submitted({ db, organizationId, conferenceId }) {
     const { data } = await db
       .from("conference_people")
       .select("travel_mode")
@@ -79,7 +86,7 @@ const CHECKS: Record<
     return data.every((p) => p.travel_mode !== null);
   },
 
-  async payment_complete(db, organizationId, conferenceId) {
+  async payment_complete({ db, organizationId, conferenceId }) {
     const { count } = await db
       .from("conference_orders")
       .select("id", { count: "exact", head: true })
@@ -89,7 +96,7 @@ const CHECKS: Record<
     return (count ?? 0) > 0;
   },
 
-  async legal_document_accepted(db, organizationId, conferenceId) {
+  async legal_document_accepted({ db, organizationId, conferenceId }) {
     return computeOrgLegalCompleteness(db, conferenceId, organizationId);
   },
 
@@ -108,11 +115,38 @@ const CHECKS: Record<
    * `org_admins`, which needs only a provisioned account: 76 of 78, and 30 of
    * 30 exhibitors.
    */
-  async directory_profile_complete(db, organizationId) {
+  async directory_profile_complete({ organizationId }) {
     const rows = await loadDirectoryCompleteness({ orgIds: [organizationId] });
     // No row means the org isn't in the directory population at all — nothing
     // to chase, so never block them on it.
     return rows.length === 0 ? true : rows[0].isPrintReady;
+  },
+
+  /**
+   * Things that happen on someone else's system — Stronco's portal, Encore's
+   * emailed order form, a hotel booking. CSC can't observe any of them, so the
+   * exhibitor ticks them off and we record who said so.
+   *
+   * "Not applicable" counts as done. Someone staying at their own hotel is not
+   * behind; nagging them until February teaches them to ignore the reminders
+   * that DO cost money if missed.
+   *
+   * Org-level only here, because this engine is org-scoped throughout — reminders
+   * resolve to org admins, and the user's rule is "org admins answer for the
+   * company, people answer for themselves." Per-person items (hotel, travel,
+   * assignee-accepted policies) surface through resolvePersonObligations on
+   * /me/conference instead, reading the same table with person_id set.
+   */
+  async self_reported({ db, organizationId, conferenceId, taskId }) {
+    const { data } = await db
+      .from("conference_task_acknowledgements")
+      .select("state")
+      .eq("task_id", taskId)
+      .eq("organization_id", organizationId)
+      .eq("conference_id", conferenceId)
+      .is("person_id", null)
+      .maybeSingle();
+    return Boolean(data);
   },
 };
 
@@ -143,6 +177,9 @@ function getTaskCta(
     case "directory_profile_complete":
       // Straight to the org's own page, where every field this checks is edited.
       return { label: "Update your listing", url: `${appUrl}/org/${ctx.orgSlug}` };
+    case "self_reported":
+      // The org's conference page is where the tick-off list lives.
+      return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
   }
 }
 
@@ -275,7 +312,7 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
         for (const task of tasks ?? []) {
           const checkType = task.check_type as CheckType;
           const checkFn = CHECKS[checkType];
-          const complete = await checkFn(db, organizationId, checklist.conference_id, task.check_entity_id);
+          const complete = await checkFn({ db, organizationId, conferenceId: checklist.conference_id, entityId: task.check_entity_id, taskId: task.id });
           if (!complete) {
             openItems.push({
               name: task.name,
@@ -362,9 +399,10 @@ export async function evaluateChecklistTaskCheck(
   checkType: CheckType,
   organizationId: string,
   conferenceId: string,
-  entityId: string | null
+  entityId: string | null,
+  taskId: string
 ): Promise<boolean> {
-  return CHECKS[checkType](db, organizationId, conferenceId, entityId);
+  return CHECKS[checkType]({ db, organizationId, conferenceId, entityId, taskId });
 }
 
 export { CHECK_TYPES, type CheckType };
