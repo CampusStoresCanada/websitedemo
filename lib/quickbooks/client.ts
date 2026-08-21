@@ -197,14 +197,31 @@ async function qbRequest<T>(
 // Customer operations
 // ─────────────────────────────────────────────────────────────────
 
-export async function findQBCustomer(displayName: string): Promise<QBCustomer | null> {
-  const escaped = displayName.replace(/'/g, "\\'");
-  const query = `SELECT * FROM Customer WHERE DisplayName = '${escaped}'`;
-  const res = await qbRequest<{ QueryResponse: { Customer?: QBCustomer[] } }>(
-    "GET",
-    `/query?query=${encodeURIComponent(query)}`
-  );
-  return res.QueryResponse.Customer?.[0] ?? null;
+/**
+ * Look up a QBO customer by name, checking DisplayName first and falling back
+ * to CompanyName.
+ *
+ * The CompanyName leg is not a nicety — most of CSC's QBO customers are filed
+ * under the *contact person* as DisplayName, with the institution in
+ * CompanyName (e.g. DisplayName "Jill Lewis" / CompanyName "University of
+ * Guelph"). A DisplayName-only lookup can never match those, so resolveQBCustomer
+ * fell through to createQBCustomer and would have minted a duplicate customer
+ * for an org QBO already knew about. That's how 21 active orgs ended up with no
+ * quickbooks_customer_id despite years of invoicing — see the 2026-08-21
+ * reconciliation.
+ */
+export async function findQBCustomer(name: string): Promise<QBCustomer | null> {
+  const escaped = name.replace(/'/g, "\\'");
+  for (const field of ["DisplayName", "CompanyName"] as const) {
+    const query = `SELECT * FROM Customer WHERE ${field} = '${escaped}'`;
+    const res = await qbRequest<{ QueryResponse: { Customer?: QBCustomer[] } }>(
+      "GET",
+      `/query?query=${encodeURIComponent(query)}`
+    );
+    const hit = res.QueryResponse.Customer?.[0];
+    if (hit) return hit;
+  }
+  return null;
 }
 
 export async function createQBCustomer(input: QBCustomerInput): Promise<QBCustomer> {
