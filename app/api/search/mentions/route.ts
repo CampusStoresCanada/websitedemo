@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOptionalAuthContext } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { listDirectoryContacts } from "@/lib/contacts/directory";
 
 export const runtime = "edge";
 
@@ -13,7 +14,7 @@ export async function GET(req: NextRequest) {
 
   const db = createAdminClient();
 
-  const [orgsResult, contactsResult] = await Promise.all([
+  const [orgsResult, contactRows] = await Promise.all([
     db
       .from("organizations")
       .select("id, name, slug, type")
@@ -21,12 +22,16 @@ export async function GET(req: NextRequest) {
       .not("slug", "is", null)
       .eq("is_test", false)
       .limit(5),
-    db
-      .from("contacts")
-      .select("id, name, organization_id, role_title")
-      .ilike("name", `%${q}%`)
-      .is("archived_at", null)
-      .limit(5),
+    listDirectoryContacts<{
+      id: string;
+      name: string | null;
+      organization_id: string | null;
+      role_title: string | null;
+    }>({
+      nameSearch: q,
+      fields: "id, name, organization_id, role_title",
+      limit: 5,
+    }),
   ]);
 
   const orgs = (orgsResult.data ?? []).map((o) => ({
@@ -37,9 +42,9 @@ export async function GET(req: NextRequest) {
     type: "org" as const,
   }));
 
-  const contacts = (contactsResult.data ?? []).map((c) => ({
+  const contacts = contactRows.map((c) => ({
     id: `contact:${c.id}`,
-    label: c.name,
+    label: c.name ?? "Unnamed",
     sublabel: c.role_title ?? "",
     href: `/contact/${c.id}`,
     type: "contact" as const,

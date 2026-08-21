@@ -8,7 +8,12 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { resolvePlacements, resolveSurfaces, defaultSurfaceId } from "@/lib/conference/floor-surfaces";
+import { listDirectoryContacts } from "@/lib/contacts/directory";
+import {
+  resolvePlacements,
+  resolveSurfaces,
+  defaultSurfaceId,
+} from "@/lib/conference/floor-surfaces";
 import {
   COMPLETENESS_ORG_COLUMNS,
   computeOrgCompleteness,
@@ -25,11 +30,15 @@ import {
 type OrgRow = Omit<OrgCompletenessSource, "contactCount">;
 
 /** org id → booth numbers held at this conference, ascending. */
-async function boothNumbersByOrg(conferenceId: string): Promise<Map<string, string[]>> {
+async function boothNumbersByOrg(
+  conferenceId: string,
+): Promise<Map<string, string[]>> {
   const db = createAdminClient();
   const { data } = await db
     .from("entity_balances")
-    .select("organization_id, entity:conference_entities!entity_balances_entity_id_fkey(kind, name)")
+    .select(
+      "organization_id, entity:conference_entities!entity_balances_entity_id_fkey(kind, name)",
+    )
     .eq("conference_id", conferenceId);
 
   const byOrg = new Map<string, string[]>();
@@ -37,7 +46,8 @@ async function boothNumbersByOrg(conferenceId: string): Promise<Map<string, stri
     const entity = Array.isArray(row.entity) ? row.entity[0] : row.entity;
     // A booth entity's `name` IS its number — `attributes.number` is null for
     // every booth in the catalogue.
-    if (entity?.kind !== "booth" || !row.organization_id || !entity.name) continue;
+    if (entity?.kind !== "booth" || !row.organization_id || !entity.name)
+      continue;
     const list = byOrg.get(row.organization_id) ?? [];
     if (!list.includes(entity.name)) list.push(entity.name);
     byOrg.set(row.organization_id, list);
@@ -47,11 +57,21 @@ async function boothNumbersByOrg(conferenceId: string): Promise<Map<string, stri
 }
 
 /** Surfaces for the map section, with the same legacy fallback the viewer uses. */
-export async function loadSurfacesForPublication(conferenceId: string): Promise<SurfaceForPublication[]> {
+export async function loadSurfacesForPublication(
+  conferenceId: string,
+): Promise<SurfaceForPublication[]> {
   const db = createAdminClient();
   const [{ data: entities }, { data: conf }] = await Promise.all([
-    db.from("conference_entities").select("id, name, attributes").eq("conference_id", conferenceId).eq("kind", "floorplan"),
-    db.from("conference_instances").select("floor_plan_url").eq("id", conferenceId).maybeSingle(),
+    db
+      .from("conference_entities")
+      .select("id, name, attributes")
+      .eq("conference_id", conferenceId)
+      .eq("kind", "floorplan"),
+    db
+      .from("conference_instances")
+      .select("floor_plan_url")
+      .eq("id", conferenceId)
+      .maybeSingle(),
   ]);
   return resolveSurfaces(entities ?? [], conf?.floor_plan_url ?? null);
 }
@@ -63,7 +83,9 @@ export async function loadSurfacesForPublication(conferenceId: string): Promise<
  * not the for-sale catalogue — the same line `getConfirmedExhibitors()` already
  * draws between inventory and real exhibitors.
  */
-export async function loadDirectoryEntries(source: PublicationSource): Promise<DirectoryEntry[]> {
+export async function loadDirectoryEntries(
+  source: PublicationSource,
+): Promise<DirectoryEntry[]> {
   const db = createAdminClient();
 
   let boothsByOrg = new Map<string, string[]>();
@@ -92,21 +114,39 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
   // pinned by COMPLETENESS_ORG_COLUMNS, which OrgCompletenessSource mirrors.
   const orgs = data as unknown as OrgRow[];
 
-  const { data: contacts } = await db
-    .from("contacts")
-    .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone")
-    .in("organization_id", orgs.map((o) => o.id));
+  // Printed directory: exclude people who have left or asked not to be listed.
+  const contacts = await listDirectoryContacts<{
+    id: string;
+    organization_id: string | null;
+    name: string | null;
+    role_title: string | null;
+    work_email: string | null;
+    email: string | null;
+    work_phone_number: string | null;
+    phone: string | null;
+  }>({
+    organizationIds: orgs.map((o) => o.id),
+    fields:
+      "id, organization_id, name, role_title, work_email, email, work_phone_number, phone",
+  });
 
   type ContactRow = {
-    organization_id: string | null; name: string | null; role_title: string | null;
-    work_email: string | null; email: string | null;
-    work_phone_number: string | null; phone: string | null;
+    organization_id: string | null;
+    name: string | null;
+    role_title: string | null;
+    work_email: string | null;
+    email: string | null;
+    work_phone_number: string | null;
+    phone: string | null;
   };
   const contactCount = new Map<string, number>();
   const primaryContact = new Map<string, DirectoryEntry["primaryContact"]>();
   for (const c of (contacts ?? []) as ContactRow[]) {
     if (!c.organization_id) continue;
-    contactCount.set(c.organization_id, (contactCount.get(c.organization_id) ?? 0) + 1);
+    contactCount.set(
+      c.organization_id,
+      (contactCount.get(c.organization_id) ?? 0) + 1,
+    );
     if (!c.name?.trim()) continue;
     const candidate = {
       name: c.name.trim(),
@@ -124,7 +164,10 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
 
   return orgs
     .map((o): DirectoryEntry => {
-      const withContacts: OrgCompletenessSource = { ...o, contactCount: contactCount.get(o.id) ?? 0 };
+      const withContacts: OrgCompletenessSource = {
+        ...o,
+        contactCount: contactCount.get(o.id) ?? 0,
+      };
       return {
         orgId: o.id,
         orgName: o.name,
@@ -136,7 +179,8 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
         catalogueUrl: o.catalogue_url,
         rawCategories: o.primary_category,
         boothNumbers: boothsByOrg.get(o.id) ?? [],
-        publicCode: (o as OrgRow & { public_code?: string | null }).public_code ?? null,
+        publicCode:
+          (o as OrgRow & { public_code?: string | null }).public_code ?? null,
         primaryContact: primaryContact.get(o.id) ?? null,
         completeness: computeOrgCompleteness(withContacts),
       };
@@ -153,38 +197,61 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
  */
 export async function loadPlacementsForPublication(
   conferenceId: string,
-  surfaces: SurfaceForPublication[]
+  surfaces: SurfaceForPublication[],
 ): Promise<PlacedThing[]> {
   const db = createAdminClient();
-  const [{ data: booths }, { data: refs }, { data: balances }] = await Promise.all([
-    db.from("conference_entities").select("id, name, attributes").eq("conference_id", conferenceId).eq("kind", "booth"),
-    db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role").eq("conference_id", conferenceId),
-    db.from("entity_balances")
-      .select("entity_id, organizations(name)")
-      .eq("conference_id", conferenceId),
-  ]);
+  const [{ data: booths }, { data: refs }, { data: balances }] =
+    await Promise.all([
+      db
+        .from("conference_entities")
+        .select("id, name, attributes")
+        .eq("conference_id", conferenceId)
+        .eq("kind", "booth"),
+      db
+        .from("conference_entity_refs")
+        .select("from_entity_id, to_entity_id, role")
+        .eq("conference_id", conferenceId),
+      db
+        .from("entity_balances")
+        .select("entity_id, organizations(name)")
+        .eq("conference_id", conferenceId),
+    ]);
 
   const bySurface = resolvePlacements(refs ?? [], surfaces);
   const fallback = defaultSurfaceId(surfaces);
 
   const orgByEntity = new Map<string, string>();
   for (const row of balances ?? []) {
-    const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
-    if (row.entity_id && org?.name && !orgByEntity.has(row.entity_id)) orgByEntity.set(row.entity_id, org.name);
+    const org = Array.isArray(row.organizations)
+      ? row.organizations[0]
+      : row.organizations;
+    if (row.entity_id && org?.name && !orgByEntity.has(row.entity_id))
+      orgByEntity.set(row.entity_id, org.name);
   }
 
   const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
 
   return (booths ?? []).flatMap((b): PlacedThing[] => {
     const a = (b.attributes ?? {}) as Record<string, unknown>;
-    const x = num(a.x); const y = num(a.y); const w = num(a.w); const h = num(a.h);
+    const x = num(a.x);
+    const y = num(a.y);
+    const w = num(a.w);
+    const h = num(a.h);
     if (x == null || y == null || w == null || h == null) return [];
     const surfaceId = bySurface.get(b.id) ?? fallback;
     if (!surfaceId) return [];
-    return [{
-      entityId: b.id, surfaceId, label: b.name, x, y, w, h,
-      rotation: num(a.rotation) ?? 0,
-      orgName: orgByEntity.get(b.id) ?? null,
-    }];
+    return [
+      {
+        entityId: b.id,
+        surfaceId,
+        label: b.name,
+        x,
+        y,
+        w,
+        h,
+        rotation: num(a.rotation) ?? 0,
+        orgName: orgByEntity.get(b.id) ?? null,
+      },
+    ];
   });
 }

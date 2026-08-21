@@ -32,6 +32,7 @@ import {
   type CandidateEligibility,
 } from "./nomination";
 import { deriveSchedule, phaseOn, type ElectionSchedule } from "./schedule";
+import { buildAgmScript } from "./documents/agm-script";
 import {
   buildNominatingCommitteeReport,
   type ReportDirector,
@@ -2307,5 +2308,132 @@ export async function getNominatingCommitteeReport(
     completing,
     candidates,
     officerTitles: ELECTED_OFFICER_TITLES,
+  });
+}
+
+/**
+ * The times CSC states on every AGM notice and script. Six zones, because the
+ * membership spans them and a single "1:00 pm Eastern" makes half the country
+ * do arithmetic at seven in the morning.
+ */
+const CSC_MEETING_TIMES = [
+  { label: "Pacific Time", start: "9:00 am", end: "10:00 am" },
+  { label: "Mountain Time", start: "10:00 am", end: "11:00 am" },
+  { label: "Central Time", start: "11:00 am", end: "12:00 pm" },
+  { label: "Eastern Time", start: "12:00 pm", end: "1:00 pm" },
+  { label: "Atlantic Time", start: "1:00 pm", end: "2:00 pm" },
+  { label: "Newfoundland Time", start: "1:30 pm", end: "2:30 pm" },
+];
+
+async function officerNamed(bodyId: string, roleKey: string) {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("governance_role_assignments")
+    .select("profiles:person_profile_id(display_name), organizations:organization_id(name)")
+    .eq("body_id", bodyId)
+    .eq("role_key", roleKey)
+    .is("term_end", null)
+    .limit(1);
+  const row = data?.[0];
+  if (!row) return null;
+  return {
+    name: (row.profiles as { display_name: string } | null)?.display_name ?? "",
+    institution: (row.organizations as { name: string } | null)?.name ?? "",
+  };
+}
+
+/**
+ * Assemble the AGM script.
+ *
+ * The results section only carries real names once the election has been
+ * certified; before that it renders the frame with the roster empty, which is
+ * exactly what a script drafted in the autumn looks like.
+ */
+export async function getAgmScript(
+  slug: string,
+  options: {
+    pollster?: string | null;
+    publicAccountant?: string;
+    meetingUrl?: string | null;
+  } = {}
+): Promise<ReturnType<typeof buildAgmScript> | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const [president, treasurer, pastPresident, ed] = await Promise.all([
+    officerNamed(election.bodyId, "president"),
+    officerNamed(election.bodyId, "treasurer"),
+    officerNamed(election.bodyId, "past_president"),
+    officerNamed(election.bodyId, "executive_director"),
+  ]);
+
+  // The most recent AGM before this one, for the receipt-of-minutes item.
+  const { data: prior } = await db
+    .from("board_meetings")
+    .select("meeting_date")
+    .eq("meeting_type", "agm")
+    .lt("meeting_date", election.schedule.agmDate)
+    .order("meeting_date", { ascending: false })
+    .limit(1);
+
+  const report = await getNominatingCommitteeReport(slug);
+  const counted =
+    election.status === "certified" ? await countElection(slug) : null;
+
+  const elected =
+    counted?.ok
+      ? counted.data.results
+          .filter((r) => r.elected)
+          .map((r) => ({ name: r.displayName, institution: r.organizationName }))
+      : (report?.sections.find((s) => s.paragraphs[0]?.includes("candidate"))?.roster ?? []).map(
+          (d) => ({ name: d.name, institution: d.institution })
+        );
+
+  const continuing = (
+    report?.sections.find((s) => s.paragraphs[0]?.includes("second year"))?.roster ?? []
+  ).map((d) => ({ name: d.name, institution: d.institution }));
+
+  // Departing = completing a term and NOT standing again — which is unknowable
+  // until the field is fixed. Before the nomination close, every director whose
+  // term ends looks like they are leaving, and generating a farewell tribute for
+  // four people who are about to stand for re-election would be quite a thing to
+  // hand the Past President.
+  const fieldIsFixed =
+    election.status === "balloting" ||
+    election.status === "nominations_closed" ||
+    election.status === "sealed" ||
+    election.status === "certified";
+  const standingNames = new Set(elected.map((e) => e.name));
+  const departing = fieldIsFixed
+    ? (report?.sections.find((s) => s.paragraphs[0]?.includes("completing"))?.roster ?? [])
+        .filter((d) => !standingNames.has(d.name))
+        .map((d) => ({ name: d.name, institution: d.institution }))
+    : [];
+
+  const fiscalYearEnd = `${election.cycleYear - 1}-08-31`;
+
+  return buildAgmScript({
+    cycleYear: election.cycleYear,
+    agmDate: election.schedule.agmDate,
+    times: CSC_MEETING_TIMES,
+    meetingUrl: options.meetingUrl ?? null,
+    priorAgmDate: (prior?.[0]?.meeting_date as string) ?? null,
+    chair: {
+      name: president?.name ?? "the President",
+      institution: president?.institution ?? "",
+      role: "President",
+    },
+    treasurer,
+    nominatingChair: pastPresident,
+    executiveDirector: ed?.name ?? "the Executive Director",
+    pollster: options.pollster ?? null,
+    publicAccountant: options.publicAccountant ?? "MNP LLP",
+    fiscalYearEnd,
+    elected,
+    continuing,
+    departing,
+    acclaimed: election.outcome === "acclaimed",
+    officerMeetingNote: null,
   });
 }

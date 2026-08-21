@@ -1,6 +1,6 @@
 "use server";
 
-import { createAdminClient } from "@/lib/supabase/admin";
+import { listDirectoryContacts } from "@/lib/contacts/directory";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { loadVisibilityConfig, applyFieldMask } from "@/lib/visibility/engine";
 import type { Contact } from "@/lib/types/db";
@@ -22,18 +22,32 @@ export interface MapContactEntry {
  */
 export async function getPrimaryContactsForMap(
   orgId: string,
-  orgType: string | null
+  orgType: string | null,
 ): Promise<MapContactEntry[]> {
-  const admin = createAdminClient();
-  const { data, error } = await admin
-    .from("contacts")
-    .select("id, name, role_title, work_email, email, work_phone_number, phone, profile_picture_url")
-    .eq("organization_id", orgId)
-    .is("archived_at", null)
-    .eq("is_primary", true)
-    .order("name");
+  // listDirectoryContacts drops archived people and anyone flagged hidden.
+  // This panel is reachable by anonymous visitors, so a hidden primary contact
+  // appearing here would be a straight leak to the public web.
+  const rows = await listDirectoryContacts<{
+    id: string;
+    name: string | null;
+    role_title: string | null;
+    work_email: string | null;
+    email: string | null;
+    work_phone_number: string | null;
+    phone: string | null;
+    profile_picture_url: string | null;
+    is_primary: boolean | null;
+  }>({
+    organizationIds: [orgId],
+    fields:
+      "id, name, role_title, work_email, email, work_phone_number, phone, profile_picture_url, is_primary",
+  });
 
-  if (error || !data) return [];
+  const data = rows
+    .filter((c) => c.is_primary === true)
+    .sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+
+  if (data.length === 0) return [];
 
   const viewer = await getViewerContext();
   const config = await loadVisibilityConfig();
@@ -46,14 +60,17 @@ export async function getPrimaryContactsForMap(
       config,
       "contacts",
       isOwnOrg,
-      orgType
+      orgType,
     ) as Partial<Contact>;
 
     return {
       name: (masked.name as string) || "Unknown",
       roleTitle: (masked.role_title as string) ?? null,
       email: (masked.work_email as string) || (masked.email as string) || null,
-      phone: (masked.work_phone_number as string) || (masked.phone as string) || null,
+      phone:
+        (masked.work_phone_number as string) ||
+        (masked.phone as string) ||
+        null,
       avatarUrl: row.profile_picture_url ?? null,
     };
   });

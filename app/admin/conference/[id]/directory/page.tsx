@@ -8,6 +8,7 @@ import {
   loadPlacementsForPublication,
   loadSurfacesForPublication,
 } from "@/lib/publication/composition-loader";
+import { loadPrintUsage } from "@/lib/publication/scan-tracking";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Directory | Conference Admin" };
@@ -49,6 +50,10 @@ export default async function ConferenceDirectoryPage({
     loadPlacementsForPublication(conference.id, surfaces),
   ]);
   const doc = composePublication(publication, entries, surfaces, placements);
+
+  // Was the print run used? Not an exhibitor metric — the question is whether
+  // printing again is worth the money.
+  const usage = await loadPrintUsage(doc.entries.length);
 
   const { notes } = doc;
   const hasWarnings =
@@ -101,6 +106,49 @@ export default async function ConferenceDirectoryPage({
             </ul>
           </div>
         ) : null}
+
+        <section className="mt-4 rounded-lg border border-gray-200 bg-white p-4">
+          <h2 className="text-sm font-semibold text-gray-900">Did the book get used?</h2>
+          {usage.totalScans === 0 ? (
+            <p className="mt-1 text-sm text-gray-500">
+              No scans yet. Codes start reporting once the directory is in people&rsquo;s hands.
+            </p>
+          ) : (
+            <>
+              <dl className="mt-3 grid grid-cols-2 gap-4 sm:grid-cols-4">
+                <div>
+                  <dt className="text-xs text-gray-500">Scanned off paper</dt>
+                  <dd className="text-2xl font-bold tabular-nums text-[#163D6D]">{usage.printScans}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-500">Via shared links</dt>
+                  <dd className="text-2xl font-bold tabular-nums text-gray-700">{usage.linkScans}</dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-500">Listings reached</dt>
+                  <dd className="text-2xl font-bold tabular-nums text-gray-700">
+                    {usage.listingsScanned}
+                    <span className="text-sm font-normal text-gray-400"> / {usage.listingsPrinted}</span>
+                  </dd>
+                </div>
+                <div>
+                  <dt className="text-xs text-gray-500">On a phone</dt>
+                  <dd className="text-2xl font-bold tabular-nums text-gray-700">
+                    {Math.round((usage.mobileScans / usage.totalScans) * 100)}%
+                  </dd>
+                </div>
+              </dl>
+              {usage.byMonth.length > 0 ? (
+                <p className="mt-3 text-xs text-gray-500">
+                  {/* Staying power is the real question: a spike in conference
+                      week and silence after means it was a handout, not a book. */}
+                  By month:{" "}
+                  {usage.byMonth.map((m) => `${m.month} (${m.scans})`).join(" · ")}
+                </p>
+              ) : null}
+            </>
+          )}
+        </section>
 
         <p className="mt-3 text-xs text-gray-400">
           {notes.totalCandidates} candidate{notes.totalCandidates === 1 ? "" : "s"} ·{" "}

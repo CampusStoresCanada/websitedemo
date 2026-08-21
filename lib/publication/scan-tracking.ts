@@ -77,40 +77,91 @@ export async function recordDirectoryScan(input: {
   }
 }
 
-export type ScanStats = {
-  organizationId: string;
-  organizationName: string;
-  total: number;
-  fromPrint: number;
+/**
+ * Did the book get used?
+ *
+ * This exists for one decision: whether printing again is worth the money. It
+ * is deliberately not an exhibitor-facing metric — nobody is being told how
+ * popular their listing was, and the shape of this data reflects that.
+ *
+ * The three numbers that answer it:
+ *  - `printScans` — scans off paper (`?s=p`), as opposed to forwarded links.
+ *    This is the only figure attributable to the print run itself.
+ *  - `listingsScanned` of `listingsPrinted` — thirty scans across twenty
+ *    listings says the book is being used; thirty across two says one
+ *    exhibitor put the QR on their booth banner.
+ *  - `byMonth` — a spike in conference week and nothing after means it was a
+ *    four-day handout. Activity in April is the case for printing again.
+ */
+export type PrintUsage = {
+  totalScans: number;
+  printScans: number;
+  linkScans: number;
+  mobileScans: number;
+  /** Distinct listings that got at least one scan. */
+  listingsScanned: number;
+  /** Listings in the book, for the denominator. */
+  listingsPrinted: number;
+  firstScanAt: string | null;
   lastScanAt: string | null;
+  /** "2027-02" → scan count, ascending. The staying-power question. */
+  byMonth: Array<{ month: string; scans: number }>;
+  /** Busiest listings — whether use is broad or concentrated, not a leaderboard. */
+  topListings: Array<{ organizationName: string; scans: number }>;
 };
 
-/** Scan counts per exhibitor, busiest first — "did the book get used". */
-export async function loadScanStats(orgIds?: string[]): Promise<ScanStats[]> {
+/**
+ * Usage of the printed directory as a whole.
+ *
+ * `listingsPrinted` is passed in rather than derived: what matters is the
+ * denominator of the book that actually went to press, which the caller knows
+ * and this table does not.
+ */
+export async function loadPrintUsage(listingsPrinted: number): Promise<PrintUsage> {
   const db = createAdminClient();
-  let q = db
+  const { data } = await db
     .from("directory_scan_events")
-    .select("organization_id, source, occurred_at, organizations(name)");
-  if (orgIds?.length) q = q.in("organization_id", orgIds);
+    .select("organization_id, source, device, occurred_at, organizations(name)")
+    .order("occurred_at", { ascending: true });
 
-  const { data } = await q;
-  const byOrg = new Map<string, ScanStats>();
-  for (const row of data ?? []) {
+  const rows = data ?? [];
+  const byOrg = new Map<string, { name: string; scans: number }>();
+  const byMonth = new Map<string, number>();
+  let printScans = 0;
+  let mobileScans = 0;
+
+  for (const row of rows) {
+    if (row.source === "print") printScans += 1;
+    if (row.device === "mobile") mobileScans += 1;
+
     const orgId = row.organization_id as string | null;
-    if (!orgId) continue;
-    const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
-    const held = byOrg.get(orgId) ?? {
-      organizationId: orgId,
-      organizationName: (org as { name?: string } | null)?.name ?? "Unknown",
-      total: 0,
-      fromPrint: 0,
-      lastScanAt: null,
-    };
-    held.total += 1;
-    if (row.source === "print") held.fromPrint += 1;
+    if (orgId) {
+      const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
+      const held = byOrg.get(orgId) ?? { name: (org as { name?: string } | null)?.name ?? "Unknown", scans: 0 };
+      held.scans += 1;
+      byOrg.set(orgId, held);
+    }
+
     const at = row.occurred_at as string | null;
-    if (at && (!held.lastScanAt || at > held.lastScanAt)) held.lastScanAt = at;
-    byOrg.set(orgId, held);
+    if (at) {
+      const month = at.slice(0, 7); // YYYY-MM
+      byMonth.set(month, (byMonth.get(month) ?? 0) + 1);
+    }
   }
-  return [...byOrg.values()].sort((a, b) => b.total - a.total);
+
+  const occurredAt = rows.map((r) => r.occurred_at as string | null).filter((v): v is string => !!v);
+
+  return {
+    totalScans: rows.length,
+    printScans,
+    linkScans: rows.length - printScans,
+    mobileScans,
+    listingsScanned: byOrg.size,
+    listingsPrinted,
+    firstScanAt: occurredAt[0] ?? null,
+    lastScanAt: occurredAt.at(-1) ?? null,
+    byMonth: [...byMonth.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([month, scans]) => ({ month, scans })),
+    topListings: [...byOrg.values()].sort((a, b) => b.scans - a.scans).slice(0, 10)
+      .map((o) => ({ organizationName: o.name, scans: o.scans })),
+  };
 }
