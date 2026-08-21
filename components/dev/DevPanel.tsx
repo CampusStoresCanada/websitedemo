@@ -24,24 +24,43 @@ const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
     { value: "super_admin", label: "Super Admin" },
   ];
 
+type DevAccount = { email: string; password: string; label: string };
+
 /**
- * Quick-login personas for local development. Rendered only when
- * NODE_ENV === "development" (see app/layout.tsx).
+ * Quick-login personas, read from `NEXT_PUBLIC_DEV_ACCOUNTS` in `.env.local`.
  *
- * ⚠️ Purpose-built test accounts only, plus the one real account whose owner
- * maintains this file. Other people's real logins were removed 2026-08-21:
- * this file is tracked in git, so anything added here travels with every
- * clone, worktree and agent session, and stays in history afterwards.
+ * The credentials deliberately do NOT live in this file. It is tracked in git,
+ * so anything written here travels with every clone, worktree and agent session
+ * and stays in history afterwards. `.env.local` is already gitignored and never
+ * leaves the machine that made it.
  *
- * Need a persona that isn't here? Create a dedicated test account against a
- * test org rather than borrowing a real member's.
+ * The component itself stays tracked on purpose: `app/layout.tsx` imports it, so
+ * gitignoring the file would break `next build` on any fresh clone — including
+ * Vercel. Unset env just means no quick-login buttons, which is exactly right
+ * anywhere that isn't a developer's laptop.
+ *
+ * Format — a JSON array on one line in `.env.local`:
+ *   NEXT_PUBLIC_DEV_ACCOUNTS=[{"email":"you@example.com","password":"…","label":"Super Admin"}]
  */
-const TEST_ACCOUNTS = [
-  { email: "google@campusstores.ca", password: "Bl00p!Bl00p!", label: "Super Admin (Steve)" },
-  { email: "test.public.tier@example.com", password: "CSCTestPublic2026!", label: "Test Org — Public Tier (Non-Member)" },
-  { email: "test.partner@example.com", password: "CSCTestPartner2026!", label: "Test Org — Partner" },
-  { email: "test.member@example.com", password: "CSCTestMember2026!", label: "Test Org — Member" },
-];
+const TEST_ACCOUNTS: DevAccount[] = (() => {
+  const raw = process.env.NEXT_PUBLIC_DEV_ACCOUNTS;
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (a): a is DevAccount =>
+        !!a && typeof a === "object" &&
+        typeof (a as DevAccount).email === "string" &&
+        typeof (a as DevAccount).password === "string" &&
+        typeof (a as DevAccount).label === "string"
+    );
+  } catch {
+    // Malformed JSON shouldn't take the whole dev panel down.
+    console.warn("[DevPanel] NEXT_PUBLIC_DEV_ACCOUNTS is not valid JSON — quick login disabled.");
+    return [];
+  }
+})();
 
 export default function DevPanel() {
   const [show, setShow] = useState(false);
