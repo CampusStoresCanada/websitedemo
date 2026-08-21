@@ -906,6 +906,70 @@ export type Database = {
           },
         ]
       }
+      benchmarking_recipients: {
+        Row: {
+          assigned_to: string | null
+          confirmed_at: string | null
+          confirmed_by: string | null
+          contact_id: string | null
+          created_at: string
+          id: string
+          note: string | null
+          organization_id: string
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          assigned_to?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id: string
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          assigned_to?: string | null
+          confirmed_at?: string | null
+          confirmed_by?: string | null
+          contact_id?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id?: string
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_recipients_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_recipients_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_field_reviews: {
         Row: {
           comment: string | null
@@ -1706,6 +1770,21 @@ export type Database = {
           },
         ]
       }
+      capability_delegates: {
+        Row: {
+          child_capability: string
+          parent_capability: string
+        }
+        Insert: {
+          child_capability: string
+          parent_capability: string
+        }
+        Update: {
+          child_capability?: string
+          parent_capability?: string
+        }
+        Relationships: []
+      }
       capability_grants: {
         Row: {
           can_delegate: boolean
@@ -1763,6 +1842,27 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "capability_grants_delegated_from_fkey"
+            columns: ["delegated_from"]
+            isOneToOne: false
+            referencedRelation: "capability_grants"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capability_grants_granted_by_fkey"
+            columns: ["granted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "capability_grants_revoked_by_fkey"
+            columns: ["revoked_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "capability_grants_subject_id_fkey"
             columns: ["subject_id"]
             isOneToOne: false
@@ -1771,7 +1871,6 @@ export type Database = {
           },
         ]
       }
-
       cart_items: {
         Row: {
           conference_id: string
@@ -2677,6 +2776,7 @@ export type Database = {
       conference_checklist_tasks: {
         Row: {
           active: boolean
+          audience: string
           check_entity_id: string | null
           check_type: string
           checklist_id: string
@@ -2689,6 +2789,7 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          audience?: string
           check_entity_id?: string | null
           check_type: string
           checklist_id: string
@@ -2701,6 +2802,7 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          audience?: string
           check_entity_id?: string | null
           check_type?: string
           checklist_id?: string
@@ -11387,6 +11489,30 @@ export type Database = {
           },
         ]
       }
+      capability_contributions: {
+        Row: {
+          capability: string | null
+          display_name: string | null
+          ends_at: string | null
+          granted_by_name: string | null
+          is_active: boolean | null
+          reason: string | null
+          revoked_at: string | null
+          scope_id: string | null
+          scope_type: string | null
+          starts_at: string | null
+          subject_id: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capability_grants_subject_id_fkey"
+            columns: ["subject_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       comms_campaign_totals: {
         Row: {
           campaign_id: string | null
@@ -11664,21 +11790,6 @@ export type Database = {
       }
     }
     Functions: {
-      max_delegable_until: {
-        Args: {
-          p_subject: string
-          p_child_capability: string
-        }
-        Returns: string
-      }
-      has_capability: {
-        Args: {
-          p_subject: string
-          p_capability: string
-          p_scope_id?: string
-        }
-        Returns: boolean
-      }
       approve_booth_request: {
         Args: { p_approval_id: string; p_notes?: string }
         Returns: string
@@ -11959,6 +12070,10 @@ export type Database = {
           id: string
         }[]
       }
+      has_capability: {
+        Args: { p_capability: string; p_scope_id?: string; p_subject: string }
+        Returns: boolean
+      }
       increment_share_link_use: {
         Args: { link_id: string }
         Returns: undefined
@@ -11969,6 +12084,10 @@ export type Database = {
           email: string
           id: string
         }[]
+      }
+      max_delegable_until: {
+        Args: { p_child_capability: string; p_subject: string }
+        Returns: string
       }
       mint_entity_offer_purchase: {
         Args: {
@@ -12151,6 +12270,13 @@ export type Database = {
         Returns: {
           records_purged: number
           retention_job_id: string
+        }[]
+      }
+      seal_election: {
+        Args: { p_election_id: string }
+        Returns: {
+          participation_count: number
+          sealed_count: number
         }[]
       }
       search_partner_embeddings: {

@@ -16,10 +16,13 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
-import { getCommitteeReview } from "@/lib/elections/service";
+import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
+import { getCommitteeReview, getNoticeState } from "@/lib/elections/service";
 import {
   requestWithdrawalAction,
   sendCallForNominationsAction,
+  sendAgmNoticeAction,
+  sendProxyFormAction,
   chaseIncompleteAction,
   mintElectionActionItemsAction,
 } from "@/lib/actions/elections";
@@ -72,6 +75,7 @@ export default async function ElectionReviewPage({
   const { slug } = await params;
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
+  const noticeState = await getNoticeState(slug);
 
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
     review;
@@ -97,6 +101,16 @@ export default async function ElectionReviewPage({
     await mintElectionActionItemsAction(slug);
   }
 
+  async function sendNotice(formData: FormData) {
+    "use server";
+    await sendAgmNoticeAction(slug, formData);
+  }
+
+  async function sendProxy() {
+    "use server";
+    await sendProxyFormAction(slug);
+  }
+
   const closing =
     daysUntilNominationsClose > 0
       ? `${daysUntilNominationsClose} day${daysUntilNominationsClose === 1 ? "" : "s"} left`
@@ -109,6 +123,14 @@ export default async function ElectionReviewPage({
       <AdminPageHeader
         title={`${election.cycleYear} Board election`}
         description={`${election.seatsAvailable} seats · AGM ${formatDate(election.schedule.agmDate)} · nominations ${formatDate(election.schedule.nominationsOpenAt)} – ${formatDate(election.schedule.nominationsCloseAt)} (${closing})`}
+        actions={
+          <Link
+            href={`/admin/elections/${slug}/audit`}
+            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Ballots &amp; audit
+          </Link>
+        }
       />
 
       {/* The electorate, which during a renewal cycle is a moving number. */}
@@ -145,6 +167,10 @@ export default async function ElectionReviewPage({
           their renewal and cannot nominate, co-sign, or vote until they do. They are not lapsed —
           each becomes eligible the day it pays. This number is re-checked every time this page loads.
         </div>
+      )}
+
+      {noticeState && (
+        <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
       )}
 
       {/* The election's obligations belong on the board's own list, assigned to

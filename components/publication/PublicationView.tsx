@@ -167,8 +167,24 @@ function Listing({ entry }: { entry: ComposedEntry }) {
         </p>
       ) : null}
 
+      {entry.primaryContact ? (
+        <p className="pub-contact">
+          <span className="pub-contact-name">{entry.primaryContact.name}</span>
+          {entry.primaryContact.roleTitle ? `, ${entry.primaryContact.roleTitle}` : ""}
+          {entry.primaryContact.phone ? ` · ${entry.primaryContact.phone}` : ""}
+          {entry.primaryContact.email ? ` · ${entry.primaryContact.email}` : ""}
+        </p>
+      ) : null}
+
       {entry.classes.length > 0 ? <p className="pub-classes">{entry.classes.join(" · ")}</p> : null}
-      {entry.catalogueUrl ? <p className="pub-link">{cleanUrl(entry.catalogueUrl)}</p> : null}
+
+      <div className="pub-listing-foot">
+        {entry.catalogueUrl ? <p className="pub-link">{cleanUrl(entry.catalogueUrl)}</p> : <span />}
+        {entry.qrSvg ? (
+          <span className="pub-qr" aria-hidden="true"
+            dangerouslySetInnerHTML={{ __html: entry.qrSvg }} />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -272,6 +288,14 @@ function PublicationStyles() {
                             color: var(--muted); margin-right: .25rem; }
       .pub-classes { margin: 0 0 .3rem; font-size: .75rem; color: var(--muted); }
       .pub-link { margin: 0; font-size: .75rem; color: var(--navy); word-break: break-all; }
+      .pub-contact { margin: 0 0 .3rem; font-size: .8125rem; color: #374151; }
+      .pub-contact-name { font-weight: 600; color: var(--ink); }
+      /* The QR sits with the links, small and out of the way. It is the thing
+         that keeps this page useful after the book is frozen, but it should
+         never dominate a listing. */
+      .pub-listing-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: .5rem; }
+      .pub-qr { display: block; width: 3.25rem; height: 3.25rem; flex: none; }
+      .pub-qr svg { width: 100%; height: 100%; display: block; }
 
       .pub-map { margin: 0 0 1rem; }
       .pub-map-svg { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
@@ -296,6 +320,8 @@ function PublicationStyles() {
         .pub-index { columns: 3; }
         .pub-listing, .pub-index-block, .pub-map { break-inside: avoid; }
         .pub-map-svg { border: .5pt solid #999; }
+        /* Below ~18mm a phone camera struggles at arm's length. */
+        .pub-qr { width: 19mm; height: 19mm; }
         /* Links are read on paper, not clicked. */
         .pub-link { color: var(--ink); }
       }

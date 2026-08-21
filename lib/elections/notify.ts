@@ -331,3 +331,99 @@ export function summarizeOutcomes(outcomes: NotifyOutcome[]): {
     problems: failed.map((o) => `${o.template}${o.to ? ` → ${o.to}` : ""}: ${o.error ?? "unknown"}`),
   };
 }
+
+// ---------------------------------------------------------------------------
+// AGM notices — By-Law Part VII
+// ---------------------------------------------------------------------------
+
+function formatLongDate(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
+  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", {
+    timeZone: "UTC",
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+/**
+ * Notice of the annual general meeting, to every member entitled to vote.
+ *
+ * "Each member entitled to vote" is the institution, and the people who can act
+ * for it are its administrators — the same audience as the call for nominations.
+ * Sending to every administrator rather than one named contact is deliberate:
+ * notice that lands with someone on leave has not reached the member.
+ */
+export async function notifyAgmNotice(
+  election: Election,
+  organizationIds: string[],
+  details: { agmTime: string; location: string | null; agmUrl: string }
+): Promise<NotifyOutcome[]> {
+  const db = createAdminClient();
+  const outcomes: NotifyOutcome[] = [];
+
+  for (const orgId of organizationIds) {
+    const { data: org } = await db.from("organizations").select("name").eq("id", orgId).maybeSingle();
+    const admins = await loadOrgAdminContacts(orgId);
+
+    if (admins.length === 0) {
+      // A member with nobody to give notice to is a compliance problem, not a
+      // send failure — it must be visible before the window closes.
+      outcomes.push({
+        template: "agm_notice_of_meeting",
+        to: "",
+        sent: false,
+        error: `${(org?.name as string) ?? orgId} has no administrator to give notice to. Notice cannot be given to this member electronically.`,
+      });
+      continue;
+    }
+
+    for (const admin of admins) {
+      outcomes.push(
+        await send("agm_notice_of_meeting", admin.email, {
+          contact_name: admin.name,
+          organization_name: (org?.name as string) ?? "your institution",
+          cycle_year: election.cycleYear,
+          agm_date: election.schedule.agmDate,
+          agm_date_long: formatLongDate(election.schedule.agmDate),
+          agm_time: details.agmTime,
+          // The renderer has no inline conditionals that sendTransactional can
+          // reach ({{#if}} needs a flags map it does not pass), so optionality
+          // is baked into the value rather than the template.
+          location_clause: details.location ? `, ${details.location}` : "",
+          seats_available: election.seatsAvailable,
+          agm_url: details.agmUrl,
+        })
+      );
+    }
+  }
+  return outcomes;
+}
+
+/** The proxy form. Separate obligation, separate date — Part VII S7(b). */
+export async function notifyProxyForm(
+  election: Election,
+  organizationIds: string[],
+  details: { proxyFormUrl: string; lateNote?: string | null }
+): Promise<NotifyOutcome[]> {
+  const db = createAdminClient();
+  const outcomes: NotifyOutcome[] = [];
+
+  for (const orgId of organizationIds) {
+    const { data: org } = await db.from("organizations").select("name").eq("id", orgId).maybeSingle();
+    for (const admin of await loadOrgAdminContacts(orgId)) {
+      outcomes.push(
+        await send("agm_proxy_form", admin.email, {
+          contact_name: admin.name,
+          organization_name: (org?.name as string) ?? "your institution",
+          cycle_year: election.cycleYear,
+          agm_date_long: formatLongDate(election.schedule.agmDate),
+          proxy_form_url: details.proxyFormUrl,
+          late_note: details.lateNote ?? null,
+        })
+      );
+    }
+  }
+  return outcomes;
+}

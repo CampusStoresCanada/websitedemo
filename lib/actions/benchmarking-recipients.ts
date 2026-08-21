@@ -1,0 +1,206 @@
+"use server";
+
+import { revalidatePath } from "next/cache";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+
+/**
+ * Recipient confirmation — who actually receives the survey at each store.
+ *
+ * Writes go through createAdminClient(): the session client holds SELECT only,
+ * and a GRANT without a matching write policy returns zero rows with
+ * error:null, which reads as success and quietly loses the rep's work.
+ */
+
+async function verifyRep(): Promise<{
+  ok: boolean;
+  userId?: string;
+  isAdmin?: boolean;
+  error?: string;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { ok: false, error: "Not signed in" };
+  const admin = isGlobalAdmin(auth.ctx.globalRole);
+  if (admin) return { ok: true, userId: auth.ctx.userId, isAdmin: true };
+  if (!auth.ctx.capabilities.includes("benchmarking.recipient_confirm")) {
+    return { ok: false, error: "Recipient confirmation access required" };
+  }
+  return { ok: true, userId: auth.ctx.userId, isAdmin: false };
+}
+
+async function verifyAdmin(): Promise<{
+  ok: boolean;
+  userId?: string;
+  error?: string;
+}> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { ok: false, error: "Not signed in" };
+  if (!isGlobalAdmin(auth.ctx.globalRole)) {
+    return { ok: false, error: "Admin access required" };
+  }
+  return { ok: true, userId: auth.ctx.userId };
+}
+
+/**
+ * Create one queue row per active member store for this survey, seeding each
+ * with our current best guess at the contact. Idempotent — re-running adds
+ * only stores that joined since.
+ */
+export async function seedRecipientQueue(
+  surveyId: string,
+): Promise<{ success: boolean; created?: number; error?: string }> {
+  const auth = await verifyAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+
+  const { data: orgs, error: orgErr } = await db
+    .from("organizations")
+    .select("id")
+    .eq("type", "Member")
+    .eq("membership_status", "active")
+    .or("is_test.is.null,is_test.eq.false");
+
+  if (orgErr) {
+    console.error("[recipients] seed org read failed:", orgErr);
+    return { success: false, error: "Could not read member stores" };
+  }
+
+  const { data: existing } = await db
+    .from("benchmarking_recipients")
+    .select("organization_id")
+    .eq("survey_id", surveyId);
+
+  const have = new Set((existing ?? []).map((r) => r.organization_id));
+  const missing = (orgs ?? []).filter((o) => !have.has(o.id));
+  if (missing.length === 0) return { success: true, created: 0 };
+
+  // Best guess at the contact: their primary, if they have one.
+  const { data: primaries } = await db
+    .from("contacts")
+    .select("id, organization_id")
+    .in(
+      "organization_id",
+      missing.map((o) => o.id),
+    )
+    .eq("is_primary", true)
+    .is("archived_at", null);
+
+  const primaryByOrg = new Map(
+    (primaries ?? []).map((c) => [c.organization_id, c.id]),
+  );
+
+  const { error: insErr } = await db.from("benchmarking_recipients").insert(
+    missing.map((o) => ({
+      survey_id: surveyId,
+      organization_id: o.id,
+      contact_id: primaryByOrg.get(o.id) ?? null,
+      // No primary contact means nobody to even guess at — that one goes
+      // straight to the office rather than sitting in a rep's queue going stale.
+      status: primaryByOrg.has(o.id) ? "unconfirmed" : "escalated",
+    })),
+  );
+
+  if (insErr) {
+    console.error("[recipients] seed insert failed:", insErr);
+    return { success: false, error: "Could not create the queue" };
+  }
+
+  revalidatePath("/benchmarking/recipients");
+  return { success: true, created: missing.length };
+}
+
+/** Hand a whole region to one rep in a single move. */
+export async function assignRegion(
+  surveyId: string,
+  region: string,
+  repId: string | null,
+): Promise<{ success: boolean; assigned?: number; error?: string }> {
+  const auth = await verifyAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id, province")
+    .eq("type", "Member")
+    .eq("membership_status", "active");
+
+  // Region is derived from province; do it here rather than a round trip.
+  const REGION: Record<string, string[]> = {
+    Atlantic: [
+      "Newfoundland and Labrador",
+      "Nova Scotia",
+      "New Brunswick",
+      "Prince Edward Island",
+    ],
+    Quebec: ["Quebec"],
+    Ontario: ["Ontario"],
+    Prairies: ["Manitoba", "Saskatchewan", "Alberta"],
+    West: ["British Columbia", "Yukon", "Northwest Territories", "Nunavut"],
+  };
+  const provinces = REGION[region] ?? [];
+  const orgIds = (orgs ?? [])
+    .filter((o) => provinces.includes(o.province ?? ""))
+    .map((o) => o.id);
+
+  if (orgIds.length === 0) return { success: true, assigned: 0 };
+
+  const { error } = await db
+    .from("benchmarking_recipients")
+    .update({ assigned_to: repId })
+    .eq("survey_id", surveyId)
+    .in("organization_id", orgIds);
+
+  if (error) {
+    console.error("[recipients] assignRegion failed:", error);
+    return { success: false, error: "Could not assign the region" };
+  }
+
+  revalidatePath("/benchmarking/recipients");
+  return { success: true, assigned: orgIds.length };
+}
+
+/**
+ * A rep's answer on one store. "I don't know" is a first-class outcome — much
+ * better than a guess, and it routes the store back to the office.
+ */
+export async function resolveRecipient(input: {
+  recipientId: string;
+  outcome: "confirmed" | "corrected" | "unknown";
+  contactId?: string | null;
+  note?: string | null;
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyRep();
+  if (!auth.ok || !auth.userId) return { success: false, error: auth.error };
+
+  if (
+    (input.outcome === "confirmed" || input.outcome === "corrected") &&
+    !input.contactId
+  ) {
+    return { success: false, error: "Pick the person first" };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("benchmarking_recipients")
+    .update({
+      status: input.outcome === "unknown" ? "escalated" : input.outcome,
+      contact_id:
+        input.outcome === "unknown" ? null : (input.contactId ?? null),
+      note: input.note?.trim() || null,
+      confirmed_by: auth.userId,
+      confirmed_at: new Date().toISOString(),
+    })
+    .eq("id", input.recipientId);
+
+  if (error) {
+    console.error("[recipients] resolve failed:", error);
+    return { success: false, error: "Could not save" };
+  }
+
+  revalidatePath("/benchmarking/recipients");
+  revalidatePath("/benchmarking/committee");
+  return { success: true };
+}

@@ -338,3 +338,114 @@ export async function startElectionCycleAction(formData: FormData): Promise<Acti
   revalidatePath("/admin/elections");
   return { ok: true };
 }
+
+
+async function requireBoard() {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false as const, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false as const, error: "Only the board or association staff can do this." };
+  return { ok: true as const, userId: auth.user.id };
+}
+
+/**
+ * Seal the ballots. Irreversible — the confirmation lives in the UI, and the
+ * typed phrase is checked here so a stray click cannot do it.
+ */
+export async function sealElectionAction(slug: string, formData: FormData): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  if (String(formData.get("confirm") ?? "").trim().toUpperCase() !== "SEAL")
+    return { ok: false, error: 'Type SEAL to confirm. This permanently removes the link between every ballot and the institution that cast it.' };
+
+  const { sealElection } = await import("@/lib/elections/service");
+  const result = await sealElection(slug);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}/audit`);
+  return {
+    ok: true,
+    error: result.data.reconciled
+      ? undefined
+      : `Sealed, but ${result.data.sealed} ballots do not match ${result.data.participation} on the roll. Do not certify until this is understood.`,
+  };
+}
+
+export async function recordTieResolutionAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const { recordTieResolution } = await import("@/lib/elections/service");
+  const result = await recordTieResolution(slug, {
+    method: String(formData.get("method") ?? "refer_to_agm") as "refer_to_agm" | "board_appoints" | "other",
+    note: String(formData.get("note") ?? ""),
+    resolvedByProfileId: guard.userId,
+    electedNominationIds: formData.getAll("elected").map(String).filter(Boolean),
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}/audit`);
+  return { ok: true };
+}
+
+export async function certifyElectionAction(slug: string, formData: FormData): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const { certifyElection } = await import("@/lib/elections/service");
+  const result = await certifyElection(slug, {
+    certifiedByProfileId: guard.userId,
+    scrutineerContactId: String(formData.get("scrutineerContactId") ?? "").trim() || null,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}/audit`);
+  return { ok: true };
+}
+
+
+/**
+ * Give notice of the AGM. The window check lives in the service; this only
+ * carries the meeting details a person has to supply.
+ */
+export async function sendAgmNoticeAction(slug: string, formData: FormData): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const agmTime = String(formData.get("agmTime") ?? "").trim();
+  if (!agmTime)
+    return { ok: false, error: "Notice must state the time of the meeting — Part VII S4 requires the time and place." };
+
+  const { sendAgmNotice } = await import("@/lib/elections/service");
+  const result = await sendAgmNotice(slug, {
+    sentByProfileId: guard.userId,
+    agmTime,
+    location: String(formData.get("location") ?? "").trim() || null,
+    includeProxyForm: formData.get("includeProxyForm") === "1",
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return {
+    ok: true,
+    error: result.data.problems.length
+      ? `Sent to ${result.data.sent}, but ${result.data.failed} did not go: ${result.data.problems.join(" · ")}`
+      : undefined,
+  };
+}
+
+export async function sendProxyFormAction(slug: string): Promise<ActionResult> {
+  const guard = await requireBoard();
+  if (!guard.ok) return guard;
+
+  const { sendProxyForm } = await import("@/lib/elections/service");
+  const result = await sendProxyForm(slug, guard.userId);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}

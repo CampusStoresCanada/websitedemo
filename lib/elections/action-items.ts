@@ -23,7 +23,18 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveNoticeWindow } from "./agm-notice";
 import type { Election } from "./service";
+
+/** Last day notice of the AGM may be given — By-Law Part VII S4(b). */
+function noticeWindowCloses(election: Election): string {
+  return resolveNoticeWindow(election.schedule.agmDate).closesOn;
+}
+
+/** By-Law Part VII S7(b) — the proxy form deadline. */
+function proxyFormDue(election: Election): string {
+  return resolveNoticeWindow(election.schedule.agmDate).proxyDueOn;
+}
 
 /** Offices the election process depends on. */
 export type ElectionRoleKey =
@@ -113,6 +124,22 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     description:
       "Ballots are due back no less than 30 days before the AGM (Part V S3(c)).\n\nTurnout is measured from ballots actually returned, not from whether anyone opened an email — delivery tracking is not currently recording anything, so the returned count is the only figure worth acting on. Every director is also an administrator of their own institution; if turnout is limited to them, the board has effectively re-elected itself, and that is worth a round of phone calls.",
     dueOn: (e) => e.schedule.ballotsCloseAt,
+    owners: ["executive_director"],
+  },
+  {
+    key: "agm_notice",
+    title: "Give notice of the {year} annual general meeting",
+    description:
+      "By-Law Part VII S4(b): notice of the time and place must reach every member entitled to vote, by electronic means, during a period of 21 to 35 days before the meeting.\n\nThis is a WINDOW, not a deadline — too early is as defective as too late. Miss the 21-day floor and notice was not given as the by-laws require, which leaves the meeting improperly called and everything decided at it open to challenge, including the election of directors.\n\nFor a January meeting the window falls over the holidays and the last board meeting of the year sits at its opening edge. There is no later meeting to catch a miss, so this is best done at that meeting or in the days immediately after it. The election screen will not let notice go out on the wrong side of the window.\n\nSending it also sends the proxy form where the dates allow, which discharges both obligations in one go.",
+    dueOn: (e) => noticeWindowCloses(e),
+    owners: ["executive_director"],
+  },
+  {
+    key: "agm_proxy_form",
+    title: "Send the proxy form for the {year} annual general meeting",
+    description:
+      "By-Law Part VII S7(b): members eligible to vote must be provided with the proxy form 30 days before the meeting.\n\nA proxyholder must be an employee of the member's own store or the primary contact of another member store, and a proxy is valid only for the meeting it was given for.\n\nIf this went out with the notice of meeting it is already done — the election screen will say so. Unlike the notice, a late proxy form is still worth sending: it leaves a member worse off but does not invalidate the meeting.",
+    dueOn: (e) => proxyFormDue(e),
     owners: ["executive_director"],
   },
   {

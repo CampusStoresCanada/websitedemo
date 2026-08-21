@@ -80,6 +80,23 @@ export default async function CommitteePage() {
     reviewDone = flagged.filter((f) => answeredFields.has(f.name)).length;
   }
 
+  let recipientsDone = 0;
+  let recipientsTotal = 0;
+  let recipientsEscalated = 0;
+  if (survey) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: recipientRows } = (await (supabase as any)
+      .from("benchmarking_recipients")
+      .select("status")
+      .eq("survey_id", survey.id)) as { data: any[] | null };
+    const rows = recipientRows ?? [];
+    recipientsTotal = rows.length;
+    recipientsDone = rows.filter(
+      (r) => r.status === "confirmed" || r.status === "corrected",
+    ).length;
+    recipientsEscalated = rows.filter((r) => r.status === "escalated").length;
+  }
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { count: openFlags } = (await (supabase as any)
     .from("delta_flags")
@@ -103,6 +120,9 @@ export default async function CommitteePage() {
         reviewDone,
         reviewTotal,
         openFlags: openFlags ?? 0,
+        recipientsDone,
+        recipientsTotal,
+        recipientsEscalated,
       }}
     />
   );

@@ -20,6 +20,7 @@ const entry = (name: string, cats: string | null, booths: string[] = [], printRe
   orgId: name, orgName: name, orgSlug: name.toLowerCase(),
   logoUrl: null, description: null, featuredProduct: null, featuredProductDetail: null,
   catalogueUrl: null, rawCategories: cats, boothNumbers: booths,
+  publicCode: "AAAA0001", primaryContact: null,
   completeness: completeness(printReady ? {} : { logo_url: null }),
 });
 

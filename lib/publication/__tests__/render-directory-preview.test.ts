@@ -54,7 +54,9 @@ describe("directory preview", () => {
       loadDirectoryEntries(publication.source),
       loadPlacementsForPublication(CONFERENCE_ID!, surfaces),
     ]);
-    const doc = composePublication(publication, entries, surfaces, placements);
+    const { attachQrCodes } = await import("../qr");
+    const withQr = await attachQrCodes(entries, process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca");
+    const doc = composePublication(publication, withQr, surfaces, placements);
 
     // Assert the shape the SQL check predicted, so a silent regression in the
     // loaders shows up here rather than in a printed directory.

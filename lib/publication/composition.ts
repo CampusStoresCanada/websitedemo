@@ -126,6 +126,27 @@ export type DirectoryEntry = {
   rawCategories: string | null;
   /** Booth numbers held, ascending. Empty for a non-conference source. */
   boothNumbers: string[];
+  /**
+   * Permanent code behind the printed QR. Never changes once printed — see
+   * organizations.public_code.
+   */
+  publicCode: string | null;
+  /**
+   * Someone a reader can actually contact. The printed page is frozen; a name
+   * and a number are what make it actionable months later.
+   */
+  primaryContact: {
+    name: string;
+    roleTitle: string | null;
+    email: string | null;
+    phone: string | null;
+  } | null;
+  /**
+   * Inline SVG QR pointing at /e/<publicCode>. Attached by attachQrCodes()
+   * rather than generated in the renderer, because the renderer must stay
+   * synchronous — it is also driven by renderToStaticMarkup.
+   */
+  qrSvg?: string | null;
   completeness: OrgCompleteness;
 };
 

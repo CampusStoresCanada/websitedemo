@@ -22,6 +22,7 @@ interface Row {
 }
 
 const CAPABILITY_LABEL: Record<string, string> = {
+  "benchmarking.committee_lead": "Benchmarking — committee lead",
   "benchmarking.content_review": "Benchmarking — question review",
   "benchmarking.qa_verify": "Benchmarking — QA verification",
   "benchmarking.recipient_confirm": "Benchmarking — recipient confirmation",
@@ -251,6 +252,7 @@ function GrantForm({
   const [capability, setCapability] = useState("benchmarking.content_review");
   const [reason, setReason] = useState("");
   const [endsAt, setEndsAt] = useState("");
+  const [canDelegate, setCanDelegate] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Search as you type. An Enter-only binding is invisible, and this form is
@@ -282,6 +284,7 @@ function GrantForm({
       capability,
       reason,
       endsAt: iso,
+      canDelegate,
     });
     setSaving(false);
     if (result.success) {
@@ -291,6 +294,7 @@ function GrantForm({
       setResults([]);
       setReason("");
       setEndsAt("");
+      setCanDelegate(false);
       setOpen(false);
       onDone();
     } else {
@@ -400,6 +404,23 @@ function GrantForm({
           className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
         />
       </div>
+      <label className="flex items-start gap-2 text-sm text-gray-700">
+        <input
+          type="checkbox"
+          checked={canDelegate}
+          onChange={(e) => setCanDelegate(e.target.checked)}
+          className="mt-0.5"
+        />
+        <span>
+          Can hand this work out to others
+          <span className="block text-xs text-gray-500">
+            For committee leads. They may issue the working capabilities
+            themselves, but never past their own end date, and never another
+            lead.
+          </span>
+        </span>
+      </label>
+
       <div className="flex gap-2">
         <button
           onClick={submit}

@@ -85,6 +85,9 @@ export type TemplateKey =
   | "election_store_permission_request"
   | "election_nomination_ready"
   | "election_nomination_incomplete"
+  // AGM — By-Law Part VII notices, both date-bound
+  | "agm_notice_of_meeting"
+  | "agm_proxy_form"
   | "prospective_booth_payment_confirmation"
   | "prospective_booth_application_reminder"
   // Events

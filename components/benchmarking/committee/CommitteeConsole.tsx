@@ -38,7 +38,14 @@ export default function CommitteeConsole({
   canDelegateAny: boolean;
   delegableUntil: Record<string, string | null>;
   holders: Holder[];
-  progress: { reviewDone: number; reviewTotal: number; openFlags: number };
+  progress: {
+    reviewDone: number;
+    reviewTotal: number;
+    openFlags: number;
+    recipientsDone: number;
+    recipientsTotal: number;
+    recipientsEscalated: number;
+  };
 }) {
   const [assigning, setAssigning] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +87,14 @@ export default function CommitteeConsole({
                 ? progress.openFlags === 0
                   ? "No flags waiting"
                   : `${progress.openFlags} flag${progress.openFlags === 1 ? "" : "s"} waiting`
-                : null;
+                : w.capability === "benchmarking.recipient_confirm"
+                  ? progress.recipientsTotal === 0
+                    ? "Queue not built yet"
+                    : `${progress.recipientsDone} of ${progress.recipientsTotal} stores confirmed` +
+                      (progress.recipientsEscalated > 0
+                        ? ` · ${progress.recipientsEscalated} with the office`
+                        : "")
+                  : null;
 
           return (
             <section
@@ -131,17 +145,26 @@ export default function CommitteeConsole({
                     <p className="text-[11px] text-gray-500 mt-0.5">
                       Done when: {w.doneWhen}
                     </p>
-                    {w.capability === "benchmarking.content_review" &&
-                      progress.reviewTotal > 0 && (
-                        <div className="mt-2 h-1.5 w-full rounded bg-gray-200 overflow-hidden">
-                          <div
-                            className="h-full bg-gray-800"
-                            style={{
-                              width: `${Math.round((progress.reviewDone / progress.reviewTotal) * 100)}%`,
-                            }}
-                          />
-                        </div>
-                      )}
+                    {((w.capability === "benchmarking.content_review" &&
+                      progress.reviewTotal > 0) ||
+                      (w.capability === "benchmarking.recipient_confirm" &&
+                        progress.recipientsTotal > 0)) && (
+                      <div className="mt-2 h-1.5 w-full rounded bg-gray-200 overflow-hidden">
+                        <div
+                          className="h-full bg-gray-800"
+                          style={{
+                            width: `${Math.round(
+                              w.capability === "benchmarking.content_review"
+                                ? (progress.reviewDone / progress.reviewTotal) *
+                                    100
+                                : (progress.recipientsDone /
+                                    progress.recipientsTotal) *
+                                    100,
+                            )}%`,
+                          }}
+                        />
+                      </div>
+                    )}
                   </div>
                 )}
 

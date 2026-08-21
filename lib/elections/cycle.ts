@@ -15,11 +15,13 @@
  *      thing" — deliberately not automatic, because opening an election is a
  *      governance act with a date the board should have seen.
  *
- * What the software will NOT do is schedule the AGM as a board meeting. Board
- * meetings come from Google Calendar; generating them from a recurrence rule is
- * how a calendar and a database quietly stop agreeing. The members-only AGM
- * EVENT is a different record and is created here, and the kickoff task tells
- * the ED to put the meeting itself in the calendar.
+ * Opening a cycle also schedules the AGM: a board meeting of type `agm` and a
+ * members-only event linked to it, exactly as the meetings admin does it. Google
+ * Calendar seeded the existing board meetings, but the events apparatus writes
+ * the other way too — publishing a virtual event mints the Google event and Meet
+ * link. The AGM event is created as a DRAFT, so the date exists in the system,
+ * the announce-the-result task has a meeting to hang off, and nothing reaches
+ * the membership or the calendar until someone publishes it.
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -47,8 +49,9 @@ export interface CycleStartResult {
   slug: string;
   agmDate: string;
   seatsAvailable: number;
+  agmMeetingId: string | null;
   agmEventId: string | null;
-  agmEventSkipped: string | null;
+  agmNote: string;
   tasks: MintedTask[];
 }
 
@@ -117,52 +120,16 @@ export async function startElectionCycle(input: {
     .single();
   if (error || !election) return fail(`Could not create the election: ${error?.message}`);
 
-  // The members-only AGM event. Distinct from the board meeting record, which
-  // stays Google Calendar's to own.
-  let agmEventId: string | null = null;
-  let agmEventSkipped: string | null = null;
-
-  const eventSlug = `csc-annual-general-meeting-${input.cycleYear}`;
-  const { data: existingEvent } = await db
-    .from("events")
-    .select("id")
-    .eq("slug", eventSlug)
-    .maybeSingle();
-
-  if (existingEvent) {
-    agmEventId = existingEvent.id as string;
-    agmEventSkipped = "An event with this slug already existed and was left alone.";
-  } else {
-    const { data: event, error: eventError } = await db
-      .from("events")
-      .insert({
-        slug: eventSlug,
-        title: `Campus Stores Canada Annual General Meeting — ${input.cycleYear}`,
-        starts_at: `${agmDate}T16:00:00`,
-        ends_at: `${agmDate}T18:00:00`,
-        audience_mode: "members",
-        is_virtual: true,
-        status: "draft",
-        created_by: input.startedByProfileId,
-        body_html:
-          `<p>The ${input.cycleYear} Annual General Meeting of Campus Stores Canada.</p>` +
-          `<p>Directors are elected at this meeting. If more nominees stand than there are seats, ` +
-          `ballots go to member institutions beforehand and the result is announced here; otherwise ` +
-          `the nominees are acclaimed.</p>` +
-          `<p>Each member institution is entitled to attend and to vote.</p>`,
-      })
-      .select("id")
-      .single();
-
-    if (eventError) {
-      // Not fatal. The election is the record that matters; a missing event is
-      // something a person can fix in a minute, and losing the whole cycle start
-      // over it would be worse.
-      agmEventSkipped = `The AGM event could not be created (${eventError.message}). Create it by hand.`;
-    } else {
-      agmEventId = event!.id as string;
-    }
-  }
+  // The AGM itself: a board meeting of type `agm` plus a members-only event
+  // linked to it, mirroring POST /api/admin/board/meetings. Held as a DRAFT —
+  // the date is in the system and the announce-the-result task has somewhere to
+  // land, but nothing is announced and no Google Calendar event exists until a
+  // person publishes it. Publishing is what pushes it out.
+  const agm = await ensureAgmMeetingAndEvent({
+    agmDate,
+    cycleYear: input.cycleYear,
+    createdByProfileId: input.startedByProfileId,
+  });
 
   // Seats. Incumbents are left blank — filling them means asserting whose term
   // ends this cycle, which is exactly what the human confirming seatsAvailable
@@ -171,6 +138,8 @@ export async function startElectionCycle(input: {
     await db.from("election_seats").insert({ election_id: election.id, seat_key: `seat-${i}` });
   }
 
+  // Minted AFTER the AGM meeting exists, so "Announce the result at the annual
+  // general meeting" parents to the AGM rather than to December's meeting.
   const loaded = await getElection(slug);
   const tasks = loaded ? await mintElectionActionItems(loaded) : [];
 
@@ -178,10 +147,120 @@ export async function startElectionCycle(input: {
     slug,
     agmDate,
     seatsAvailable: input.seatsAvailable,
-    agmEventId,
-    agmEventSkipped,
+    agmMeetingId: agm.meetingId,
+    agmEventId: agm.eventId,
+    agmNote: agm.note,
     tasks,
   });
+}
+
+export interface AgmScheduleResult {
+  meetingId: string | null;
+  eventId: string | null;
+  note: string;
+}
+
+/**
+ * Schedule the AGM, idempotently.
+ *
+ * The event is a draft on purpose. A draft virtual event has no Google Calendar
+ * entry — `updateEventStatus` mints one on the transition to published — so this
+ * puts the date in the system without announcing it to the membership or
+ * putting it in anyone's calendar. Publish when the details are settled.
+ */
+export async function ensureAgmMeetingAndEvent(input: {
+  agmDate: string;
+  cycleYear: number;
+  createdByProfileId: string;
+}): Promise<AgmScheduleResult> {
+  const db = createAdminClient();
+  const title = `CSC Annual General Meeting — ${input.agmDate}`;
+  const eventSlug = `csc-annual-general-meeting-${input.cycleYear}`;
+
+  const { data: existingMeeting } = await db
+    .from("board_meetings")
+    .select("id, event_id, meeting_type")
+    .eq("meeting_date", input.agmDate)
+    .maybeSingle();
+
+  let meetingId = (existingMeeting?.id as string) ?? null;
+  let eventId = (existingMeeting?.event_id as string) ?? null;
+  const notes: string[] = [];
+
+  if (existingMeeting) {
+    notes.push(
+      `A meeting already existed on ${input.agmDate}` +
+        (existingMeeting.meeting_type !== "agm"
+          ? ` with type "${existingMeeting.meeting_type}" — left as it is; check it is the AGM.`
+          : " — left as it is.")
+    );
+  } else {
+    const { data: meeting, error } = await db
+      .from("board_meetings")
+      .insert({
+        meeting_date: input.agmDate,
+        meeting_type: "agm",
+        title,
+        status: "upcoming",
+        created_by: input.createdByProfileId,
+      })
+      .select("id")
+      .single();
+    if (error) {
+      notes.push(`The AGM meeting could not be created (${error.message}).`);
+    } else {
+      meetingId = meeting!.id as string;
+      notes.push("AGM board meeting created.");
+    }
+  }
+
+  if (!eventId) {
+    const { data: existingEvent } = await db
+      .from("events")
+      .select("id")
+      .eq("slug", eventSlug)
+      .maybeSingle();
+
+    if (existingEvent) {
+      eventId = existingEvent.id as string;
+      notes.push("An AGM event with this slug already existed and was reused.");
+    } else {
+      const { data: event, error: eventError } = await db
+        .from("events")
+        .insert({
+          slug: eventSlug,
+          title: `Campus Stores Canada Annual General Meeting — ${input.cycleYear}`,
+          starts_at: `${input.agmDate}T16:00:00`,
+          ends_at: `${input.agmDate}T18:00:00`,
+          audience_mode: "members",
+          is_virtual: true,
+          status: "draft",
+          created_by: input.createdByProfileId,
+          body_html:
+            `<p>The ${input.cycleYear} Annual General Meeting of Campus Stores Canada.</p>` +
+            `<p>Directors are elected at this meeting. If more nominees stand than there are seats, ` +
+            `ballots go to member institutions beforehand and the result is announced here; ` +
+            `otherwise the nominees are acclaimed.</p>` +
+            `<p>Each member institution is entitled to attend and to vote.</p>`,
+        })
+        .select("id")
+        .single();
+
+      if (eventError) {
+        // Not fatal. The meeting and the election are the records that matter.
+        notes.push(`The AGM event could not be created (${eventError.message}).`);
+      } else {
+        eventId = event!.id as string;
+        notes.push("Members-only AGM event created as a DRAFT — publish it to announce the date and put it in the calendar.");
+      }
+    }
+
+    if (meetingId && eventId) {
+      await db.from("board_meetings").update({ event_id: eventId }).eq("id", meetingId);
+    }
+  }
+
+  return { meetingId, eventId, note: notes.join(" ") };
 }
 
 export interface KickoffResult {
@@ -335,9 +414,11 @@ export async function ensureElectionKickoff(
       `Before starting, confirm how many seats are up. CSC alternates four and five, but a seat filled ` +
       `mid-term by appointment (Part IV S3) shifts the pattern — check the term register rather than the ` +
       `alternation.\n\n` +
-      `Two things the software will not do for you: schedule the AGM itself as a board meeting (it comes ` +
-      `from Google Calendar), and appoint the Nominating Committee (Part V S1 — that is the board's, ` +
-      `annually). Both want doing at the same meeting.`,
+      `Starting the cycle also schedules the AGM — a board meeting and a members-only event, held as a ` +
+      `DRAFT. The date will be in the system without being announced; publish the event when the ` +
+      `details are settled and that is what puts it in front of members and in the calendar.\n\n` +
+      `One thing the software will not do for you: appoint the Nominating Committee (Part V S1 — that ` +
+      `is the board's, annually). Worth doing at the same meeting.`,
     assignees: holder?.person_profile_id ? [holder.person_profile_id] : [],
     due_date: schedule.nominationsOpenAt,
     sort_order: ((last?.sort_order as number) ?? -1) + 1,

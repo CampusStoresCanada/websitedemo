@@ -62,7 +62,7 @@ export const WORKSTREAMS: Workstream[] = [
       "A survey that lands in the wrong inbox is a survey that doesn't get filled in. The stores we hear least from are the ones we know least about — so this is the difference between 37 responses and 52.",
     timeCommitment: "About 30 minutes for 8–12 stores",
     window: "October, during collection",
-    href: "/benchmarking/admin",
+    href: "/benchmarking/recipients",
     doneWhen: "Every active member store has a confirmed respondent",
   },
 ];

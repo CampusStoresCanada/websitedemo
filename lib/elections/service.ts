@@ -37,8 +37,13 @@ import {
   type OrgProfile,
   type RepresentationSnapshot,
 } from "./representation";
-import { resolveOutcome } from "./tally";
+import { resolveOutcome, tallyElection, formatTally as formatElectionTally } from "./tally";
 import { validateBallot, orderCandidates } from "./ballot";
+import {
+  resolveNoticeWindow,
+  evaluateNoticeWindow,
+  evaluateProxyDeadline,
+} from "./agm-notice";
 import {
   notifyNominee,
   notifyCosigners,
@@ -46,6 +51,8 @@ import {
   notifyNominationReady,
   notifyNominationIncomplete,
   notifyCallForNominations,
+  notifyAgmNotice,
+  notifyProxyForm,
   summarizeOutcomes,
   type NotifyOutcome,
 } from "./notify";
@@ -1641,4 +1648,551 @@ export async function getTurnout(
     abstained: (ballots ?? []).filter((b) => b.abstained).length,
     outstanding: Math.max(0, summary.eligible - returned),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Seal, count, certify
+// ---------------------------------------------------------------------------
+
+export interface SealResult {
+  sealed: number;
+  participation: number;
+  reconciled: boolean;
+}
+
+/**
+ * Seal the ballots. Irreversible.
+ *
+ * The work happens in `seal_election()` so it is one transaction — see that
+ * function for why a partial seal is worse than either outcome. This wrapper
+ * exists to check the window has actually closed and to report the
+ * reconciliation, which is the number a scrutineer will be asked about: the
+ * count of sealed ballots must equal the count of institutions recorded as
+ * having voted. If those disagree, something was lost, and it is unrecoverable
+ * — so it is surfaced immediately rather than discovered at certification.
+ */
+export async function sealElection(slug: string): Promise<Result<SealResult>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+  if (election.status !== "balloting")
+    return fail(`This election is "${election.status}" — only a balloting election can be sealed.`);
+
+  // Refuse while voting is still open. Sealing mid-vote would silently discard
+  // every ballot cast afterwards, because the linked rows are gone.
+  if (phaseOn(election.schedule, today()) === "balloting")
+    return fail(
+      `Voting is still open until ${election.schedule.ballotsCloseAt}. Sealing now would discard every ballot cast between now and then.`
+    );
+
+  const { data, error } = await db.rpc("seal_election", { p_election_id: election.id });
+  if (error) return fail(`The seal did not complete: ${error.message}`);
+
+  const row = Array.isArray(data) ? data[0] : data;
+  const sealed = (row?.sealed_count as number) ?? 0;
+  const participation = (row?.participation_count as number) ?? 0;
+
+  return ok({ sealed, participation, reconciled: sealed === participation });
+}
+
+export interface CountedResult {
+  nominationId: string;
+  displayName: string;
+  organizationName: string;
+  votes: number;
+  rank: number;
+  elected: boolean;
+  tiedAtCutoff: boolean;
+}
+
+export interface ElectionCount {
+  seats: number;
+  ballotsCounted: number;
+  abstentions: number;
+  blankBallots: number;
+  results: CountedResult[];
+  tieAtCutoff: boolean;
+  tiedCandidates: CountedResult[];
+  seatsResolved: number;
+  certifiable: boolean;
+  /** True when a tie existed and a human has recorded how it was settled. */
+  tieSettled: boolean;
+  summary: string;
+}
+
+/**
+ * Count the sealed ballots and persist the result.
+ *
+ * Re-runnable: the sealed ballots do not change, so counting twice gives the
+ * same answer. That matters for a scrutineer who wants to satisfy themselves by
+ * running it again rather than taking the first number on trust.
+ */
+export async function countElection(slug: string): Promise<Result<ElectionCount>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+  if (election.status !== "sealed" && election.status !== "certified")
+    return fail(`Ballots must be sealed before they can be counted — this election is "${election.status}".`);
+
+  const { data: sealed } = await db
+    .from("election_ballots_sealed")
+    .select("abstain, selections")
+    .eq("election_id", election.id);
+
+  const candidates = await getBallotCandidates(election);
+  const byId = new Map(candidates.map((c) => [c.nominationId, c]));
+
+  const tally = tallyElection(
+    (sealed ?? []).map((b) => ({
+      selections: (b.selections as string[]) ?? [],
+      abstain: b.abstain as boolean,
+    })),
+    candidates.map((c) => c.nominationId),
+    election.seatsAvailable
+  );
+
+  // A recorded tie resolution is a HUMAN decision and outranks the recount.
+  // Without this, re-counting silently un-elects the candidate the board seated
+  // — the tally has no way to know a tie was settled, so it would hand back the
+  // same unresolved answer and overwrite the resolution on its way out.
+  const { data: resolution } = await db
+    .from("election_certifications")
+    .select("tie_resolved_at")
+    .eq("election_id", election.id)
+    .maybeSingle();
+  const tieSettled = !!resolution?.tie_resolved_at;
+
+  const { data: storedResults } = tieSettled
+    ? await db
+        .from("election_results")
+        .select("nomination_id, elected")
+        .eq("election_id", election.id)
+    : { data: null };
+  const storedElected = new Map(
+    (storedResults ?? []).map((r) => [r.nomination_id as string, r.elected as boolean])
+  );
+
+  const results: CountedResult[] = tally.results.map((r) => ({
+    nominationId: r.nominationId,
+    displayName: byId.get(r.nominationId)?.displayName ?? "Unknown candidate",
+    organizationName: byId.get(r.nominationId)?.organizationName ?? "",
+    votes: r.votes,
+    rank: r.rank,
+    elected: tieSettled ? (storedElected.get(r.nominationId) ?? r.elected) : r.elected,
+    tiedAtCutoff: r.tiedAtCutoff,
+  }));
+
+  for (const r of results) {
+    await db.from("election_results").upsert(
+      {
+        election_id: election.id,
+        nomination_id: r.nominationId,
+        votes: r.votes,
+        rank: r.rank,
+        elected: r.elected,
+      },
+      { onConflict: "election_id,nomination_id" }
+    );
+  }
+
+  return ok({
+    seats: tally.seats,
+    ballotsCounted: tally.ballotsCounted,
+    abstentions: tally.abstentions,
+    blankBallots: tally.blankBallots,
+    results,
+    tieAtCutoff: tally.tieAtCutoff,
+    tiedCandidates: results.filter((r) => r.tiedAtCutoff),
+    seatsResolved: tally.seatsResolved,
+    certifiable: tally.certifiable || tieSettled,
+    tieSettled,
+    summary: formatElectionTally(tally),
+  });
+}
+
+/**
+ * Record how a tie was resolved.
+ *
+ * Kept separate from certification so the resolution and its authority are their
+ * own act with their own timestamp. By-Law No. 1 prescribes no tie-break, so
+ * whatever is recorded here IS the precedent — it should read like something a
+ * future board would be content to be bound by.
+ */
+export async function recordTieResolution(
+  slug: string,
+  input: {
+    method: "refer_to_agm" | "board_appoints" | "other";
+    note: string;
+    resolvedByProfileId: string;
+    /** Nomination ids that take the remaining seats. */
+    electedNominationIds: string[];
+  }
+): Promise<Result<null>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+  if (!input.note.trim())
+    return fail("Record how the tie was resolved and on what authority — this is the precedent.");
+
+  const counted = await countElection(slug);
+  if (!counted.ok) return fail(counted.error);
+  if (!counted.data.tieAtCutoff) return fail("There is no tie at the cutoff to resolve.");
+
+  const tied = new Set(counted.data.tiedCandidates.map((c) => c.nominationId));
+  for (const id of input.electedNominationIds) {
+    if (!tied.has(id))
+      return fail("Only candidates tied at the cutoff can be given the remaining seats.");
+  }
+
+  const seatsLeft = counted.data.seats - counted.data.seatsResolved;
+  if (input.electedNominationIds.length !== seatsLeft)
+    return fail(
+      `${seatsLeft} seat${seatsLeft === 1 ? "" : "s"} remain to be filled, but ${input.electedNominationIds.length} candidate${input.electedNominationIds.length === 1 ? " was" : "s were"} named.`
+    );
+
+  // Order matters: the certification row (carrying tie_resolved_at) has to exist
+  // BEFORE the elected flags are set, because any countElection that runs in
+  // between would recompute the tie and overwrite them.
+  await db.from("election_certifications").upsert(
+    {
+      election_id: election.id,
+      ballots_returned: counted.data.ballotsCounted,
+      ballots_sealed: counted.data.ballotsCounted,
+      reconciled: true,
+      tie_at_cutoff: true,
+      tie_candidates: counted.data.tiedCandidates.map((c) => c.nominationId),
+      tie_resolution_method: input.method,
+      tie_resolution_note: input.note.trim(),
+      tie_resolved_by_profile_id: input.resolvedByProfileId,
+      tie_resolved_at: new Date().toISOString(),
+    },
+    { onConflict: "election_id" }
+  );
+
+  for (const id of input.electedNominationIds) {
+    await db
+      .from("election_results")
+      .update({ elected: true })
+      .eq("election_id", election.id)
+      .eq("nomination_id", id);
+  }
+
+  return ok(null);
+}
+
+/**
+ * Certify the result.
+ *
+ * Blocked while a tie at the cutoff has no recorded resolution. That block is
+ * the point of the whole tally design: the software will not pick a director,
+ * and it will not let anyone certify a result in which it silently did.
+ */
+export async function certifyElection(
+  slug: string,
+  input: { certifiedByProfileId: string; scrutineerContactId?: string | null }
+): Promise<Result<{ elected: CountedResult[]; reconciled: boolean }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+  if (election.status !== "sealed")
+    return fail(`Only a sealed election can be certified — this one is "${election.status}".`);
+
+  const counted = await countElection(slug);
+  if (!counted.ok) return fail(counted.error);
+
+  const { data: existing } = await db
+    .from("election_certifications")
+    .select("tie_resolution_method, tie_resolved_at")
+    .eq("election_id", election.id)
+    .maybeSingle();
+
+  if (counted.data.tieAtCutoff && !existing?.tie_resolved_at) {
+    const names = counted.data.tiedCandidates.map((c) => c.displayName).join(" and ");
+    return fail(
+      `${names} are tied for the last seat. By-Law No. 1 prescribes no tie-break, so this cannot be certified until someone records how it was resolved and on what authority.`
+    );
+  }
+
+  const { count: participationCount } = await db
+    .from("election_participation")
+    .select("id", { count: "exact", head: true })
+    .eq("election_id", election.id);
+
+  const reconciled = (participationCount ?? 0) === counted.data.ballotsCounted;
+
+  await db.from("election_certifications").upsert(
+    {
+      election_id: election.id,
+      scrutineer_contact_id: input.scrutineerContactId ?? null,
+      ballots_returned: participationCount ?? 0,
+      ballots_sealed: counted.data.ballotsCounted,
+      reconciled,
+      tie_at_cutoff: counted.data.tieAtCutoff,
+      tie_candidates: counted.data.tiedCandidates.map((c) => c.nominationId),
+      certified_by_profile_id: input.certifiedByProfileId,
+      certified_at: new Date().toISOString(),
+    },
+    { onConflict: "election_id" }
+  );
+
+  await db
+    .from("elections")
+    .update({ status: "certified", updated_at: new Date().toISOString() })
+    .eq("id", election.id);
+
+  return ok({ elected: counted.data.results.filter((r) => r.elected), reconciled });
+}
+
+export interface AuditView {
+  election: Election;
+  /** Institutions that returned a ballot. Never how they voted. */
+  roll: { organizationName: string; firstCastAt: string; abstained: boolean }[];
+  sealedCount: number;
+  reconciled: boolean;
+  count: ElectionCount | null;
+  certification: {
+    scrutineerName: string | null;
+    certifiedByName: string | null;
+    certifiedAt: string | null;
+    tieResolutionMethod: string | null;
+    tieResolutionNote: string | null;
+  } | null;
+}
+
+/**
+ * What the scrutineer sees.
+ *
+ * The roll and the totals, and the fact that they reconcile. Deliberately no
+ * path from one to the other — after sealing there is none to offer, which is
+ * the property the design exists to guarantee rather than merely to promise.
+ */
+export async function getAuditView(slug: string): Promise<AuditView | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const { data: participation } = await db
+    .from("election_participation")
+    .select("first_cast_at, abstained, organizations(name)")
+    .eq("election_id", election.id)
+    .order("first_cast_at");
+
+  const { count: sealedCount } = await db
+    .from("election_ballots_sealed")
+    .select("id", { count: "exact", head: true })
+    .eq("election_id", election.id);
+
+  const counted =
+    election.status === "sealed" || election.status === "certified"
+      ? await countElection(slug)
+      : null;
+
+  const { data: cert } = await db
+    .from("election_certifications")
+    .select(
+      "tie_resolution_method, tie_resolution_note, certified_at, scrutineer_contact_id, certified_by_profile_id, contacts!election_certifications_scrutineer_contact_id_fkey(name), profiles!election_certifications_certified_by_profile_id_fkey(display_name)"
+    )
+    .eq("election_id", election.id)
+    .maybeSingle();
+
+  const roll = (participation ?? []).map((p) => ({
+    organizationName: (p.organizations as { name: string } | null)?.name ?? "Unknown institution",
+    firstCastAt: p.first_cast_at as string,
+    abstained: p.abstained as boolean,
+  }));
+
+  return {
+    election,
+    roll,
+    sealedCount: sealedCount ?? 0,
+    reconciled: (sealedCount ?? 0) === roll.length,
+    count: counted?.ok ? counted.data : null,
+    certification: cert
+      ? {
+          scrutineerName: (cert.contacts as { name: string } | null)?.name ?? null,
+          certifiedByName: (cert.profiles as { display_name: string } | null)?.display_name ?? null,
+          certifiedAt: (cert.certified_at as string) ?? null,
+          tieResolutionMethod: (cert.tie_resolution_method as string) ?? null,
+          tieResolutionNote: (cert.tie_resolution_note as string) ?? null,
+        }
+      : null,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// AGM notices — By-Law Part VII S4(b) and S7(b)
+// ---------------------------------------------------------------------------
+
+export interface NoticeState {
+  window: ReturnType<typeof resolveNoticeWindow>;
+  notice: ReturnType<typeof evaluateNoticeWindow>;
+  proxy: ReturnType<typeof evaluateProxyDeadline>;
+  noticeSentAt: string | null;
+  proxySentAt: string | null;
+  /** Eligible member institutions — who notice must reach. */
+  recipients: number;
+  /** Eligible members with no administrator to give notice to. */
+  unreachable: string[];
+}
+
+export async function getNoticeState(slug: string): Promise<NoticeState | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const cfg = election.config as unknown as {
+    agmNoticeSentAt?: string;
+    proxyFormSentAt?: string;
+  };
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  const eligible = verdicts.filter((v) => v.isEligible);
+
+  // A member nobody can be reached at is a compliance gap, and it has to be
+  // visible while there is still time to fix it — not discovered afterwards.
+  const unreachable: string[] = [];
+  for (const v of eligible) {
+    const { data: admins } = await db
+      .from("user_organizations")
+      .select("user_id")
+      .eq("organization_id", v.organizationId)
+      .eq("role", "org_admin")
+      .eq("status", "active");
+    if (!admins?.length) {
+      const { data: org } = await db
+        .from("organizations")
+        .select("name")
+        .eq("id", v.organizationId)
+        .maybeSingle();
+      unreachable.push((org?.name as string) ?? v.organizationId);
+    }
+  }
+
+  const onDate = today();
+  return {
+    window: resolveNoticeWindow(election.schedule.agmDate),
+    notice: evaluateNoticeWindow(election.schedule.agmDate, onDate),
+    proxy: evaluateProxyDeadline(election.schedule.agmDate, onDate),
+    noticeSentAt: cfg.agmNoticeSentAt ?? null,
+    proxySentAt: cfg.proxyFormSentAt ?? null,
+    recipients: eligible.length,
+    unreachable,
+  };
+}
+
+/**
+ * Give notice of the AGM.
+ *
+ * Refuses outside the 21–35 day window. Outside it the send would not be notice
+ * at all — By-Law Part VII S4 is a window, and a notice given on the wrong side
+ * of it leaves the meeting improperly called. Sending anyway and noting the
+ * problem would produce a record that LOOKS like compliance, which is worse than
+ * a refusal somebody has to deal with.
+ */
+export async function sendAgmNotice(
+  slug: string,
+  input: {
+    sentByProfileId: string;
+    agmTime: string;
+    location?: string | null;
+    /** Send the proxy form in the same run where the dates allow it. */
+    includeProxyForm: boolean;
+  }
+): Promise<Result<{ sent: number; failed: number; problems: string[]; proxyIncluded: boolean }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  const state = await getNoticeState(slug);
+  if (!state) return fail("Could not evaluate the notice window.");
+
+  if (state.noticeSentAt)
+    return fail(
+      `Notice was already given on ${state.noticeSentAt.slice(0, 10)}. Sending again would put a second, contradictory notice in front of every member.`
+    );
+  if (!state.notice.canSend) return fail(state.notice.message);
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  const eligible = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+  if (eligible.length === 0)
+    return fail("No institutions are currently eligible to vote, so there is nobody to give notice to.");
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+  const outcomes = await notifyAgmNotice(election, eligible, {
+    agmTime: input.agmTime,
+    location: input.location ?? null,
+    agmUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}`,
+  });
+
+  let proxyIncluded = false;
+  if (input.includeProxyForm && !state.proxySentAt) {
+    const proxyOutcomes = await notifyProxyForm(election, eligible, {
+      proxyFormUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}#proxy`,
+      lateNote: state.proxy.overdue
+        ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+        : null,
+    });
+    outcomes.push(...proxyOutcomes);
+    proxyIncluded = true;
+  }
+
+  const summary = summarizeOutcomes(outcomes);
+  const now = new Date().toISOString();
+
+  await db
+    .from("elections")
+    .update({
+      config: {
+        ...(election.config as unknown as Record<string, unknown>),
+        agmNoticeSentAt: now,
+        agmNoticeSentBy: input.sentByProfileId,
+        ...(proxyIncluded ? { proxyFormSentAt: now } : {}),
+      },
+      updated_at: now,
+    })
+    .eq("id", election.id);
+
+  return ok({ ...summary, proxyIncluded });
+}
+
+/** The proxy form on its own, where it was not sent with the notice. */
+export async function sendProxyForm(
+  slug: string,
+  sentByProfileId: string
+): Promise<Result<{ sent: number; failed: number; problems: string[]; wasLate: boolean }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  const state = await getNoticeState(slug);
+  if (!state) return fail("Could not evaluate the proxy deadline.");
+  if (state.proxySentAt)
+    return fail(`The proxy form was already sent on ${state.proxySentAt.slice(0, 10)}.`);
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  const eligible = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+  if (eligible.length === 0) return fail("No institutions are currently eligible to vote.");
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
+  const outcomes = await notifyProxyForm(election, eligible, {
+    proxyFormUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}#proxy`,
+    lateNote: state.proxy.overdue
+      ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+      : null,
+  });
+
+  const now = new Date().toISOString();
+  await db
+    .from("elections")
+    .update({
+      config: {
+        ...(election.config as unknown as Record<string, unknown>),
+        proxyFormSentAt: now,
+        proxyFormSentBy: sentByProfileId,
+      },
+      updated_at: now,
+    })
+    .eq("id", election.id);
+
+  return ok({ ...summarizeOutcomes(outcomes), wasLate: state.proxy.overdue });
 }

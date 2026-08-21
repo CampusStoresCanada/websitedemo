@@ -94,11 +94,32 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
 
   const { data: contacts } = await db
     .from("contacts")
-    .select("id, organization_id")
+    .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone")
     .in("organization_id", orgs.map((o) => o.id));
+
+  type ContactRow = {
+    organization_id: string | null; name: string | null; role_title: string | null;
+    work_email: string | null; email: string | null;
+    work_phone_number: string | null; phone: string | null;
+  };
   const contactCount = new Map<string, number>();
-  for (const c of (contacts ?? []) as { organization_id: string | null }[]) {
-    if (c.organization_id) contactCount.set(c.organization_id, (contactCount.get(c.organization_id) ?? 0) + 1);
+  const primaryContact = new Map<string, DirectoryEntry["primaryContact"]>();
+  for (const c of (contacts ?? []) as ContactRow[]) {
+    if (!c.organization_id) continue;
+    contactCount.set(c.organization_id, (contactCount.get(c.organization_id) ?? 0) + 1);
+    if (!c.name?.trim()) continue;
+    const candidate = {
+      name: c.name.trim(),
+      roleTitle: c.role_title?.trim() || null,
+      email: c.work_email?.trim() || c.email?.trim() || null,
+      phone: c.work_phone_number?.trim() || c.phone?.trim() || null,
+    };
+    // Prefer a contact with a stated role — "Sales Manager" tells a reader who
+    // they're calling, which is the difference between a name and a lead.
+    const held = primaryContact.get(c.organization_id);
+    if (!held || (!held.roleTitle && candidate.roleTitle)) {
+      primaryContact.set(c.organization_id, candidate);
+    }
   }
 
   return orgs
@@ -115,6 +136,8 @@ export async function loadDirectoryEntries(source: PublicationSource): Promise<D
         catalogueUrl: o.catalogue_url,
         rawCategories: o.primary_category,
         boothNumbers: boothsByOrg.get(o.id) ?? [],
+        publicCode: (o as OrgRow & { public_code?: string | null }).public_code ?? null,
+        primaryContact: primaryContact.get(o.id) ?? null,
         completeness: computeOrgCompleteness(withContacts),
       };
     })
