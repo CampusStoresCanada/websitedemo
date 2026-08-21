@@ -114,6 +114,11 @@ export async function publishNextAnnouncement(
       tiptap_body: queued.body_tiptap as Record<string, unknown>,
       status: "published",
       user_email: HELPFUL_EMAIL,
+      // Explicit, not inherited: omitting these stores NULL, which the
+      // member-facing API resolves to FALSE. Members should be able to
+      // welcome a new partner.
+      is_liking_enabled: true,
+      is_comments_enabled: true,
     });
 
     await db

@@ -503,6 +503,14 @@ export class CircleAdminClient {
    * `tiptap_body`, returning HTTP 200 with the node missing from the rendered
    * HTML (`poll` behaves exactly this way — see lib/board/vote-post.ts).
    * Verify anything new by reading the post back and checking `body.body`.
+   *
+   * ⚠️ ALWAYS pass `is_liking_enabled` and `is_comments_enabled` explicitly.
+   * Omitting them stores NULL, and the member-facing API resolves NULL to
+   * FALSE — the post ships with no like button and no comment box, unlike
+   * anything created through Circle's own UI. Worse, a comments-disabled post
+   * rejects even our own API comments ("You cannot perform this action"), so
+   * anything that follows up on its own post (a reminder, a closing tally)
+   * silently loses the ability to do so.
    */
   async createPost(payload: {
     space_id: number;
@@ -513,6 +521,7 @@ export class CircleAdminClient {
     user_email?: string;
     skip_notifications?: boolean;
     is_comments_enabled?: boolean;
+    is_liking_enabled?: boolean;
   }): Promise<CirclePost> {
     const result = await this.request<{ post?: CirclePost } & CirclePost>("POST", "/posts", {
       body: payload as unknown as Record<string, unknown>,
