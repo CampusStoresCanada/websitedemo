@@ -23,7 +23,12 @@ import { draftPendingAnnouncementsCore } from "@/lib/ghosts/draft";
 import { fetchRecentFirstActivations, NEWEST_ORG_WINDOW_DAYS } from "@/lib/homepage-slides";
 // The preview must show exactly what will be posted, so it uses the composer's
 // own formatters rather than re-deriving location and URL display itself.
-import { formatLocation, displayUrl } from "@/lib/ghosts/new-partner-post";
+import {
+  formatLocation,
+  displayUrl,
+  ensureAbsoluteUrl,
+  splitCategories,
+} from "@/lib/ghosts/new-partner-post";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
 const REVIEW_PATH = "/admin/comms/announcements";
@@ -44,7 +49,10 @@ export interface AnnouncementRow {
   /** Facts pulled live from the org, shown in the preview but not editable. */
   category: string | null;
   location: string | null;
+  /** Display form — no protocol. */
   website: string | null;
+  /** Always absolute, so the preview link actually goes somewhere. */
+  websiteHref: string | null;
 }
 
 /** Everything that has been drafted, newest first. */
@@ -89,9 +97,10 @@ export async function listAnnouncements(): Promise<AnnouncementRow[]> {
       circlePostUrl: (row.circle_post_url as string) ?? null,
       publishedAt: (row.published_at as string) ?? null,
       createdAt: row.created_at as string,
-      category: (org?.primary_category as string) ?? null,
+      category: splitCategories(org?.primary_category as string | null).join(", ") || null,
       location: formatLocation(org?.city as string | null, org?.province as string | null) || null,
       website: org?.website ? displayUrl(org.website as string) : null,
+      websiteHref: org?.website ? ensureAbsoluteUrl(org.website as string) : null,
     };
   });
 }

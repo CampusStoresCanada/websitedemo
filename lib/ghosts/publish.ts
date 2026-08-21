@@ -99,7 +99,7 @@ export async function publishNextAnnouncement(
 
   const { data: org } = await db
     .from("organizations")
-    .select("name, slug, city, province, primary_category")
+    .select("name, slug, city, province, primary_category, website")
     .eq("id", queued.organization_id as string)
     .maybeSingle();
   const organizationName = (org?.name as string) ?? "the new partner";
@@ -139,6 +139,7 @@ export async function publishNextAnnouncement(
       circlePostUrl: created.url ?? null,
       category: (org?.primary_category as string) ?? null,
       location: formatLocation(org?.city as string | null, org?.province as string | null) || null,
+      website: (org?.website as string) ?? null,
     });
 
     return {

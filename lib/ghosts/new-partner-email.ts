@@ -11,6 +11,20 @@
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
 
+/**
+ * A URL safe to put in an href. 40% of partner websites are stored as bare
+ * domains, and a bare domain in an href is a relative link that goes nowhere.
+ */
+function ensureAbsoluteUrl(raw: string | null | undefined): string {
+  const trimmed = raw?.trim() ?? "";
+  if (!trimmed) return "";
+  return /^https?:\/\//i.test(trimmed) ? trimmed : `https://${trimmed}`;
+}
+
+function displayUrl(raw: string | null | undefined): string {
+  return (raw ?? "").trim().replace(/^https?:\/\//i, "").replace(/\/+$/, "");
+}
+
 export interface AnnouncementEmailInput {
   organizationName: string;
   organizationSlug: string;
@@ -20,6 +34,8 @@ export interface AnnouncementEmailInput {
   circlePostUrl?: string | null;
   category?: string | null;
   location?: string | null;
+  /** The partner's own site. Rendered as a link, not bare text. */
+  website?: string | null;
 }
 
 export function buildAnnouncementEmail(input: AnnouncementEmailInput): {
@@ -37,6 +53,11 @@ export function buildAnnouncementEmail(input: AnnouncementEmailInput): {
 <p>${escapeHtml(input.organizationName)} has joined Campus Stores Canada as a Vendor Partner.</p>
 ${shortSummary ? `<p>${escapeHtml(shortSummary)}</p>` : ""}
 ${facts ? `<p><strong>${escapeHtml(facts)}</strong></p>` : ""}
+${
+  input.website?.trim()
+    ? `<p><a href="${ensureAbsoluteUrl(input.website)}">${escapeHtml(displayUrl(input.website))}</a></p>`
+    : ""
+}
 <p><a href="${profileUrl}">See their profile →</a></p>
 ${
   input.circlePostUrl
