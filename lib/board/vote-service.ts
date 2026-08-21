@@ -153,6 +153,13 @@ export async function openVoteForApplication(
       tiptap_body: post.tiptap_body,
       status: "published",
       user_email: BUTLER_EMAIL,
+      // Explicit, not inherited. Omitting these stores NULL, which resolves to
+      // FALSE — and a comments-disabled post rejects even Butler's own
+      // comments, which would break the reminder and the closing tally. The
+      // discussion under a vote is half the point: on the 2026-08-13 precedent
+      // post the board raised due diligence in the comments.
+      is_liking_enabled: true,
+      is_comments_enabled: true,
     });
 
     await db
