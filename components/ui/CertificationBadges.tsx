@@ -18,25 +18,34 @@ interface CertificationBadgesProps {
    * green ring — used to indicate certs that match the viewer's preferences.
    */
   highlightSet?: Set<string>;
+  /**
+   * DERIVED badges — computed per render (e.g. Exhibitor, from booth
+   * ownership) rather than stored in `organizations.certifications`.
+   * Rendered after the stored ones. Kept as a separate input on purpose:
+   * nothing here can ever be round-tripped back into the DB array by the
+   * edit-mode toggles, so a derived badge can't outlive the fact it reflects.
+   */
+  extraBadges?: Certification[];
 }
 
 /**
  * Renders a row of circular certification badge images with hover tooltips.
  * Images load from /certifications/{filename} (defaults to {slug}.svg)
  */
-export function CertificationBadges({ certifications, size = "md", showCancoll = false, highlightSet }: CertificationBadgesProps) {
+export function CertificationBadges({ certifications, size = "md", showCancoll = false, highlightSet, extraBadges = [] }: CertificationBadgesProps) {
   const certs: Certification[] = certifications
     .filter((name) => name !== "CANCOLL" || showCancoll) // gate CANCOLL by viewer permission
     .map((name) => CERTIFICATION_BY_NAME[name])
     .filter(Boolean) as Certification[];
 
-  if (certs.length === 0) return null;
+  const all = [...certs, ...extraBadges];
+  if (all.length === 0) return null;
 
   const px = size === "sm" ? 32 : 40;
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {certs.map((cert) => (
+      {all.map((cert) => (
         <CertBadge
           key={cert.slug}
           name={cert.name}

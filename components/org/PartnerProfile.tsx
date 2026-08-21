@@ -21,6 +21,8 @@ import HeldOfferCard from "@/components/conference/HeldOfferCard";
 import type { AssignableEntityColumn } from "@/app/org/[slug]/page";
 import type { ConferenceOffer } from "@/lib/actions/conference-entities";
 import { TierIconPreview } from "@/components/sponsorship/SponsorTierBadge";
+import ExhibitorBoothLine from "@/components/conference/ExhibitorBoothLine";
+import type { ExhibitorStatus } from "@/lib/conference/exhibitor-status";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import RenewMembershipCard from "@/components/org/RenewMembershipCard";
 import GracePeriodBanner from "@/components/membership/GracePeriodBanner";
@@ -30,7 +32,7 @@ import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procureme
 import PartnerLinksSection from "@/components/org/PartnerLinksSection";
 import type { ResolvedPartnerLink, PartnerLink } from "@/lib/partner-links";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
-import { CERTIFICATIONS } from "@/lib/certifications";
+import { CERTIFICATIONS, exhibitorCertification, newPartnerCertification } from "@/lib/certifications";
 import { updateCertifications, updateCancollStatus } from "@/lib/actions/update-certifications";
 import { setContactHidden } from "@/lib/actions/user-management";
 import ContactEditModal from "@/components/org/ContactEditModal";
@@ -138,7 +140,10 @@ interface PartnerProfileProps {
   transferCandidates?: TransferCandidate[];
   buyableExtras: ConferenceOffer[];
   currentConferenceId: string | null;
-  heldBooths: Array<{ name: string }>;
+  /** Booth(s) held for the current publicly-visible conference — drives the Exhibitor badge and the booth line under the logo. Public. */
+  exhibitorStatus?: ExhibitorStatus | null;
+  /** YYYY-MM-DD of first activation, when inside the 90-day new-partner window. */
+  newPartnerJoinedOn?: string | null;
   /** Whether this org is within its admin-configured renewal window (renewal.reminder_days) — computed server-side, gates the Renew Now card. */
   renewalWindowOpen?: boolean;
   /** renewal.grace_days policy value — feeds the GracePeriodBanner countdown. */
@@ -219,7 +224,8 @@ export default function PartnerProfile({
   transferCandidates = [],
   buyableExtras,
   currentConferenceId,
-  heldBooths,
+  exhibitorStatus = null,
+  newPartnerJoinedOn = null,
   sponsorTier,
   visibleLinks,
   hasGatedLinks,
@@ -237,11 +243,6 @@ export default function PartnerProfile({
   // HeldOfferCard (holdings-aware) instead of the plain buy-only OfferCard.
   // Offer id and entity id are the same id, confirmed against real data.
   const heldEntityById = new Map(assignableEntities.map((e) => [e.entityId, e]));
-  // An org can hold more than one booth — list all of them in the staffing heading.
-  const staffingHeading =
-    heldBooths.length > 0
-      ? `Staffing — Booth${heldBooths.length > 1 ? "s" : ""} ${heldBooths.map((b) => b.name).join(", ")}`
-      : "Staffing";
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
   const { permissionState, organizations, user } = useAuth();
@@ -267,6 +268,19 @@ export default function PartnerProfile({
     Array.isArray(organization.certifications) ? (organization.certifications as string[]) : []
   );
   const [certSaving, setCertSaving] = useState(false);
+
+  // Exhibitor is DERIVED from booth ownership, never stored in
+  // organizations.certifications — so it's passed to CertificationBadges as an
+  // extra badge and is deliberately absent from the edit-mode toggle grid.
+  // Nothing here can be turned on or off by hand; releasing the booth clears it.
+  // "New Partner" is derived the same way — from the activation date, expiring
+  // on its own after 90 days with nothing to clean up.
+  const derivedBadges = [
+    ...(newPartnerJoinedOn ? [newPartnerCertification(newPartnerJoinedOn)] : []),
+    ...(exhibitorStatus
+      ? [exhibitorCertification(exhibitorStatus.boothNumbers, exhibitorStatus.conferenceName)]
+      : []),
+  ];
 
   // CANCOLL — optimistic local state (admin only)
   const [cancollMember, setCancollMember] = useState<boolean>(
@@ -708,6 +722,14 @@ export default function PartnerProfile({
             )}
           </div>
 
+          {/* Booth number, stated plainly right under the logo. The matching
+              circular mark rides in the Certifications & Standing row below. */}
+          {exhibitorStatus && (
+            <div className="-mt-[46px] mb-10">
+              <ExhibitorBoothLine status={exhibitorStatus} />
+            </div>
+          )}
+
           {/* Directory Mark — separate SQUARE logo used on the map & directory cards.
               Edit-mode only so the public profile stays focused on the horizontal logo above. */}
           {editMode && canEditThisOrg && (
@@ -871,12 +893,13 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {/* Certifications + CANCOLL badges */}
-          {(certifications.length > 0 || cancollMember || (editMode && (isOrgAdminForThisOrg || isAdmin))) && (
+          {/* Certifications & Standing — self-declared certs, CANCOLL (member-gated),
+              and the derived Exhibitor badge. Not all certifications, hence the name. */}
+          {(certifications.length > 0 || cancollMember || derivedBadges.length > 0 || (editMode && (isOrgAdminForThisOrg || isAdmin))) && (
             <div className="mb-10">
               <div className="flex items-center gap-3 mb-3">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">
-                  Certifications
+                  Certifications &amp; Standing
                 </h3>
                 {(certSaving || cancollSaving) && (
                   <span className="text-[10px] text-gray-400">Saving…</span>
@@ -929,6 +952,18 @@ export default function PartnerProfile({
                       {cancollMember && <span className="text-white/70">✓</span>}
                     </button>
                   )}
+                  {/* Exhibitor — shown so the edit view matches the public one,
+                      but not a toggle: it follows the booth, not a choice. */}
+                  {exhibitorStatus && (
+                    <span
+                      title="Automatic — granted by holding a booth. Not editable."
+                      className="flex items-center gap-2 rounded-full border border-dashed border-[#16345a]/40 bg-white px-3 py-1.5 text-xs font-medium text-[#16345a]"
+                    >
+                      <img src="/certifications/exhibitor-2027.svg" alt="" className="w-5 h-5 rounded-full" />
+                      Exhibitor
+                      <span className="text-gray-400">auto</span>
+                    </span>
+                  )}
                 </div>
               ) : (
                 /* View mode */
@@ -936,6 +971,7 @@ export default function PartnerProfile({
                   certifications={certifications}
                   size="md"
                   showCancoll={cancollMember && (viewerLevel === "member" || viewerLevel === "org_admin" || viewerLevel === "admin" || viewerLevel === "super_admin")}
+                  extraBadges={derivedBadges}
                 />
               )}
             </div>
@@ -1043,7 +1079,7 @@ export default function PartnerProfile({
             >
               <div>
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
-                  {staffingHeading}
+                  Staffing
                 </h3>
                 <table className="w-full text-sm">
                   <thead>
@@ -1262,6 +1298,11 @@ export default function PartnerProfile({
                 {organization.name.toUpperCase()}
               </h1>
             )}
+            {exhibitorStatus && (
+              <div className="mt-2">
+                <ExhibitorBoothLine status={exhibitorStatus} />
+              </div>
+            )}
           </div>
 
           {(isCscAdmin || isOrgAdminForThisOrg) &&
@@ -1421,7 +1462,7 @@ export default function PartnerProfile({
             >
               <div>
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
-                  {staffingHeading}
+                  Staffing
                 </h3>
                 <div className="space-y-3">
                   {contacts.map((contact) => (

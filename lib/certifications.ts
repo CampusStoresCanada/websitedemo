@@ -70,3 +70,60 @@ export const CERTIFICATION_BY_NAME = Object.fromEntries(
 
 /** All valid certification names — use for validation */
 export const CERTIFICATION_NAMES = CERTIFICATIONS.map((c) => c.name);
+
+/**
+ * "Exhibitor" — a DERIVED badge, not a stored one.
+ *
+ * Unlike CERTIFICATIONS (self-declared, toggled by the org) and CANCOLL
+ * (admin-toggled), this one is computed from booth ownership every render —
+ * it must never be written into `organizations.certifications`, or it would
+ * survive a booth being released and become a lie the org can't clear.
+ * That's why it's a factory rather than a constant: the description carries
+ * the live booth numbers.
+ *
+ * See lib/conference/exhibitor-status.ts for where the booths come from.
+ */
+/**
+ * "New Partner" — a DERIVED badge, on the same footing as Exhibitor.
+ *
+ * Computed from the org's first activation (`membership_state_log`,
+ * `approved → active`) every render, and shown only while that is inside the
+ * 90-day window. It must never be written into `organizations.certifications`
+ * for the same reason Exhibitor must not: it would outlive its window and
+ * become a permanent claim of newness the org has no way to clear.
+ *
+ * Returning partners are excluded upstream — `fetchRecentFirstActivations()`
+ * only matches `approved → active`, so a partner coming back after years away
+ * never picks this up.
+ *
+ * @param joinedOn YYYY-MM-DD, the day they became active.
+ */
+export function newPartnerCertification(joinedOn: string): Certification {
+  const joined = new Date(`${joinedOn}T00:00:00`);
+  const label = Number.isNaN(joined.getTime())
+    ? null
+    : joined.toLocaleDateString("en-CA", { month: "long", year: "numeric" });
+
+  return {
+    name: "New Partner",
+    slug: "new-partner",
+    description: label
+      ? `New Partner — joined Campus Stores Canada in ${label}.`
+      : "New Partner — recently joined Campus Stores Canada.",
+  };
+}
+
+export function exhibitorCertification(
+  boothNumbers: string[],
+  conferenceName: string
+): Certification {
+  const boothLabel =
+    boothNumbers.length === 0
+      ? ""
+      : ` — Booth${boothNumbers.length > 1 ? "s" : ""} ${boothNumbers.join(", ")}`;
+  return {
+    name: "Exhibitor",
+    slug: "exhibitor-2027",
+    description: `Exhibiting at ${conferenceName}${boothLabel}.`,
+  };
+}

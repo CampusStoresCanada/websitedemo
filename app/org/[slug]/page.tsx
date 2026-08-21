@@ -19,6 +19,8 @@ import type { MarketData } from "@/lib/actions/partner-market";
 import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
 import type { SupplierData } from "@/lib/actions/member-suppliers";
 import { listEntitySeatsForOrg, type OrgEntitySeat } from "@/lib/actions/conference-entity-commerce";
+import { getExhibitorStatusForOrg, type ExhibitorStatus } from "@/lib/conference/exhibitor-status";
+import { getNewPartnerJoinedOn } from "@/lib/membership/new-partner-spotlight";
 import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/lib/actions/conference-entities";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
@@ -245,8 +247,14 @@ export default async function OrgProfilePage({ params }: PageProps) {
   let buyableExtras: ConferenceOffer[] = [];
   let currentConferenceId: string | null = null;
   let currentConferenceIsPublic = false;
-  // An org can hold more than one booth (board decision), so this is a list.
-  let heldBooths: Array<{ name: string }> = [];
+  // Booth ownership drives the public "Exhibitor" badge + booth number, so it
+  // is resolved OUTSIDE canViewConferenceAttendance: the floor plan is public
+  // and already names who's in each booth. Its own status filter keeps a
+  // draft conference's sales off the profile. See lib/conference/exhibitor-status.ts.
+  const exhibitorStatus: ExhibitorStatus | null = await getExhibitorStatusForOrg(organization.id);
+  // Derived "New Partner" badge — null unless they activated inside the window.
+  const newPartnerJoinedOn = await getNewPartnerJoinedOn(organization.id);
+
   if (canViewConferenceAttendance) {
     const startById = new Map<string, number>();
     const statusById = new Map<string, string>();
@@ -299,17 +307,13 @@ export default async function OrgProfilePage({ params }: PageProps) {
     );
 
     if (currentConferenceId) {
-      // Booths are an org-level holding (entity_balances) — they never mint
-      // a person-level seat row in entity_balance_seats, so booth ownership
-      // has to be read from entity_balances directly, not listEntitySeatsForOrg.
-      const [seatsResult, offersResult, boothBalanceResult, usageIntentsResult] = await Promise.all([
+      // Booth holdings used to be read here too; they now come from
+      // getExhibitorStatusForOrg() above, which is public and not gated behind
+      // canViewConferenceAttendance. Booths never mint a person-level seat row
+      // in entity_balance_seats, so they're still absent from listEntitySeatsForOrg.
+      const [seatsResult, offersResult, usageIntentsResult] = await Promise.all([
         listEntitySeatsForOrg(currentConferenceId, organization.id),
         listConferenceOffers(currentConferenceId, organization.id),
-        createAdminClient()
-          .from("entity_balances")
-          .select("entity:conference_entities!entity_balances_entity_id_fkey(name, kind)")
-          .eq("conference_id", currentConferenceId)
-          .eq("organization_id", organization.id),
         createAdminClient()
           .from("conference_entity_usage_intents")
           .select("entity_id, intended_quantity, declared_against_total")
@@ -320,13 +324,6 @@ export default async function OrgProfilePage({ params }: PageProps) {
       const usageIntentByEntity = new Map(
         (usageIntentsResult.data ?? []).map((r) => [r.entity_id, r])
       );
-
-      // The booth(s) are a place, not a person — surfaced as a plain headline
-      // (heldBooths below), never as an assignable checkbox column.
-      heldBooths = (boothBalanceResult.data ?? [])
-        .map((b) => (Array.isArray(b.entity) ? b.entity[0] : b.entity))
-        .filter((e): e is { name: string; kind: string } => e?.kind === "booth")
-        .map((e) => ({ name: e.name }));
 
       const byEntity = new Map<string, AssignableEntityColumn>();
       for (const seat of seatsResult.success ? seatsResult.data : []) {
@@ -563,7 +560,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
       assignableEntities={assignableEntities}
       buyableExtras={buyableExtras}
       currentConferenceId={currentConferenceId}
-      heldBooths={heldBooths}
+      exhibitorStatus={exhibitorStatus}
+      newPartnerJoinedOn={newPartnerJoinedOn}
       sponsorTier={sponsorTier}
       visibleLinks={visibleLinks}
       hasGatedLinks={hasGated}
