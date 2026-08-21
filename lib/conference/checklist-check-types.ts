@@ -12,6 +12,7 @@ export const CHECK_TYPES = [
   "legal_document_accepted",
   "directory_profile_complete",
   "self_reported",
+  "directory_profile_enriched",
 ] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
 

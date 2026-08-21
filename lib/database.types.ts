@@ -1706,6 +1706,66 @@ export type Database = {
           },
         ]
       }
+      capability_grants: {
+        Row: {
+          capability: string
+          created_at: string
+          ends_at: string
+          granted_by: string | null
+          id: string
+          reason: string
+          revoked_at: string | null
+          revoked_by: string | null
+          revoked_reason: string | null
+          scope_id: string | null
+          scope_type: string | null
+          starts_at: string
+          subject_id: string
+          updated_at: string
+        }
+        Insert: {
+          capability: string
+          created_at?: string
+          ends_at: string
+          granted_by?: string | null
+          id?: string
+          reason: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          revoked_reason?: string | null
+          scope_id?: string | null
+          scope_type?: string | null
+          starts_at?: string
+          subject_id: string
+          updated_at?: string
+        }
+        Update: {
+          capability?: string
+          created_at?: string
+          ends_at?: string
+          granted_by?: string | null
+          id?: string
+          reason?: string
+          revoked_at?: string | null
+          revoked_by?: string | null
+          revoked_reason?: string | null
+          scope_id?: string | null
+          scope_type?: string | null
+          starts_at?: string
+          subject_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "capability_grants_subject_id_fkey"
+            columns: ["subject_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+
       cart_items: {
         Row: {
           conference_id: string
@@ -11604,6 +11664,14 @@ export type Database = {
       }
     }
     Functions: {
+      has_capability: {
+        Args: {
+          p_subject: string
+          p_capability: string
+          p_scope_id?: string
+        }
+        Returns: boolean
+      }
       approve_booth_request: {
         Args: { p_approval_id: string; p_notes?: string }
         Returns: string

@@ -48,6 +48,7 @@ interface Draft {
   proposedExampleCredit: string;
   proposedHelpText: string;
   saved: boolean;
+  savedOnce?: boolean;
   saving: boolean;
   error: string | null;
 }
@@ -107,6 +108,7 @@ export default function FieldReviewWorkspace({
         proposedExampleCredit: r.proposed_example_credit ?? "",
         proposedHelpText: r.proposed_help_text ?? "",
         saved: true,
+        savedOnce: true,
         saving: false,
         error: null,
       };
@@ -138,6 +140,7 @@ export default function FieldReviewWorkspace({
         ...prev[name],
         saving: false,
         saved: result.success,
+        savedOnce: prev[name]?.savedOnce || result.success,
         error: result.success ? null : (result.error ?? "Could not save"),
       },
     }));
@@ -234,6 +237,9 @@ function FieldCard({
 }) {
   const [open, setOpen] = useState(false);
   const answered = draft.status !== "pending";
+  // Distinct from `answered`: a verdict is selected the instant you click one,
+  // but the row only exists once it has been written.
+  const hasSaved = draft.saved || Boolean(draft.savedOnce);
 
   return (
     <div
@@ -455,7 +461,7 @@ function FieldCard({
               disabled={draft.saving}
               className="text-xs font-medium px-4 py-2 rounded bg-gray-900 text-white hover:bg-gray-800 disabled:opacity-50 transition-colors"
             >
-              {draft.saving ? "Saving…" : answered ? "Update" : "Save"}
+              {draft.saving ? "Saving…" : hasSaved ? "Update" : "Save"}
             </button>
             {draft.saved && (
               <span className="text-xs text-green-700">Saved</span>

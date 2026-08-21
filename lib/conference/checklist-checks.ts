@@ -137,6 +137,23 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
    * assignee-accepted policies) surface through resolvePersonObligations on
    * /me/conference instead, reading the same table with person_id set.
    */
+  /**
+   * The half of a listing that makes it worth reading: featured product and a
+   * catalogue link. Separate from `directory_profile_complete` on purpose —
+   * that one gates whether an entry can print at all, this one is what turns a
+   * name and a booth number into something a member acts on.
+   *
+   * Kept as its own task so a partner who is technically "print-ready" still
+   * gets asked. These are the worst-filled fields on the whole platform (31 and
+   * 36 of 78 missing), and folding them into the required check would either
+   * block listings that should print, or let them stay empty unnoticed.
+   */
+  async directory_profile_enriched({ organizationId }) {
+    const rows = await loadDirectoryCompleteness({ orgIds: [organizationId] });
+    if (rows.length === 0) return true;
+    return rows[0].enhancedFilled === rows[0].enhancedTotal;
+  },
+
   async self_reported({ db, organizationId, conferenceId, taskId }) {
     const { data } = await db
       .from("conference_task_acknowledgements")

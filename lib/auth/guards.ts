@@ -16,6 +16,8 @@ export interface AuthContext {
   globalRole: GlobalRole;
   isBenchmarkingReviewer: boolean;
   isBenchmarkingContentReviewer: boolean;
+  /** Every capability held right now, for checks with no dedicated flag. */
+  capabilities: string[];
   orgAdminOrgIds: string[];
   activeOrgIds: string[];
 }
@@ -56,6 +58,8 @@ export type IdentitySnapshot =
       profileError: unknown;
       organizations: UserOrganization[] | null;
       orgsError: unknown;
+      /** Capabilities held right now via unexpired, unrevoked grants. */
+      capabilities: string[];
     };
 
 export const getIdentitySnapshot = cache(
@@ -79,8 +83,11 @@ export const getIdentitySnapshot = cache(
     let orgsResult: { data: UserOrganization[] | null; error: unknown } | null =
       null;
 
+    let grantsResult: { data: { capability: string }[] | null } | null = null;
+    const nowIso = new Date().toISOString();
+
     for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
-      const [profileRes, orgsRes] = await Promise.all([
+      const [profileRes, orgsRes, grantsRes] = await Promise.all([
         client.from("profiles").select("*").eq("id", userId).maybeSingle(),
         client
           .from("user_organizations")
@@ -97,6 +104,14 @@ export const getIdentitySnapshot = cache(
           )
           .eq("user_id", userId)
           .eq("status", "active"),
+        // Grants ride along on the existing round trip — no extra latency.
+        client
+          .from("capability_grants")
+          .select("capability")
+          .eq("subject_id", userId)
+          .is("revoked_at", null)
+          .lte("starts_at", nowIso)
+          .gt("ends_at", nowIso),
       ]);
 
       profileResult = profileRes as unknown as {
@@ -106,6 +121,9 @@ export const getIdentitySnapshot = cache(
       orgsResult = orgsRes as unknown as {
         data: UserOrganization[] | null;
         error: unknown;
+      };
+      grantsResult = grantsRes as unknown as {
+        data: { capability: string }[] | null;
       };
 
       if (!profileRes.error && !orgsRes.error) {
@@ -126,6 +144,9 @@ export const getIdentitySnapshot = cache(
       profileError: profileResult?.error ?? null,
       organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
       orgsError: orgsResult?.error ?? null,
+      capabilities: Array.from(
+        new Set((grantsResult?.data ?? []).map((g) => g.capability)),
+      ),
     };
   },
 );
@@ -152,9 +173,15 @@ async function loadAuthContext(
   const organizations = snapshot.organizations ?? [];
   const globalRole =
     (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
+  // Grants first — the profile booleans are the retired path, kept only so an
+  // in-flight session does not lose access mid-cutover. Remove once nothing
+  // depends on them.
+  const capabilities = snapshot.capabilities ?? [];
   const isBenchmarkingReviewer =
+    capabilities.includes("benchmarking.qa_verify") ||
     snapshot.profile?.is_benchmarking_reviewer === true;
   const isBenchmarkingContentReviewer =
+    capabilities.includes("benchmarking.content_review") ||
     snapshot.profile?.is_benchmarking_content_reviewer === true;
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
@@ -168,6 +195,7 @@ async function loadAuthContext(
     globalRole,
     isBenchmarkingReviewer,
     isBenchmarkingContentReviewer,
+    capabilities,
     orgAdminOrgIds,
     activeOrgIds,
   };

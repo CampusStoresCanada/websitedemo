@@ -276,3 +276,28 @@ export async function saveBallotAction(slug: string, formData: FormData): Promis
   revalidatePath(`/elections/${slug}/ballot`);
   return { ok: true };
 }
+
+
+/**
+ * Hand the election's obligations to the officers who hold them.
+ *
+ * Creates board action items, assigned from `governance_role_assignments`, each
+ * parented to the last board meeting before its deadline. Idempotent — pressing
+ * it twice does not double the board's list.
+ */
+export async function mintElectionActionItemsAction(slug: string): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the board can create action items." };
+
+  const { getElection: load } = await import("@/lib/elections/service");
+  const { mintElectionActionItems } = await import("@/lib/elections/action-items");
+
+  const election = await load(slug);
+  if (!election) return { ok: false, error: "That election does not exist." };
+
+  await mintElectionActionItems(election);
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}

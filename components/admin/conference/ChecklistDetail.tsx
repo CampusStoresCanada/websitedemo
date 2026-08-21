@@ -47,6 +47,7 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   payment_complete: "Payment complete",
   legal_document_accepted: "Legal document accepted (per org, all attendees)",
   directory_profile_complete: "Directory listing ready (logo, description, categories, contacts)",
+  directory_profile_enriched: "Directory listing enriched (featured product, catalogue)",
   self_reported: "Self-reported — the org ticks it off (Stronco, Encore, anything off-site)",
 };
 
