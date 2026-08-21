@@ -527,6 +527,27 @@ export default function DirectoryTable({
                                 {org.sponsorTier.name}
                               </span>
                             )}
+                            {/* Exhibitor — derived from booth ownership, same
+                                source as the profile badge. Booth number is
+                                the useful half, so it rides in the chip. */}
+                            {org.exhibitorBooths && org.exhibitorBooths.length > 0 && (
+                              <span
+                                title={`Exhibiting — Booth${org.exhibitorBooths.length > 1 ? "s" : ""} ${org.exhibitorBooths.join(", ")}`}
+                                className="shrink-0 inline-flex items-center gap-1 rounded-full border border-[#16345a]/25 bg-[#16345a]/[0.06] py-0.5 pl-0.5 pr-1.5 text-[10px] font-semibold text-[#16345a] whitespace-nowrap"
+                              >
+                                <img
+                                  src="/certifications/exhibitor-2027.svg"
+                                  alt=""
+                                  className="h-4 w-4 rounded-full"
+                                />
+                                {/* The visible text is a bare number; without this
+                                    a screen reader announces "402" with no context. */}
+                                <span className="sr-only">
+                                  Exhibiting, Booth{org.exhibitorBooths.length > 1 ? "s" : ""}{" "}
+                                </span>
+                                {org.exhibitorBooths.join(", ")}
+                              </span>
+                            )}
                           </div>
                         </div>
                       </div>

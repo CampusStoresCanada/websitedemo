@@ -45,6 +45,8 @@ export interface CompoundFilters {
   cancoll?: string;
   /** "true" when filtering to partners who have a catalogue */
   hasCatalogue?: string;
+  /** "true" when filtering to partners holding a booth at the current conference */
+  exhibiting?: string;
 }
 
 /** Human-readable labels for each lens */

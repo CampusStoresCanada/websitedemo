@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { sendEmail } from "@/lib/email/send";
+import { requireAdmin } from "@/lib/auth/guards";
 
 /**
  * POST /api/admin/comms/test-send
@@ -15,6 +16,9 @@ import { sendEmail } from "@/lib/email/send";
  * this is a one-off, not part of send analytics.
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const { body_html, subject, variables = {}, is_transactional = false, to } = (await request.json()) as {
     body_html: string;
     subject: string;

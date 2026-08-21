@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setBoothLayout, type FloorPlanBooth } from "@/lib/actions/conference-entities";
+import type { FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import { uploadFloorPlanImage, removeFloorPlanImage } from "@/lib/actions/conference-floor-plan";
 import BoothMoveModal from "@/components/admin/conference/BoothMoveModal";
 
@@ -48,10 +49,13 @@ type Drag =
 export default function FloorPlanManager({
   conferenceId,
   floorPlanUrl,
+  surfaces,
   booths: initialBooths,
 }: {
   conferenceId: string;
+  /** Legacy conference-level background; only used when there are no surfaces. */
   floorPlanUrl: string | null;
+  surfaces: FloorPlanSurface[];
   booths: FloorPlanBooth[];
 }) {
   const router  = useRouter();
@@ -78,6 +82,13 @@ export default function FloorPlanManager({
   const [busy, setBusy]             = useState(false);
   const [error, setError]           = useState<string | null>(null);
   const [moveModalOpen, setMoveModalOpen] = useState(false);
+  // Which surface is being edited. Everything below is scoped to it — a booth on
+  // another floor is not shown, not selectable, and not counted as unplaced.
+  const [activeSurfaceId, setActiveSurfaceId] = useState<string | null>(surfaces[0]?.id ?? null);
+
+  const activeSurface = surfaces.find(s => s.id === activeSurfaceId) ?? null;
+  // Fall back to the conference-level image only when there are no surfaces at all.
+  const backgroundUrl = activeSurface ? activeSurface.imageUrl : floorPlanUrl;
 
   // ── snap helpers ─────────────────────────────────────────────────────────────
   const snapFrac = gridSize / 100;
@@ -190,8 +201,18 @@ export default function FloorPlanManager({
     return [...list].sort(naturalSort); // "number" default
   };
 
-  const placed   = applySort(booths.filter(b => b.x != null && b.y != null && b.w != null && b.h != null));
-  const unplaced = booths.filter(b => b.x == null || b.y == null || b.w == null || b.h == null).sort(naturalSort);
+  // A booth is "on" this surface when it says so, or when there's only one
+  // surface and it has never been told otherwise (the pre-surface default).
+  const onActiveSurface = (b: FloorPlanBooth) =>
+    activeSurfaceId == null || b.surfaceId == null || b.surfaceId === activeSurfaceId;
+  const hasCoords = (b: FloorPlanBooth) => b.x != null && b.y != null && b.w != null && b.h != null;
+
+  const placed   = applySort(booths.filter(b => hasCoords(b) && onActiveSurface(b)));
+  // The tray is anything without coordinates. A booth whose surface was deleted
+  // has its ref cascaded away, so it reads as surfaceId null and shows up on
+  // whichever surface is active rather than vanishing.
+  const unplaced = booths.filter(b => !hasCoords(b)).sort(naturalSort);
+  const elsewhere = booths.filter(b => hasCoords(b) && !onActiveSurface(b)).length;
   const selArray = placed.filter(b => selectedIds.has(b.id));
   const keyed    = booths.find(b => b.id === keyId) ?? null;
   const solo     = selArray.length === 1 ? selArray[0] : null;
@@ -216,7 +237,10 @@ export default function FloorPlanManager({
   // ── persistence ──────────────────────────────────────────────────────────────
   const persist = (b: FloorPlanBooth) => {
     if (b.x == null || b.y == null || b.w == null || b.h == null) return;
-    setBoothLayout(b.id, { x: b.x, y: b.y, w: b.w, h: b.h, rotation: b.rotation ?? 0, color: b.color ?? null, pitch: b.pitch ?? null })
+    setBoothLayout(b.id, { x: b.x, y: b.y, w: b.w, h: b.h, rotation: b.rotation ?? 0, color: b.color ?? null, pitch: b.pitch ?? null,
+      // Placing on the active surface is the other half of a placement — saved
+      // in the same call so position and floor can never disagree.
+      surfaceId: activeSurfaceId })
       .then(r => { if (!r.success) setError(r.error); });
   };
   const patch = (id: string, next: Partial<FloorPlanBooth>) =>
@@ -609,8 +633,27 @@ export default function FloorPlanManager({
           <p className="mt-1 text-sm text-gray-500">
             Click to select · Shift+click to multi-select · Drag to move · Corner = resize · Top handle = rotate
           </p>
+          {activeSurface && surfaces.length > 1 ? (
+            <p className="mt-1 text-xs text-gray-500">
+              Editing <span className="font-semibold text-gray-700">{activeSurface.name}</span>
+              {elsewhere > 0 ? ` · ${elsewhere} booth${elsewhere === 1 ? "" : "s"} on other surfaces` : ""}
+              {!activeSurface.imageUrl ? " · no background image yet" : ""}
+            </p>
+          ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {surfaces.length > 1 ? (
+            <label className="flex items-center gap-1.5 text-xs text-gray-600">
+              <span className="font-medium">Surface</span>
+              <select
+                value={activeSurfaceId ?? ""}
+                onChange={e => { setActiveSurfaceId(e.target.value); setIds(new Set()); setKeyId(null); }}
+                className="rounded-md border border-gray-300 px-2 py-1.5 text-xs font-medium text-gray-700"
+              >
+                {surfaces.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+              </select>
+            </label>
+          ) : null}
           <input ref={fileRef} type="file"
             accept="image/png,image/jpeg,image/webp,image/svg+xml"
             className="hidden" onChange={onPickFile} />
@@ -897,8 +940,8 @@ export default function FloorPlanManager({
               aria-label="Conference floor plan"
             >
               <rect x={0} y={0} width={VIEW_W} height={vbH} fill="white" />
-              {floorPlanUrl
-                ? <image href={floorPlanUrl} x={0} y={0} width={VIEW_W} height={vbH} preserveAspectRatio="none" />
+              {backgroundUrl
+                ? <image href={backgroundUrl} x={0} y={0} width={VIEW_W} height={vbH} preserveAspectRatio="none" />
                 : Array.from({ length: Math.ceil(VIEW_W / 50) + 1 }).map((_, i) => (
                     <line key={`v${i}`} x1={i*50} y1={0} x2={i*50} y2={vbH} stroke="#eef2f7" strokeWidth={1} />
                   ))

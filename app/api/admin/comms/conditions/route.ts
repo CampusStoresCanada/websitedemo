@@ -1,17 +1,24 @@
 import { NextRequest, NextResponse } from "next/server";
 import { listConditions, createCondition } from "@/lib/comms/conditions/store";
 import type { ConditionOperator, ConditionSubjectKey } from "@/lib/comms/conditions/registry";
+import { requireAdmin } from "@/lib/auth/guards";
 
 /**
  * GET  /api/admin/comms/conditions — list saved conditions for the "Insert Conditional" picker.
  * POST /api/admin/comms/conditions — create a new saved condition, returns its key.
  */
 export async function GET() {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const conditions = await listConditions();
   return NextResponse.json({ conditions });
 }
 
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const body = (await request.json()) as {
     label: string;
     subject: ConditionSubjectKey;

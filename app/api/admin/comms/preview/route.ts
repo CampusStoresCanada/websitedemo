@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { wrapEmailBody } from "@/lib/email/layout";
+import { requireAdmin } from "@/lib/auth/guards";
 
 /**
  * POST /api/admin/comms/preview
@@ -7,6 +8,9 @@ import { wrapEmailBody } from "@/lib/email/layout";
  * Accepts { body_html, subject, variables } — unknown {{keys}} rendered as [key] placeholders.
  */
 export async function POST(request: NextRequest) {
+  const auth = await requireAdmin();
+  if (!auth.ok) return NextResponse.json({ error: auth.error }, { status: auth.status });
+
   const { body_html, subject, variables = {}, is_transactional = false } = (await request.json()) as {
     body_html: string;
     subject: string;

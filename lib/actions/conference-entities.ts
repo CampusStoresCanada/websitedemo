@@ -2,6 +2,7 @@
 
 import { requireAdmin, requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements, resolveSurfaces, type FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
@@ -503,7 +504,13 @@ export type FloorPlanBooth = {
   name: string;
   number: string | null;
   size: string | null;
-  /** Placement on the background, as fractions of the image (0..1) + degrees. */
+  /**
+   * Which surface this booth is placed on — the `placed_on` ref's target. Null
+   * means unplaced-on-a-surface, and the caller falls back to the first
+   * surface, which is what every booth did before surfaces existed.
+   */
+  surfaceId: string | null;
+  /** Placement on that surface, as fractions of the image (0..1) + degrees. */
   x: number | null;
   y: number | null;
   w: number | null;
@@ -521,12 +528,26 @@ export type FloorPlanBooth = {
   /** Short admin-authored blurb explaining what this booth's price buys, shown on the public card. */
   pitch: string | null;
   /** Identity of the org that purchased this booth, for the "who is there" card + map logo. Sold only. */
-  soldOrg: { id: string; name: string; logoUrl: string | null; category: string | null; type: string } | null;
+  soldOrg: { id: string; slug: string | null; name: string; logoUrl: string | null; category: string | null; type: string } | null;
 };
 
+// Type-only re-export: erased at compile, so it's legal here. LEGACY_SURFACE_ID
+// is deliberately NOT re-exported — a "use server" file may only export async
+// functions, and exporting the const breaks the whole module (and every page
+// importing it) at runtime while still type-checking clean. Import it from
+// "@/lib/conference/floor-surfaces" directly.
+export type { FloorPlanSurface };
+
 export type ConferenceFloorPlan = {
-  /** Public URL of the uploaded venue background image, if any. */
+  /**
+   * @deprecated Conference-level single background image. Retained as a
+   * fallback while surfaces are backfilled — booth sales are live on this
+   * column right now, so it stays readable until the entity path is proven.
+   * Prefer `surfaces[].imageUrl`.
+   */
   floorPlanUrl: string | null;
+  /** Every surface this conference has, in level order. Never empty when art exists. */
+  surfaces: FloorPlanSurface[];
   booths: FloorPlanBooth[];
 };
 
@@ -624,11 +645,11 @@ export async function getConfirmedExhibitors(conferenceId: string): Promise<Conf
 async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFloorPlan>> {
   const db = createAdminClient();
   const now = new Date().toISOString();
-  const [boothsRes, salesRes, cartRes, pendingOrderRes, prospectRes, confRes, refsRes] = await Promise.all([
+  const [boothsRes, salesRes, cartRes, pendingOrderRes, prospectRes, confRes, refsRes, surfaceRes] = await Promise.all([
     db.from("conference_entities").select("id, name, is_for_sale, price_cents, attributes").eq("conference_id", conferenceId).eq("kind", "booth"),
     // Sold: entity_balances tells us which org holds each booth (1 row per purchase → entity).
     db.from("entity_balances")
-      .select("entity_id, organization_id, organizations(id, name, logo_url, primary_category, type)")
+      .select("entity_id, organization_id, organizations(id, slug, name, logo_url, primary_category, type)")
       .eq("conference_id", conferenceId),
     // Active (non-expired) booth cart items show as "reserved" (amber on the map).
     db.from("cart_items").select("offer_entity_id, organization_id, organizations(name)")
@@ -659,27 +680,31 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
       .eq("conference_id", conferenceId)
       .in("status", ["paid", "linked"]),
     db.from("conference_instances").select("floor_plan_url").eq("id", conferenceId).maybeSingle(),
-    // instance_of refs so we know which type each booth belongs to.
-    db.from("conference_entity_refs").select("from_entity_id, to_entity_id")
+    // instance_of tells us which type a booth belongs to; placed_on tells us
+    // which surface it sits on. One query, split by role below.
+    db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role")
       .eq("conference_id", conferenceId)
-      .eq("role", "instance_of"),
+      .in("role", ["instance_of", PLACEMENT_ROLE]),
+    // The surfaces themselves.
+    db.from("conference_entities").select("id, name, attributes")
+      .eq("conference_id", conferenceId).eq("kind", "floorplan"),
   ]);
   if (boothsRes.error) return { success: false, error: boothsRes.error.message };
 
   // Build sold map: entity_id → org identity (first purchaser wins for display).
-  type SoldOrgInfo = { id: string; name: string; logoUrl: string | null; category: string | null; type: string };
+  type SoldOrgInfo = { id: string; slug: string | null; name: string; logoUrl: string | null; category: string | null; type: string };
   const soldOrgByEntity = new Map<string, string>();
   const soldOrgInfoByEntity = new Map<string, SoldOrgInfo>();
   for (const row of salesRes.data ?? []) {
     if (!row.entity_id || soldOrgByEntity.has(row.entity_id)) continue;
     const org = (row as unknown as {
-      organizations?: { id?: string; name?: string; logo_url?: string | null; primary_category?: string | null; type?: string };
+      organizations?: { id?: string; slug?: string | null; name?: string; logo_url?: string | null; primary_category?: string | null; type?: string };
     }).organizations;
     if (org?.name) {
       soldOrgByEntity.set(row.entity_id, org.name);
       if (org.id) {
         soldOrgInfoByEntity.set(row.entity_id, {
-          id: org.id, name: org.name, logoUrl: org.logo_url ?? null, category: org.primary_category ?? null, type: org.type ?? "Vendor Partner",
+          id: org.id, slug: org.slug ?? null, name: org.name, logoUrl: org.logo_url ?? null, category: org.primary_category ?? null, type: org.type ?? "Vendor Partner",
         });
       }
     }
@@ -720,15 +745,16 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
 
   // Build a map from booth entity id → type entity name via instance_of refs.
   const boothNameById = new Map((boothsRes.data ?? []).map(b => [b.id, b.name]));
+  const instanceOfRefs = (refsRes.data ?? []).filter(r => r.role === "instance_of");
   const typeNameByBoothId = new Map<string, string>();
-  for (const ref of refsRes.data ?? []) {
+  for (const ref of instanceOfRefs) {
     const typeName = boothNameById.get(ref.to_entity_id);
     if (typeName) typeNameByBoothId.set(ref.from_entity_id, typeName);
   }
   // Type entities themselves (booths that other booths point at via instance_of) have
   // no instance_of ref of their own, so typeName would be null. Assign their own name
   // so they sort and group with their instances.
-  for (const ref of refsRes.data ?? []) {
+  for (const ref of instanceOfRefs) {
     if (boothNameById.has(ref.to_entity_id) && !typeNameByBoothId.has(ref.to_entity_id)) {
       typeNameByBoothId.set(ref.to_entity_id, boothNameById.get(ref.to_entity_id)!);
     }
@@ -736,6 +762,15 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
 
   const num = (v: unknown): number | null => (typeof v === "number" ? v : null);
   const str = (v: unknown): string | null => (typeof v === "string" ? v : null);
+
+  // ── Surfaces ──────────────────────────────────────────────────────────────
+  // Resolution + fallback rules live in lib/conference/floor-surfaces.ts so they
+  // can be tested without a database. Booth sales are live on the legacy column,
+  // so those rules are load-bearing.
+  const legacyUrl = confRes.data?.floor_plan_url ?? null;
+  const surfaces = resolveSurfaces(surfaceRes.data ?? [], legacyUrl);
+  const surfaceByBoothId = resolvePlacements(refsRes.data ?? [], surfaces);
+  const fallbackSurfaceId = defaultSurfaceId(surfaces);
 
   const booths: FloorPlanBooth[] = (boothsRes.data ?? []).map((b) => {
     const a = (b.attributes ?? {}) as Record<string, unknown>;
@@ -746,9 +781,9 @@ async function _loadFloorPlan(conferenceId: string): Promise<Result<ConferenceFl
     const heldByOrg = isSold
       ? (soldOrgByEntity.get(b.id) ?? null)
       : (reservedInfo?.orgName ?? null);
-    return { id: b.id, name: b.name, number: str(a.number), size: str(a.size), x: num(a.x), y: num(a.y), w: num(a.w), h: num(a.h), rotation: num(a.rotation), color: str(a.color), isForSale: b.is_for_sale, priceCents: b.price_cents, status, heldByOrg, typeName: typeNameByBoothId.get(b.id) ?? null, pitch: str(a.pitch), soldOrg: isSold ? (soldOrgInfoByEntity.get(b.id) ?? null) : null };
+    return { id: b.id, name: b.name, surfaceId: surfaceByBoothId.get(b.id) ?? fallbackSurfaceId, number: str(a.number), size: str(a.size), x: num(a.x), y: num(a.y), w: num(a.w), h: num(a.h), rotation: num(a.rotation), color: str(a.color), isForSale: b.is_for_sale, priceCents: b.price_cents, status, heldByOrg, typeName: typeNameByBoothId.get(b.id) ?? null, pitch: str(a.pitch), soldOrg: isSold ? (soldOrgInfoByEntity.get(b.id) ?? null) : null };
   });
-  return { success: true, data: { floorPlanUrl: confRes.data?.floor_plan_url ?? null, booths } };
+  return { success: true, data: { floorPlanUrl: legacyUrl, surfaces, booths } };
 }
 
 /** The booth things in a conference with their placement, plus the background image. */
@@ -765,12 +800,43 @@ export async function getConferenceFloorPlan(conferenceId: string): Promise<Resu
  */
 export async function setBoothLayout(
   boothId: string,
-  layout: { x: number; y: number; w: number; h: number; rotation?: number; color?: string | null; pitch?: string | null }
+  layout: {
+    x: number; y: number; w: number; h: number; rotation?: number;
+    color?: string | null; pitch?: string | null;
+    /**
+     * Surface to place this booth on. Passing it rewrites the `placed_on` ref,
+     * so dragging a booth while a surface is selected both positions it and
+     * says which floor it's on — the two halves of a placement, saved together.
+     * Omit to leave the existing surface alone.
+     */
+    surfaceId?: string | null;
+  }
 ): Promise<Result<null>> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
 
   const db = createAdminClient();
+
+  if (layout.surfaceId !== undefined) {
+    const { data: boothRow } = await db
+      .from("conference_entities").select("conference_id").eq("id", boothId).single();
+    if (boothRow?.conference_id) {
+      // One surface per thing: clear any existing placement before writing the
+      // new one, so a moved booth doesn't end up on two floors at once.
+      await db.from("conference_entity_refs")
+        .delete().eq("from_entity_id", boothId).eq("role", PLACEMENT_ROLE);
+      // LEGACY_SURFACE_ID is synthesised, not a real entity — nothing to point at.
+      if (layout.surfaceId && layout.surfaceId !== LEGACY_SURFACE_ID) {
+        await db.from("conference_entity_refs").insert({
+          conference_id: boothRow.conference_id,
+          from_entity_id: boothId,
+          to_entity_id: layout.surfaceId,
+          role: PLACEMENT_ROLE,
+        });
+      }
+    }
+  }
+
   const { data: booth, error: readErr } = await db
     .from("conference_entities")
     .select("attributes")

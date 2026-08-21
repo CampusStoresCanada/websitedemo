@@ -9,6 +9,7 @@ import { getPrimaryContactsForMap } from "@/lib/actions/map-contacts";
 import type { HomeMapOrg } from "@/lib/homepage";
 import type { MapRef } from "./Map";
 import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/types";
+import { orgMatchesQuery } from "@/lib/explore/org-search";
 import { SCALE_RANGES } from "@/lib/explore/types";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { orgSubtitle, hasActiveCompounds } from "@/lib/explore/filters";
@@ -328,12 +329,7 @@ export default function MapExplore({
         discoveryFocus === "partners" ? partners
         : discoveryFocus === "members" ? members
         : organizations;
-      return scope.filter(
-        (o) =>
-          o.name.toLowerCase().includes(q) ||
-          (o.city && o.city.toLowerCase().includes(q)) ||
-          (o.province && o.province.toLowerCase().includes(q))
-      );
+      return scope.filter((o) => orgMatchesQuery(o, q));
     }
     switch (lens) {
       case "members": return [...members];
@@ -545,14 +541,7 @@ export default function MapExplore({
 
         // Text match: name / city / province (instant, client-side)
         const textMatchIds = new Set(
-          partners
-            .filter(
-              (o) =>
-                o.name.toLowerCase().includes(q) ||
-                (o.city && o.city.toLowerCase().includes(q)) ||
-                (o.province && o.province.toLowerCase().includes(q))
-            )
-            .map((o) => o.id)
+          partners.filter((o) => orgMatchesQuery(o, q)).map((o) => o.id)
         );
 
         // Semantic match: null = still loading (debounce), [] = API returned nothing
@@ -676,6 +665,7 @@ export default function MapExplore({
       );
     }
     if (compoundFilters.cancoll === "true") pool = pool.filter((o) => o.isCancollMember);
+    if (compoundFilters.exhibiting === "true") pool = pool.filter((o) => (o.exhibitorBooths?.length ?? 0) > 0);
 
     return { filteredOrgs: pool, highlightedIds: pool.map((o) => o.id) };
   }, [organizations, members, partners, lens, scaleFilter, checkedCategories, checkedSubcategories, posFilter, serviceFilter, mandateFilter, searchQuery, selectedOrg, compoundFilters, viewMode, semanticResults, discoveryFocus]);
@@ -986,6 +976,7 @@ export default function MapExplore({
               mandateCounts={mandateCounts}
               partnerCategoryCounts={partnerCategoryCounts}
               certificationCounts={certificationCounts}
+              exhibitingCount={lensPartners.filter((o) => (o.exhibitorBooths?.length ?? 0) > 0).length}
               canViewCancoll={canViewCancoll}
               checkedCategories={checkedCategories}
               setCheckedCategories={setCheckedCategories}
@@ -1088,7 +1079,7 @@ export default function MapExplore({
                 <p className="text-sm text-gray-600">
                   <span className="font-semibold text-gray-900">{partnersWithCategory}</span> categorized partners
                 </p>
-                {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue) && (
+                {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue || compoundFilters.exhibiting) && (
                   <button
                     type="button"
                     onClick={() => { setCheckedCategories(new Set()); setCheckedSubcategories(new Set()); setCompoundFilters({}); }}
@@ -1174,26 +1165,49 @@ export default function MapExplore({
                     );
                   })}
 
-                {/* Has catalogue filter */}
-                {partners.some((o) => o.catalogueUrl) && (
+                {/* Resources / presence filters */}
+                {(partners.some((o) => o.catalogueUrl) ||
+                  partners.some((o) => (o.exhibitorBooths?.length ?? 0) > 0)) && (
                   <div className="mt-3 pt-3 border-t border-gray-100">
                     <p className="text-[10px] font-semibold text-gray-400 uppercase tracking-wider px-3 mb-1">Resources</p>
-                    <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={compoundFilters.hasCatalogue === "true"}
-                        onChange={() => setCompoundFilters((f) => ({ ...f, hasCatalogue: f.hasCatalogue === "true" ? undefined : "true" }))}
-                        className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
-                      />
-                      <span className="text-sm text-gray-700">Has catalogue</span>
-                      <span className="text-xs text-gray-400 tabular-nums ml-auto">{partners.filter((o) => o.catalogueUrl).length}</span>
-                    </label>
+                    {partners.some((o) => o.catalogueUrl) && (
+                      <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={compoundFilters.hasCatalogue === "true"}
+                          onChange={() => setCompoundFilters((f) => ({ ...f, hasCatalogue: f.hasCatalogue === "true" ? undefined : "true" }))}
+                          className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
+                        />
+                        <span className="text-sm text-gray-700">Has catalogue</span>
+                        <span className="text-xs text-gray-400 tabular-nums ml-auto">{partners.filter((o) => o.catalogueUrl).length}</span>
+                      </label>
+                    )}
+                    {/* Exhibiting — derived from booth ownership, same source as
+                        the profile badge and the directory chip. */}
+                    {partners.some((o) => (o.exhibitorBooths?.length ?? 0) > 0) && (
+                      <label className="flex items-center gap-2.5 px-3 py-2.5 rounded-lg hover:bg-gray-50 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={compoundFilters.exhibiting === "true"}
+                          onChange={() => setCompoundFilters((f) => ({ ...f, exhibiting: f.exhibiting === "true" ? undefined : "true" }))}
+                          className="h-4 w-4 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer"
+                        />
+                        <span className="flex items-center gap-1.5 text-sm text-gray-700">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src="/certifications/exhibitor-2027.svg" alt="" className="h-4 w-4 rounded-full" />
+                          Exhibiting
+                        </span>
+                        <span className="text-xs text-gray-400 tabular-nums ml-auto">
+                          {partners.filter((o) => (o.exhibitorBooths?.length ?? 0) > 0).length}
+                        </span>
+                      </label>
+                    )}
                   </div>
                 )}
               </div>
 
               {/* Results */}
-              {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue) && (
+              {(checkedCategories.size > 0 || checkedSubcategories.size > 0 || compoundFilters.hasCatalogue || compoundFilters.exhibiting) && (
                 <div className="border-t border-gray-100">
                   <GroupSummary orgs={filteredOrgs} lens={lens} />
                   <OrgList orgs={filteredOrgs} onOrgClick={handleOrgClick} isMember={isMember} focus={discoveryFocus} />

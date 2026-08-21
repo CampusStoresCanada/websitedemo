@@ -227,7 +227,11 @@ function BoothCard({
 
       {booth.status === "sold" && booth.soldOrg ? (
         // Sold — the question here is "who is there?", not price/track detail.
-        <div className="px-3 py-3 flex items-center gap-3">
+        // The profile link below is the natural next question ("who ARE they?"),
+        // and /org/[slug] does its own viewer masking, so it's safe to offer
+        // from this deliberately-public page.
+        <div className="px-3 py-3 space-y-2.5">
+        <div className="flex items-center gap-3">
           {booth.soldOrg.logoUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={booth.soldOrg.logoUrl} alt=""
@@ -247,6 +251,15 @@ function BoothCard({
             <p className="font-bold text-gray-900 text-sm leading-tight truncate">{booth.soldOrg.name}</p>
             <p className="text-xs text-gray-500 truncate">{booth.soldOrg.category ?? "Exhibitor"}</p>
           </div>
+        </div>
+        {booth.soldOrg.slug && (
+          <a
+            href={`/org/${booth.soldOrg.slug}`}
+            className="block w-full rounded-md bg-[#163D6D] px-3 py-1.5 text-center text-xs font-semibold text-white transition-colors hover:bg-[#0F2C4F]"
+          >
+            See full profile →
+          </a>
+        )}
         </div>
       ) : (
         <div className="px-3 py-2 space-y-1">
