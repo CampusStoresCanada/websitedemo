@@ -16,9 +16,9 @@ export const revalidate = 0;
 export default async function PartnerAsksPage({
   searchParams,
 }: {
-  searchParams: Promise<{ ask?: string }>;
+  searchParams: Promise<{ ask?: string; error?: string }>;
 }) {
-  const { ask: askParam } = await searchParams;
+  const { ask: askParam, error: errorParam } = await searchParams;
   const asks = await listPartnerAsks();
   const selected = askParam ? asks.find((a) => String(a.id) === askParam) : undefined;
   const candidates = selected ? await matchPartnersToAsk(selected) : [];
@@ -68,7 +68,10 @@ export default async function PartnerAsksPage({
     if (result.success && result.campaignId) {
       redirect(`/admin/comms/${result.campaignId}`);
     }
-    redirect(`/admin/comms/asks?ask=${askId}`);
+    // Surface the reason. Redirecting bare looked identical to "nothing was
+    // ticked", so a real failure read as a no-op.
+    const reason = result.error ?? "Campaign could not be created.";
+    redirect(`/admin/comms/asks?ask=${askId}&error=${encodeURIComponent(reason)}`);
   }
 
   return (
@@ -82,6 +85,12 @@ export default async function PartnerAsksPage({
           </Link>
         }
       />
+
+      {errorParam && (
+        <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <strong>Couldn&apos;t prepare the send.</strong> {errorParam}
+        </div>
+      )}
 
       {asks.length === 0 ? (
         <div className="mt-6 rounded-lg border border-gray-200 bg-white p-8 text-center text-gray-500">
