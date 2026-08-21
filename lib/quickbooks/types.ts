@@ -6,6 +6,13 @@ export interface QBCustomer {
   CompanyName?: string;
   PrimaryEmailAddr?: { Address: string };
   SyncToken: string;
+  /**
+   * False once a record has been merged away or deactivated — QBO keeps the
+   * row and renames it "<name> (deleted)" rather than removing it, and a
+   * direct GET still returns it. getQBCustomerById relies on this to avoid
+   * resolving a stored id to a dead customer.
+   */
+  Active?: boolean;
 }
 
 export interface QBCustomerInput {
