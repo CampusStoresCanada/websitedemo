@@ -41,6 +41,14 @@ export type TemplateCategory =
   | "conference"
   | "events"
   | "user_mgmt"
+  /**
+   * Board elections and other governance business. Kept separate from
+   * "general" because these are the association's constitutional
+   * correspondence: they are transactional under CASL (a nomination is not a
+   * commercial electronic message), and a member must not be able to
+   * unsubscribe from being told they have been nominated.
+   */
+  | "governance"
   | "general";
 
 // ── Template key registry (all known keys) ────────────────────────
@@ -70,6 +78,13 @@ export type TemplateKey =
   | "conference_reminder"
   | "conference_waitlist_approved"
   | "conference_checklist_reminder"
+  // Elections
+  | "election_call_for_nominations"
+  | "election_nomination_received"
+  | "election_cosign_request"
+  | "election_store_permission_request"
+  | "election_nomination_ready"
+  | "election_nomination_incomplete"
   | "prospective_booth_payment_confirmation"
   | "prospective_booth_application_reminder"
   // Events

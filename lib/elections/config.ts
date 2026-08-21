@@ -65,6 +65,13 @@ export interface ElectionsConfig {
     voterRule: EligibilityRule;
     /** Applied to the nominee's institution. */
     nomineeRule: EligibilityRule;
+    /**
+     * Exclude organizations flagged `is_test`. True for any real election.
+     * Configurable rather than hardcoded so a scratch election can exercise the
+     * full nomination and ballot flow end to end without touching real member
+     * records -- which is the only way this gets tested before September.
+     */
+    excludeTestOrganizations: boolean;
   };
 
   nominations: {
@@ -92,9 +99,13 @@ export interface ElectionsConfig {
     /** By-Law Part IV S1 -- only employees of member stores may be elected. */
     mustBeMemberStoreEmployee: boolean;
     /**
-     * By-Law Part IV S2 -- three consecutive terms. NULL disables the cap.
+     * Consecutive terms a director may be elected to. NULL disables the cap.
      * Enforceable only once term history exists in governance_role_assignments;
      * there is no other source for it.
+     *
+     * ⚠️ The two circulating copies of By-Law No. 1 DISAGREE on this number and
+     * on nothing else -- see CSC_ELECTIONS_CONFIG below. It is the one field
+     * here that should not be changed without documentary authority.
      */
     maxConsecutiveTerms: number | null;
   };
@@ -155,16 +166,27 @@ export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
     ballotsOpenDaysBefore: 60,
     ballotsCloseDaysBefore: 30,
   },
-  // Third Wednesday of January. weekday 3 = Wednesday (ISO: Mon=1).
-  agmRule: { month: 1, weekday: 3, occurrence: 3 },
+  // Third Thursday of January. weekday 4 = Thursday (ISO: Mon=1).
+  // Moved from Wednesday for 2027 on the Executive Director's conflict; the
+  // board terms compiled in September 2026 already run to "January 21, 2027",
+  // which is the third Thursday, so the association is de facto on Thursday
+  // already. Every countback below shifts with it automatically.
+  agmRule: { month: 1, weekday: 4, occurrence: 3 },
   electorate: {
     rule: "org_admins",
     oneBallotPerOrganization: true,
     anyAdminMayEdit: true,
   },
   eligibility: {
-    voterRule: "active_status",
-    nomineeRule: "active_status",
+    // Strict, because at CSC a missing expiry means an OUTSTANDING RENEWAL
+    // rather than a missing record — the membership year ends August 31 and
+    // renewals run into September. "Pay or you don't get this" is the intended
+    // policy, and the ineligible verdict is recoverable by the member the same
+    // day. Eligibility is therefore re-evaluated at every gate, never snapshotted
+    // once when the election is created.
+    voterRule: "active_status_and_dated_expiry",
+    nomineeRule: "active_status_and_dated_expiry",
+    excludeTestOrganizations: true,
   },
   nominations: {
     cosignersRequired: 2,
@@ -177,7 +199,13 @@ export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
   },
   candidacy: {
     mustBeMemberStoreEmployee: true,
-    maxConsecutiveTerms: 3,
+    // FOUR. Confirmed 2026-08-21 against the by-laws as filed with the federal
+    // government. Worth knowing WHY that confirmation was needed: the bylaws
+    // folder holds two files both titled "Approved January 30, 2014" whose only
+    // difference across all 13 pages is this word -- one says three. Under three
+    // the sitting President and Vice-President would both have been barred from
+    // standing in 2027, having each served three consecutive terms.
+    maxConsecutiveTerms: 4,
   },
   ballot: {
     alphabetical: true,

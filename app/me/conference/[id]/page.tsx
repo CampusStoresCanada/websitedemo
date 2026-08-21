@@ -4,6 +4,9 @@ import { revalidatePath } from "next/cache";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
+import { answerPersonalTask } from "@/lib/actions/conference-tasks";
+import { loadPersonalTasks } from "@/lib/conference/checklist-tasks";
+import TaskChecklist from "@/components/conference/TaskChecklist";
 import { resolvePersonObligations } from "@/lib/actions/conference-access";
 import {
   buildAttendeeMeetingRows,
@@ -127,6 +130,27 @@ export default async function MyConferencePage({
   const readinessFlags = (person.data_quality_flags ?? []).filter((f) => f.trim().length > 0);
   const readinessIsReady = obligations.isReady && readinessFlags.length === 0;
 
+  // Check-ins the attendee answers for themselves — hotel and anything else
+  // only they can confirm. Deliberately separate from the obligations above:
+  // those are data they owe because of a grant they hold, these are questions
+  // where "doesn't apply to me" is a complete answer.
+  const personalTasks = await loadPersonalTasks(createAdminClient(), conferenceId, person.id);
+  // Captured outside the server action: the closure below doesn't inherit the
+  // null-narrowing the guard above established.
+  const personId = person.id;
+
+  async function handleTaskAnswer(
+    taskId: string,
+    state: "done" | "not_applicable",
+    evidence?: string
+  ) {
+    "use server";
+    return answerPersonalTask({
+      personId, taskId, state, evidence,
+      revalidate: `/me/conference/${conferenceId}`,
+    });
+  }
+
   const nextMeeting =
     person.registration_id
       ? await loadNextMeeting({
@@ -201,6 +225,17 @@ export default async function MyConferencePage({
             ))}
           </ul>
         )}
+      </section>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <h2 className="text-base font-semibold text-gray-900">Your To-Do List</h2>
+        <p className="mt-0.5 text-sm text-gray-500">
+          Things only you can confirm. Tick them off as you go — or tell us one doesn&rsquo;t apply and we&rsquo;ll stop asking.
+        </p>
+        <div className="mt-2">
+          <TaskChecklist tasks={personalTasks} onAnswer={handleTaskAnswer}
+            emptyLabel="Nothing to confirm right now." />
+        </div>
       </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">

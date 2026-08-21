@@ -9,28 +9,37 @@ import {
 } from "../schedule";
 
 describe("AGM date resolution", () => {
-  it("finds the third Wednesday of January", () => {
-    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2027)).toBe("2027-01-20");
-    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2028)).toBe("2028-01-19");
-    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2029)).toBe("2029-01-17");
+  it("finds the third Thursday of January", () => {
+    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2027)).toBe("2027-01-21");
+    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2028)).toBe("2028-01-20");
+    expect(resolveAgmDate(CSC_ELECTIONS_CONFIG, 2029)).toBe("2029-01-18");
+  });
+
+  it("moves every countback with the AGM rule", () => {
+    // Moving Wednesday -> Thursday shifts all four windows by a day. Nothing
+    // recomputes them by hand, which is the point of deriving them.
+    const wed = deriveSchedule("2027-01-20", CSC_ELECTIONS_CONFIG);
+    const thu = deriveSchedule("2027-01-21", CSC_ELECTIONS_CONFIG);
+    expect(wed.nominationsOpenAt).toBe("2026-09-22");
+    expect(thu.nominationsOpenAt).toBe("2026-09-23");
   });
 
   it("returns null where the occurrence does not exist", () => {
-    // No fifth Wednesday in February 2027.
-    expect(nthWeekdayOfMonth(2027, 2, 3, 5)).toBeNull();
+    // No fifth Thursday in February 2027.
+    expect(nthWeekdayOfMonth(2027, 2, 4, 5)).toBeNull();
   });
 });
 
 describe("the CSC 2026-27 cycle", () => {
-  const schedule = deriveSchedule("2027-01-20", CSC_ELECTIONS_CONFIG);
+  const schedule = deriveSchedule("2027-01-21", CSC_ELECTIONS_CONFIG);
 
   it("derives the four by-law countbacks", () => {
     expect(schedule).toEqual({
-      agmDate: "2027-01-20",
-      nominationsOpenAt: "2026-09-22", // 120 days
-      nominationsCloseAt: "2026-10-22", // 90 days
-      ballotsOpenAt: "2026-11-21", // 60 days
-      ballotsCloseAt: "2026-12-21", // 30 days
+      agmDate: "2027-01-21",
+      nominationsOpenAt: "2026-09-23", // 120 days
+      nominationsCloseAt: "2026-10-23", // 90 days
+      ballotsOpenAt: "2026-11-22", // 60 days
+      ballotsCloseAt: "2026-12-22", // 30 days
     });
   });
 
@@ -51,13 +60,13 @@ describe("the CSC 2026-27 cycle", () => {
     expect(phaseOn(schedule, "2026-11-01")).toBe("between_nominations_and_ballot");
     expect(phaseOn(schedule, "2026-12-01")).toBe("balloting");
     expect(phaseOn(schedule, "2027-01-05")).toBe("after_ballot");
-    expect(phaseOn(schedule, "2027-01-20")).toBe("after_agm");
+    expect(phaseOn(schedule, "2027-01-21")).toBe("after_agm");
   });
 });
 
 describe("schedule validation", () => {
   it("rejects ballots opening before nominations close", () => {
-    const broken = deriveSchedule("2027-01-20", {
+    const broken = deriveSchedule("2027-01-21", {
       ...CSC_ELECTIONS_CONFIG,
       schedule: {
         nominationsOpenDaysBefore: 120,

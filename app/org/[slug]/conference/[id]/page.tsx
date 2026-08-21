@@ -9,6 +9,9 @@ import {
 import { resolveOrgSlug } from "@/lib/org/resolve";
 import { resolveConferenceObligations } from "@/lib/actions/conference-access";
 import { resolveConferenceBadges } from "@/lib/actions/conference-entities";
+import { answerOrgTask } from "@/lib/actions/conference-tasks";
+import { loadOrgTasks } from "@/lib/conference/checklist-tasks";
+import TaskChecklist from "@/components/conference/TaskChecklist";
 
 type OrgConferencePersonRow = {
   id: string;
@@ -140,6 +143,23 @@ export default async function OrgConferencePage({
   const notReadyCount = readinessRows.filter((row) => !row.isReady).length;
   const exhibitorRows = people.filter((row) => row.person_kind === "exhibitor");
 
+  // The company's list: monitored items (payment, seats, directory listing) and
+  // self-reported ones (Stronco, Encore) in a single view. A partner shouldn't
+  // have to know which half we can see — they want what's outstanding.
+  const orgTasks = await loadOrgTasks(createAdminClient(), conferenceId, orgId);
+
+  async function handleOrgTaskAnswer(
+    taskId: string,
+    state: "done" | "not_applicable",
+    evidence?: string
+  ) {
+    "use server";
+    return answerOrgTask({
+      organizationId: orgId, conferenceId, taskId, state, evidence,
+      revalidate: `/org/${slug}/conference/${conferenceId}`,
+    });
+  }
+
   return (
     <main className="max-w-6xl mx-auto px-4 py-8 space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -170,6 +190,17 @@ export default async function OrgConferencePage({
           </Link>
         </div>
       </div>
+
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <h2 className="text-base font-semibold text-gray-900">Company To-Do List</h2>
+        <p className="mt-0.5 text-sm text-gray-500">
+          What your company still owes for this conference. Some we track automatically; the rest you tick off yourself.
+        </p>
+        <div className="mt-2">
+          <TaskChecklist tasks={orgTasks} onAnswer={handleOrgTaskAnswer}
+            emptyLabel="Nothing outstanding for your company." />
+        </div>
+      </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Org Readiness</h2>

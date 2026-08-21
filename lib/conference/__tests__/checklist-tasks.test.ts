@@ -35,7 +35,7 @@ function stubDb(opts: {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const load = async (db: any) =>
-  (await import("../personal-tasks")).loadPersonalTasks(db, "conf", "person-1");
+  (await import("../checklist-tasks")).loadPersonalTasks(db, "conf", "person-1");
 
 describe("loadPersonalTasks", () => {
   it("is pending when nothing has been said or captured", async () => {

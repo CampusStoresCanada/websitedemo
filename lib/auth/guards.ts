@@ -15,6 +15,7 @@ export interface AuthContext {
   userEmail: string | null;
   globalRole: GlobalRole;
   isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
   orgAdminOrgIds: string[];
   activeOrgIds: string[];
 }
@@ -57,30 +58,34 @@ export type IdentitySnapshot =
       orgsError: unknown;
     };
 
-export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => {
-  const client = await createClient();
+export const getIdentitySnapshot = cache(
+  async (): Promise<IdentitySnapshot> => {
+    const client = await createClient();
 
-  // Use getClaims() for local JWT validation — instant, never hangs.
-  // NEVER use getUser() on server side — it makes a network request that can hang.
-  // eslint-disable-next-line no-restricted-syntax
-  const { data: claimsData, error: claimsError } = await client.auth.getClaims();
-  const userId = claimsData?.claims?.sub as string | undefined;
-  const userEmail = (claimsData?.claims?.email as string | undefined) ?? null;
+    // Use getClaims() for local JWT validation — instant, never hangs.
+    // NEVER use getUser() on server side — it makes a network request that can hang.
+    // eslint-disable-next-line no-restricted-syntax
+    const { data: claimsData, error: claimsError } =
+      await client.auth.getClaims();
+    const userId = claimsData?.claims?.sub as string | undefined;
+    const userEmail = (claimsData?.claims?.email as string | undefined) ?? null;
 
-  if (claimsError || !userId) {
-    return { status: "anonymous" };
-  }
+    if (claimsError || !userId) {
+      return { status: "anonymous" };
+    }
 
-  let profileResult: { data: UserProfile | null; error: unknown } | null = null;
-  let orgsResult: { data: UserOrganization[] | null; error: unknown } | null = null;
+    let profileResult: { data: UserProfile | null; error: unknown } | null =
+      null;
+    let orgsResult: { data: UserOrganization[] | null; error: unknown } | null =
+      null;
 
-  for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
-    const [profileRes, orgsRes] = await Promise.all([
-      client.from("profiles").select("*").eq("id", userId).maybeSingle(),
-      client
-        .from("user_organizations")
-        .select(
-          `
+    for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
+      const [profileRes, orgsRes] = await Promise.all([
+        client.from("profiles").select("*").eq("id", userId).maybeSingle(),
+        client
+          .from("user_organizations")
+          .select(
+            `
           id,
           user_id,
           organization_id,
@@ -88,37 +93,46 @@ export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => 
           status,
           created_at,
           organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status, memberships(status, program_key))
-        `
-        )
-        .eq("user_id", userId)
-        .eq("status", "active"),
-    ]);
+        `,
+          )
+          .eq("user_id", userId)
+          .eq("status", "active"),
+      ]);
 
-    profileResult = profileRes as unknown as { data: UserProfile | null; error: unknown };
-    orgsResult = orgsRes as unknown as { data: UserOrganization[] | null; error: unknown };
+      profileResult = profileRes as unknown as {
+        data: UserProfile | null;
+        error: unknown;
+      };
+      orgsResult = orgsRes as unknown as {
+        data: UserOrganization[] | null;
+        error: unknown;
+      };
 
-    if (!profileRes.error && !orgsRes.error) {
-      break;
+      if (!profileRes.error && !orgsRes.error) {
+        break;
+      }
+
+      if (attempt < AUTHZ_QUERY_RETRIES) {
+        const delayMs = AUTHZ_RETRY_BASE_MS * 2 ** (attempt - 1);
+        await sleep(delayMs);
+      }
     }
 
-    if (attempt < AUTHZ_QUERY_RETRIES) {
-      const delayMs = AUTHZ_RETRY_BASE_MS * 2 ** (attempt - 1);
-      await sleep(delayMs);
-    }
-  }
+    return {
+      status: "resolved",
+      userId,
+      userEmail,
+      profile: profileResult?.error ? null : (profileResult?.data ?? null),
+      profileError: profileResult?.error ?? null,
+      organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
+      orgsError: orgsResult?.error ?? null,
+    };
+  },
+);
 
-  return {
-    status: "resolved",
-    userId,
-    userEmail,
-    profile: profileResult?.error ? null : (profileResult?.data ?? null),
-    profileError: profileResult?.error ?? null,
-    organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
-    orgsError: orgsResult?.error ?? null,
-  };
-});
-
-async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | null> {
+async function loadAuthContext(
+  supabase?: AppSupabase,
+): Promise<AuthContext | null> {
   const snapshot = await getIdentitySnapshot();
 
   if (snapshot.status === "anonymous") {
@@ -136,8 +150,12 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
 
   const client = supabase ?? (await createClient());
   const organizations = snapshot.organizations ?? [];
-  const globalRole = (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
-  const isBenchmarkingReviewer = snapshot.profile?.is_benchmarking_reviewer === true;
+  const globalRole =
+    (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
+  const isBenchmarkingReviewer =
+    snapshot.profile?.is_benchmarking_reviewer === true;
+  const isBenchmarkingContentReviewer =
+    snapshot.profile?.is_benchmarking_content_reviewer === true;
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
     .filter((uo) => uo.role === "org_admin")
@@ -149,6 +167,7 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     userEmail: snapshot.userEmail,
     globalRole,
     isBenchmarkingReviewer,
+    isBenchmarkingContentReviewer,
     orgAdminOrgIds,
     activeOrgIds,
   };
@@ -166,12 +185,17 @@ export function isSuperAdmin(role: GlobalRole): boolean {
   return role === "super_admin";
 }
 
-export function canManageOrganization(ctx: AuthContext, organizationId: string): boolean {
+export function canManageOrganization(
+  ctx: AuthContext,
+  organizationId: string,
+): boolean {
   // admin + super_admin → global scope, can manage any org
   // org_admin → org scope, can only manage orgs they administrate
   // The super_admin vs admin distinction (who can create/alter global roles) is
   // enforced separately — this guard is only about org-level management operations.
-  return isGlobalAdmin(ctx.globalRole) || ctx.orgAdminOrgIds.includes(organizationId);
+  return (
+    isGlobalAdmin(ctx.globalRole) || ctx.orgAdminOrgIds.includes(organizationId)
+  );
 }
 
 export async function requireAuthenticated(): Promise<GuardResult> {
@@ -282,7 +306,7 @@ export async function requireConferenceOpsAccess(): Promise<GuardResult> {
     const integration = await getIntegrationConfig();
     const allowlist = integration.conference_ops_masthead_org_ids ?? [];
     const hasAllowedOpsOrg = auth.ctx.orgAdminOrgIds.some((orgId) =>
-      allowlist.includes(orgId)
+      allowlist.includes(orgId),
     );
     if (!hasAllowedOpsOrg) {
       await logAuditEventSafe({
@@ -337,7 +361,7 @@ export async function requireReviewerOrAdmin(): Promise<GuardResult> {
 }
 
 export async function requireOrgAdminOrSuperAdmin(
-  organizationId: string
+  organizationId: string,
 ): Promise<GuardResult> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return auth;

@@ -24,17 +24,45 @@ export type InstitutionType = "university" | "college" | "polytechnic" | "instit
  * Western Region is Manitoba and west. Nothing in Part V uses these -- they are
  * vestigial in the elections process -- but they are the association's own
  * language for geography, which beats inventing a new split.
+ *
+ * `organizations.province` holds FULL NAMES ("British Columbia"), not the
+ * two-letter codes an earlier version of this assumed -- which silently sorted
+ * every institution into "unknown" and made the region breakdown useless without
+ * erroring. Both forms are accepted, plus the French names, because a column
+ * that is free text today can hold either tomorrow.
  */
-const WESTERN_PROVINCES = new Set(["MB", "SK", "AB", "BC", "YT", "NT", "NU"]);
+const WESTERN = new Set([
+  "MB", "SK", "AB", "BC", "YT", "NT", "NU",
+  "MANITOBA", "SASKATCHEWAN", "ALBERTA", "BRITISH COLUMBIA", "YUKON",
+  "NORTHWEST TERRITORIES", "NUNAVUT",
+  "COLOMBIE-BRITANNIQUE", "TERRITOIRES DU NORD-OUEST",
+]);
+
+const EASTERN = new Set([
+  "ON", "QC", "NB", "NS", "PE", "PEI", "NL", "NF",
+  "ONTARIO", "QUEBEC", "QUÉBEC", "NEW BRUNSWICK", "NOVA SCOTIA",
+  "PRINCE EDWARD ISLAND", "NEWFOUNDLAND AND LABRADOR", "NEWFOUNDLAND & LABRADOR",
+  "NEWFOUNDLAND", "NOUVEAU-BRUNSWICK", "NOUVELLE-ÉCOSSE",
+  "ÎLE-DU-PRINCE-ÉDOUARD", "TERRE-NEUVE-ET-LABRADOR",
+]);
 
 export type Region = "eastern" | "western" | "unknown";
 
 export function resolveRegion(province: string | null): Region {
   if (!province) return "unknown";
-  const code = province.trim().toUpperCase();
-  if (WESTERN_PROVINCES.has(code)) return "western";
-  // Anything recognizably a province that isn't western is eastern.
-  return code.length === 2 ? "eastern" : "unknown";
+  const key = province.trim().toUpperCase();
+  if (WESTERN.has(key)) return "western";
+  if (EASTERN.has(key)) return "eastern";
+  // Unrecognized rather than guessed. An unfamiliar value showing as "unknown"
+  // is a prompt to look; quietly filing it east would not be.
+  return "unknown";
+}
+
+/** "BRITISH COLUMBIA" → "British Columbia", for display. */
+export function titleCaseProvince(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/(^|[\s\-])([a-zà-ÿ])/g, (_, sep, ch) => sep + ch.toUpperCase());
 }
 
 /**

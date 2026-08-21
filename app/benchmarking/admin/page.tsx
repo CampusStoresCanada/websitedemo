@@ -24,7 +24,12 @@ export default async function BenchmarkingAdminPage() {
   const latestSurvey = surveys?.[0] ?? null;
 
   // Response rate for latest survey
-  let responseRate = { totalMemberOrgs: 0, drafts: 0, submitted: 0, verified: 0 };
+  let responseRate = {
+    totalMemberOrgs: 0,
+    drafts: 0,
+    submitted: 0,
+    verified: 0,
+  };
 
   if (latestSurvey) {
     // Count active member orgs
@@ -41,8 +46,10 @@ export default async function BenchmarkingAdminPage() {
       .eq("fiscal_year", latestSurvey.fiscal_year)) as { data: any[] | null };
 
     const drafts = submissions?.filter((s) => s.status === "draft").length ?? 0;
-    const submitted = submissions?.filter((s) => s.status === "submitted").length ?? 0;
-    const verified = submissions?.filter((s) => s.verified_by !== null).length ?? 0;
+    const submitted =
+      submissions?.filter((s) => s.status === "submitted").length ?? 0;
+    const verified =
+      submissions?.filter((s) => s.verified_by !== null).length ?? 0;
 
     responseRate = {
       totalMemberOrgs: totalOrgs ?? 0,
@@ -58,18 +65,30 @@ export default async function BenchmarkingAdminPage() {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { count } = (await (supabase as any)
       .from("delta_flags")
-      .select("id, benchmarking!inner(fiscal_year)", { count: "exact", head: true })
+      .select("id, benchmarking!inner(fiscal_year)", {
+        count: "exact",
+        head: true,
+      })
       .eq("committee_status", "pending")
-      .eq("benchmarking.fiscal_year", latestSurvey.fiscal_year)) as { count: number | null };
+      .eq("benchmarking.fiscal_year", latestSurvey.fiscal_year)) as {
+      count: number | null;
+    };
     pendingFlagCount = count ?? 0;
   }
 
-  // Fetch current reviewers
+  // Fetch current reviewers — two distinct groups, two distinct jobs
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: reviewers } = (await (supabase as any)
     .from("profiles")
     .select("id, display_name, global_role")
     .eq("is_benchmarking_reviewer", true)
+    .order("display_name")) as { data: any[] | null };
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: contentReviewers } = (await (supabase as any)
+    .from("profiles")
+    .select("id, display_name, global_role")
+    .eq("is_benchmarking_content_reviewer", true)
     .order("display_name")) as { data: any[] | null };
 
   return (
@@ -141,13 +160,16 @@ export default async function BenchmarkingAdminPage() {
 
         {/* Reviewer Management — admin only */}
         <ReviewerManagement
-          currentReviewers={
-            (reviewers ?? []).map((r) => ({
-              id: r.id,
-              displayName: r.display_name ?? "Unknown",
-              globalRole: r.global_role,
-            }))
-          }
+          currentReviewers={(reviewers ?? []).map((r) => ({
+            id: r.id,
+            displayName: r.display_name ?? "Unknown",
+            globalRole: r.global_role,
+          }))}
+          currentContentReviewers={(contentReviewers ?? []).map((r) => ({
+            id: r.id,
+            displayName: r.display_name ?? "Unknown",
+            globalRole: r.global_role,
+          }))}
         />
       </div>
     </div>

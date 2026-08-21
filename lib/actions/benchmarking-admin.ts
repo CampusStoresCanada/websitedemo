@@ -1,9 +1,6 @@
 "use server";
 
-import {
-  requireAdmin,
-  requireReviewerOrAdmin,
-} from "@/lib/auth/guards";
+import { requireAdmin, requireReviewerOrAdmin } from "@/lib/auth/guards";
 import type { AuthContext } from "@/lib/auth/guards";
 import type { Json } from "@/lib/database.types";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
@@ -68,7 +65,7 @@ export async function createBenchmarkingSurvey(
   fiscalYear: number,
   title: string,
   opensAt: string | null,
-  closesAt: string | null
+  closesAt: string | null,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -114,7 +111,7 @@ export async function createBenchmarkingSurvey(
 
 export async function updateSurveyStatus(
   surveyId: string,
-  newStatus: string
+  newStatus: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -155,7 +152,7 @@ export async function updateSurveyStatus(
 export async function updateSurveyDates(
   surveyId: string,
   opensAt: string | null,
-  closesAt: string | null
+  closesAt: string | null,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -179,7 +176,7 @@ export async function updateSurveyDates(
 // ─────────────────────────────────────────────────────────────────
 
 export async function verifySubmission(
-  benchmarkingId: string
+  benchmarkingId: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -206,7 +203,10 @@ export async function verifySubmission(
   });
 
   if (!promotion.success) {
-    console.error("[benchmarking-admin] verifySubmission promotion error:", promotion.error);
+    console.error(
+      "[benchmarking-admin] verifySubmission promotion error:",
+      promotion.error,
+    );
     await auth.supabase
       .from("benchmarking")
       .update({ verified_by: null, verified_at: null })
@@ -221,7 +221,7 @@ export async function verifySubmission(
 }
 
 export async function unverifySubmission(
-  benchmarkingId: string
+  benchmarkingId: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -247,7 +247,7 @@ export async function unverifySubmission(
 export async function reviewDeltaFlag(
   flagId: string,
   decision: "approved" | "rejected",
-  committeeNotes: string
+  committeeNotes: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -279,17 +279,31 @@ export async function reviewDeltaFlag(
 // Reviewer Management (admin-only)
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Two distinct capabilities, two different groups, two different times of year:
+ *   "qa"      — board committee, Nov/Dec, resolves delta flags and verifies
+ *               submissions. Sees every store's data.
+ *   "content" — store directors, Sept, correct question wording and author
+ *               worked examples. Must never reach submission data.
+ * Defaults to "qa" so existing call sites keep their meaning.
+ */
 export async function toggleBenchmarkingReviewer(
   userId: string,
-  enabled: boolean
+  enabled: boolean,
+  kind: "qa" | "content" = "qa",
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
     return { success: false, error: auth.error };
 
+  const column =
+    kind === "content"
+      ? "is_benchmarking_content_reviewer"
+      : "is_benchmarking_reviewer";
+
   const { error } = await auth.supabase
     .from("profiles")
-    .update({ is_benchmarking_reviewer: enabled })
+    .update({ [column]: enabled })
     .eq("id", userId);
 
   if (error) {
@@ -300,11 +314,15 @@ export async function toggleBenchmarkingReviewer(
   return { success: true };
 }
 
-export async function searchUsersForReviewer(
-  query: string
-): Promise<{
+export async function searchUsersForReviewer(query: string): Promise<{
   success: boolean;
-  users?: { id: string; displayName: string; globalRole: string; isReviewer: boolean }[];
+  users?: {
+    id: string;
+    displayName: string;
+    globalRole: string;
+    isReviewer: boolean;
+    isContentReviewer: boolean;
+  }[];
   error?: string;
 }> {
   const auth = await verifyAdminAccess();
@@ -320,7 +338,9 @@ export async function searchUsersForReviewer(
   // Search profiles by display_name
   const { data: profiles, error } = await auth.supabase
     .from("profiles")
-    .select("id, display_name, global_role, is_benchmarking_reviewer")
+    .select(
+      "id, display_name, global_role, is_benchmarking_reviewer, is_benchmarking_content_reviewer",
+    )
     .ilike("display_name", searchTerm)
     .limit(10);
 
@@ -329,12 +349,21 @@ export async function searchUsersForReviewer(
     return { success: false, error: "Search failed" };
   }
 
-  const users = (profiles ?? []).map((p: { id: string; display_name: string | null; global_role: string; is_benchmarking_reviewer: boolean }) => ({
-    id: p.id,
-    displayName: p.display_name ?? "Unknown",
-    globalRole: p.global_role,
-    isReviewer: p.is_benchmarking_reviewer ?? false,
-  }));
+  const users = (profiles ?? []).map(
+    (p: {
+      id: string;
+      display_name: string | null;
+      global_role: string;
+      is_benchmarking_reviewer: boolean;
+      is_benchmarking_content_reviewer: boolean;
+    }) => ({
+      id: p.id,
+      displayName: p.display_name ?? "Unknown",
+      globalRole: p.global_role,
+      isReviewer: p.is_benchmarking_reviewer ?? false,
+      isContentReviewer: p.is_benchmarking_content_reviewer ?? false,
+    }),
+  );
 
   return { success: true, users };
 }
@@ -348,27 +377,45 @@ export async function searchUsersForReviewer(
  */
 export async function saveFieldConfig(
   surveyId: string,
-  config: SurveyFieldConfig
+  config: SurveyFieldConfig,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
     return { success: false, error: auth.error };
 
   // Basic validation: must have sections array
-  if (!config || !Array.isArray(config.sections) || config.sections.length === 0) {
-    return { success: false, error: "Invalid field config: must have at least one section" };
+  if (
+    !config ||
+    !Array.isArray(config.sections) ||
+    config.sections.length === 0
+  ) {
+    return {
+      success: false,
+      error: "Invalid field config: must have at least one section",
+    };
   }
 
   // Validate each section has required fields
   for (const section of config.sections) {
     if (!section.id || !section.title || typeof section.order !== "number") {
-      return { success: false, error: `Invalid section: missing id, title, or order` };
+      return {
+        success: false,
+        error: `Invalid section: missing id, title, or order`,
+      };
     }
     if (!Array.isArray(section.fields)) {
-      return { success: false, error: `Section "${section.title}" must have a fields array` };
+      return {
+        success: false,
+        error: `Section "${section.title}" must have a fields array`,
+      };
     }
     for (const field of section.fields) {
-      if (!field.name || !field.label || !field.type || typeof field.order !== "number") {
+      if (
+        !field.name ||
+        !field.label ||
+        !field.type ||
+        typeof field.order !== "number"
+      ) {
         return {
           success: false,
           error: `Invalid field in section "${section.title}": missing name, label, type, or order`,
@@ -395,7 +442,7 @@ export async function saveFieldConfig(
  */
 export async function initializeFieldConfig(
   surveyId: string,
-  fromSurveyId?: string
+  fromSurveyId?: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -422,7 +469,7 @@ export async function initializeFieldConfig(
  * Reset a survey's field_config to NULL (revert to DEFAULT).
  */
 export async function resetFieldConfig(
-  surveyId: string
+  surveyId: string,
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)

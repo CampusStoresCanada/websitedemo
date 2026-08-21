@@ -26,8 +26,26 @@ import type { MembershipProgramDef } from "@/lib/policy/types";
 // client-side; createAdminClient() is server-only). rateCents is a
 // placeholder here since permission resolution never reads it.
 const FALLBACK_PROGRAMS: MembershipProgramDef[] = [
-  { key: "member", orgTypeValue: "Member", label: "Member", permissionLevel: "member", orgAdminElevates: true, conferenceTier: "member", invoiceType: "membership", billing: { mode: "metric_engine" } },
-  { key: "partner", orgTypeValue: "Vendor Partner", label: "Vendor Partner", permissionLevel: "partner", orgAdminElevates: false, conferenceTier: "partner", invoiceType: "partnership", billing: { mode: "flat_rate", rateCents: 0 } },
+  {
+    key: "member",
+    orgTypeValue: "Member",
+    label: "Member",
+    permissionLevel: "member",
+    orgAdminElevates: true,
+    conferenceTier: "member",
+    invoiceType: "membership",
+    billing: { mode: "metric_engine" },
+  },
+  {
+    key: "partner",
+    orgTypeValue: "Vendor Partner",
+    label: "Vendor Partner",
+    permissionLevel: "partner",
+    orgAdminElevates: false,
+    conferenceTier: "partner",
+    invoiceType: "partnership",
+    billing: { mode: "flat_rate", rateCents: 0 },
+  },
 ];
 
 interface AuthContextValue {
@@ -45,6 +63,7 @@ interface AuthContextValue {
   isSurveyParticipant: boolean;
   /** True if the user is tagged as a benchmarking reviewer */
   isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
   /** True if the viewer's own org is a CANCOLL member — grants visibility of CANCOLL status on partner profiles */
   isCancollMember: boolean;
   signOut: () => Promise<void>;
@@ -73,6 +92,7 @@ const AuthContext = createContext<AuthContextValue>({
   decryptionKey: null,
   isSurveyParticipant: false,
   isBenchmarkingReviewer: false,
+  isBenchmarkingContentReviewer: false,
   isCancollMember: false,
   signOut: async () => {},
   refreshPermissions: async () => {},
@@ -104,6 +124,7 @@ interface AuthProviderProps {
     programs: MembershipProgramDef[];
     isSurveyParticipant: boolean;
     isBenchmarkingReviewer: boolean;
+    isBenchmarkingContentReviewer: boolean;
     isCancollMember?: boolean;
   } | null;
 }
@@ -121,11 +142,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+function withTimeout<T>(
+  promise: Promise<T>,
+  ms: number,
+  label: string,
+): Promise<T> {
   return Promise.race([
     promise,
     new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
+      setTimeout(
+        () => reject(new Error(`${label} timed out after ${ms}ms`)),
+        ms,
+      ),
     ),
   ]);
 }
@@ -137,10 +165,7 @@ function describeError(err: unknown): Record<string, unknown> {
       name: err.name,
       message: err.message,
       stack: err.stack ?? null,
-      cause:
-        typeof err.cause === "undefined"
-          ? null
-          : describeError(err.cause),
+      cause: typeof err.cause === "undefined" ? null : describeError(err.cause),
     };
   }
 
@@ -186,7 +211,7 @@ function isExpectedMissingSessionError(err: unknown): boolean {
 
 async function emitAuthTelemetry(
   event: "auth_idle_timeout" | "auth_bootstrap_recovery_failed",
-  details: Record<string, unknown>
+  details: Record<string, unknown>,
 ): Promise<void> {
   try {
     await fetch("/api/telemetry/auth-event", {
@@ -201,7 +226,10 @@ async function emitAuthTelemetry(
   }
 }
 
-export function AuthProvider({ children, initialAuth = null }: AuthProviderProps) {
+export function AuthProvider({
+  children,
+  initialAuth = null,
+}: AuthProviderProps) {
   const hasInitialAuthUser = Boolean(initialAuth?.user);
   const initialUser = initialAuth?.user
     ? ({ id: initialAuth.user.id, email: initialAuth.user.email } as User)
@@ -209,22 +237,28 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   // Auth state - starts empty, populated from client-side cookie check
   const [user, setUser] = useState<User | null>(initialUser);
   const [profile, setProfile] = useState<UserProfile | null>(
-    initialAuth?.profile ?? null
+    initialAuth?.profile ?? null,
   );
   const [globalRole, setGlobalRole] = useState<GlobalRole>(
-    initialAuth?.globalRole ?? "user"
+    initialAuth?.globalRole ?? "user",
   );
-  const [permissionState, setPermissionState] =
-    useState<PermissionState>(initialAuth?.permissionState ?? "public");
+  const [permissionState, setPermissionState] = useState<PermissionState>(
+    initialAuth?.permissionState ?? "public",
+  );
   const [organizations, setOrganizations] = useState<UserOrganization[]>(
-    initialAuth?.organizations ?? []
+    initialAuth?.organizations ?? [],
   );
-  const [isSurveyParticipant, setIsSurveyParticipant] =
-    useState<boolean>(initialAuth?.isSurveyParticipant ?? false);
-  const [isBenchmarkingReviewer, setIsBenchmarkingReviewer] =
-    useState<boolean>(initialAuth?.isBenchmarkingReviewer ?? false);
-  const [isCancollMember, setIsCancollMember] =
-    useState<boolean>(initialAuth?.isCancollMember ?? false);
+  const [isSurveyParticipant, setIsSurveyParticipant] = useState<boolean>(
+    initialAuth?.isSurveyParticipant ?? false,
+  );
+  const [isBenchmarkingReviewer, setIsBenchmarkingReviewer] = useState<boolean>(
+    initialAuth?.isBenchmarkingReviewer ?? false,
+  );
+  const [isBenchmarkingContentReviewer, setIsBenchmarkingContentReviewer] =
+    useState<boolean>(initialAuth?.isBenchmarkingContentReviewer ?? false);
+  const [isCancollMember, setIsCancollMember] = useState<boolean>(
+    initialAuth?.isCancollMember ?? false,
+  );
   const [isLoading, setIsLoading] = useState(initialAuth ? false : true);
   const [decryptionKey, setDecryptionKey] = useState<CryptoKey | null>(null);
   const [devOverride, setDevOverride] = useState<PermissionState | null>(null);
@@ -240,7 +274,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   // snapshot for every client-side re-derivation rather than re-fetching
   // (getProgramsConfig() is server-only anyway, so there's no client fetch
   // path to add even if we wanted fresher data on every auth-state-change).
-  const programsRef = useRef<MembershipProgramDef[]>(initialAuth?.programs ?? FALLBACK_PROGRAMS);
+  const programsRef = useRef<MembershipProgramDef[]>(
+    initialAuth?.programs ?? FALLBACK_PROGRAMS,
+  );
   const consecutivePermissionFailuresRef = useRef(0);
   const lastActivityAtRef = useRef<number>(0);
   const idleTimeoutTriggeredRef = useRef(false);
@@ -255,6 +291,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     organizations: UserOrganization[];
     isSurveyParticipant: boolean;
     isBenchmarkingReviewer: boolean;
+    isBenchmarkingContentReviewer: boolean;
     isCancollMember: boolean;
   } | null>(
     initialAuth
@@ -266,9 +303,11 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           organizations: initialAuth.organizations,
           isSurveyParticipant: initialAuth.isSurveyParticipant,
           isBenchmarkingReviewer: initialAuth.isBenchmarkingReviewer,
+          isBenchmarkingContentReviewer:
+            initialAuth.isBenchmarkingContentReviewer,
           isCancollMember: initialAuth.isCancollMember ?? false,
         }
-      : null
+      : null,
   );
 
   const supabase = useMemo(() => createClient(), []);
@@ -281,6 +320,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     setPermissionState("public");
     setIsSurveyParticipant(false);
     setIsBenchmarkingReviewer(false);
+    setIsBenchmarkingContentReviewer(false);
     setDecryptionKey(null);
     setDevOverride(null);
     setDevSurveyParticipantOverride(null);
@@ -312,26 +352,29 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     }
   }, []);
 
-  const finalizePendingConferenceAssignments = useCallback(async (userId: string) => {
-    if (finalizedConferenceAssignmentsForUserRef.current === userId) {
-      return;
-    }
+  const finalizePendingConferenceAssignments = useCallback(
+    async (userId: string) => {
+      if (finalizedConferenceAssignmentsForUserRef.current === userId) {
+        return;
+      }
 
-    finalizedConferenceAssignmentsForUserRef.current = userId;
+      finalizedConferenceAssignmentsForUserRef.current = userId;
 
-    try {
-      await fetch("/api/conference/assignments/finalize", {
-        method: "POST",
-        credentials: "same-origin",
-        headers: {
-          "content-type": "application/json",
-        },
-      });
-    } catch {
-      // Non-blocking: assignment finalization retries next auth refresh.
-      finalizedConferenceAssignmentsForUserRef.current = null;
-    }
-  }, []);
+      try {
+        await fetch("/api/conference/assignments/finalize", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: {
+            "content-type": "application/json",
+          },
+        });
+      } catch {
+        // Non-blocking: assignment finalization retries next auth refresh.
+        finalizedConferenceAssignmentsForUserRef.current = null;
+      }
+    },
+    [],
+  );
 
   const keepSessionAlive = useCallback(() => {
     lastActivityAtRef.current = Date.now();
@@ -361,7 +404,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             status,
             created_at,
             organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status, memberships(status, program_key))
-          `
+          `,
           )
           .eq("user_id", userId)
           .eq("status", "active"),
@@ -369,39 +412,56 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
       if (profileResult.error || orgsResult.error) {
         const anyError = profileResult.error ?? orgsResult.error;
-        const isAbort = anyError?.message?.toLowerCase().includes("abort") ||
+        const isAbort =
+          anyError?.message?.toLowerCase().includes("abort") ||
           anyError?.details?.toLowerCase().includes("abort");
         if (!isAbort) {
-          console.error("[AuthProvider] query errors:", JSON.stringify({
-            profileError: profileResult.error ? {
-              message: profileResult.error.message,
-              code: profileResult.error.code,
-              details: profileResult.error.details,
-              hint: profileResult.error.hint,
-            } : null,
-            orgsError: orgsResult.error ? {
-              message: orgsResult.error.message,
-              code: orgsResult.error.code,
-              details: orgsResult.error.details,
-              hint: orgsResult.error.hint,
-            } : null,
-          }, null, 2));
+          console.error(
+            "[AuthProvider] query errors:",
+            JSON.stringify(
+              {
+                profileError: profileResult.error
+                  ? {
+                      message: profileResult.error.message,
+                      code: profileResult.error.code,
+                      details: profileResult.error.details,
+                      hint: profileResult.error.hint,
+                    }
+                  : null,
+                orgsError: orgsResult.error
+                  ? {
+                      message: orgsResult.error.message,
+                      code: orgsResult.error.code,
+                      details: orgsResult.error.details,
+                      hint: orgsResult.error.hint,
+                    }
+                  : null,
+              },
+              null,
+              2,
+            ),
+          );
         }
         throw new Error("Failed to fetch profile or organization membership");
       }
 
-      const userProfile = (profileResult.data as unknown as UserProfile) || null;
+      const userProfile =
+        (profileResult.data as unknown as UserProfile) || null;
       const userOrgs = (orgsResult.data as unknown as UserOrganization[]) || [];
       const role: GlobalRole = userProfile?.global_role || "user";
       const programs = programsRef.current;
-      const resolvedPermissionState = derivePermissionState(role, userOrgs, programs);
+      const resolvedPermissionState = derivePermissionState(
+        role,
+        userOrgs,
+        programs,
+      );
 
       // Super admins and admins always have survey access.
       // For other roles, attempt benchmarking lookup best-effort only.
       let hasSurveyData = role === "super_admin" || role === "admin";
       if (!hasSurveyData) {
         const elevatingOrgTypes = new Set(
-          programs.filter((p) => p.orgAdminElevates).map((p) => p.orgTypeValue)
+          programs.filter((p) => p.orgAdminElevates).map((p) => p.orgTypeValue),
         );
         const memberOrgIds = userOrgs
           .filter(
@@ -409,22 +469,26 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
               uo.organization?.type != null &&
               elevatingOrgTypes.has(uo.organization.type) &&
               uo.role === "org_admin" &&
-              uo.status === "active"
+              uo.status === "active",
           )
           .map((uo) => uo.organization_id);
 
         if (memberOrgIds.length > 0) {
-          const { data: benchmarkingData, error: benchmarkingError } = await supabase
-            .from("benchmarking")
-            .select("organization_id")
-            .in("organization_id", memberOrgIds)
-            .limit(1);
+          const { data: benchmarkingData, error: benchmarkingError } =
+            await supabase
+              .from("benchmarking")
+              .select("organization_id")
+              .in("organization_id", memberOrgIds)
+              .limit(1);
 
           if (benchmarkingError) {
-            console.warn("[AuthProvider] benchmarking query failed (non-blocking)", {
-              code: benchmarkingError.code,
-              message: benchmarkingError.message,
-            });
+            console.warn(
+              "[AuthProvider] benchmarking query failed (non-blocking)",
+              {
+                code: benchmarkingError.code,
+                message: benchmarkingError.message,
+              },
+            );
           } else {
             hasSurveyData = (benchmarkingData?.length ?? 0) > 0;
           }
@@ -432,7 +496,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       }
 
       // True if any of the viewer's active orgs is a CANCOLL member
-      const hasCANCOLL = userOrgs.some((uo) => uo.organization?.is_cancoll_member === true);
+      const hasCANCOLL = userOrgs.some(
+        (uo) => uo.organization?.is_cancoll_member === true,
+      );
 
       // Persistent, non-httpOnly cookie so logged-out visits can tell "known
       // member/org admin/admin/partner, nudge log in" from "never seen them,
@@ -448,6 +514,9 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
       setIsBenchmarkingReviewer(userProfile?.is_benchmarking_reviewer ?? false);
+      setIsBenchmarkingContentReviewer(
+        userProfile?.is_benchmarking_content_reviewer ?? false,
+      );
       setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
       setReauthMessage(null);
@@ -461,6 +530,8 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
         isBenchmarkingReviewer: userProfile?.is_benchmarking_reviewer ?? false,
+        isBenchmarkingContentReviewer:
+          userProfile?.is_benchmarking_content_reviewer ?? false,
         isCancollMember: hasCANCOLL,
       };
 
@@ -472,7 +543,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         orgsCount: userOrgs.length,
       });
     },
-    [supabase]
+    [supabase],
   );
 
   useEffect(() => {
@@ -481,7 +552,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
     const loadSession = async (
       session: { user: User } | null,
-      source: string
+      source: string,
     ) => {
       if (!mounted) return;
 
@@ -494,10 +565,16 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         return;
       }
 
-      console.log(`[AuthProvider] loadSession (${source}):`, session.user.email);
+      console.log(
+        `[AuthProvider] loadSession (${source}):`,
+        session.user.email,
+      );
       setUser(session.user);
       const previousSnapshotUserId = lastKnownGoodRef.current?.userId ?? null;
-      if (previousSnapshotUserId && previousSnapshotUserId !== session.user.id) {
+      if (
+        previousSnapshotUserId &&
+        previousSnapshotUserId !== session.user.id
+      ) {
         // Session switched accounts. Reset authz state to safe defaults until fresh fetch succeeds.
         setProfile(null);
         setOrganizations([]);
@@ -505,6 +582,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         setPermissionState("public");
         setIsSurveyParticipant(false);
         setIsBenchmarkingReviewer(false);
+        setIsBenchmarkingContentReviewer(false);
         setDevOverride(null);
         setDevSurveyParticipantOverride(null);
         lastKnownGoodRef.current = null;
@@ -520,10 +598,13 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       // client-side re-fetch on this first callback only. Anything after the
       // first call (a later TOKEN_REFRESHED, etc.) still does a real fetch,
       // since a mid-session role/org change should still be caught.
-      if (isFirstLoadSessionCall && previousSnapshotUserId === session.user.id) {
+      if (
+        isFirstLoadSessionCall &&
+        previousSnapshotUserId === session.user.id
+      ) {
         console.log(
           "[AuthProvider] loadSession: skipping fetchUserData — SSR-seeded data already matches",
-          { userId: session.user.id, source }
+          { userId: session.user.id, source },
         );
         return;
       }
@@ -534,7 +615,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           await withTimeout(
             fetchUserData(session.user.id),
             AUTH_FETCH_TIMEOUT_MS,
-            "fetchUserData"
+            "fetchUserData",
           );
           fetched = true;
           break;
@@ -568,7 +649,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         if (lastKnownGoodRef.current?.userId === session.user.id) {
           console.warn(
             "[AuthProvider] retaining last-known-good permissions after repeated fetch failures",
-            { failures: consecutivePermissionFailuresRef.current }
+            { failures: consecutivePermissionFailuresRef.current },
           );
           setProfile(lastKnownGoodRef.current.profile);
           setGlobalRole(lastKnownGoodRef.current.globalRole);
@@ -576,7 +657,10 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           setOrganizations(lastKnownGoodRef.current.organizations);
           setIsSurveyParticipant(lastKnownGoodRef.current.isSurveyParticipant);
           setIsBenchmarkingReviewer(
-            lastKnownGoodRef.current.isBenchmarkingReviewer
+            lastKnownGoodRef.current.isBenchmarkingReviewer,
+          );
+          setIsBenchmarkingContentReviewer(
+            lastKnownGoodRef.current.isBenchmarkingContentReviewer,
           );
           setIsCancollMember(lastKnownGoodRef.current.isCancollMember);
         } else if (
@@ -585,7 +669,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           // No valid permission snapshot to trust yet. Keep the session alive and
           // avoid forced sign-out loops; server guards enforce authorization.
           console.error(
-            "[AuthProvider] no trusted permission snapshot available; deferring reauth while session remains valid"
+            "[AuthProvider] no trusted permission snapshot available; deferring reauth while session remains valid",
           );
         }
       }
@@ -600,7 +684,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       } = await withTimeout(
         supabase.auth.getUser(),
         AUTH_FETCH_TIMEOUT_MS,
-        "getUser"
+        "getUser",
       );
 
       if (fallbackUserError) {
@@ -642,16 +726,22 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           } = await withTimeout(
             supabase.auth.getSession(),
             AUTH_BOOTSTRAP_TIMEOUT_MS,
-            "getSession"
+            "getSession",
           );
 
           if (error) {
-            console.error("[AuthProvider] getSession failed during bootstrap:", error);
+            console.error(
+              "[AuthProvider] getSession failed during bootstrap:",
+              error,
+            );
             const recovered = await recoverSessionFromUser(
-              "BOOTSTRAP_RECOVERY_AFTER_SESSION_ERROR"
+              "BOOTSTRAP_RECOVERY_AFTER_SESSION_ERROR",
             ).catch((recoverErr) => {
               if (!isExpectedMissingSessionError(recoverErr)) {
-                console.error("[AuthProvider] getUser recovery failed:", recoverErr);
+                console.error(
+                  "[AuthProvider] getUser recovery failed:",
+                  recoverErr,
+                );
               }
               return false;
             });
@@ -669,7 +759,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
 
           if (!session?.user) {
             const recovered = await recoverSessionFromUser(
-              "BOOTSTRAP_RECOVERY_AFTER_EMPTY_SESSION"
+              "BOOTSTRAP_RECOVERY_AFTER_EMPTY_SESSION",
             );
             if (!recovered) {
               await loadSession(null, "BOOTSTRAP_EMPTY_SESSION");
@@ -681,10 +771,13 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         } catch (err) {
           console.error("[AuthProvider] bootstrap error:", err);
           const recovered = await recoverSessionFromUser(
-            "BOOTSTRAP_RECOVERY_AFTER_THROW"
+            "BOOTSTRAP_RECOVERY_AFTER_THROW",
           ).catch((recoverErr) => {
             if (!isExpectedMissingSessionError(recoverErr)) {
-              console.error("[AuthProvider] getUser recovery after throw failed:", recoverErr);
+              console.error(
+                "[AuthProvider] getUser recovery after throw failed:",
+                recoverErr,
+              );
             }
             return false;
           });
@@ -700,14 +793,24 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         }
       })();
     } else {
-      console.log("[AuthProvider] skipping bootstrap — server provided initialAuth");
+      console.log(
+        "[AuthProvider] skipping bootstrap — server provided initialAuth",
+      );
     }
 
     return () => {
       mounted = false;
       subscription.unsubscribe();
     };
-  }, [supabase, fetchUserData, clearAuthState, finishBootstrap, ensureCircleSession, finalizePendingConferenceAssignments, hasInitialAuthUser]);
+  }, [
+    supabase,
+    fetchUserData,
+    clearAuthState,
+    finishBootstrap,
+    ensureCircleSession,
+    finalizePendingConferenceAssignments,
+    hasInitialAuthUser,
+  ]);
 
   useEffect(() => {
     if (!requiresReauth) return;
@@ -768,7 +871,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     ];
 
     events.forEach((eventName) =>
-      window.addEventListener(eventName, onActivity, { passive: true })
+      window.addEventListener(eventName, onActivity, { passive: true }),
     );
 
     const onVisibilityChange = () => {
@@ -792,9 +895,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             timeoutMs,
             warningMs,
             path:
-              typeof window !== "undefined"
-                ? window.location.pathname
-                : null,
+              typeof window !== "undefined" ? window.location.pathname : null,
           });
           window.location.assign("/login?reason=idle_timeout");
         });
@@ -813,7 +914,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
     return () => {
       window.clearInterval(intervalId);
       events.forEach((eventName) =>
-        window.removeEventListener(eventName, onActivity)
+        window.removeEventListener(eventName, onActivity),
       );
       document.removeEventListener("visibilitychange", onVisibilityChange);
     };
@@ -866,6 +967,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       decryptionKey,
       isSurveyParticipant: effectiveSurveyParticipant,
       isBenchmarkingReviewer,
+      isBenchmarkingContentReviewer,
       isCancollMember,
       signOut,
       refreshPermissions,
@@ -891,6 +993,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       decryptionKey,
       effectiveSurveyParticipant,
       isBenchmarkingReviewer,
+      isBenchmarkingContentReviewer,
       isCancollMember,
       signOut,
       refreshPermissions,
@@ -903,7 +1006,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       idleWarningVisible,
       idleSecondsRemaining,
       keepSessionAlive,
-    ]
+    ],
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

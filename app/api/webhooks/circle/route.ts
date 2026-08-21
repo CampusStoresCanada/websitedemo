@@ -194,7 +194,7 @@ async function handleProfileFieldUpdated(data: Record<string, unknown>): Promise
   // Find the contact by circle_id
   const { data: contact } = await db
     .from("contacts")
-    .select("id, circle_properties")
+    .select("id, circle_properties, updated_at")
     .eq("circle_id", String(circleId))
     .limit(1)
     .maybeSingle();
@@ -207,14 +207,36 @@ async function handleProfileFieldUpdated(data: Record<string, unknown>): Promise
   const canonicalColumn = CANONICAL_FIELD_MAP[fieldKey];
 
   if (canonicalColumn) {
-    // Canonical field — write to the proper column
-    await db
-      .from("contacts")
-      .update({
-        [canonicalColumn]: fieldValue || null,
-        synced_from_circle_at: new Date().toISOString(),
-      })
-      .eq("id", contact.id);
+    // Canonical field — write to the proper column, last-write-wins.
+    //
+    // Circle is where members maintain their own profile, so their edit should
+    // normally win, and it does: profile_field_updated fires as they save, and
+    // with no event timestamp on this payload we fall back to receipt time,
+    // which is newer than anything already on the row. The comparison only
+    // bites when our record was edited *after* the webhook was raised — a
+    // delayed or replayed event landing on a fresher local correction.
+    //
+    // Same heuristic as the name guard in handleMemberUpdated: whole-row
+    // contacts.updated_at, since no per-field timestamp exists.
+    const circleEventAt =
+      typeof data.updated_at === "string" ? new Date(data.updated_at) : new Date();
+    const oursUpdatedAt = contact.updated_at
+      ? new Date(contact.updated_at)
+      : new Date(0);
+
+    if (circleEventAt > oursUpdatedAt) {
+      await db
+        .from("contacts")
+        .update({
+          [canonicalColumn]: fieldValue || null,
+          synced_from_circle_at: new Date().toISOString(),
+        })
+        .eq("id", contact.id);
+    } else {
+      console.log(
+        `[circle/webhook] ${canonicalColumn} change for circle_id=${circleId} ignored — our record (updated ${contact.updated_at}) is newer than Circle's event`
+      );
+    }
   } else {
     // Non-canonical — store in circle_properties JSONB
     const existing = (contact.circle_properties as Record<string, unknown>) ?? {};

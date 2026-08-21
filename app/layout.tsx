@@ -48,6 +48,8 @@ export default async function RootLayout({
       serverAuth.globalRole === "admin" ||
       serverAuth.permissionState === "org_admin",
     isBenchmarkingReviewer: serverAuth.profile?.is_benchmarking_reviewer ?? false,
+    isBenchmarkingContentReviewer:
+      serverAuth.profile?.is_benchmarking_content_reviewer ?? false,
     isCancollMember: serverAuth.organizations.some(
       (uo) => uo.organization?.is_cancoll_member === true
     ),
