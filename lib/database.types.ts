@@ -8982,6 +8982,42 @@ export type Database = {
           },
         ]
       }
+      publications: {
+        Row: {
+          created_at: string
+          id: string
+          last_printed_at: string | null
+          name: string
+          sections: Json
+          selection: Json
+          source: Json
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          last_printed_at?: string | null
+          name: string
+          sections?: Json
+          selection?: Json
+          source: Json
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          last_printed_at?: string | null
+          name?: string
+          sections?: Json
+          selection?: Json
+          source?: Json
+          title?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
       qbo_conference_receipt_queue: {
         Row: {
           conference_order_id: string

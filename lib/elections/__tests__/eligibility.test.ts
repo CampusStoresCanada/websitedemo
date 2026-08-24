@@ -72,13 +72,35 @@ describe("active_status_and_dated_expiry rule (the default)", () => {
     expect(v.reason).toMatch(/Completing the renewal restores eligibility/);
   });
 
-  it("rejects an expiry that lands before the AGM", () => {
+  it("rejects an expiry that lands before the AGM, and says it is fixable", () => {
     const v = evaluateOrgEligibility(
       org({ membershipExpiresAt: "2026-12-31" }),
       "active_status_and_dated_expiry",
       AGM
     );
+    expect(v.isEligible).toBe(false);
     expect(v.reasonCode).toBe("membership_expires_before_agm");
+    expect(v.reason).toMatch(/Renewing for the coming year restores eligibility/);
+  });
+
+  it("counts a lapsing active member as recoverable, not as lost", () => {
+    // The morning the renewal backfill ran, 33 stores moved from "no expiry on
+    // record" to "expiry 2026-08-31" — same 33 stores, same unpaid renewal,
+    // but the summary reclassified them from fixable to unfixable and the
+    // renewal campaign would have targeted nobody. A member in good standing
+    // who has not paid for the coming year is recoverable however we happen to
+    // be storing that fact.
+    const verdicts = Array.from({ length: 33 }, (_, i) =>
+      evaluateOrgEligibility(
+        org({ organizationId: `lapsing-${i}`, membershipExpiresAt: "2026-08-31" }),
+        "active_status_and_dated_expiry",
+        AGM
+      )
+    );
+    const s = summarizeEligibility(verdicts);
+    expect(s.eligible).toBe(0);
+    expect(s.recoverableByRenewing).toBe(33);
+    expect(s.ineligible - s.recoverableByRenewing).toBe(0);
   });
 
   it("admits an expiry that covers the AGM", () => {

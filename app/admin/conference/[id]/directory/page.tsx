@@ -9,6 +9,7 @@ import {
   loadSurfacesForPublication,
 } from "@/lib/publication/composition-loader";
 import { loadPrintUsage } from "@/lib/publication/scan-tracking";
+import { loadPublicationForConference } from "@/lib/publication/store";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Directory | Conference Admin" };
@@ -43,7 +44,12 @@ export default async function ConferenceDirectoryPage({
     return <main className="max-w-3xl mx-auto py-12 px-4 text-gray-600">Conference not found.</main>;
   }
 
-  const publication = conferenceDirectory(conference.id, `${conference.name} — Directory`);
+  // Prefer the saved definition so edits to it are what actually print. The
+  // code-defined default is a fallback for a conference nobody has set one up
+  // for yet — not the source of truth.
+  const saved = await loadPublicationForConference(conference.id);
+  const publication = saved?.publication ?? conferenceDirectory(conference.id, `${conference.name} — Directory`);
+  const rejected = saved?.rejected ?? [];
   const surfaces = await loadSurfacesForPublication(conference.id);
   const [entries, placements] = await Promise.all([
     loadDirectoryEntries(publication.source),
@@ -57,6 +63,7 @@ export default async function ConferenceDirectoryPage({
 
   const { notes } = doc;
   const hasWarnings =
+    rejected.length > 0 ||
     notes.uncategorized.length > 0 ||
     notes.unrecognizedCategories.length > 0 ||
     notes.excludedByDepartment > 0 ||
@@ -70,7 +77,9 @@ export default async function ConferenceDirectoryPage({
           <div>
             <h1 className="text-xl font-bold text-gray-900">Directory preview</h1>
             <p className="mt-1 text-sm text-gray-500">
-              Composed live. Print or save as PDF straight from your browser.
+              {saved
+              ? "From the saved definition. Print or save as PDF straight from your browser."
+              : "No saved definition yet — showing the default layout. Print or save as PDF straight from your browser."}
             </p>
           </div>
           <Link
@@ -85,6 +94,11 @@ export default async function ConferenceDirectoryPage({
           <div className="mt-4 rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
             <p className="font-semibold">Before this goes to press</p>
             <ul className="mt-1.5 list-disc pl-5 space-y-0.5">
+              {rejected.map((r) => (
+                <li key={r}>
+                  <strong>Ignored part of the saved definition:</strong> {r}
+                </li>
+              ))}
               {notes.uncategorized.length > 0 ? (
                 <li>
                   <strong>{notes.uncategorized.length}</strong> printing under

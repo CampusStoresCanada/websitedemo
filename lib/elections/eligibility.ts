@@ -141,11 +141,17 @@ export function evaluateOrgEligibility(
     };
   }
   if (!covers) {
+    // Reachable only for a member whose STATUS is still active — a genuinely
+    // lapsed one was returned above as membership_not_active. So an active
+    // member whose cover runs out before the meeting has not renewed yet, and
+    // that is something they can fix today. Counted as recoverable for exactly
+    // that reason; the message keeps the date because it is more useful than
+    // "outstanding".
     return {
       ...base,
       isEligible: false,
       reasonCode: "membership_expires_before_agm",
-      reason: `${facts.name}'s membership expires ${facts.membershipExpiresAt}, before the AGM on ${agmDate}.`,
+      reason: `${facts.name}'s membership expires ${facts.membershipExpiresAt}, before the AGM on ${agmDate}. Renewing for the coming year restores eligibility immediately.`,
     };
   }
 
@@ -202,7 +208,15 @@ export function summarizeEligibility(verdicts: EligibilityVerdict[]): Eligibilit
     if (v.isEligible) {
       eligible++;
       if (v.reasonCode === "eligible_renewal_outstanding") eligibleOnOutstandingRenewal++;
-    } else if (v.reasonCode === "renewal_outstanding") {
+    } else if (
+      v.reasonCode === "renewal_outstanding" ||
+      v.reasonCode === "membership_expires_before_agm"
+    ) {
+      // Both are the same situation wearing different clothes: a member in good
+      // standing who has not paid for the year that covers the meeting. Whether
+      // we hold no expiry for them or an expiry that runs out too soon is our
+      // record-keeping, not their status. Counting only the first understated
+      // the gap by 33 stores the morning the renewal backfill ran.
       recoverableByRenewing++;
     }
   }

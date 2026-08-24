@@ -26,8 +26,11 @@ function verifySignature(
 
   const key = Buffer.from(secret, "base64");
   const toSign = `${headers.svixId}.${headers.svixTimestamp}.${rawBody}`;
-  const computed = createHmac("sha256", key).update(toSign).digest("base64");
-  const computedBuf = Buffer.from(computed);
+  // Compare raw digest bytes, not text. svix sends the signature base64-encoded,
+  // so the incoming value must be decoded to its 32 digest bytes and matched
+  // against an equally raw digest — encoding one side as base64 text and the
+  // other as bytes yields 44 vs 32 and never matches.
+  const computedBuf = createHmac("sha256", key).update(toSign).digest();
 
   // svix-signature may contain multiple space-separated "v1,<sig>" values
   const sigs = headers.svixSignature.split(" ");
