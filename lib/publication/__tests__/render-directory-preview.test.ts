@@ -9,7 +9,12 @@
  *   DIRECTORY_PREVIEW_OUT=/tmp/directory.html npx vitest run \
  *     lib/publication/__tests__/render-directory-preview.test.ts
  */
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
+
+// composition-loader now reads contacts through lib/contacts/directory.ts, which
+// is marked "server-only". Next aliases that package internally; plain Node
+// resolution does not, so the harness stubs it.
+vi.mock("server-only", () => ({}));
 import { readFileSync, writeFileSync } from "node:fs";
 
 /**

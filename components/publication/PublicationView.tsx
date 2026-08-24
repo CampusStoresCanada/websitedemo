@@ -30,8 +30,8 @@ const VIEW_H = 620;
 export default function PublicationView({ doc }: { doc: ComposedPublication }) {
   return (
     <article className="pub">
-      <PublicationStyles />
-      <header className="pub-cover">
+      <PublicationStyles doc={doc} />
+      <header className="pub-cover" style={{ page: "cover" } as React.CSSProperties}>
         <p className="pub-eyebrow">Campus Stores Canada</p>
         <h1 className="pub-title">{doc.title}</h1>
         <p className="pub-sub">
@@ -40,17 +40,34 @@ export default function PublicationView({ doc }: { doc: ComposedPublication }) {
       </header>
 
       {doc.sections.map((section, i) => (
-        <Section key={`${section.type}-${i}`} section={section} />
+        <Section key={`${section.type}-${i}`} section={section} pageName={pageNameFor(i)} />
       ))}
     </article>
   );
 }
 
-function Section({ section }: { section: ComposedSection }) {
+/**
+ * Each section gets its own named page so it can carry its own running head.
+ *
+ * The obvious approach — `string-set` on the heading, `content: string(...)` in
+ * the margin box — is unsupported in Chrome: the declaration is dropped at parse
+ * time, silently, and you get blank running heads with no error. Named pages
+ * are supported, so the rules are generated per section instead, from the real
+ * titles rather than hardcoded strings that would drift when a section is
+ * renamed.
+ */
+const pageNameFor = (index: number) => `sec${index}`;
+
+/** CSS string literal — a stray quote in an admin-authored title kills the rule. */
+function cssString(value: string): string {
+  return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+function Section({ section, pageName }: { section: ComposedSection; pageName: string }) {
   switch (section.type) {
     case "static":
       return (
-        <section className="pub-section">
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           <p className="pub-body">{section.body}</p>
         </section>
@@ -58,7 +75,7 @@ function Section({ section }: { section: ComposedSection }) {
 
     case "map":
       return (
-        <section className="pub-section">
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.surfaces.length === 0 ? (
             <p className="pub-empty">No floor plan available.</p>
@@ -72,7 +89,7 @@ function Section({ section }: { section: ComposedSection }) {
 
     case "category_index":
       return (
-        <section className="pub-section">
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.departments.length === 0 ? (
             <p className="pub-empty">No categories to index.</p>
@@ -100,7 +117,7 @@ function Section({ section }: { section: ComposedSection }) {
 
     case "booth_index":
       return (
-        <section className="pub-section">
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.booths.length === 0 ? (
             <p className="pub-empty">No booths assigned yet.</p>
@@ -121,7 +138,7 @@ function Section({ section }: { section: ComposedSection }) {
 
     case "listings":
       return (
-        <section className="pub-section">
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.groups.length === 0 ? (
             <p className="pub-empty">No listings.</p>
@@ -240,7 +257,12 @@ function SurfaceMap({ surface, placements }: { surface: SurfaceForPublication; p
  * both outputs. `@page` + `@media print` is the whole print pipeline: no
  * toolchain, no service, no per-render cost.
  */
-function PublicationStyles() {
+function PublicationStyles({ doc }: { doc: ComposedPublication }) {
+  // Per-section running heads, from the real titles.
+  const sectionPages = doc.sections
+    .map((section, i) => `
+        @page ${pageNameFor(i)} { @top-right { content: ${cssString(section.title)}; font: 8pt sans-serif; color: #999; } }`)
+    .join("");
   return (
     <style>{`
       .pub {
@@ -308,17 +330,57 @@ function PublicationStyles() {
       .pub-swatch-open { background: #fff; }
 
       @media print {
-        @page { size: Letter portrait; margin: 16mm 14mm; }
+        @page {
+          size: Letter portrait;
+          margin: 18mm 14mm 16mm;
+          /* Page numbers. Chrome parses margin boxes; string-set does NOT work,
+             which is why running heads come from named pages below rather than
+             from the heading text. */
+          @bottom-center {
+            content: counter(page);
+            font: 9pt sans-serif;
+            color: #888;
+          }
+        }
+        /* The cover carries no number and no running head — a numbered cover is
+           the fastest way for a book to look generated. */
+        @page cover {
+          margin: 0;
+          @bottom-center { content: none; }
+          @top-right { content: none; }
+        }
+        ${sectionPages}
+
         .pub { max-width: none; padding: 0; font-size: 10.5pt; }
-        /* Every section starts a page: an index that dribbles onto the previous
-           spread is the classic generated-directory tell. */
+
+        /* ── Cover ───────────────────────────────────────────────────────── */
+        .pub-cover {
+          break-after: page;
+          display: flex; flex-direction: column; justify-content: center;
+          min-height: 232mm; padding: 0 22mm;
+          border-bottom: none;
+          background: var(--surface);
+        }
+        .pub-cover .pub-eyebrow { font-size: 10pt; letter-spacing: .18em; }
+        .pub-cover .pub-title { font-size: 34pt; line-height: 1.05; margin: 6mm 0 4mm; }
+        .pub-cover .pub-sub { font-size: 11pt; }
+        .pub-cover::after {
+          content: ""; display: block; width: 38mm; height: 3pt;
+          background: var(--navy); margin-top: 10mm;
+        }
+
+        /* ── Flow ────────────────────────────────────────────────────────── */
         .pub-section { break-before: page; margin-bottom: 0; }
-        .pub-cover { break-after: page; border-bottom-width: 2pt; }
-        .pub-h2 { break-after: avoid; }
+        .pub-h2 { break-after: avoid; font-size: 16pt; }
         .pub-h3, .pub-group-head { break-after: avoid; }
+        /* A heading alone at the foot of a page is the classic generated-directory
+           tell; so is a single line of a description carried over. */
+        .pub-body, .pub-desc, .pub-featured { orphans: 3; widows: 3; }
+
         .pub-listings { grid-template-columns: repeat(2, 1fr); gap: 8pt; }
         .pub-index { columns: 3; }
         .pub-listing, .pub-index-block, .pub-map { break-inside: avoid; }
+        .pub-table tr { break-inside: avoid; }
         .pub-map-svg { border: .5pt solid #999; }
         /* Below ~18mm a phone camera struggles at arm's length. */
         .pub-qr { width: 19mm; height: 19mm; }

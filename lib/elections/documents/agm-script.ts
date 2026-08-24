@@ -243,17 +243,27 @@ export function buildAgmScript(input: AgmScriptInput): AgmScript {
   nominatingLines.push(
     "As per the provisions of the CSC bylaws, the Board established a slate of nominees for the vacant Director positions.",
     "When seeking nominees, we try to balance the Board with representation from small, medium and large schools, Universities and Colleges, and we look for a mix of Managers, Text Buyers, GM Buyers and when possible a Director who has the Bookstore under their portfolio.",
-    input.acclaimed
-      ? "No additional nominations were received beyond the slate, so the following candidates are acclaimed."
-      : "An election was held, and I would now like to give you the results and introduce your incoming Campus Stores Canada Board of Directors.",
+    input.elected.length === 0
+      ? "<<< RESULTS NOT YET KNOWN — this section fills in once the election is certified. Do not read it as written. >>>"
+      : input.acclaimed
+        ? "No additional nominations were received beyond the slate, so the following candidates are acclaimed."
+        : "An election was held, and I would now like to give you the results and introduce your incoming Campus Stores Canada Board of Directors.",
     "As it's hard in this format to ask our Board members to stand up, I will ask the Board to wave their hands to identify themselves.",
-    `I'll start by introducing our ${input.elected.length} ${input.acclaimed ? "acclaimed" : "elected"} Board member${input.elected.length === 1 ? "" : "s"} (in order by last name).`,
-    ...input.elected.map((p) => `   ${p.name}, ${p.institution}`),
-    "Congratulations everyone!",
+    ...(input.elected.length === 0
+      ? []
+      : [
+          `I'll start by introducing our ${input.elected.length} ${input.acclaimed ? "acclaimed" : "elected"} Board member${input.elected.length === 1 ? "" : "s"} (in order by last name).`,
+          ...input.elected.map((p) => `   ${p.name}, ${p.institution}`),
+          "Congratulations everyone!",
+        ]),
     "Our continuing Board members are (in no particular order):",
     ...input.continuing.map((p) => `   ${p.name}, ${p.institution}`),
     `I will now pass things over to ${ed} who will install our Board of Directors.`
   );
+
+  if (input.elected.length === 0) {
+    outstanding.push("Election results (fills in once the election is certified)");
+  }
 
   blocks.push({
     number: 6,
@@ -312,6 +322,15 @@ export function buildAgmScript(input: AgmScriptInput): AgmScript {
     ],
   });
 
+  // Renumber by what is present. A script that jumps from 1 to 3 because there
+  // was no prior meeting to receive minutes from reads as a mistake.
+  let n = 0;
+  for (const b of blocks) if (b.number !== null) b.number = ++n;
+
+  const agenda = blocks
+    .filter((b) => b.number !== null)
+    .map((b) => `${b.number}. ${b.heading}`);
+
   const header = [
     `# Script — Annual General Meeting`,
     ``,
@@ -323,6 +342,10 @@ export function buildAgmScript(input: AgmScriptInput): AgmScript {
     `Speaking: ${[input.chair.name, input.treasurer?.name, input.nominatingChair?.name, input.executiveDirector]
       .filter(Boolean)
       .join(", ")}${input.pollster ? ` · Polls: ${input.pollster}` : ""}`,
+    ``,
+    `## Agenda`,
+    ``,
+    ...agenda.map((a) => `${a}`),
     ``,
     `> ${outstanding.length} section${outstanding.length === 1 ? "" : "s"} still to be written before the meeting: ${outstanding.join("; ")}.`,
     ``,
