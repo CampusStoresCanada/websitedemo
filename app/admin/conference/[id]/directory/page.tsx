@@ -82,12 +82,20 @@ export default async function ConferenceDirectoryPage({
               : "No saved definition yet — showing the default layout. Print or save as PDF straight from your browser."}
             </p>
           </div>
-          <Link
-            href={`/admin/conference/${conference.id}/floor-plan`}
-            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Floor plan
-          </Link>
+          <div className="flex items-center gap-2">
+            <a
+              href={`/admin/conference/${conference.id}/directory/export`}
+              className="rounded-md bg-[#163D6D] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#12325a]"
+            >
+              Export for InDesign
+            </a>
+            <Link
+              href={`/admin/conference/${conference.id}/floor-plan`}
+              className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Floor plan
+            </Link>
+          </div>
         </div>
 
         {hasWarnings ? (
