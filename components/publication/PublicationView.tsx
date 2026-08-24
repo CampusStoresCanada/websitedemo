@@ -17,6 +17,7 @@
  */
 
 import type {
+  ComposedPerson,
   ComposedEntry,
   ComposedPublication,
   ComposedSection,
@@ -136,6 +137,22 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
         </section>
       );
 
+    case "people":
+      return (
+        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+          <h2 className="pub-h2">{section.title}</h2>
+          {section.people.length === 0 ? (
+            <p className="pub-empty">Nobody listed.</p>
+          ) : (
+            <div className="pub-people">
+              {section.people.map((p, i) => (
+                <PersonRow key={`${p.name}-${p.orgCode}-${i}`} person={p} />
+              ))}
+            </div>
+          )}
+        </section>
+      );
+
     case "listings":
       return (
         <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
@@ -157,6 +174,19 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
         </section>
       );
   }
+}
+
+function PersonRow({ person }: { person: ComposedPerson }) {
+  return (
+    <div className="pub-person">
+      <span className="pub-person-name">{person.name}</span>
+      {person.roleTitle ? <span className="pub-person-role">{person.roleTitle}</span> : null}
+      <span className="pub-person-org">{person.orgName}</span>
+      <span className="pub-person-reach">
+        {[person.phone, person.email].filter(Boolean).join(" · ")}
+      </span>
+    </div>
+  );
 }
 
 function Listing({ entry }: { entry: ComposedEntry }) {
@@ -311,6 +341,15 @@ function PublicationStyles({ doc }: { doc: ComposedPublication }) {
       .pub-classes { margin: 0 0 .3rem; font-size: .75rem; color: var(--muted); }
       .pub-link { margin: 0; font-size: .75rem; color: var(--navy); word-break: break-all; }
       .pub-contact { margin: 0 0 .3rem; font-size: .8125rem; color: #374151; }
+      /* People index — dense by design. This section is scanned for a name,
+         not read, so it wants many short rows rather than cards. */
+      .pub-people { columns: 2; column-gap: 2rem; font-size: .8125rem; }
+      .pub-person { break-inside: avoid; margin-bottom: .5rem; display: flex;
+                    flex-direction: column; line-height: 1.35; }
+      .pub-person-name { font-weight: 600; }
+      .pub-person-role { color: var(--muted); }
+      .pub-person-org { color: var(--navy); font-weight: 600; }
+      .pub-person-reach { color: var(--muted); word-break: break-word; }
       .pub-contact-name { font-weight: 600; color: var(--ink); }
       /* The QR sits with the links, small and out of the way. It is the thing
          that keeps this page useful after the book is frozen, but it should
@@ -379,6 +418,7 @@ function PublicationStyles({ doc }: { doc: ComposedPublication }) {
 
         .pub-listings { grid-template-columns: repeat(2, 1fr); gap: 8pt; }
         .pub-index { columns: 3; }
+        .pub-people { columns: 3; font-size: 8.5pt; }
         .pub-listing, .pub-index-block, .pub-map { break-inside: avoid; }
         .pub-table tr { break-inside: avoid; }
         .pub-map-svg { border: .5pt solid #999; }

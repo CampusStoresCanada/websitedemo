@@ -20,7 +20,8 @@ const entry = (name: string, cats: string | null, booths: string[] = [], printRe
   orgId: name, orgName: name, orgSlug: name.toLowerCase(),
   logoUrl: null, description: null, featuredProduct: null, featuredProductDetail: null,
   catalogueUrl: null, rawCategories: cats, boothNumbers: booths,
-  publicCode: "AAAA0001", primaryContact: null,
+  publicCode: "AAAA0001", primaryContact: null, contacts: [],
+  orgType: "Vendor Partner", city: null, province: null, website: null, orgPhone: null,
   completeness: completeness(printReady ? {} : { logo_url: null }),
 });
 
@@ -212,5 +213,66 @@ describe("orgListingProof", () => {
     const r = composePublication(p, [entry("Sock Rocket", "General Merchandise")]);
     expect(r.notes.uncategorized).toEqual(["Sock Rocket"]);
     expect(r.notes.unrecognizedCategories).toEqual(["General Merchandise"]);
+  });
+});
+
+describe("people section", () => {
+  const person = (name: string, role: string | null) => ({ name, roleTitle: role, email: `${name}@x.test`, phone: "555" });
+
+  it("lists everyone, sorted by last name, pointing back at their org", () => {
+    // You remember a name and not a company. This is the only way in from
+    // that direction, which is what makes the book a desk reference.
+    const r = composePublication(
+      pub({ sections: [{ type: "people", title: "People" }] }),
+      [
+        { ...entry("Acme", "Apparel"), publicCode: "AAA", contacts: [person("Zoe Adams", "Buyer")] },
+        { ...entry("Beta", "Books"), publicCode: "BBB", contacts: [person("Al Zephyr", null), person("Jo Brown", "Manager")] },
+      ]
+    );
+    const s = r.sections[0];
+    if (s.type !== "people") throw new Error("wrong section");
+    expect(s.people.map((p) => p.name)).toEqual(["Zoe Adams", "Jo Brown", "Al Zephyr"]);
+    expect(s.people[0]).toMatchObject({ orgName: "Acme", orgCode: "AAA", roleTitle: "Buyer" });
+  });
+
+  it("carries an org code, never a page number", () => {
+    // InDesign paginates; any page number we emitted would be wrong the moment
+    // a margin changed. The stable identity is the code.
+    const r = composePublication(
+      pub({ sections: [{ type: "people" }] }),
+      [{ ...entry("Acme", "Apparel"), publicCode: "AAA", contacts: [person("Zoe Adams", null)] }]
+    );
+    const s = r.sections[0];
+    if (s.type !== "people") throw new Error("wrong section");
+    expect(s.people[0].orgCode).toBe("AAA");
+    expect(JSON.stringify(s.people[0])).not.toMatch(/page/i);
+  });
+
+  it("is empty when nobody is listable, rather than inventing entries", () => {
+    const r = composePublication(pub({ sections: [{ type: "people" }] }), [entry("Acme", "Apparel")]);
+    const s = r.sections[0];
+    if (s.type !== "people") throw new Error("wrong section");
+    expect(s.people).toEqual([]);
+  });
+});
+
+describe("listing styles", () => {
+  it("defaults to the full shape", () => {
+    const s = composePublication(pub(), [entry("A", "Apparel")]).sections[0];
+    if (s.type !== "listings") throw new Error("wrong section");
+    expect(s.style).toBe("full");
+  });
+
+  it("carries the requested style through to the renderer", () => {
+    // An exhibitor is selling; a partner who isn't at the show needs to be
+    // findable, not pitched; a member store isn't selling at all.
+    for (const style of ["full", "compact", "member"] as const) {
+      const s = composePublication(
+        pub({ sections: [{ type: "listings", groupBy: "name", style }] }),
+        [entry("A", "Apparel")]
+      ).sections[0];
+      if (s.type !== "listings") throw new Error("wrong section");
+      expect(s.style).toBe(style);
+    }
   });
 });

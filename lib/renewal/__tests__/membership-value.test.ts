@@ -17,30 +17,42 @@ const base: MembershipValueInput = {
 };
 
 describe("what the clause says", () => {
-  it("leads with the collective argument, not a feature list", () => {
+  it("uses the association's own approved pillars, verbatim", () => {
+    // Lifted from the 2025-11-05 campaign. If these drift, the renewal series
+    // stops sounding like CSC and starts sounding like software.
     const html = buildMembershipValueHtml(base);
-    expect(html).toContain("do the things no single store can do on its own");
-    expect(html).toContain("A say in who runs the association");
-    expect(html).toContain("does not exist anywhere else");
-  });
-
-  it("covers everything a member is paying for", () => {
-    const html = buildMembershipValueHtml(base);
-    for (const thing of [
-      "annual general meeting",
-      "conference and trade show",
-      "Monthly member meetings",
-      "benchmarking survey",
-      "salary survey",
-      "Circle",
-      "Member Space",
+    for (const pillar of [
+      "A community that gets it",
+      "Data that proves your value",
+      "Ongoing education",
+      "Collective advocacy",
     ]) {
-      expect(html).toContain(thing);
+      expect(html).toContain(pillar);
     }
+    expect(html).toContain("budgets are under pressure across the sector");
   });
 
-  it("links Member Space at the given base url", () => {
-    expect(buildMembershipValueHtml(base)).toContain('href="https://example.org/members"');
+  it("does NOT promise the salary survey — participation is unconfirmed", () => {
+    expect(buildMembershipValueHtml(base).toLowerCase()).not.toContain("salary");
+  });
+
+  it("treats Circle and Member Space as one thing, because they are", () => {
+    const html = buildMembershipValueHtml(base);
+    expect(html).toContain("Your peers are in Circle");
+    expect(html).not.toContain("Member Space");
+  });
+
+  it("describes the platform as more than the community", () => {
+    const html = buildMembershipValueHtml(base);
+    expect(html).toContain("The member platform");
+    expect(html).toContain("partner directory");
+    expect(html).toContain('href="https://example.org"');
+  });
+
+  it("decouples membership from the conference", () => {
+    expect(buildMembershipValueHtml(base)).toContain(
+      "whether you make it to the show or not"
+    );
   });
 });
 
@@ -56,7 +68,7 @@ describe("the election line", () => {
     const html = buildMembershipValueHtml({ ...base, election: null });
     expect(html).not.toContain("board election");
     expect(html).not.toContain("Nominations are open");
-    expect(html).toContain("benchmarking survey");
+    expect(html).toContain("Data that proves your value");
   });
 
   it("changes tense once access is suspended", () => {

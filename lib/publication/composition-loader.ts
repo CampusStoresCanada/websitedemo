@@ -141,6 +141,9 @@ export async function loadDirectoryEntries(
   };
   const contactCount = new Map<string, number>();
   const primaryContact = new Map<string, DirectoryEntry["primaryContact"]>();
+  // Every listable person, for the People section. listDirectoryContacts has
+  // already dropped opt-outs and departures.
+  const allContacts = new Map<string, DirectoryEntry["contacts"]>();
   for (const c of (contacts ?? []) as ContactRow[]) {
     if (!c.organization_id) continue;
     contactCount.set(
@@ -160,6 +163,7 @@ export async function loadDirectoryEntries(
     if (!held || (!held.roleTitle && candidate.roleTitle)) {
       primaryContact.set(c.organization_id, candidate);
     }
+    allContacts.set(c.organization_id, [...(allContacts.get(c.organization_id) ?? []), candidate]);
   }
 
   return orgs
@@ -179,9 +183,14 @@ export async function loadDirectoryEntries(
         catalogueUrl: o.catalogue_url,
         rawCategories: o.primary_category,
         boothNumbers: boothsByOrg.get(o.id) ?? [],
-        publicCode:
-          (o as OrgRow & { public_code?: string | null }).public_code ?? null,
+        publicCode: o.public_code ?? null,
+        orgType: o.type ?? null,
+        city: o.city ?? null,
+        province: o.province ?? null,
+        website: o.website ?? null,
+        orgPhone: o.phone ?? null,
         primaryContact: primaryContact.get(o.id) ?? null,
+        contacts: allContacts.get(o.id) ?? [],
         completeness: computeOrgCompleteness(withContacts),
       };
     })

@@ -55,18 +55,27 @@ function longDate(iso: string): string {
 }
 
 /**
- * The standing benefits, in the order a member would rank them — the things
- * only a collective can do come first, the platform last. Deliberately not a
- * feature list: each line says what the member gets OUT of it.
+ * The standing benefits.
+ *
+ * This is the association's OWN approved language, lifted from the renewal
+ * campaign sent 2025-11-05 ("Membership Renewal: The Value of Your CSC
+ * Membership Year-Round"). Four pillars, each stated as what it does for the
+ * reader rather than as a feature. Do not reword these without checking — they
+ * were written and approved to be said to the whole membership.
+ *
+ * Two things deliberately NOT here:
+ *  - The salary survey. Participation is not confirmed for this year, and a
+ *    renewal notice is the last place to promise something that might not run.
+ *  - Any split between "Circle" and "Member Space". They are the same thing.
  */
 function benefits(appUrl: string): string[] {
   return [
-    `<strong>A say in who runs the association.</strong> One vote per member store at the annual general meeting, and the right to nominate a director.`,
-    `<strong>The conference and trade show</strong> at member rates — the one time the sector is in a room together.`,
-    `<strong>Monthly member meetings</strong>, where what is actually happening in stores gets discussed before it becomes a problem.`,
-    `<strong>The benchmarking survey and the salary survey.</strong> This data does not exist anywhere else. It exists because members contribute to it, and it is only useful because enough of them do.`,
-    `<strong>Circle</strong> — the member network, where a question posted in the morning usually has three answers by the afternoon.`,
-    `<strong><a href="${appUrl}/members">Member Space</a></strong> on the new website: your store's profile, the partner directory, and the resources behind the member login.`,
+    `<strong>A community that gets it.</strong> When you are navigating a tricky vendor situation, or your administration has questions about your store's future, you are not figuring it out alone. Your peers are in Circle, ready to share what worked — and what didn't — when they faced the same thing.`,
+    `<strong>Data that proves your value.</strong> Our benchmarking data gives you the numbers you need when budget conversations happen. It is there when you need it, helping you demonstrate why your independent campus store matters to your institution.`,
+    `<strong>Ongoing education.</strong> Monthly online sessions on the real issues you are facing right now — course materials, merchandising, operational efficiency. Learning doesn't stop after the conference.`,
+    `<strong>Collective advocacy.</strong> When industry challenges affect us all, CSC speaks up on behalf of Canadian campus stores in ways no single store could manage alone.`,
+    `<strong>The conference and trade show</strong> at member rates — though your membership is worth having whether you make it to the show or not.`,
+    `<strong><a href="${appUrl}">The member platform</a></strong>: renew, register, and keep your institution's own information current in one place, alongside your store profile, the partner directory, and the resources behind the member login. Built for members, and still growing.`,
   ];
 }
 
@@ -102,7 +111,7 @@ export function buildMembershipValueHtml(input: MembershipValueInput): string {
     return (
       `<div style="border-top:1px solid #e5e7eb;margin-top:24px;padding-top:16px">` +
       `<h3 style="margin:0 0 8px">What your membership carries</h3>` +
-      `<p style="margin:0 0 8px">Campus Stores Canada exists to do the things no single store can do on its own.</p>` +
+      `<p style="margin:0 0 8px">We know budgets are under pressure across the sector, and we know the landscape is challenging. That is exactly why this community matters more than ever.</p>` +
       list +
       election +
       `</div>`

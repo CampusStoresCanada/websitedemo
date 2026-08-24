@@ -89,8 +89,15 @@ function parseSection(raw: unknown, index: number, rejected: string[]): Publicat
         rejected.push(`section ${index} (listings) has invalid groupBy: ${JSON.stringify(groupBy)}`);
         return null;
       }
-      return { type: "listings", title, groupBy };
+      const style = raw.style;
+      if (style !== undefined && style !== "full" && style !== "compact" && style !== "member") {
+        rejected.push(`section ${index} (listings) has invalid style: ${JSON.stringify(style)}`);
+        return null;
+      }
+      return { type: "listings", title, groupBy, style };
     }
+    case "people":
+      return { type: "people", title };
     case "category_index":
       return { type: "category_index", title };
     case "booth_index":

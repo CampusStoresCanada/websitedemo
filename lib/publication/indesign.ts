@@ -59,6 +59,11 @@ function listingXml(entry: ComposedEntry, indent: string): string {
   out += tag("OrgName", entry.orgName, inner);
   if (entry.boothNumbers.length > 0) out += tag("BoothNumber", entry.boothNumbers.join(", "), inner);
   out += tag("Description", entry.description, inner);
+  if (entry.city || entry.province) {
+    out += tag("Location", [entry.city, entry.province].filter(Boolean).join(", "), inner);
+  }
+  out += tag("Website", entry.website, inner);
+  out += tag("OrgPhone", entry.orgPhone, inner);
   out += tag("FeaturedProduct", entry.featuredProduct, inner);
   out += tag("FeaturedDetail", entry.featuredProductDetail, inner);
   if (entry.classes.length > 0) out += tag("Classes", entry.classes.join(" · "), inner);
@@ -83,7 +88,8 @@ function listingXml(entry: ComposedEntry, indent: string): string {
 
 function sectionXml(section: ComposedSection, indent: string): string {
   const inner = `${indent}  `;
-  let out = `${indent}<Section${attr("type", section.type)}>\n`;
+  const style = section.type === "listings" ? attr("style", section.style) : "";
+  let out = `${indent}<Section${attr("type", section.type)}${style}>\n`;
   out += tag("SectionTitle", section.title, inner);
 
   switch (section.type) {
@@ -131,6 +137,21 @@ function sectionXml(section: ComposedSection, indent: string): string {
             ` x="${p.x}" y="${p.y}" w="${p.w}" h="${p.h}" rotation="${p.rotation}"/>\n`;
         }
         out += `${inner}</FloorPlan>\n`;
+      }
+      break;
+
+    case "people":
+      for (const person of section.people) {
+        out += `${inner}<Person>\n`;
+        out += tag("PersonName", person.name, `${inner}  `);
+        out += tag("PersonRole", person.roleTitle, `${inner}  `);
+        out += tag("PersonPhone", person.phone, `${inner}  `);
+        out += tag("PersonEmail", person.email, `${inner}  `);
+        out += tag("PersonOrg", person.orgName, `${inner}  `);
+        // A code, not a page number: InDesign paginates, so it builds the
+        // "see p. 14" cross-reference from this identity.
+        if (person.orgCode) out += `${inner}  <OrgRef${attr("code", person.orgCode)}/>\n`;
+        out += `${inner}</Person>\n`;
       }
       break;
 

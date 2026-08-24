@@ -50,9 +50,33 @@ export type PublicationSelection = {
   printReadyOnly?: boolean;
 };
 
+/**
+ * How much of an entry a listing shows.
+ *
+ * The book has four audiences for the same underlying orgs, and forcing one
+ * template across them is the actual mistake — not the fact that there are
+ * four. An exhibitor is selling and needs the room to do it; a partner who
+ * isn't at the show needs to be findable, not pitched; a member store isn't
+ * selling anything at all, so what matters is where it is and who works there.
+ */
+export type ListingStyle =
+  /** Everything: description, featured product, catalogue, booth, contact, QR. */
+  | "full"
+  /** Name, categories, contact, QR. For partners not exhibiting this year. */
+  | "compact"
+  /** Store at a glance: where it is, how to reach it, who works there. */
+  | "member";
+
 export type PublicationSection =
   /** The listings themselves. */
-  | { type: "listings"; title?: string; groupBy: "category" | "name" | "booth" }
+  | { type: "listings"; title?: string; groupBy: "category" | "name" | "booth"; style?: ListingStyle }
+  /**
+   * Everyone, alphabetically, each pointing back at their organisation.
+   *
+   * The section that makes the book a desk reference: you remember a name and
+   * not a company, and this is the only way in from that direction.
+   */
+  | { type: "people"; title?: string }
   /** Department → who's in it. The index a reader scans first. */
   | { type: "category_index"; title?: string }
   /** Booth number → who's in it. Only meaningful for a conference source. */
@@ -112,6 +136,13 @@ export function orgListingProof(conferenceId: string, orgId: string, title: stri
 // Input rows
 // ─────────────────────────────────────────────────────────────────────────────
 
+export type DirectoryContact = {
+  name: string;
+  roleTitle: string | null;
+  email: string | null;
+  phone: string | null;
+};
+
 /** One org as the publication sees it. Built by composition-loader.ts. */
 export type DirectoryEntry = {
   orgId: string;
@@ -131,16 +162,25 @@ export type DirectoryEntry = {
    * organizations.public_code.
    */
   publicCode: string | null;
+  /** Member | Vendor Partner | … — decides which listing shape applies. */
+  orgType: string | null;
+  /** Where the store is. The whole of a member listing's "at a glance". */
+  city: string | null;
+  province: string | null;
+  website: string | null;
+  orgPhone: string | null;
   /**
    * Someone a reader can actually contact. The printed page is frozen; a name
    * and a number are what make it actionable months later.
    */
-  primaryContact: {
-    name: string;
-    roleTitle: string | null;
-    email: string | null;
-    phone: string | null;
-  } | null;
+  primaryContact: DirectoryContact | null;
+  /**
+   * Everyone listable at this org, for the People section. Already filtered by
+   * lib/contacts/directory.ts, so anyone who asked not to be listed, or who has
+   * left, is absent — which matters more on paper than on screen, because print
+   * cannot be corrected after the fact.
+   */
+  contacts: DirectoryContact[];
   /**
    * Inline SVG QR pointing at /e/<publicCode>. Attached by attachQrCodes()
    * rather than generated in the renderer, because the renderer must stay
@@ -187,8 +227,20 @@ export type ComposedEntry = DirectoryEntry & {
   unrecognizedCategories: string[];
 };
 
+/** One person, with the org they belong to. */
+export type ComposedPerson = {
+  name: string;
+  roleTitle: string | null;
+  email: string | null;
+  phone: string | null;
+  orgName: string;
+  /** Cross-reference target — the org's permanent code, never a page number. */
+  orgCode: string | null;
+};
+
 export type ComposedSection =
-  | { type: "listings"; title: string; groups: Array<{ heading: string | null; entries: ComposedEntry[] }> }
+  | { type: "listings"; title: string; style: ListingStyle; groups: Array<{ heading: string | null; entries: ComposedEntry[] }> }
+  | { type: "people"; title: string; people: ComposedPerson[] }
   | { type: "category_index"; title: string; departments: Array<{ department: string; entries: ComposedEntry[] }> }
   | { type: "booth_index"; title: string; booths: Array<{ booth: string; entry: ComposedEntry }> }
   | { type: "map"; title: string; surfaces: Array<{ surface: SurfaceForPublication; placements: PlacedThing[] }> }
@@ -269,7 +321,14 @@ export function composePublication(
   const sections = publication.sections.map((section): ComposedSection => {
     switch (section.type) {
       case "listings":
-        return { type: "listings", title: section.title ?? "Listings", groups: buildListingGroups(kept, section.groupBy) };
+        return {
+          type: "listings",
+          title: section.title ?? "Listings",
+          style: section.style ?? "full",
+          groups: buildListingGroups(kept, section.groupBy),
+        };
+      case "people":
+        return { type: "people", title: section.title ?? "People", people: buildPeopleIndex(kept) };
       case "category_index":
         return { type: "category_index", title: section.title ?? "By Category", departments: buildCategoryIndex(kept) };
       case "booth_index":
@@ -337,6 +396,35 @@ function buildListingGroups(
   // says so, rather than being dropped out of the only section that lists people.
   const orphans = entries.filter((e) => e.departments.length === 0).sort(byName);
   return orphans.length > 0 ? [...groups, { heading: "Uncategorized", entries: orphans }] : groups;
+}
+
+/**
+ * Every listable person, alphabetically by surname-ish (last word of the name),
+ * each carrying its org's code so InDesign can build a real cross-reference.
+ *
+ * Page numbers are deliberately NOT emitted: InDesign paginates, and any number
+ * we produced would be wrong the moment a margin changed. The stable identity
+ * is the org code; turning that into "see p. 14" is the layout tool's job.
+ */
+function buildPeopleIndex(entries: ComposedEntry[]): ComposedPerson[] {
+  const people: ComposedPerson[] = [];
+  for (const entry of entries) {
+    for (const contact of entry.contacts) {
+      people.push({
+        name: contact.name,
+        roleTitle: contact.roleTitle,
+        email: contact.email,
+        phone: contact.phone,
+        orgName: entry.orgName,
+        orgCode: entry.publicCode,
+      });
+    }
+  }
+  const sortKey = (name: string) => {
+    const parts = name.trim().split(/\s+/);
+    return `${parts.at(-1) ?? ""} ${parts.slice(0, -1).join(" ")}`.toLowerCase();
+  };
+  return people.sort((a, b) => sortKey(a.name).localeCompare(sortKey(b.name)) || a.orgName.localeCompare(b.orgName));
 }
 
 function buildCategoryIndex(entries: ComposedEntry[]): Array<{ department: string; entries: ComposedEntry[] }> {
