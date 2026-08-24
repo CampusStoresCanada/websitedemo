@@ -292,6 +292,33 @@ export async function renewalReminderRun(): Promise<JobResult> {
     // same for every org, so this check happens once, not per org.
     if (daysUntilCycleStart <= maxReminderDay && daysUntilCycleStart >= 0) {
       const worker = async (org: (typeof orgs)[number]) => {
+        // Reminders explicitly switched off for this org's current invoice.
+        //
+        // `invoices.reminder_suppressed_at` has existed since the Stripe
+        // billing cutover and was WRITTEN by markPaidOutOfBand but never read
+        // by anything — a flag that looked like an off-switch and was not
+        // connected to one. It is honoured here now, which gives a real lever
+        // for the case it was presumably added for: a dead inbox, a partner
+        // with no contact left, an invoice being settled some other way. It
+        // stops the chase without cancelling the org or voiding revenue, both
+        // of which are decisions someone should make deliberately.
+        //
+        // Matched on STATUS, not on a date. Invoices are generated ~30 days
+        // before the cycle starts and carry a billing_period_start of Aug 31,
+        // so neither created_at nor billing_period_start lines up with
+        // cycleBillingPeriodStart — a date filter here silently matches nothing
+        // and the flag stays a no-op. "An open invoice somebody told us to stop
+        // chasing" is the actual condition, and it says itself.
+        const { data: suppressedInvoice } = await db
+          .from("invoices")
+          .select("id")
+          .eq("organization_id", org.id)
+          .eq("status", "invoiced")
+          .not("reminder_suppressed_at", "is", null)
+          .limit(1)
+          .maybeSingle();
+        if (suppressedInvoice) return;
+
         // An org that already paid through this renewal year or beyond
         // (e.g. bridged multiple cycles at once via `bridgeFrom` in
         // renewal-activation.ts, covering a future conference) shouldn't
