@@ -9,6 +9,7 @@ import {
 } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { sendTransactional } from "@/lib/comms/send";
+import { buildMembershipValueHtml, getOpenElectionForRenewal } from "./membership-value";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import type { Json } from "@/lib/database.types";
@@ -229,6 +230,9 @@ export async function renewalReminderRun(): Promise<JobResult> {
   try {
     const reminderDays = config.reminder_days; // e.g., [30, 14, 7, 0]
     const timezone = config.dispatch_timezone; // e.g., "America/Toronto"
+    // Fetched once for the whole run, not per org. Null when no cycle is open,
+    // in which case the value clause simply omits the election.
+    const openElection = await getOpenElectionForRenewal();
     const maxReminderDay = Math.max(...reminderDays);
     const activePolicySet = await getActivePolicySet();
     if (!activePolicySet) {
@@ -380,12 +384,25 @@ export async function renewalReminderRun(): Promise<JobResult> {
                 templateKey: "renewal_reminder",
                 to,
                 variables: {
-                  contact_name: org.name,
+                  // contact_name was the ORG name, so every reminder opened
+                  // "Hi Algonquin College," — resolveRenewalRecipients gives us
+                  // addresses, not names, so greet the store rather than
+                  // pretending to greet a person.
+                  contact_name: `${org.name} team`,
                   org_name: org.name,
                   renewal_date: cycleBillingPeriodStart,
                   days_until_expiry: reminderDay,
+                  // Was "" and rendered as "Your invoice for  has been
+                  // generated." The amount is not resolved at this point, so the
+                  // template now carries the sentence without it.
                   invoice_amount: "",
                   invoice_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                  membership_value_html: buildMembershipValueHtml({
+                    stage: "reminder",
+                    lapsesOn: null,
+                    election: openElection,
+                    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                  }),
                 },
               });
             }
@@ -722,6 +739,7 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
 
   try {
     const graceDays = config.grace_days; // e.g., 30
+    const openElection = await getOpenElectionForRenewal();
 
     // Find all orgs currently in grace
     const { data: orgs, error: queryError } = await db
@@ -822,9 +840,15 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
                 templateKey: "membership_locked",
                 to,
                 variables: {
-                  contact_name: org.name,
+                  contact_name: `${org.name} team`,
                   org_name: org.name,
                   admin_contact_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/contact`,
+                  membership_value_html: buildMembershipValueHtml({
+                    stage: "locked",
+                    lapsesOn: null,
+                    election: openElection,
+                    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                  }),
                 },
               });
             }
@@ -843,6 +867,17 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
           );
 
           if (daysSinceLastReminder === null || daysSinceLastReminder >= 7) {
+            // The date access actually stops, derived from where this org is in
+            // its own grace period rather than assumed.
+            const graceLapsesOn = org.grace_period_started_at
+              ? new Date(
+                  new Date(org.grace_period_started_at as string).getTime() +
+                    graceDays * 86_400_000
+                )
+                  .toISOString()
+                  .slice(0, 10)
+              : null;
+
             await recordRenewalEvent(db, org.id, renewalYear, "grace_reminder", undefined, {
               days_in_grace: Math.floor(daysInGrace),
               days_remaining: Math.ceil(graceDays - daysInGrace),
@@ -854,10 +889,16 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
                 templateKey: "grace_weekly_reminder",
                 to,
                 variables: {
-                  contact_name: org.name,
+                  contact_name: `${org.name} team`,
                   org_name: org.name,
                   grace_days_remaining: Math.ceil(graceDays - daysInGrace),
                   payment_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                  membership_value_html: buildMembershipValueHtml({
+                    stage: "grace",
+                    lapsesOn: graceLapsesOn,
+                    election: openElection,
+                    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                  }),
                 },
               });
             }

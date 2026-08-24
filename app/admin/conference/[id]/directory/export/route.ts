@@ -8,7 +8,8 @@ import {
   loadSurfacesForPublication,
 } from "@/lib/publication/composition-loader";
 import { attachQrCodes } from "@/lib/publication/qr";
-import { inDesignFilename, toInDesignXml } from "@/lib/publication/indesign";
+import { inDesignFilename } from "@/lib/publication/indesign";
+import { buildPublicationPackage } from "@/lib/publication/package";
 import { loadPublicationForConference } from "@/lib/publication/store";
 
 /**
@@ -53,15 +54,23 @@ export async function GET(
   const withQr = await attachQrCodes(entries, process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca");
   const doc = composePublication(publication, withQr, surfaces, placements);
 
-  const xml = toInDesignXml(doc);
-  const filename = inDesignFilename(doc, new Date().toISOString());
+  const generatedAt = new Date().toISOString();
+  // The QR codes go into print, so they must point at the public site. A
+  // localhost URL printed into 700 books is unrecoverable.
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
+  const { zip, manifest } = await buildPublicationPackage(doc, baseUrl, generatedAt);
+  const filename = inDesignFilename(doc, generatedAt).replace(/\.xml$/, ".zip");
 
-  return new NextResponse(xml, {
+  return new NextResponse(zip as unknown as BodyInit, {
     headers: {
-      // text/xml rather than application/xml: InDesign's Import XML dialog
-      // filters on it, and browsers hand it straight to the download.
-      "Content-Type": "text/xml; charset=utf-8",
+      "Content-Type": "application/zip",
       "Content-Disposition": `attachment; filename="${filename}"`,
+      // Surfaced in the response so a caller can see what was left out without
+      // unzipping — the same numbers are in README.txt inside.
+      "X-Publication-Listings": String(manifest.listings),
+      "X-Publication-Qr-Codes": String(manifest.qrCodes),
+      "X-Publication-Logos": String(manifest.logos),
+      "X-Publication-Skipped": String(manifest.skipped.length),
       // A directory export is a point-in-time artifact; a cached one that
       // silently omits last week's new exhibitor is worse than a slow request.
       "Cache-Control": "no-store",
