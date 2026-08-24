@@ -95,8 +95,19 @@ export interface CandidateFacts {
   contactId: string;
   displayName: string;
   organizationId: string;
-  /** Employed by an institution that is an eligible member. */
+  /** Employed by an institution that is a member in good standing. */
   isMemberStoreEmployee: boolean;
+  /**
+   * The nominee's institution has RENEWED far enough to cover the meeting.
+   *
+   * Separate from `isMemberStoreEmployee` on purpose. A store in its grace
+   * period is still a member and may put a name forward — but a candidate only
+   * reaches the ballot if the renewal is done. Left undefined by callers that
+   * do not distinguish the two, in which case it is not checked.
+   */
+  institutionRenewedThroughAgm?: boolean;
+  /** Why not, in the institution's own terms, for the chase list. */
+  renewalReason?: string | null;
   /**
    * Consecutive terms already served on this body, counted from
    * governance_role_assignments. NULL means the history has not been entered —
@@ -122,6 +133,16 @@ export function evaluateCandidateEligibility(
   if (config.candidacy.mustBeMemberStoreEmployee && !facts.isMemberStoreEmployee) {
     blocking.push(
       `${facts.displayName} is not recorded as an employee of a member institution in good standing.`
+    );
+  }
+
+  // The grace-period case: nominated legitimately, but not on the ballot until
+  // the renewal lands. Blocking rather than unverifiable — it is a known fact
+  // with a known fix, and the deadline is the nomination close.
+  if (facts.institutionRenewedThroughAgm === false) {
+    blocking.push(
+      facts.renewalReason ??
+        `${facts.displayName}'s institution has not completed its renewal, so this nomination cannot go on the ballot. Renewing before nominations close resolves it.`
     );
   }
 

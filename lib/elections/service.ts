@@ -217,6 +217,60 @@ export async function evaluateElectionEligibility(
   return { verdicts, summary: summarizeEligibility(verdicts) };
 }
 
+/**
+ * Can this institution TAKE PART — nominate someone, co-sign a nomination?
+ *
+ * Looser than `isOrganizationEligible`, which answers the ballot question. A
+ * store in grace is still a member and may put a name forward; it just cannot
+ * reach the ballot or vote until it has renewed. Keeping these as two questions
+ * rather than one is what lets the grace policy stay at 30 days without
+ * shutting members out of the nomination window entirely.
+ */
+export async function canOrganizationParticipate(
+  electionId: string,
+  organizationId: string
+): Promise<EligibilityVerdict | null> {
+  const db = createAdminClient();
+  const { data: election } = await db
+    .from("elections")
+    .select("agm_date, config")
+    .eq("id", electionId)
+    .maybeSingle();
+  if (!election) return null;
+
+  const config = resolveElectionsConfig(election.config as Partial<ElectionsConfig>);
+  const programs = await getProgramsConfig();
+  const votingTypes = new Set(
+    programs.filter((p) => p.permissionLevel === "member").map((p) => p.orgTypeValue)
+  );
+
+  const { data: o } = await db
+    .from("organizations")
+    .select("id, name, type, membership_status, membership_expires_at, memberships(status, program_key, expires_at)")
+    .eq("id", organizationId)
+    .maybeSingle();
+  if (!o) return null;
+
+  const memberships = (o.memberships ?? []) as { status: string; program_key: string; expires_at: string | null }[];
+  const programKey = programs.find((p) => p.orgTypeValue === o.type)?.key;
+  const matched = memberships.find((m) => m.program_key === programKey);
+
+  return evaluateOrgEligibility(
+    {
+      organizationId: o.id as string,
+      name: o.name as string,
+      membershipStatus: resolveMembershipStatus(
+        o as Parameters<typeof resolveMembershipStatus>[0],
+        programs
+      ),
+      membershipExpiresAt: (o.membership_expires_at as string) ?? matched?.expires_at ?? null,
+      isVotingProgram: votingTypes.has(o.type as string),
+    },
+    config.eligibility.participationRule,
+    election.agm_date as string
+  );
+}
+
 /** Live single-org check, for gating an action at the moment it is attempted. */
 export async function isOrganizationEligible(
   electionId: string,
@@ -343,17 +397,21 @@ async function hydrateNomination(
   const orgRow = n.organizations as { name: string } | null;
   const nomineeName = [contact?.first_name, contact?.last_name].filter(Boolean).join(" ") || "Unnamed nominee";
 
-  const eligibility = await isOrganizationEligible(
-    election.id,
-    n.nominee_organization_id as string
-  );
+  // Two questions, two answers: may this institution take part at all, and has
+  // it renewed far enough to put someone on the ballot.
+  const [participation, ballotEligibility] = await Promise.all([
+    canOrganizationParticipate(election.id, n.nominee_organization_id as string),
+    isOrganizationEligible(election.id, n.nominee_organization_id as string),
+  ]);
 
   const candidate = evaluateCandidateEligibility(
     {
       contactId: n.nominee_contact_id as string,
       displayName: nomineeName,
       organizationId: n.nominee_organization_id as string,
-      isMemberStoreEmployee: eligibility?.isEligible ?? false,
+      isMemberStoreEmployee: participation?.isEligible ?? false,
+      institutionRenewedThroughAgm: ballotEligibility?.isEligible ?? false,
+      renewalReason: ballotEligibility?.isEligible ? null : ballotEligibility?.reason ?? null,
       consecutiveTermsServed: await countConsecutiveTerms(
         election.bodyId,
         n.nominee_profile_id as string | null,
@@ -448,11 +506,12 @@ export async function createNomination(input: {
       `Nominations closed on ${election.schedule.nominationsCloseAt} and cannot be reopened.`
     );
 
-  // The nominee's institution must itself be eligible. Checked live rather than
-  // against a stored verdict, because a renewal completed this morning counts.
-  const orgVerdict = await isOrganizationEligible(election.id, input.nomineeOrganizationId);
+  // Gated on PARTICIPATION, not on the ballot rule. A store in grace may put a
+  // name forward — whether that name reaches the ballot is decided at the close,
+  // by the completeness check, and it depends on the renewal being done by then.
+  const orgVerdict = await canOrganizationParticipate(election.id, input.nomineeOrganizationId);
   if (!orgVerdict?.isEligible)
-    return fail(orgVerdict?.reason ?? "The nominee's institution is not eligible to put a candidate forward.");
+    return fail(orgVerdict?.reason ?? "The nominee's institution is not a member in good standing.");
 
   const acceptToken = mintToken();
   const { data, error } = await db
@@ -595,9 +654,9 @@ export async function signCosignature(
   )
     return fail("A nominee cannot co-sign their own nomination.");
 
-  // The signing institution must itself be a member in good standing — a lapsed
-  // store's signature would not carry the support the by-law is asking for.
-  const orgVerdict = await isOrganizationEligible(election.id, sig.organization_id as string);
+  // Same looser test as nominating: a member in grace is still a member, and
+  // its support for putting a name forward still counts. A lapsed one's does not.
+  const orgVerdict = await canOrganizationParticipate(election.id, sig.organization_id as string);
   if (!orgVerdict?.isEligible)
     return fail(orgVerdict?.reason ?? "Your institution is not currently eligible to co-sign.");
 

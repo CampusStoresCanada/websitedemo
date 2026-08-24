@@ -28,8 +28,14 @@ import type { OrgCompleteness } from "./completeness";
 export type PublicationSource =
   /** Orgs holding a booth at one conference — the conference directory. */
   | { kind: "conference"; conferenceId: string }
-  /** Every active org of a type — a standing member or partner directory. */
-  | { kind: "organizations"; orgType: string };
+  /**
+   * Every active org of a type — a standing member or partner directory.
+   *
+   * "Active" means `membership_status = 'active'`, not merely un-archived.
+   * `includeInactive` exists for lapsed-member reporting; a directory should
+   * never set it, because a printed book cannot un-list someone who left.
+   */
+  | { kind: "organizations"; orgType: string; includeInactive?: boolean };
 
 export type PublicationSelection = {
   /**

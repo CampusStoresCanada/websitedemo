@@ -51,7 +51,13 @@ function parseSource(raw: unknown, rejected: string[]): PublicationSource | null
       rejected.push("organizations source has no orgType");
       return null;
     }
-    return { kind: "organizations", orgType };
+    return {
+      kind: "organizations",
+      orgType,
+      // Only an explicit `true` opts in — a malformed value must not silently
+      // widen a directory to include lapsed organisations.
+      includeInactive: raw.includeInactive === true ? true : undefined,
+    };
   }
   rejected.push(`unknown source kind: ${JSON.stringify(raw.kind)}`);
   return null;

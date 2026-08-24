@@ -105,8 +105,21 @@ export async function loadDirectoryEntries(
   // Narrow on the discriminant, not on orgIds — TS can't tell the two apart
   // otherwise. `type` is capitalised in the DB; a lowercase filter silently
   // returns [].
-  if (source.kind === "organizations") query = query.eq("type", source.orgType);
-  else if (orgIds) query = query.in("id", orgIds);
+  if (source.kind === "organizations") {
+    query = query.eq("type", source.orgType);
+    // "Active" is a membership status, NOT the absence of archived_at. Without
+    // this the network directory would print 27 canceled members and 7 lapsed
+    // partners as if they were current — in a book that cannot be corrected.
+    //
+    // Deliberately not the `active_organizations` view: that filters only
+    // archived_at, so its name means the wrong thing here.
+    if (!source.includeInactive) query = query.eq("membership_status", "active");
+  } else if (orgIds) {
+    // Conference source: membership status is intentionally NOT applied. A
+    // partner who bought a booth and later lapsed is still standing in the hall
+    // — booth ownership is what qualifies them for the exhibitor listing.
+    query = query.in("id", orgIds);
+  }
 
   const { data, error } = await query;
   if (error || !data) return [];

@@ -63,8 +63,18 @@ export interface ElectionsConfig {
   eligibility: {
     /** Applied to the voting institution. */
     voterRule: EligibilityRule;
-    /** Applied to the nominee's institution. */
+    /** Applied to the nominee's institution to reach the BALLOT. */
     nomineeRule: EligibilityRule;
+    /**
+     * Applied to taking part at all — putting a name forward, co-signing one.
+     *
+     * Deliberately looser than the ballot rules. A store in its grace period is
+     * still a member: it can nominate a colleague and it can co-sign. What it
+     * cannot do is put a candidate ON the ballot or cast a vote, because by then
+     * the renewal has to be done. The board set the grace policy; this honours
+     * it without pretending a member in grace has stopped being a member.
+     */
+    participationRule: EligibilityRule;
     /**
      * Exclude organizations flagged `is_test`. True for any real election.
      * Configurable rather than hardcoded so a scratch election can exercise the
@@ -203,6 +213,9 @@ export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
     // once when the election is created.
     voterRule: "active_status_and_dated_expiry",
     nomineeRule: "active_status_and_dated_expiry",
+    // In grace you may nominate and co-sign; you are not on the ballot and you
+    // do not vote until you have renewed.
+    participationRule: "active_status",
     excludeTestOrganizations: true,
   },
   nominations: {

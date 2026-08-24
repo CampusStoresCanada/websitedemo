@@ -177,3 +177,63 @@ describe("completeness", () => {
     expect(r.complete).toBe(false);
   });
 });
+
+describe("a store in its grace period", () => {
+  const inGrace = {
+    contactId: "c",
+    displayName: "Sam Willis",
+    organizationId: "org-1",
+    // Still a member: may be nominated, may co-sign.
+    isMemberStoreEmployee: true,
+    // Has not renewed for the year that covers the meeting.
+    institutionRenewedThroughAgm: false,
+    renewalReason:
+      "Lakeland College's membership expires 2026-08-31, before the AGM on 2027-01-21. Renewing for the coming year restores eligibility immediately.",
+    consecutiveTermsServed: 1,
+  };
+
+  it("can be nominated, but is kept off the ballot", () => {
+    // The rule the board actually set: nominate in grace, yes; on the ballot,
+    // only once renewed. Blocking rather than unverifiable — it is a known fact
+    // with a known fix and a known deadline.
+    const r = evaluateCandidateEligibility(inGrace, CSC_ELECTIONS_CONFIG);
+    expect(r.eligible).toBe(false);
+    expect(r.blocking.join(" ")).toMatch(/expires 2026-08-31/);
+    expect(r.unverifiable).toEqual([]);
+  });
+
+  it("shows up on the committee's chase list with the reason", () => {
+    const cosigs = evaluateCosignatures(
+      [sig("org-1", "c1"), sig("org-2", "c2")],
+      CSC_ELECTIONS_CONFIG,
+      MEMBER
+    );
+    const r = evaluateNominationCompleteness(
+      {
+        candidateAcceptedAt: "2026-10-02T00:00:00Z",
+        candidateDeclinedAt: null,
+        storePermissionGrantedAt: "2026-10-03T00:00:00Z",
+        withdrawnAt: null,
+        bio: "Twenty years in campus retail.",
+        platform: "Shared procurement.",
+      },
+      cosigs,
+      evaluateCandidateEligibility(inGrace, CSC_ELECTIONS_CONFIG),
+      CSC_ELECTIONS_CONFIG
+    );
+    expect(r.complete).toBe(false);
+    expect(r.missing.join(" ")).toMatch(/Renewing for the coming year/);
+  });
+
+  it("clears the moment the renewal lands", () => {
+    const renewed = { ...inGrace, institutionRenewedThroughAgm: true, renewalReason: null };
+    expect(evaluateCandidateEligibility(renewed, CSC_ELECTIONS_CONFIG).eligible).toBe(true);
+  });
+
+  it("is not checked at all when the caller does not distinguish the two", () => {
+    const { institutionRenewedThroughAgm, renewalReason, ...unaware } = inGrace;
+    void institutionRenewedThroughAgm;
+    void renewalReason;
+    expect(evaluateCandidateEligibility(unaware, CSC_ELECTIONS_CONFIG).eligible).toBe(true);
+  });
+});
