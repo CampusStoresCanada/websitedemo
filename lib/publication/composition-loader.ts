@@ -111,13 +111,26 @@ export async function loadDirectoryEntries(
     // this the network directory would print 27 canceled members and 7 lapsed
     // partners as if they were current — in a book that cannot be corrected.
     //
-    // Deliberately not the `active_organizations` view: that filters only
+    // Deliberately NOT `membership_expires_at >= <date>`, which is the other
+    // meaning of "active" in this codebase and the right one for the conference
+    // gate: that asks "does your membership cover the event?". A directory asks
+    // "are you a member now?" — a different question. Using coverage here would
+    // print 19 of 52 members today, because the membership year ends Aug 31 and
+    // renewals are mid-collection.
+    //
+    // Deliberately not the `active_organizations` view either: that filters only
     // archived_at, so its name means the wrong thing here.
     if (!source.includeInactive) query = query.eq("membership_status", "active");
   } else if (orgIds) {
-    // Conference source: membership status is intentionally NOT applied. A
-    // partner who bought a booth and later lapsed is still standing in the hall
-    // — booth ownership is what qualifies them for the exhibitor listing.
+    // Conference source: no membership filter, because checkout already
+    // enforces it. Buying a booth or a registration requires a membership that
+    // covers the conference dates — see membershipCoversConference() and the
+    // `requires` membership-renewal ref, which drags a renewal into the cart
+    // when it doesn't. Confirmed against live data: every one of the 36 booth
+    // holdings belongs to an org with membership_status 'active'.
+    //
+    // So filtering here would be a redundant no-op, and a redundant filter
+    // would hide it if that invariant ever broke.
     query = query.in("id", orgIds);
   }
 
