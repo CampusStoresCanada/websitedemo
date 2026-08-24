@@ -13,6 +13,15 @@ import { buildPublicationPackage } from "@/lib/publication/package";
 import { loadPublicationForConference } from "@/lib/publication/store";
 
 /**
+ * Never cached. Next currently treats GET route handlers as dynamic by default,
+ * but relying on a default here is not worth it: a cached export would hand a
+ * designer a stale book — silently, with no error and nothing to notice until
+ * it is printed. Verified live (a database edit appeared in the very next
+ * export) and now declared so it stays that way.
+ */
+export const dynamic = "force-dynamic";
+
+/**
  * Downloads the directory as InDesign-importable XML.
  *
  * Same composition the browser renderer uses — the online directory and the
