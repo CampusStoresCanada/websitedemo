@@ -39,6 +39,11 @@ interface Props {
   peerComments: Record<string, PeerComment[]>;
   /** How many peers have answered each field, whether or not you can see them yet. */
   peerCounts: Record<string, number>;
+  /**
+   * Show the real thing to someone deciding whether to take this on.
+   * Nothing saves. Steve can send a link instead of describing it down a phone.
+   */
+  preview?: boolean;
 }
 
 interface Draft {
@@ -73,6 +78,7 @@ export default function FieldReviewWorkspace({
   existingReviews,
   peerComments,
   peerCounts,
+  preview = false,
 }: Props) {
   const [showAll, setShowAll] = useState(false);
 
@@ -126,6 +132,14 @@ export default function FieldReviewWorkspace({
 
   const save = async (name: string) => {
     const d = draftFor(name);
+    if (preview) {
+      // Let them click it and see it acknowledge, without writing anything.
+      setDrafts((prev) => ({
+        ...prev,
+        [name]: { ...prev[name], saved: true, savedOnce: true, saving: false },
+      }));
+      return;
+    }
     update(name, { saving: true, error: null });
     const result = await saveFieldReview(surveyId, name, {
       status: d.status === "pending" ? "ok" : d.status,
@@ -176,6 +190,19 @@ export default function FieldReviewWorkspace({
           send us six.
         </p>
       </header>
+
+      {preview && (
+        <div className="mb-5 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3">
+          <p className="text-sm font-semibold text-amber-900">
+            This is a look around, not the real thing.
+          </p>
+          <p className="text-xs text-amber-800 mt-1">
+            Everything works — click a verdict, open a question, type an
+            example. Nothing is saved and nobody sees it. If you decide to take
+            this on, you get the same screen with your name on it.
+          </p>
+        </div>
+      )}
 
       <div className="flex items-center justify-between mb-5 pb-3 border-b border-gray-200">
         <p className="text-sm text-gray-500">
