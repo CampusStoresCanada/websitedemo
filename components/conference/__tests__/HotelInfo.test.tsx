@@ -108,6 +108,15 @@ describe("HotelInfo", () => {
     expect(html).toContain("Book your room");
   });
 
+  it("calls the cutoff day the last day, not zero days left", () => {
+    atDate("2027-03-12");
+    const html = renderToStaticMarkup(
+      <HotelInfo venue={VENUE} bookingUrl="https://book.hilton.com/csc27" bookingCutoff="2027-03-12" />
+    );
+    expect(html).toContain("last day to book at this rate");
+    expect(html).not.toContain("0 days left");
+  });
+
   it("withdraws the button and explains once the block has closed", () => {
     atDate("2027-03-13");
     const html = renderToStaticMarkup(

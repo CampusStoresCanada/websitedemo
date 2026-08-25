@@ -100,9 +100,14 @@ export default function HotelInfo({
               {urgency === "soon" && (
                 <>
                   {" — "}
-                  {daysUntilCutoff(bookingCutoff, today)}{" "}
-                  {daysUntilCutoff(bookingCutoff, today) === 1 ? "day" : "days"} left at
-                  this rate
+                  {/* On the cutoff day itself the count is 0, and "0 days left"
+                      reads as though booking has already closed when it is in
+                      fact the last day it is open. */}
+                  {daysUntilCutoff(bookingCutoff, today) === 0
+                    ? "last day to book at this rate"
+                    : `${daysUntilCutoff(bookingCutoff, today)} ${
+                        daysUntilCutoff(bookingCutoff, today) === 1 ? "day" : "days"
+                      } left at this rate`}
                 </>
               )}
             </p>
