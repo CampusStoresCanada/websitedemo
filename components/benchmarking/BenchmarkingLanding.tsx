@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 import type { BenchmarkingSurvey } from "@/lib/types/db";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { parseUTC } from "@/lib/utils";
@@ -79,11 +80,7 @@ export default function BenchmarkingLanding({
               {latestSurvey.closes_at && (
                 <p>
                   Closes:{" "}
-                  {parseUTC(latestSurvey.closes_at).toLocaleDateString("en-CA", {
-                    year: "numeric",
-                    month: "long",
-                    day: "numeric",
-                  })}
+                  {formatDeadline(latestSurvey.closes_at)}
                 </p>
               )}
             </div>
@@ -140,13 +137,34 @@ export default function BenchmarkingLanding({
             </p>
           </div>
         ) : !activeSurvey ? (
-          /* Org admin but no open survey */
-          <div className="text-center py-4">
+          /* Org admin, nothing open yet */
+          <div className="py-4 text-center">
             <p className="text-gray-600">
               There is no survey currently open for submissions.
               {latestSurvey?.status === "draft" &&
                 " The next survey is being prepared."}
             </p>
+            {/*
+              The worksheet belongs HERE most of all. It exists so a store can
+              gather its figures before the survey opens, and the window where
+              that is useful is exactly this one — the weeks when nothing is
+              open yet. Offering it only alongside a live Start Survey button
+              hid it for the entire period it was built for.
+            */}
+            {latestSurvey && (
+              <div className="mt-4">
+                <Link
+                  href="/benchmarking/worksheet"
+                  className="inline-block rounded-lg border border-gray-300 px-6 py-2.5 font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  Print the worksheet
+                </Link>
+                <p className="mt-2 text-sm text-gray-500">
+                  Every figure you will need, with your own previous answers beside it.
+                  Worth gathering before the survey opens.
+                </p>
+              </div>
+            )}
           </div>
         ) : (
           /* Org admin with open survey — show action */

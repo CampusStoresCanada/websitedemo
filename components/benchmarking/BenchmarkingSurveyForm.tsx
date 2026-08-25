@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect, useMemo } from "react";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 import type { Benchmarking, DeltaFlag } from "@/lib/types/db";
 import {
   saveBenchmarkingField,
@@ -226,12 +227,8 @@ export default function BenchmarkingSurveyForm({
 
         {surveyClosesAt && (
           <p className="text-sm text-gray-500 mt-2">
-            Survey closes{" "}
-            {parseUTC(surveyClosesAt).toLocaleDateString("en-CA", {
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            })}
+            {/* closes_at is an exclusive boundary — see lib/benchmarking/deadline.ts */}
+            Survey closes {formatDeadline(surveyClosesAt)}
           </p>
         )}
 

@@ -3,6 +3,7 @@ import BenchmarkingSurveyForm from "@/components/benchmarking/BenchmarkingSurvey
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
+import { createAdminClient } from "@/lib/supabase/admin";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -118,9 +119,21 @@ export default async function BenchmarkingSurveyPage() {
     redirect("/benchmarking");
   }
 
-  // 5. Fetch or create the draft row for this org + fiscal year
+  // 5. Fetch or create the draft row for this org + fiscal year.
+  //
+  // Service role, not the session client. `authenticated` holds SELECT on
+  // benchmarking and nothing else — the INSERT and UPDATE policies exist but
+  // carry no matching GRANT, so an insert through the session client returns
+  // 42501 and this page silently redirects the store back to the landing page.
+  // That is every store's first action on opening day, so the whole survey was
+  // unreachable for all 52.
+  //
+  // Safe because access is already decided above: resolveSurveyAccess() has
+  // said this org may file, and the row created is scoped to that org.
+  const db = createAdminClient();
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  let { data: currentRow } = (await (supabase as any)
+  let { data: currentRow } = (await (db as any)
     .from("benchmarking")
     .select("*")
     .eq("organization_id", organization.id)
@@ -133,7 +146,7 @@ export default async function BenchmarkingSurveyPage() {
   if (!currentRow) {
     // Create a new draft row
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: newRow, error: insertError } = (await (supabase as any)
+    const { data: newRow, error: insertError } = (await (db as any)
       .from("benchmarking")
       .insert({
         organization_id: organization.id,
@@ -145,8 +158,13 @@ export default async function BenchmarkingSurveyPage() {
       .single()) as { data: any; error: any };
 
     if (insertError) {
-      console.error("Error creating benchmarking draft:", insertError);
-      redirect("/benchmarking");
+      // Loud, not silent. A bounce to the landing page with no explanation is
+      // indistinguishable from "the survey is not open", which is what hid
+      // the missing GRANT in the first place.
+      console.error("[benchmarking/survey] could not create draft row:", insertError);
+      throw new Error(
+        "Could not start your survey. This has been logged — please contact CSC.",
+      );
     }
 
     currentRow = newRow;
