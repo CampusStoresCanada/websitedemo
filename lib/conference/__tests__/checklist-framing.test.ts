@@ -120,3 +120,25 @@ describe("one email per organisation, not one per checklist", () => {
     expect(source).toContain("sentLog.push(...pending.log)");
   });
 });
+
+describe("people can track this without keeping the email", () => {
+  it("points at BOTH lists an org admin holds", () => {
+    // An org admin is also a person and has two separate to-do lists — the
+    // company's (which is what the email is) and their own. Sending them to
+    // one and letting them find the other is how the overlapping-messages
+    // problem started.
+    expect(source).toContain("your organisation's conference page");
+    expect(source).toContain("your own conference page");
+    expect(source).toContain("/me/conference/");
+    expect(source).toContain("/org/${org.slug}/conference/");
+  });
+
+  it("escapes the org name in the pointer", () => {
+    // "Cutter & Buck" is a real member of this association.
+    expect(source).toContain("escapeHtml(org.name)");
+  });
+
+  it("says the email is not the system of record", () => {
+    expect(source).toContain("You don't need to keep this email");
+  });
+});

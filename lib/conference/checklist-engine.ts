@@ -112,6 +112,13 @@ function renderFraming(checklist: {
   };
 }
 
+/** Org names carry ampersands — "Cutter & Buck" would break the markup. */
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+}
+
 function renderOpenItemsHtml(
   items: { name: string; description: string; cta: { label: string; url: string } }[]
 ): string {
@@ -245,10 +252,26 @@ export async function buildChecklistDigest(
   if (openItems.length === 0) return null;
 
   const framing = renderFraming(checklist, conference.year);
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
   return {
     orgName: org.name,
     openItems,
     variables: {
+      /**
+       * Where this list lives, so nobody has to keep the email to find it.
+       *
+       * Two destinations because an org admin is also a person and holds two
+       * separate lists: the company's items (which is what this email is) and
+       * their own. Sending them to one and letting them discover the other is
+       * how the "conflicting messages" problem started.
+       */
+      where_to_track:
+        `<p style="margin:18px 0 0;font-size:13px;color:#6b7280;line-height:1.55">` +
+        `You don't need to keep this email — ${escapeHtml(org.name)}'s list is always at ` +
+        `<a href="${appUrl}/org/${org.slug}/conference/${checklist.conference_id}" style="color:#163D6D">your organisation's conference page</a>, ` +
+        `and anything that's yours personally is at ` +
+        `<a href="${appUrl}/me/conference/${checklist.conference_id}" style="color:#163D6D">your own conference page</a>.` +
+        `</p>`,
       org_name: org.name,
       checklist_name: checklist.name,
       open_items_html: renderOpenItemsHtml(openItems),
