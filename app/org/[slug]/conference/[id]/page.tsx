@@ -141,6 +141,32 @@ export default async function OrgConferencePage({
     });
 
   const notReadyCount = readinessRows.filter((row) => !row.isReady).length;
+
+  /**
+   * Seats this org holds with nobody on them.
+   *
+   * Readiness used to count only the data quality of people already ASSIGNED,
+   * so a company that had assigned nobody read as "All assigned conference
+   * people are ready" — true, and useless. Across this conference that hid 163
+   * empty seats, including both social-event tickets. An empty seat is the
+   * larger problem: a badge that cannot be printed and a place at a dinner
+   * nobody can attend.
+   */
+  const { data: seatRows } = await adminClient
+    .from("entity_balance_seats")
+    .select("holder_person_id, entity:conference_entities!inner(name, kind)")
+    .eq("organization_id", orgId)
+    .eq("conference_id", conferenceId);
+
+  const unassignedByEntity = new Map<string, number>();
+  for (const row of seatRows ?? []) {
+    if (row.holder_person_id) continue;
+    const entity = Array.isArray(row.entity) ? row.entity[0] : row.entity;
+    // Membership renewal is not a person's seat — nobody attends it.
+    if (!entity?.name || entity.kind === "membership_renewal") continue;
+    unassignedByEntity.set(entity.name, (unassignedByEntity.get(entity.name) ?? 0) + 1);
+  }
+  const unassignedTotal = [...unassignedByEntity.values()].reduce((a, b) => a + b, 0);
   const exhibitorRows = people.filter((row) => row.person_kind === "exhibitor");
 
   // The company's list: monitored items (payment, seats, directory listing) and
@@ -210,10 +236,32 @@ export default async function OrgConferencePage({
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Org Readiness</h2>
+        {unassignedTotal > 0 ? (
+          <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2">
+            <p className="text-sm font-medium text-amber-900">
+              {unassignedTotal} {unassignedTotal === 1 ? "place has" : "places have"} nobody assigned
+            </p>
+            <ul className="mt-1 space-y-0.5 text-sm text-amber-900">
+              {[...unassignedByEntity.entries()]
+                .sort((a, b) => b[1] - a[1])
+                .map(([name, count]) => (
+                  <li key={name}>
+                    {count} × {name}
+                  </li>
+                ))}
+            </ul>
+            <p className="mt-1.5 text-xs text-amber-800">
+              A place with nobody on it is a badge that can&rsquo;t be printed and a seat at
+              the table nobody can take.
+            </p>
+          </div>
+        ) : null}
         <p className="mt-2 text-sm text-gray-700">
-          {notReadyCount === 0
-            ? "All assigned conference people are ready."
-            : `${notReadyCount} people need required data updates before conference readiness.`}
+          {readinessRows.length === 0
+            ? "Nobody has been added to this conference yet."
+            : notReadyCount === 0
+              ? `${readinessRows.length} ${readinessRows.length === 1 ? "person is" : "people are"} assigned, and their details are complete.`
+              : `${notReadyCount} of ${readinessRows.length} assigned ${notReadyCount === 1 ? "person needs" : "people need"} required data updates.`}
         </p>
       </section>
 
