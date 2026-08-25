@@ -57,7 +57,8 @@ describe("buildAgmAgenda — what belongs on it", () => {
 
   it("names who leads each item", () => {
     const a = buildAgmAgenda(input());
-    expect(a.html).toMatch(/Call to Order.*Chair/s);
+    // [\s\S] rather than the `s` flag — the tsconfig target predates dotAll.
+    expect(a.html).toMatch(/Call to Order[\s\S]*Chair/);
   });
 });
 

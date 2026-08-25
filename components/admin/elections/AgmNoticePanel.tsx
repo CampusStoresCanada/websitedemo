@@ -62,6 +62,18 @@ export default function AgmNoticePanel({
         </p>
       )}
 
+      {!state.eventPage.readyForNotice && !state.noticeSentAt && (
+        <div className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <strong>
+            The meeting&apos;s event page is {state.eventPage.status ?? "missing"}, so the link in
+            the notice would show members &ldquo;Event not found&rdquo;.
+          </strong>{" "}
+          Publish <code>/events/{state.eventPage.slug}</code> before giving notice — notice with a
+          dead link is defective notice, and the send refuses until it is live. Worth doing now
+          rather than on the day: the window has very few usable days.
+        </div>
+      )}
+
       {state.unreachable.length > 0 && (
         <div className="mt-3 rounded border border-red-200 bg-red-50 p-3 text-xs text-red-900">
           <strong>{state.unreachable.length} member{state.unreachable.length === 1 ? "" : "s"} cannot be given notice electronically</strong>{" "}

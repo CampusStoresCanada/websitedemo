@@ -2127,6 +2127,14 @@ export interface NoticeState {
   recipients: number;
   /** Eligible members with no administrator to give notice to. */
   unreachable: string[];
+  /**
+   * The meeting's event page, which the notice links to. A draft is invisible
+   * to members — getEventBySlug filters on status = 'published' — so notice
+   * given while it is a draft carries a dead link. Surfaced here rather than
+   * only at send time because the 2027 window has exactly ONE usable day, and
+   * discovering this on it would be too late to act.
+   */
+  eventPage: { slug: string; status: string | null; readyForNotice: boolean };
 }
 
 export async function getNoticeState(slug: string): Promise<NoticeState | null> {
@@ -2162,6 +2170,13 @@ export async function getNoticeState(slug: string): Promise<NoticeState | null> 
     }
   }
 
+  const eventSlug = `csc-annual-general-meeting-${election.cycleYear}`;
+  const { data: agmEvent } = await db
+    .from("events")
+    .select("status")
+    .eq("slug", eventSlug)
+    .maybeSingle();
+
   const onDate = today();
   return {
     window: resolveNoticeWindow(election.schedule.agmDate),
@@ -2171,6 +2186,11 @@ export async function getNoticeState(slug: string): Promise<NoticeState | null> 
     proxySentAt: cfg.proxyFormSentAt ?? null,
     recipients: eligible.length,
     unreachable,
+    eventPage: {
+      slug: eventSlug,
+      status: (agmEvent?.status as string) ?? null,
+      readyForNotice: agmEvent?.status === "published",
+    },
   };
 }
 
@@ -2211,17 +2231,45 @@ export async function sendAgmNotice(
   if (eligible.length === 0)
     return fail("No institutions are currently eligible to vote, so there is nobody to give notice to.");
 
+  // The notice links members to the meeting's event page, and
+  // `getEventBySlug` filters on status = 'published' — a draft returns "Event
+  // not found". ensureAgmMeetingAndEvent deliberately creates the event as a
+  // draft so nothing is announced before a person publishes it, which means the
+  // notice would otherwise discharge a Part VII S4(b) obligation with a dead
+  // link in it. Publishing the event is part of giving notice, not a separate
+  // errand, so this refuses rather than sending something broken.
+  const eventSlug = `csc-annual-general-meeting-${election.cycleYear}`;
+  const { data: agmEvent } = await db
+    .from("events")
+    .select("status")
+    .eq("slug", eventSlug)
+    .maybeSingle();
+
+  if (!agmEvent)
+    return fail(
+      `There is no event page at /events/${eventSlug} for the notice to point at. The election kickoff creates it.`
+    );
+  if (agmEvent.status !== "published")
+    return fail(
+      `The meeting's event page is still a ${agmEvent.status}, so the link in the notice would show members "Event not found". Publish /events/${eventSlug} first — notice with a dead link is defective notice.`
+    );
+
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
   const outcomes = await notifyAgmNotice(election, eligible, {
     agmTime: input.agmTime,
     location: input.location ?? null,
-    agmUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}`,
+    agmUrl: `${appUrl}/events/${eventSlug}`,
   });
 
   let proxyIncluded = false;
   if (input.includeProxyForm && !state.proxySentAt) {
     const proxyOutcomes = await notifyProxyForm(election, eligible, {
-      proxyFormUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}#proxy`,
+      // The appointment page, not the events listing. The old URL pointed at
+      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+      // an event that is created as a DRAFT. This email discharges a Part VII
+      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+      // members are not permitted to see.
+      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
       lateNote: state.proxy.overdue
         ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
         : null,
@@ -2269,7 +2317,12 @@ export async function sendProxyForm(
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
   const outcomes = await notifyProxyForm(election, eligible, {
-    proxyFormUrl: `${appUrl}/events/csc-annual-general-meeting-${election.cycleYear}#proxy`,
+    // The appointment page, not the events listing. The old URL pointed at
+      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+      // an event that is created as a DRAFT. This email discharges a Part VII
+      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+      // members are not permitted to see.
+      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
     lateNote: state.proxy.overdue
       ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
       : null,
