@@ -179,16 +179,31 @@ export default function BenchmarkingLanding({
                 )}
               </div>
 
-              <Link
-                href="/benchmarking/survey"
-                className="inline-block px-6 py-2.5 bg-[#EE2A2E] text-white rounded-lg font-medium hover:bg-[#D92327] transition-colors"
-              >
-                {existingDraft
-                  ? existingDraft.status === "submitted"
-                    ? "View Submission"
-                    : "Continue Survey"
-                  : "Start Survey"}
-              </Link>
+              <div className="flex flex-col items-stretch gap-2 sm:flex-row sm:items-center">
+                {/*
+                  The worksheet sits BESIDE the start button, not behind it.
+                  Most stores cannot answer these questions at a keyboard — the
+                  figures live in a P&L, a POS export and an HR headcount — so
+                  the gathering pass has to be the obvious first move rather
+                  than something you find after opening the form and stalling.
+                */}
+                <Link
+                  href="/benchmarking/worksheet"
+                  className="inline-block rounded-lg border border-gray-300 px-6 py-2.5 text-center font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  Print the worksheet
+                </Link>
+                <Link
+                  href="/benchmarking/survey"
+                  className="inline-block px-6 py-2.5 bg-[#EE2A2E] text-white rounded-lg font-medium hover:bg-[#D92327] transition-colors text-center"
+                >
+                  {existingDraft
+                    ? existingDraft.status === "submitted"
+                      ? "View Submission"
+                      : "Continue Survey"
+                    : "Start Survey"}
+                </Link>
+              </div>
             </div>
           </div>
         )}
