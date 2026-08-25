@@ -37,6 +37,20 @@ export type PublicationSource =
    */
   | { kind: "organizations"; orgType: string; includeInactive?: boolean };
 
+/**
+ * Stable identity for a source, so the same population is loaded once however
+ * many sections draw on it.
+ *
+ * The network directory has four sections over three populations, and the
+ * People section spans all of them — without a key, "every active partner"
+ * would be queried twice and the two results could disagree mid-render.
+ */
+export function sourceKey(source: PublicationSource): string {
+  return source.kind === "conference"
+    ? `conference:${source.conferenceId}`
+    : `organizations:${source.orgType}:${source.includeInactive ? "all" : "active"}`;
+}
+
 export type PublicationSelection = {
   /**
    * Scope to specific organizations. Unlike the filters below this is not an
@@ -54,6 +68,20 @@ export type PublicationSelection = {
    * gets chased — not here, silently, at render time.
    */
   printReadyOnly?: boolean;
+  /**
+   * An organisation appears in the FIRST section that claims it, not in every
+   * section it qualifies for.
+   *
+   * Exhibitors are a subset of partners, so without this the network directory
+   * prints every exhibiting partner twice — once in full, once compact, pages
+   * apart. With it, the Exhibitors section takes them and the Partners section
+   * lists only the partners who aren't at the show, which is what a reader
+   * actually wants from that second section.
+   *
+   * Only listings sections claim. The indexes and the People section always see
+   * everyone, because cross-referencing is the point of them.
+   */
+  dedupeAcrossSections?: boolean;
 };
 
 /**
@@ -73,23 +101,85 @@ export type ListingStyle =
   /** Store at a glance: where it is, how to reach it, who works there. */
   | "member";
 
+/**
+ * Does this listing shape carry a QR code?
+ *
+ * The code resolves to a live page so a reader can reach the current version,
+ * a named contact, and eventually an order. That is a SELLING affordance — it
+ * belongs to exhibitors and partners. A member store is not selling to the
+ * people holding this book, so a code on its listing costs paper and print for
+ * nothing.
+ *
+ * Keyed on the listing style rather than on organisation type, so the rule
+ * stays general: any publication that lists non-selling organisations gets the
+ * same behaviour without knowing what CSC calls them.
+ */
+export const styleShowsQr = (style: ListingStyle): boolean => style !== "member";
+
+/**
+ * Advertising slots, in the three sizes a directory actually sells.
+ *
+ * A slot with no `imageUrl` is NOT an error — it renders as a reserved, labelled
+ * box. Ad space is sold against a page count, so the book has to be layoutable
+ * before anything is sold, and a slot you can see is what makes that possible.
+ */
+export type AdSize = "quarter" | "half" | "full";
+
+export type PublicationAd = {
+  size: AdSize;
+  /** Artwork. Absent means the slot is reserved but unsold. */
+  imageUrl?: string | null;
+  /** Who bought it, shown as a small credit and used for the InDesign tag. */
+  advertiser?: string | null;
+  /** Alt text — the artwork carries the message, so it needs a description. */
+  alt?: string | null;
+};
+
 export type PublicationSection =
   /** The listings themselves. */
-  | { type: "listings"; title?: string; groupBy: "category" | "name" | "booth"; style?: ListingStyle }
+  | {
+      type: "listings";
+      title?: string;
+      groupBy: "category" | "name" | "booth";
+      style?: ListingStyle;
+      /**
+       * Which population this section lists. Defaults to the publication's own
+       * source, which is what a single-population directory wants; the network
+       * book sets one per section.
+       */
+      source?: PublicationSource;
+    }
   /**
    * Everyone, alphabetically, each pointing back at their organisation.
    *
    * The section that makes the book a desk reference: you remember a name and
    * not a company, and this is the only way in from that direction.
    */
-  | { type: "people"; title?: string }
+  | {
+      type: "people";
+      title?: string;
+      /**
+       * Defaults to everyone in the publication — the union of every listings
+       * section's population. That default IS the feature: you remember a name
+       * and not a company, and this is the only way into the book from that
+       * direction, so scoping it to one section would defeat it.
+       */
+      source?: PublicationSource;
+    }
   /** Department → who's in it. The index a reader scans first. */
   | { type: "category_index"; title?: string }
   /** Booth number → who's in it. Only meaningful for a conference source. */
   | { type: "booth_index"; title?: string }
+  /**
+   * Advertising. Its own section rather than a property of listings: an ad is
+   * bought against the book, not against a company's entry, and a full-page ad
+   * has to be able to sit on a page of its own.
+   */
+  | { type: "ads"; title?: string; ads: PublicationAd[] }
   /** One page per surface, or a named surface. */
   | { type: "map"; title?: string; surfaceId?: string }
   /** Editorial: cover copy, a welcome letter, sponsor thanks. */
+  | { type: "ads"; title: string; ads: PublicationAd[] }
   | { type: "static"; title: string; body: string };
 
 export type Publication = {
@@ -116,6 +206,44 @@ export function conferenceDirectory(conferenceId: string, title: string): Public
       { type: "category_index", title: "By Category" },
       { type: "listings", title: "Exhibitors", groupBy: "category" },
       { type: "booth_index", title: "By Booth Number" },
+    ],
+  };
+}
+
+/**
+ * The whole network in one book: exhibitors, partners, members, people.
+ *
+ * The four sections are four populations, not four filters on one — which is
+ * why sections carry their own source. The point of the artifact is that it
+ * sits on a desk and answers "who are these people, what do they sell, who do
+ * I call" without a search engine, so it has to cover everyone, not just the
+ * companies who bought a booth this year.
+ *
+ * `dedupeAcrossSections` is what keeps an exhibiting partner from appearing
+ * twice: Exhibitors claims them in full, and Partners lists only the partners
+ * who aren't at the show.
+ */
+export function networkDirectory(conferenceId: string, title: string): Publication {
+  return {
+    id: `network-directory-${conferenceId}`,
+    title,
+    // The publication-level source is the fallback for sections that don't name
+    // one — here, the indexes and anything added later.
+    source: { kind: "conference", conferenceId },
+    selection: { dedupeAcrossSections: true },
+    sections: [
+      { type: "map", title: "Trade Show Floor" },
+      { type: "listings", title: "Exhibitors", groupBy: "category", style: "full",
+        source: { kind: "conference", conferenceId } },
+      { type: "booth_index", title: "By Booth Number" },
+      { type: "listings", title: "Partners", groupBy: "category", style: "compact",
+        source: { kind: "organizations", orgType: "Vendor Partner" } },
+      { type: "listings", title: "Member Stores", groupBy: "name", style: "member",
+        source: { kind: "organizations", orgType: "Member" } },
+      { type: "category_index", title: "By Category" },
+      // No source: spans every population above, which is the whole reason the
+      // section exists.
+      { type: "people", title: "People" },
     ],
   };
 }
@@ -175,6 +303,16 @@ export type DirectoryEntry = {
   province: string | null;
   website: string | null;
   orgPhone: string | null;
+  /**
+   * What kind of institution, from the latest benchmarking response —
+   * College | Polytechnic | University. Present for the ~37 of 52 members who
+   * answered the survey; absent for partners entirely.
+   *
+   * NOT `organizations.institution_type`, which is an empty legacy column.
+   */
+  institutionType: string | null;
+  /** Headcount the member is billed on. Every active member has one. */
+  fte: number | null;
   /**
    * Someone a reader can actually contact. The printed page is frozen; a name
    * and a number are what make it actionable months later.
@@ -250,6 +388,7 @@ export type ComposedSection =
   | { type: "category_index"; title: string; departments: Array<{ department: string; entries: ComposedEntry[] }> }
   | { type: "booth_index"; title: string; booths: Array<{ booth: string; entry: ComposedEntry }> }
   | { type: "map"; title: string; surfaces: Array<{ surface: SurfaceForPublication; placements: PlacedThing[] }> }
+  | { type: "ads"; title: string; ads: PublicationAd[] }
   | { type: "static"; title: string; body: string };
 
 export type ComposedPublication = {
@@ -293,52 +432,127 @@ export function compareBoothNumbers(a: string, b: string): number {
  */
 export function composePublication(
   publication: Publication,
-  entries: DirectoryEntry[],
+  entries: DirectoryEntry[] | ReadonlyMap<string, DirectoryEntry[]>,
   surfaces: SurfaceForPublication[] = [],
   placements: PlacedThing[] = []
 ): ComposedPublication {
-  // Scope first, so `totalCandidates` describes this publication rather than
-  // reporting every org in the database as "excluded".
-  const scoped = publication.selection.orgIds?.length
-    ? entries.filter((e) => publication.selection.orgIds!.includes(e.orgId))
-    : entries;
+  // An array means "one population, every section" — the shape a conference
+  // directory or a single-org proof wants, and not worth a Map of one entry.
+  // A Map is keyed by sourceKey() and is what the multi-section book passes.
+  const bySource: ReadonlyMap<string, DirectoryEntry[]> | null =
+    entries instanceof Map ? entries : null;
+  const single = bySource ? null : (entries as DirectoryEntry[]);
 
-  const composed: ComposedEntry[] = scoped.map((e) => {
-    const cats = parseOrgCategories(e.rawCategories);
-    return { ...e, departments: cats.departments, classes: cats.classes, unrecognizedCategories: cats.unrecognized };
-  });
-
-  const wanted = publication.selection.departments?.filter(Boolean) ?? [];
   let excludedByDepartment = 0;
   let excludedAsNotPrintReady = 0;
+  let totalCandidates = 0;
 
-  const kept = composed.filter((e) => {
-    if (wanted.length > 0 && !e.departments.some((d) => wanted.includes(d))) {
-      excludedByDepartment++;
-      return false;
+  // Memoised per source: the People section and the indexes read the same
+  // populations the listings do, and filtering them repeatedly would multiply
+  // the exclusion counts into fiction.
+  const prepared = new Map<string, ComposedEntry[]>();
+
+  function prepareFor(source: PublicationSource): ComposedEntry[] {
+    const key = sourceKey(source);
+    const hit = prepared.get(key);
+    if (hit) return hit;
+
+    const raw = bySource ? (bySource.get(key) ?? []) : single!;
+
+    // Scope first, so `totalCandidates` describes this publication rather than
+    // reporting every org in the database as "excluded".
+    const scoped = publication.selection.orgIds?.length
+      ? raw.filter((e) => publication.selection.orgIds!.includes(e.orgId))
+      : raw;
+    totalCandidates += scoped.length;
+
+    const composed: ComposedEntry[] = scoped.map((e) => {
+      const cats = parseOrgCategories(e.rawCategories);
+      return { ...e, departments: cats.departments, classes: cats.classes, unrecognizedCategories: cats.unrecognized };
+    });
+
+    const wanted = publication.selection.departments?.filter(Boolean) ?? [];
+    const kept = composed
+      .filter((e) => {
+        if (wanted.length > 0 && !e.departments.some((d) => wanted.includes(d))) {
+          excludedByDepartment++;
+          return false;
+        }
+        if (publication.selection.printReadyOnly && !e.completeness.isPrintReady) {
+          excludedAsNotPrintReady++;
+          return false;
+        }
+        return true;
+      })
+      .sort(byName);
+
+    prepared.set(key, kept);
+    return kept;
+  }
+
+  // Every population this publication draws on, prepared up front so the
+  // indexes can span all of them regardless of section order.
+  const listingSections = publication.sections.filter((s) => s.type === "listings");
+  const sourcesUsed =
+    listingSections.length > 0
+      ? listingSections.map((s) => s.source ?? publication.source)
+      : [publication.source];
+
+  const everyone: ComposedEntry[] = [];
+  const seen = new Set<string>();
+  for (const source of sourcesUsed) {
+    for (const entry of prepareFor(source)) {
+      // An exhibiting partner is in two populations and is still one company.
+      if (seen.has(entry.orgId)) continue;
+      seen.add(entry.orgId);
+      everyone.push(entry);
     }
-    if (publication.selection.printReadyOnly && !e.completeness.isPrintReady) {
-      excludedAsNotPrintReady++;
-      return false;
-    }
-    return true;
-  }).sort(byName);
+  }
+  everyone.sort(byName);
+
+  // Claimed by an earlier listings section — see `dedupeAcrossSections`.
+  const claimed = new Set<string>();
+
+  /**
+   * Entries that visibly print under an "Uncategorized" heading.
+   *
+   * Deliberately not "every entry with no department": a member store has no
+   * NACS categories because it doesn't sell anything, and its section lists by
+   * name, so it never appears under that heading. Counting it as a gap made the
+   * warning 52 false positives deep and buried the handful of partners who
+   * genuinely haven't picked a category — which is the one thing the warning
+   * exists to surface.
+   */
+  const printedUncategorized = new Map<string, string>();
 
   const sections = publication.sections.map((section): ComposedSection => {
     switch (section.type) {
-      case "listings":
+      case "listings": {
+        let list = prepareFor(section.source ?? publication.source);
+        if (publication.selection.dedupeAcrossSections) {
+          list = list.filter((e) => !claimed.has(e.orgId));
+          for (const e of list) claimed.add(e.orgId);
+        }
+        if (section.groupBy === "category") {
+          for (const e of list) {
+            if (e.departments.length === 0) printedUncategorized.set(e.orgId, e.orgName);
+          }
+        }
         return {
           type: "listings",
           title: section.title ?? "Listings",
           style: section.style ?? "full",
-          groups: buildListingGroups(kept, section.groupBy),
+          groups: buildListingGroups(list, section.groupBy),
         };
-      case "people":
-        return { type: "people", title: section.title ?? "People", people: buildPeopleIndex(kept) };
+      }
+      case "people": {
+        const people = section.source ? prepareFor(section.source) : everyone;
+        return { type: "people", title: section.title ?? "People", people: buildPeopleIndex(people) };
+      }
       case "category_index":
-        return { type: "category_index", title: section.title ?? "By Category", departments: buildCategoryIndex(kept) };
+        return { type: "category_index", title: section.title ?? "By Category", departments: buildCategoryIndex(everyone) };
       case "booth_index":
-        return { type: "booth_index", title: section.title ?? "By Booth", booths: buildBoothIndex(kept) };
+        return { type: "booth_index", title: section.title ?? "By Booth", booths: buildBoothIndex(everyone) };
       case "map": {
         const chosen = section.surfaceId ? surfaces.filter((s) => s.id === section.surfaceId) : surfaces;
         return {
@@ -356,6 +570,8 @@ export function composePublication(
             })),
         };
       }
+      case "ads":
+        return { type: "ads", title: section.title ?? "Advertising", ads: section.ads };
       case "static":
         return { type: "static", title: section.title, body: section.body };
     }
@@ -365,13 +581,13 @@ export function composePublication(
     id: publication.id,
     title: publication.title,
     sections,
-    entries: kept,
+    entries: everyone,
     notes: {
-      totalCandidates: scoped.length,
+      totalCandidates,
       excludedByDepartment,
       excludedAsNotPrintReady,
-      uncategorized: kept.filter((e) => e.departments.length === 0).map((e) => e.orgName),
-      unrecognizedCategories: [...new Set(kept.flatMap((e) => e.unrecognizedCategories))].sort(),
+      uncategorized: [...printedUncategorized.values()].sort(),
+      unrecognizedCategories: [...new Set(everyone.flatMap((e) => e.unrecognizedCategories))].sort(),
     },
   };
 }

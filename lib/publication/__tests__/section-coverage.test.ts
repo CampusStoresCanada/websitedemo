@@ -20,6 +20,10 @@ const ALL_SECTIONS: PublicationSection[] = [
   { type: "category_index", title: "By Category" },
   { type: "booth_index", title: "By Booth" },
   { type: "map", title: "Floor Plan" },
+  { type: "ads", title: "Advertising", ads: [
+    { size: "full", imageUrl: "https://x.test/a.png", advertiser: "Acme" },
+    { size: "quarter" },
+  ] },
   { type: "static", title: "Welcome", body: "Hello." },
 ];
 
@@ -29,6 +33,7 @@ const entry = () => ({
   catalogueUrl: null, rawCategories: "Apparel", boothNumbers: ["101"],
   publicCode: "AAAA0001", orgType: "Vendor Partner",
   city: "Ottawa", province: "ON", website: "acme.test", orgPhone: "555",
+  institutionType: null, fte: null,
   primaryContact: { name: "Dana", roleTitle: "Sales", email: "d@a.test", phone: "555" },
   contacts: [{ name: "Dana Fox", roleTitle: "Sales", email: "d@a.test", phone: "555" }],
   completeness: computeOrgCompleteness({
@@ -84,6 +89,25 @@ describe("every section type is handled end to end", () => {
     for (const section of ALL_SECTIONS) {
       expect(source, `PublicationView has no case for "${section.type}"`)
         .toContain(`case "${section.type}":`);
+    }
+  });
+});
+
+describe("empty sections", () => {
+  const source = readFileSync("components/publication/PublicationView.tsx", "utf8");
+
+  it("are marked so print can drop them, while screen still explains itself", () => {
+    // A printed page reading "People — Nobody listed" is a defect; the same
+    // words on screen tell an admin the consent answers have not arrived.
+    expect(source).toContain("pub-section--empty");
+    expect(source).toContain(".pub-section--empty { display: none; }");
+    expect(source).toContain("Nobody listed.");
+  });
+
+  it("classifies every section type, so a new one cannot slip through as never-empty", () => {
+    const fn = source.slice(source.indexOf("function isEmptySection"), source.indexOf("function Section("));
+    for (const t of ["listings", "people", "category_index", "booth_index", "map", "static"]) {
+      expect(fn, `isEmptySection has no case for "${t}"`).toContain(`case "${t}":`);
     }
   });
 });

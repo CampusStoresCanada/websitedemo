@@ -4,6 +4,7 @@ import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
 import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
 import { CHECKS, evaluateChecklistTaskCheck } from "./checklist-checks";
+import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -51,6 +52,66 @@ function getTaskCta(
   }
 }
 
+/**
+ * The framing sentence and the consent ask, both per checklist.
+ *
+ * The body used to hardcode "still has a few things to finish for the 2027 CSC
+ * Conference". That is true for Booth Readiness and WRONG for Directory
+ * Listing, which since 2026-08-24 also reaches 52 member stores — they are in
+ * the book because they are in the network, not because they are exhibiting.
+ *
+ * A publication-scoped checklist is about the printed book, so it says so, and
+ * it carries the consent ask: the listing prints real contact details for real
+ * people, and paper cannot be corrected afterwards.
+ *
+ * ⚠️ Consent to be printed is **per person** and the admin has NO role in it —
+ * not even a fail-safe. Two earlier versions of this copy got it wrong: the
+ * first told the admin to remove anyone who did not want to appear, the second
+ * still presented consent as part of what they were approving. Both made one
+ * person the gatekeeper for everyone else's privacy, and a fail-safe that lets
+ * an admin stand in for silence is just opt-OUT with a different label.
+ *
+ * What is left here is a single informational line so the admin is not
+ * surprised when their staff get asked. It states plainly that there is nothing
+ * for them to do. The ask itself goes to each person.
+ */
+function renderFraming(checklist: {
+  publication_id?: string | null;
+  deadline_at: string;
+  publicationTitle?: string | null;
+}, conferenceYear: number): { intro_line: string; consent_note: string } {
+  if (!checklist.publication_id) {
+    return {
+      intro_line:
+        `still has a few things to finish for the <strong>${conferenceYear} CSC Conference</strong>:`,
+      consent_note: "",
+    };
+  }
+
+  // ⚠️ Hand-rolled parsing here shipped "goes to press on NaN undefined" to a
+  // real inbox: the guard checked only for a trailing "Z", so a timestamp that
+  // already carried "+00" got a Z appended and became invalid. Formatting is in
+  // Eastern, because a 23:59 deadline formatted in UTC lands on the next day.
+  const deadline = formatDayMonth(checklist.deadline_at) ?? "the deadline";
+  const title = checklist.publicationTitle?.trim() || `${conferenceYear} Campus Stores Canada Directory`;
+
+  return {
+    intro_line:
+      `has an entry in the <strong>${title}</strong> — the printed directory that ships to ` +
+      `every member store and goes out at the conference. It goes to press on ` +
+      `<strong>${deadline}</strong>, and a few things still need you:`,
+    // Informational, NOT a task. The admin is told their staff are being asked
+    // so nobody is blindsided when the ask lands — and told explicitly that it
+    // is not theirs to action, because anything they could "action" here would
+    // be them consenting on someone else's behalf.
+    consent_note: `<p style="margin:18px 0 0;font-size:14px;color:#6b7280;line-height:1.55">
+  Separately, everyone from your organisation listed in the book is being asked, for
+  themselves, whether they want their name and contact details printed. Nobody appears
+  without their own yes, and there is nothing for you to do about that here.
+</p>`,
+  };
+}
+
 function renderOpenItemsHtml(
   items: { name: string; description: string; cta: { label: string; url: string } }[]
 ): string {
@@ -76,9 +137,130 @@ interface DueOrg {
  * simultaneously overdue (e.g. cron missed a few days), only the most
  * recent unlogged one is returned per org — never a backlog burst.
  */
+/**
+ * Which organisations does this checklist speak to?
+ *
+ * Two scopes, because two different questions:
+ *
+ *  - **Purchasers** (default) — orgs with an `entity_balances` row for the
+ *    conference. Right for "you bought a booth, now assign staff and pay".
+ *  - **Publication** — every org listed in a saved publication. Right for
+ *    "your entry is going to print, check it". Measured 2026-08-24: purchaser
+ *    scoping reached 30 of the 123 organisations in the network directory —
+ *    NONE of the 52 member stores — so 93 orgs printed data that nothing ever
+ *    asked them to confirm.
+ *
+ * A directory is a network artifact even when it ships inside a conference box.
+ * Scoping the loop to buyers meant the loop could never maintain the book.
+ */
+async function resolveScopedOrgs(
+  db: AdminClient,
+  checklist: { id: string; conference_id: string; scope_entity_id: string | null; publication_id?: string | null }
+): Promise<string[]> {
+  if (checklist.publication_id) {
+    const { loadPublication } = await import("@/lib/publication/store");
+    const { loadEntriesForPublication } = await import("@/lib/publication/composition-loader");
+    const { composePublication } = await import("@/lib/publication/composition");
+
+    const saved = await loadPublication(checklist.publication_id);
+    // A checklist pointing at a deleted or unparseable publication must reach
+    // NOBODY rather than silently falling back to purchasers — that would mail
+    // the wrong population about the wrong thing.
+    if (!saved) return [];
+
+    const bySource = await loadEntriesForPublication(saved.publication);
+    const doc = composePublication(saved.publication, bySource);
+    // doc.entries is already deduped across sections, so an exhibiting partner
+    // is asked once, not once per section they appear in.
+    return doc.entries.map((e) => e.orgId);
+  }
+
+  let orgQuery = db
+    .from("entity_balances")
+    .select("organization_id")
+    .eq("conference_id", checklist.conference_id)
+    .not("organization_id", "is", null);
+  if (checklist.scope_entity_id) {
+    orgQuery = orgQuery.eq("entity_id", checklist.scope_entity_id);
+  }
+  const { data: orgRows } = await orgQuery;
+  return [...new Set((orgRows ?? []).map((r) => r.organization_id).filter((id): id is string => !!id))];
+}
+
+export interface ChecklistDigest {
+  orgName: string;
+  openItems: { name: string; description: string; cta: { label: string; url: string } }[];
+  variables: Record<string, string>;
+}
+
+/**
+ * The digest for ONE organisation — the open items and the variables the
+ * template needs.
+ *
+ * Extracted so the "send a test to myself" path runs the SAME code as the real
+ * send. A test that builds its own approximation of the email tells you nothing
+ * about the email that will actually go out.
+ *
+ * Returns null when the org has nothing open: that is the same silence the real
+ * run uses, and a test send should reproduce it rather than inventing content.
+ */
+export async function buildChecklistDigest(
+  checklist: { id: string; name: string; conference_id: string; deadline_at: string; publication_id?: string | null; publicationTitle?: string | null },
+  conference: { year: number; edition_code: string },
+  organizationId: string,
+  db: AdminClient = createAdminClient()
+): Promise<ChecklistDigest | null> {
+  const { data: org } = await db.from("organizations").select("name, slug").eq("id", organizationId).single();
+  if (!org) return null;
+
+  const { data: tasks } = await db
+    .from("conference_checklist_tasks")
+    .select("id, name, description, check_type, check_entity_id")
+    .eq("checklist_id", checklist.id)
+    .eq("active", true)
+    .eq("audience", "org")
+    .order("sort_order", { ascending: true });
+
+  const openItems: ChecklistDigest["openItems"] = [];
+  for (const task of tasks ?? []) {
+    const checkType = task.check_type as CheckType;
+    const complete = await CHECKS[checkType]({
+      db, organizationId, conferenceId: checklist.conference_id,
+      entityId: task.check_entity_id, taskId: task.id,
+    });
+    if (!complete) {
+      openItems.push({
+        name: task.name,
+        description: task.description,
+        cta: getTaskCta(checkType, {
+          orgSlug: org.slug,
+          conferenceId: checklist.conference_id,
+          conferenceYear: conference.year,
+          conferenceEdition: conference.edition_code,
+          organizationId,
+        }),
+      });
+    }
+  }
+  if (openItems.length === 0) return null;
+
+  const framing = renderFraming(checklist, conference.year);
+  return {
+    orgName: org.name,
+    openItems,
+    variables: {
+      org_name: org.name,
+      checklist_name: checklist.name,
+      open_items_html: renderOpenItemsHtml(openItems),
+      conference_year: String(conference.year),
+      ...framing,
+    },
+  };
+}
+
 async function findDueOrgs(
   db: AdminClient,
-  checklist: { id: string; conference_id: string; scope_entity_id: string | null; deadline_at: string }
+  checklist: { id: string; conference_id: string; scope_entity_id: string | null; deadline_at: string; publication_id?: string | null }
 ): Promise<DueOrg[]> {
   const { data: checkpoints } = await db
     .from("conference_checklist_checkpoints")
@@ -94,18 +276,7 @@ async function findDueOrgs(
   );
   if (dueCheckpoints.length === 0) return [];
 
-  // Scope: orgs holding scope_entity_id, or every org with any purchase
-  // for this conference if unscoped.
-  let orgQuery = db
-    .from("entity_balances")
-    .select("organization_id")
-    .eq("conference_id", checklist.conference_id)
-    .not("organization_id", "is", null);
-  if (checklist.scope_entity_id) {
-    orgQuery = orgQuery.eq("entity_id", checklist.scope_entity_id);
-  }
-  const { data: orgRows } = await orgQuery;
-  const orgIds = [...new Set((orgRows ?? []).map((r) => r.organization_id).filter((id): id is string => !!id))];
+  const orgIds = await resolveScopedOrgs(db, checklist);
   if (orgIds.length === 0) return [];
 
   const { data: alreadyLogged } = await db
@@ -144,116 +315,160 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
 
   const { data: checklists, error: checklistsError } = await db
     .from("conference_checklists")
-    .select("id, conference_id, name, deadline_at, scope_entity_id, conference:conference_instances(year, edition_code)")
+    .select("id, conference_id, name, deadline_at, scope_entity_id, publication_id, publication:publications(title), conference:conference_instances(year, edition_code)")
     .eq("active", true);
   if (checklistsError) {
     result.errors.push(`Failed to load checklists: ${checklistsError.message}`);
     return result;
   }
 
+  /**
+   * One email per organisation, not one per checklist.
+   *
+   * The old shape sent a separate digest for every checklist that happened to
+   * be due, so a partner admin with three armed checklists received three
+   * messages — each titled "a few things still need your attention", each
+   * showing a slice of their list, each framed differently. From the
+   * recipient's side that reads as three unrelated nags about the same
+   * conference.
+   *
+   * The action centres already merge across checklists (`loadOrgTasks` /
+   * `loadPersonalTasks`); this makes the mail agree with them.
+   */
+  type Pending = {
+    conferenceId: string;
+    conferenceYear: number;
+    orgName: string;
+    /** Each carries its OWN framing, so a lone reminder still reads specifically. */
+    sections: { checklistName: string; openItemsHtml: string; introLine: string }[];
+    /** Only publication-scoped checklists contribute the consent note. */
+    consentNote: string;
+    log: { checklist_id: string; checkpoint_id: string; organization_id: string }[];
+  };
+  const pendingByOrg = new Map<string, Pending>();
+
   for (const checklist of checklists ?? []) {
     try {
       const conference = Array.isArray(checklist.conference) ? checklist.conference[0] : checklist.conference;
       if (!conference) continue;
+      const publication = Array.isArray(checklist.publication) ? checklist.publication[0] : checklist.publication;
+      const framing = renderFraming(
+        { ...checklist, publicationTitle: publication?.title ?? null },
+        conference.year
+      );
 
       const dueOrgs = await findDueOrgs(db, checklist);
-      if (dueOrgs.length === 0) {
-        result.checklistsProcessed++;
-        continue;
-      }
-
-      const { data: tasks } = await db
-        .from("conference_checklist_tasks")
-        .select("id, name, description, check_type, check_entity_id")
-        .eq("checklist_id", checklist.id)
-        .eq("active", true)
-        // Org tasks only. This engine resolves recipients to org admins, so a
-        // person-audience task here would email one admin about every
-        // attendee's hotel booking. Those render on /me/conference instead.
-        .eq("audience", "org")
-        .order("sort_order", { ascending: true });
-
-      const recipients: { email: string; name: string | null; variableOverrides: Record<string, string> }[] = [];
-      const sentLog: { checklist_id: string; checkpoint_id: string; organization_id: string }[] = [];
+      result.checklistsProcessed++;
+      if (dueOrgs.length === 0) continue;
 
       for (const { organizationId, checkpointId } of dueOrgs) {
-        const { data: org } = await db.from("organizations").select("name, slug").eq("id", organizationId).single();
-        if (!org) continue;
+        const digest = await buildChecklistDigest(
+          { ...checklist, publicationTitle: publication?.title ?? null },
+          conference,
+          organizationId,
+          db
+        );
+        if (!digest) continue; // fully caught up — silently skip, nothing logged
 
-        const openItems: { name: string; description: string; cta: { label: string; url: string } }[] = [];
-        for (const task of tasks ?? []) {
-          const checkType = task.check_type as CheckType;
-          const checkFn = CHECKS[checkType];
-          const complete = await checkFn({ db, organizationId, conferenceId: checklist.conference_id, entityId: task.check_entity_id, taskId: task.id });
-          if (!complete) {
-            openItems.push({
-              name: task.name,
-              description: task.description,
-              cta: getTaskCta(checkType, {
-                orgSlug: org.slug,
-                conferenceId: checklist.conference_id,
-                conferenceYear: conference.year,
-                conferenceEdition: conference.edition_code,
-                organizationId,
-              }),
-            });
-          }
-        }
-
-        if (openItems.length === 0) continue; // fully caught up — silently skip, nothing logged
-
-        const admins = await resolveAudience({
-          type: "org_admins",
-          filters: { org_ids: [organizationId] },
-        } satisfies AudienceDefinition);
-        if (admins.length === 0) continue;
-
-        const openItemsHtml = renderOpenItemsHtml(openItems);
-        for (const admin of admins) {
-          recipients.push({
-            email: admin.email,
-            name: admin.name,
-            variableOverrides: {
-              contact_name: admin.name ?? admin.email,
-              org_name: org.name,
-              checklist_name: checklist.name,
-              open_items_html: openItemsHtml,
-              conference_year: String(conference.year),
-            },
-          });
-        }
-        sentLog.push({ checklist_id: checklist.id, checkpoint_id: checkpointId, organization_id: organizationId });
-      }
-
-      if (recipients.length > 0) {
-        const campaignResult = await createCampaign({
-          name: `Checklist Reminder: ${checklist.name}`,
-          templateKey: "conference_checklist_reminder",
-          audience: {
-            type: "custom_recipient_list",
-            filters: { conference_instance_id: checklist.conference_id, recipients },
-          },
-          triggerSource: "conference",
-          automationMode: "auto_send",
+        const existing: Pending = pendingByOrg.get(organizationId) ?? {
+          conferenceId: checklist.conference_id,
+          conferenceYear: conference.year,
+          orgName: digest.orgName,
+          sections: [],
+          consentNote: "",
+          log: [],
+        };
+        existing.sections.push({
+          checklistName: checklist.name,
+          openItemsHtml: digest.variables.open_items_html,
+          introLine: framing.intro_line,
         });
-
-        if (campaignResult.success && campaignResult.campaignId) {
-          await executeCampaignSend(campaignResult.campaignId);
-          if (sentLog.length > 0) {
-            await db.from("conference_checklist_reminder_log").insert(sentLog);
-          }
-          result.orgsReminded += sentLog.length;
-        } else {
-          result.errors.push(`Checklist ${checklist.name}: campaign creation failed — ${campaignResult.error}`);
-        }
+        // Carried once even if several checklists would supply it.
+        if (!existing.consentNote && framing.consent_note) existing.consentNote = framing.consent_note;
+        existing.log.push({ checklist_id: checklist.id, checkpoint_id: checkpointId, organization_id: organizationId });
+        pendingByOrg.set(organizationId, existing);
       }
-
-      result.checklistsProcessed++;
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown error";
       result.errors.push(`Checklist ${checklist.id}: ${msg}`);
       console.error(`[checklist-engine] Failed for checklist ${checklist.id}:`, msg);
     }
+  }
+
+  if (pendingByOrg.size === 0) return result;
+
+  const recipients: { email: string; name: string | null; variableOverrides: Record<string, string> }[] = [];
+  const sentLog: { checklist_id: string; checkpoint_id: string; organization_id: string }[] = [];
+  let conferenceIdForAudience: string | null = null;
+
+  for (const [organizationId, pending] of pendingByOrg) {
+    const admins = await resolveAudience({
+      type: "org_admins",
+      filters: { org_ids: [organizationId] },
+    } satisfies AudienceDefinition);
+    if (admins.length === 0) continue;
+
+    conferenceIdForAudience ??= pending.conferenceId;
+    // Several checklists due at once become headed sections in one message,
+    // rather than several messages.
+    const body =
+      pending.sections.length === 1
+        ? pending.sections[0].openItemsHtml
+        : pending.sections
+            .map((s) => `<p style="margin:18px 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280">${s.checklistName}</p>\n${s.openItemsHtml}`)
+            .join("\n");
+
+    for (const admin of admins) {
+      recipients.push({
+        email: admin.email,
+        name: admin.name,
+        variableOverrides: {
+          contact_name: admin.name ?? admin.email,
+          org_name: pending.orgName,
+          checklist_name:
+            pending.sections.length === 1
+              ? pending.sections[0].checklistName
+              : `${pending.conferenceYear} conference`,
+          open_items_html: body,
+          conference_year: String(pending.conferenceYear),
+          // One checklist keeps its own specific framing. Several become a
+          // NEUTRAL opening, because the sections may mix a conference
+          // checklist with a directory one — asserting "for the conference"
+          // over a member store's directory tasks is exactly the wrong-audience
+          // wording this framing exists to avoid. Each section is headed by its
+          // checklist name, so the specifics are not lost.
+          intro_line:
+            pending.sections.length === 1
+              ? pending.sections[0].introLine
+              : "has a few things outstanding:",
+          consent_note: pending.consentNote,
+        },
+      });
+    }
+    sentLog.push(...pending.log);
+  }
+
+  if (recipients.length === 0) return result;
+
+  const campaignResult = await createCampaign({
+    name: `Checklist reminders — ${pendingByOrg.size} organisation${pendingByOrg.size === 1 ? "" : "s"}`,
+    templateKey: "conference_checklist_reminder",
+    audience: {
+      type: "custom_recipient_list",
+      filters: { conference_instance_id: conferenceIdForAudience ?? undefined, recipients },
+    },
+    triggerSource: "conference",
+    automationMode: "auto_send",
+  });
+
+  if (campaignResult.success && campaignResult.campaignId) {
+    await executeCampaignSend(campaignResult.campaignId);
+    if (sentLog.length > 0) {
+      await db.from("conference_checklist_reminder_log").insert(sentLog);
+    }
+    result.orgsReminded += pendingByOrg.size;
+  } else {
+    result.errors.push(`Campaign creation failed — ${campaignResult.error}`);
   }
 
   return result;

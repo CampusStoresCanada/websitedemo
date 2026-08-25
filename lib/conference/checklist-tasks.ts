@@ -56,7 +56,7 @@ export type PersonalTask = {
  * and was read by nothing — asking for it turns hotel from self-reported into
  * genuinely captured.
  */
-const DERIVED_FROM_FIELD: Record<string, string> = {
+export const DERIVED_FROM_FIELD: Record<string, string> = {
   "Book your hotel room": "hotel_confirmation_code",
 };
 

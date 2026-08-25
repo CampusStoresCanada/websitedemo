@@ -10,6 +10,8 @@ import type { ProcurementInfo } from "@/lib/types/procurement";
 import { getMemberSupplierData, type SupplierData } from "@/lib/actions/member-suppliers";
 import { getPartnerMarketData, checkNudgeCooldown, type MarketData } from "@/lib/actions/partner-market";
 import MemberSupplierPanel from "@/components/org/MemberSupplierPanel";
+import DirectoryVisibilityPanel, { type VisibilityRow } from "@/components/me/DirectoryVisibilityPanel";
+import type { DirectoryVisibility } from "@/lib/contacts/visibility";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 
 export const metadata = {
@@ -42,7 +44,7 @@ export default async function MyAccountPage() {
       userEmail
         ? (db as any)
             .from("contacts")
-            .select("id, name, role_title, email, work_email, work_phone_number, phone, hidden, organization_id, circle_id")
+            .select("id, name, role_title, email, work_email, work_phone_number, phone, hidden, directory_visibility, organization_id, circle_id")
             .or(`email.eq.${userEmail},work_email.eq.${userEmail}`)
             .is("archived_at", null)
         : Promise.resolve({ data: [] }),
@@ -86,6 +88,7 @@ export default async function MyAccountPage() {
     work_phone_number: string | null;
     phone: string | null;
     hidden: boolean | null;
+    directory_visibility: string | null;
     organization_id: string | null;
     circle_id: number | null;
   }>;
@@ -113,6 +116,24 @@ export default async function MyAccountPage() {
 
   // Build per-org edit data — only orgs where the user has a contact row
   const contactByOrgId = new Map(allContacts.map((c) => [c.organization_id, c]));
+
+  // One visibility choice per organisation: a person at two stores may
+  // reasonably want a different answer for each.
+  const orgNameById = new Map(orgs.map((o) => [o.organization.id, o.organization.name]));
+  const visibilityRows: VisibilityRow[] = allContacts
+    .filter((c) => !!c.organization_id)
+    .map((c) => ({
+      contactId: c.id,
+      orgName: orgNameById.get(c.organization_id!) ?? "Your organisation",
+      name: c.name,
+      roleTitle: c.role_title,
+      choice:
+        c.directory_visibility === "hidden" ||
+        c.directory_visibility === "members" ||
+        c.directory_visibility === "public"
+          ? (c.directory_visibility as DirectoryVisibility)
+          : null,
+    }));
   const orgEditData: OrgEditData[] = orgs
     .filter((o) => contactByOrgId.has(o.organization.id))
     .map((o) => ({
@@ -300,6 +321,9 @@ export default async function MyAccountPage() {
           ))}
         </div>
       )}
+
+      {/* ── Where you appear (the person's own decision, not their org's) ── */}
+      <DirectoryVisibilityPanel rows={visibilityRows} />
 
       {/* ── Possible Suppliers (Member orgs — matched to your buying categories) ── */}
       {supplierSections.map((section) => (

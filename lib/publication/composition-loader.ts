@@ -21,7 +21,10 @@ import {
 } from "./completeness";
 import {
   compareBoothNumbers,
+  sourceKey,
+  type DirectoryContact,
   type DirectoryEntry,
+  type Publication,
   type PlacedThing,
   type PublicationSource,
   type SurfaceForPublication,
@@ -53,6 +56,34 @@ async function boothNumbersByOrg(
     byOrg.set(row.organization_id, list);
   }
   for (const list of byOrg.values()) list.sort(compareBoothNumbers);
+  return byOrg;
+}
+
+/**
+ * org id → institution type, from the most recent benchmarking response.
+ *
+ * ⚠️ NOT `organizations.institution_type`, which is an empty legacy column —
+ * reading it is what produced a member section claiming nobody had one. The
+ * answered value lives in `benchmarking`, one row per org per fiscal year, so
+ * the latest year wins.
+ */
+async function institutionTypeByOrg(orgIds: string[]): Promise<Map<string, string>> {
+  if (orgIds.length === 0) return new Map();
+  const db = createAdminClient();
+  const { data } = await db
+    .from("benchmarking")
+    .select("organization_id, institution_type, fiscal_year")
+    .in("organization_id", orgIds)
+    .not("institution_type", "is", null)
+    .order("fiscal_year", { ascending: false });
+
+  const byOrg = new Map<string, string>();
+  for (const row of data ?? []) {
+    // Ordered newest-first, so the first row seen for an org is its latest.
+    if (!row.organization_id || byOrg.has(row.organization_id)) continue;
+    const value = row.institution_type?.trim();
+    if (value) byOrg.set(row.organization_id, value);
+  }
   return byOrg;
 }
 
@@ -140,7 +171,13 @@ export async function loadDirectoryEntries(
   // pinned by COMPLETENESS_ORG_COLUMNS, which OrgCompletenessSource mirrors.
   const orgs = data as unknown as OrgRow[];
 
-  // Printed directory: exclude people who have left or asked not to be listed.
+  const institutionTypes = await institutionTypeByOrg(orgs.map((o) => o.id));
+
+  // Printed directory: only people who have said yes to being printed.
+  //
+  // Strict opt-in, and NOT the same rule the website uses. Someone who has not
+  // answered stays listed on the site and stays out of the book — paper cannot
+  // be corrected, so it takes an explicit yes. See lib/contacts/visibility.ts.
   const contacts = await listDirectoryContacts<{
     id: string;
     organization_id: string | null;
@@ -152,6 +189,7 @@ export async function loadDirectoryEntries(
     phone: string | null;
   }>({
     organizationIds: orgs.map((o) => o.id),
+    printableOnly: true,
     fields:
       "id, organization_id, name, role_title, work_email, email, work_phone_number, phone",
   });
@@ -167,17 +205,25 @@ export async function loadDirectoryEntries(
   };
   const contactCount = new Map<string, number>();
   const primaryContact = new Map<string, DirectoryEntry["primaryContact"]>();
-  // Every listable person, for the People section. listDirectoryContacts has
-  // already dropped opt-outs and departures.
+
+  /**
+   * Every listable person, for the People section — one entry per ROW.
+   *
+   * ⛔ Do NOT collapse rows here. Two rows for the same name at one
+   * organisation are two rows; a shared or group address (`ops@`, `info@`,
+   * a store's general inbox) is normal and says nothing about how many people
+   * there are. Deciding that two records are "really" one person is not a
+   * render-time judgment — see [[feedback_never_merge_identities]].
+   *
+   * `listDirectoryContacts` has already dropped opt-outs and departures, which
+   * is the only filtering that belongs here.
+   */
   const allContacts = new Map<string, DirectoryEntry["contacts"]>();
   for (const c of (contacts ?? []) as ContactRow[]) {
     if (!c.organization_id) continue;
-    contactCount.set(
-      c.organization_id,
-      (contactCount.get(c.organization_id) ?? 0) + 1,
-    );
+    contactCount.set(c.organization_id, (contactCount.get(c.organization_id) ?? 0) + 1);
     if (!c.name?.trim()) continue;
-    const candidate = {
+    const candidate: DirectoryContact = {
       name: c.name.trim(),
       roleTitle: c.role_title?.trim() || null,
       email: c.work_email?.trim() || c.email?.trim() || null,
@@ -191,6 +237,9 @@ export async function loadDirectoryEntries(
     }
     allContacts.set(c.organization_id, [...(allContacts.get(c.organization_id) ?? []), candidate]);
   }
+  // Ordering only, never merging: keeps the InDesign export byte-identical
+  // between runs so a re-import diffs cleanly.
+  for (const list of allContacts.values()) list.sort((a, b) => a.name.localeCompare(b.name));
 
   return orgs
     .map((o): DirectoryEntry => {
@@ -215,6 +264,8 @@ export async function loadDirectoryEntries(
         province: o.province ?? null,
         website: o.website ?? null,
         orgPhone: o.phone ?? null,
+        institutionType: institutionTypes.get(o.id) ?? null,
+        fte: typeof o.fte === "number" ? o.fte : null,
         primaryContact: primaryContact.get(o.id) ?? null,
         contacts: allContacts.get(o.id) ?? [],
         completeness: computeOrgCompleteness(withContacts),
@@ -289,4 +340,33 @@ export async function loadPlacementsForPublication(
       },
     ];
   });
+}
+
+/**
+ * Every population a publication draws on, loaded once each.
+ *
+ * The network directory has three listings sections over three different
+ * populations, and its People section spans all of them. Loading per section
+ * would query the partner list twice; loading once and keying by
+ * `sourceKey()` also guarantees the two sections that share a population see
+ * byte-identical rows, rather than two reads that could land either side of an
+ * edit.
+ */
+export async function loadEntriesForPublication(
+  publication: Publication,
+): Promise<Map<string, DirectoryEntry[]>> {
+  const sources = [
+    publication.source,
+    ...publication.sections.flatMap((s) =>
+      (s.type === "listings" || s.type === "people") && s.source ? [s.source] : [],
+    ),
+  ];
+
+  const distinct = new Map<string, (typeof sources)[number]>();
+  for (const source of sources) distinct.set(sourceKey(source), source);
+
+  const loaded = await Promise.all(
+    [...distinct].map(async ([key, source]) => [key, await loadDirectoryEntries(source)] as const),
+  );
+  return new Map(loaded);
 }

@@ -17,17 +17,21 @@ interface ChecklistRow {
   name: string;
   description: string | null;
   scope_entity_id: string | null;
+  publication_id: string | null;
   deadline_at: string;
   active: boolean;
   created_at: string;
-  conference_checklist_tasks: { count: number }[] | { count: number } | null;
-  conference_checklist_checkpoints: { count: number }[] | { count: number } | null;
+  // Full rows rather than a count: the list now reports WHO each checklist
+  // speaks to, which is derived from its tasks' audience.
+  conference_checklist_tasks: { audience: string | null; active: boolean }[] | null;
+  conference_checklist_checkpoints: { id: string }[] | null;
   scope_entity: { name: string }[] | { name: string } | null;
+  publication: { id: string; title: string }[] | { id: string; title: string } | null;
 }
 
-function countOf(rel: { count: number }[] | { count: number } | null): number {
+function countOf(rel: unknown[] | null): number {
   if (!rel) return 0;
-  return Array.isArray(rel) ? (rel[0]?.count ?? 0) : rel.count;
+  return Array.isArray(rel) ? rel.length : 0;
 }
 
 function nameOf(rel: { name: string }[] | { name: string } | null): string | null {
@@ -38,14 +42,64 @@ function nameOf(rel: { name: string }[] | { name: string } | null): string | nul
 const inputClass =
   "block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-accent/30 focus:border-accent";
 
+export interface PublicationOption {
+  id: string;
+  title: string;
+}
+
+const one = <T,>(v: T[] | T | null): T | null => (Array.isArray(v) ? v[0] ?? null : v);
+
+/**
+ * Who this checklist actually reaches.
+ *
+ * A publication-scoped checklist used to read "All registered orgs", which is
+ * badly wrong: the network directory reaches 123 organisations including 52
+ * member stores who bought nothing at the conference. An admin deciding whether
+ * to switch it on has to be told the real audience.
+ */
+/**
+ * Who this checklist actually speaks to.
+ *
+ * "Your Conference" is entirely person-audience — its tasks render on each
+ * individual's own page and are deliberately excluded from the org reminder
+ * engine — yet it displayed the same scope sentence as Booth Readiness. Two
+ * checklists that behave completely differently looked identical in the list.
+ */
+function audienceLabel(c: ChecklistRow): string {
+  const audiences = new Set(
+    (c.conference_checklist_tasks ?? []).filter((t) => t.active).map((t) => t.audience)
+  );
+  if (audiences.size === 0) return "—";
+  if (audiences.has("org") && audiences.has("person")) return "Org admins + individuals";
+  return audiences.has("person") ? "Individuals" : "Org admins";
+}
+
+function scopeLabel(c: ChecklistRow): string {
+  // A person-audience checklist never resolves to organisations at all, so the
+  // org scope sentence would be actively misleading.
+  const audiences = new Set(
+    (c.conference_checklist_tasks ?? []).filter((t) => t.active).map((t) => t.audience)
+  );
+  if (audiences.size > 0 && !audiences.has("org")) {
+    return "Each person, on their own conference page";
+  }
+  const publication = one(c.publication);
+  if (publication) return `Everyone listed in ${publication.title}`;
+  const entity = one(c.scope_entity);
+  if (entity) return entity.name;
+  return "Every org with a purchase for this conference";
+}
+
 export default function ChecklistList({
   conferenceId,
   checklists,
   entities,
+  publications,
 }: {
   conferenceId: string;
   checklists: ChecklistRow[];
   entities: EntityOption[];
+  publications: PublicationOption[];
 }) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
@@ -64,6 +118,7 @@ export default function ChecklistList({
 
       {adding && (
         <NewChecklistForm
+          publications={publications}
           conferenceId={conferenceId}
           entities={entities}
           onClose={() => setAdding(false)}
@@ -81,7 +136,8 @@ export default function ChecklistList({
             <thead>
               <tr className="border-b border-gray-100 bg-gray-50">
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Name</th>
-                <th className="px-4 py-2 text-left font-medium text-gray-600">Scope</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Who</th>
+                <th className="px-4 py-2 text-left font-medium text-gray-600">Reaches</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Deadline</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Tasks</th>
                 <th className="px-4 py-2 text-left font-medium text-gray-600">Checkpoints</th>
@@ -99,7 +155,8 @@ export default function ChecklistList({
                       {c.name}
                     </Link>
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{nameOf(c.scope_entity) ?? "All registered orgs"}</td>
+                  <td className="px-4 py-3 text-gray-600">{audienceLabel(c)}</td>
+                  <td className="px-4 py-3 text-gray-600">{scopeLabel(c)}</td>
                   <td className="px-4 py-3 text-gray-500">{parseUTC(c.deadline_at).toLocaleDateString("en-CA")}</td>
                   <td className="px-4 py-3 text-gray-700">{countOf(c.conference_checklist_tasks)}</td>
                   <td className="px-4 py-3 text-gray-700">{countOf(c.conference_checklist_checkpoints)}</td>
@@ -123,6 +180,7 @@ export default function ChecklistList({
 }
 
 function NewChecklistForm({
+  publications,
   conferenceId,
   entities,
   onClose,
@@ -130,12 +188,14 @@ function NewChecklistForm({
 }: {
   conferenceId: string;
   entities: EntityOption[];
+  publications: PublicationOption[];
   onClose: () => void;
   onSaved: (id: string) => void;
 }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [scopeEntityId, setScopeEntityId] = useState("");
+  const [publicationId, setPublicationId] = useState("");
   const [deadlineAt, setDeadlineAt] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -156,6 +216,7 @@ function NewChecklistForm({
       name,
       description: description || null,
       scopeEntityId: scopeEntityId || null,
+      publicationId: publicationId || null,
       deadlineAt: new Date(`${deadlineAt}T00:00:00`).toISOString(),
       active: true,
     });
@@ -204,6 +265,24 @@ function NewChecklistForm({
             ))}
           </select>
           <p className="mt-1 text-xs text-gray-500">Only orgs holding this item are in scope. Blank = every org with a purchase for this conference.</p>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Or scope to a publication</label>
+          <select
+            value={publicationId}
+            onChange={(e) => setPublicationId(e.target.value)}
+            className={inputClass}
+            disabled={publications.length === 0}
+          >
+            <option value="">Not publication-scoped</option>
+            {publications.map((p) => (
+              <option key={p.id} value={p.id}>{p.title}</option>
+            ))}
+          </select>
+          <p className="mt-1 text-xs text-gray-500">
+            Reaches everyone listed in that publication, including organisations with no
+            conference purchase. Overrides the scope on the left.
+          </p>
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Deadline</label>

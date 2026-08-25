@@ -36,6 +36,16 @@ const MAILING_ADDRESS = "P.O. Box 71157 Silver Springs, Calgary, Alberta, Canada
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
 
 /**
+ * Bumped by hand whenever an asset in /public/email is replaced.
+ *
+ * Not a build hash, deliberately: these URLs are embedded in emails that are
+ * already delivered and sit in inboxes for years, so the version has to change
+ * only when the artwork does — not on every deploy, which would defeat caching
+ * entirely for no benefit.
+ */
+const ASSET_VERSION = "20260808";
+
+/**
  * Wraps a raw HTML content block in the branded CSC email layout.
  * Applied at send time — templates store only their content body.
  *
@@ -60,12 +70,19 @@ export async function wrapEmailBody(
 ): Promise<string> {
   const resolvedIdentity = identity ?? (await getPlatformIdentity());
   const base        = baseUrl ?? APP_URL;
-  const bgUrl       = base ? `${base}/email/background.png`    : "";
+  const bgUrl       = base ? `${base}/email/background.png?v=${ASSET_VERSION}` : "";
   // Wordmark/mark images are CSC's specific assets — a fresh deployment
   // without them configured falls back to the text lockup below, which
   // already reads from identity.clientName.
-  const wordmarkUrl = base ? `${base}/email/logo-wordmark.png` : "";
-  const markUrl     = base ? `${base}/email/logo-mark.png`     : "";
+  // ⚠️ Cache-bust the brand assets. The filenames never change when the
+  // artwork does, so every mail client and CDN that cached the old logo keeps
+  // serving it — the 2026-08-08 replacement was still showing the previous
+  // dev-stage mark in a real inbox two weeks later, while the server was
+  // serving the correct file all along.
+  //
+  // BUMP ASSET_VERSION WHENEVER A FILE IN /public/email CHANGES.
+  const wordmarkUrl = base ? `${base}/email/logo-wordmark.png?v=${ASSET_VERSION}` : "";
+  const markUrl     = base ? `${base}/email/logo-mark.png?v=${ASSET_VERSION}`     : "";
 
   return `<!DOCTYPE html>
 <html lang="en" xmlns:v="urn:schemas-microsoft-com:vml" xmlns:o="urn:schemas-microsoft-com:office:office">

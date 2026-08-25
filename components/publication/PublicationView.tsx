@@ -16,11 +16,14 @@
  * put on paper.
  */
 
+import { styleShowsQr } from "@/lib/publication/composition";
 import type {
   ComposedPerson,
+  PublicationAd,
   ComposedEntry,
   ComposedPublication,
   ComposedSection,
+  ListingStyle,
   PlacedThing,
   SurfaceForPublication,
 } from "@/lib/publication/composition";
@@ -64,11 +67,37 @@ function cssString(value: string): string {
   return `"${value.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
 }
 
+const sectionClass = (section: ComposedSection) =>
+  isEmptySection(section) ? "pub-section pub-section--empty" : "pub-section";
+
+/**
+ * Does this section have anything in it?
+ *
+ * On screen an empty section is USEFUL — "Nobody listed" tells an admin the
+ * consent answers have not come in yet. On paper it is a defect: a page with a
+ * heading and the words "Nobody listed" is worse than no page. Same markup,
+ * different treatment, which is the whole reason both outputs share one
+ * component.
+ */
+function isEmptySection(section: ComposedSection): boolean {
+  switch (section.type) {
+    case "listings":       return section.groups.every((g) => g.entries.length === 0);
+    case "people":         return section.people.length === 0;
+    case "category_index": return section.departments.length === 0;
+    case "booth_index":    return section.booths.length === 0;
+    case "map":            return section.surfaces.length === 0;
+    // A slot with no artwork is NOT empty — it is reserved space, and seeing it
+    // is how a book gets laid out before the space is sold.
+    case "ads":            return section.ads.length === 0;
+    case "static":         return !section.body.trim();
+  }
+}
+
 function Section({ section, pageName }: { section: ComposedSection; pageName: string }) {
   switch (section.type) {
     case "static":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           <p className="pub-body">{section.body}</p>
         </section>
@@ -76,7 +105,7 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
 
     case "map":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.surfaces.length === 0 ? (
             <p className="pub-empty">No floor plan available.</p>
@@ -90,7 +119,7 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
 
     case "category_index":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.departments.length === 0 ? (
             <p className="pub-empty">No categories to index.</p>
@@ -118,7 +147,7 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
 
     case "booth_index":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.booths.length === 0 ? (
             <p className="pub-empty">No booths assigned yet.</p>
@@ -139,7 +168,7 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
 
     case "people":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.people.length === 0 ? (
             <p className="pub-empty">Nobody listed.</p>
@@ -153,9 +182,21 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
         </section>
       );
 
+    case "ads":
+      return (
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
+          <h2 className="pub-h2 pub-ads-heading">{section.title}</h2>
+          <div className="pub-ads">
+            {section.ads.map((ad, i) => (
+              <AdSlot key={`${ad.size}-${ad.advertiser ?? "open"}-${i}`} ad={ad} />
+            ))}
+          </div>
+        </section>
+      );
+
     case "listings":
       return (
-        <section className="pub-section" style={{ page: pageName } as React.CSSProperties}>
+        <section className={sectionClass(section)} style={{ page: pageName } as React.CSSProperties}>
           <h2 className="pub-h2">{section.title}</h2>
           {section.groups.length === 0 ? (
             <p className="pub-empty">No listings.</p>
@@ -163,9 +204,9 @@ function Section({ section, pageName }: { section: ComposedSection; pageName: st
             section.groups.map((g, gi) => (
               <div key={g.heading ?? gi} className="pub-group">
                 {g.heading ? <h3 className="pub-h3 pub-group-head">{g.heading}</h3> : null}
-                <div className="pub-listings">
+                <div className={`pub-listings pub-listings--${section.style}`}>
                   {g.entries.map((e) => (
-                    <Listing key={`${g.heading}-${e.orgId}`} entry={e} />
+                    <Listing key={`${g.heading}-${e.orgId}`} entry={e} style={section.style} />
                   ))}
                 </div>
               </div>
@@ -189,9 +230,71 @@ function PersonRow({ person }: { person: ComposedPerson }) {
   );
 }
 
-function Listing({ entry }: { entry: ComposedEntry }) {
+/**
+ * One organisation, in one of three shapes.
+ *
+ * The shapes are not "the same card with bits hidden" — they answer different
+ * questions. An exhibitor listing is a pitch: it has the room for a description,
+ * a featured product and a booth number because the reader is deciding whether
+ * to walk over. A partner who isn't at the show needs to be *findable*, so it
+ * keeps identity and categories and drops the show-specific selling. A member
+ * store isn't selling anything, so none of that applies: what matters is where
+ * it is, how big it is, and who works there.
+ */
+function Listing({ entry, style = "full" }: { entry: ComposedEntry; style?: ListingStyle }) {
+  const qr = entry.qrSvg && styleShowsQr(style) ? (
+    <span className="pub-qr" aria-hidden="true" dangerouslySetInnerHTML={{ __html: entry.qrSvg }} />
+  ) : null;
+
+  if (style === "member") {
+    // Scale, then place, then people. A buyer scanning this page is sizing up
+    // the store before deciding who to call.
+    const scale = [entry.institutionType, entry.fte ? `${entry.fte.toLocaleString()} FTE` : null]
+      .filter(Boolean)
+      .join(" · ");
+    const place = [entry.city, entry.province].filter(Boolean).join(", ");
+
+    return (
+      <div className="pub-listing pub-listing--member">
+        <div className="pub-listing-head">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          {entry.logoUrl ? <img className="pub-logo pub-logo-sm" src={entry.logoUrl} alt="" /> : null}
+          <div className="pub-listing-id">
+            <h4 className="pub-org">{entry.orgName}</h4>
+            {place ? <p className="pub-place">{place}</p> : null}
+          </div>
+        </div>
+
+        {scale ? <p className="pub-scale">{scale}</p> : null}
+
+        <p className="pub-reach">
+          {[entry.website ? cleanUrl(entry.website) : null, entry.orgPhone].filter(Boolean).join(" · ")}
+        </p>
+
+        {/* Names and roles only. Phone and email for every one of these people
+            live in the People section, which is the part of the book built for
+            looking someone up — repeating them here would cost pages to say
+            the same thing twice. */}
+        {entry.contacts.length > 0 ? (
+          <ul className="pub-staff">
+            {entry.contacts.map((c, i) => (
+              <li key={`${c.name}-${c.roleTitle ?? ""}-${i}`}>
+                <span className="pub-staff-name">{c.name}</span>
+                {c.roleTitle ? <span className="pub-staff-role">{c.roleTitle}</span> : null}
+              </li>
+            ))}
+          </ul>
+        ) : null}
+
+        {qr ? <div className="pub-listing-foot"><span />{qr}</div> : null}
+      </div>
+    );
+  }
+
+  const compact = style === "compact";
+
   return (
-    <div className="pub-listing">
+    <div className={compact ? "pub-listing pub-listing--compact" : "pub-listing"}>
       <div className="pub-listing-head">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         {entry.logoUrl ? <img className="pub-logo" src={entry.logoUrl} alt="" /> : <div className="pub-logo pub-logo-empty" />}
@@ -205,9 +308,14 @@ function Listing({ entry }: { entry: ComposedEntry }) {
         </div>
       </div>
 
-      {entry.description ? <p className="pub-desc">{entry.description}</p> : null}
+      {entry.description ? (
+        <p className={compact ? "pub-desc pub-desc--clamp" : "pub-desc"}>{entry.description}</p>
+      ) : null}
 
-      {entry.featuredProduct ? (
+      {/* "Featured" means a conference special. A partner who isn't exhibiting
+          has nothing to feature, so the compact shape drops it entirely rather
+          than printing last year's. */}
+      {!compact && entry.featuredProduct ? (
         <p className="pub-featured">
           <span className="pub-featured-label">Featured</span> {entry.featuredProduct}
           {entry.featuredProductDetail ? ` — ${entry.featuredProductDetail}` : ""}
@@ -227,12 +335,40 @@ function Listing({ entry }: { entry: ComposedEntry }) {
 
       <div className="pub-listing-foot">
         {entry.catalogueUrl ? <p className="pub-link">{cleanUrl(entry.catalogueUrl)}</p> : <span />}
-        {entry.qrSvg ? (
-          <span className="pub-qr" aria-hidden="true"
-            dangerouslySetInnerHTML={{ __html: entry.qrSvg }} />
-        ) : null}
+        {qr}
       </div>
     </div>
+  );
+}
+
+/**
+ * One advertising slot.
+ *
+ * Artwork is placed with `object-fit: contain` rather than stretched: an
+ * advertiser's supplied file will not match the slot ratio exactly, and
+ * distorting somebody's paid artwork is worse than leaving a margin.
+ *
+ * An unsold slot renders as a labelled outline. That is deliberate — ad space
+ * is sold against a page count, so the book must be layoutable before anything
+ * is sold.
+ */
+function AdSlot({ ad }: { ad: PublicationAd }) {
+  const label = ad.size === "full" ? "Full page" : ad.size === "half" ? "Half page" : "Quarter page";
+  return (
+    <figure className={`pub-ad pub-ad--${ad.size}`}>
+      {ad.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="pub-ad-art" src={ad.imageUrl} alt={ad.alt ?? (ad.advertiser ? `Advertisement — ${ad.advertiser}` : "Advertisement")} />
+      ) : (
+        <div className="pub-ad-open">
+          <span className="pub-ad-size">{label}</span>
+          <span className="pub-ad-note">available</span>
+        </div>
+      )}
+      {ad.imageUrl && ad.advertiser ? (
+        <figcaption className="pub-ad-credit">{ad.advertiser}</figcaption>
+      ) : null}
+    </figure>
   );
 }
 
@@ -351,12 +487,60 @@ function PublicationStyles({ doc }: { doc: ComposedPublication }) {
       .pub-person-org { color: var(--navy); font-weight: 600; }
       .pub-person-reach { color: var(--muted); word-break: break-word; }
       .pub-contact-name { font-weight: 600; color: var(--ink); }
+
+      /* Compact — partners who aren't exhibiting. Narrower columns fit more per
+         page, and the description is clamped so one verbose company can't take
+         four times the space of its neighbours. */
+      .pub-listings--compact { grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+      .pub-listing--compact { padding: .65rem; }
+      .pub-desc--clamp { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+                         overflow: hidden; }
+
+      /* Member — a store at a glance. Denser again: these carry no prose, so
+         the grid can go narrower still. */
+      .pub-listings--member { grid-template-columns: repeat(auto-fill, minmax(12rem, 1fr)); }
+      .pub-listing--member { padding: .65rem; }
+      .pub-logo-sm { width: 2rem; height: 2rem; }
+      .pub-place { margin: 0; font-size: .8125rem; color: var(--muted); }
+      .pub-scale { margin: 0 0 .3rem; font-size: .75rem; color: var(--navy); font-weight: 600; }
+      .pub-reach { margin: 0 0 .35rem; font-size: .75rem; color: #374151; word-break: break-word; }
+      .pub-staff { margin: 0; padding: 0; list-style: none; font-size: .75rem; line-height: 1.4; }
+      .pub-staff li { margin-bottom: .1rem; }
+      .pub-staff-name { font-weight: 600; }
+      /* Role follows the name inline rather than being pushed to the far edge:
+         justified columns were breaking short names across two lines. */
+      .pub-staff-role { color: var(--muted); }
+      .pub-staff-role::before { content: ", "; }
       /* The QR sits with the links, small and out of the way. It is the thing
          that keeps this page useful after the book is frozen, but it should
          never dominate a listing. */
       .pub-listing-foot { display: flex; align-items: flex-end; justify-content: space-between; gap: .5rem; }
       .pub-qr { display: block; width: 3.25rem; height: 3.25rem; flex: none; }
       .pub-qr svg { width: 100%; height: 100%; display: block; }
+
+      /* ── Advertising ─────────────────────────────────────────────────
+         Slots are sized by ratio on screen and in real millimetres for print,
+         because what is being sold is an area on a page, not a proportion of a
+         browser window. */
+      /* Grid, not flex. Two "50% minus a gap" flex items total exactly the row
+         width, and sub-pixel rounding tips them over into wrapping one per
+         line — which silently turns a quarter page into a half page. A two
+         column grid states the intent instead of computing it. */
+      .pub-ads { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; align-items: start; }
+      .pub-ad { margin: 0; border: 1px solid var(--line); border-radius: 4px; overflow: hidden;
+                background: #fff; display: flex; flex-direction: column; }
+      .pub-ad--full    { grid-column: 1 / -1; aspect-ratio: 8.5 / 11; }
+      .pub-ad--half    { grid-column: 1 / -1; aspect-ratio: 17 / 11; }
+      .pub-ad--quarter { grid-column: span 1; aspect-ratio: 17 / 22; }
+      .pub-ad-art { width: 100%; height: 100%; object-fit: contain; display: block; }
+      .pub-ad-open { flex: 1; display: flex; flex-direction: column; align-items: center;
+                     justify-content: center; gap: .2rem; background: #FAFAF8;
+                     border: 1px dashed var(--line); margin: 3px; border-radius: 3px; }
+      .pub-ad-size { font-size: .8125rem; font-weight: 700; color: var(--navy); }
+      .pub-ad-note { font-size: .6875rem; text-transform: uppercase; letter-spacing: .08em;
+                     color: var(--muted); }
+      .pub-ad-credit { font-size: .6875rem; color: var(--muted); padding: .25rem .4rem;
+                       border-top: 1px solid var(--line); }
 
       .pub-map { margin: 0 0 1rem; }
       .pub-map-svg { width: 100%; height: auto; border: 1px solid var(--line); border-radius: 6px; background: #fff; }
@@ -410,16 +594,41 @@ function PublicationStyles({ doc }: { doc: ComposedPublication }) {
 
         /* ── Flow ────────────────────────────────────────────────────────── */
         .pub-section { break-before: page; margin-bottom: 0; }
+        /* An empty section is feedback on screen and a defect on paper. A page
+           reading "People — Nobody listed" is worse than no page at all. */
+        .pub-section--empty { display: none; }
         .pub-h2 { break-after: avoid; font-size: 16pt; }
         .pub-h3, .pub-group-head { break-after: avoid; }
         /* A heading alone at the foot of a page is the classic generated-directory
            tell; so is a single line of a description carried over. */
         .pub-body, .pub-desc, .pub-featured { orphans: 3; widows: 3; }
 
+        /* Grid, deliberately — multi-column was measured and is WORSE here.
+           Switching .pub-listings to a 2-up column set took it from 51 pages
+           to 54: Chrome balances a column set within each page rather than
+           flowing it across pages, so a short page ends in a big blank band.
+           The grid's atomic rows waste space too, but less. Do not "fix" this
+           by reaching for columns again without re-measuring the page count. */
         .pub-listings { grid-template-columns: repeat(2, 1fr); gap: 8pt; }
         .pub-index { columns: 3; }
         .pub-people { columns: 3; font-size: 8.5pt; }
         .pub-listing, .pub-index-block, .pub-map { break-inside: avoid; }
+
+        /* Letter portrait with 18/16mm vertical and 14mm side margins leaves a
+           content box of roughly 188 × 245mm. Slots are cut from that, so a
+           "half page" really is half a page of this book. */
+        /* The gap and the width subtraction must agree, or two "50%" slots
+           total more than the row and wrap to one per line — which silently
+           turns a quarter page into a half page. 2 × (50% − 4pt) + 8pt = 100%. */
+        .pub-ads { gap: 8pt; }
+        .pub-ad { break-inside: avoid; border-color: #999; }
+        .pub-ad--full    { grid-column: 1 / -1; height: 245mm; break-before: page; break-after: page; }
+        .pub-ad--half    { grid-column: 1 / -1; height: 120mm; }
+        .pub-ad--quarter { grid-column: span 1; height: 120mm; }
+        .pub-ad--full, .pub-ad--half, .pub-ad--quarter { aspect-ratio: auto; }
+        /* A full-page ad owns its page, so the running head and section
+           heading would be intrusions on paid space. */
+        .pub-ads-heading { break-after: avoid; }
         .pub-table tr { break-inside: avoid; }
         .pub-map-svg { border: .5pt solid #999; }
         /* Below ~18mm a phone camera struggles at arm's length. */

@@ -81,7 +81,7 @@ export const PUBLICATION_FIELD_BY_KEY: Record<PublicationFieldKey, PublicationFi
  * and nothing drifts between the loader, the nudge job, and any future consumer.
  */
 export const COMPLETENESS_ORG_COLUMNS =
-  "id, name, slug, public_code, type, city, province, website, phone, logo_url, company_description, primary_category, " +
+  "id, name, slug, public_code, type, city, province, website, phone, fte, logo_url, company_description, primary_category, " +
   "highlight_product_name, highlight_product_description, catalogue_url, partner_links, " +
   "hero_image_url";
 
@@ -102,6 +102,9 @@ export type OrgCompletenessSource = {
   province?: string | null;
   website?: string | null;
   phone?: string | null;
+  /** Billed-on headcount. Present for every active member — it is what dues are
+   *  assessed against — and meaningless for partners. Not scored. */
+  fte?: number | null;
   highlight_product_name: string | null;
   highlight_product_description: string | null;
   catalogue_url: string | null;

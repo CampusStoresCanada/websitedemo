@@ -9094,6 +9094,7 @@ export type Database = {
           display_name: string | null
           global_role: string
           id: string
+          preferences: Json
           updated_at: string | null
         }
         Insert: {
@@ -9102,6 +9103,7 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id: string
+          preferences?: Json
           updated_at?: string | null
         }
         Update: {
@@ -9110,6 +9112,7 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id?: string
+          preferences?: Json
           updated_at?: string | null
         }
         Relationships: []

@@ -1,5 +1,6 @@
 import type { CalendarItemEnriched, CalendarLayer } from "@/lib/calendar/types";
 import CalendarItemCard, { isResolved, itemSortRank } from "./CalendarItemCard";
+import { calendarDayKey } from "@/lib/calendar/day-key";
 
 type Props = {
   items: CalendarItemEnriched[];
@@ -26,7 +27,7 @@ function groupUrgencyRank(items: CalendarItemEnriched[]): number {
 function groupByDate(items: CalendarItemEnriched[]): [string, CalendarItemEnriched[]][] {
   const map = new Map<string, CalendarItemEnriched[]>();
   for (const item of items) {
-    const key = item.starts_at.slice(0, 10);
+    const key = calendarDayKey(item.starts_at);
     const arr = map.get(key);
     if (arr) arr.push(item);
     else map.set(key, [item]);

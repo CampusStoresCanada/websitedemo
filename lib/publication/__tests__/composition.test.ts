@@ -22,6 +22,7 @@ const entry = (name: string, cats: string | null, booths: string[] = [], printRe
   catalogueUrl: null, rawCategories: cats, boothNumbers: booths,
   publicCode: "AAAA0001", primaryContact: null, contacts: [],
   orgType: "Vendor Partner", city: null, province: null, website: null, orgPhone: null,
+  institutionType: null, fte: null,
   completeness: completeness(printReady ? {} : { logo_url: null }),
 });
 

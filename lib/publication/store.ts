@@ -15,6 +15,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type {
   Publication,
+  PublicationAd,
   PublicationSection,
   PublicationSelection,
   PublicationSource,
@@ -73,6 +74,7 @@ function parseSelection(raw: unknown, rejected: string[]): PublicationSelection 
   if (Array.isArray(raw.orgIds)) selection.orgIds = raw.orgIds.filter((v): v is string => typeof v === "string");
   if (Array.isArray(raw.departments)) selection.departments = raw.departments.filter((v): v is string => typeof v === "string");
   if (typeof raw.printReadyOnly === "boolean") selection.printReadyOnly = raw.printReadyOnly;
+  if (typeof raw.dedupeAcrossSections === "boolean") selection.dedupeAcrossSections = raw.dedupeAcrossSections;
   return selection;
 }
 
@@ -88,6 +90,24 @@ function parseSection(raw: unknown, index: number, rejected: string[]): Publicat
   }
   const title = str(raw.title) ?? undefined;
 
+  /**
+   * A section's own source, when it has one.
+   *
+   * Absent is fine — it means "use the publication's". A present-but-invalid
+   * one is not: falling back would print a whole section of the wrong
+   * population under a heading claiming otherwise, which on paper is
+   * unrecoverable. So it rejects the section instead.
+   */
+  let sectionSource: PublicationSource | undefined;
+  if (raw.source !== undefined && raw.source !== null) {
+    const parsed = parseSource(raw.source, rejected);
+    if (!parsed) {
+      rejected.push(`section ${index} has an invalid source and was ignored`);
+      return null;
+    }
+    sectionSource = parsed;
+  }
+
   switch (raw.type) {
     case "listings": {
       const groupBy = raw.groupBy;
@@ -100,10 +120,38 @@ function parseSection(raw: unknown, index: number, rejected: string[]): Publicat
         rejected.push(`section ${index} (listings) has invalid style: ${JSON.stringify(style)}`);
         return null;
       }
-      return { type: "listings", title, groupBy, style };
+      return { type: "listings", title, groupBy, style, source: sectionSource };
     }
     case "people":
-      return { type: "people", title };
+      return { type: "people", title, source: sectionSource };
+    case "ads": {
+      if (!Array.isArray(raw.ads)) {
+        rejected.push(`section ${index} (ads) has no ads array`);
+        return null;
+      }
+      const ads: PublicationAd[] = [];
+      raw.ads.forEach((entry, i) => {
+        if (!isRecord(entry)) {
+          rejected.push(`section ${index}, ad ${i} is not an object`);
+          return;
+        }
+        const size = entry.size;
+        // A slot with an unknown size has no dimensions, so it cannot be laid
+        // out at all — dropping just that slot keeps the rest of the page.
+        if (size !== "quarter" && size !== "half" && size !== "full") {
+          rejected.push(`section ${index}, ad ${i} has invalid size: ${JSON.stringify(size)}`);
+          return;
+        }
+        ads.push({
+          size,
+          // No imageUrl is legitimate: the slot is reserved but unsold.
+          imageUrl: str(entry.imageUrl) ?? null,
+          advertiser: str(entry.advertiser) ?? null,
+          alt: str(entry.alt) ?? null,
+        });
+      });
+      return { type: "ads", title, ads };
+    }
     case "category_index":
       return { type: "category_index", title };
     case "booth_index":

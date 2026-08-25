@@ -13,7 +13,7 @@
  */
 
 import JSZip from "jszip";
-import type { ComposedPublication } from "./composition";
+import { styleShowsQr, type ComposedPublication } from "./composition";
 import { toInDesignXml } from "./indesign";
 import { exhibitorCodeUrl, qrSvg } from "./qr";
 
@@ -23,6 +23,16 @@ export type PackageManifest = {
   logos: number;
   /** Things a designer needs to know are missing before they start. */
   skipped: string[];
+  /**
+   * Listings that carry no QR by design, not by omission.
+   *
+   * Kept apart from `skipped` deliberately: a designer reading "52 skipped"
+   * goes looking for 52 missing files. Nothing is missing — member stores are
+   * not selling to the reader, so their shape has no code.
+   */
+  qrNotApplicable: number;
+  /** Ad artwork included. Unsold slots are reported under `skipped`. */
+  ads: number;
 };
 
 /** Extension from a URL, defaulting to png — InDesign places by extension. */
@@ -55,10 +65,14 @@ function readme(doc: ComposedPublication, manifest: PackageManifest, generatedAt
     "",
     `Generated ${generatedAt}`,
     `${manifest.listings} listings · ${manifest.qrCodes} QR codes · ${manifest.logos} logos`,
+    manifest.qrNotApplicable > 0
+      ? `${manifest.qrNotApplicable} listings carry no QR by design (member stores are not selling here).`
+      : "",
     "",
     "CONTENTS",
     "  directory.xml   Tagged content for File > Import XML",
     "  qr/             One SVG per listing, named by its permanent code",
+    "  ads/            Advertising artwork, numbered in page order",
     "  logos/          Organisation logos, named by the same code",
     "",
     "IMPORTING",
@@ -95,7 +109,18 @@ export async function buildPublicationPackage(
   generatedAt: string
 ): Promise<{ zip: Uint8Array; manifest: PackageManifest }> {
   const zip = new JSZip();
-  const manifest: PackageManifest = { listings: doc.entries.length, qrCodes: 0, logos: 0, skipped: [] };
+  const manifest: PackageManifest = {
+    listings: doc.entries.length, qrCodes: 0, logos: 0, skipped: [], qrNotApplicable: 0, ads: 0,
+  };
+
+  // Which organisations does this publication actually print a code for? An org
+  // can only appear in one listing section here, but reading it off the
+  // composed sections keeps the zip honest if that ever stops being true.
+  const qrEligible = new Set<string>();
+  for (const section of doc.sections) {
+    if (section.type !== "listings" || !styleShowsQr(section.style)) continue;
+    for (const group of section.groups) for (const e of group.entries) qrEligible.add(e.orgId);
+  }
 
   zip.file("directory.xml", toInDesignXml(doc));
 
@@ -111,7 +136,9 @@ export async function buildPublicationPackage(
   );
 
   for (const { entry, logo } of logoResults) {
-    if (!entry.publicCode) {
+    if (!qrEligible.has(entry.orgId)) {
+      manifest.qrNotApplicable += 1;
+    } else if (!entry.publicCode) {
       manifest.skipped.push(`${entry.orgName}: no public code, so no QR code`);
     } else {
       qrFolder?.file(`${entry.publicCode}.svg`, await qrSvg(exhibitorCodeUrl(baseUrl, entry.publicCode)));
@@ -125,6 +152,29 @@ export async function buildPublicationPackage(
     } else if (entry.publicCode) {
       logoFolder?.file(`${entry.publicCode}.${logo.ext}`, logo.data);
       manifest.logos += 1;
+    }
+  }
+
+  // Ad artwork is referenced by the XML like every other image, so it has to
+  // be in the folder too — otherwise the designer opens the book with the
+  // paid-for pages missing.
+  const adFolder = zip.folder("ads");
+  let adIndex = 0;
+  for (const section of doc.sections) {
+    if (section.type !== "ads") continue;
+    for (const ad of section.ads) {
+      adIndex += 1;
+      if (!ad.imageUrl) {
+        manifest.skipped.push(`Ad slot ${adIndex} (${ad.size}): reserved but unsold — no artwork`);
+        continue;
+      }
+      const art = await fetchLogo(ad.imageUrl);
+      if (!art) {
+        manifest.skipped.push(`Ad slot ${adIndex} (${ad.size}): artwork could not be downloaded`);
+        continue;
+      }
+      adFolder?.file(`${String(adIndex).padStart(2, "0")}-${ad.size}.${art.ext}`, art.data);
+      manifest.ads += 1;
     }
   }
 

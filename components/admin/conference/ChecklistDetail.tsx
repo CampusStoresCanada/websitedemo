@@ -14,6 +14,7 @@ import { CHECK_TYPES, type CheckType } from "@/lib/conference/checklist-check-ty
 import type { ChecklistRunResult } from "@/lib/conference/checklist-engine";
 import type { Tables } from "@/lib/database.types";
 import { parseUTC } from "@/lib/utils";
+import { sendChecklistTestEmail } from "@/lib/actions/checklist-test-send";
 
 type Checklist = Tables<"conference_checklists">;
 type Task = Tables<"conference_checklist_tasks">;
@@ -77,6 +78,8 @@ export default function ChecklistDetail({
   const [taskForm, setTaskForm] = useState<TaskFormState>(null);
   const [runResult, setRunResult] = useState<ChecklistRunResult | null>(null);
   const [running, setRunning] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testResult, setTestResult] = useState<string | null>(null);
 
   return (
     <div className="space-y-8">
@@ -189,6 +192,37 @@ export default function ChecklistDetail({
           deadlineAt={checklist.deadline_at}
           onChanged={() => router.refresh()}
         />
+      </section>
+
+      {/* Test send — safe, and the only one that works on a switched-off list */}
+      <section>
+        <h2 className="text-sm font-semibold text-gray-900 mb-2">Send a test to yourself</h2>
+        <p className="text-xs text-gray-500 mb-3">
+          Builds this checklist&rsquo;s reminder for a real organisation with something outstanding
+          and sends it to you alone. Works whether or not the checklist is switched on, and does
+          not mark anyone as reminded.
+        </p>
+        <button
+          type="button"
+          disabled={testing}
+          onClick={async () => {
+            setTesting(true);
+            setTestResult(null);
+            const res = await sendChecklistTestEmail(checklist.id);
+            setTesting(false);
+            setTestResult(
+              res.success
+                ? `Sent to ${res.sentTo}${res.sampledOrg ? ` — built from ${res.sampledOrg}` : ""}.`
+                : res.error ?? "Something went wrong."
+            );
+          }}
+          className="rounded-md border border-accent px-4 py-2 text-sm font-medium text-accent hover:bg-accent/5 disabled:opacity-50"
+        >
+          {testing ? "Sending…" : "Send a test to me"}
+        </button>
+        {testResult && (
+          <p className="mt-2 text-xs text-gray-700">{testResult}</p>
+        )}
       </section>
 
       {/* Run now */}

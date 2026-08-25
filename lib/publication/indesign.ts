@@ -20,7 +20,8 @@
  * workflow rather than a fresh layout job each year.
  */
 
-import type { ComposedEntry, ComposedPublication, ComposedSection } from "./composition";
+import { styleShowsQr } from "./composition";
+import type { ComposedEntry, ComposedPublication, ComposedSection, ListingStyle } from "./composition";
 
 /**
  * XML 1.0 forbids most control characters outright. One pasted in from Word
@@ -53,36 +54,83 @@ const tag = (name: string, value: string | null | undefined, indent: string): st
 const attr = (name: string, value: string | null | undefined): string =>
   value && value.trim() ? ` ${name}="${escapeXml(value.trim())}"` : "";
 
-function listingXml(entry: ComposedEntry, indent: string): string {
+/**
+ * One listing, shaped to its style.
+ *
+ * The shapes emit *different tag sets*, not the same tags with empty values —
+ * that is the whole point on this side. A designer maps `MemberName` to a
+ * different paragraph style than `OrgName`, and a member listing that emitted
+ * a hollow `<FeaturedProduct/>` would style as a blank paragraph in the layout
+ * and have to be cleaned out of 52 listings by hand.
+ */
+function listingXml(entry: ComposedEntry, indent: string, style: ListingStyle): string {
   const inner = `${indent}  `;
-  let out = `${indent}<Listing${attr("code", entry.publicCode)}>\n`;
-  out += tag("OrgName", entry.orgName, inner);
-  if (entry.boothNumbers.length > 0) out += tag("BoothNumber", entry.boothNumbers.join(", "), inner);
-  out += tag("Description", entry.description, inner);
-  if (entry.city || entry.province) {
-    out += tag("Location", [entry.city, entry.province].filter(Boolean).join(", "), inner);
-  }
-  out += tag("Website", entry.website, inner);
-  out += tag("OrgPhone", entry.orgPhone, inner);
-  out += tag("FeaturedProduct", entry.featuredProduct, inner);
-  out += tag("FeaturedDetail", entry.featuredProductDetail, inner);
-  if (entry.classes.length > 0) out += tag("Classes", entry.classes.join(" · "), inner);
-  if (entry.primaryContact) {
-    out += `${inner}<Contact>\n`;
-    out += tag("ContactName", entry.primaryContact.name, `${inner}  `);
-    out += tag("ContactRole", entry.primaryContact.roleTitle, `${inner}  `);
-    out += tag("ContactPhone", entry.primaryContact.phone, `${inner}  `);
-    out += tag("ContactEmail", entry.primaryContact.email, `${inner}  `);
-    out += `${inner}</Contact>\n`;
-  }
-  out += tag("Catalogue", entry.catalogueUrl, inner);
+  const contactXml = (): string => {
+    if (!entry.primaryContact) return "";
+    let c = `${inner}<Contact>\n`;
+    c += tag("ContactName", entry.primaryContact.name, `${inner}  `);
+    c += tag("ContactRole", entry.primaryContact.roleTitle, `${inner}  `);
+    c += tag("ContactPhone", entry.primaryContact.phone, `${inner}  `);
+    c += tag("ContactEmail", entry.primaryContact.email, `${inner}  `);
+    c += `${inner}</Contact>\n`;
+    return c;
+  };
   // Images are referenced, not embedded. InDesign relinks by path, and a
   // designer needs control over placement and cropping regardless.
-  if (entry.logoUrl) out += `${inner}<Logo${attr("href", entry.logoUrl)}/>\n`;
-  if (entry.publicCode) {
-    out += `${inner}<QRCode${attr("code", entry.publicCode)}${attr("href", `qr/${entry.publicCode}.svg`)}/>\n`;
+  const assetsXml = (): string => {
+    let a = "";
+    if (entry.logoUrl) a += `${inner}<Logo${attr("href", entry.logoUrl)}/>\n`;
+    if (entry.publicCode && styleShowsQr(style)) {
+      a += `${inner}<QRCode${attr("code", entry.publicCode)}${attr("href", `qr/${entry.publicCode}.svg`)}/>\n`;
+    }
+    return a;
+  };
+  const location = [entry.city, entry.province].filter(Boolean).join(", ");
+
+  if (style === "member") {
+    let out = `${indent}<MemberListing${attr("code", entry.publicCode)}>\n`;
+    out += tag("MemberName", entry.orgName, inner);
+    out += tag("Location", location, inner);
+    out += tag("InstitutionType", entry.institutionType, inner);
+    // A number, not a string: emitted only when present, so "0 FTE" never
+    // prints for a store whose headcount simply isn't recorded.
+    if (typeof entry.fte === "number") out += tag("FTE", String(entry.fte), inner);
+    out += tag("Website", entry.website, inner);
+    out += tag("OrgPhone", entry.orgPhone, inner);
+    // Every listable person, not just the primary — a store's staff IS its
+    // listing. Reach details are carried by the People section.
+    for (const person of entry.contacts) {
+      out += `${inner}<Staff>\n`;
+      out += tag("StaffName", person.name, `${inner}  `);
+      out += tag("StaffRole", person.roleTitle, `${inner}  `);
+      out += `${inner}</Staff>\n`;
+    }
+    out += assetsXml();
+    out += `${indent}</MemberListing>\n`;
+    return out;
   }
-  out += `${indent}</Listing>\n`;
+
+  const compact = style === "compact";
+  let out = `${indent}<${compact ? "CompactListing" : "Listing"}${attr("code", entry.publicCode)}>\n`;
+  out += tag("OrgName", entry.orgName, inner);
+  if (!compact && entry.boothNumbers.length > 0) {
+    out += tag("BoothNumber", entry.boothNumbers.join(", "), inner);
+  }
+  out += tag("Description", entry.description, inner);
+  out += tag("Location", location, inner);
+  out += tag("Website", entry.website, inner);
+  out += tag("OrgPhone", entry.orgPhone, inner);
+  // "Featured" means a conference special; a partner who isn't exhibiting has
+  // none, so the compact shape omits it rather than printing last year's.
+  if (!compact) {
+    out += tag("FeaturedProduct", entry.featuredProduct, inner);
+    out += tag("FeaturedDetail", entry.featuredProductDetail, inner);
+  }
+  if (entry.classes.length > 0) out += tag("Classes", entry.classes.join(" · "), inner);
+  out += contactXml();
+  out += tag("Catalogue", entry.catalogueUrl, inner);
+  out += assetsXml();
+  out += `${indent}</${compact ? "CompactListing" : "Listing"}>\n`;
   return out;
 }
 
@@ -97,7 +145,7 @@ function sectionXml(section: ComposedSection, indent: string): string {
       for (const group of section.groups) {
         out += `${inner}<Group>\n`;
         out += tag("CategoryHeading", group.heading, `${inner}  `);
-        for (const entry of group.entries) out += listingXml(entry, `${inner}  `);
+        for (const entry of group.entries) out += listingXml(entry, `${inner}  `, section.style);
         out += `${inner}</Group>\n`;
       }
       break;
@@ -152,6 +200,16 @@ function sectionXml(section: ComposedSection, indent: string): string {
         // "see p. 14" cross-reference from this identity.
         if (person.orgCode) out += `${inner}  <OrgRef${attr("code", person.orgCode)}/>\n`;
         out += `${inner}</Person>\n`;
+      }
+      break;
+
+    case "ads":
+      for (const ad of section.ads) {
+        // Emitted even when unsold, carrying `sold="false"`. The designer needs
+        // the reserved space in the flow to lay the book out; an omitted slot
+        // silently changes the page count.
+        out += `${inner}<Advertisement${attr("size", ad.size)}${attr("advertiser", ad.advertiser)}` +
+          `${ad.imageUrl ? attr("href", ad.imageUrl) : ""} sold="${ad.imageUrl ? "true" : "false"}"/>\n`;
       }
       break;
 

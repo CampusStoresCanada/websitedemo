@@ -2,12 +2,8 @@ import Link from "next/link";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import PublicationView from "@/components/publication/PublicationView";
-import { composePublication, conferenceDirectory } from "@/lib/publication/composition";
-import {
-  loadDirectoryEntries,
-  loadPlacementsForPublication,
-  loadSurfacesForPublication,
-} from "@/lib/publication/composition-loader";
+import { conferenceDirectory } from "@/lib/publication/composition";
+import { composeSavedPublication } from "@/lib/publication/render";
 import { loadPrintUsage } from "@/lib/publication/scan-tracking";
 import { loadPublicationForConference } from "@/lib/publication/store";
 
@@ -50,12 +46,7 @@ export default async function ConferenceDirectoryPage({
   const saved = await loadPublicationForConference(conference.id);
   const publication = saved?.publication ?? conferenceDirectory(conference.id, `${conference.name} — Directory`);
   const rejected = saved?.rejected ?? [];
-  const surfaces = await loadSurfacesForPublication(conference.id);
-  const [entries, placements] = await Promise.all([
-    loadDirectoryEntries(publication.source),
-    loadPlacementsForPublication(conference.id, surfaces),
-  ]);
-  const doc = composePublication(publication, entries, surfaces, placements);
+  const doc = await composeSavedPublication(publication);
 
   // Was the print run used? Not an exhibitor metric — the question is whether
   // printing again is worth the money.

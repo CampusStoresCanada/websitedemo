@@ -59,6 +59,31 @@ describe("loadDirectoryEntries — membership status", () => {
     }
   }, 60_000);
 
+  it.skipIf(!RUN)("fills institution type and FTE for member listings", async () => {
+    // The member shape is built out of these two fields, and both were wrong
+    // once: FTE was omitted from the column list, and institution type was read
+    // from `organizations.institution_type` — an empty legacy column — instead
+    // of the answered value in `benchmarking`. Both failures produced a clean
+    // render of blank listings, so this asserts real coverage, not just types.
+    loadEnvLocal();
+    const { loadDirectoryEntries } = await import("../composition-loader");
+    const members = await loadDirectoryEntries({ kind: "organizations", orgType: "Member" });
+
+    const withFte = members.filter((m) => typeof m.fte === "number" && m.fte > 0);
+    const withType = members.filter((m) => !!m.institutionType);
+
+    // eslint-disable-next-line no-console
+    console.log(`members: ${members.length} · FTE ${withFte.length} · institution type ${withType.length}`);
+
+    // Every active member is billed on an FTE, so a gap here is a loader bug
+    // rather than missing data.
+    expect(withFte.length, "every active member should carry an FTE").toBe(members.length);
+    // Institution type comes from the benchmarking survey, so genuine
+    // non-respondents are expected — but a near-zero count means it is reading
+    // the wrong column again.
+    expect(withType.length).toBeGreaterThan(members.length / 2);
+  }, 60_000);
+
   it.skipIf(!RUN)("keeps a lapsed booth holder in the conference directory", async () => {
     // Booth ownership is what qualifies an exhibitor, not membership status —
     // someone who paid for a booth is standing in the hall regardless.
