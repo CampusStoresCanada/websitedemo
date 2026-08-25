@@ -14,6 +14,7 @@ export const DASHBOARD_WIDGETS = [
   { key: "membership", label: "Membership Renewals" },
   { key: "board_checklist", label: "Board Action Items" },
   { key: "conference", label: "The Conference" },
+  { key: "elections", label: "Board Election" },
 ] as const;
 
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGETS)[number]["key"];

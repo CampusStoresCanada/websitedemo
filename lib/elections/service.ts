@@ -42,6 +42,7 @@ import {
   type ResultsAnnouncement,
 } from "./documents/results-announcement";
 import { buildAgmAgenda } from "./documents/agm-agenda";
+import { buildElectionTimeline, type TimelineStage } from "./timeline";
 import {
   buildNominatingCommitteeReport,
   type ReportDirector,
@@ -3437,4 +3438,66 @@ export async function generateAgmAgenda(
   if (error) return fail(`Could not save the agenda: ${error.message}`);
 
   return ok({ meetingId: meeting.id as string, items: agenda.items.length, replaced: hadAgenda });
+}
+
+/** The cycle as a chronological spine, resolved from live state. */
+export async function getElectionTimeline(slug: string): Promise<TimelineStage[] | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const cfg = election.config as unknown as {
+    callSentAt?: string;
+    ballotsCirculatedAt?: string;
+    agmNoticeSentAt?: string;
+    proxyFormSentAt?: string;
+    agmPackageSentAt?: string;
+    resultsAnnouncedAt?: string;
+  };
+
+  const notice = await getNoticeState(slug);
+  const nominations = await listNominations(slug);
+  const validated = nominations.filter((n) => n.completeness.complete).length;
+  const { summary } = await evaluateElectionEligibility(election.id);
+
+  const { count: ballotsReturned } = await db
+    .from("election_participation")
+    .select("id", { count: "exact", head: true })
+    .eq("election_id", election.id);
+
+  const { data: cert } = await db
+    .from("election_certifications")
+    .select("certified_at")
+    .eq("election_id", election.id)
+    .maybeSingle();
+
+  return buildElectionTimeline(
+    {
+      cycleYear: election.cycleYear,
+      status: election.status,
+      outcome: (election.outcome as "acclaimed" | "balloted" | null) ?? null,
+      schedule: election.schedule,
+      callSentAt: cfg.callSentAt ?? null,
+      ballotsCirculatedAt: cfg.ballotsCirculatedAt ?? null,
+      noticeSentAt: cfg.agmNoticeSentAt ?? null,
+      proxySentAt: cfg.proxyFormSentAt ?? null,
+      packageSentAt: cfg.agmPackageSentAt ?? null,
+      resultsAnnouncedAt: cfg.resultsAnnouncedAt ?? null,
+      certifiedAt: (cert?.certified_at as string) ?? null,
+      sealed: ["sealed", "certified"].includes(election.status),
+      noticeWindow: notice
+        ? {
+            opensOn: notice.window.opensOn,
+            closesOn: notice.window.closesOn,
+            proxyDueOn: notice.window.proxyDueOn,
+          }
+        : null,
+      eventPublished: notice?.eventPage.readyForNotice ?? false,
+      nominationsReceived: nominations.length,
+      validatedNominees: validated,
+      ballotsReturned: ballotsReturned ?? 0,
+      electorate: summary.eligible,
+    },
+    today()
+  );
 }

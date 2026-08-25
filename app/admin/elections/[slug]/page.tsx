@@ -19,11 +19,13 @@ import RepresentationPanel from "@/components/admin/elections/RepresentationPane
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
+import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import {
   getCommitteeReview,
   getNoticeState,
   countOutstandingBallots,
   getAgmPackageState,
+  getElectionTimeline,
 } from "@/lib/elections/service";
 import {
   requestWithdrawalAction,
@@ -229,6 +231,7 @@ export default async function ElectionReviewPage({
   const closeReadiness = canCloseNominations(election.schedule, todayHere);
   const reminderPlan = planReminders(election.schedule, election.config);
   const agmPackage = await getAgmPackageState(slug);
+  const timeline = await getElectionTimeline(slug);
 
   // How many institutions a "not yet voted" reminder would reach today. Only
   // computed while balloting: before then every eligible store is outstanding,
@@ -288,6 +291,20 @@ export default async function ElectionReviewPage({
           Ballot links are on their way. Delivery tracking is not recording anything yet, so
           treat this as &ldquo;attempted&rdquo; — ballots arriving is the reliable signal.
         </div>
+      )}
+
+      {timeline && (
+        <ElectionTimeline
+          stages={timeline}
+          actions={{
+            sendCall,
+            closeNominations: close,
+            circulateBallots: circulate,
+            sendAgmNotice: sendNotice,
+            sendProxyForm: sendProxy,
+            sendAgmPackage: sendPackage,
+          }}
+        />
       )}
 
       {/* The electorate, which during a renewal cycle is a moving number. */}

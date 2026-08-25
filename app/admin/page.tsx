@@ -6,6 +6,7 @@ import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
 import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
 import { getBoardChecklist } from "@/lib/board/checklist";
+import { getElectionsWidgetData } from "@/lib/elections/dashboard-widget";
 import { getDashboardWidgetLayout } from "@/lib/admin/dashboard-widgets";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
@@ -14,6 +15,7 @@ import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
 import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
 import { BoardChecklist } from "@/components/admin/board/BoardChecklist";
+import { ElectionsWidget } from "@/components/admin/ElectionsWidget";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -166,6 +168,7 @@ export default async function AdminConsolePage() {
     conferenceStats,
     widgetLayout,
     boardChecklist,
+    electionsWidget,
   ] = await Promise.all([
     // Current conference
     db.from("conference_instances")
@@ -242,6 +245,16 @@ export default async function AdminConsolePage() {
 
     // Board action-item checklist
     getBoardChecklist(auth.ok ? auth.ctx.userId : null),
+
+    // Board election — nominations or turnout, null outside a live cycle.
+    getElectionsWidgetData(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date())
+    ),
   ]);
 
   const conf         = conferenceResult.data;
@@ -406,6 +419,13 @@ export default async function AdminConsolePage() {
           if (key === "conference") {
             return conferenceStats
               ? <ConferenceWidget key={key} data={conferenceStats} />
+              : null;
+          }
+          // Renders only while nominations or voting are open; null otherwise,
+          // so the dashboard does not carry a dead election slot all year.
+          if (key === "elections") {
+            return electionsWidget
+              ? <ElectionsWidget key={key} data={electionsWidget} />
               : null;
           }
           return null;
