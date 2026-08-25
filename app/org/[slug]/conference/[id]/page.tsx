@@ -13,6 +13,8 @@ import { answerOrgTask } from "@/lib/actions/conference-tasks";
 import { loadOrgTasks } from "@/lib/conference/checklist-tasks";
 import TaskChecklist from "@/components/conference/TaskChecklist";
 import SeatAssignment from "@/components/org/SeatAssignment";
+import OrgAgreements from "@/components/org/OrgAgreements";
+import { loadOrgLegalStatus } from "@/lib/conference/org-legal";
 import { listEntitySeatsForOrg } from "@/lib/actions/conference-entity-commerce";
 
 type OrgConferencePersonRow = {
@@ -168,6 +170,10 @@ export default async function OrgConferencePage({
   // Anyone already on this conference for this org is assignable. Not filtered
   // to the unseated: one person legitimately holds a registration AND a ticket
   // to the offsite.
+  // Agreements split by who owes them: the buyer signs for the company, each
+  // attendee signs their own.
+  const legalStatus = await loadOrgLegalStatus(adminClient, conferenceId, orgId, auth.ctx.userId);
+
   const attendeeOptions = people
     .filter((row) => row.assignment_status !== "canceled")
     .map((row) => ({
@@ -241,6 +247,8 @@ export default async function OrgConferencePage({
           </Link>
         </p>
       </section>
+
+      <OrgAgreements status={legalStatus} />
 
       <SeatAssignment
         seats={seatRows}

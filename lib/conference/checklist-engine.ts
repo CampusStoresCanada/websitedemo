@@ -28,7 +28,11 @@ function getTaskCta(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   switch (checkType) {
     case "seat_assigned":
-      return { label: "Assign your seats", url: `${appUrl}/org/${ctx.orgSlug}` };
+      // The bare org page has no seat UI on it; the conference page now does.
+      return {
+        label: "Choose who's going",
+        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#whos-going`,
+      };
     case "entity_purchased":
       return {
         label: "Browse & purchase",
@@ -39,7 +43,12 @@ function getTaskCta(
     case "payment_complete":
       return { label: "View your account", url: `${appUrl}/org/${ctx.orgSlug}` };
     case "legal_document_accepted":
-      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
+      // Was "View readiness & travel status" pointing at this same page, which
+      // then had no acceptance on it — a CTA that led nowhere twice over.
+      return {
+        label: "Read and accept",
+        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#agreements`,
+      };
     case "directory_profile_complete":
       // Straight to the org's own page, where every field this checks is edited.
       return { label: "Update your listing", url: `${appUrl}/org/${ctx.orgSlug}` };

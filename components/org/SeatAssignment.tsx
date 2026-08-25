@@ -63,7 +63,7 @@ export default function SeatAssignment({
   const filled = attendable.filter((s) => s.holderPersonId).length;
 
   return (
-    <section className="rounded-xl border border-gray-200 bg-white p-4">
+    <section id="whos-going" className="rounded-xl border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="text-base font-semibold text-gray-900">Who&rsquo;s going</h2>
         <p className="text-sm tabular-nums text-gray-500">
