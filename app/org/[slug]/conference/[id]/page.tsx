@@ -12,6 +12,8 @@ import { resolveConferenceBadges } from "@/lib/actions/conference-entities";
 import { answerOrgTask } from "@/lib/actions/conference-tasks";
 import { loadOrgTasks } from "@/lib/conference/checklist-tasks";
 import TaskChecklist from "@/components/conference/TaskChecklist";
+import SeatAssignment from "@/components/org/SeatAssignment";
+import { listEntitySeatsForOrg } from "@/lib/actions/conference-entity-commerce";
 
 type OrgConferencePersonRow = {
   id: string;
@@ -152,21 +154,27 @@ export default async function OrgConferencePage({
    * larger problem: a badge that cannot be printed and a place at a dinner
    * nobody can attend.
    */
-  const { data: seatRows } = await adminClient
-    .from("entity_balance_seats")
-    .select("holder_person_id, entity:conference_entities!inner(name, kind)")
-    .eq("organization_id", orgId)
-    .eq("conference_id", conferenceId);
+  const seatsResult = await listEntitySeatsForOrg(conferenceId, orgId);
+  const seatRows = seatsResult.success ? seatsResult.data : [];
 
   const unassignedByEntity = new Map<string, number>();
-  for (const row of seatRows ?? []) {
-    if (row.holder_person_id) continue;
-    const entity = Array.isArray(row.entity) ? row.entity[0] : row.entity;
-    // Membership renewal is not a person's seat — nobody attends it.
-    if (!entity?.name || entity.kind === "membership_renewal") continue;
-    unassignedByEntity.set(entity.name, (unassignedByEntity.get(entity.name) ?? 0) + 1);
+  for (const seat of seatRows) {
+    // Membership renewal is not a person's seat — nobody attends one.
+    if (seat.holderPersonId || seat.kind === "membership_renewal" || !seat.name) continue;
+    unassignedByEntity.set(seat.name, (unassignedByEntity.get(seat.name) ?? 0) + 1);
   }
   const unassignedTotal = [...unassignedByEntity.values()].reduce((a, b) => a + b, 0);
+
+  // Anyone already on this conference for this org is assignable. Not filtered
+  // to the unseated: one person legitimately holds a registration AND a ticket
+  // to the offsite.
+  const attendeeOptions = people
+    .filter((row) => row.assignment_status !== "canceled")
+    .map((row) => ({
+      id: row.id,
+      name: row.display_name ?? profileNameByUserId[row.user_id ?? ""] ?? row.contact_email ?? "Unnamed",
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
   const exhibitorRows = people.filter((row) => row.person_kind === "exhibitor");
 
   // The company's list: monitored items (payment, seats, directory listing) and
@@ -233,6 +241,13 @@ export default async function OrgConferencePage({
           </Link>
         </p>
       </section>
+
+      <SeatAssignment
+        seats={seatRows}
+        people={attendeeOptions}
+        conferenceId={conferenceId}
+        organizationId={orgId}
+      />
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Org Readiness</h2>
