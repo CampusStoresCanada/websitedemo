@@ -1116,9 +1116,13 @@ export type Database = {
           contact_id: string | null
           created_at: string
           id: string
+          invited_at: string | null
           is_beta: boolean
+          last_send_error: string | null
           note: string | null
           organization_id: string
+          reminded_at: string | null
+          reminder_count: number
           status: string
           survey_id: string
           updated_at: string
@@ -1130,9 +1134,13 @@ export type Database = {
           contact_id?: string | null
           created_at?: string
           id?: string
+          invited_at?: string | null
           is_beta?: boolean
+          last_send_error?: string | null
           note?: string | null
           organization_id: string
+          reminded_at?: string | null
+          reminder_count?: number
           status?: string
           survey_id: string
           updated_at?: string
@@ -1144,9 +1152,13 @@ export type Database = {
           contact_id?: string | null
           created_at?: string
           id?: string
+          invited_at?: string | null
           is_beta?: boolean
+          last_send_error?: string | null
           note?: string | null
           organization_id?: string
+          reminded_at?: string | null
+          reminder_count?: number
           status?: string
           survey_id?: string
           updated_at?: string

@@ -564,7 +564,7 @@ export async function submitBenchmarkingSurvey(
         updated_at: new Date().toISOString(),
       })
       .eq("id", benchmarkingId)
-      .select("organization_id, enrollment_fte")
+      .select("organization_id, enrollment_fte, fiscal_year")
       .single();
 
     if (updateError) {
@@ -586,6 +586,24 @@ export async function submitBenchmarkingSurvey(
         .eq("id", submitted.organization_id);
       if (orgUpdateError) {
         console.warn("[submitBenchmarkingSurvey] failed to sync organizations.fte:", orgUpdateError.message);
+      }
+    }
+
+    // Confirm receipt, and tell them what happens to their figures next. Fire
+    // and forget on purpose: the submission is saved either way, and a store
+    // must never see "failed to submit" because Resend was having a bad day.
+    if (submitted?.fiscal_year && submitted?.organization_id) {
+      try {
+        const { sendSubmissionReceipt } = await import("@/lib/benchmarking/notify");
+        const outcome = await sendSubmissionReceipt(
+          submitted.fiscal_year,
+          submitted.organization_id
+        );
+        if (outcome && !outcome.sent) {
+          console.warn("[submitBenchmarkingSurvey] receipt not sent:", outcome.error);
+        }
+      } catch (err) {
+        console.warn("[submitBenchmarkingSurvey] receipt threw:", err);
       }
     }
 

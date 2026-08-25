@@ -87,6 +87,13 @@ export type TemplateKey =
   | "conference_checklist_reminder"
   // Sent to ONE person about their own listing — never to their org admin.
   | "directory_visibility_ask"
+  // Benchmarking. Transactional: the survey is a membership obligation and a
+  // member benefit, not a commercial message, so these bypass suppressions on
+  // the same reasoning as election mail. See lib/benchmarking/notify.ts.
+  | "benchmarking_invitation"
+  | "benchmarking_beta_invitation"
+  | "benchmarking_reminder"
+  | "benchmarking_submission_received"
   // Elections
   | "election_call_for_nominations"
   | "election_nomination_received"
@@ -98,6 +105,9 @@ export type TemplateKey =
   // the site, where the session identifies them. See lib/elections/notify.ts.
   | "election_ballots_open"
   | "election_ballot_reminder"
+  // Post-AGM. The members elect at the meeting (Part V S3(e)), so this cannot
+  // be sent before it — see lib/elections/documents/results-announcement.ts.
+  | "election_results_announced"
   // AGM — By-Law Part VII notices, both date-bound
   | "agm_notice_of_meeting"
   | "agm_proxy_form"

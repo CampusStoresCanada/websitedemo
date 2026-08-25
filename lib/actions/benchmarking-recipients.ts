@@ -204,3 +204,84 @@ export async function resolveRecipient(input: {
   revalidatePath("/benchmarking/committee");
   return { success: true };
 }
+
+/**
+ * Send the invitations.
+ *
+ * Admin-only, not rep-only. A regional rep may confirm who the right person is
+ * at a store — that is the job — but putting mail into 52 inboxes is a
+ * different act, and there is no undo on it.
+ *
+ * Safe to run twice: the send skips anyone already invited, so the natural
+ * response to a partial failure (run it again) does not double-mail the stores
+ * that succeeded the first time.
+ */
+export async function sendInvitations(input: {
+  surveyId: string;
+  betaOnly?: boolean;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  sent?: number;
+  failed?: number;
+  failures?: { organizationName: string; error?: string }[];
+}> {
+  const auth = await verifyRep();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!auth.isAdmin) {
+    return { success: false, error: "Only an administrator can send the survey invitations." };
+  }
+
+  const { sendBenchmarkingInvitations } = await import("@/lib/benchmarking/notify");
+  const summary = await sendBenchmarkingInvitations(input.surveyId, {
+    betaOnly: input.betaOnly,
+  });
+
+  revalidatePath("/benchmarking/recipients");
+  return {
+    success: true,
+    sent: summary.sent,
+    failed: summary.failed,
+    // Surfaced, never swallowed: a store with no address on file is the most
+    // common failure and it is also the most actionable one.
+    failures: summary.outcomes
+      .filter((o) => !o.sent)
+      .map((o) => ({ organizationName: o.organizationName, error: o.error })),
+  };
+}
+
+/**
+ * Chase the stores that have not filed.
+ *
+ * Skips anyone who has submitted and anyone who was never successfully invited.
+ * A draft is not a submission — someone who saved and walked away is exactly
+ * who this is for.
+ */
+export async function sendReminders(input: { surveyId: string }): Promise<{
+  success: boolean;
+  error?: string;
+  sent?: number;
+  failed?: number;
+  skipped?: number;
+  failures?: { organizationName: string; error?: string }[];
+}> {
+  const auth = await verifyRep();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!auth.isAdmin) {
+    return { success: false, error: "Only an administrator can send reminders." };
+  }
+
+  const { sendBenchmarkingReminders } = await import("@/lib/benchmarking/notify");
+  const summary = await sendBenchmarkingReminders(input.surveyId);
+
+  revalidatePath("/benchmarking/recipients");
+  return {
+    success: true,
+    sent: summary.sent,
+    failed: summary.failed,
+    skipped: summary.skipped,
+    failures: summary.outcomes
+      .filter((o) => !o.sent)
+      .map((o) => ({ organizationName: o.organizationName, error: o.error })),
+  };
+}
