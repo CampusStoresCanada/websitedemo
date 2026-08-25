@@ -1,5 +1,6 @@
 import type { Worksheet, WorksheetLine } from "@/lib/benchmarking/worksheet";
 import PrintButton from "./PrintButton";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 
 /**
  * The worksheet as it prints.
@@ -10,19 +11,6 @@ import PrintButton from "./PrintButton";
  *
  * Everything interactive is `print:hidden`; everything structural survives.
  */
-
-function fmtDate(iso: string | null): string | null {
-  if (!iso) return null;
-  const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
-  // UTC, like the email: a deadline is a calendar date, and rendering it in the
-  // server's zone turns "closes November 20" into the 19th for every member.
-  return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", {
-    timeZone: "UTC",
-    year: "numeric",
-    month: "long",
-    day: "numeric",
-  });
-}
 
 function WriteBox({ line }: { line: WorksheetLine }) {
   if (line.type === "boolean") {
@@ -48,7 +36,7 @@ function WriteBox({ line }: { line: WorksheetLine }) {
 }
 
 export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) {
-  const closes = fmtDate(worksheet.closesAt);
+  const closes = formatDeadline(worksheet.closesAt);
   const cols = worksheet.priorYears.length;
 
   return (

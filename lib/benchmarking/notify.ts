@@ -24,6 +24,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
+import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
 
 export interface NotifyOutcome {
   template: string;
@@ -47,10 +48,9 @@ function appUrl(): string {
 }
 
 /**
- * Dates are rendered in UTC deliberately. A survey deadline is a calendar date,
- * not an instant, and formatting it in the server's zone turns "closes November
- * 20" into "closes November 19" for anyone west of the runtime — which on
- * Vercel is UTC, so it would be wrong for every Canadian member.
+ * A plain calendar date, for anything that is not the closing boundary.
+ * The deadline goes through formatDeadline() instead — see lib/benchmarking/
+ * deadline.ts for why the two cannot share a formatter.
  */
 function formatDate(iso: string): string {
   const [y, m, d] = iso.slice(0, 10).split("-").map(Number);
@@ -272,8 +272,8 @@ export async function sendBenchmarkingInvitations(
       contact_name: recipientName(r),
       organization_name: orgName,
       fiscal_year: survey.fiscal_year,
-      opens_date: survey.opens_at ? formatDate(survey.opens_at) : "",
-      closes_date: survey.closes_at ? formatDate(survey.closes_at) : "",
+      opens_date: formatOpening(survey.opens_at) ?? "",
+      closes_date: formatDeadline(survey.closes_at) ?? "",
       survey_url: `${appUrl()}/benchmarking/survey`,
     });
 
@@ -301,14 +301,7 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
     submittedOrgIds(survey.fiscal_year),
   ]);
 
-  const daysRemaining = survey.closes_at
-    ? Math.max(
-        0,
-        Math.ceil(
-          (new Date(survey.closes_at).getTime() - Date.now()) / (1000 * 60 * 60 * 24),
-        ),
-      )
-    : 0;
+  const daysRemaining = daysUntilDeadline(survey.closes_at);
 
   const outcomes: NotifyOutcome[] = [];
   let skipped = 0;
@@ -329,7 +322,7 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
         contact_name: recipientName(r),
         organization_name: orgName,
         fiscal_year: survey.fiscal_year,
-        closes_date: survey.closes_at ? formatDate(survey.closes_at) : "",
+        closes_date: formatDeadline(survey.closes_at) ?? "",
         days_remaining: daysRemaining,
         survey_url: `${appUrl()}/benchmarking/survey`,
       },
@@ -372,7 +365,7 @@ export async function sendSubmissionReceipt(
       organization_name: orgName,
       fiscal_year: survey.fiscal_year,
       submitted_date: formatDate(new Date().toISOString()),
-      closes_date: survey.closes_at ? formatDate(survey.closes_at) : "",
+      closes_date: formatDeadline(survey.closes_at) ?? "",
     },
   );
 }
