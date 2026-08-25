@@ -11,6 +11,7 @@ export interface ConferenceHotelSettings {
   hotel_booking_url: string | null;
   hotel_booking_cutoff: string | null;
   hotel_rates: HotelRate[];
+  hotel_note: string | null;
 }
 
 interface SaveHotelResult {
@@ -40,6 +41,7 @@ export async function saveConferenceHotel(
     bookingUrl: string | null;
     bookingCutoff: string | null;
     rates: HotelRate[];
+    note: string | null;
   }
 ): Promise<SaveHotelResult> {
   const auth = await requireAdmin();
@@ -99,10 +101,11 @@ export async function saveConferenceHotel(
       hotel_booking_url: bookingUrl,
       hotel_booking_cutoff: cutoff,
       hotel_rates: cleanRates as unknown as Json,
+      hotel_note: input.note?.trim() || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", conferenceId)
-    .select("hotel_booking_url, hotel_booking_cutoff, hotel_rates")
+    .select("hotel_booking_url, hotel_booking_cutoff, hotel_rates, hotel_note")
     .single();
 
   if (updateError) {
@@ -119,6 +122,7 @@ export async function saveConferenceHotel(
       booking_link_set: Boolean(bookingUrl),
       booking_cutoff: cutoff,
       rate_count: cleanRates.length,
+      note_set: Boolean(input.note?.trim()),
     },
   });
 
@@ -133,6 +137,7 @@ export async function saveConferenceHotel(
       hotel_booking_url: updated.hotel_booking_url,
       hotel_booking_cutoff: updated.hotel_booking_cutoff,
       hotel_rates: parseHotelRates(updated.hotel_rates),
+      hotel_note: updated.hotel_note,
     },
   };
 }

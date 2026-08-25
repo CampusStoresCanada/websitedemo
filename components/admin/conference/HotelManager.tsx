@@ -42,6 +42,7 @@ export default function HotelManager({
     bookingUrl: string | null;
     bookingCutoff: string | null;
     rates: HotelRate[];
+    note: string | null;
   };
 }) {
   const [bookingUrl, setBookingUrl] = useState(initial.bookingUrl ?? "");
@@ -49,6 +50,7 @@ export default function HotelManager({
   const [rates, setRates] = useState<DraftRate[]>(
     initial.rates.map((r) => ({ ...r, rateInput: centsToInput(r.rate_cents) }))
   );
+  const [note, setNote] = useState(initial.note ?? "");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
@@ -117,6 +119,7 @@ export default function HotelManager({
       bookingUrl: bookingUrl.trim() || null,
       bookingCutoff: bookingCutoff.trim() || null,
       rates: parsed,
+      note: note.trim() || null,
     });
     setSaving(false);
 
@@ -323,6 +326,28 @@ export default function HotelManager({
             ))}
           </ul>
         )}
+      </div>
+
+      {/* Anything that is not a rate */}
+      <div className="rounded-xl border border-gray-200 bg-white p-5">
+        <label className={LABEL_CLASS} htmlFor="hotel-note">
+          Note under the rates
+        </label>
+        <textarea
+          id="hotel-note"
+          value={note}
+          onChange={(e) => {
+            dirty();
+            setNote(e.target.value);
+          }}
+          rows={4}
+          placeholder="What the rates exclude, parking, which nights the block covers, who to contact to book outside it."
+          className={`${INPUT_CLASS} resize-y`}
+        />
+        <p className="mt-1.5 text-xs text-gray-500">
+          Plain text — email addresses and links become clickable on the page. Line
+          breaks are kept.
+        </p>
       </div>
 
       {/* Preview of the public line */}

@@ -6,6 +6,7 @@ import {
   formatRate,
   isCutoffPassed,
   parseHotelRates,
+  tokenizeNote,
 } from "../hotel";
 
 describe("parseHotelRates", () => {
@@ -121,5 +122,47 @@ describe("formatCutoffDate", () => {
     // The bug this guards: `new Date("2027-03-12")` is UTC midnight, which is
     // March 11 in Mountain time — the deadline would read a day early.
     expect(formatCutoffDate("2027-01-01")).toBe("Friday, January 1, 2027");
+  });
+});
+
+describe("tokenizeNote", () => {
+  it("leaves plain prose as a single text token", () => {
+    expect(tokenizeNote("Rates exclude HST.")).toEqual([
+      { kind: "text", value: "Rates exclude HST." },
+    ]);
+  });
+
+  it("pulls an email out of surrounding prose", () => {
+    expect(tokenizeNote("Contact carolyn@campusstores.ca to book.")).toEqual([
+      { kind: "text", value: "Contact " },
+      { kind: "email", value: "carolyn@campusstores.ca" },
+      { kind: "text", value: " to book." },
+    ]);
+  });
+
+  it("does not swallow the sentence's full stop into the address", () => {
+    const tokens = tokenizeNote("Email carolyn@campusstores.ca.");
+    expect(tokens[1]).toEqual({ kind: "email", value: "carolyn@campusstores.ca" });
+    expect(tokens[2]).toEqual({ kind: "text", value: "." });
+  });
+
+  it("recognises a URL and keeps trailing punctuation out of the href", () => {
+    const tokens = tokenizeNote("See https://book.passkey.com/e/50914321, then call.");
+    expect(tokens[1]).toEqual({ kind: "url", value: "https://book.passkey.com/e/50914321" });
+    expect(tokens[2]).toEqual({ kind: "text", value: ", then call." });
+  });
+
+  it("handles several links in one note", () => {
+    const tokens = tokenizeNote("a@b.ca and https://x.com and c@d.org");
+    expect(tokens.filter((t) => t.kind !== "text").map((t) => t.value)).toEqual([
+      "a@b.ca",
+      "https://x.com",
+      "c@d.org",
+    ]);
+  });
+
+  it("returns tokens, never markup — angle brackets stay literal text", () => {
+    const tokens = tokenizeNote("<script>alert(1)</script>");
+    expect(tokens).toEqual([{ kind: "text", value: "<script>alert(1)</script>" }]);
   });
 });

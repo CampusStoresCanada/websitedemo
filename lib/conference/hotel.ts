@@ -90,3 +90,41 @@ export function cutoffUrgency(
   if (days <= 14) return "soon";
   return "upcoming";
 }
+
+/**
+ * A note is plain text, but it routinely contains an email address ("contact
+ * carolyn@…") or a URL, and a reader on a phone expects those to be tappable.
+ *
+ * Splitting into tokens here — rather than building an HTML string — is the
+ * whole point: the component renders each token as a React node, so
+ * admin-entered text can never become markup. There is no path from this
+ * function to dangerouslySetInnerHTML.
+ */
+export type NoteToken =
+  | { kind: "text"; value: string }
+  | { kind: "email"; value: string }
+  | { kind: "url"; value: string };
+
+const LINKABLE = /(https?:\/\/[^\s<>()]+[^\s<>().,;:!?]|[\w.+-]+@[\w-]+\.[\w.-]*[\w])/g;
+
+export function tokenizeNote(note: string): NoteToken[] {
+  const tokens: NoteToken[] = [];
+  let lastIndex = 0;
+
+  for (const match of note.matchAll(LINKABLE)) {
+    const value = match[0];
+    const start = match.index ?? 0;
+    if (start > lastIndex) {
+      tokens.push({ kind: "text", value: note.slice(lastIndex, start) });
+    }
+    tokens.push(
+      value.startsWith("http") ? { kind: "url", value } : { kind: "email", value }
+    );
+    lastIndex = start + value.length;
+  }
+
+  if (lastIndex < note.length) {
+    tokens.push({ kind: "text", value: note.slice(lastIndex) });
+  }
+  return tokens;
+}

@@ -4,6 +4,7 @@ import {
   daysUntilCutoff,
   formatCutoffDate,
   formatRate,
+  tokenizeNote,
   type HotelRate,
 } from "@/lib/conference/hotel";
 
@@ -15,6 +16,7 @@ export default function HotelInfo({
   bookingUrl,
   bookingCutoff,
   rates = [],
+  note,
 }: {
   venue: string;
   /** Verified venue coordinates (conference_instances.location_latitude/longitude) — the same
@@ -29,6 +31,9 @@ export default function HotelInfo({
   bookingCutoff?: string | null;
   /** One entry per room type, in admin-chosen display order. */
   rates?: HotelRate[];
+  /** Free-text note under the rates — tax treatment, parking, block dates,
+   *  who to contact for stays outside the block. */
+  note?: string | null;
 }) {
   if (!venue) return null;
 
@@ -61,6 +66,28 @@ export default function HotelInfo({
                 </li>
               ))}
             </ul>
+          ) : null}
+
+          {note?.trim() ? (
+            <p className="mt-3 whitespace-pre-line text-sm text-[#6B6B6B]">
+              {tokenizeNote(note.trim()).map((token, i) => {
+                if (token.kind === "text") return token.value;
+                const href =
+                  token.kind === "email" ? `mailto:${token.value}` : token.value;
+                return (
+                  <a
+                    key={i}
+                    href={href}
+                    {...(token.kind === "url"
+                      ? { target: "_blank", rel: "noopener noreferrer" }
+                      : {})}
+                    className="underline underline-offset-2 hover:text-[#1A1A1A]"
+                  >
+                    {token.value}
+                  </a>
+                );
+              })}
+            </p>
           ) : null}
 
           {bookingCutoff && !blockClosed && (

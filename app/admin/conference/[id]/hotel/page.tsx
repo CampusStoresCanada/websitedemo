@@ -75,6 +75,7 @@ export default async function ConferenceHotelPage({
           bookingUrl: conference.hotel_booking_url,
           bookingCutoff: conference.hotel_booking_cutoff,
           rates: parseHotelRates(conference.hotel_rates),
+          note: conference.hotel_note,
         }}
       />
     </main>

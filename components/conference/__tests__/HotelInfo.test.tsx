@@ -130,3 +130,46 @@ describe("HotelInfo", () => {
     expect(html).toContain("The booking link will be live soon");
   });
 });
+
+describe("HotelInfo note", () => {
+  const NOTE =
+    "Rates exclude HST. Parking is $20 per vehicle per day.\nTo book outside the block, contact carolyn@campusstores.ca.";
+
+  it("renders the note under the rates", () => {
+    const html = renderToStaticMarkup(<HotelInfo venue={VENUE} rates={RATES} note={NOTE} />);
+    expect(html).toContain("Rates exclude HST");
+    expect(html).toContain("Parking is $20 per vehicle per day");
+  });
+
+  it("makes the contact address a mailto link", () => {
+    const html = renderToStaticMarkup(<HotelInfo venue={VENUE} note={NOTE} />);
+    expect(html).toContain('href="mailto:carolyn@campusstores.ca"');
+  });
+
+  it("keeps the line break the admin typed", () => {
+    const html = renderToStaticMarkup(<HotelInfo venue={VENUE} note={NOTE} />);
+    expect(html).toContain("whitespace-pre-line");
+  });
+
+  it("escapes markup in the note instead of rendering it", () => {
+    const html = renderToStaticMarkup(
+      <HotelInfo venue={VENUE} note={"<img src=x onerror=alert(1)>"} />
+    );
+    expect(html).not.toContain("<img");
+    expect(html).toContain("&lt;img");
+  });
+
+  it("renders nothing extra when there is no note", () => {
+    const html = renderToStaticMarkup(<HotelInfo venue={VENUE} rates={RATES} />);
+    expect(html).not.toContain("whitespace-pre-line");
+  });
+
+  it("still shows the note after the block has closed", () => {
+    atDate("2027-03-13");
+    const html = renderToStaticMarkup(
+      <HotelInfo venue={VENUE} note={NOTE} bookingUrl="https://x.com" bookingCutoff="2027-03-12" />
+    );
+    expect(html).toContain("carolyn@campusstores.ca");
+    expect(html).toContain("Our room block has closed");
+  });
+});

@@ -70,7 +70,7 @@ export default async function ConferenceEditionHubPage({
   const db = createAdminClient();
   const { data: conference } = await db
     .from("conference_instances")
-    .select("id, name, year, edition_code, status, start_date, end_date, location_venue, location_city, location_province, location_latitude, location_longitude, bursary_goal_cents, hotel_booking_url, hotel_booking_cutoff, hotel_rates")
+    .select("id, name, year, edition_code, status, start_date, end_date, location_venue, location_city, location_province, location_latitude, location_longitude, bursary_goal_cents, hotel_booking_url, hotel_booking_cutoff, hotel_rates, hotel_note")
     .eq("year", parseInt(year, 10))
     .eq("edition_code", edition)
     .maybeSingle();
@@ -357,6 +357,7 @@ export default async function ConferenceEditionHubPage({
                   bookingUrl={conference.hotel_booking_url}
                   bookingCutoff={conference.hotel_booking_cutoff}
                   rates={hotelRates}
+                  note={conference.hotel_note}
                 />
               </div>
               {partnerOrg && (
@@ -564,6 +565,7 @@ export default async function ConferenceEditionHubPage({
                   bookingUrl={conference.hotel_booking_url}
                   bookingCutoff={conference.hotel_booking_cutoff}
                   rates={hotelRates}
+                  note={conference.hotel_note}
                 />
                 </div>
                 {footerLinks}
