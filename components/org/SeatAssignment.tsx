@@ -37,14 +37,34 @@ export interface AttendeeOption {
   name: string;
 }
 
+/**
+ * What is true about a person, in the reader's words.
+ *
+ * The page used to carry a separate eight-column table of `person_kind`,
+ * `assignment_status`, `badge_print_status` and "Access (from seats)" — the
+ * database's vocabulary, next to a panel that decides exactly those values.
+ * Cause and effect shown as unrelated tables. This folds the parts a company
+ * can act on into the place where they act.
+ */
+export interface PersonStatus {
+  /** No account yet — they cannot accept agreements or see their own page. */
+  hasAccount: boolean;
+  /** Required details still missing (travel data, flags). */
+  missingCount: number;
+  badgePrinted: boolean;
+  checkedIn: boolean;
+}
+
 export default function SeatAssignment({
   seats,
   people,
+  statusByPerson,
   conferenceId,
   organizationId,
 }: {
   seats: SeatRow[];
   people: AttendeeOption[];
+  statusByPerson: Record<string, PersonStatus>;
   conferenceId: string;
   organizationId: string;
 }) {
@@ -61,6 +81,15 @@ export default function SeatAssignment({
   }
 
   const filled = attendable.filter((s) => s.holderPersonId).length;
+  const needAttention = new Set(
+    attendable
+      .map((s) => s.holderPersonId)
+      .filter((id): id is string => !!id)
+      .filter((id) => {
+        const st = statusByPerson[id];
+        return st && (!st.hasAccount || st.missingCount > 0);
+      })
+  ).size;
 
   return (
     <section id="whos-going" className="rounded-xl border border-gray-200 bg-white p-4">
@@ -68,6 +97,7 @@ export default function SeatAssignment({
         <h2 className="text-base font-semibold text-gray-900">Who&rsquo;s going</h2>
         <p className="text-sm tabular-nums text-gray-500">
           {filled} of {attendable.length} places filled
+          {needAttention > 0 ? ` · ${needAttention} need something` : ""}
         </p>
       </div>
       <p className="mt-1 text-sm text-gray-600">
@@ -83,6 +113,7 @@ export default function SeatAssignment({
             name={name}
             rows={rows}
             people={people}
+            statusByPerson={statusByPerson}
             conferenceId={conferenceId}
             organizationId={organizationId}
           />
@@ -96,12 +127,14 @@ function EntityGroup({
   name,
   rows,
   people,
+  statusByPerson,
   conferenceId,
   organizationId,
 }: {
   name: string;
   rows: SeatRow[];
   people: AttendeeOption[];
+  statusByPerson: Record<string, PersonStatus>;
   conferenceId: string;
   organizationId: string;
 }) {
@@ -123,6 +156,7 @@ function EntityGroup({
               key={seat.id}
               seat={seat}
               people={people}
+              status={seat.holderPersonId ? statusByPerson[seat.holderPersonId] ?? null : null}
               conferenceId={conferenceId}
               organizationId={organizationId}
             />
@@ -132,14 +166,46 @@ function EntityGroup({
   );
 }
 
+/**
+ * Only what a company can act on, and only when it is true.
+ *
+ * Deliberately not a status column per person: "assigned", "not checked in"
+ * and "badge pending" are the normal state for months and say nothing. A flag
+ * appears when there is something to be done about it.
+ */
+function PersonFlags({ status }: { status: PersonStatus }) {
+  const flags: { label: string; tone: string }[] = [];
+  if (!status.hasAccount) flags.push({ label: "hasn't activated their account", tone: "text-amber-800" });
+  if (status.missingCount > 0)
+    flags.push({
+      label: `${status.missingCount} detail${status.missingCount === 1 ? "" : "s"} missing`,
+      tone: "text-amber-800",
+    });
+  if (status.checkedIn) flags.push({ label: "checked in", tone: "text-green-700" });
+  else if (status.badgePrinted) flags.push({ label: "badge printed", tone: "text-gray-500" });
+  if (flags.length === 0) return null;
+  return (
+    <span className="ml-2 text-xs font-normal">
+      {flags.map((f, i) => (
+        <span key={f.label} className={f.tone}>
+          {i > 0 ? " · " : ""}
+          {f.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 function SeatLine({
   seat,
   people,
+  status,
   conferenceId,
   organizationId,
 }: {
   seat: SeatRow;
   people: AttendeeOption[];
+  status: PersonStatus | null;
   conferenceId: string;
   organizationId: string;
 }) {
@@ -222,6 +288,7 @@ function SeatLine({
           <>
             <span className="flex-1 text-sm font-medium text-gray-900">
               {seat.holderName ?? "Assigned"}
+              {status ? <PersonFlags status={status} /> : null}
             </span>
             <button
               type="button"
