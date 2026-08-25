@@ -27,43 +27,89 @@ type CheckArgs = {
 };
 
 export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = {
+  /**
+   * Has this org assigned the people to the seats it holds?
+   *
+   * ⚠️ Sweeps every entity of the SAME KIND the org holds, not the single
+   * entity named on the task.
+   *
+   * The named-entity version silently passed anyone holding an equivalent
+   * entity under a different name. Measured 2026-08-25: the task pointed at
+   * "Exhibitor Staff Registration" while 12 orgs held "Connected Exhibitor
+   * Staff Registration" — two independent entities with no `instance_of`
+   * between them. All 12 were reported complete with **zero** people assigned
+   * and 60 seats unfilled, on the only checklist that was live. A booth with
+   * nobody assigned cannot be checked in on site, so this failed in the
+   * direction that costs the most.
+   *
+   * The "holds none of this — nothing to assign" shortcut was not itself
+   * wrong; it was the right answer to the wrong question. Now "nothing to
+   * assign" means the org holds no seats of that kind at all.
+   *
+   * Kind rather than every seat-bearing entity, deliberately: `event` and
+   * `membership_renewal` also carry seats, and neither is booth staff.
+   */
   async seat_assigned({ db, organizationId, conferenceId, entityId }) {
     if (!entityId) return true; // malformed task — never blocks, but shouldn't happen (form requires it)
-    const { data } = await db
-      .from("entity_balance_seats")
-      .select("holder_person_id")
-      .eq("organization_id", organizationId)
-      .eq("entity_id", entityId);
-    if (!data || data.length === 0) return true; // org holds none of this entity — nothing to assign
-    const assignedCount = data.filter((s) => s.holder_person_id !== null).length;
 
-    // "All purchased seats assigned" is only the right definition of done
-    // when the org actually intends to use every seat it bought — someone
-    // who buys 4 exhibitor registrations but is only sending 1 person isn't
-    // "behind," they're done. If they've told us how many they actually
-    // plan to use (conference_entity_usage_intents), that number is what
-    // "complete" means instead — capped at the real seat count so a stale
-    // over-declaration can never make this impossible to satisfy.
-    const { data: intent } = await db
-      .from("conference_entity_usage_intents")
-      .select("intended_quantity, declared_against_total")
-      .eq("organization_id", organizationId)
-      .eq("entity_id", entityId)
-      .eq("conference_id", conferenceId)
+    const { data: named } = await db
+      .from("conference_entities")
+      .select("kind")
+      .eq("id", entityId)
       .maybeSingle();
+    if (!named?.kind) return true;
 
-    // A later purchase can raise the real seat count past what the org saw
-    // when they declared — e.g. they said "using 1 of 4," then bought 2
-    // more, now holding 6. The old "1" no longer reflects a real decision
-    // about those extra seats, so it's treated as stale (not merely
-    // clamped) and this falls through to strict mode until they re-declare.
-    if (intent && data.length <= intent.declared_against_total) {
-      return assignedCount >= Math.min(intent.intended_quantity, data.length);
+    const { data: seats } = await db
+      .from("entity_balance_seats")
+      .select("entity_id, holder_person_id, entity:conference_entities!inner(kind)")
+      .eq("organization_id", organizationId)
+      .eq("conference_id", conferenceId)
+      .eq("entity.kind", named.kind);
+    // Genuinely nothing of this kind on their account.
+    if (!seats || seats.length === 0) return true;
+
+    const byEntity = new Map<string, (boolean | null)[]>();
+    for (const row of seats) {
+      if (!row.entity_id) continue;
+      const list = byEntity.get(row.entity_id) ?? [];
+      list.push(row.holder_person_id !== null);
+      byEntity.set(row.entity_id, list);
     }
 
-    // No declared intent, or the declaration is stale — fall back to the
-    // original strict definition.
-    return data.every((s) => s.holder_person_id !== null);
+    const { data: intents } = await db
+      .from("conference_entity_usage_intents")
+      .select("entity_id, intended_quantity, declared_against_total")
+      .eq("organization_id", organizationId)
+      .eq("conference_id", conferenceId)
+      .in("entity_id", [...byEntity.keys()]);
+    const intentByEntity = new Map(
+      (intents ?? []).map((i) => [i.entity_id, i])
+    );
+
+    // Every entity of this kind must be satisfied. One fully-staffed
+    // registration type does not excuse an empty one.
+    for (const [id, assignments] of byEntity) {
+      const total = assignments.length;
+      const assignedCount = assignments.filter(Boolean).length;
+      const intent = intentByEntity.get(id);
+
+      // "All purchased seats assigned" is only the right definition of done
+      // when the org intends to use every seat it bought — someone who buys 4
+      // and is sending 1 isn't behind, they're done. Their declared number is
+      // what complete means instead, capped at the real seat count so a stale
+      // over-declaration can never make this impossible to satisfy.
+      //
+      // A later purchase can raise the real count past what they saw when they
+      // declared — said "using 1 of 4", then bought 2 more, now holding 6. The
+      // old "1" no longer reflects a decision about the extra seats, so it is
+      // treated as stale and falls through to strict until they re-declare.
+      if (intent && total <= intent.declared_against_total) {
+        if (assignedCount < Math.min(intent.intended_quantity, total)) return false;
+        continue;
+      }
+      if (assignedCount < total) return false;
+    }
+    return true;
   },
 
   async entity_purchased({ db, organizationId, entityId }) {
