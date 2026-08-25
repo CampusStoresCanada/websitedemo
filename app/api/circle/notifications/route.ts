@@ -4,6 +4,7 @@ import { isCircleConfigured } from "@/lib/circle/config";
 import { getCircleClientForUser } from "@/lib/circle/member-session";
 import { TTLCache } from "@/lib/cache/ttl-cache";
 import { isFeatureEnabled } from "@/lib/data";
+import { isCircleBadgePaused } from "@/lib/circle/badge-preference";
 
 export const dynamic = "force-dynamic";
 
@@ -68,6 +69,16 @@ export async function GET() {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
     return NextResponse.json({ error: auth.error }, { status: auth.status });
+  }
+
+  // Belt and braces with Header.tsx, which already skips the poll when paused:
+  // a tab left open across the toggle would otherwise keep billing Circle until
+  // it reloads.
+  if (await isCircleBadgePaused(auth.ctx.userId, auth.ctx.userEmail)) {
+    return NextResponse.json(
+      { notifications: [], replies: [], dms: [], linked: true, unreadCount: 0, dmUnreadCount: 0, paused: true },
+      { status: 200, headers: { "x-circle-cache": "PAUSED" } }
+    );
   }
 
   const cacheKey = summaryCacheKey(auth.ctx.userId);

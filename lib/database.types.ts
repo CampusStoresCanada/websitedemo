@@ -7402,6 +7402,7 @@ export type Database = {
           global_role: string
           id: string
           is_benchmarking_reviewer: boolean
+          preferences: Json
           updated_at: string | null
         }
         Insert: {
@@ -7411,6 +7412,7 @@ export type Database = {
           global_role?: string
           id: string
           is_benchmarking_reviewer?: boolean
+          preferences?: Json
           updated_at?: string | null
         }
         Update: {
@@ -7420,6 +7422,7 @@ export type Database = {
           global_role?: string
           id?: string
           is_benchmarking_reviewer?: boolean
+          preferences?: Json
           updated_at?: string | null
         }
         Relationships: []

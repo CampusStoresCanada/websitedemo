@@ -5,6 +5,7 @@ import { mintMemberToken } from "@/lib/circle/headless-auth";
 import { resolveUserCircleId } from "@/lib/circle/member-link";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import { isFeatureEnabled } from "@/lib/data";
+import { isCircleBadgePaused } from "@/lib/circle/badge-preference";
 
 export const dynamic = "force-dynamic";
 
@@ -33,6 +34,14 @@ export async function POST() {
 
   if (!isCircleConfigured() || !(await isFeatureEnabled("circle"))) {
     return NextResponse.json({ ok: true, skipped: "circle_not_configured" }, { status: 200 });
+  }
+
+  // mintMemberToken() is a billed Circle call on every page load. Someone who
+  // has paused their badge is using Circle directly anyway, so pre-warming a
+  // headless session for them buys nothing — /api/circle/member-space still
+  // mints on demand if they do click through.
+  if (await isCircleBadgePaused(auth.ctx.userId, auth.ctx.userEmail)) {
+    return NextResponse.json({ ok: true, skipped: "badge_paused" }, { status: 200 });
   }
 
   try {
