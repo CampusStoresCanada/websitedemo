@@ -2878,6 +2878,9 @@ export type Database = {
           edition_code: string
           end_date: string | null
           floor_plan_url: string | null
+          hotel_booking_cutoff: string | null
+          hotel_booking_url: string | null
+          hotel_rates: Json
           id: string
           location_city: string | null
           location_latitude: number | null
@@ -2911,6 +2914,9 @@ export type Database = {
           edition_code?: string
           end_date?: string | null
           floor_plan_url?: string | null
+          hotel_booking_cutoff?: string | null
+          hotel_booking_url?: string | null
+          hotel_rates?: Json
           id?: string
           location_city?: string | null
           location_latitude?: number | null
@@ -2944,6 +2950,9 @@ export type Database = {
           edition_code?: string
           end_date?: string | null
           floor_plan_url?: string | null
+          hotel_booking_cutoff?: string | null
+          hotel_booking_url?: string | null
+          hotel_rates?: Json
           id?: string
           location_city?: string | null
           location_latitude?: number | null

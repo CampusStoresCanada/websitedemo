@@ -25,6 +25,7 @@ import BursaryImpactStat from "@/components/conference/BursaryImpactStat";
 import RegisterBursaryInterestCTA from "@/components/conference/RegisterBursaryInterestCTA";
 import TuesdayAudienceNote from "@/components/conference/TuesdayAudienceNote";
 import HotelInfo from "@/components/conference/HotelInfo";
+import { parseHotelRates } from "@/lib/conference/hotel";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
 import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
@@ -69,7 +70,7 @@ export default async function ConferenceEditionHubPage({
   const db = createAdminClient();
   const { data: conference } = await db
     .from("conference_instances")
-    .select("id, name, year, edition_code, status, start_date, end_date, location_venue, location_city, location_province, location_latitude, location_longitude, bursary_goal_cents")
+    .select("id, name, year, edition_code, status, start_date, end_date, location_venue, location_city, location_province, location_latitude, location_longitude, bursary_goal_cents, hotel_booking_url, hotel_booking_cutoff, hotel_rates")
     .eq("year", parseInt(year, 10))
     .eq("edition_code", edition)
     .maybeSingle();
@@ -248,6 +249,7 @@ export default async function ConferenceEditionHubPage({
     </div>
   ) : undefined;
 
+  const hotelRates = parseHotelRates(conference.hotel_rates);
   const venue = [conference.location_venue?.trim(), conference.location_city?.trim(), conference.location_province?.trim()]
     .filter(Boolean)
     .join(", ");
@@ -348,7 +350,14 @@ export default async function ConferenceEditionHubPage({
                 <p className="text-sm text-red-600">{offers.error}</p>
               )}
               <div className="pt-4">
-                <HotelInfo venue={venue} lat={conference.location_latitude} lng={conference.location_longitude} />
+                <HotelInfo
+                  venue={venue}
+                  lat={conference.location_latitude}
+                  lng={conference.location_longitude}
+                  bookingUrl={conference.hotel_booking_url}
+                  bookingCutoff={conference.hotel_booking_cutoff}
+                  rates={hotelRates}
+                />
               </div>
               {partnerOrg && (
                 <div className="pt-4">
@@ -548,7 +557,14 @@ export default async function ConferenceEditionHubPage({
                     conferenceEndDate={conference.end_date ?? ""}
                     audiences={["Partner"]}
                   />
-                  <HotelInfo venue={venue} lat={conference.location_latitude} lng={conference.location_longitude} />
+                  <HotelInfo
+                  venue={venue}
+                  lat={conference.location_latitude}
+                  lng={conference.location_longitude}
+                  bookingUrl={conference.hotel_booking_url}
+                  bookingCutoff={conference.hotel_booking_cutoff}
+                  rates={hotelRates}
+                />
                 </div>
                 {footerLinks}
               </div>
