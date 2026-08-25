@@ -14,6 +14,8 @@ import { loadOrgTasks } from "@/lib/conference/checklist-tasks";
 import TaskChecklist from "@/components/conference/TaskChecklist";
 import SeatAssignment from "@/components/org/SeatAssignment";
 import OrgAgreements from "@/components/org/OrgAgreements";
+import OrgPayments from "@/components/org/OrgPayments";
+import { loadOrgPayments } from "@/lib/conference/org-payments";
 import { loadOrgLegalStatus } from "@/lib/conference/org-legal";
 import { listEntitySeatsForOrg } from "@/lib/actions/conference-entity-commerce";
 
@@ -173,6 +175,7 @@ export default async function OrgConferencePage({
   // Agreements split by who owes them: the buyer signs for the company, each
   // attendee signs their own.
   const legalStatus = await loadOrgLegalStatus(adminClient, conferenceId, orgId, auth.ctx.userId);
+  const payments = await loadOrgPayments(adminClient, conferenceId, orgId);
 
   const attendeeOptions = people
     .filter((row) => row.assignment_status !== "canceled")
@@ -247,6 +250,8 @@ export default async function OrgConferencePage({
           </Link>
         </p>
       </section>
+
+      <OrgPayments summary={payments} />
 
       <OrgAgreements status={legalStatus} />
 

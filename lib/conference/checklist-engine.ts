@@ -41,7 +41,11 @@ function getTaskCta(
     case "travel_info_submitted":
       return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
     case "payment_complete":
-      return { label: "View your account", url: `${appUrl}/org/${ctx.orgSlug}` };
+      // The bare org page shows nothing about conference money.
+      return {
+        label: "See what's owed",
+        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#payment`,
+      };
     case "legal_document_accepted":
       // Was "View readiness & travel status" pointing at this same page, which
       // then had no acceptance on it — a CTA that led nowhere twice over.

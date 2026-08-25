@@ -132,14 +132,34 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
     return data.every((p) => p.travel_mode !== null);
   },
 
+  /**
+   * Does this org owe anything for the conference?
+   *
+   * Two corrections over the original, both of the same family as the
+   * seat_assigned bug — the right answer to the wrong question:
+   *
+   * 1. It asked "have you paid ANYTHING?" — one paid order marked the whole
+   *    task complete no matter what else was outstanding. Now it asks whether
+   *    anything is unsettled, which is what the task actually claims.
+   * 2. It gated on `paid_at`, which is not reliably populated: on CSC 2027 an
+   *    order carries status 'paid' with a null `paid_at` (Varsity Collection,
+   *    $9,040, two booths). That would have told a company it had not paid for
+   *    booths it holds. `status` is what the refund and reconciliation paths
+   *    maintain.
+   *
+   * Cancelled and expired orders are not debts, so they never block.
+   */
   async payment_complete({ db, organizationId, conferenceId }) {
-    const { count } = await db
+    const { data } = await db
       .from("conference_orders")
-      .select("id", { count: "exact", head: true })
+      .select("status")
       .eq("organization_id", organizationId)
-      .eq("conference_id", conferenceId)
-      .not("paid_at", "is", null);
-    return (count ?? 0) > 0;
+      .eq("conference_id", conferenceId);
+    if (!data || data.length === 0) return true; // bought nothing — owes nothing
+
+    const settled = new Set(["paid", "partially_refunded", "refunded"]);
+    const ignored = new Set(["canceled", "cancelled", "expired"]);
+    return data.every((o) => settled.has(o.status) || ignored.has(o.status));
   },
 
   async legal_document_accepted({ db, organizationId, conferenceId }) {
