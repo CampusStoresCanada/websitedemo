@@ -56,23 +56,22 @@ export async function hasCapability(
   return data === true;
 }
 
-/** Every capability this person currently holds. */
+/** Every capability this person currently holds, via the roles they hold. */
 export async function activeCapabilities(subjectId: string): Promise<string[]> {
   const db = createAdminClient();
-  const nowIso = new Date().toISOString();
-  const { data, error } = await db
-    .from("capability_grants")
-    .select("capability")
-    .eq("subject_id", subjectId)
-    .is("revoked_at", null)
-    .lte("starts_at", nowIso)
-    .gt("ends_at", nowIso);
+  const { data, error } = await db.rpc("current_capabilities", {
+    p_subject: subjectId,
+  });
 
   if (error) {
-    console.error("[capabilities] activeCapabilities failed:", error);
+    console.error("[capabilities] current_capabilities failed:", error);
     return [];
   }
   return Array.from(
-    new Set((data ?? []).map((r: { capability: string }) => r.capability)),
+    new Set(
+      ((data ?? []) as (string | { capability: string })[]).map((c) =>
+        typeof c === "string" ? c : c.capability,
+      ),
+    ),
   );
 }

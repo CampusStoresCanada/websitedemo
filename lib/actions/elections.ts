@@ -642,3 +642,81 @@ export async function saveReminderScheduleAction(
   revalidatePath(`/admin/elections/${slug}`);
   return { ok: true };
 }
+
+/**
+ * Upload the reviewed financial statements for the AGM.
+ *
+ * The one item in the package that nothing in this system can generate — it
+ * arrives from the public accountant as a file, and until it does the package
+ * cannot go to members.
+ */
+export async function uploadFinancialStatementsAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only an administrator can attach the financial statements." };
+
+  const file = formData.get("file");
+  if (!(file instanceof File) || file.size === 0)
+    return { ok: false, error: "Choose the statements file to upload." };
+
+  // The board-documents bucket accepts these; anything else fails at the
+  // storage layer with a less helpful message than this one.
+  const allowed = [
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+  ];
+  if (!allowed.includes(file.type))
+    return { ok: false, error: `${file.type || "That file type"} cannot be attached — use a PDF, Word or Excel file.` };
+
+  if (file.size > 50 * 1024 * 1024)
+    return { ok: false, error: "That file is over the 50MB limit." };
+
+  const { attachFinancialStatements } = await import("@/lib/elections/service");
+  const result = await attachFinancialStatements({
+    slug,
+    filename: file.name,
+    contentType: file.type,
+    bytes: new Uint8Array(await file.arrayBuffer()),
+    uploadedByProfileId: auth.user.id,
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
+/**
+ * Send the members' AGM package.
+ *
+ * Sending while items are outstanding is allowed and often right — the
+ * statements commonly arrive last. It just has to be a decision rather than an
+ * accident, so the caller acknowledges what is missing and members are told
+ * what is still to come.
+ */
+export async function sendAgmPackageAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only an administrator can send the AGM package." };
+
+  const { sendAgmPackage } = await import("@/lib/elections/service");
+  const result = await sendAgmPackage(slug, auth.user.id, {
+    acknowledgedOutstanding: formData.get("acknowledgeOutstanding") === "1",
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}

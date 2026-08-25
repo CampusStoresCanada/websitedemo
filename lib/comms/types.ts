@@ -101,6 +101,7 @@ export type TemplateKey =
   // AGM — By-Law Part VII notices, both date-bound
   | "agm_notice_of_meeting"
   | "agm_proxy_form"
+  | "agm_package_available"
   | "prospective_booth_payment_confirmation"
   | "prospective_booth_application_reminder"
   // Events

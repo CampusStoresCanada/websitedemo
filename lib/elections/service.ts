@@ -36,6 +36,7 @@ import {
 import { deriveSchedule, phaseOn, canCloseNominations, type ElectionSchedule } from "./schedule";
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import { buildAgmScript } from "./documents/agm-script";
+import { buildAgmPackage, type AgmPackage } from "./documents/agm-package";
 import {
   buildNominatingCommitteeReport,
   type ReportDirector,
@@ -62,6 +63,7 @@ import {
   notifyNominationIncomplete,
   notifyCallForNominations,
   notifyBallotsOpen,
+  notifyAgmPackage,
   notifyAgmNotice,
   notifyProxyForm,
   summarizeOutcomes,
@@ -2807,4 +2809,352 @@ export async function runDueBallotReminders(
   }
 
   return fired;
+}
+
+// ---------------------------------------------------------------------------
+// The members' AGM package
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the AGM package's real state.
+ *
+ * Reads across three places deliberately: the election (what stage the slate is
+ * at), the meeting record (agenda, and the financial statements attached to it),
+ * and the PREVIOUS AGM (whose minutes this meeting approves). None of those is
+ * the package's owner — the package is a view over all of them.
+ */
+export async function getAgmPackageState(slug: string): Promise<
+  | (AgmPackage & {
+      meetingId: string | null;
+      financialDocumentId: string | null;
+    })
+  | null
+> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const cfg = election.config as unknown as {
+    agmNoticeSentAt?: string;
+    proxyFormSentAt?: string;
+    publicAccountant?: string;
+  };
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, agenda_html")
+    .eq("meeting_type", "agm")
+    .eq("meeting_date", election.schedule.agmDate)
+    .maybeSingle();
+
+  // The AGM immediately before this one. Its minutes are what this meeting is
+  // asked to approve, so they travel with the package.
+  const { data: prior } = await db
+    .from("board_meetings")
+    .select("meeting_date, minutes_html")
+    .eq("meeting_type", "agm")
+    .lt("meeting_date", election.schedule.agmDate)
+    .order("meeting_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let financialDocumentId: string | null = null;
+  let financialFilename: string | null = null;
+  if (meeting?.id) {
+    const { data: fin } = await db
+      .from("board_documents")
+      .select("id, title, storage_path")
+      .eq("meeting_id", meeting.id)
+      .eq("document_type", "financials")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (fin) {
+      financialDocumentId = fin.id as string;
+      financialFilename =
+        (fin.title as string) ?? (fin.storage_path as string)?.split("/").pop() ?? "Uploaded";
+    }
+  }
+
+  const candidates = await getBallotCandidates(election);
+  const nominationsClosed = !["draft", "nominating"].includes(election.status);
+
+  const pkg = buildAgmPackage({
+    cycleYear: election.cycleYear,
+    agmDate: election.schedule.agmDate,
+    // Matches getAgmScript: CSC's year ends 31 August before the AGM.
+    fiscalYearEnd: `${election.cycleYear - 1}-08-31`,
+    publicAccountant: cfg.publicAccountant ?? "MNP LLP",
+    noticeSentAt: cfg.agmNoticeSentAt ?? null,
+    hasAgenda: Boolean(meeting?.agenda_html),
+    priorAgmDate: (prior?.meeting_date as string) ?? null,
+    hasPriorMinutes: Boolean(prior?.minutes_html),
+    financialStatementsFilename: financialFilename,
+    nominationsClosed,
+    candidateCount: candidates.length,
+    outcome: (election.outcome as "acclaimed" | "balloted" | null) ?? null,
+    proxyFormSentAt: cfg.proxyFormSentAt ?? null,
+  });
+
+  return { ...pkg, meetingId: meeting?.id ?? null, financialDocumentId };
+}
+
+/**
+ * Attach the reviewed financial statements to the AGM.
+ *
+ * Stored as a `financials` board document on the meeting rather than anywhere
+ * election-specific: the statements belong to the meeting that receives them,
+ * and the board-documents bucket and OneDrive sync already understand that
+ * shape. Replacing supersedes rather than deletes — a superseded set of
+ * statements is a thing an auditor may ask about.
+ */
+export async function attachFinancialStatements(params: {
+  slug: string;
+  filename: string;
+  contentType: string;
+  bytes: Uint8Array;
+  uploadedByProfileId: string;
+}): Promise<Result<{ documentId: string; replaced: boolean }>> {
+  const db = createAdminClient();
+  const election = await getElection(params.slug);
+  if (!election) return fail("That election does not exist.");
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, meeting_date")
+    .eq("meeting_type", "agm")
+    .eq("meeting_date", election.schedule.agmDate)
+    .maybeSingle();
+
+  if (!meeting?.id)
+    return fail("There is no AGM meeting record yet, so there is nothing to attach this to.");
+
+  const safeName = params.filename.replace(/[^A-Za-z0-9._-]/g, "_");
+  const storagePath = `${meeting.meeting_date}/financials/${Date.now()}_${safeName}`;
+
+  const { error: uploadError } = await db.storage
+    .from("board-documents")
+    .upload(storagePath, params.bytes, { contentType: params.contentType, upsert: false });
+
+  if (uploadError) return fail(`Upload failed: ${uploadError.message}`);
+
+  const { data: existing } = await db
+    .from("board_documents")
+    .select("id")
+    .eq("meeting_id", meeting.id)
+    .eq("document_type", "financials")
+    .maybeSingle();
+
+  const { data: inserted, error } = await db
+    .from("board_documents")
+    .insert({
+      meeting_id: meeting.id,
+      title: params.filename,
+      document_type: "financials",
+      context: "meeting",
+      storage_path: storagePath,
+      mime_type: params.contentType,
+      file_size_bytes: params.bytes.byteLength,
+      uploaded_by: params.uploadedByProfileId,
+    })
+    .select("id")
+    .single();
+
+  if (error || !inserted) return fail(`Could not record the document: ${error?.message}`);
+
+  return ok({ documentId: inserted.id as string, replaced: Boolean(existing) });
+}
+
+/**
+ * The AGM package as a member sees it.
+ *
+ * Assembled at read time rather than published as a file. Three reasons: the
+ * financial statements are a private document that must not become a public URL;
+ * the nominating report and candidate statements are generated from live data
+ * and would go stale the moment a nominee withdrew; and a page can be revisited,
+ * which a 40MB email attachment cannot.
+ *
+ * The statements are served through a short-lived signed URL generated here,
+ * after the caller has been shown to administer an eligible member store. The
+ * storage path is never returned — same rule as the partner documents.
+ */
+export async function getMemberAgmPackage(
+  slug: string,
+  profileId: string,
+  organizations: { organization_id: string; role: string; status: string }[]
+): Promise<
+  | {
+      election: Election;
+      organizationName: string | null;
+      blocked: string | null;
+      noticeSentAt: string | null;
+      agendaHtml: string | null;
+      priorAgmDate: string | null;
+      priorMinutesHtml: string | null;
+      financials: { filename: string; url: string } | null;
+      report: Awaited<ReturnType<typeof getNominatingCommitteeReport>> | null;
+      candidates: BallotCandidate[];
+      proxyUrl: string;
+    }
+  | null
+> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const actor = await resolveActor(profileId, organizations);
+
+  // The package is member-facing governance material: eligibility to receive it
+  // is the same test as eligibility to vote, so a lapsed store is told why
+  // rather than shown a blank page.
+  let organizationName: string | null = null;
+  let blocked: string | null = "You do not administer a member store.";
+  for (const orgId of actor.adminOrganizationIds) {
+    const verdict = await isOrganizationEligible(election.id, orgId);
+    if (verdict?.isEligible) {
+      const { data: org } = await db.from("organizations").select("name").eq("id", orgId).maybeSingle();
+      organizationName = (org?.name as string) ?? null;
+      blocked = null;
+      break;
+    }
+    if (verdict?.reason) blocked = verdict.reason;
+  }
+
+  const cfg = election.config as unknown as { agmNoticeSentAt?: string };
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, agenda_html")
+    .eq("meeting_type", "agm")
+    .eq("meeting_date", election.schedule.agmDate)
+    .maybeSingle();
+
+  const { data: prior } = await db
+    .from("board_meetings")
+    .select("meeting_date, minutes_html")
+    .eq("meeting_type", "agm")
+    .lt("meeting_date", election.schedule.agmDate)
+    .order("meeting_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  let financials: { filename: string; url: string } | null = null;
+  if (!blocked && meeting?.id) {
+    const { data: fin } = await db
+      .from("board_documents")
+      .select("title, storage_path")
+      .eq("meeting_id", meeting.id)
+      .eq("document_type", "financials")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (fin?.storage_path) {
+      const { data: signed } = await db.storage
+        .from("board-documents")
+        .createSignedUrl(fin.storage_path as string, 3600);
+      if (signed?.signedUrl) {
+        financials = {
+          filename: (fin.title as string) ?? "Financial statements",
+          url: signed.signedUrl,
+        };
+      }
+    }
+  }
+
+  const nominationsClosed = !["draft", "nominating"].includes(election.status);
+
+  return {
+    election,
+    organizationName,
+    blocked,
+    noticeSentAt: cfg.agmNoticeSentAt ?? null,
+    agendaHtml: (meeting?.agenda_html as string) ?? null,
+    priorAgmDate: (prior?.meeting_date as string) ?? null,
+    priorMinutesHtml: (prior?.minutes_html as string) ?? null,
+    financials,
+    report: nominationsClosed ? await getNominatingCommitteeReport(slug) : null,
+    candidates: election.outcome === "acclaimed" ? [] : await getBallotCandidates(election),
+    proxyUrl: `/elections/${slug}/proxy`,
+  };
+}
+
+/**
+ * Send the members' AGM package.
+ *
+ * An incomplete package can still be sent, and often should be: the statements
+ * commonly arrive last, and members are better served by having the agenda and
+ * the minutes in December than by receiving everything in January. What is not
+ * acceptable is sending it silently incomplete, so the caller must acknowledge
+ * what is missing and the email itself tells members what is still to come.
+ *
+ * Repeatable. Re-sending after the statements land is the expected second use,
+ * not an accident to guard against.
+ */
+export async function sendAgmPackage(
+  slug: string,
+  sentByProfileId: string,
+  opts: { acknowledgedOutstanding: boolean }
+): Promise<
+  Result<{ institutions: number; sent: number; failed: number; problems: string[]; outstanding: number }>
+> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  const pkg = await getAgmPackageState(slug);
+  if (!pkg) return fail("Could not resolve the package.");
+
+  if (!pkg.complete && !opts.acknowledgedOutstanding) {
+    return fail(
+      `${pkg.outstanding.length} item${pkg.outstanding.length === 1 ? " is" : "s are"} still outstanding — ${pkg.outstanding
+        .map((i) => i.title)
+        .join("; ")}. Tick the box to send anyway; members will be told what is still to come.`
+    );
+  }
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  const targets = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+  if (targets.length === 0)
+    return fail("No institutions are currently eligible, so there is nobody to send to.");
+
+  // Said in the email, in members' terms rather than as an admin checklist.
+  // Carries its own <p> tags. The template cannot wrap it, because an empty
+  // value inside <p>{{...}}</p> ships a blank paragraph to every member — the
+  // same "bake optionality into the value" rule the renewal value clause needed.
+  const stillToCome = pkg.complete
+    ? ""
+    : `<p>Still to come: ${pkg.outstanding
+        .map((i) => i.title.charAt(0).toLowerCase() + i.title.slice(1))
+        .join("; ")}. We will add ${pkg.outstanding.length === 1 ? "it" : "them"} to the same page as soon as ${pkg.outstanding.length === 1 ? "it arrives" : "they arrive"}.</p>`;
+
+  const outcomes = await notifyAgmPackage(election, targets, { stillToCome });
+  const summary = summarizeOutcomes(outcomes);
+
+  const { data: existing } = await db
+    .from("elections")
+    .select("config")
+    .eq("id", election.id)
+    .single();
+
+  await db
+    .from("elections")
+    .update({
+      config: JSON.parse(
+        JSON.stringify({
+          ...((existing?.config as Record<string, unknown>) ?? {}),
+          agmPackageSentAt: new Date().toISOString(),
+          agmPackageSentBy: sentByProfileId,
+          agmPackageSendCount:
+            (((existing?.config as Record<string, unknown>)?.agmPackageSendCount as number) ?? 0) + 1,
+        })
+      ) as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", election.id);
+
+  return {
+    ok: true,
+    data: { institutions: targets.length, outstanding: pkg.outstanding.length, ...summary },
+  };
 }

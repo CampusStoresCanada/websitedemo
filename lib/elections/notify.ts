@@ -489,3 +489,42 @@ export async function notifyBallotsOpen(
   }
   return outcomes;
 }
+
+/**
+ * The members' AGM package is ready — come and read it.
+ *
+ * Like the ballot, this carries no token and no attachment. The financial
+ * statements are members-only and would become a public URL the moment they
+ * were linked directly; the package page serves them through a short-lived
+ * signed URL after the session has been checked.
+ *
+ * `stillToCome` is baked into a variable rather than a conditional block: this
+ * renderer's only branch is `{{#if}}` against a flags map sendTransactional does
+ * not pass, so a conditional in the body would reach members as literal text.
+ * An empty string renders as nothing, which is the honest default when the
+ * package is complete.
+ */
+export async function notifyAgmPackage(
+  election: Election,
+  organizationIds: string[],
+  opts: { stillToCome: string }
+): Promise<NotifyOutcome[]> {
+  const outcomes: NotifyOutcome[] = [];
+  for (const orgId of organizationIds) {
+    const admins = await loadOrgAdminContacts(orgId);
+    const organizationName = await loadOrgName(orgId);
+    for (const admin of admins) {
+      outcomes.push(
+        await send("agm_package_available", admin.email, {
+          contact_name: admin.name,
+          organization_name: organizationName,
+          cycle_year: election.cycleYear,
+          agm_date: formatDate(election.schedule.agmDate),
+          package_url: `${appUrl()}/elections/${election.slug}/package`,
+          still_to_come: opts.stillToCome,
+        })
+      );
+    }
+  }
+  return outcomes;
+}

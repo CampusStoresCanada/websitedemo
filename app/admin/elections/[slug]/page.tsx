@@ -18,10 +18,12 @@ import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
+import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import {
   getCommitteeReview,
   getNoticeState,
   countOutstandingBallots,
+  getAgmPackageState,
 } from "@/lib/elections/service";
 import {
   requestWithdrawalAction,
@@ -33,6 +35,8 @@ import {
   closeNominationsAction,
   circulateBallotsAction,
   saveReminderScheduleAction,
+  uploadFinancialStatementsAction,
+  sendAgmPackageAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
 import { canCloseNominations } from "@/lib/elections/schedule";
@@ -88,11 +92,22 @@ export default async function ElectionReviewPage({
     circulated?: string;
     reminderError?: string;
     remindersSaved?: string;
+    packageError?: string;
+    uploaded?: string;
+    packageSent?: string;
   }>;
 }) {
   const { slug } = await params;
-  const { error: closeError, closed, circulated, reminderError, remindersSaved } =
-    await searchParams;
+  const {
+    error: closeError,
+    closed,
+    circulated,
+    reminderError,
+    remindersSaved,
+    packageError,
+    uploaded,
+    packageSent,
+  } = await searchParams;
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
   const noticeState = await getNoticeState(slug);
@@ -106,6 +121,12 @@ export default async function ElectionReviewPage({
   };
   const ballotsCirculatedAt = ballotConfig.ballotsCirculatedAt ?? null;
   const ballotCirculationCount = ballotConfig.ballotCirculationCount ?? 0;
+  const packageConfig = election.config as unknown as {
+    agmPackageSentAt?: string;
+    agmPackageSendCount?: number;
+  };
+  const agmPackageSentAt = packageConfig.agmPackageSentAt ?? null;
+  const agmPackageSendCount = packageConfig.agmPackageSendCount ?? 0;
 
   async function askToWithdraw(formData: FormData) {
     "use server";
@@ -145,6 +166,26 @@ export default async function ElectionReviewPage({
     );
   }
 
+  async function uploadFinancials(formData: FormData) {
+    "use server";
+    const r = await uploadFinancialStatementsAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${
+        r.ok ? "?uploaded=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
+      }`
+    );
+  }
+
+  async function sendPackage(formData: FormData) {
+    "use server";
+    const r = await sendAgmPackageAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${
+        r.ok ? "?packageSent=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
+      }`
+    );
+  }
+
   async function saveReminders(formData: FormData) {
     "use server";
     const r = await saveReminderScheduleAction(slug, formData);
@@ -174,6 +215,7 @@ export default async function ElectionReviewPage({
 
   const closeReadiness = canCloseNominations(election.schedule, todayHere);
   const reminderPlan = planReminders(election.schedule, election.config);
+  const agmPackage = await getAgmPackageState(slug);
 
   // How many institutions a "not yet voted" reminder would reach today. Only
   // computed while balloting: before then every eligible store is outstanding,
@@ -367,6 +409,24 @@ export default async function ElectionReviewPage({
           progressing is the reliable signal.
         </p>
       </section>
+
+      {agmPackage && (
+        <AgmPackagePanel
+          items={agmPackage.items}
+          outstanding={agmPackage.outstanding}
+          complete={agmPackage.complete}
+          summary={agmPackage.summary}
+          hasMeeting={agmPackage.meetingId !== null}
+          financialsSupplied={agmPackage.financialDocumentId !== null}
+          upload={uploadFinancials}
+          send={sendPackage}
+          sentAt={agmPackageSentAt ? formatDate(agmPackageSentAt) : null}
+          sendCount={agmPackageSendCount}
+          error={packageError}
+          uploaded={Boolean(uploaded)}
+          sent={Boolean(packageSent)}
+        />
+      )}
 
       <ReminderSchedulePanel
         plan={reminderPlan}

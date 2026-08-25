@@ -29,18 +29,23 @@ async function emailsForUserIds(userIds: string[]): Promise<string[]> {
   return results.filter((e): e is string => Boolean(e));
 }
 
-/** Whoever currently holds the committee lead grant. */
+/** Whoever currently leads benchmarking — normally the Secretary. */
 async function committeeLeadEmails(): Promise<string[]> {
   const db = createAdminClient();
-  const nowIso = new Date().toISOString();
   const { data } = await db
-    .from("capability_grants")
+    .from("capability_contributions")
     .select("subject_id")
     .eq("capability", "benchmarking.committee_lead")
-    .is("revoked_at", null)
-    .lte("starts_at", nowIso)
-    .gt("ends_at", nowIso);
-  return emailsForUserIds((data ?? []).map((g) => g.subject_id));
+    .eq("is_active", true);
+  return emailsForUserIds(
+    Array.from(
+      new Set(
+        (data ?? [])
+          .map((g) => g.subject_id)
+          .filter((id): id is string => Boolean(id)),
+      ),
+    ),
+  );
 }
 
 async function orgAdminEmails(organizationId: string): Promise<string[]> {

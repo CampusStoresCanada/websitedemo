@@ -83,8 +83,9 @@ export const getIdentitySnapshot = cache(
     let orgsResult: { data: UserOrganization[] | null; error: unknown } | null =
       null;
 
-    let grantsResult: { data: { capability: string }[] | null } | null = null;
-    const nowIso = new Date().toISOString();
+    let grantsResult: {
+      data: string[] | { capability: string }[] | null;
+    } | null = null;
 
     for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
       const [profileRes, orgsRes, grantsRes] = await Promise.all([
@@ -104,14 +105,10 @@ export const getIdentitySnapshot = cache(
           )
           .eq("user_id", userId)
           .eq("status", "active"),
-        // Grants ride along on the existing round trip — no extra latency.
-        client
-          .from("capability_grants")
-          .select("capability")
-          .eq("subject_id", userId)
-          .is("revoked_at", null)
-          .lte("starts_at", nowIso)
-          .gt("ends_at", nowIso),
+        // Capabilities follow the roles a person currently holds — see
+        // governance_role_capabilities. Rides along on the existing round
+        // trip, so no extra latency.
+        client.rpc("current_capabilities", { p_subject: userId }),
       ]);
 
       profileResult = profileRes as unknown as {
@@ -123,7 +120,7 @@ export const getIdentitySnapshot = cache(
         error: unknown;
       };
       grantsResult = grantsRes as unknown as {
-        data: { capability: string }[] | null;
+        data: string[] | { capability: string }[] | null;
       };
 
       if (!profileRes.error && !orgsRes.error) {
@@ -145,7 +142,11 @@ export const getIdentitySnapshot = cache(
       organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
       orgsError: orgsResult?.error ?? null,
       capabilities: Array.from(
-        new Set((grantsResult?.data ?? []).map((g) => g.capability)),
+        new Set(
+          (grantsResult?.data ?? []).map((g) =>
+            typeof g === "string" ? g : g.capability,
+          ),
+        ),
       ),
     };
   },
