@@ -2,6 +2,7 @@
 
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createClient } from "@/lib/supabase/server";
+import { createAdminClient } from "@/lib/supabase/admin";
 import type { AnySnapshot, SnapshotRecord, SnapshotType } from "@/lib/snapshots/types";
 import {
   captureOrgProfileSnapshot,
@@ -81,7 +82,11 @@ export async function resolveSnapshot(id: string): Promise<{
   record?: SnapshotRecord;
   reason?: "not_found" | "expired";
 }> {
-  const supabase = await createClient();
+  // Read with the service role, not the session client. anon can no longer
+  // SELECT page_snapshots directly — which is the point: a snapshot must only
+  // ever be served through here, where expiry is enforced. A direct API read
+  // ran neither that check nor any of the recipient scoping.
+  const supabase = createAdminClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)

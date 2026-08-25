@@ -507,9 +507,14 @@ async function fetchMapOrgsWithBenchmarking(
     orgQuery = orgQuery.eq("type", typeFilter);
   }
 
+  // Read benchmarking with the service role, not the anon singleton. anon can no
+  // longer SELECT this table — that is deliberate, because the row also carries
+  // sales and margin figures stores gave us in confidence. The column list below
+  // is the operational slice only (POS, footprint, services); the financials are
+  // never selected here, so the directory keeps working without reopening the leak.
   const [orgResult, benchResult] = await Promise.all([
     orgQuery,
-    supabase
+    createAdminClient()
       .from("benchmarking")
       .select("organization_id, pos_system, enrollment_fte, num_store_locations, total_square_footage, services_offered, operations_mandate, payment_options, shopping_services, lms_system, social_media_platforms, institution_type, fulltime_employees")
       .order("fiscal_year", { ascending: false }),
@@ -518,6 +523,13 @@ async function fetchMapOrgsWithBenchmarking(
   if (orgResult.error) {
     console.error("org query failed:", orgResult.error);
     return null;
+  }
+
+  // Not fatal — the directory still renders without the operational slice. But it
+  // must never fail silently again: an unchecked error here blanked POS system and
+  // square footage for all 52 stores and the page still returned 200.
+  if (benchResult.error) {
+    console.error("benchmarking query failed:", benchResult.error);
   }
 
   // Build benchmarking lookup — latest record per org (already sorted by fiscal_year desc)
