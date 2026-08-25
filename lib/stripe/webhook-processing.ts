@@ -4,7 +4,11 @@ import { parseUTC } from "@/lib/utils";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 // Relative import: vitest has no @/ alias resolver for real (non-mocked)
 // runtime imports — see project notes on the test setup.
-import { activateMembershipRenewal, computeNewExpiresAt } from "../membership/renewal-activation";
+import {
+  activateMembershipRenewal,
+  computeNewExpiresAt,
+  settlePaidInvoiceMembership,
+} from "../membership/renewal-activation";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import {
@@ -788,42 +792,19 @@ async function handleInvoicePaid(
 
   if (!orgId) return;
 
-  // Invoices created by createMembershipInvoice/createPartnershipInvoice
-  // always set billing_period_start/end — when present, advance the org's
-  // membership_expires_at through the shared activation helper (this is the
-  // actual fix: previously this webhook only flipped status, never expiry).
-  if (updatedInvoice?.billing_period_end) {
-    const result = await activateMembershipRenewal({
-      organizationId: orgId,
-      newExpiresAt: updatedInvoice.billing_period_end,
-      billingPeriodStart: updatedInvoice.billing_period_start ?? updatedInvoice.billing_period_end,
-      triggeredBy: "stripe_webhook",
-      idempotencyKey: stripeInvoice.id,
-      invoiceId: updatedInvoice.id,
-    });
-    if (!result.success) {
-      console.error(`invoice.paid: membership activation failed for org ${orgId}: ${result.error}`);
-    }
-    return;
-  }
-
-  // No billing period on this invoice (created outside the normal renewal
-  // flow) — preserve exactly today's behavior rather than guessing a date.
-  const { data: org } = await db
-    .from("organizations")
-    .select("membership_status")
-    .eq("id", orgId)
-    .single();
-
-  if (org?.membership_status === "grace") {
-    await transitionMembershipState(
-      orgId,
-      "active",
-      "stripe_webhook",
-      null,
-      "Renewal payment received"
-    );
-  }
+  // Advance membership state through the shared settlement helper — the same
+  // one markInvoicePaidOutOfBand uses, so a cheque settled in QuickBooks and
+  // a card paid through Stripe buy the year identically. Invoices created by
+  // createProgramInvoice always carry billing_period_start/end; ones without
+  // a period buy no time and only lift an org out of grace.
+  await settlePaidInvoiceMembership({
+    organizationId: orgId,
+    invoiceId: updatedInvoice?.id ?? null,
+    billingPeriodStart: updatedInvoice?.billing_period_start ?? null,
+    billingPeriodEnd: updatedInvoice?.billing_period_end ?? null,
+    triggeredBy: "stripe_webhook",
+    idempotencyKey: stripeInvoice.id,
+  });
 }
 
 async function handleInvoicePaymentFailed(

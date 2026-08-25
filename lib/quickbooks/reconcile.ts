@@ -121,7 +121,9 @@ async function processInboundPayment(
       throw new Error(`markInvoicePaidOutOfBand failed: ${settleResult.error}`);
     }
 
-    // Record in reconciliation queue as matched
+    // Record in reconciliation queue as matched. The invoice is settled
+    // either way; an activation problem is carried into the notes so it
+    // surfaces to whoever reviews the queue rather than only in the logs.
     await db.from("qbo_reconciliation_queue").insert({
       qbo_payment_id: payment.Id,
       qbo_customer_id: payment.CustomerRef.value,
@@ -130,6 +132,9 @@ async function processInboundPayment(
       status: "matched",
       matched_invoice_id: invoiceId,
       match_strategy: strategy,
+      notes: settleResult.activationError
+        ? `Invoice settled, but membership activation failed: ${settleResult.activationError}`
+        : null,
       resolved_at: new Date().toISOString(),
     });
 
