@@ -12,6 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { ensureElectionKickoff } from "@/lib/elections/cycle";
+import { runDueBallotReminders } from "@/lib/elections/service";
 
 export const dynamic = "force-dynamic";
 
@@ -26,7 +27,19 @@ export async function GET(req: NextRequest) {
     if (result.created || (result.needed && !result.meetingDate)) {
       console.log("[cron/elections-kickoff]", result.note, result);
     }
-    return NextResponse.json(result);
+
+    // Ballot reminders ride the same daily tick. Separate try/catch: a failure
+    // chasing votes must not stop the kickoff obligation from being raised, and
+    // vice versa — they are unrelated duties that happen to share a schedule.
+    let reminders: Awaited<ReturnType<typeof runDueBallotReminders>> = [];
+    try {
+      reminders = await runDueBallotReminders();
+      if (reminders.length > 0) console.log("[cron/elections-kickoff] reminders", reminders);
+    } catch (err) {
+      console.error("[cron/elections-kickoff] ballot reminders failed:", err);
+    }
+
+    return NextResponse.json({ ...result, reminders });
   } catch (err) {
     console.error("[cron/elections-kickoff] failed:", err);
     return NextResponse.json(

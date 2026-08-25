@@ -33,6 +33,36 @@ export type TieResolution =
   /** Seat is left vacant and the board appoints for the unexpired term. */
   | "board_appoints";
 
+/**
+ * One scheduled nudge during the ballot window.
+ *
+ * `audience` is the part that matters and the part a bare day-number cannot
+ * express: "not_yet_voted" chases only institutions with no ballot on file,
+ * which is almost always what is wanted. "everyone" exists for the opening
+ * announcement, where there is nobody to exclude yet.
+ */
+export type NonWorkingDayPolicy = "move_earlier" | "move_later" | "send_anyway";
+
+export interface ReminderStep {
+  /** Days before ballots close. 0 is the closing day itself. */
+  daysBeforeClose: number;
+  /** Shown to the admin, and used in the send log. */
+  label: string;
+  audience: "not_yet_voted" | "everyone";
+  /**
+   * What to do when the computed date is a weekend or a national holiday.
+   *
+   * Campus stores are shut, so a nudge that lands then is read on Monday at the
+   * earliest — by which time "closing tomorrow" may be a lie. Defaults to moving
+   * EARLIER rather than later: later can fall past the close, and a reminder
+   * after the deadline is worse than one a day early.
+   *
+   * "send_anyway" is a real option. If somebody deliberately wants a Sunday
+   * send, the software should let them and simply stop mentioning it.
+   */
+  onNonWorkingDay?: NonWorkingDayPolicy;
+}
+
 export interface ElectionsConfig {
   /** Countbacks in days before the AGM. By-Law Part V S2-S3. */
   schedule: {
@@ -126,6 +156,25 @@ export interface ElectionsConfig {
     /** Allow selecting fewer than the number of seats. */
     allowUndervote: boolean;
     allowAbstain: boolean;
+  };
+
+  /**
+   * How the association chases a vote once ballots are open.
+   *
+   * The renewal series encodes this as a bare list of day-numbers, which is
+   * enough for a machine and useless to the person deciding whether it is
+   * humane. Each step here carries its own label and audience so the admin
+   * screen can say what will happen, to whom, and on what date, instead of
+   * showing "[10, 3, 1]" and leaving them to work it out.
+   */
+  reminders: {
+    enabled: boolean;
+    steps: ReminderStep[];
+    /**
+     * Never send two reminders closer together than this. A guard against an
+     * admin editing the steps into a cluster that reads as harassment.
+     */
+    minimumGapDays: number;
   };
 
   tabulation: {
@@ -242,6 +291,24 @@ export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
     allowUndervote: true,
     allowAbstain: true,
   },
+  // The CSC ballot window is 19 days (64 -> 45 days before the AGM). These sit
+  // at roughly the half-way point, the final week, and the last working day.
+  //
+  // 10/3/1 was the obvious spacing and it does not survive the weekend rule: for
+  // the 2027 cycle, "1 day before" is Sunday 6 December, which moves back to
+  // Friday the 4th — on top of the 3-day step. Any fixed set of offsets will
+  // collide in some year; planReminders refuses the plan when it does, and the
+  // admin moves one. These offsets are simply a set that works for the cycle in
+  // front of us.
+  reminders: {
+    enabled: true,
+    steps: [
+      { daysBeforeClose: 12, label: "Halfway nudge", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+      { daysBeforeClose: 5, label: "Final week", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+      { daysBeforeClose: 1, label: "Last chance", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+    ],
+    minimumGapDays: 2,
+  },
   tabulation: {
     method: "plurality_at_large",
     tieResolution: "refer_to_agm",
@@ -275,6 +342,19 @@ export function resolveElectionsConfig(
     ballot: { ...CSC_ELECTIONS_CONFIG.ballot, ...overrides.ballot },
     tabulation: { ...CSC_ELECTIONS_CONFIG.tabulation, ...overrides.tabulation },
     gate: { ...CSC_ELECTIONS_CONFIG.gate, ...overrides.gate },
+    // Steps are normalised rather than spread: an election snapshotted before
+    // `onNonWorkingDay` existed has steps without it, and a missing policy must
+    // resolve to the default rather than to undefined behaviour at send time.
+    reminders: {
+      ...CSC_ELECTIONS_CONFIG.reminders,
+      ...overrides.reminders,
+      steps: (overrides.reminders?.steps ?? CSC_ELECTIONS_CONFIG.reminders.steps).map(
+        (step) => ({
+          ...step,
+          onNonWorkingDay: step.onNonWorkingDay ?? "move_earlier",
+        })
+      ),
+    },
   } as ElectionsConfig;
 }
 

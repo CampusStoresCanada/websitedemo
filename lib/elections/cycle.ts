@@ -25,6 +25,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Json } from "@/lib/database.types";
 import { CSC_ELECTIONS_CONFIG, type ElectionsConfig } from "./config";
 import { resolveAgmDate, deriveSchedule, validateSchedule } from "./schedule";
 import { mintElectionActionItems, type MintedTask } from "./action-items";
@@ -114,7 +115,16 @@ export async function startElectionCycle(input: {
       ballots_close_at: schedule.ballotsCloseAt,
       seats_available: input.seatsAvailable,
       status: "draft",
-      config: { ...config, startedBy: input.startedByProfileId, startedAt: new Date().toISOString() },
+      // Round-tripped through JSON so the snapshot satisfies `Json`: the config
+      // carries string-union fields (reminder audiences, tie resolution) that
+      // are structurally fine but not assignable to Json as written.
+      config: JSON.parse(
+        JSON.stringify({
+          ...config,
+          startedBy: input.startedByProfileId,
+          startedAt: new Date().toISOString(),
+        })
+      ) as Json,
     })
     .select("id")
     .single();

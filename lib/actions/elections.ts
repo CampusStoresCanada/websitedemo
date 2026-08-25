@@ -449,3 +449,196 @@ export async function sendProxyFormAction(slug: string): Promise<ActionResult> {
   revalidatePath(`/admin/elections/${slug}`);
   return { ok: true };
 }
+
+/**
+ * Appoint a proxyholder for the AGM.
+ *
+ * Authorization is by session: the caller must administer the store whose vote
+ * is being assigned. `appointProxy` re-checks the By-Law Part VII S7 eligibility
+ * of the person being appointed, so a tampered form value cannot install an
+ * ineligible proxyholder.
+ */
+export async function appointProxyAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in to appoint a proxy." };
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const proxyholderContactId = String(formData.get("proxyholderContactId") ?? "");
+
+  if (!organizationId || !meetingId || !proxyholderContactId) {
+    return { ok: false, error: "Choose who will carry your store's vote." };
+  }
+
+  const administers = auth.organizations.some(
+    (o) => o.organization_id === organizationId && o.role === "org_admin" && o.status === "active"
+  );
+  if (!administers) {
+    return { ok: false, error: "You are not an administrator of that store." };
+  }
+
+  const { appointProxy } = await import("@/lib/elections/proxy-service");
+  const actor = await resolveActor(auth.user.id, auth.organizations);
+
+  const result = await appointProxy({
+    meetingId,
+    grantorOrganizationId: organizationId,
+    grantorContactId: actor.contactIdFor(organizationId),
+    proxyholderContactId,
+    formSource: "online",
+    actorId: auth.user.id,
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/elections/${slug}/proxy`);
+  return { ok: true };
+}
+
+/**
+ * Withdraw a proxy the store has given. Soft — the register keeps the record
+ * that an appointment was made and withdrawn.
+ */
+export async function revokeProxyAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+
+  const proxyId = String(formData.get("proxyId") ?? "");
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!proxyId) return { ok: false, error: "That proxy could not be identified." };
+
+  const administers = auth.organizations.some(
+    (o) => o.organization_id === organizationId && o.role === "org_admin" && o.status === "active"
+  );
+  if (!administers) {
+    return { ok: false, error: "You are not an administrator of that store." };
+  }
+
+  const { revokeProxy, getProxyRegister } = await import("@/lib/elections/proxy-service");
+
+  // The proxy must belong to the store the caller administers — otherwise an
+  // administrator of any store could withdraw any other store's appointment.
+  const meetingId = String(formData.get("meetingId") ?? "");
+  const register = await getProxyRegister(meetingId, { includeRevoked: true });
+  if (!register.ok) return { ok: false, error: register.error };
+  const target = register.data.find((p) => p.id === proxyId);
+  if (!target || target.grantorOrganizationId !== organizationId) {
+    return { ok: false, error: "That proxy does not belong to your store." };
+  }
+
+  const result = await revokeProxy(proxyId, auth.user.id, "Withdrawn by the store");
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/elections/${slug}/proxy`);
+  return { ok: true };
+}
+
+/**
+ * Close nominations and settle the outcome.
+ *
+ * This is the moment the projection becomes a decision: every accepted
+ * nomination is frozen as `validated` or `ineligible`, and the election moves to
+ * balloting or to acclamation depending on how many cleared. There is no undo in
+ * the UI, so the page states what will happen before it is pressed and the form
+ * requires an explicit confirmation.
+ *
+ * `closeNominations` refuses to run before the published close date. That guard
+ * lives in the service rather than here so a future scheduled job closing the
+ * window automatically inherits it.
+ */
+export async function closeNominationsAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the nominating committee can close nominations." };
+
+  if (formData.get("confirm") !== "1") {
+    return { ok: false, error: "Tick the confirmation before closing nominations." };
+  }
+
+  const { closeNominations } = await import("@/lib/elections/service");
+  const result = await closeNominations(slug);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
+/**
+ * Circulate the ballot, or chase the institutions that have not voted.
+ *
+ * Repeatable on purpose — the association's posture is to remind as often as it
+ * takes. `circulateBallots` decides which of the two it is: the first send goes
+ * to every eligible institution, and every send after that goes only to the ones
+ * with no ballot on file.
+ */
+export async function circulateBallotsAction(slug: string): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the nominating committee can circulate ballots." };
+
+  const { circulateBallots } = await import("@/lib/elections/service");
+  const result = await circulateBallots(slug, auth.user.id);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
+/**
+ * Save the ballot reminder schedule for one election.
+ *
+ * Steps arrive as parallel arrays from the form. A row with a blank label is
+ * treated as deleted rather than as an error — that is how the admin removes
+ * one, and making them press a separate delete button for the same effect would
+ * just be ceremony.
+ */
+export async function saveReminderScheduleAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the nominating committee can change the reminder schedule." };
+
+  const labels = formData.getAll("label").map(String);
+  const days = formData.getAll("daysBeforeClose").map(String);
+  const audiences = formData.getAll("audience").map(String);
+  const policies = formData.getAll("onNonWorkingDay").map(String);
+
+  const steps = labels
+    .map((label, i) => ({
+      label: label.trim(),
+      daysBeforeClose: Number(days[i] ?? ""),
+      audience: (audiences[i] === "everyone" ? "everyone" : "not_yet_voted") as
+        | "everyone"
+        | "not_yet_voted",
+      onNonWorkingDay: (["move_earlier", "move_later", "send_anyway"].includes(policies[i])
+        ? policies[i]
+        : "move_earlier") as "move_earlier" | "move_later" | "send_anyway",
+    }))
+    .filter((s) => s.label !== "" && Number.isFinite(s.daysBeforeClose));
+
+  const { saveReminderSchedule } = await import("@/lib/elections/service");
+  const result = await saveReminderSchedule(slug, {
+    enabled: formData.get("enabled") === "1",
+    minimumGapDays: Number(formData.get("minimumGapDays") ?? 2),
+    steps,
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}

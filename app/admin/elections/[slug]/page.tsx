@@ -13,11 +13,16 @@
  */
 
 import Link from "next/link";
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
-import { getCommitteeReview, getNoticeState } from "@/lib/elections/service";
+import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
+import {
+  getCommitteeReview,
+  getNoticeState,
+  countOutstandingBallots,
+} from "@/lib/elections/service";
 import {
   requestWithdrawalAction,
   sendCallForNominationsAction,
@@ -25,8 +30,13 @@ import {
   sendProxyFormAction,
   chaseIncompleteAction,
   mintElectionActionItemsAction,
+  closeNominationsAction,
+  circulateBallotsAction,
+  saveReminderScheduleAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
+import { canCloseNominations } from "@/lib/elections/schedule";
+import { planReminders } from "@/lib/elections/reminders";
 
 export const metadata = { title: "Election | Admin | Campus Stores Canada" };
 export const dynamic = "force-dynamic";
@@ -69,10 +79,20 @@ function Stat({
 
 export default async function ElectionReviewPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{
+    error?: string;
+    closed?: string;
+    circulated?: string;
+    reminderError?: string;
+    remindersSaved?: string;
+  }>;
 }) {
   const { slug } = await params;
+  const { error: closeError, closed, circulated, reminderError, remindersSaved } =
+    await searchParams;
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
   const noticeState = await getNoticeState(slug);
@@ -80,6 +100,12 @@ export default async function ElectionReviewPage({
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
     review;
   const callSentAt = (election.config as unknown as { callSentAt?: string }).callSentAt ?? null;
+  const ballotConfig = election.config as unknown as {
+    ballotsCirculatedAt?: string;
+    ballotCirculationCount?: number;
+  };
+  const ballotsCirculatedAt = ballotConfig.ballotsCirculatedAt ?? null;
+  const ballotCirculationCount = ballotConfig.ballotCirculationCount ?? 0;
 
   async function askToWithdraw(formData: FormData) {
     "use server";
@@ -111,6 +137,56 @@ export default async function ElectionReviewPage({
     await sendProxyFormAction(slug);
   }
 
+  async function circulate() {
+    "use server";
+    const r = await circulateBallotsAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?circulated=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
+  async function saveReminders(formData: FormData) {
+    "use server";
+    const r = await saveReminderScheduleAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${
+        r.ok ? "?remindersSaved=1" : `?reminderError=${encodeURIComponent(r.error ?? "")}`
+      }`
+    );
+  }
+
+  async function close(formData: FormData) {
+    "use server";
+    const r = await closeNominationsAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?closed=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
+  // Today in the association's timezone. A UTC "today" flips five hours early
+  // and would let the close run the evening before the window shuts.
+  const todayHere = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Edmonton",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+
+  const closeReadiness = canCloseNominations(election.schedule, todayHere);
+  const reminderPlan = planReminders(election.schedule, election.config);
+
+  // How many institutions a "not yet voted" reminder would reach today. Only
+  // computed while balloting: before then every eligible store is outstanding,
+  // which is true but tells the admin nothing.
+  const outstandingBallots =
+    election.status === "balloting" ? await countOutstandingBallots(slug) : null;
+
+  // What the close will actually do. `incomplete` counts only those who accepted
+  // and are still missing something; the close also marks ineligible anyone who
+  // never responded, so the honest figure is everything that is not complete.
+  const willValidate = validated.length;
+  const willExclude = nominations.length - validated.length;
+
   const closing =
     daysUntilNominationsClose > 0
       ? `${daysUntilNominationsClose} day${daysUntilNominationsClose === 1 ? "" : "s"} left`
@@ -124,14 +200,40 @@ export default async function ElectionReviewPage({
         title={`${election.cycleYear} Board election`}
         description={`${election.seatsAvailable} seats · AGM ${formatDate(election.schedule.agmDate)} · nominations ${formatDate(election.schedule.nominationsOpenAt)} – ${formatDate(election.schedule.nominationsCloseAt)} (${closing})`}
         actions={
-          <Link
-            href={`/admin/elections/${slug}/audit`}
-            className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
-          >
-            Ballots &amp; audit
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link
+              href={`/admin/elections/${slug}/proxies`}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Proxy register
+            </Link>
+            <Link
+              href={`/admin/elections/${slug}/audit`}
+              className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+            >
+              Ballots &amp; audit
+            </Link>
+          </div>
         }
       />
+
+      {closeError && (
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
+          {closeError}
+        </div>
+      )}
+      {closed && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          Nominations are closed. The nominee list is frozen and the election has moved to{" "}
+          {election.status === "balloting" ? "balloting" : "acclamation"}.
+        </div>
+      )}
+      {circulated && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          Ballot links are on their way. Delivery tracking is not recording anything yet, so
+          treat this as &ldquo;attempted&rdquo; — ballots arriving is the reliable signal.
+        </div>
+      )}
 
       {/* The electorate, which during a renewal cycle is a moving number. */}
       <div className="grid gap-3 sm:grid-cols-4">
@@ -230,6 +332,32 @@ export default async function ElectionReviewPage({
               <span className="text-xs text-gray-500">Safe to repeat.</span>
             </form>
           )}
+
+          {election.status === "balloting" && (
+            <form action={circulate} className="flex flex-wrap items-center gap-3">
+              <button
+                type="submit"
+                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                {ballotsCirculatedAt ? "Remind those who have not voted" : "Tell members voting is open"}
+              </button>
+              <span className="text-xs text-gray-500">
+                {ballotsCirculatedAt ? (
+                  <>
+                    Last circulated {formatDate(ballotsCirculatedAt)}
+                    {ballotCirculationCount > 1 && ` (${ballotCirculationCount} times)`}. A
+                    reminder goes only to institutions with no ballot on file — nobody who has
+                    already voted is contacted again.
+                  </>
+                ) : (
+                  <>
+                    Emails every administrator at each eligible institution with a link to the
+                    ballot. The ballot itself is never in the email.
+                  </>
+                )}
+              </span>
+            </form>
+          )}
         </div>
         <p className="mt-3 text-xs text-gray-500">
           Election mail is transactional, so it reaches members who have unsubscribed from
@@ -240,13 +368,82 @@ export default async function ElectionReviewPage({
         </p>
       </section>
 
+      <ReminderSchedulePanel
+        plan={reminderPlan}
+        minimumGapDays={election.config.reminders.minimumGapDays}
+        save={saveReminders}
+        error={reminderError}
+        saved={Boolean(remindersSaved)}
+        outstandingCount={outstandingBallots}
+      />
+
       <div className="rounded-lg border border-gray-200 bg-white px-5 py-4">
         <h2 className="text-sm font-semibold text-gray-900">As things stand</h2>
         <p className="mt-1 text-sm text-gray-600">{projected.reason}</p>
-        <p className="mt-2 text-xs text-gray-500">
-          This is a projection from what would count today, not a decision. It settles on{" "}
-          {formatDate(election.schedule.nominationsCloseAt)} when nominations close.
-        </p>
+        {election.status === "draft" ? (
+          <p className="mt-2 text-xs text-gray-500">
+            Nominations have not opened yet — they run{" "}
+            {formatDate(election.schedule.nominationsOpenAt)} to{" "}
+            {formatDate(election.schedule.nominationsCloseAt)}. This is what the outcome would
+            be if nobody stood.
+          </p>
+        ) : election.status === "nominating" ? (
+          <p className="mt-2 text-xs text-gray-500">
+            This is a projection from what would count today, not a decision. It settles when
+            you close nominations below.
+          </p>
+        ) : (
+          <p className="mt-2 text-xs text-gray-500">
+            Nominations are closed — these figures are frozen.
+          </p>
+        )}
+
+        {election.status === "nominating" &&
+          (closeReadiness.ready ? (
+            <form action={close} className="mt-4 border-t border-gray-200 pt-4">
+              <p className="text-sm font-medium text-gray-900">Close nominations</p>
+              <p className="mt-1 text-sm text-gray-600">
+                {willValidate} nominee{willValidate === 1 ? "" : "s"} will be frozen onto the
+                ballot
+                {willExclude > 0 && (
+                  <>
+                    {" "}
+                    and {willExclude} incomplete nomination{willExclude === 1 ? "" : "s"} will be
+                    marked ineligible
+                  </>
+                )}
+                . {projected.reason}
+              </p>
+              {!closeReadiness.onTime && (
+                <p className="mt-1 text-xs text-amber-700">
+                  This is {closeReadiness.daysLate} day
+                  {closeReadiness.daysLate === 1 ? "" : "s"} after the published close date of{" "}
+                  {formatDate(election.schedule.nominationsCloseAt)}.
+                </p>
+              )}
+              <label className="mt-3 flex items-start gap-2 text-sm text-gray-700">
+                <input type="checkbox" name="confirm" value="1" className="mt-0.5" />
+                <span>
+                  I understand this cannot be undone from here — the nominee list is frozen and
+                  the election moves to{" "}
+                  {projected.outcome === "balloted" ? "balloting" : "acclamation"}.
+                </span>
+              </label>
+              <button
+                type="submit"
+                className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Close nominations
+              </button>
+            </form>
+          ) : (
+            <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
+              <p className="text-sm font-medium text-gray-900">
+                Nominations cannot be closed yet
+              </p>
+              <p className="mt-1 text-sm text-gray-600">{closeReadiness.reason}</p>
+            </div>
+          ))}
       </div>
 
       <div className="grid gap-6 lg:grid-cols-[1.4fr_1fr]">

@@ -116,3 +116,46 @@ export function phaseOn(schedule: ElectionSchedule, onDate: string): ElectionPha
   if (onDate < schedule.agmDate) return "after_ballot";
   return "after_agm";
 }
+
+export type NominationCloseReadiness =
+  | { ready: true; onTime: boolean; daysLate: number }
+  | { ready: false; daysEarly: number; reason: string };
+
+/**
+ * May nominations be closed today?
+ *
+ * Closing is not a discretionary act. The nomination window is published to the
+ * membership in the call for nominations, and a member who has not yet acted is
+ * entitled to the whole of it. Closing on the 20th a window that runs to the
+ * 23rd removes a right three days early — the same defect, in the other
+ * direction, as issuing notice of a meeting outside its window.
+ *
+ * So: refused before `nominationsCloseAt`, permitted on or after it. There is
+ * deliberately no override. If the date itself is wrong, the schedule is the
+ * thing to change, and every derived date moves with it.
+ *
+ * Closing LATE is permitted and merely noted. An election that nobody got round
+ * to closing on the day is untidy; one closed early is defective.
+ */
+export function canCloseNominations(
+  schedule: ElectionSchedule,
+  onDate: string
+): NominationCloseReadiness {
+  const close = parseISODate(schedule.nominationsCloseAt);
+  const today = parseISODate(onDate);
+  const days = Math.round((today.getTime() - close.getTime()) / 86_400_000);
+
+  if (days < 0) {
+    const early = Math.abs(days);
+    return {
+      ready: false,
+      daysEarly: early,
+      reason:
+        `Nominations run to ${schedule.nominationsCloseAt} — ${early} day${early === 1 ? "" : "s"} from now. ` +
+        `Closing early would take the right to nominate away from members who have not acted yet. ` +
+        `If that date is wrong, change the schedule rather than closing ahead of it.`,
+    };
+  }
+
+  return { ready: true, onTime: days === 0, daysLate: days };
+}

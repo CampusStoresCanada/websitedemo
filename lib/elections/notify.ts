@@ -116,6 +116,17 @@ async function loadContact(contactId: string): Promise<ContactRow | null> {
   };
 }
 
+/** The institution's own name, for copy that addresses the store rather than the reader. */
+async function loadOrgName(organizationId: string): Promise<string> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("organizations")
+    .select("name")
+    .eq("id", organizationId)
+    .maybeSingle();
+  return (data?.name as string) ?? "Your institution";
+}
+
 /**
  * Admins at an institution, excluding one person.
  *
@@ -421,6 +432,57 @@ export async function notifyProxyForm(
           agm_date_long: formatLongDate(election.schedule.agmDate),
           proxy_form_url: details.proxyFormUrl,
           late_note: details.lateNote ?? null,
+        })
+      );
+    }
+  }
+  return outcomes;
+}
+
+/**
+ * Ballots are open — go to the site and vote.
+ *
+ * Every other election email in this module carries a token, because it
+ * addresses one record: a nomination to accept, a co-signature to sign. The
+ * ballot deliberately does not.
+ *
+ * A ballot belongs to the INSTITUTION, and any of its administrators may open
+ * and revise it. A token in an email would therefore be a bearer credential for
+ * a store's entire vote — forward the message, or have it sit in a shared inbox,
+ * and somebody else can cast it. So this mails a plain URL and lets the session
+ * decide: an administrator who is signed in lands on the ballot, and anyone else
+ * is asked to sign in first. That is a small amount of friction bought with a
+ * real guarantee, and the copy says so rather than leaving the reader to wonder
+ * why voting needs a login.
+ *
+ * `reminder` swaps the template for the chase sent to stores that have not voted.
+ * Two templates rather than one with a conditional: this renderer's only
+ * conditional is `{{#if}}` against a flags map that sendTransactional does not
+ * pass, so a branch inside the body would ship to members as literal text.
+ */
+export async function notifyBallotsOpen(
+  election: Election,
+  organizationIds: string[],
+  opts: { candidateCount: number; reminder?: boolean }
+): Promise<NotifyOutcome[]> {
+  const outcomes: NotifyOutcome[] = [];
+  const templateKey = opts.reminder ? "election_ballot_reminder" : "election_ballots_open";
+
+  for (const orgId of organizationIds) {
+    const admins = await loadOrgAdminContacts(orgId);
+    const organizationName = await loadOrgName(orgId);
+
+    for (const admin of admins) {
+      outcomes.push(
+        await send(templateKey, admin.email, {
+          contact_name: admin.name,
+          organization_name: organizationName,
+          cycle_year: election.cycleYear,
+          candidate_count: opts.candidateCount,
+          seats_available: election.seatsAvailable,
+          agm_date: formatDate(election.schedule.agmDate),
+          ballots_close: formatDate(election.schedule.ballotsCloseAt),
+          ballot_url: `${appUrl()}/elections/${election.slug}/ballot`,
         })
       );
     }

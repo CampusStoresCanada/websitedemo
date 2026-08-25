@@ -6,6 +6,7 @@ import {
   deriveSchedule,
   validateSchedule,
   phaseOn,
+  canCloseNominations,
 } from "../schedule";
 
 describe("AGM date resolution", () => {
@@ -96,5 +97,51 @@ describe("schedule validation", () => {
       },
     });
     expect(validateSchedule(broken).join(" ")).toMatch(/cannot go out before nominations close/);
+  });
+});
+
+describe("canCloseNominations", () => {
+  const schedule = deriveSchedule("2027-01-21", CSC_ELECTIONS_CONFIG);
+
+  it("refuses before the published close date", () => {
+    // The window was published to the membership in the call for nominations.
+    // A member who has not acted yet is entitled to the whole of it.
+    const r = canCloseNominations(schedule, "2026-10-20");
+    expect(r.ready).toBe(false);
+    if (!r.ready) {
+      expect(r.daysEarly).toBeGreaterThan(0);
+      expect(r.reason).toMatch(/change the schedule/i);
+    }
+  });
+
+  it("counts exactly how early it would be", () => {
+    const close = schedule.nominationsCloseAt;
+    const [y, m, d] = close.split("-").map(Number);
+    const threeDaysBefore = new Date(Date.UTC(y, m - 1, d - 3)).toISOString().slice(0, 10);
+    const r = canCloseNominations(schedule, threeDaysBefore);
+    expect(r.ready).toBe(false);
+    if (!r.ready) expect(r.daysEarly).toBe(3);
+  });
+
+  it("permits closing on the day", () => {
+    const r = canCloseNominations(schedule, schedule.nominationsCloseAt);
+    expect(r.ready).toBe(true);
+    if (r.ready) {
+      expect(r.onTime).toBe(true);
+      expect(r.daysLate).toBe(0);
+    }
+  });
+
+  it("permits closing late, and says how late", () => {
+    // Untidy, not defective — unlike closing early, nobody loses a right.
+    const close = schedule.nominationsCloseAt;
+    const [y, m, d] = close.split("-").map(Number);
+    const twoDaysAfter = new Date(Date.UTC(y, m - 1, d + 2)).toISOString().slice(0, 10);
+    const r = canCloseNominations(schedule, twoDaysAfter);
+    expect(r.ready).toBe(true);
+    if (r.ready) {
+      expect(r.onTime).toBe(false);
+      expect(r.daysLate).toBe(2);
+    }
   });
 });

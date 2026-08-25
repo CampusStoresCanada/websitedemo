@@ -11,11 +11,13 @@
 
 import crypto from "node:crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { Json } from "@/lib/database.types";
 import { getProgramsConfig } from "@/lib/policy/engine";
 import { resolveMembershipStatus } from "@/lib/auth/org-level";
 import {
   resolveElectionsConfig,
   type ElectionsConfig,
+  type ReminderStep,
 } from "./config";
 import {
   evaluateOrgEligibility,
@@ -31,7 +33,8 @@ import {
   type CosignatureStatus,
   type CandidateEligibility,
 } from "./nomination";
-import { deriveSchedule, phaseOn, type ElectionSchedule } from "./schedule";
+import { deriveSchedule, phaseOn, canCloseNominations, type ElectionSchedule } from "./schedule";
+import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import { buildAgmScript } from "./documents/agm-script";
 import {
   buildNominatingCommitteeReport,
@@ -58,6 +61,7 @@ import {
   notifyNominationReady,
   notifyNominationIncomplete,
   notifyCallForNominations,
+  notifyBallotsOpen,
   notifyAgmNotice,
   notifyProxyForm,
   summarizeOutcomes,
@@ -1395,6 +1399,12 @@ export async function closeNominations(
   if (election.status !== "nominating")
     return fail(`Nominations cannot be closed from status "${election.status}".`);
 
+  // The published window belongs to the members, not to whoever is holding the
+  // button. Closing early removes the right to nominate from anyone who has not
+  // acted yet — see canCloseNominations. Late is fine and merely noted.
+  const readiness = canCloseNominations(election.schedule, today());
+  if (!readiness.ready) return fail(readiness.reason);
+
   const nominations = await listNominations(slug);
   const validated = nominations.filter((n) => n.completeness.complete);
   const excluded = nominations.filter((n) => !n.completeness.complete);
@@ -2495,4 +2505,306 @@ export async function getAgmScript(
     acclaimed: election.outcome === "acclaimed",
     officerMeetingNote: null,
   });
+}
+
+// ---------------------------------------------------------------------------
+// Circulating the ballot
+// ---------------------------------------------------------------------------
+
+/**
+ * Tell the electorate that voting is open, and chase the ones who have not.
+ *
+ * Unlike the call for nominations, this is NOT once-only. The association's
+ * stated posture is to remind people as often as it takes, so a second press is
+ * a legitimate act rather than an accident to guard against. What it must not do
+ * is nag somebody who has already voted, so every send after the first goes only
+ * to institutions with no ballot on file — and says so in different words, via a
+ * different template.
+ *
+ * Eligibility is re-evaluated at send time rather than reusing whatever was true
+ * when balloting opened: a store that renewed yesterday is entitled to vote
+ * today, and would otherwise never be told the election was happening.
+ */
+export async function circulateBallots(
+  slug: string,
+  sentByProfileId: string
+): Promise<
+  Result<{
+    reminder: boolean;
+    institutions: number;
+    sent: number;
+    failed: number;
+    problems: string[];
+    skippedAlreadyVoted: number;
+  }>
+> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  if (election.status !== "balloting")
+    return fail(
+      `Ballots can only be circulated while the election is balloting — this one is "${election.status}".`
+    );
+
+  if (phaseOn(election.schedule, today()) !== "balloting")
+    return fail(
+      `Voting runs ${election.schedule.ballotsOpenAt} to ${election.schedule.ballotsCloseAt}. There is no point sending members to a ballot that is not open.`
+    );
+
+  const candidates = await getBallotCandidates(election);
+  if (candidates.length === 0)
+    return fail("There are no candidates on this ballot, so there is nothing to circulate.");
+
+  const { data: existing } = await db
+    .from("elections")
+    .select("config")
+    .eq("id", election.id)
+    .single();
+  const config = (existing?.config as Record<string, unknown>) ?? {};
+  const previouslyCirculated = Boolean(config.ballotsCirculatedAt);
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  let targets = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+  const eligibleCount = targets.length;
+
+  if (previouslyCirculated) {
+    const { data: voted } = await db
+      .from("election_ballots")
+      .select("organization_id")
+      .eq("election_id", election.id);
+    const votedIds = new Set((voted ?? []).map((b) => b.organization_id as string));
+    targets = targets.filter((id) => !votedIds.has(id));
+  }
+
+  if (targets.length === 0)
+    return fail(
+      previouslyCirculated
+        ? "Every eligible institution has already voted — there is nobody left to remind."
+        : "No institutions are currently eligible, so there is nobody to send to."
+    );
+
+  const outcomes = await notifyBallotsOpen(election, targets, {
+    candidateCount: candidates.length,
+    reminder: previouslyCirculated,
+  });
+  const summary = summarizeOutcomes(outcomes);
+
+  await db
+    .from("elections")
+    .update({
+      config: {
+        ...config,
+        ballotsCirculatedAt: new Date().toISOString(),
+        ballotsCirculatedBy: sentByProfileId,
+        ballotCirculationCount: ((config.ballotCirculationCount as number) ?? 0) + 1,
+      },
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", election.id);
+
+  return ok({
+    reminder: previouslyCirculated,
+    institutions: targets.length,
+    skippedAlreadyVoted: previouslyCirculated ? eligibleCount - targets.length : 0,
+    ...summary,
+  });
+}
+
+/**
+ * Save the ballot reminder schedule onto this election.
+ *
+ * Refuses to store a plan that cannot run, and says why. An incoherent schedule
+ * saved quietly is worse than a rejected one: the cron would either skip steps
+ * without explanation or fire two nudges into the same afternoon, and the person
+ * who set it would have no reason to suspect either.
+ *
+ * Written onto the ELECTION's config rather than the global default, because
+ * that config is the per-cycle snapshot — changing the association's default
+ * should not silently re-time a chase that is already under way.
+ */
+export async function saveReminderSchedule(
+  slug: string,
+  input: { enabled: boolean; minimumGapDays: number; steps: ReminderStep[] }
+): Promise<Result<{ plan: ReminderPlan }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  if (input.steps.length === 0 && input.enabled)
+    return fail("Add at least one reminder, or switch reminders off.");
+
+  if (input.minimumGapDays < 0)
+    return fail("The minimum gap between reminders cannot be negative.");
+
+  for (const step of input.steps) {
+    if (!Number.isInteger(step.daysBeforeClose) || step.daysBeforeClose < 0)
+      return fail(`"${step.label || "Untitled"}" needs a whole number of days, zero or more.`);
+    if (!step.label.trim()) return fail("Every reminder needs a label, so the log is readable.");
+  }
+
+  const candidate: ElectionsConfig = {
+    ...election.config,
+    reminders: {
+      enabled: input.enabled,
+      minimumGapDays: input.minimumGapDays,
+      steps: input.steps,
+    },
+  };
+
+  const plan = planReminders(election.schedule, candidate);
+  if (plan.problems.length > 0) {
+    return fail(`That schedule will not run: ${plan.problems.join(" ")}`);
+  }
+
+  const { data: existing } = await db
+    .from("elections")
+    .select("config")
+    .eq("id", election.id)
+    .single();
+
+  const { error } = await db
+    .from("elections")
+    .update({
+      config: JSON.parse(
+        JSON.stringify({
+          ...((existing?.config as Record<string, unknown>) ?? {}),
+          reminders: candidate.reminders,
+        })
+      ) as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", election.id);
+
+  if (error) return fail(`Could not save the schedule: ${error.message}`);
+  return ok({ plan });
+}
+
+/** The dated plan for this election, for the admin screen and the cron. */
+export async function getReminderPlan(slug: string): Promise<ReminderPlan | null> {
+  const election = await getElection(slug);
+  if (!election) return null;
+  return planReminders(election.schedule, election.config);
+}
+
+/**
+ * Eligible institutions with no ballot on file — who a "not yet voted" reminder
+ * would actually reach. Shown next to the schedule so the admin can see the
+ * size of the chase before scheduling it.
+ */
+export async function countOutstandingBallots(slug: string): Promise<number | null> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const { verdicts } = await evaluateElectionEligibility(election.id);
+  const eligible = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+
+  const { data: voted } = await db
+    .from("election_ballots")
+    .select("organization_id")
+    .eq("election_id", election.id);
+  const votedIds = new Set((voted ?? []).map((b) => b.organization_id as string));
+
+  return eligible.filter((id) => !votedIds.has(id)).length;
+}
+
+/**
+ * Fire whichever reminder is due today, across every balloting election.
+ *
+ * Called daily. Does nothing on a day with no step due, which is most days.
+ * The exact-date match in `reminderDueOn` means a missed run is not caught up
+ * later — see the note there.
+ *
+ * Idempotent within a day: the step's label and date are recorded on the
+ * election config, so a cron that runs twice does not mail the electorate twice.
+ */
+export async function runDueBallotReminders(
+  onDate?: string
+): Promise<
+  { slug: string; label: string; institutions: number; sent: number; failed: number }[]
+> {
+  const db = createAdminClient();
+  const today_ = onDate ?? today();
+  const fired: {
+    slug: string;
+    label: string;
+    institutions: number;
+    sent: number;
+    failed: number;
+  }[] = [];
+
+  const { data: live } = await db
+    .from("elections")
+    .select("slug")
+    .eq("status", "balloting");
+
+  for (const row of live ?? []) {
+    const slug = row.slug as string;
+    const election = await getElection(slug);
+    if (!election) continue;
+
+    const plan = planReminders(election.schedule, election.config);
+    const due = reminderDueOn(plan, today_);
+    if (!due) continue;
+
+    const sentLog =
+      ((election.config as unknown as { remindersSent?: Record<string, string> })
+        .remindersSent ?? {}) as Record<string, string>;
+    const key = `${due.sendOn}:${due.label}`;
+    if (sentLog[key]) continue;
+
+    const candidates = await getBallotCandidates(election);
+    if (candidates.length === 0) continue;
+
+    const { verdicts } = await evaluateElectionEligibility(election.id);
+    let targets = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+
+    if (due.audience === "not_yet_voted") {
+      const { data: voted } = await db
+        .from("election_ballots")
+        .select("organization_id")
+        .eq("election_id", election.id);
+      const votedIds = new Set((voted ?? []).map((b) => b.organization_id as string));
+      targets = targets.filter((id) => !votedIds.has(id));
+    }
+
+    if (targets.length === 0) continue;
+
+    const outcomes = await notifyBallotsOpen(election, targets, {
+      candidateCount: candidates.length,
+      // Every scheduled step after voting opens is a chase, not an announcement.
+      reminder: true,
+    });
+    const summary = summarizeOutcomes(outcomes);
+
+    const { data: existing } = await db
+      .from("elections")
+      .select("config")
+      .eq("id", election.id)
+      .single();
+
+    await db
+      .from("elections")
+      .update({
+        config: JSON.parse(
+          JSON.stringify({
+            ...((existing?.config as Record<string, unknown>) ?? {}),
+            remindersSent: { ...sentLog, [key]: new Date().toISOString() },
+          })
+        ) as Json,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", election.id);
+
+    fired.push({
+      slug,
+      label: due.label,
+      institutions: targets.length,
+      sent: summary.sent,
+      failed: summary.failed,
+    });
+  }
+
+  return fired;
 }
