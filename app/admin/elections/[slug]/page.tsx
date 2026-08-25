@@ -37,6 +37,7 @@ import {
   saveReminderScheduleAction,
   uploadFinancialStatementsAction,
   sendAgmPackageAction,
+  generateAgmAgendaAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
 import { canCloseNominations } from "@/lib/elections/schedule";
@@ -95,6 +96,7 @@ export default async function ElectionReviewPage({
     packageError?: string;
     uploaded?: string;
     packageSent?: string;
+    agendaGenerated?: string;
   }>;
 }) {
   const { slug } = await params;
@@ -107,6 +109,7 @@ export default async function ElectionReviewPage({
     packageError,
     uploaded,
     packageSent,
+    agendaGenerated,
   } = await searchParams;
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
@@ -172,6 +175,16 @@ export default async function ElectionReviewPage({
     redirect(
       `/admin/elections/${slug}${
         r.ok ? "?uploaded=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
+      }`
+    );
+  }
+
+  async function generateAgenda(formData: FormData) {
+    "use server";
+    const r = await generateAgmAgendaAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${
+        r.ok ? "?agendaGenerated=1" : `?packageError=${encodeURIComponent(r.error ?? "")}`
       }`
     );
   }
@@ -419,12 +432,17 @@ export default async function ElectionReviewPage({
           hasMeeting={agmPackage.meetingId !== null}
           financialsSupplied={agmPackage.financialDocumentId !== null}
           upload={uploadFinancials}
+          generateAgenda={generateAgenda}
+          agendaSupplied={
+            agmPackage.items.find((i) => i.key === "agenda")?.state === "supplied"
+          }
           send={sendPackage}
           sentAt={agmPackageSentAt ? formatDate(agmPackageSentAt) : null}
           sendCount={agmPackageSendCount}
           error={packageError}
           uploaded={Boolean(uploaded)}
           sent={Boolean(packageSent)}
+          agendaGenerated={Boolean(agendaGenerated)}
         />
       )}
 

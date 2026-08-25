@@ -38,6 +38,11 @@ import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import { buildAgmScript } from "./documents/agm-script";
 import { buildAgmPackage, type AgmPackage } from "./documents/agm-package";
 import {
+  buildResultsAnnouncement,
+  type ResultsAnnouncement,
+} from "./documents/results-announcement";
+import { buildAgmAgenda } from "./documents/agm-agenda";
+import {
   buildNominatingCommitteeReport,
   type ReportDirector,
   type ReportCandidate,
@@ -64,6 +69,7 @@ import {
   notifyCallForNominations,
   notifyBallotsOpen,
   notifyAgmPackage,
+  notifyElectionResults,
   notifyAgmNotice,
   notifyProxyForm,
   summarizeOutcomes,
@@ -1351,9 +1357,19 @@ export async function sendCallForNominations(
   const outcomes = await notifyCallForNominations(election, eligible);
   const summary = summarizeOutcomes(outcomes);
 
+  // Sending the call is what OPENS nominations — they are the same act. A
+  // separate button would create two states that are both wrong: nominations
+  // "open" that nobody was told about, or a call sent while the form still says
+  // closed. Until this existed nothing moved an election off `draft`, so the
+  // nominate page — which requires status `nominating` — refused every member.
+  //
+  // Opening early is harmless: the page also checks the SCHEDULE, so a call sent
+  // ahead of nominationsOpenAt announces the dates without opening the form
+  // before them.
   await db
     .from("elections")
     .update({
+      status: election.status === "draft" ? "nominating" : election.status,
       config: {
         ...(existing?.config as Record<string, unknown>),
         callSentAt: new Date().toISOString(),
@@ -3157,4 +3173,215 @@ export async function sendAgmPackage(
     ok: true,
     data: { institutions: targets.length, outstanding: pkg.outstanding.length, ...summary },
   };
+}
+
+// ---------------------------------------------------------------------------
+// Announcing the result
+// ---------------------------------------------------------------------------
+
+/**
+ * Build the results announcement from live state.
+ *
+ * `departing` is the dangerous field. A director completing a term who stands
+ * again is NOT departing, and getting it wrong thanks them for their service in
+ * the same message that announces their re-election. Computed the same way
+ * getAgmScript does: term-enders minus everyone the members just elected.
+ */
+export async function getResultsAnnouncement(slug: string): Promise<
+  | (ResultsAnnouncement & {
+      election: Election;
+      canSend: boolean;
+      blockedReason: string | null;
+      meetingHasHappened: boolean;
+      recipients: number;
+    })
+  | null
+> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const report = await getNominatingCommitteeReport(slug);
+  const counted = election.status === "certified" ? await countElection(slug) : null;
+
+  const elected = (counted?.ok ? counted.data.results.filter((r) => r.elected) : []).map((r) => ({
+    name: r.displayName,
+    institution: r.organizationName,
+  }));
+
+  const rosterFor = (needle: string) =>
+    (report?.sections.find((s) => s.paragraphs[0]?.includes(needle))?.roster ?? []).map((d) => ({
+      name: d.name,
+      institution: d.institution,
+    }));
+
+  const electedNames = new Set(elected.map((e) => e.name));
+  const departing = rosterFor("completing").filter((d) => !electedNames.has(d.name));
+
+  const { count: ballotsReturned } = await db
+    .from("election_participation")
+    .select("id", { count: "exact", head: true })
+    .eq("election_id", election.id);
+
+  const { summary, verdicts } = await evaluateElectionEligibility(election.id);
+  const recipients = verdicts.filter((v) => v.isEligible).length;
+
+  const outcome = (election.outcome as "acclaimed" | "balloted" | null) ?? "balloted";
+
+  const announcement = buildResultsAnnouncement({
+    cycleYear: election.cycleYear,
+    agmDate: election.schedule.agmDate,
+    outcome,
+    elected,
+    continuing: rosterFor("second year"),
+    departing,
+    ballotsReturned: outcome === "acclaimed" ? null : (ballotsReturned ?? 0),
+    electorateSize: summary.eligible,
+    // Two-year terms: a director elected at this AGM serves to the second annual
+    // meeting following (By-Law Part IV S2).
+    termEndsYear: election.cycleYear + 2,
+  });
+
+  // Part V S3(e): the members elect AT the meeting. Before it has happened,
+  // nobody has been elected and this message would be false — however finished
+  // the count looks.
+  const meetingHasHappened = today() >= election.schedule.agmDate;
+
+  let blockedReason: string | null = null;
+  if (election.status !== "certified")
+    blockedReason = `The result has not been certified — the election is "${election.status}".`;
+  else if (announcement.outstanding.length > 0)
+    blockedReason = announcement.outstanding.join(" ");
+
+  return {
+    ...announcement,
+    election,
+    meetingHasHappened,
+    canSend: blockedReason === null,
+    blockedReason,
+    recipients,
+  };
+}
+
+/**
+ * Send the result to the membership.
+ *
+ * Refuses before certification, and refuses before the meeting unless the caller
+ * states the meeting has taken place — the AGM date passing is good evidence but
+ * not proof, and a postponed meeting would otherwise announce an election that
+ * has not happened.
+ */
+export async function announceResults(
+  slug: string,
+  sentByProfileId: string,
+  opts: { confirmedMeetingHeld: boolean }
+): Promise<Result<{ institutions: number; sent: number; failed: number; problems: string[] }>> {
+  const db = createAdminClient();
+  const state = await getResultsAnnouncement(slug);
+  if (!state) return fail("That election does not exist.");
+  if (!state.canSend) return fail(state.blockedReason ?? "This cannot be announced yet.");
+
+  if (!state.meetingHasHappened && !opts.confirmedMeetingHeld)
+    return fail(
+      `The annual general meeting is on ${state.election.schedule.agmDate} and has not happened yet. ` +
+        `The members elect at the meeting, so until then nobody has been elected. Confirm the meeting took place to send anyway.`
+    );
+
+  const { data: existing } = await db
+    .from("elections")
+    .select("config")
+    .eq("id", state.election.id)
+    .single();
+  const cfg = (existing?.config as Record<string, unknown>) ?? {};
+  if (cfg.resultsAnnouncedAt)
+    return fail(
+      `The result was already announced on ${String(cfg.resultsAnnouncedAt).slice(0, 10)}. Sending again would tell every member store twice.`
+    );
+
+  const { verdicts } = await evaluateElectionEligibility(state.election.id);
+  const targets = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+  if (targets.length === 0) return fail("No eligible institutions to announce to.");
+
+  const outcomes = await notifyElectionResults(state.election, targets, {
+    subject: state.subject,
+    html: state.html,
+  });
+  const summary = summarizeOutcomes(outcomes);
+
+  await db
+    .from("elections")
+    .update({
+      config: JSON.parse(
+        JSON.stringify({
+          ...cfg,
+          resultsAnnouncedAt: new Date().toISOString(),
+          resultsAnnouncedBy: sentByProfileId,
+        })
+      ) as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", state.election.id);
+
+  return ok({ institutions: targets.length, ...summary });
+}
+
+/**
+ * Generate the members' agenda onto the AGM meeting record.
+ *
+ * Derived from the same blocks the chair's script uses, so the two cannot drift.
+ * Written to `board_meetings.agenda_html`, which is where the package looks and
+ * where the meeting's own screens already read from.
+ *
+ * Refuses to overwrite. An agenda someone has edited by hand is the real one,
+ * and silently replacing it with a regenerated version is how a meeting ends up
+ * running an order nobody agreed to. Replacing is possible, but it has to be
+ * asked for.
+ */
+export async function generateAgmAgenda(
+  slug: string,
+  opts: { replace?: boolean; meetingUrl?: string | null } = {}
+): Promise<Result<{ meetingId: string; items: number; replaced: boolean }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, agenda_html")
+    .eq("meeting_type", "agm")
+    .eq("meeting_date", election.schedule.agmDate)
+    .maybeSingle();
+
+  if (!meeting?.id)
+    return fail("There is no AGM meeting record yet — the election kickoff creates it.");
+
+  const hadAgenda = Boolean(meeting.agenda_html);
+  if (hadAgenda && !opts.replace)
+    return fail(
+      "This meeting already has an agenda. Regenerating would discard whatever has been edited into it — ask for a replacement if that is what you want."
+    );
+
+  const script = await getAgmScript(slug, { meetingUrl: opts.meetingUrl ?? null });
+  if (!script) return fail("Could not build the meeting script to derive an agenda from.");
+
+  const agenda = buildAgmAgenda({
+    cycleYear: election.cycleYear,
+    agmDate: election.schedule.agmDate,
+    blocks: script.blocks,
+    times: CSC_MEETING_TIMES,
+    meetingUrl: opts.meetingUrl ?? null,
+  });
+
+  const { error } = await db
+    .from("board_meetings")
+    .update({
+      agenda_html: agenda.html,
+      agenda_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", meeting.id);
+
+  if (error) return fail(`Could not save the agenda: ${error.message}`);
+
+  return ok({ meetingId: meeting.id as string, items: agenda.items.length, replaced: hadAgenda });
 }

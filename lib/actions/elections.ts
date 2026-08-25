@@ -720,3 +720,60 @@ export async function sendAgmPackageAction(
   revalidatePath(`/admin/elections/${slug}`);
   return { ok: true };
 }
+
+/**
+ * Announce the election result to the membership.
+ *
+ * By-Law Part V S3(e): the members elect at the annual general meeting, so this
+ * cannot honestly go out before it. The date passing is good evidence the
+ * meeting happened but not proof — a postponement would otherwise announce an
+ * election that never took place — so the caller confirms.
+ */
+export async function announceResultsAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only an administrator can announce the result." };
+
+  const { announceResults } = await import("@/lib/elections/service");
+  const result = await announceResults(slug, auth.user.id, {
+    confirmedMeetingHeld: formData.get("confirmMeetingHeld") === "1",
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
+/**
+ * Generate the members' agenda onto the AGM meeting.
+ *
+ * Refuses to clobber an existing agenda unless `replace` is set — an agenda
+ * someone has edited is the real one.
+ */
+export async function generateAgmAgendaAction(
+  slug: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only an administrator can generate the agenda." };
+
+  const { generateAgmAgenda } = await import("@/lib/elections/service");
+  const meetingUrl = String(formData.get("meetingUrl") ?? "").trim();
+
+  const result = await generateAgmAgenda(slug, {
+    replace: formData.get("replace") === "1",
+    meetingUrl: meetingUrl || null,
+  });
+
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}

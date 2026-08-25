@@ -50,12 +50,15 @@ export default function AgmPackagePanel({
   hasMeeting,
   financialsSupplied,
   upload,
+  generateAgenda,
+  agendaSupplied,
   send,
   sentAt,
   sendCount,
   error,
   uploaded,
   sent,
+  agendaGenerated,
 }: {
   items: PackageItem[];
   outstanding: PackageItem[];
@@ -64,12 +67,15 @@ export default function AgmPackagePanel({
   hasMeeting: boolean;
   financialsSupplied: boolean;
   upload: (formData: FormData) => Promise<void>;
+  generateAgenda: (formData: FormData) => Promise<void>;
+  agendaSupplied: boolean;
   send: (formData: FormData) => Promise<void>;
   sentAt: string | null;
   sendCount: number;
   error?: string;
   uploaded?: boolean;
   sent?: boolean;
+  agendaGenerated?: boolean;
 }) {
   const blocked = items.filter((i) => i.state === "missing");
   const settled = items.filter((i) => i.state !== "missing");
@@ -93,6 +99,11 @@ export default function AgmPackagePanel({
           The package is on its way to member stores.
         </div>
       )}
+      {agendaGenerated && (
+        <div className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
+          Agenda generated and saved to the meeting.
+        </div>
+      )}
       {uploaded && (
         <div className="mt-3 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-sm text-green-900">
           Financial statements attached to the meeting.
@@ -106,6 +117,39 @@ export default function AgmPackagePanel({
           ))}
         </ul>
       )}
+
+      <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
+        <p className="text-sm font-medium text-gray-900">Agenda</p>
+        <p className="mt-0.5 text-xs text-gray-600">
+          Generated from the same running order as the chair&apos;s script, so the two cannot
+          drift. Saved onto the meeting, where you can edit it afterwards.
+        </p>
+        <form action={generateAgenda} className="mt-3 flex flex-wrap items-center gap-3">
+          <input
+            name="meetingUrl"
+            placeholder="Meeting link (optional)"
+            className="w-64 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+          />
+          {agendaSupplied && (
+            <label className="flex items-center gap-2 text-xs text-gray-700">
+              <input type="checkbox" name="replace" value="1" />
+              Replace the existing agenda
+            </label>
+          )}
+          <button
+            type="submit"
+            className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-900 hover:bg-gray-50"
+          >
+            {agendaSupplied ? "Regenerate agenda" : "Generate agenda"}
+          </button>
+        </form>
+        {agendaSupplied && (
+          <p className="mt-2 text-xs text-gray-500">
+            An agenda already exists. Regenerating discards anything edited into it, so it needs
+            the box ticked.
+          </p>
+        )}
+      </div>
 
       <div className="mt-4 rounded-md border border-gray-200 bg-gray-50 px-4 py-3">
         <p className="text-sm font-medium text-gray-900">

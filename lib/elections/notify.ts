@@ -528,3 +528,36 @@ export async function notifyAgmPackage(
   }
   return outcomes;
 }
+
+/**
+ * The result, after the annual general meeting has elected the board.
+ *
+ * The body is generated whole by buildResultsAnnouncement and passed in as one
+ * variable. That is deliberate: the wording turns on the by-law's split between
+ * announcing and electing, on acclamation versus ballot, and on who actually
+ * departed — none of which a template with placeholders could get right, and all
+ * of which is covered by tests where it lives.
+ */
+export async function notifyElectionResults(
+  election: Election,
+  organizationIds: string[],
+  announcement: { subject: string; html: string }
+): Promise<NotifyOutcome[]> {
+  const outcomes: NotifyOutcome[] = [];
+  for (const orgId of organizationIds) {
+    const admins = await loadOrgAdminContacts(orgId);
+    const organizationName = await loadOrgName(orgId);
+    for (const admin of admins) {
+      outcomes.push(
+        await send("election_results_announced", admin.email, {
+          contact_name: admin.name,
+          organization_name: organizationName,
+          subject_line: announcement.subject,
+          heading: `Your ${election.cycleYear} Board of Directors`,
+          announcement_html: announcement.html,
+        })
+      );
+    }
+  }
+  return outcomes;
+}

@@ -14,11 +14,12 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
-import { getAuditView } from "@/lib/elections/service";
+import { getAuditView, getResultsAnnouncement } from "@/lib/elections/service";
 import {
   sealElectionAction,
   recordTieResolutionAction,
   certifyElectionAction,
+  announceResultsAction,
 } from "@/lib/actions/elections";
 
 export const metadata = { title: "Election audit | Admin | Campus Stores Canada" };
@@ -42,12 +43,13 @@ export default async function ElectionAuditPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; announced?: string }>;
 }) {
   const { slug } = await params;
-  const { error } = await searchParams;
+  const { error, announced } = await searchParams;
   const audit = await getAuditView(slug);
   if (!audit) notFound();
+  const results = await getResultsAnnouncement(slug);
 
   const { election, roll, sealedCount, reconciled, count, certification } = audit;
   const sealed = election.status === "sealed" || election.status === "certified";
@@ -66,6 +68,14 @@ export default async function ElectionAuditPage({
       `/admin/elections/${slug}/audit${r.ok ? "" : `?error=${encodeURIComponent(r.error ?? "")}`}`
     );
   }
+  async function announce(formData: FormData) {
+    "use server";
+    const r = await announceResultsAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}/audit${r.ok ? "?announced=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
   async function certify(formData: FormData) {
     "use server";
     const r = await certifyElectionAction(slug, formData);
@@ -89,6 +99,11 @@ export default async function ElectionAuditPage({
       {error && (
         <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
           {error}
+        </div>
+      )}
+      {announced && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          The result has gone to the membership.
         </div>
       )}
 
@@ -257,6 +272,46 @@ export default async function ElectionAuditPage({
               <strong>Tie resolution</strong> ({certification.tieResolutionMethod}):{" "}
               {certification.tieResolutionNote}
             </p>
+          )}
+        </section>
+      )}
+
+      {certification?.certifiedAt && results && (
+        <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
+          <h2 className="text-sm font-semibold text-gray-900">Announce the result</h2>
+          <p className="mt-1 text-xs text-gray-500">
+            By-Law Part V S3(e) — the members elect at the meeting, so this is written in the
+            past tense of a meeting that has happened and cannot go out before it.
+          </p>
+
+          <div
+            className="mt-3 rounded-md border border-gray-200 bg-gray-50 px-4 py-3 text-sm text-gray-800 [&_p]:mt-2 first:[&_p]:mt-0"
+            dangerouslySetInnerHTML={{ __html: results.html }}
+          />
+
+          {results.blockedReason ? (
+            <p className="mt-3 text-sm text-red-700">{results.blockedReason}</p>
+          ) : (
+            <form action={announce} className="mt-3">
+              {!results.meetingHasHappened && (
+                <label className="flex items-start gap-2 text-sm text-gray-700">
+                  <input type="checkbox" name="confirmMeetingHeld" value="1" className="mt-0.5" />
+                  <span>
+                    The meeting on {results.election.schedule.agmDate} has taken place and the
+                    members elected this board. Without this, nothing sends — until the meeting
+                    happens nobody has been elected.
+                  </span>
+                </label>
+              )}
+              <button
+                type="submit"
+                className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
+              >
+                Send to {results.recipients} member institution
+                {results.recipients === 1 ? "" : "s"}
+              </button>
+              <span className="ml-3 text-xs text-gray-500">Sends once.</span>
+            </form>
           )}
         </section>
       )}

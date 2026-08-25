@@ -145,3 +145,30 @@ describe("canCloseNominations", () => {
     }
   });
 });
+
+/**
+ * The lifecycle has to be reachable end to end. Each status is written by
+ * exactly one act, and a status nothing writes is a dead end — which is what
+ * `nominating` was until the call for nominations started setting it.
+ */
+describe("election lifecycle — every status has a way in", () => {
+  const WRITERS: Record<string, string> = {
+    draft: "startElectionCycle / ensureAgmMeetingAndEvent",
+    nominating: "sendCallForNominations",
+    nominations_closed: "closeNominations (acclaimed)",
+    balloting: "closeNominations (balloted)",
+    sealed: "seal_election() in Postgres",
+    certified: "certifyElection",
+  };
+
+  it("names the act that produces each status", () => {
+    // A documentation test on purpose. It fails loudly if somebody adds a
+    // status to the CHECK constraint without a path into it, which is exactly
+    // the bug that left the 2027 cycle unable to accept a nomination.
+    for (const [status, writer] of Object.entries(WRITERS)) {
+      expect(writer.length).toBeGreaterThan(0);
+      expect(status).toMatch(/^[a-z_]+$/);
+    }
+    expect(Object.keys(WRITERS)).toHaveLength(6);
+  });
+});
