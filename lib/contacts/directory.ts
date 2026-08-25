@@ -27,7 +27,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 /** The columns a directory-style view usually wants. */
 export const DIRECTORY_CONTACT_FIELDS =
-  "id, organization_id, name, role_title, work_email, email, work_phone_number, phone, is_primary, hidden, last_contact_date";
+  "id, organization_id, name, role_title, work_email, email, work_phone_number, phone, is_primary, hidden, directory_visibility, last_contact_date";
 
 export interface DirectoryContactOptions {
   /** Restrict to these organizations. Omit for all. */
@@ -41,6 +41,15 @@ export interface DirectoryContactOptions {
   includeHidden?: boolean;
   /** Include people who have left. Almost always false. */
   includeArchived?: boolean;
+  /**
+   * Only people who have explicitly agreed to be PRINTED.
+   *
+   * A stricter rule than the website's, on purpose: `hidden = false` is the
+   * absence of an opt-out, not the presence of consent. Undecided people stay
+   * visible on the site — where a mistake is fixable — and stay out of the
+   * book, where it is not.
+   */
+  printableOnly?: boolean;
 }
 
 /**
@@ -57,6 +66,7 @@ export async function listDirectoryContacts<T = Record<string, unknown>>(
     fields = DIRECTORY_CONTACT_FIELDS,
     includeHidden = false,
     includeArchived = false,
+    printableOnly = false,
   } = opts;
 
   // An empty org list means "no organizations", not "all organizations" —
@@ -73,6 +83,9 @@ export async function listDirectoryContacts<T = Record<string, unknown>>(
   if (!includeArchived) query = query.is("archived_at", null);
   // hidden is nullable, so "not true" has to be spelled out.
   if (!includeHidden) query = query.or("hidden.is.null,hidden.eq.false");
+  // Silence prints nobody: an explicit choice is required, not merely the
+  // absence of an opt-out.
+  if (printableOnly) query = query.in("directory_visibility", ["members", "public"]);
   if (limit) query = query.limit(limit);
 
   const { data, error } = await query;
