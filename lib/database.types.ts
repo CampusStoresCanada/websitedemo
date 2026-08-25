@@ -982,6 +982,132 @@ export type Database = {
           },
         ]
       }
+      benchmarking_notes: {
+        Row: {
+          author_id: string
+          created_at: string
+          delta_flag_id: string | null
+          field_name: string
+          id: string
+          note: string
+          organization_id: string
+          override_at: string | null
+          override_by: string | null
+          override_reason: string | null
+          published_on_override: boolean
+          respondent_at: string | null
+          respondent_decision: string | null
+          respondent_id: string | null
+          secretary_at: string | null
+          secretary_decision: string | null
+          secretary_id: string | null
+          status: string
+          survey_id: string
+          updated_at: string
+        }
+        Insert: {
+          author_id: string
+          created_at?: string
+          delta_flag_id?: string | null
+          field_name: string
+          id?: string
+          note: string
+          organization_id: string
+          override_at?: string | null
+          override_by?: string | null
+          override_reason?: string | null
+          published_on_override?: boolean
+          respondent_at?: string | null
+          respondent_decision?: string | null
+          respondent_id?: string | null
+          secretary_at?: string | null
+          secretary_decision?: string | null
+          secretary_id?: string | null
+          status?: string
+          survey_id: string
+          updated_at?: string
+        }
+        Update: {
+          author_id?: string
+          created_at?: string
+          delta_flag_id?: string | null
+          field_name?: string
+          id?: string
+          note?: string
+          organization_id?: string
+          override_at?: string | null
+          override_by?: string | null
+          override_reason?: string | null
+          published_on_override?: boolean
+          respondent_at?: string | null
+          respondent_decision?: string | null
+          respondent_id?: string | null
+          secretary_at?: string | null
+          secretary_decision?: string | null
+          secretary_id?: string | null
+          status?: string
+          survey_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_notes_author_id_fkey"
+            columns: ["author_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_delta_flag_id_fkey"
+            columns: ["delta_flag_id"]
+            isOneToOne: false
+            referencedRelation: "delta_flags"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_override_by_fkey"
+            columns: ["override_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_respondent_id_fkey"
+            columns: ["respondent_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_secretary_id_fkey"
+            columns: ["secretary_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_notes_survey_id_fkey"
+            columns: ["survey_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_recipients: {
         Row: {
           assigned_to: string | null
@@ -990,6 +1116,7 @@ export type Database = {
           contact_id: string | null
           created_at: string
           id: string
+          is_beta: boolean
           note: string | null
           organization_id: string
           status: string
@@ -1003,6 +1130,7 @@ export type Database = {
           contact_id?: string | null
           created_at?: string
           id?: string
+          is_beta?: boolean
           note?: string | null
           organization_id: string
           status?: string
@@ -1016,6 +1144,7 @@ export type Database = {
           contact_id?: string | null
           created_at?: string
           id?: string
+          is_beta?: boolean
           note?: string | null
           organization_id?: string
           status?: string
@@ -2881,6 +3010,7 @@ export type Database = {
           description: string | null
           id: string
           name: string
+          publication_id: string | null
           scope_entity_id: string | null
           updated_at: string
         }
@@ -2892,6 +3022,7 @@ export type Database = {
           description?: string | null
           id?: string
           name: string
+          publication_id?: string | null
           scope_entity_id?: string | null
           updated_at?: string
         }
@@ -2903,6 +3034,7 @@ export type Database = {
           description?: string | null
           id?: string
           name?: string
+          publication_id?: string | null
           scope_entity_id?: string | null
           updated_at?: string
         }
@@ -2912,6 +3044,13 @@ export type Database = {
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_checklists_publication_id_fkey"
+            columns: ["publication_id"]
+            isOneToOne: false
+            referencedRelation: "publications"
             referencedColumns: ["id"]
           },
           {
@@ -3164,6 +3303,10 @@ export type Database = {
           edition_code: string
           end_date: string | null
           floor_plan_url: string | null
+          hotel_booking_cutoff: string | null
+          hotel_booking_url: string | null
+          hotel_note: string | null
+          hotel_rates: Json
           id: string
           location_city: string | null
           location_latitude: number | null
@@ -3197,6 +3340,10 @@ export type Database = {
           edition_code?: string
           end_date?: string | null
           floor_plan_url?: string | null
+          hotel_booking_cutoff?: string | null
+          hotel_booking_url?: string | null
+          hotel_note?: string | null
+          hotel_rates?: Json
           id?: string
           location_city?: string | null
           location_latitude?: number | null
@@ -3230,6 +3377,10 @@ export type Database = {
           edition_code?: string
           end_date?: string | null
           floor_plan_url?: string | null
+          hotel_booking_cutoff?: string | null
+          hotel_booking_url?: string | null
+          hotel_note?: string | null
+          hotel_rates?: Json
           id?: string
           location_city?: string | null
           location_latitude?: number | null
@@ -4417,6 +4568,9 @@ export type Database = {
           contact_type: string[] | null
           created_at: string | null
           dietary_restrictions: string | null
+          directory_visibility: string | null
+          directory_visibility_asked_at: string | null
+          directory_visibility_set_at: string | null
           email: string | null
           first_name: string | null
           hidden: boolean
@@ -4455,6 +4609,9 @@ export type Database = {
           contact_type?: string[] | null
           created_at?: string | null
           dietary_restrictions?: string | null
+          directory_visibility?: string | null
+          directory_visibility_asked_at?: string | null
+          directory_visibility_set_at?: string | null
           email?: string | null
           first_name?: string | null
           hidden?: boolean
@@ -4493,6 +4650,9 @@ export type Database = {
           contact_type?: string[] | null
           created_at?: string | null
           dietary_restrictions?: string | null
+          directory_visibility?: string | null
+          directory_visibility_asked_at?: string | null
+          directory_visibility_set_at?: string | null
           email?: string | null
           first_name?: string | null
           hidden?: boolean
@@ -6185,6 +6345,24 @@ export type Database = {
           },
         ]
       }
+      governance_role_capabilities: {
+        Row: {
+          can_delegate: boolean
+          capability: string
+          role_key: string
+        }
+        Insert: {
+          can_delegate?: boolean
+          capability: string
+          role_key: string
+        }
+        Update: {
+          can_delegate?: boolean
+          capability?: string
+          role_key?: string
+        }
+        Relationships: []
+      }
       hero_area_config: {
         Row: {
           cycle_interval_ms: number
@@ -6575,6 +6753,135 @@ export type Database = {
             columns: ["scheduler_run_id"]
             isOneToOne: false
             referencedRelation: "scheduler_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meeting_proxies: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          document_path: string | null
+          form_source: string
+          grantor_contact_id: string | null
+          grantor_organization_id: string
+          id: string
+          meeting_id: string
+          proxyholder_contact_id: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          signed_at: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          document_path?: string | null
+          form_source?: string
+          grantor_contact_id?: string | null
+          grantor_organization_id: string
+          id?: string
+          meeting_id: string
+          proxyholder_contact_id: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          signed_at?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          document_path?: string | null
+          form_source?: string
+          grantor_contact_id?: string | null
+          grantor_organization_id?: string
+          id?: string
+          meeting_id?: string
+          proxyholder_contact_id?: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          signed_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_organization_id_fkey"
+            columns: ["grantor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_organization_id_fkey"
+            columns: ["grantor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
         ]
@@ -11617,21 +11924,19 @@ export type Database = {
       }
       capability_contributions: {
         Row: {
+          body_name: string | null
           capability: string | null
           display_name: string | null
-          ends_at: string | null
-          granted_by_name: string | null
           is_active: boolean | null
           reason: string | null
-          revoked_at: string | null
-          scope_id: string | null
-          scope_type: string | null
-          starts_at: string | null
+          role_key: string | null
           subject_id: string | null
+          term_end: string | null
+          term_start: string | null
         }
         Relationships: [
           {
-            foreignKeyName: "capability_grants_subject_id_fkey"
+            foreignKeyName: "governance_role_assignments_person_profile_id_fkey"
             columns: ["subject_id"]
             isOneToOne: false
             referencedRelation: "profiles"
@@ -12018,6 +12323,7 @@ export type Database = {
         }
       }
       csc_region: { Args: { p_province: string }; Returns: string }
+      current_capabilities: { Args: { p_subject: string }; Returns: string[] }
       db_access_drift: { Args: never; Returns: Json }
       ensure_conference_badge_token_for_person: {
         Args: {
@@ -12249,6 +12555,7 @@ export type Database = {
         Returns: string
       }
       mint_v3_for_order: { Args: { p_order_id: string }; Returns: number }
+      over_exposed_relations: { Args: never; Returns: Json }
       process_conference_order_paid: {
         Args: {
           p_checkout_session_id: string

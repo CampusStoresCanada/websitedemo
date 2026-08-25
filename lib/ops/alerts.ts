@@ -54,6 +54,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "retention_overdue",
   "qbo_export_backlog",
   "orgs_missing_admin",
+  "renewal_unsubscribed_unpaid",
   "board_meeting_not_closed_out",
   "board_no_upcoming_meeting",
   "board_action_item_overdue",
@@ -67,6 +68,7 @@ const PERIODIC_RULE_KEYS = new Set([
 const PERIODIC_RULE_KEY_PREFIXES = [
   "job_consecutive_failures:",
   "db_access_drift:",
+  "over_exposed_relation:",
 ];
 
 function isPeriodicRuleKey(ruleKey: string): boolean {
@@ -264,6 +266,84 @@ async function evaluateBillingFailureRate(): Promise<CandidateAlert | null> {
       failureRate,
       status: data.status,
     },
+  };
+}
+
+/**
+ * Someone who unsubscribed while still owing us money.
+ *
+ * Unsubscribing is a communications preference, not a cancellation, so this
+ * does NOT void the invoice — `optOutOfRenewal()` does that properly, with a
+ * reason, a refund where one is due, and a status change, and it should stay a
+ * decision a person makes. But an unsubscribe from a paying member with an open
+ * invoice is a clear signal, and until now it went nowhere: the renewal series
+ * is transactional, so it keeps sending regardless, and nobody is told.
+ *
+ * Periodic rather than event-driven so it re-evaluates and closes itself the
+ * moment they pay, resubscribe, or are opted out — an alert whose message is
+ * frozen at creation goes stale, and this one counts things that move daily.
+ */
+async function evaluateRenewalUnsubscribedUnpaid(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+
+  // A hard bounce and an unsubscribe are NOT the same signal and must not be
+  // counted together. Of the 51 rows in this table, 42 are bounces backfilled
+  // from Resend history — dead addresses, where the member has told us nothing
+  // and may not even know they owe. Only the self-serve and admin-recorded rows
+  // are somebody actually saying something. Lumping them flagged ten
+  // organizations as "signalling" when four were.
+  const { data: suppressed } = await db
+    .from("comms_suppressions")
+    .select("email, reason")
+    .eq("category", "all");
+  const suppressedEmails = new Set(
+    (suppressed ?? [])
+      .filter((r) => !((r.reason as string) ?? "").startsWith("backfill"))
+      .map((r) => (r.email as string).trim().toLowerCase()),
+  );
+  if (suppressedEmails.size === 0) return null;
+
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id, name, type, contacts(email, work_email)")
+    .in("membership_status", ["active", "reactivated"])
+    .is("archived_at", null)
+    .eq("is_test", false);
+
+  const flagged: { name: string; type: string; who: string }[] = [];
+
+  for (const org of orgs ?? []) {
+    const emails = ((org.contacts ?? []) as { email: string | null; work_email: string | null }[])
+      .map((c) => (c.work_email ?? c.email ?? "").trim().toLowerCase())
+      .filter(Boolean);
+    const hit = emails.find((e) => suppressedEmails.has(e));
+    if (!hit) continue;
+
+    // Only worth surfacing while money is actually outstanding.
+    const { data: invoice } = await db
+      .from("invoices")
+      .select("status")
+      .eq("organization_id", org.id)
+      .gte("created_at", "2026-08-01")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!invoice || invoice.status !== "invoiced") continue;
+
+    flagged.push({ name: org.name as string, type: org.type as string, who: hit });
+  }
+
+  if (flagged.length === 0) return null;
+
+  return {
+    ruleKey: "renewal_unsubscribed_unpaid",
+    severity: "warning",
+    message:
+      `${flagged.length} organization${flagged.length === 1 ? "" : "s"} asked to stop receiving email and still have an open renewal invoice. ` +
+      `Renewal notices are transactional so they keep sending regardless — each of these will receive roughly seven more. ` +
+      `An unsubscribe is not a cancellation, so nothing is voided automatically: if they are leaving, opting them out does it ` +
+      `properly, and if they are not, a call beats another seven emails.`,
+    details: { count: flagged.length, organizations: flagged },
   };
 }
 
@@ -1446,11 +1526,114 @@ async function evaluateDbAccessDrift(): Promise<CandidateAlert[]> {
   });
 }
 
+type OverExposedReport = {
+  exposed: Array<{
+    relation: string;
+    kind: string;
+    problem: string;
+    exposed_to: string;
+    detail: string | null;
+    severity: Severity;
+  }>;
+  traps: Array<{ relation: string; grantee: string }>;
+  acknowledged: Array<{ relation: string; why: string }>;
+};
+
+const EXPOSURE_EXPLANATION: Record<string, string> = {
+  rls_off: "RLS is switched off, so every row is returned to anyone holding that key.",
+  permissive_policy:
+    "its RLS policy has an unconditional USING (true), which admits every row.",
+  owner_rights_view:
+    "it is a view running with its owner's rights (security_invoker is not on), so RLS on the tables underneath does not apply to the caller at all.",
+};
+
+/**
+ * Read exposure, as opposed to the write drift `db_access_drift()` looks for.
+ *
+ * These are the two halves of the same blind spot. The drift audit compares
+ * GRANTs against policies for `authenticated` on write verbs, looking for the
+ * two to disagree. It cannot see a table where they agree and are both simply
+ * too generous — which is how `benchmarking` sat readable with the publishable
+ * key, and how `capability_contributions` handed the governance roster to every
+ * signed-in member through a view that bypassed RLS entirely.
+ *
+ * `traps` are not leaks today: a SELECT grant with no policy admitting the role
+ * returns zero rows and no error. They are reported because that is exactly one
+ * permissive policy away from being a leak, and because a grant nothing uses is
+ * evidence that nobody has looked at the table recently.
+ *
+ * One alert per relation, for the same reason drift does it: a single summary
+ * alert freezes its message at creation, so a second relation drifting later
+ * would never be mentioned anywhere.
+ */
+async function evaluateOverExposedRelations(): Promise<CandidateAlert[]> {
+  const db = createAdminClient() as unknown as {
+    rpc: (
+      fn: string,
+    ) => Promise<{ data: unknown; error: { message: string } | null }>;
+  };
+
+  const { data, error } = await db.rpc("over_exposed_relations");
+
+  if (error || !data) {
+    // A rule that cannot run looks identical to a rule that found nothing,
+    // which is the failure this whole check exists to catch.
+    return [
+      {
+        ruleKey: "over_exposed_relation:audit_unavailable",
+        severity: "warning",
+        message:
+          "The read-exposure audit could not run, so permissive read policies and owner-rights views are currently unmonitored.",
+        details: {
+          error: error?.message ?? "over_exposed_relations() returned no data",
+        },
+      },
+    ];
+  }
+
+  const report = data as OverExposedReport;
+  const alerts: CandidateAlert[] = [];
+
+  for (const f of report.exposed ?? []) {
+    const who =
+      f.exposed_to === "anon"
+        ? "anyone on the internet — the publishable key ships in the browser bundle"
+        : "every signed-in user, which is several hundred people";
+
+    alerts.push({
+      ruleKey: `over_exposed_relation:${f.relation}:${f.exposed_to}`,
+      severity: f.severity,
+      message: `"${f.relation}" is readable by ${who}, because ${
+        EXPOSURE_EXPLANATION[f.problem] ?? f.problem
+      } Either scope the policy, or read it with createAdminClient() behind a route guard and drop the grant.`,
+      details: {
+        relation: f.relation,
+        kind: f.kind,
+        problem: f.problem,
+        exposedTo: f.exposed_to,
+        detail: f.detail,
+      },
+    });
+  }
+
+  for (const t of report.traps ?? []) {
+    alerts.push({
+      ruleKey: `over_exposed_relation:trap:${t.relation}:${t.grantee}`,
+      severity: "info",
+      message: `"${t.relation}" grants SELECT to ${t.grantee} but no policy admits it, so reads return zero rows and no error. Nothing leaks today, but adding any permissive read policy later opens it without anyone touching a GRANT. Drop the grant if nothing reads it as ${t.grantee}.`,
+      details: { relation: t.relation, grantee: t.grantee, kind: "inert_grant" },
+    });
+  }
+
+  return alerts;
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
     evaluateSchedulerInfeasible(),
     evaluateBillingFailureRate(),
+    evaluateRenewalUnsubscribedUnpaid(),
     evaluateCircleBacklog(),
     evaluateWebhookBacklog(),
     evaluateSwapStaleConflicts(),
@@ -1475,10 +1658,12 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
   // Flattened separately: every other check yields at most one candidate, but
   // access drift yields one per affected table.
   const driftChecks = await evaluateDbAccessDrift();
+  const exposureChecks = await evaluateOverExposedRelations();
 
   return [
     ...checks.filter((item): item is CandidateAlert => Boolean(item)),
     ...driftChecks,
+    ...exposureChecks,
   ];
 }
 

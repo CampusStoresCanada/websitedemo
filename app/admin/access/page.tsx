@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import AccessGrantsBoard from "@/components/admin/AccessGrantsBoard";
 
@@ -21,7 +22,7 @@ export default async function AccessGrantsPage({
   const year = Number(params.year) || new Date().getFullYear();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: grants } = (await (supabase as any)
+  const { data: grants } = (await (createAdminClient() as any)
     .from("capability_contributions")
     .select("*")
     .order("starts_at", { ascending: false })) as { data: any[] | null };

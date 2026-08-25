@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { WORKSTREAMS } from "@/lib/benchmarking/committee-workstreams";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
@@ -40,7 +41,7 @@ export default async function CommitteePage() {
 
   // Who currently holds each benchmarking capability
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: holders } = (await (supabase as any)
+  const { data: holders } = (await (createAdminClient() as any)
     .from("capability_contributions")
     .select("subject_id, display_name, capability, reason, ends_at")
     .like("capability", "benchmarking.%")

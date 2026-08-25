@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/guards";
@@ -79,7 +80,7 @@ export default async function BenchmarkingAdminPage() {
   // /admin/access, where a grant carries an end date and a reason.
   const nowIso = new Date().toISOString();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: benchmarkingGrants } = (await (supabase as any)
+  const { data: benchmarkingGrants } = (await (createAdminClient() as any)
     .from("capability_contributions")
     .select("display_name, capability, reason, ends_at")
     .like("capability", "benchmarking.%")
