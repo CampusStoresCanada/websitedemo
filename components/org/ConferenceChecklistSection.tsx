@@ -4,9 +4,11 @@ import { answerOrgTask } from "@/lib/actions/conference-tasks";
 import { loadOrgTasks } from "@/lib/conference/checklist-tasks";
 import { loadOrgPayments } from "@/lib/conference/org-payments";
 import { loadOrgLegalStatus } from "@/lib/conference/org-legal";
+import { getExhibitorStatusForOrg } from "@/lib/conference/exhibitor-status";
 import TaskChecklist from "@/components/conference/TaskChecklist";
 import OrgAgreements from "@/components/org/OrgAgreements";
 import OrgPayments from "@/components/org/OrgPayments";
+import PrintReadiness from "@/components/org/PrintReadiness";
 
 /**
  * Everything this organisation owes for the conference, on the page they were
@@ -41,11 +43,15 @@ export default async function ConferenceChecklistSection({
   if (!auth.ok || !canManageOrganization(auth.ctx, orgId)) return null;
 
   const db = createAdminClient();
-  const [allOrgTasks, payments, legalStatus] = await Promise.all([
+  const [allOrgTasks, payments, legalStatus, exhibitor] = await Promise.all([
     loadOrgTasks(db, conferenceId, orgId),
     loadOrgPayments(db, conferenceId, orgId),
     loadOrgLegalStatus(db, conferenceId, orgId, auth.ctx.userId),
+    // Booth numbers go on a shipping label, so they belong beside the supplier
+    // order — not two screens away on the storefront.
+    getExhibitorStatusForOrg(orgId),
   ]);
+  const boothNumbers = exhibitor?.boothNumbers ?? [];
 
   /**
    * A task earns a place in the list only if the list is where you act on it.
@@ -94,6 +100,7 @@ export default async function ConferenceChecklistSection({
           </p>
           <div className="mt-2">
             <TaskChecklist tasks={orgTasks} onAnswer={handleOrgTaskAnswer}
+              boothNumbers={boothNumbers}
               emptyLabel="Nothing outstanding for your company." />
           </div>
         </div>
@@ -102,14 +109,12 @@ export default async function ConferenceChecklistSection({
       <OrgPayments summary={payments} />
       <OrgAgreements status={legalStatus} />
 
-      <p className="text-sm">
-        <a
-          href={`/org/${slug}/conference/${conferenceId}/listing`}
-          className="font-medium text-[#163D6D] hover:underline"
-        >
-          See your printed directory listing &rarr;
-        </a>
-      </p>
+      {/* Replaces a bare "see your listing" link. A link tells you where to
+          look; this tells you what is wrong and how to change it. */}
+      <PrintReadiness
+        orgId={orgId}
+        listingHref={`/org/${slug}/conference/${conferenceId}/listing`}
+      />
     </section>
   );
 }

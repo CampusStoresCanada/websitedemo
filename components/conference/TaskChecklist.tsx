@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import type { PersonalTask } from "@/lib/conference/checklist-tasks";
+import ServiceFacts from "./ServiceFacts";
 
 /**
  * The tick-off list. One list mixing what the site can see with what only the
@@ -17,10 +18,13 @@ export default function TaskChecklist({
   tasks,
   onAnswer,
   emptyLabel = "Nothing outstanding.",
+  boothNumbers = [],
 }: {
   tasks: PersonalTask[];
   onAnswer: (taskId: string, state: "done" | "not_applicable", evidence?: string) => Promise<{ success: boolean; error?: string }>;
   emptyLabel?: string;
+  /** Shown on supplier tasks — a shipping label needs the booth number. */
+  boothNumbers?: string[];
 }) {
   if (tasks.length === 0) {
     return <p className="text-sm text-gray-500">{emptyLabel}</p>;
@@ -28,7 +32,7 @@ export default function TaskChecklist({
   return (
     <ul className="divide-y divide-gray-100">
       {tasks.map((task) => (
-        <TaskRow key={task.taskId} task={task} onAnswer={onAnswer} />
+        <TaskRow key={task.taskId} task={task} onAnswer={onAnswer} boothNumbers={boothNumbers} />
       ))}
     </ul>
   );
@@ -37,8 +41,10 @@ export default function TaskChecklist({
 function TaskRow({
   task,
   onAnswer,
+  boothNumbers,
 }: {
   task: PersonalTask;
+  boothNumbers: string[];
   onAnswer: (taskId: string, state: "done" | "not_applicable", evidence?: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const [pending, startTransition] = useTransition();
@@ -79,6 +85,9 @@ function TaskRow({
                   admin calendar had. */}
               Closes {new Date(task.deadline).toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Toronto" })}
             </p>
+          ) : null}
+          {task.service ? (
+            <ServiceFacts service={task.service} boothNumbers={boothNumbers} />
           ) : null}
           {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
         </div>

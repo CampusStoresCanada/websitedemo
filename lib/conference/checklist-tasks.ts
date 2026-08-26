@@ -21,6 +21,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { evaluateChecklistTaskCheck } from "./checklist-checks";
 import type { CheckType } from "./checklist-check-types";
+import { parseServiceDetails, type ServiceDetails } from "./service-details";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -52,6 +53,11 @@ export type PersonalTask = {
   /** ISO date this closes, from the task's checklist. */
   deadline: string | null;
   source: TaskSource;
+  /**
+   * Supplier facts for a task that is really "go and order this from someone
+   * else" — deadlines, show code, the link. Null for every other task.
+   */
+  service: ServiceDetails | null;
 };
 
 /**
@@ -174,7 +180,7 @@ export async function loadPersonalTasks(
       if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
         return { taskId: task.id, name: task.name, description: task.description,
                  state: "done", evidence: derivedValue, derived: true, deadline,
-                 source: "self_reported", checkType: task.check_type };
+                 source: "self_reported", checkType: task.check_type, service: null };
       }
       const ack = ackByTask.get(task.id);
       return {
@@ -185,7 +191,7 @@ export async function loadPersonalTasks(
         evidence: ack?.evidence ?? null,
         derived: false,
         deadline,
-        source: "self_reported", checkType: task.check_type,
+        source: "self_reported", checkType: task.check_type, service: null,
       };
     });
 }
@@ -229,6 +235,21 @@ export async function loadOrgTasks(
   }
   if (rows.length === 0) return [];
 
+  // Supplier facts live on a `service`-kind entity the task points at.
+  const serviceIds = [...new Set(rows.map((r) => r.task.check_entity_id).filter((id): id is string => !!id))];
+  const serviceByEntity = new Map<string, ServiceDetails>();
+  if (serviceIds.length > 0) {
+    const { data: entities } = await db
+      .from("conference_entities")
+      .select("id, name, kind, attributes")
+      .in("id", serviceIds)
+      .eq("kind", "service");
+    for (const e of entities ?? []) {
+      const parsed = parseServiceDetails(e.name, e.attributes);
+      if (parsed) serviceByEntity.set(e.id, parsed);
+    }
+  }
+
   const { data: acks } = await db
     .from("conference_task_acknowledgements")
     .select("task_id, state, evidence")
@@ -241,13 +262,16 @@ export async function loadOrgTasks(
     rows
       .sort(byDeadlineThenOrder)
       .map(async ({ task, deadline }): Promise<PersonalTask> => {
+        const service = task.check_entity_id
+          ? serviceByEntity.get(task.check_entity_id) ?? null
+          : null;
         if (task.check_type === "self_reported") {
           const ack = ackByTask.get(task.id);
           return {
             taskId: task.id, name: task.name, description: task.description,
             state: ack ? (ack.state as PersonalTaskState) : "pending",
             evidence: ack?.evidence ?? null, derived: false, deadline,
-            source: "self_reported", checkType: task.check_type,
+            source: "self_reported", checkType: task.check_type, service,
           };
         }
         const complete = await evaluateChecklistTaskCheck(
@@ -256,7 +280,8 @@ export async function loadOrgTasks(
         return {
           taskId: task.id, name: task.name, description: task.description,
           state: complete ? "done" : "pending",
-          evidence: null, derived: true, deadline, source: "monitored", checkType: task.check_type,
+          evidence: null, derived: true, deadline, source: "monitored",
+          checkType: task.check_type, service,
         };
       })
   );

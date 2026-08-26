@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useRef, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { acceptLegalDocument } from "@/lib/actions/conference-legal";
 import type { OrgLegalStatus } from "@/lib/conference/org-legal";
@@ -100,6 +100,36 @@ function DocRow({ doc }: { doc: OrgLegalStatus["mine"][number] }) {
   const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
 
+  /**
+   * Accept unlocks only once the document has actually been scrolled to the
+   * end — or, for one short enough to fit without scrolling, once it has been
+   * opened. This is an agreement about money and liability; a button that can
+   * be clicked without opening the text makes "I have read and accept" false
+   * on its face, and the acceptance record is the thing CSC would rely on.
+   *
+   * Deliberately not a timer. A reader who is fast is still a reader; a timer
+   * only teaches people to wait, and then click without reading anyway.
+   */
+  const [hasRead, setHasRead] = useState(false);
+  const bodyRef = useRef<HTMLDivElement | null>(null);
+
+  function onOpen() {
+    const next = !open;
+    setOpen(next);
+    if (!next) return;
+    // A short document may never fire a scroll event because there is nothing
+    // to scroll. Measured after paint, so it reflects the rendered height.
+    requestAnimationFrame(() => {
+      const el = bodyRef.current;
+      if (el && el.scrollHeight <= el.clientHeight + 4) setHasRead(true);
+    });
+  }
+
+  function onScroll(e: React.UIEvent<HTMLDivElement>) {
+    const el = e.currentTarget;
+    if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) setHasRead(true);
+  }
+
   function accept() {
     setError(null);
     startTransition(async () => {
@@ -123,7 +153,7 @@ function DocRow({ doc }: { doc: OrgLegalStatus["mine"][number] }) {
         <div className="flex items-center gap-3">
           <button
             type="button"
-            onClick={() => setOpen((v) => !v)}
+            onClick={onOpen}
             className="text-xs text-[#163D6D] underline"
           >
             {open ? "Hide" : "Read it"}
@@ -136,8 +166,9 @@ function DocRow({ doc }: { doc: OrgLegalStatus["mine"][number] }) {
             <button
               type="button"
               onClick={accept}
-              disabled={pending}
-              className="rounded-md bg-[#163D6D] px-3 py-1 text-xs font-semibold text-white hover:bg-[#12325a] disabled:opacity-50"
+              disabled={pending || !hasRead}
+              title={hasRead ? undefined : "Open it and read to the end first"}
+              className="rounded-md bg-[#163D6D] px-3 py-1 text-xs font-semibold text-white hover:bg-[#12325a] disabled:cursor-not-allowed disabled:bg-gray-300 disabled:text-gray-500"
             >
               {pending ? "Recording…" : "Accept"}
             </button>
@@ -147,10 +178,17 @@ function DocRow({ doc }: { doc: OrgLegalStatus["mine"][number] }) {
 
       {open && (
         <div
+          ref={bodyRef}
+          onScroll={onScroll}
           // Authored by CSC admins in the legal-docs editor, not user input.
-          className="prose prose-sm max-w-none border-t border-gray-200 px-3 py-3 text-sm text-gray-700"
+          className="prose prose-sm max-h-64 max-w-none overflow-y-auto border-t border-gray-200 px-3 py-3 text-sm text-gray-700"
           dangerouslySetInnerHTML={{ __html: doc.content }}
         />
+      )}
+      {open && !hasRead && (
+        <p className="px-3 pb-2 text-xs text-gray-500">
+          Scroll to the end to enable Accept.
+        </p>
       )}
       {error && <p className="px-3 pb-2 text-xs text-red-700">{error}</p>}
     </div>
