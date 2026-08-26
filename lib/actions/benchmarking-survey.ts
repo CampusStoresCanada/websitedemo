@@ -14,8 +14,9 @@ import {
 interface SaveFieldResult {
   success: boolean;
   error?: string;
-  /** When a value was auto-corrected (e.g. rounded to cents), return the canonical value */
-  correctedValue?: string | number | boolean | null;
+  /** When a value was auto-corrected (e.g. rounded to cents, or a comma-separated
+   *  string split into an array), return the canonical value */
+  correctedValue?: string | number | boolean | string[] | null;
 }
 
 type FieldType =
@@ -26,6 +27,7 @@ type FieldType =
   | "text"         // free-text (max 500 chars)
   | "text_long"    // longer text (max 2000 chars)
   | "select"       // must match one of allowed values
+  | "multiselect"  // text[] column — zero or more values, stored as an array
   | "boolean";     // true / false / null
 
 interface FieldDef {
@@ -121,12 +123,12 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   ebook_delivery_system:   { type: "text" },
   student_info_system:     { type: "text" },
   lms_system:              { type: "text" },
-  payment_options:         { type: "text_long" },
-  social_media_platforms:  { type: "text_long" },
+  payment_options:         { type: "multiselect" },
+  social_media_platforms:  { type: "multiselect", options: ["X (Twitter)", "Facebook", "Instagram", "TikTok", "BlueSky", "LinkedIn", "YouTube", "Other"] },
   social_media_frequency:  { type: "select", options: ["Daily", "Several times a week", "Weekly", "Monthly", "Rarely", "Never"] },
   social_media_run_by:     { type: "select", options: ["In-house", "Outsourced", "Mix", "N/A"] },
-  services_offered:        { type: "text_long" },
-  shopping_services:       { type: "text_long" },
+  services_offered:        { type: "multiselect" },
+  shopping_services:       { type: "multiselect" },
   store_in_stores:         { type: "text_long" },
   physical_inventory_schedule: { type: "text" },
 
@@ -173,15 +175,15 @@ const SYSTEM_ONLY_FIELDS = new Set([
 
 interface ValidationResult {
   valid: boolean;
-  /** The cleaned/canonical value to store */
-  cleanValue: string | number | boolean | null;
+  /** The cleaned/canonical value to store. string[] for multiselect (text[] columns). */
+  cleanValue: string | number | boolean | string[] | null;
   /** Human-readable error if invalid */
   error?: string;
 }
 
 function validateFieldValue(
   field: string,
-  value: string | number | boolean | null
+  value: string | number | boolean | string[] | null
 ): ValidationResult {
   const def = FIELD_REGISTRY[field];
   if (!def) {
@@ -215,6 +217,41 @@ function validateFieldValue(
         return { valid: false, cleanValue: null, error: `"${field}" cannot exceed $${def.max.toLocaleString()}` };
       }
       return { valid: true, cleanValue: rounded };
+    }
+
+    case "multiselect": {
+      // These four columns are text[] in the database but were declared as
+      // free text here and in the field config, so the form sent a
+      // comma-separated string and Postgres rejected it outright:
+      //   malformed array literal: "Instagram, TikTok"
+      // Every one of them was unsaveable. Accepting both shapes fixes the
+      // break for the three that still have no agreed vocabulary, while
+      // social_media_platforms moves to real options.
+      const list = Array.isArray(value)
+        ? value
+        : String(value)
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+
+      if (list.length === 0) return { valid: true, cleanValue: null };
+
+      // Only enforce membership where a vocabulary actually exists. The other
+      // three take free text until the committee agrees their lists — an
+      // invented taxonomy is worse than an honest open field.
+      if (def.options) {
+        const unknown = list.filter((v) => !def.options!.includes(v));
+        if (unknown.length > 0) {
+          return {
+            valid: false,
+            cleanValue: null,
+            error: `"${field}" does not allow: ${unknown.join(", ")}`,
+          };
+        }
+      }
+
+      // De-duplicate, preserving the order they picked.
+      return { valid: true, cleanValue: [...new Set(list)] };
     }
 
     case "number": {
@@ -433,7 +470,7 @@ async function verifyBenchmarkingAccess(
 export async function saveBenchmarkingField(
   benchmarkingId: string,
   field: string,
-  value: string | number | boolean | null
+  value: string | number | boolean | string[] | null
 ): Promise<SaveFieldResult> {
   try {
     // 1. Allowlist check
@@ -492,11 +529,11 @@ export async function saveBenchmarkingField(
 
 export async function saveBenchmarkingFields(
   benchmarkingId: string,
-  fields: Record<string, string | number | boolean | null>
+  fields: Record<string, string | number | boolean | string[] | null>
 ): Promise<SaveFieldResult> {
   try {
     // 1. Validate ALL fields before writing any
-    const cleanedFields: Record<string, string | number | boolean | null> = {};
+    const cleanedFields: Record<string, string | number | boolean | string[] | null> = {};
     for (const [field, value] of Object.entries(fields)) {
       if (!ALLOWED_FIELDS.has(field) || SYSTEM_ONLY_FIELDS.has(field)) {
         console.error(`[SECURITY] Blocked batch write to disallowed field: ${field}`);

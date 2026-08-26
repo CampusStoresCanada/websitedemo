@@ -10273,6 +10273,10 @@ export type Database = {
           application_data: Json | null
           application_type: string
           created_at: string | null
+          duplicate_cleared_at: string | null
+          duplicate_cleared_by: string | null
+          duplicate_hold_at: string | null
+          duplicate_matches: Json | null
           id: string
           organization_id: string | null
           paid_amount_cents: number | null
@@ -10298,6 +10302,10 @@ export type Database = {
           application_data?: Json | null
           application_type?: string
           created_at?: string | null
+          duplicate_cleared_at?: string | null
+          duplicate_cleared_by?: string | null
+          duplicate_hold_at?: string | null
+          duplicate_matches?: Json | null
           id?: string
           organization_id?: string | null
           paid_amount_cents?: number | null
@@ -10323,6 +10331,10 @@ export type Database = {
           application_data?: Json | null
           application_type?: string
           created_at?: string | null
+          duplicate_cleared_at?: string | null
+          duplicate_cleared_by?: string | null
+          duplicate_hold_at?: string | null
+          duplicate_matches?: Json | null
           id?: string
           organization_id?: string | null
           paid_amount_cents?: number | null

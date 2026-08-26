@@ -12,6 +12,18 @@ import { formatDeadline } from "@/lib/benchmarking/deadline";
  * Everything interactive is `print:hidden`; everything structural survives.
  */
 
+/** Types whose answer needs the page width rather than a 40mm column. */
+const WIDE_ANSWER = new Set(["text", "text_long", "select", "multiselect"]);
+
+/**
+ * How much room a question gets to be answered in.
+ *
+ * A number needs one short rule. A description needs somewhere to write a
+ * sentence, and giving it the same 40mm slot as a dollar figure tells the
+ * reader their explanation is not really wanted. Options need to be printed,
+ * not hinted at — "choose one" is useless on paper if the choices are only on
+ * the screen.
+ */
 function WriteBox({ line }: { line: WorksheetLine }) {
   if (line.type === "boolean") {
     return (
@@ -25,6 +37,46 @@ function WriteBox({ line }: { line: WorksheetLine }) {
       </span>
     );
   }
+
+  // Print the actual choices. Circle one for a single answer, tick boxes when
+  // more than one is allowed — the shape of the control tells them which.
+  if (line.type === "select" || line.type === "multiselect") {
+    const many = line.type === "multiselect";
+    return (
+      <span className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[10.5px]">
+        {(line.options ?? []).map((opt) => (
+          <span key={opt} className="inline-flex items-center gap-1">
+            {many ? (
+              <span className="inline-block h-2.5 w-2.5 shrink-0 border border-black" />
+            ) : (
+              <span className="inline-block h-2.5 w-2.5 shrink-0 rounded-full border border-black" />
+            )}
+            {opt}
+          </span>
+        ))}
+        {(line.options ?? []).length === 0 && (
+          <span className="inline-block min-w-[120px] flex-1 border-b border-black/70">
+            &nbsp;
+          </span>
+        )}
+      </span>
+    );
+  }
+
+  // Free text gets real writing room: three ruled lines, full width.
+  if (line.type === "text" || line.type === "text_long") {
+    const rules = line.type === "text_long" ? 4 : 3;
+    return (
+      <span className="block">
+        {Array.from({ length: rules }, (_, i) => (
+          <span key={i} className="block border-b border-black/50 pt-3.5">
+            &nbsp;
+          </span>
+        ))}
+      </span>
+    );
+  }
+
   return (
     <span className="flex items-end gap-1">
       {line.type === "currency" && <span className="text-[11px]">$</span>}
@@ -111,6 +163,13 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                 className="break-inside-avoid border-b border-black/15 pb-2"
                 style={{ marginLeft: `${line.indent * 14}px` }}
               >
+                {/*
+                  Two shapes of row. A figure answers beside its label in the
+                  narrow column, because a figure fits there. Prose and lists
+                  answer UNDERNEATH at full width — the prior-year columns stay
+                  on the label row either way, so the years still line up down
+                  the page.
+                */}
                 <div className="flex items-start gap-3">
                   <div className="flex-1">
                     <p className="text-[12px] font-semibold leading-snug">
@@ -140,10 +199,18 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                     </div>
                   ))}
 
-                  <div className="w-40 pt-0.5">
+                  {!WIDE_ANSWER.has(line.type) && (
+                    <div className="w-40 pt-0.5">
+                      <WriteBox line={line} />
+                    </div>
+                  )}
+                </div>
+
+                {WIDE_ANSWER.has(line.type) && (
+                  <div className="mt-1.5 w-full">
                     <WriteBox line={line} />
                   </div>
-                </div>
+                )}
               </li>
             ))}
           </ul>

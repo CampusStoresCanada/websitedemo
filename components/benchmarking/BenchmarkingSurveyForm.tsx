@@ -65,7 +65,7 @@ export default function BenchmarkingSurveyForm({
 
   // Auto-save a single field with debounce
   const handleFieldChange = useCallback(
-    (field: string, value: string | number | boolean | null) => {
+    (field: string, value: string | number | boolean | string[] | null) => {
       setFormData((prev) => ({ ...prev, [field]: value }));
       setSaveError(null);
 

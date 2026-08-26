@@ -10,6 +10,7 @@ export type FieldType =
   | "text"
   | "text_long"
   | "select"
+  | "multiselect"
   | "boolean";
 
 export interface FieldConfig {
@@ -84,11 +85,15 @@ const NUMBER_TYPES: FieldType[] = [
   "percentage",
 ];
 const BOOLEAN_TYPES: FieldType[] = ["boolean"];
+// Deliberately alone: these are text[] columns. Retyping one to `text` would
+// mean every stored array has to be flattened, and back again is worse.
+const MULTI_TYPES: FieldType[] = ["multiselect"];
 
 export function getCompatibleTypes(currentType: FieldType): FieldType[] {
   if (TEXT_TYPES.includes(currentType)) return TEXT_TYPES;
   if (NUMBER_TYPES.includes(currentType)) return NUMBER_TYPES;
   if (BOOLEAN_TYPES.includes(currentType)) return BOOLEAN_TYPES;
+  if (MULTI_TYPES.includes(currentType)) return MULTI_TYPES;
   return [currentType];
 }
 
@@ -1011,11 +1016,21 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           name: "social_media_platforms",
           label: "Social Media Platforms",
-          type: "text",
+          type: "multiselect",
           order: 6,
           visible: true,
-          placeholder: "e.g., Instagram, TikTok, Facebook, X/Twitter",
-          helpText: "List all platforms, separated by commas",
+          options: [
+            "X (Twitter)",
+            "Facebook",
+            "Instagram",
+            "TikTok",
+            "BlueSky",
+            "LinkedIn",
+            "YouTube",
+            "Other",
+          ],
+          helpText:
+            "Tick every platform your store posts to itself. Not the institution's central accounts — only the ones you run.",
           group: "Social Media & Marketing",
           indent: true,
         },

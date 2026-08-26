@@ -31,6 +31,8 @@ export interface WorksheetLine {
   example?: string;
   exampleCredit?: string;
   suffix?: string;
+  /** For select / multiselect: printed so the reader can circle or tick one. */
+  options?: string[];
   required: boolean;
   group?: string;
   indent: number;
@@ -89,6 +91,12 @@ function formatValue(value: unknown, type: FieldConfig["type"]): string | null {
     }
     case "boolean":
       return value === true ? "Yes" : value === false ? "No" : null;
+    case "multiselect": {
+      // text[] column — String() on an array gives "a,b" with no spaces.
+      if (!Array.isArray(value)) return String(value).trim() || null;
+      const picked = value.filter(Boolean).map(String);
+      return picked.length ? picked.join(", ") : null;
+    }
     default: {
       const s = String(value).trim();
       if (!s) return null;
@@ -173,6 +181,7 @@ export function buildWorksheet(input: {
           example: field.example,
           exampleCredit: field.exampleCredit,
           suffix: field.suffix,
+          options: field.options,
           required: field.required === true,
           group: field.group,
           indent: indentLevel(field),

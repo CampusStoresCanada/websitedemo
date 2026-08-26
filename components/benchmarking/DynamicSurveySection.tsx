@@ -289,6 +289,50 @@ function FieldRenderer({
       );
     }
 
+    case "multiselect": {
+      // text[] column. Checkboxes rather than a comma-separated text box: the
+      // free-text version could not be saved at all (Postgres rejected the
+      // string as a malformed array literal), and even when it saved it
+      // produced "Instagram, TikTok" next to "IG/TT" next to "instagram" —
+      // three spellings of one answer, which is the same class of damage the
+      // combined-sales field did in 2025.
+      const selected: string[] = Array.isArray(formData[field.name])
+        ? (formData[field.name] as string[])
+        : [];
+      const toggle = (opt: string) => {
+        if (isReadOnly) return;
+        const next = selected.includes(opt)
+          ? selected.filter((v) => v !== opt)
+          : [...selected, opt];
+        onFieldChange(field.name, next);
+      };
+
+      return wrapper(
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            {field.label}
+            {field.required && <span className="text-red-600"> *</span>}
+          </label>
+          {field.helpText && (
+            <p className="mt-1 text-sm text-gray-500">{field.helpText}</p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+            {(field.options ?? []).map((opt) => (
+              <label key={opt} className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt)}
+                  onChange={() => toggle(opt)}
+                  disabled={isReadOnly}
+                />
+                {opt}
+              </label>
+            ))}
+          </div>
+        </div>,
+      );
+    }
+
     case "boolean":
       return wrapper(
         <BooleanField
