@@ -103,6 +103,24 @@ export default async function OrgListingProofPage({
         </section>
       ) : (
         <>
+          {entry.contacts.length === 0 ? (
+            /**
+             * People are missing for a reason that has nothing to do with the
+             * profile. Print is strict opt-in — a name only appears once that
+             * person has said yes — and nobody has been asked yet. Saying
+             * "missing contacts, add some" sent a company to duplicate staff
+             * it already had on file.
+             */
+            <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <p className="font-semibold">Nobody from {org.name} is printed yet</p>
+              <p className="mt-0.5">
+                Names only appear once that person has agreed to be listed, and we
+                haven&rsquo;t asked yet. Nothing for you to do — we&rsquo;ll ask everyone
+                directly, and whoever says yes appears here.
+              </p>
+            </div>
+          ) : null}
+
           {missingRequired.length > 0 ? (
             <div className="rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-900">
               <p className="font-semibold">This won&rsquo;t print as it stands</p>

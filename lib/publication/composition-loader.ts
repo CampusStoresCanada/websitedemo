@@ -173,11 +173,15 @@ export async function loadDirectoryEntries(
 
   const institutionTypes = await institutionTypeByOrg(orgs.map((o) => o.id));
 
-  // Printed directory: only people who have said yes to being printed.
+  // EVERY contact on file, not just the printable ones.
   //
-  // Strict opt-in, and NOT the same rule the website uses. Someone who has not
-  // answered stays listed on the site and stays out of the book — paper cannot
-  // be corrected, so it takes an explicit yes. See lib/contacts/visibility.ts.
+  // Two different questions were being answered by one list: "does this org
+  // have contacts?" (completeness) and "has anyone agreed to be printed?"
+  // (the listing itself). Feeding the consent-filtered list to both told
+  // Varsity Collection it was "Missing contacts" — with a CTA to add some —
+  // while four sat on its profile. Nobody had been ASKED yet.
+  //
+  // So: count them all for completeness, print only those who said yes.
   const contacts = await listDirectoryContacts<{
     id: string;
     organization_id: string | null;
@@ -187,11 +191,11 @@ export async function loadDirectoryEntries(
     email: string | null;
     work_phone_number: string | null;
     phone: string | null;
+    directory_visibility: string | null;
   }>({
     organizationIds: orgs.map((o) => o.id),
-    printableOnly: true,
     fields:
-      "id, organization_id, name, role_title, work_email, email, work_phone_number, phone",
+      "id, organization_id, name, role_title, work_email, email, work_phone_number, phone, directory_visibility",
   });
 
   type ContactRow = {
@@ -202,6 +206,7 @@ export async function loadDirectoryEntries(
     email: string | null;
     work_phone_number: string | null;
     phone: string | null;
+    directory_visibility: string | null;
   };
   const contactCount = new Map<string, number>();
   const primaryContact = new Map<string, DirectoryEntry["primaryContact"]>();
@@ -223,12 +228,22 @@ export async function loadDirectoryEntries(
     if (!c.organization_id) continue;
     contactCount.set(c.organization_id, (contactCount.get(c.organization_id) ?? 0) + 1);
     if (!c.name?.trim()) continue;
-    const candidate: DirectoryContact = {
+    const candidate: DirectoryContact & { printable: boolean } = {
+      // Strict opt-in for PRINT only. The website keeps showing undecided
+      // people; paper cannot be corrected, so it takes an explicit yes.
+      printable: c.directory_visibility === "members" || c.directory_visibility === "public",
       name: c.name.trim(),
       roleTitle: c.role_title?.trim() || null,
       email: c.work_email?.trim() || c.email?.trim() || null,
       phone: c.work_phone_number?.trim() || c.phone?.trim() || null,
     };
+    // ⛔ Everything past here decides what goes ON PAPER. Counting happened
+    // above, because "do you have contacts on file?" and "has anyone agreed to
+    // be printed?" are different questions — answering the first with the
+    // second told Varsity Collection it was missing contacts while four sat on
+    // its profile.
+    if (!candidate.printable) continue;
+
     // Prefer a contact with a stated role — "Sales Manager" tells a reader who
     // they're calling, which is the difference between a name and a lead.
     const held = primaryContact.get(c.organization_id);
