@@ -41,6 +41,10 @@ export type TemplateCategory =
   | "conference"
   | "events"
   | "user_mgmt"
+  // Benchmarking. Transactional: the survey is a membership obligation and a
+  // member benefit, not a commercial message, so these bypass suppressions on
+  // the same reasoning as election mail. See lib/benchmarking/notify.ts.
+  | "benchmarking"
   | "general";
 
 // ── Template key registry (all known keys) ────────────────────────
@@ -73,6 +77,12 @@ export type TemplateKey =
   | "prospective_booth_payment_confirmation"
   | "prospective_booth_application_reminder"
   // Events
+  // Benchmarking
+  | "benchmarking_invitation"
+  | "benchmarking_beta_invitation"
+  | "benchmarking_reminder"
+  | "benchmarking_submission_received"
+
   | "event_submitted"
   | "event_approved"
   | "event_changes_requested"
