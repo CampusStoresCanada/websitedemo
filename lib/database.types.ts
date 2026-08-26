@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "13.0.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -567,6 +567,9 @@ export type Database = {
           contributions_to_campus: string[] | null
           created_at: string | null
           custom_imprint_online_only: boolean | null
+          disclosure_level: string
+          disclosure_level_set_at: string | null
+          disclosure_level_set_by: string | null
           ebook_delivery_system: string | null
           enrollment_fte: number | null
           expense_hr: number | null
@@ -678,6 +681,9 @@ export type Database = {
           contributions_to_campus?: string[] | null
           created_at?: string | null
           custom_imprint_online_only?: boolean | null
+          disclosure_level?: string
+          disclosure_level_set_at?: string | null
+          disclosure_level_set_by?: string | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
           expense_hr?: number | null
@@ -789,6 +795,9 @@ export type Database = {
           contributions_to_campus?: string[] | null
           created_at?: string | null
           custom_imprint_online_only?: boolean | null
+          disclosure_level?: string
+          disclosure_level_set_at?: string | null
+          disclosure_level_set_by?: string | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
           expense_hr?: number | null
@@ -876,6 +885,13 @@ export type Database = {
           weekday_hours_open?: string | null
         }
         Relationships: [
+          {
+            foreignKeyName: "benchmarking_disclosure_level_set_by_fkey"
+            columns: ["disclosure_level_set_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "benchmarking_organization_id_fkey"
             columns: ["organization_id"]

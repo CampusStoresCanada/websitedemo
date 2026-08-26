@@ -4,6 +4,7 @@ import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
 import { createAdminClient } from "@/lib/supabase/admin";
+import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -204,6 +205,20 @@ export default async function BenchmarkingSurveyPage() {
         surveyClosesAt={activeSurvey.closes_at}
         fieldConfig={fieldConfig}
       />
+
+      {/*
+        Below the form, not buried in it. This is a consent decision about the
+        store's own business, and it deserves its own block rather than being
+        one more field among ninety-five.
+      */}
+      <div className="mx-auto mt-8 max-w-5xl px-4">
+        <DisclosureChoice
+          benchmarkingId={currentRow!.id}
+          initialLevel={
+            currentRow!.disclosure_level === "aggregate_only" ? "aggregate_only" : "full"
+          }
+        />
+      </div>
     </div>
   );
 }

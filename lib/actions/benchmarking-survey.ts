@@ -771,3 +771,57 @@ export async function saveDeltaFlag(
     return { success: false, error: "An unexpected error occurred" };
   }
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Server Action: set disclosure level (launch plan §5B / §5D)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * A store choosing whether it may be named to its peers.
+ *
+ * `requireDraft: false` on purpose. Consent here is live, not a gate at
+ * submission: a store may change its mind after filing and everything
+ * downstream reads the current value. The only hard stop is the seal when the
+ * successor survey opens, and nothing computes that yet — see §5D. Until it
+ * does, a change is always allowed, which is the permissive direction and the
+ * right one to be wrong in.
+ */
+export async function setDisclosureLevel(
+  benchmarkingId: string,
+  level: "full" | "aggregate_only"
+): Promise<SaveFieldResult> {
+  try {
+    if (level !== "full" && level !== "aggregate_only") {
+      return { success: false, error: "Unknown disclosure level" };
+    }
+
+    const auth = await verifyBenchmarkingAccess(benchmarkingId, false);
+    if (!auth.authorized || !auth.row || !auth.userId) {
+      return { success: false, error: auth.error };
+    }
+
+    // Service role, as everywhere else on this table: `authenticated` holds
+    // SELECT only, so a session-client update matches zero rows and reports
+    // success.
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from("benchmarking")
+      .update({
+        disclosure_level: level,
+        disclosure_level_set_at: new Date().toISOString(),
+        disclosure_level_set_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", benchmarkingId);
+
+    if (error) {
+      console.error("[setDisclosureLevel]", error);
+      return { success: false, error: "Could not save that choice" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("[setDisclosureLevel]", err);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}
