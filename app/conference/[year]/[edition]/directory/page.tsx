@@ -3,31 +3,24 @@ import { getViewerContext } from "@/lib/visibility/viewer";
 import { hasDraftPreviewAccess } from "@/lib/conference/draft-preview";
 import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadMemberMap } from "@/lib/conference/member-map";
+import { loadMemberDirectory } from "@/lib/conference/member-directory";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
-import MemberMap from "@/components/conference/MemberMap";
+import MemberDirectory from "@/components/conference/MemberDirectory";
 
 export const dynamic = "force-dynamic";
 
 /**
- * The member's map. Sits beside /floor-plan, which sells booths, on the same
- * placement model — two viewers, one set of coordinates.
- *
- * Same visibility rule as its sibling: a conference nobody can see yet is
- * previewable by CSC staff and draft-preview orgs, and by nobody else. The map
- * itself carries no per-viewer filtering, because a floor plan showing who is
- * in which booth is exactly what gets printed in the book and handed out at
- * the door.
+ * Who is on the floor, browsable by what they sell. The map's other half, and
+ * the screen equivalent of the printed directory — same orgs, same booth
+ * numbers, same categories, sourced from real purchases rather than the
+ * for-sale catalogue.
  */
-export default async function ConferenceMapPage({
+export default async function ConferenceDirectoryPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ year: string; edition: string }>;
-  searchParams: Promise<{ find?: string }>;
 }) {
   const { year, edition } = await params;
-  const { find } = await searchParams;
   const viewer = await getViewerContext();
   const canPreviewUnpublished =
     viewer.viewerLevel === "admin" ||
@@ -55,7 +48,8 @@ export default async function ConferenceMapPage({
     );
   }
 
-  const { surfaces, things } = await loadMemberMap(conference.id);
+  const { listings, departments } = await loadMemberDirectory(conference.id);
+  const mapHref = `/conference/${conference.year}/${conference.edition_code}/map`;
 
   return (
     <main className="mx-auto max-w-3xl space-y-4 px-4 py-6">
@@ -64,16 +58,15 @@ export default async function ConferenceMapPage({
       )}
 
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <h1 className="text-xl font-semibold text-gray-900">{conference.name} — Map</h1>
-        <Link
-          href={`/conference/${conference.year}/${conference.edition_code}/directory`}
-          className="text-sm font-medium text-[#163D6D] hover:underline"
-        >
-          Exhibitor list &rarr;
+        <h1 className="text-xl font-semibold text-gray-900">
+          {conference.name} — Exhibitors
+        </h1>
+        <Link href={mapHref} className="text-sm font-medium text-[#163D6D] hover:underline">
+          Map &rarr;
         </Link>
       </div>
 
-      <MemberMap surfaces={surfaces} things={things} initialQuery={find ?? ""} />
+      <MemberDirectory listings={listings} departments={departments} mapHref={mapHref} />
     </main>
   );
 }

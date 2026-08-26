@@ -25,12 +25,25 @@ const VIEW_H = 700;
 export default function MemberMap({
   surfaces,
   things,
+  initialQuery = "",
 }: {
   surfaces: FloorPlanSurface[];
   things: MappedThing[];
+  /** From the directory's "Find on map" — arrive already searching. */
+  initialQuery?: string;
 }) {
-  const [surfaceId, setSurfaceId] = useState(surfaces[0]?.id ?? "");
-  const [query, setQuery] = useState("");
+  // The surface holding the incoming match, so a hand-off does not land on
+  // floor 1 while the company is on floor 2.
+  const initialSurface = (() => {
+    const q = initialQuery.trim().toLowerCase();
+    if (!q) return surfaces[0]?.id ?? "";
+    const hit = things.find(
+      (t) => t.label.toLowerCase().includes(q) || (t.orgName ?? "").toLowerCase().includes(q)
+    );
+    return hit?.surfaceId ?? surfaces[0]?.id ?? "";
+  })();
+  const [surfaceId, setSurfaceId] = useState(initialSurface);
+  const [query, setQuery] = useState(initialQuery);
   const [selected, setSelected] = useState<MappedThing | null>(null);
 
   const surface = surfaces.find((s) => s.id === surfaceId) ?? surfaces[0];
@@ -121,7 +134,7 @@ export default function MemberMap({
 
       <svg
         viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        className="w-full rounded-lg border border-gray-200 bg-white"
+        className="w-full rounded-lg border border-gray-200 bg-white [font-family:inherit]"
         role="img"
         aria-label={`Map: ${surface.name}`}
       >
@@ -145,22 +158,36 @@ export default function MemberMap({
               className="cursor-pointer"
               opacity={dimmed ? 0.25 : 1}
             >
+              {/* The background art already carries the booth numbers, printed
+                  where the venue put them. Drawing them again produced numbers
+                  on top of numbers, so these boxes say STATE — held, free,
+                  matched — and stay out of the way of the artwork underneath.
+                  The label reappears only when it is the answer to something:
+                  a search hit, or the box you just tapped. */}
               <rect
                 x={x} y={y} width={w} height={h} rx={2}
-                fill={isMatch || isSelected ? "#EE2A2E" : t.orgName ? "#163D6D" : "#ffffff"}
-                stroke={isSelected ? "#1A1A1A" : "#163D6D"}
-                strokeWidth={isSelected ? 3 : 1}
+                fill={
+                  isMatch || isSelected ? "#EE2A2E"
+                    : t.orgName ? "#163D6D"
+                      : "transparent"
+                }
+                fillOpacity={isMatch || isSelected ? 0.85 : t.orgName ? 0.18 : 0}
+                stroke={isSelected || isMatch ? "#EE2A2E" : "#163D6D"}
+                strokeWidth={isSelected ? 3 : isMatch ? 2 : 1}
+                strokeOpacity={isMatch || isSelected ? 1 : 0.45}
               />
-              <text
-                x={x + w / 2} y={y + h / 2}
-                textAnchor="middle" dominantBaseline="central"
-                fontSize={Math.max(8, Math.min(w, h) * 0.42)}
-                fill={isMatch || isSelected || t.orgName ? "#ffffff" : "#163D6D"}
-                fontWeight={600}
-                pointerEvents="none"
-              >
-                {t.label}
-              </text>
+              {(isMatch || isSelected) && (
+                <text
+                  x={x + w / 2} y={y + h / 2}
+                  textAnchor="middle" dominantBaseline="central"
+                  fontSize={Math.max(10, Math.min(w, h) * 0.42)}
+                  fill="#ffffff"
+                  fontWeight={700}
+                  pointerEvents="none"
+                >
+                  {t.label}
+                </text>
+              )}
             </g>
           );
         })}
