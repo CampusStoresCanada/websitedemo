@@ -73,7 +73,11 @@ function TaskRow({
           ) : null}
           {task.deadline ? (
             <p className="mt-1 text-xs text-gray-400">
-              Closes {new Date(task.deadline).toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric", timeZone: "UTC" })}
+              {/* Eastern, not UTC. The Exhibitor deadline is 10 January 23:59
+                  ET, which is 11 January in UTC — formatting it there told a
+                  company it had a day it does not have. Same off-by-one the
+                  admin calendar had. */}
+              Closes {new Date(task.deadline).toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Toronto" })}
             </p>
           ) : null}
           {error ? <p className="mt-1 text-xs text-red-600">{error}</p> : null}
