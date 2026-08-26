@@ -2,12 +2,16 @@ import type { ServiceDetails } from "@/lib/conference/service-details";
 import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
 
 /**
- * What you need in front of you to place a supplier order.
+ * What a partner needs to order power at their booth.
  *
- * Deliberately not prose. The show code has to be typed into Stronco's site
- * and the booth number written on a shipping label, so both are set large
- * enough to read off the screen while looking somewhere else. The deadlines
- * are a list because there are four of them and only one costs money.
+ * The form IS the task. Encore's process is: take this PDF, fill it in, email
+ * it back. So the download is the biggest thing here and everything else is
+ * one line at most.
+ *
+ * An earlier version explained the process, the extra charges, the derivation
+ * of the deadline and what happens after submission — all true, none of it
+ * what someone wanting electricity is looking for. That belongs in the PDF,
+ * which is where Encore already put it.
  */
 export default function ServiceFacts({
   service,
@@ -16,20 +20,59 @@ export default function ServiceFacts({
   service: ServiceDetails;
   boothNumbers: string[];
 }) {
-  const bigFacts: { label: string; value: string }[] = [];
-  if (service.showCode) bigFacts.push({ label: "Show code", value: service.showCode });
+  const facts: { label: string; value: string }[] = [];
+  if (service.showCode) facts.push({ label: "Show code", value: service.showCode });
   if (boothNumbers.length > 0) {
-    bigFacts.push({
-      label: boothNumbers.length === 1 ? "Your booth" : "Your booths",
+    facts.push({
+      label: boothNumbers.length === 1 ? "Booth" : "Booths",
       value: boothNumbers.join(", "),
     });
   }
 
   return (
     <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3">
-      {bigFacts.length > 0 && (
-        <div className="flex flex-wrap gap-6">
-          {bigFacts.map((f) => (
+      <div className="flex flex-wrap items-center gap-3">
+        {service.documents.map((d) => (
+          <a
+            key={d.href}
+            href={d.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
+          >
+            {d.label}
+          </a>
+        ))}
+        {service.actionUrl && (
+          <a
+            href={service.actionUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
+          >
+            {service.actionLabel ?? `Order from ${service.name}`}
+          </a>
+        )}
+        {service.contactEmail && (
+          <span className="text-sm text-gray-600">
+            Email it to{" "}
+            <a href={`mailto:${service.contactEmail}`} className="font-medium text-[#163D6D] hover:underline">
+              {service.contactName ?? service.contactEmail}
+            </a>
+          </span>
+        )}
+      </div>
+
+      {service.formMissing && (
+        <p className="mt-2 text-sm text-amber-900">
+          We don&rsquo;t have their form yet —{" "}
+          <a href="mailto:info@campusstorescanada.ca" className="underline">ask us</a> for it.
+        </p>
+      )}
+
+      {facts.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-6">
+          {facts.map((f) => (
             <div key={f.label}>
               <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
                 {f.label}
@@ -43,7 +86,7 @@ export default function ServiceFacts({
       )}
 
       {service.deadlines.length > 0 && (
-        <ul className={`${bigFacts.length > 0 ? "mt-3 " : ""}space-y-1`}>
+        <ul className="mt-3 space-y-0.5">
           {service.deadlines.map((d) => (
             <li key={`${d.label}-${d.date}`} className="text-sm">
               <span className="font-medium text-gray-900">
@@ -51,92 +94,16 @@ export default function ServiceFacts({
                 {d.time && <span className="font-normal text-gray-700">, {d.time}</span>}
               </span>
               <span className="text-gray-600"> — {d.label}</span>
-              {d.consequence && (
-                <span className="block text-xs text-amber-800">{d.consequence}</span>
-              )}
-              {/* Say when the date is ours rather than theirs, so nobody plans
-                  to the hour against arithmetic we did. */}
-              {d.derivedFrom && (
-                <span className="block text-xs text-gray-500">
-                  Our reading of &ldquo;{d.derivedFrom}&rdquo; — confirm with them if it&rsquo;s close.
-                </span>
-              )}
             </li>
           ))}
         </ul>
       )}
-
-      {service.how && (
-        <p className={`${bigFacts.length > 0 || service.deadlines.length > 0 ? "mt-3 " : ""}text-sm text-gray-700`}>
-          {service.how}
-        </p>
-      )}
-
-      {service.watchFor && (
-        // The rate table is the reassuring part; this is the part that turns a
-        // quoted price into a bigger invoice.
-        <p className="mt-2 text-xs text-amber-800">{service.watchFor}</p>
-      )}
-
-      {service.formMissing && (
-        // Named, not hidden. An exhibitor told to "complete their order form"
-        // with no form attached needs to know the gap is ours, not theirs.
-        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
-          We don&rsquo;t have {service.name}&rsquo;s order form on file yet. Email{" "}
-          <a href="mailto:info@campusstorescanada.ca" className="underline">
-            info@campusstorescanada.ca
-          </a>{" "}
-          and we&rsquo;ll send it — don&rsquo;t go hunting for it.
-        </p>
-      )}
-
-      {service.documents.length > 0 && (
-        <ul className="mt-3 space-y-1">
-          {service.documents.map((d) => (
-            <li key={d.url}>
-              <a
-                href={d.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-sm font-medium text-[#163D6D] hover:underline"
-              >
-                {d.label} &darr;
-              </a>
-            </li>
-          ))}
-        </ul>
-      )}
-
-      <div className="mt-3 flex flex-wrap items-center gap-3">
-        {service.actionUrl && (
-          <a
-            href={service.actionUrl}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="rounded-md bg-[#163D6D] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#12325a]"
-          >
-            {service.actionLabel ?? `Open ${service.name}`}
-          </a>
-        )}
-        {service.contactEmail && (
-          <a
-            href={`mailto:${service.contactEmail}`}
-            className="text-xs font-medium text-[#163D6D] hover:underline"
-          >
-            Send it to {service.contactName ?? service.contactEmail}
-          </a>
-        )}
-        {service.contactPhone && (
-          <span className="text-xs text-gray-500">{service.contactPhone}</span>
-        )}
-      </div>
 
       {service.onsiteSupportPhone && (
-        // Only useful during the show, and useless if it is buried in a PDF in
-        // someone's inbox when the screen will not turn on.
+        // The one fact that is useless in the PDF, because during the show the
+        // PDF is in an inbox and the screen is not turning on.
         <p className="mt-2 text-xs text-gray-500">
-          Trouble on the floor:{" "}
-          <span className="font-semibold text-gray-800">{service.onsiteSupportPhone}</span>
+          On-site help: <span className="font-semibold text-gray-800">{service.onsiteSupportPhone}</span>
         </p>
       )}
     </div>

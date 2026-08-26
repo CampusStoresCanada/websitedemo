@@ -53,8 +53,15 @@ export type ServiceDetails = {
   /** Costs or limits the rate sheet does not show. */
   watchFor: string | null;
   deadlines: ServiceDeadline[];
-  /** Forms and kits attached to this supplier. */
-  documents: { label: string; url: string }[];
+  /**
+   * Forms and kits, ready to render. `href` is either an external link or a
+   * signed URL for a private file — resolved by the loader, on the server,
+   * because the component that renders this is reached through a client
+   * component and so cannot be async.
+   */
+  documents: { label: string; href: string }[];
+  /** Unresolved sources. The loader turns these into `documents`. */
+  documentSources: { label: string; url: string | null; storagePath: string | null }[];
   /**
    * True when the task says to submit a form and we hold neither the form nor
    * a link to it — the exhibitor is being told to complete something we have
@@ -97,13 +104,15 @@ export function parseServiceDetails(
   deadlines.sort((x, y) => x.date.localeCompare(y.date));
 
   const rawDocs = Array.isArray(a.documents) ? a.documents : [];
-  const documents: { label: string; url: string }[] = [];
+  const documentSources: { label: string; url: string | null; storagePath: string | null }[] = [];
   for (const entry of rawDocs) {
     if (!entry || typeof entry !== "object") continue;
     const d = entry as Record<string, unknown>;
     const label = str(d.label);
     const url = str(d.url);
-    if (label && url) documents.push({ label, url });
+    const storagePath = str(d.storage_path);
+    // A document with a label and no source is a dead link with a name on it.
+    if (label && (url || storagePath)) documentSources.push({ label, url, storagePath });
   }
 
   const details: ServiceDetails = {
@@ -119,14 +128,15 @@ export function parseServiceDetails(
     how: str(a.how),
     watchFor: str(a.watch_for),
     deadlines,
-    documents,
+    documents: [],
+    documentSources,
     formMissing:
-      str(a.submit_by) !== null && !str(a.action_url) && documents.length === 0,
+      str(a.submit_by) !== null && !str(a.action_url) && documentSources.length === 0,
   };
 
   // An entity with none of this is not a service card, it is an empty box.
   const hasAnything =
     details.actionUrl || details.showCode || details.contactEmail ||
-    deadlines.length > 0 || documents.length > 0;
+    deadlines.length > 0 || documentSources.length > 0;
   return hasAnything ? details : null;
 }

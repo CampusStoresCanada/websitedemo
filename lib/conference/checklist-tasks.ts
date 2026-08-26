@@ -244,9 +244,22 @@ export async function loadOrgTasks(
       .select("id, name, kind, attributes")
       .in("id", serviceIds)
       .eq("kind", "service");
+    const { getServiceDocumentUrl } = await import("@/lib/actions/get-conference-document-url");
     for (const e of entities ?? []) {
       const parsed = parseServiceDetails(e.name, e.attributes);
-      if (parsed) serviceByEntity.set(e.id, parsed);
+      if (!parsed) continue;
+      // Signed here, on the server. ServiceFacts is reached through the client
+      // TaskChecklist, so it cannot be async and cannot sign for itself.
+      const documents: { label: string; href: string }[] = [];
+      for (const src of parsed.documentSources) {
+        if (src.url) { documents.push({ label: src.label, href: src.url }); continue; }
+        if (!src.storagePath) continue;
+        const signed = await getServiceDocumentUrl(src.storagePath);
+        // A file we cannot sign is not shown — better a visible gap than a
+        // button that 404s at the moment someone needs the form.
+        if (signed.success) documents.push({ label: src.label, href: signed.url });
+      }
+      serviceByEntity.set(e.id, { ...parsed, documents });
     }
   }
 

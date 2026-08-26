@@ -60,19 +60,30 @@ describe("a missing form is a visible gap, not a silent one", () => {
   });
 
   it("does not flag one whose form is attached as a document", () => {
+    // A form in the private bucket counts as held — that is where Encore's
+    // actually lives, since it is theirs to distribute but not to publish.
     const d = parseServiceDetails("Encore", {
       submit_by: "email",
-      documents: [{ label: "Order form", url: "https://example.test/form.pdf" }],
+      documents: [{ label: "Order form", storage_path: "2027/encore.pdf" }],
     });
     expect(d?.formMissing).toBe(false);
-    expect(d?.documents).toHaveLength(1);
+    expect(d?.documentSources).toHaveLength(1);
   });
 
-  it("drops a document missing its url rather than rendering a dead link", () => {
+  it("drops a document with no source rather than rendering a dead link", () => {
     const d = parseServiceDetails("X", {
       show_code: "1",
-      documents: [{ label: "No url" }, { label: "Real", url: "https://example.test/a.pdf" }],
+      documents: [
+        { label: "Nothing behind it" },
+        { label: "Linked", url: "https://example.test/a.pdf" },
+        { label: "Stored", storage_path: "2027/form.pdf" },
+      ],
     });
-    expect(d?.documents).toEqual([{ label: "Real", url: "https://example.test/a.pdf" }]);
+    expect(d?.documentSources).toEqual([
+      { label: "Linked", url: "https://example.test/a.pdf", storagePath: null },
+      { label: "Stored", url: null, storagePath: "2027/form.pdf" },
+    ]);
+    // Nothing is resolved by the parser — the loader signs, on the server.
+    expect(d?.documents).toEqual([]);
   });
 });
