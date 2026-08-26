@@ -8,6 +8,7 @@ import {
   type ComparisonCut,
 } from "@/lib/benchmarking/comparison";
 import ComparisonView from "@/components/benchmarking/ComparisonView";
+import { getSizeBands, resolveSizeBand } from "@/lib/benchmarking/size-band";
 
 export const metadata = {
   title: "How you compare | Campus Stores Canada",
@@ -36,7 +37,7 @@ export default async function BenchmarkingComparePage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: userOrgs } = (await (supabase as any)
     .from("user_organizations")
-    .select("organization_id, role, organization:organizations(id, name, type, province)")
+    .select("organization_id, role, organization:organizations(id, name, type, province, fte)")
     .eq("user_id", userId)
     .eq("status", "active")) as { data: any[] | null };
 
@@ -56,7 +57,7 @@ export default async function BenchmarkingComparePage() {
     })[0];
 
   const organization = link?.organization as
-    | { id: string; name: string; province: string }
+    | { id: string; name: string; province: string; fte: number | null }
     | undefined;
   if (!organization) redirect("/benchmarking");
 
@@ -93,7 +94,7 @@ export default async function BenchmarkingComparePage() {
 
   const { data: orgRows } = await db
     .from("organizations")
-    .select("id, name, province")
+    .select("id, name, province, fte")
     .in("id", rows.map((r) => r.organization_id));
 
   const nameById = new Map(
@@ -101,6 +102,9 @@ export default async function BenchmarkingComparePage() {
   );
   const provinceById = new Map(
     (orgRows ?? []).map((o) => [o.id as string, (o.province as string) ?? ""]),
+  );
+  const fteById = new Map(
+    (orgRows ?? []).map((o) => [o.id as string, (o.fte as number | null) ?? null]),
   );
 
   const cuts: ComparisonCut[] = [];
@@ -143,6 +147,31 @@ export default async function BenchmarkingComparePage() {
         bucket: myRegion,
         rows: rows.filter(
           (r) => REGION_OF[provinceById.get(r.organization_id) ?? ""] === myRegion,
+        ),
+        nameById,
+        viewerOrgId: organization.id,
+      }),
+    );
+  }
+
+  // By size (§8). The boundaries are the DUES tiers, read from policy — see
+  // lib/benchmarking/size-band.ts for why this is not its own list of numbers.
+  //
+  // Banded on organizations.fte, the same figure billing charges against, so a
+  // store compares in the band it pays in. That figure and the survey's own
+  // enrollment_fte agreed for 38 of 39 FY2025 filers, so the choice costs
+  // almost nothing in accuracy and buys a definition the member can check
+  // against their invoice.
+  const sizeBands = await getSizeBands();
+  const myBand = resolveSizeBand(organization.fte, sizeBands);
+  if (myBand) {
+    cuts.push(
+      buildCut({
+        key: "size",
+        label: "Stores your size",
+        bucket: myBand.label,
+        rows: rows.filter(
+          (r) => resolveSizeBand(fteById.get(r.organization_id), sizeBands)?.key === myBand.key,
         ),
         nameById,
         viewerOrgId: organization.id,
