@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { buildCut, median, type BenchmarkingRow } from "../comparison";
+import { buildCut, median, effectiveFte, type BenchmarkingRow } from "../comparison";
 
 /**
  * These exist because the disclosure promise is only as good as the thing that
@@ -232,5 +232,45 @@ describe("missing inputs", () => {
     // median down and invent a store with infinite productivity.
     expect(perSqft.n).toBe(3);
     expect(cut.metrics.find((m) => m.key === "revenue")!.n).toBe(4);
+  });
+});
+
+
+/**
+ * One number everywhere.
+ *
+ * The FTE a store reports through benchmarking sets its dues for the year
+ * ahead, so organizations.fte is that same answer plus any deliberate
+ * correction — not a rival figure. Dividing by the raw answer while banding
+ * and billing on the corrected one publishes a ratio that contradicts the
+ * store's own invoice.
+ */
+describe("the FTE everything divides by", () => {
+  it("prefers the org figure, which is the priced one", () => {
+    expect(effectiveFte(12_000, 2_792)).toBe(12_000);
+  });
+
+  it("falls back to the survey answer when the org has none", () => {
+    expect(effectiveFte(null, 2_792)).toBe(2_792);
+    expect(effectiveFte(undefined, 2_792)).toBe(2_792);
+  });
+
+  it("is null when neither exists, so the ratio is withheld not guessed", () => {
+    expect(effectiveFte(null, null)).toBeNull();
+  });
+
+  it("keeps a real zero rather than treating it as missing", () => {
+    // A store can genuinely report 0. Coalescing it away would silently swap
+    // in a different store's number.
+    expect(effectiveFte(0, 2_792)).toBe(0);
+  });
+
+  it("undoes the Kwantlen outlier", () => {
+    // Filed 2,792 FTE against a corrected 12,000 on $3,230,294 of revenue.
+    // On the raw answer that is $1,157 per student against a $315 median --
+    // an outlier invented entirely by the denominator.
+    const revenue = 3_230_294;
+    expect(Math.round(revenue / effectiveFte(null, 2_792)!)).toBe(1_157);
+    expect(Math.round(revenue / effectiveFte(12_000, 2_792)!)).toBe(269);
   });
 });

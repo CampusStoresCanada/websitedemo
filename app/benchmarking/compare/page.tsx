@@ -117,6 +117,7 @@ export default async function BenchmarkingComparePage() {
       bucket: `${rows.length} stores`,
       rows,
       nameById,
+      fteById,
       viewerOrgId: organization.id,
     }),
   );
@@ -132,6 +133,7 @@ export default async function BenchmarkingComparePage() {
         bucket: myType,
         rows: rows.filter((r) => r.institution_type === myType),
         nameById,
+        fteById,
         viewerOrgId: organization.id,
       }),
     );
@@ -149,6 +151,7 @@ export default async function BenchmarkingComparePage() {
           (r) => REGION_OF[provinceById.get(r.organization_id) ?? ""] === myRegion,
         ),
         nameById,
+        fteById,
         viewerOrgId: organization.id,
       }),
     );
@@ -174,6 +177,7 @@ export default async function BenchmarkingComparePage() {
           (r) => resolveSizeBand(fteById.get(r.organization_id), sizeBands)?.key === myBand.key,
         ),
         nameById,
+        fteById,
         viewerOrgId: organization.id,
       }),
     );

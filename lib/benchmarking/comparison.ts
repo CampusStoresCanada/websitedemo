@@ -37,7 +37,7 @@ export interface MetricDef {
   label: string;
   format: MetricFormat;
   /** Null when a row lacks the inputs — excluded rather than counted as zero. */
-  compute: (row: BenchmarkingRow) => number | null;
+  compute: (row: BenchmarkingRow, ctx: MetricContext) => number | null;
   hint?: string;
 }
 
@@ -97,6 +97,35 @@ const revenue = (r: BenchmarkingRow): number | null => {
 };
 
 /**
+ * The one FTE figure everything divides by.
+ *
+ * ONE NUMBER EVERYWHERE. The FTE a store reports through benchmarking is what
+ * sets its dues for the year ahead — submitBenchmarkingSurvey writes it
+ * straight onto organizations.fte — so organizations.fte is not a second
+ * opinion, it is that same answer after any deliberate correction an admin has
+ * made on top (flagged by fte_is_manual_override, and cleared by the next
+ * submission).
+ *
+ * So the org figure wins. Dividing by the raw survey answer while the store is
+ * banded and billed on the corrected one publishes a ratio that contradicts
+ * the store's own invoice — Kwantlen answered 2,792 against a corrected 12,000
+ * and appeared at $1,157 revenue per student against a $315 median, an
+ * outlier invented entirely by the denominator.
+ *
+ * Falls back to the row's own answer only when the org has no figure at all.
+ */
+export function effectiveFte(orgFte: unknown, rowFte: unknown): number | null {
+  const o = num(orgFte);
+  if (o !== null) return o;
+  return num(rowFte);
+}
+
+export interface MetricContext {
+  /** Resolved by effectiveFte — never read enrollment_fte directly. */
+  fte: number | null;
+}
+
+/**
  * The metrics worth comparing.
  *
  * Ratios rather than raw totals, because a raw total only tells a store it is
@@ -115,7 +144,7 @@ export const METRICS: MetricDef[] = [
     key: "revenue_per_student",
     label: "Revenue per student",
     format: "currency",
-    compute: (r) => ratio(revenue(r), num(r.enrollment_fte)),
+    compute: (r, ctx) => ratio(revenue(r), ctx.fte),
     hint: "Total revenue divided by FTE enrolment — the comparison that survives a size difference.",
   },
   {
@@ -157,12 +186,20 @@ export function buildCut(input: {
   bucket: string;
   rows: BenchmarkingRow[];
   nameById: Map<string, string>;
+  /** organizations.fte per org — the priced figure. See effectiveFte. */
+  fteById?: Map<string, number | null>;
   viewerOrgId: string;
   metrics?: MetricDef[];
   minCutSize?: number;
 }): ComparisonCut {
   const { key, label, bucket, rows, nameById, viewerOrgId } = input;
   const metricDefs = input.metrics ?? METRICS;
+
+  // Resolved once per store, so the reader's own column, every median and every
+  // named peer figure all divide by the same number.
+  const ctxFor = (r: BenchmarkingRow): MetricContext => ({
+    fte: effectiveFte(input.fteById?.get(r.organization_id), r.enrollment_fte),
+  });
 
   const members: CutMember[] = rows.map((r) => ({
     organizationId: r.organization_id,
@@ -180,12 +217,12 @@ export function buildCut(input: {
   });
 
   const metrics: MetricStat[] = metricDefs.map((m) => {
-    const yours = viewerRow ? m.compute(viewerRow) : null;
+    const yours = viewerRow ? m.compute(viewerRow, ctxFor(viewerRow)) : null;
 
     // Every contributing store feeds the median, opted-out included.
     const values = view.contributing
       .map((c) => rows.find((r) => r.organization_id === c.organizationId))
-      .map((r) => (r ? m.compute(r) : null))
+      .map((r) => (r ? m.compute(r, ctxFor(r)) : null))
       .filter((v): v is number => v !== null);
 
     const med = view.showAggregate ? median(values) : null;
@@ -230,7 +267,7 @@ export function buildCut(input: {
               recipientOrgId: viewerOrgId,
               targetOrgId: m.organizationId,
               fieldKey: d.key,
-              value: d.compute(row),
+              value: d.compute(row, ctxFor(row)),
             }),
           ]),
         ),
