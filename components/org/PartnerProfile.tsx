@@ -847,7 +847,7 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {/* Store Contact — Members and above can see — partners and public are gated */}
+          {/* Vendor Contact — Members and above can see — partners and public are gated */}
           {primaryContact && (
             <ProtectedSection
               bypass={isOwnOrgPage}
@@ -855,7 +855,7 @@ export default function PartnerProfile({
             >
               <div className="mb-10">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-                  Store Contact
+                  Vendor Contact
                 </h3>
                 <div className="flex flex-wrap gap-8 text-gray-500">
                   <span data-flaggable data-field="contacts.work_email" data-entity-id={primaryContact.id}>
@@ -1373,7 +1373,7 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {/* Store Contact — Members and above can see */}
+          {/* Vendor Contact — Members and above can see */}
           {primaryContact && (
             <ProtectedSection
               bypass={isOwnOrgPage}
@@ -1381,7 +1381,7 @@ export default function PartnerProfile({
             >
               <div className="mb-8">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-                  Store Contact
+                  Vendor Contact
                 </h3>
                 <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
                   <span data-flaggable data-field="contacts.work_email" data-entity-id={primaryContact.id}>
