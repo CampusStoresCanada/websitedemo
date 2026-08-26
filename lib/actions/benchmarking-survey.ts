@@ -14,8 +14,9 @@ import {
 interface SaveFieldResult {
   success: boolean;
   error?: string;
-  /** When a value was auto-corrected (e.g. rounded to cents), return the canonical value */
-  correctedValue?: string | number | boolean | null;
+  /** When a value was auto-corrected (e.g. rounded to cents, or a comma-separated
+   *  string split into an array), return the canonical value */
+  correctedValue?: string | number | boolean | string[] | null;
 }
 
 type FieldType =
@@ -26,12 +27,23 @@ type FieldType =
   | "text"         // free-text (max 500 chars)
   | "text_long"    // longer text (max 2000 chars)
   | "select"       // must match one of allowed values
+  | "multiselect"  // text[] column — zero or more values, stored as an array
   | "boolean";     // true / false / null
 
 interface FieldDef {
   type: FieldType;
   /** For select fields: the allowed values */
   options?: string[];
+  /**
+   * multiselect only: the options are a prompt, not a closed set.
+   *
+   * Every one of these lists already has a tail of things stores added
+   * themselves — "Gown Rentals for Graduation Photography", "Lottery ticket
+   * sales". Enforcing membership would reject a store's own 2025 answer the
+   * next time they touched the row, and would teach them that the honest
+   * answer is unwelcome.
+   */
+  allowOther?: boolean;
   /** Max length for text fields (defaults to 500) */
   maxLength?: number;
   /** Min numeric value (inclusive) */
@@ -121,12 +133,12 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   ebook_delivery_system:   { type: "text" },
   student_info_system:     { type: "text" },
   lms_system:              { type: "text" },
-  payment_options:         { type: "text_long" },
-  social_media_platforms:  { type: "text_long" },
+  payment_options:         { type: "multiselect", allowOther: true, options: ["Gift Cards", "Accept Campus Card", "Loyalty / Frequent Shopper Program"] },
+  social_media_platforms:  { type: "multiselect", allowOther: true, options: ["Instagram", "Facebook", "TikTok", "Twitter (X)", "Threads", "YouTube", "BlueSky"] },
   social_media_frequency:  { type: "select", options: ["Daily", "Several times a week", "Weekly", "Monthly", "Rarely", "Never"] },
   social_media_run_by:     { type: "select", options: ["In-house", "Outsourced", "Mix", "N/A"] },
-  services_offered:        { type: "text_long" },
-  shopping_services:       { type: "text_long" },
+  services_offered:        { type: "multiselect", allowOther: true, options: ["Sponsorships", "Transit or Parking Pass Sales", "Locker Sales", "Print / Photocopy Service", "Campus Card Services", "Post Office", "Student Mail Services", "Campus Mail"] },
+  shopping_services:       { type: "multiselect", allowOther: true, options: ["In-Store Pick-up", "Ship from Store", "Order on Web", "Custom Orders", "Return to Store", "Special Orders", "Customer Service Kiosk", "Graduation Regalia", "Residence Delivery", "Locker Pick-up", "Competitive Price Guarantee", "Personal Shopper"] },
   store_in_stores:         { type: "text_long" },
   physical_inventory_schedule: { type: "text" },
 
@@ -173,15 +185,15 @@ const SYSTEM_ONLY_FIELDS = new Set([
 
 interface ValidationResult {
   valid: boolean;
-  /** The cleaned/canonical value to store */
-  cleanValue: string | number | boolean | null;
+  /** The cleaned/canonical value to store. string[] for multiselect (text[] columns). */
+  cleanValue: string | number | boolean | string[] | null;
   /** Human-readable error if invalid */
   error?: string;
 }
 
 function validateFieldValue(
   field: string,
-  value: string | number | boolean | null
+  value: string | number | boolean | string[] | null
 ): ValidationResult {
   const def = FIELD_REGISTRY[field];
   if (!def) {
@@ -215,6 +227,41 @@ function validateFieldValue(
         return { valid: false, cleanValue: null, error: `"${field}" cannot exceed $${def.max.toLocaleString()}` };
       }
       return { valid: true, cleanValue: rounded };
+    }
+
+    case "multiselect": {
+      // These four columns are text[] in the database but were declared as
+      // free text here and in the field config, so the form sent a
+      // comma-separated string and Postgres rejected it outright:
+      //   malformed array literal: "Instagram, TikTok"
+      // Every one of them was unsaveable. Accepting both shapes fixes the
+      // break for the three that still have no agreed vocabulary, while
+      // social_media_platforms moves to real options.
+      const list = Array.isArray(value)
+        ? value
+        : String(value)
+            .split(",")
+            .map((v) => v.trim())
+            .filter(Boolean);
+
+      if (list.length === 0) return { valid: true, cleanValue: null };
+
+      // Only enforce membership where a vocabulary actually exists. The other
+      // three take free text until the committee agrees their lists — an
+      // invented taxonomy is worse than an honest open field.
+      if (def.options && !def.allowOther) {
+        const unknown = list.filter((v) => !def.options!.includes(v));
+        if (unknown.length > 0) {
+          return {
+            valid: false,
+            cleanValue: null,
+            error: `"${field}" does not allow: ${unknown.join(", ")}`,
+          };
+        }
+      }
+
+      // De-duplicate, preserving the order they picked.
+      return { valid: true, cleanValue: [...new Set(list)] };
     }
 
     case "number": {
@@ -433,7 +480,7 @@ async function verifyBenchmarkingAccess(
 export async function saveBenchmarkingField(
   benchmarkingId: string,
   field: string,
-  value: string | number | boolean | null
+  value: string | number | boolean | string[] | null
 ): Promise<SaveFieldResult> {
   try {
     // 1. Allowlist check
@@ -492,11 +539,11 @@ export async function saveBenchmarkingField(
 
 export async function saveBenchmarkingFields(
   benchmarkingId: string,
-  fields: Record<string, string | number | boolean | null>
+  fields: Record<string, string | number | boolean | string[] | null>
 ): Promise<SaveFieldResult> {
   try {
     // 1. Validate ALL fields before writing any
-    const cleanedFields: Record<string, string | number | boolean | null> = {};
+    const cleanedFields: Record<string, string | number | boolean | string[] | null> = {};
     for (const [field, value] of Object.entries(fields)) {
       if (!ALLOWED_FIELDS.has(field) || SYSTEM_ONLY_FIELDS.has(field)) {
         console.error(`[SECURITY] Blocked batch write to disallowed field: ${field}`);
@@ -564,7 +611,7 @@ export async function submitBenchmarkingSurvey(
         updated_at: new Date().toISOString(),
       })
       .eq("id", benchmarkingId)
-      .select("organization_id, enrollment_fte")
+      .select("organization_id, enrollment_fte, fiscal_year")
       .single();
 
     if (updateError) {
@@ -586,6 +633,24 @@ export async function submitBenchmarkingSurvey(
         .eq("id", submitted.organization_id);
       if (orgUpdateError) {
         console.warn("[submitBenchmarkingSurvey] failed to sync organizations.fte:", orgUpdateError.message);
+      }
+    }
+
+    // Confirm receipt, and tell them what happens to their figures next. Fire
+    // and forget on purpose: the submission is saved either way, and a store
+    // must never see "failed to submit" because Resend was having a bad day.
+    if (submitted?.fiscal_year && submitted?.organization_id) {
+      try {
+        const { sendSubmissionReceipt } = await import("@/lib/benchmarking/notify");
+        const outcome = await sendSubmissionReceipt(
+          submitted.fiscal_year,
+          submitted.organization_id
+        );
+        if (outcome && !outcome.sent) {
+          console.warn("[submitBenchmarkingSurvey] receipt not sent:", outcome.error);
+        }
+      } catch (err) {
+        console.warn("[submitBenchmarkingSurvey] receipt threw:", err);
       }
     }
 
@@ -750,6 +815,60 @@ export async function saveDeltaFlag(
     return { success: true };
   } catch (err) {
     console.error("Error saving delta flag:", err);
+    return { success: false, error: "An unexpected error occurred" };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Server Action: set disclosure level (launch plan §5B / §5D)
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * A store choosing whether it may be named to its peers.
+ *
+ * `requireDraft: false` on purpose. Consent here is live, not a gate at
+ * submission: a store may change its mind after filing and everything
+ * downstream reads the current value. The only hard stop is the seal when the
+ * successor survey opens, and nothing computes that yet — see §5D. Until it
+ * does, a change is always allowed, which is the permissive direction and the
+ * right one to be wrong in.
+ */
+export async function setDisclosureLevel(
+  benchmarkingId: string,
+  level: "full" | "aggregate_only"
+): Promise<SaveFieldResult> {
+  try {
+    if (level !== "full" && level !== "aggregate_only") {
+      return { success: false, error: "Unknown disclosure level" };
+    }
+
+    const auth = await verifyBenchmarkingAccess(benchmarkingId, false);
+    if (!auth.authorized || !auth.row || !auth.userId) {
+      return { success: false, error: auth.error };
+    }
+
+    // Service role, as everywhere else on this table: `authenticated` holds
+    // SELECT only, so a session-client update matches zero rows and reports
+    // success.
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from("benchmarking")
+      .update({
+        disclosure_level: level,
+        disclosure_level_set_at: new Date().toISOString(),
+        disclosure_level_set_by: auth.userId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", benchmarkingId);
+
+    if (error) {
+      console.error("[setDisclosureLevel]", error);
+      return { success: false, error: "Could not save that choice" };
+    }
+
+    return { success: true };
+  } catch (err) {
+    console.error("[setDisclosureLevel]", err);
     return { success: false, error: "An unexpected error occurred" };
   }
 }

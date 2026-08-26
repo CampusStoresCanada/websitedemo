@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 import type { BenchmarkingSurvey } from "@/lib/types/db";
 import {
   createBenchmarkingSurvey,
@@ -205,7 +206,7 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
                     )}
                     {survey.closes_at && (
                       <span>
-                        Closes: {parseUTC(survey.closes_at).toLocaleDateString("en-CA")}
+                        Closes: {formatDeadline(survey.closes_at)}
                       </span>
                     )}
                   </div>

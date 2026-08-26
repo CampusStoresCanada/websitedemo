@@ -1,0 +1,77 @@
+import "server-only";
+import { createAdminClient } from "@/lib/supabase/admin";
+import type { Capability } from "./capability-names";
+
+/**
+ * Capability grants — narrow, time-boxed, attributed permissions.
+ *
+ * A grant is not a role. Roles persist until someone remembers to remove them;
+ * grants dissolve on their own. Anything that should be permanent belongs in
+ * `profiles.global_role`, not here.
+ *
+ * The names themselves live in ./capability-names so client components can
+ * import them without dragging in this server-only module.
+ */
+export { CAPABILITIES } from "./capability-names";
+export type { Capability } from "./capability-names";
+
+export interface CapabilityGrant {
+  id: string;
+  subjectId: string;
+  subjectName: string;
+  capability: string;
+  scopeType: string | null;
+  scopeId: string | null;
+  reason: string;
+  grantedByName: string | null;
+  startsAt: string;
+  endsAt: string;
+  revokedAt: string | null;
+  isActive: boolean;
+}
+
+/**
+ * Does this person hold an unexpired, unrevoked grant for this capability?
+ *
+ * Delegates to the SQL function so the definition of "active" lives in one
+ * place and RLS policies can use the same rule.
+ */
+export async function hasCapability(
+  subjectId: string,
+  capability: Capability,
+  scopeId?: string | null,
+): Promise<boolean> {
+  const db = createAdminClient();
+  const { data, error } = await db.rpc("has_capability", {
+    p_subject: subjectId,
+    p_capability: capability,
+    p_scope_id: scopeId ?? undefined,
+  });
+
+  if (error) {
+    // Fail closed. A capability check that errors must not grant access.
+    console.error("[capabilities] has_capability failed:", error);
+    return false;
+  }
+  return data === true;
+}
+
+/** Every capability this person currently holds, via the roles they hold. */
+export async function activeCapabilities(subjectId: string): Promise<string[]> {
+  const db = createAdminClient();
+  const { data, error } = await db.rpc("current_capabilities", {
+    p_subject: subjectId,
+  });
+
+  if (error) {
+    console.error("[capabilities] current_capabilities failed:", error);
+    return [];
+  }
+  return Array.from(
+    new Set(
+      ((data ?? []) as (string | { capability: string })[]).map((c) =>
+        typeof c === "string" ? c : c.capability,
+      ),
+    ),
+  );
+}

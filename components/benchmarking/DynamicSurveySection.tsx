@@ -1,6 +1,9 @@
 "use client";
 
-import type { SectionConfig, FieldConfig } from "@/lib/benchmarking/default-field-config";
+import type {
+  SectionConfig,
+  FieldConfig,
+} from "@/lib/benchmarking/default-field-config";
 import {
   evaluateFormula,
   evaluateWarning,
@@ -55,11 +58,7 @@ export default function DynamicSurveySection({
               </h3>
               <div className="space-y-0">
                 {block.fields.map((field) => (
-                  <FieldRenderer
-                    key={field.name}
-                    field={field}
-                    {...props}
-                  />
+                  <FieldRenderer key={field.name} field={field} {...props} />
                 ))}
               </div>
             </div>
@@ -70,11 +69,7 @@ export default function DynamicSurveySection({
         return (
           <div key={`ungrouped-${blockIdx}`}>
             {block.fields.map((field) => (
-              <FieldRenderer
-                key={field.name}
-                field={field}
-                {...props}
-              />
+              <FieldRenderer key={field.name} field={field} {...props} />
             ))}
           </div>
         );
@@ -99,11 +94,12 @@ function FieldRenderer({
   organizationProvince,
 }: { field: FieldConfig } & SurveySectionProps) {
   const indent = field.indent;
-  const indentClass = indent === true || indent === 1
-    ? "pl-4"
-    : typeof indent === "number" && indent >= 2
-    ? "pl-8"
-    : "";
+  const indentClass =
+    indent === true || indent === 1
+      ? "pl-4"
+      : typeof indent === "number" && indent >= 2
+        ? "pl-8"
+        : "";
 
   // Display-only fields (like institution name from org record)
   if (field.displayOnly) {
@@ -113,7 +109,8 @@ function FieldRenderer({
     } else if (field.name === "province_display") {
       displayValue = organizationProvince;
     } else {
-      displayValue = formData[field.name] != null ? String(formData[field.name]) : "—";
+      displayValue =
+        formData[field.name] != null ? String(formData[field.name]) : "—";
     }
 
     return (
@@ -142,7 +139,7 @@ function FieldRenderer({
 
     // Check warnings for this calculated field
     const activeWarnings = (field.warnings ?? []).filter((w) =>
-      evaluateWarning(w.condition, formData)
+      evaluateWarning(w.condition, formData),
     );
 
     return (
@@ -158,8 +155,16 @@ function FieldRenderer({
             key={w.condition}
             className="mb-4 -mt-2 bg-amber-50 border border-amber-200 rounded p-2 text-xs text-amber-800 flex items-center gap-1"
           >
-            <svg className="w-3.5 h-3.5 shrink-0" fill="currentColor" viewBox="0 0 20 20">
-              <path fillRule="evenodd" d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z" clipRule="evenodd" />
+            <svg
+              className="w-3.5 h-3.5 shrink-0"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-8a1 1 0 00-1 1v3a1 1 0 002 0V6a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
             </svg>
             {w.message}
           </div>
@@ -186,6 +191,14 @@ function FieldRenderer({
   const wrapper = (children: React.ReactNode) => (
     <div className={indentClass}>
       {children}
+      {field.example && (
+        <div className="-mt-2 mb-4 rounded border border-slate-200 bg-slate-50 px-3 py-2">
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+            Example{field.exampleCredit ? ` \u00b7 ${field.exampleCredit}` : ""}
+          </p>
+          <p className="mt-1 text-xs text-slate-700">{field.example}</p>
+        </div>
+      )}
       {field.note && (
         <p className="text-xs text-gray-500 -mt-2 mb-4">{field.note}</p>
       )}
@@ -202,7 +215,7 @@ function FieldRenderer({
           required={field.required}
           tooltip={field.tooltip}
           {...sectionProps}
-        />
+        />,
       );
 
     case "number":
@@ -223,7 +236,7 @@ function FieldRenderer({
           isReadOnly={isReadOnly}
           organizationName={organizationName}
           organizationProvince={organizationProvince}
-        />
+        />,
       );
 
     case "text":
@@ -238,7 +251,7 @@ function FieldRenderer({
           formData={formData}
           onFieldChange={onFieldChange}
           isReadOnly={isReadOnly}
-        />
+        />,
       );
 
     case "text_long":
@@ -253,7 +266,7 @@ function FieldRenderer({
           formData={formData}
           onFieldChange={onFieldChange}
           isReadOnly={isReadOnly}
-        />
+        />,
       );
 
     case "select": {
@@ -272,7 +285,98 @@ function FieldRenderer({
           formData={formData}
           onFieldChange={onFieldChange}
           isReadOnly={isReadOnly}
-        />
+        />,
+      );
+    }
+
+    case "multiselect": {
+      // text[] column. Checkboxes rather than a comma-separated text box: the
+      // free-text version could not be saved at all (Postgres rejected the
+      // string as a malformed array literal), and even when it saved it
+      // produced "Instagram, TikTok" next to "IG/TT" next to "instagram" —
+      // three spellings of one answer, which is the same class of damage the
+      // combined-sales field did in 2025.
+      const selected: string[] = Array.isArray(formData[field.name])
+        ? (formData[field.name] as string[])
+        : [];
+      const extras = selected.filter((v) => !(field.options ?? []).includes(v));
+      const toggle = (opt: string) => {
+        if (isReadOnly) return;
+        const next = selected.includes(opt)
+          ? selected.filter((v) => v !== opt)
+          : [...selected, opt];
+        onFieldChange(field.name, next);
+      };
+
+      return wrapper(
+        <div>
+          <label className="block text-sm font-medium text-gray-700">
+            {field.label}
+            {field.required && <span className="text-red-600"> *</span>}
+          </label>
+          {field.helpText && (
+            <p className="mt-1 text-sm text-gray-500">{field.helpText}</p>
+          )}
+          <div className="mt-2 flex flex-wrap gap-x-6 gap-y-2">
+            {(field.options ?? []).map((opt) => (
+              <label key={opt} className="flex items-center gap-2 text-sm text-gray-800">
+                <input
+                  type="checkbox"
+                  checked={selected.includes(opt)}
+                  onChange={() => toggle(opt)}
+                  disabled={isReadOnly}
+                />
+                {opt}
+              </label>
+            ))}
+          </div>
+
+          {/*
+            Anything the store picked that is not on the list — either typed
+            here, or carried over from 2025 when this was a free-text field.
+            Shown as removable chips rather than hidden, because silently
+            dropping a store's own answer is how you lose the tail that made
+            these lists in the first place.
+          */}
+          {extras.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {extras.map((opt) => (
+                <span
+                  key={opt}
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-sm text-gray-800"
+                >
+                  {opt}
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => toggle(opt)}
+                      aria-label={`Remove ${opt}`}
+                      className="text-gray-500 hover:text-gray-900"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {!isReadOnly && (
+            <input
+              type="text"
+              placeholder="Something else? Type it and press Enter"
+              className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const v = e.currentTarget.value.trim();
+                if (!v || selected.includes(v)) return;
+                onFieldChange(field.name, [...selected, v]);
+                e.currentTarget.value = "";
+              }}
+            />
+          )}
+        </div>,
       );
     }
 
@@ -286,7 +390,7 @@ function FieldRenderer({
           formData={formData}
           onFieldChange={onFieldChange}
           isReadOnly={isReadOnly}
-        />
+        />,
       );
 
     default:
@@ -316,7 +420,7 @@ function groupFields(fields: FieldConfig[]): FieldBlock[] {
         blocks.push(
           currentGroup
             ? { type: "group", groupName: currentGroup, fields: currentBlock }
-            : { type: "ungrouped", fields: currentBlock }
+            : { type: "ungrouped", fields: currentBlock },
         );
       }
       currentGroup = fieldGroup;
@@ -331,7 +435,7 @@ function groupFields(fields: FieldConfig[]): FieldBlock[] {
     blocks.push(
       currentGroup
         ? { type: "group", groupName: currentGroup, fields: currentBlock }
-        : { type: "ungrouped", fields: currentBlock }
+        : { type: "ungrouped", fields: currentBlock },
     );
   }
 

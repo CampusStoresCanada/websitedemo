@@ -11,7 +11,7 @@ import FieldTooltip from "./FieldTooltip";
 export interface SurveySectionProps {
   formData: Record<string, unknown>;
   priorYearData: Record<string, unknown> | null;
-  onFieldChange: (field: string, value: string | number | boolean | null) => void;
+  onFieldChange: (field: string, value: string | number | boolean | string[] | null) => void;
   onDeltaFlag: (
     fieldName: string,
     previousValue: number | null,
