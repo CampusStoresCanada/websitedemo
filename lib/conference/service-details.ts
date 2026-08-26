@@ -14,10 +14,26 @@
 
 export type ServiceDeadline = {
   label: string;
-  /** ISO date. Rendered in Toronto time — these are show-floor deadlines. */
+  /** Calendar date, YYYY-MM-DD. Formatted as digits, never parsed to an instant. */
   date: string;
+  /**
+   * The supplier's stated time, verbatim — "11:59 PM", "8:00 AM - 4:00 PM".
+   *
+   * A display string, not a timestamp. Stronco states a cut-off of 11:59 PM
+   * and a receiving window of 8:00 AM - 4:00 PM; those are their dock's local
+   * hours, and re-expressing them as instants would invent a precision the
+   * supplier never gave. Dropping them, which the first version did, loses the
+   * difference between "the 10th" and "the end of the 10th".
+   */
+  time: string | null;
   /** What happens if it is missed. Null when nothing does. */
   consequence: string | null;
+  /**
+   * The supplier's own wording where the date is DERIVED from a rule rather
+   * than stated — Encore's advance rate depends on "10 business days or more
+   * before show opening", so the date is our arithmetic, not their promise.
+   */
+  derivedFrom: string | null;
 };
 
 export type ServiceDetails = {
@@ -29,6 +45,13 @@ export type ServiceDetails = {
   showCode: string | null;
   contactName: string | null;
   contactEmail: string | null;
+  contactPhone: string | null;
+  /** Rung from the floor when something has failed, not to place an order. */
+  onsiteSupportPhone: string | null;
+  /** How the order is actually placed, in the supplier's own process terms. */
+  how: string | null;
+  /** Costs or limits the rate sheet does not show. */
+  watchFor: string | null;
   deadlines: ServiceDeadline[];
   /** Forms and kits attached to this supplier. */
   documents: { label: string; url: string }[];
@@ -63,7 +86,12 @@ export function parseServiceDetails(
     const label = str(d.label);
     const date = str(d.date);
     if (!label || !date) continue;
-    deadlines.push({ label, date, consequence: str(d.consequence) });
+    deadlines.push({
+      label, date,
+      time: str(d.time),
+      consequence: str(d.consequence),
+      derivedFrom: str(d.derived_from),
+    });
   }
   // Soonest first: the one that costs money is usually the nearest.
   deadlines.sort((x, y) => x.date.localeCompare(y.date));
@@ -86,6 +114,10 @@ export function parseServiceDetails(
     showCode: str(a.show_code),
     contactName: str(a.contact_name),
     contactEmail: str(a.contact_email),
+    contactPhone: str(a.contact_phone),
+    onsiteSupportPhone: str(a.onsite_support_phone),
+    how: str(a.how),
+    watchFor: str(a.watch_for),
     deadlines,
     documents,
     formMissing:

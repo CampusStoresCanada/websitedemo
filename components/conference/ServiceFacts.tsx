@@ -48,14 +48,34 @@ export default function ServiceFacts({
             <li key={`${d.label}-${d.date}`} className="text-sm">
               <span className="font-medium text-gray-900">
                 {formatCalendarDate(d.date) ?? d.date}
+                {d.time && <span className="font-normal text-gray-700">, {d.time}</span>}
               </span>
               <span className="text-gray-600"> — {d.label}</span>
               {d.consequence && (
                 <span className="block text-xs text-amber-800">{d.consequence}</span>
               )}
+              {/* Say when the date is ours rather than theirs, so nobody plans
+                  to the hour against arithmetic we did. */}
+              {d.derivedFrom && (
+                <span className="block text-xs text-gray-500">
+                  Our reading of &ldquo;{d.derivedFrom}&rdquo; — confirm with them if it&rsquo;s close.
+                </span>
+              )}
             </li>
           ))}
         </ul>
+      )}
+
+      {service.how && (
+        <p className={`${bigFacts.length > 0 || service.deadlines.length > 0 ? "mt-3 " : ""}text-sm text-gray-700`}>
+          {service.how}
+        </p>
+      )}
+
+      {service.watchFor && (
+        // The rate table is the reassuring part; this is the part that turns a
+        // quoted price into a bigger invoice.
+        <p className="mt-2 text-xs text-amber-800">{service.watchFor}</p>
       )}
 
       {service.formMissing && (
@@ -106,7 +126,19 @@ export default function ServiceFacts({
             Send it to {service.contactName ?? service.contactEmail}
           </a>
         )}
+        {service.contactPhone && (
+          <span className="text-xs text-gray-500">{service.contactPhone}</span>
+        )}
       </div>
+
+      {service.onsiteSupportPhone && (
+        // Only useful during the show, and useless if it is buried in a PDF in
+        // someone's inbox when the screen will not turn on.
+        <p className="mt-2 text-xs text-gray-500">
+          Trouble on the floor:{" "}
+          <span className="font-semibold text-gray-800">{service.onsiteSupportPhone}</span>
+        </p>
+      )}
     </div>
   );
 }
