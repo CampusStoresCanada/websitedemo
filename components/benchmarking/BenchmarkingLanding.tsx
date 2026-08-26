@@ -159,6 +159,14 @@ export default function BenchmarkingLanding({
                 >
                   Print the worksheet
                 </Link>
+                {/* Last year's comparison stands whether or not this year is
+                    open — and it is the clearest argument for taking part. */}
+                <Link
+                  href="/benchmarking/compare"
+                  className="ml-2 inline-block rounded-lg border border-gray-300 px-6 py-2.5 font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  How you compare
+                </Link>
                 <p className="mt-2 text-sm text-gray-500">
                   Every figure you will need, with your own previous answers beside it.
                   Worth gathering before the survey opens.
@@ -210,6 +218,12 @@ export default function BenchmarkingLanding({
                   className="inline-block rounded-lg border border-gray-300 px-6 py-2.5 text-center font-medium text-gray-700 transition-colors hover:bg-gray-50"
                 >
                   Print the worksheet
+                </Link>
+                <Link
+                  href="/benchmarking/compare"
+                  className="inline-block rounded-lg border border-gray-300 px-6 py-2.5 text-center font-medium text-gray-700 transition-colors hover:bg-gray-50"
+                >
+                  How you compare
                 </Link>
                 <Link
                   href="/benchmarking/survey"
