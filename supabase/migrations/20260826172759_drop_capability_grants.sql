@@ -1,0 +1,15 @@
+-- The table is now unreferenced by any code path. Its one live row was
+-- converted to a role assignment in 20260826172102, which is where it should
+-- have been all along.
+--
+-- Dropped rather than left dormant: an empty table with a write API attached is
+-- how the original problem happened. Someone finds it, uses it, and gets a
+-- success message for an action with no effect. The correct home for "this
+-- person may do this until this date" is governance_role_assignments, which is
+-- the only thing has_capability() has ever consulted.
+--
+-- capability_delegates is left in place. It is a small vocabulary table saying
+-- which capabilities a delegating role may pass on, it is read by nothing yet,
+-- and it describes roles rather than people — so it does not carry the same
+-- trap. Revisit when delegation is actually built.
+drop table if exists public.capability_grants;

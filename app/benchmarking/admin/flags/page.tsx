@@ -8,7 +8,7 @@ export default async function FlagsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: latestSurvey } = (await (supabase as any)
     .from("benchmarking_surveys")
-    .select("fiscal_year, title")
+    .select("id, fiscal_year, title")
     .order("fiscal_year", { ascending: false })
     .limit(1)
     .single()) as { data: any };
@@ -48,6 +48,7 @@ export default async function FlagsPage() {
     return {
       id: f.id,
       benchmarkingId: benchmarking.id,
+      organizationId: benchmarking.organization?.id ?? "",
       organizationName: benchmarking.organization?.name ?? "Unknown",
       fieldName: f.field_name,
       previousValue: f.previous_value,
@@ -62,13 +63,29 @@ export default async function FlagsPage() {
     };
   });
 
+  // A reviewer usually cannot explain a figure until they have spoken to the
+  // store, so the person to ring travels with the flag. Ordered so whoever
+  // actually filed the survey is first — they are the one who knows why the
+  // number moved.
+  const { storeContactsForFlags } = await import("@/lib/benchmarking/store-contacts");
+  const cards = await storeContactsForFlags(
+    [...new Set(tableData.map((f) => f.organizationId).filter(Boolean))],
+    latestSurvey.id,
+  );
+  const contactsByOrg = Object.fromEntries(cards);
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-2">Flag Review</h1>
       <p className="text-sm text-gray-500 mb-6">
         FY{latestSurvey.fiscal_year} &mdash; {latestSurvey.title}
       </p>
-      <DeltaFlagsTable flags={tableData} fiscalYear={latestSurvey.fiscal_year} />
+      <DeltaFlagsTable
+        flags={tableData}
+        fiscalYear={latestSurvey.fiscal_year}
+        surveyId={latestSurvey.id}
+        contactsByOrg={contactsByOrg}
+      />
     </div>
   );
 }

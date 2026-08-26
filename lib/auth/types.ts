@@ -38,7 +38,6 @@ export interface UserProfile {
   display_name: string | null;
   avatar_url: string | null;
   global_role: GlobalRole;
-  is_benchmarking_reviewer: boolean;
   created_at: string;
   updated_at: string;
 }
@@ -96,6 +95,7 @@ export interface AuthState {
   isSurveyParticipant: boolean;
   /** True if the user is tagged as a benchmarking reviewer */
   isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
 }
 
 // Shape descriptor for encrypted content placeholders

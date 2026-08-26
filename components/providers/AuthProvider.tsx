@@ -447,7 +447,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       setGlobalRole(role);
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
-      setIsBenchmarkingReviewer(userProfile?.is_benchmarking_reviewer ?? false);
+      setIsBenchmarkingReviewer(initialAuth?.isBenchmarkingReviewer ?? false);
       setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
       setReauthMessage(null);
@@ -460,7 +460,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         permissionState: resolvedPermissionState,
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
-        isBenchmarkingReviewer: userProfile?.is_benchmarking_reviewer ?? false,
+        isBenchmarkingReviewer: initialAuth?.isBenchmarkingReviewer ?? false,
         isCancollMember: hasCANCOLL,
       };
 
