@@ -16,6 +16,7 @@ import { previewAudience } from "@/lib/comms/audience";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
 import LocalDateTime from "@/components/comms/LocalDateTime";
 import type { CampaignInitiativeStatus, AudienceDefinition, CampaignStatus } from "@/lib/comms/types";
+import { revalidatePath } from "next/cache";
 
 const SEND_STATUS_COLORS: Record<CampaignStatus, string> = {
   draft: "bg-gray-100 text-gray-600",
@@ -84,6 +85,7 @@ async function updateSettingsAction(campaignId: string, formData: FormData) {
   const goal = (formData.get("goal") as string)?.trim() || null;
   const status = formData.get("status") as CampaignInitiativeStatus;
   await updateCampaignInitiative(campaignId, { name, goal, status });
+  revalidatePath(`/admin/comms/campaigns/${campaignId}`);
 }
 
 async function deleteAction(campaignId: string) {
@@ -97,6 +99,7 @@ async function updateRelevanceAction(campaignId: string, formData: FormData) {
   const target_condition_keys = formData.getAll("target_condition_keys") as string[];
   const target_condition_match = (formData.get("target_condition_match") as "all" | "any") || "all";
   await updateCampaignInitiative(campaignId, { target_condition_keys, target_condition_match });
+  revalidatePath(`/admin/comms/campaigns/${campaignId}`);
 }
 
 async function addMilestoneAction(campaignId: string, formData: FormData) {
@@ -107,6 +110,7 @@ async function addMilestoneAction(campaignId: string, formData: FormData) {
   const occurredAtRaw = formData.get("occurred_at") as string | null;
   const occurredAt = occurredAtRaw ? new Date(occurredAtRaw) : undefined;
   await createMilestone({ campaignId, note, templateId, occurredAt });
+  revalidatePath(`/admin/comms/campaigns/${campaignId}`);
 }
 
 async function forkAction(campaignId: string, formData: FormData) {

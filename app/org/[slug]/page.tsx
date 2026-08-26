@@ -5,6 +5,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
+import ConferenceChecklistSection from "@/components/org/ConferenceChecklistSection";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import type {
   PendingTransferInfo,
@@ -542,6 +543,11 @@ export default async function OrgProfilePage({ params }: PageProps) {
         pendingTransfer={pendingTransfer}
         transferCandidates={transferCandidates}
       />
+      <ConferenceChecklistSection
+        orgId={organization.id}
+        slug={slug}
+        conferenceId={currentConferenceId}
+      />
       </>
     );
   }
@@ -576,6 +582,11 @@ export default async function OrgProfilePage({ params }: PageProps) {
       viewerUserId={viewerUserId}
       pendingTransfer={pendingTransfer}
       transferCandidates={transferCandidates}
+    />
+    <ConferenceChecklistSection
+      orgId={organization.id}
+      slug={slug}
+      conferenceId={currentConferenceId}
     />
     </>
   );

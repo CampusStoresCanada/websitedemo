@@ -20,6 +20,7 @@ import {
 } from "@/lib/actions/ops";
 import { approveApplication, rejectApplication, resendApplicationInvite } from "@/lib/actions/applications";
 import { Timestamp } from "@/components/ui/LocalDate";
+import PendingSubmitButton from "@/components/ui/PendingSubmitButton";
 
 export const metadata = {
   title: "Ops Health | Admin | Campus Stores Canada",
@@ -1953,12 +1954,11 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                           await approveApplication(row.id);
                         }}
                       >
-                        <button
-                          type="submit"
+                        <PendingSubmitButton
+                          label="Approve"
+                          pendingLabel="Approving…"
                           className="rounded-md border border-emerald-300 px-2 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
-                        >
-                          Approve
-                        </button>
+                        />
                       </form>
                       <form
                         action={async (formData: FormData) => {
@@ -1976,12 +1976,11 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                           placeholder="Rejection reason"
                           className="rounded-md border border-gray-300 px-2 py-1 text-xs"
                         />
-                        <button
-                          type="submit"
+                        <PendingSubmitButton
+                          label="Reject"
+                          pendingLabel="Rejecting…"
                           className="rounded-md border border-red-300 px-2 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
-                        >
-                          Reject
-                        </button>
+                        />
                       </form>
                     </div>
                   ) : null}
@@ -2013,12 +2012,14 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                           await resendApplicationInvite(row.id);
                         }}
                       >
-                        <button
-                          type="submit"
+                        {/* Sends mail but changes nothing on this page, so
+                            revalidatePath cannot acknowledge it — the pending
+                            state is the only feedback there is. */}
+                        <PendingSubmitButton
+                          label="Resend Invite & Payment Link"
+                          pendingLabel="Resending…"
                           className="rounded-md border border-blue-300 px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-50"
-                        >
-                          Resend Invite &amp; Payment Link
-                        </button>
+                        />
                       </form>
                     </div>
                   ) : null}

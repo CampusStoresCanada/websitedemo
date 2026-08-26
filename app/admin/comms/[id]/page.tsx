@@ -12,7 +12,7 @@ import type {
 } from "@/lib/comms/types";
 import { revalidatePath } from "next/cache";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
-import SendCampaignButton from "@/components/comms/SendCampaignButton";
+import PendingSubmitButton from "@/components/ui/PendingSubmitButton";
 import CampaignClickMapButton from "@/components/comms/CampaignClickMapButton";
 import RescheduleCampaignForm from "@/components/comms/RescheduleCampaignForm";
 import LocalDateTime from "@/components/comms/LocalDateTime";
@@ -192,7 +192,7 @@ export default async function CampaignDetailPage({
                 await cancelCampaignAction(id);
               }}
             >
-              <SendCampaignButton
+              <PendingSubmitButton
                 label="Cancel Schedule"
                 pendingLabel="Cancelling…"
                 variant="secondary"
@@ -206,7 +206,7 @@ export default async function CampaignDetailPage({
                 await sendCampaignAction(id);
               }}
             >
-              <SendCampaignButton label="Send Now" pendingLabel="Sending…" />
+              <PendingSubmitButton label="Send Now" pendingLabel="Sending…" />
             </form>
           )}
         </div>

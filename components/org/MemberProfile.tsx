@@ -340,6 +340,12 @@ export default function MemberProfile({
   // ones testing a conference before it goes public, and need to be able to
   // assign seats bought against it (e.g. via dev-checkout) to verify the flow.
   const isCscAdmin = viewerLevel === "admin" || viewerLevel === "super_admin";
+  // Gates the STOREFRONT only — what is on sale really does depend on sales
+  // being open. It no longer gates the attendance columns: who is going is not
+  // a secret from the org's own people, and hiding the column from a member
+  // who cannot edit it anyway just made the roster look empty. Editing is
+  // gated on canEditConferenceAttendance (this org's admins, CSC admins,
+  // super admins).
   const hasPublicConference = currentConferenceIsPublic || isCscAdmin;
 
   // Which conference_people row (if any) represents each contact, scoped to
@@ -999,7 +1005,7 @@ export default function MemberProfile({
                       <th className="pb-2 pr-4 font-semibold">Email</th>
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
-                      {hasPublicConference && assignableEntities.map((entity) => (
+                      {assignableEntities.map((entity) => (
                         <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
                       ))}
                       {/* Badge/check-in status is a CSC staff concern, not something an org admin manages or needs to see. */}
@@ -1041,7 +1047,7 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        {hasPublicConference && assignableEntities.map((entity) => {
+                        {assignableEntities.map((entity) => {
                           const cell = getEntityAttendanceCell(contact, entity);
                           return (
                             <td key={entity.entityId} className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -1099,7 +1105,7 @@ export default function MemberProfile({
                         data-add-contact
                         data-organization-id={organization.id}
                       >
-                        <td colSpan={4 + (hasPublicConference ? assignableEntities.length : 0) + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
+                        <td colSpan={4 + assignableEntities.length + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
                           <span className="flex items-center justify-center gap-2">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1602,7 +1608,7 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
-                        {hasPublicConference && assignableEntities.map((entity) => {
+                        {assignableEntities.map((entity) => {
                           const cell = getEntityAttendanceCell(contact, entity);
                           return (
                             <div key={entity.entityId} className="text-xs mt-1 font-medium">

@@ -6,6 +6,7 @@ import {
 } from "@/lib/actions/conference-people";
 import { isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import WarRoomClient from "@/components/admin/conference/WarRoomClient";
+import { revalidatePath } from "next/cache";
 
 export const metadata = {
   title: "Conference War Room | Admin",
@@ -89,6 +90,7 @@ export default async function ConferenceWarRoomPage({
               action={async () => {
                 "use server";
                 await syncConferencePeopleIndex(id);
+                revalidatePath(`/admin/conference/${id}/war-room`);
               }}
             >
               <button
