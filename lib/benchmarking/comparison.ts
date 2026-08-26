@@ -1,3 +1,4 @@
+import { markValue } from "@/lib/benchmarking/canary";
 import {
   resolveCut,
   explainSuppression,
@@ -210,6 +211,11 @@ export function buildCut(input: {
 
   // Names come from view.named and nowhere else. The reader is dropped from
   // their own peer list — they are looking at themselves in the "yours" column.
+  //
+  // Peer figures carry this reader's fingerprint (§5A). Applied HERE and only
+  // here: the reader's own column above and every median are computed from true
+  // values and stay untouched, so the numbers anyone acts on are real and only
+  // the attributable copies of other stores' figures are marked.
   const named: NamedPeer[] = view.named
     .filter((m) => m.organizationId !== viewerOrgId)
     .map((m) => {
@@ -217,7 +223,17 @@ export function buildCut(input: {
       return {
         organizationId: m.organizationId,
         organizationName: m.organizationName,
-        values: Object.fromEntries(metricDefs.map((d) => [d.key, d.compute(row)])),
+        values: Object.fromEntries(
+          metricDefs.map((d) => [
+            d.key,
+            markValue({
+              recipientOrgId: viewerOrgId,
+              targetOrgId: m.organizationId,
+              fieldKey: d.key,
+              value: d.compute(row),
+            }),
+          ]),
+        ),
       };
     });
 

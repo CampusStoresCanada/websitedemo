@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { formatMetric, type ComparisonCut } from "@/lib/benchmarking/comparison";
+import { attributionNotice } from "@/lib/benchmarking/canary";
 
 /**
  * How a store reads against its peers.
@@ -70,6 +71,16 @@ export default function ComparisonView({
         Every figure here comes from stores that agreed to share it. Stores that asked not
         to be named still count toward the middle — they are in the numbers, just not in
         the list.
+      </p>
+
+      {/*
+        Said plainly and up front, not in a footer. This is the half of §5A that
+        actually prevents leaks: a member deciding whether to forward this should
+        know it is traceable BEFORE they do it, and should equally know their own
+        numbers are untouched so they never wonder whether we altered their data.
+      */}
+      <p className="mt-3 max-w-2xl rounded-lg bg-gray-50 p-3 text-xs text-gray-700">
+        {attributionNotice(organizationName)}
       </p>
 
       <div className="mt-8 space-y-8">

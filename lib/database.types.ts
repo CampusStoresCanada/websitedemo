@@ -1257,6 +1257,55 @@ export type Database = {
           },
         ]
       }
+      benchmarking_report_access: {
+        Row: {
+          id: string
+          named_peer_count: number
+          recipient_organization_id: string
+          survey_fiscal_year: number
+          viewed_at: string
+          viewed_by: string | null
+        }
+        Insert: {
+          id?: string
+          named_peer_count?: number
+          recipient_organization_id: string
+          survey_fiscal_year: number
+          viewed_at?: string
+          viewed_by?: string | null
+        }
+        Update: {
+          id?: string
+          named_peer_count?: number
+          recipient_organization_id?: string
+          survey_fiscal_year?: number
+          viewed_at?: string
+          viewed_by?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_report_access_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_report_access_recipient_organization_id_fkey"
+            columns: ["recipient_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_report_access_viewed_by_fkey"
+            columns: ["viewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_surveys: {
         Row: {
           closes_at: string | null
