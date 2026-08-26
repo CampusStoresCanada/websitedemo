@@ -858,6 +858,18 @@ export async function setDisclosureLevel(
       return { success: false, error: auth.error };
     }
 
+    // §5D. Live consent has an end: once the successor survey opened, these
+    // figures are published beside this year's as the reference value, and
+    // withdrawing now would retroactively change comparisons other stores have
+    // already read.
+    const { sealStateForBenchmarking, sealMessage } = await import(
+      "@/lib/benchmarking/seal"
+    );
+    const seal = await sealStateForBenchmarking(benchmarkingId);
+    if (seal?.sealed) {
+      return { success: false, error: sealMessage(seal) ?? "That year is closed." };
+    }
+
     // Service role, as everywhere else on this table: `authenticated` holds
     // SELECT only, so a session-client update matches zero rows and reports
     // success.

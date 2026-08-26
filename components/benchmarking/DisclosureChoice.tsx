@@ -19,9 +19,12 @@ import { DISCLOSURE_COPY, type DisclosureLevel } from "@/lib/benchmarking/disclo
 export default function DisclosureChoice({
   benchmarkingId,
   initialLevel,
+  sealedMessage,
 }: {
   benchmarkingId: string;
   initialLevel: DisclosureLevel;
+  /** §5D. Set once the successor survey has opened; the choice is then frozen. */
+  sealedMessage?: string | null;
 }) {
   const [level, setLevel] = useState<DisclosureLevel>(initialLevel);
   const [saving, setSaving] = useState(false);
@@ -29,7 +32,7 @@ export default function DisclosureChoice({
   const [error, setError] = useState<string | null>(null);
 
   async function choose(next: DisclosureLevel) {
-    if (next === level) return;
+    if (next === level || sealedMessage) return;
     const previous = level;
     setLevel(next);
     setSaving(true);
@@ -58,6 +61,18 @@ export default function DisclosureChoice({
         Your figures count either way. This decides only whether your store is named.
       </p>
 
+      {/*
+        Shown instead of a dead control. The action refuses either way, but a
+        radio that silently does nothing teaches a member the site is broken;
+        the reason teaches them the year is closed and points at the one they
+        can still change.
+      */}
+      {sealedMessage && (
+        <p className="mt-3 rounded-lg bg-gray-100 p-3 text-sm text-gray-700">
+          {sealedMessage}
+        </p>
+      )}
+
       <div className="mt-4 space-y-3">
         {(Object.keys(DISCLOSURE_COPY) as DisclosureLevel[]).map((key) => {
           const copy = DISCLOSURE_COPY[key];
@@ -76,7 +91,7 @@ export default function DisclosureChoice({
                 name="disclosure_level"
                 className="mt-1"
                 checked={active}
-                disabled={saving}
+                disabled={saving || Boolean(sealedMessage)}
                 onChange={() => choose(key)}
               />
               <span>

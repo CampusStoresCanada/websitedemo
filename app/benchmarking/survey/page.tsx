@@ -210,6 +210,12 @@ export default async function BenchmarkingSurveyPage() {
     note: n.note as string,
   }));
 
+  // 7c. §5D — is this year still changeable? Derived from whether a later
+  // survey has opened, never from a stored flag.
+  const { isYearSealed, sealMessage } = await import("@/lib/benchmarking/seal");
+  const sealState = await isYearSealed(activeSurvey.fiscal_year);
+  const sealedMessage = sealMessage(sealState);
+
   // 8. Get the field config for this survey (or DEFAULT if null)
   const fieldConfig = getFieldConfig(activeSurvey);
 
@@ -241,6 +247,7 @@ export default async function BenchmarkingSurveyPage() {
       */}
       <div className="mx-auto mt-8 max-w-5xl px-4">
         <DisclosureChoice
+          sealedMessage={sealedMessage}
           benchmarkingId={currentRow!.id}
           initialLevel={
             currentRow!.disclosure_level === "aggregate_only" ? "aggregate_only" : "full"

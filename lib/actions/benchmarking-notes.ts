@@ -61,6 +61,41 @@ async function secretaryOrAdmin(): Promise<Actor> {
   return { ok: true, userId: auth.ctx.userId };
 }
 
+
+/**
+ * §5D. Nothing about a sealed year may change — not the note, not the
+ * approval, not the store's answer.
+ *
+ * Checked in every action rather than once at a chokepoint, because there is no
+ * chokepoint: five separate entry points can alter what a published figure says
+ * about a store, and one of them forgetting is the same as none of them
+ * checking.
+ */
+async function sealBlockForSurvey(surveyId: string): Promise<string | null> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("benchmarking_surveys")
+    .select("fiscal_year")
+    .eq("id", surveyId)
+    .maybeSingle();
+  if (!data?.fiscal_year) return null;
+
+  const { isYearSealed, sealMessage } = await import("@/lib/benchmarking/seal");
+  const state = await isYearSealed(data.fiscal_year as number);
+  return state.sealed ? sealMessage(state) : null;
+}
+
+async function sealBlockForNote(noteId: string): Promise<string | null> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("benchmarking_notes")
+    .select("survey_id")
+    .eq("id", noteId)
+    .maybeSingle();
+  if (!data?.survey_id) return null;
+  return sealBlockForSurvey(data.survey_id as string);
+}
+
 /**
  * A reviewer explains why a figure is unusual but correct.
  *
@@ -81,6 +116,9 @@ export async function writeNote(input: {
 
   const text = input.note?.trim();
   if (!text) return { success: false, error: "Write the explanation first" };
+
+  const sealed = await sealBlockForSurvey(input.surveyId);
+  if (sealed) return { success: false, error: sealed };
 
   const db = createAdminClient();
   const { data, error } = await db
@@ -130,6 +168,9 @@ export async function updateNote(
   const me = await actor();
   if (!me.ok || !me.userId) return { success: false, error: me.error };
 
+  const sealed = await sealBlockForNote(noteId);
+  if (sealed) return { success: false, error: sealed };
+
   const text = note?.trim();
   if (!text) return { success: false, error: "The explanation can't be empty" };
 
@@ -157,6 +198,9 @@ export async function secretaryDecide(
 ): Promise<{ success: boolean; error?: string }> {
   const me = await secretaryOrAdmin();
   if (!me.ok || !me.userId) return { success: false, error: me.error };
+
+  const sealed = await sealBlockForNote(noteId);
+  if (sealed) return { success: false, error: sealed };
 
   const db = createAdminClient();
   const { error } = await db
@@ -212,6 +256,9 @@ export async function respondentDecide(
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: "Not signed in" };
+
+  const sealed = await sealBlockForNote(noteId);
+  if (sealed) return { success: false, error: sealed };
   const { userId, activeOrgIds } = auth.ctx;
 
   const db = createAdminClient();
@@ -277,6 +324,9 @@ export async function overridePublish(
 ): Promise<{ success: boolean; error?: string }> {
   const me = await secretaryOrAdmin();
   if (!me.ok || !me.userId) return { success: false, error: me.error };
+
+  const sealed = await sealBlockForNote(noteId);
+  if (sealed) return { success: false, error: sealed };
 
   const why = reason?.trim();
   if (!why) {
