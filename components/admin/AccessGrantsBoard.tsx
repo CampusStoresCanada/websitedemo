@@ -30,6 +30,7 @@ const CAPABILITY_LABEL: Record<string, string> = {
   "benchmarking.content_review": "Benchmarking — question review",
   "benchmarking.qa_verify": "Benchmarking — QA verification",
   "benchmarking.recipient_confirm": "Benchmarking — recipient confirmation",
+  "elections.nominating_review": "Elections — nominating committee",
 };
 
 // Mountain time — every stored timestamp is UTC.

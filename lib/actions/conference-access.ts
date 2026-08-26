@@ -207,3 +207,65 @@ export async function saveConferenceObligations(
 
   return { success: true, data: { saved: Object.keys(patch) } };
 }
+
+/**
+ * The conference details this contact owes, if they're on a conference at all.
+ *
+ * Fetched by the contact-edit modal itself rather than threaded down through
+ * MemberProfile and PartnerProfile as a prop. Editing a person is already a
+ * click-and-open action, so one query at open costs nothing, and it means the
+ * Conference tab appears everywhere that modal is used — both profiles, the
+ * Toolkit, the person picker — without four call sites learning about
+ * conference obligations.
+ *
+ * Returns null when this person holds nothing, which is the signal to render
+ * no tab at all.
+ */
+export async function loadContactConferenceObligations(
+  contactId: string,
+  organizationId: string
+): Promise<Result<{
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  values: Record<string, string | null>;
+} | null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+
+  const db = createAdminClient();
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select(`id, conference_id, ${PERSON_OBLIGATION_FIELDS.join(", ")}`)
+    .eq("contact_id", contactId)
+    .eq("organization_id", organizationId)
+    .neq("assignment_status", "canceled")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person) return { success: true, data: null };
+
+  const row = person as unknown as { id: string; conference_id: string };
+  const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
+  const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
+  if (status.obligations.length === 0) return { success: true, data: null };
+
+  const values: Record<string, string | null> = {};
+  for (const field of PERSON_OBLIGATION_FIELDS) {
+    values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
+  }
+
+  return {
+    success: true,
+    data: {
+      personId: row.id,
+      conferenceId: row.conference_id,
+      fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
+      values,
+    },
+  };
+}

@@ -8,7 +8,6 @@ import { answerPersonalTask } from "@/lib/actions/conference-tasks";
 import { loadPersonalTasks } from "@/lib/conference/checklist-tasks";
 import TaskChecklist from "@/components/conference/TaskChecklist";
 import { resolvePersonObligations } from "@/lib/actions/conference-access";
-import ObligationDetails from "@/components/me/ObligationDetails";
 import {
   buildAttendeeMeetingRows,
   getConferenceScheduleTimeline,
@@ -129,6 +128,7 @@ export default async function MyConferencePage({
     ? obligationsResult.data
     : { obligations: [], missing: [], isReady: true };
   const readinessFlags = (person.data_quality_flags ?? []).filter((f) => f.trim().length > 0);
+  const readinessIsReady = obligations.isReady && readinessFlags.length === 0;
 
   // Check-ins the attendee answers for themselves — hotel and anything else
   // only they can confirm. Deliberately separate from the obligations above:
@@ -211,35 +211,21 @@ export default async function MyConferencePage({
         </div>
       </div>
 
-      {/* The obligations ARE the readiness list, so they are rendered once, as
-          fields. A separate "Missing: Dietary restrictions" bullet above a form
-          containing that very field says the same thing twice and only one of
-          the two can be acted on. Flags stay separate: they are raised by staff
-          and an attendee cannot clear them by typing. */}
-      <ObligationDetails
-        personId={person.id}
-        conferenceId={conferenceId}
-        obligations={obligations.obligations}
-        values={person as unknown as Record<string, string | null>}
-      />
-
-      {readinessFlags.length > 0 ? (
-        <section className="rounded-xl border border-amber-200 bg-amber-50 p-4">
-          <h2 className="text-base font-semibold text-gray-900">We need to sort something out</h2>
-          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-900">
+      <section className="rounded-xl border border-gray-200 bg-white p-4">
+        <h2 className="text-base font-semibold text-gray-900">Readiness Checklist</h2>
+        {readinessIsReady ? (
+          <p className="mt-2 text-sm text-emerald-700">Ready for conference operations.</p>
+        ) : (
+          <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-amber-800">
+            {obligations.missing.map((item) => (
+              <li key={`missing:${item.key}`}>Missing: {item.label}</li>
+            ))}
             {readinessFlags.map((item) => (
-              <li key={`blocker:${item}`}>{item}</li>
+              <li key={`blocker:${item}`}>Flag: {item}</li>
             ))}
           </ul>
-          <p className="mt-2 text-xs text-amber-800">
-            Email{" "}
-            <a href="mailto:info@campusstorescanada.ca" className="underline">
-              info@campusstorescanada.ca
-            </a>{" "}
-            and we&rsquo;ll clear it — you can&rsquo;t fix these from here.
-          </p>
-        </section>
-      ) : null}
+        )}
+      </section>
 
       <section className="rounded-xl border border-gray-200 bg-white p-4">
         <h2 className="text-base font-semibold text-gray-900">Your To-Do List</h2>
