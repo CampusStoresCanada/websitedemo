@@ -299,6 +299,7 @@ function FieldRenderer({
       const selected: string[] = Array.isArray(formData[field.name])
         ? (formData[field.name] as string[])
         : [];
+      const extras = selected.filter((v) => !(field.options ?? []).includes(v));
       const toggle = (opt: string) => {
         if (isReadOnly) return;
         const next = selected.includes(opt)
@@ -329,6 +330,52 @@ function FieldRenderer({
               </label>
             ))}
           </div>
+
+          {/*
+            Anything the store picked that is not on the list — either typed
+            here, or carried over from 2025 when this was a free-text field.
+            Shown as removable chips rather than hidden, because silently
+            dropping a store's own answer is how you lose the tail that made
+            these lists in the first place.
+          */}
+          {extras.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-2">
+              {extras.map((opt) => (
+                <span
+                  key={opt}
+                  className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-sm text-gray-800"
+                >
+                  {opt}
+                  {!isReadOnly && (
+                    <button
+                      type="button"
+                      onClick={() => toggle(opt)}
+                      aria-label={`Remove ${opt}`}
+                      className="text-gray-500 hover:text-gray-900"
+                    >
+                      ×
+                    </button>
+                  )}
+                </span>
+              ))}
+            </div>
+          )}
+
+          {!isReadOnly && (
+            <input
+              type="text"
+              placeholder="Something else? Type it and press Enter"
+              className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const v = e.currentTarget.value.trim();
+                if (!v || selected.includes(v)) return;
+                onFieldChange(field.name, [...selected, v]);
+                e.currentTarget.value = "";
+              }}
+            />
+          )}
         </div>,
       );
     }

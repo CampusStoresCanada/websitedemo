@@ -34,6 +34,16 @@ interface FieldDef {
   type: FieldType;
   /** For select fields: the allowed values */
   options?: string[];
+  /**
+   * multiselect only: the options are a prompt, not a closed set.
+   *
+   * Every one of these lists already has a tail of things stores added
+   * themselves — "Gown Rentals for Graduation Photography", "Lottery ticket
+   * sales". Enforcing membership would reject a store's own 2025 answer the
+   * next time they touched the row, and would teach them that the honest
+   * answer is unwelcome.
+   */
+  allowOther?: boolean;
   /** Max length for text fields (defaults to 500) */
   maxLength?: number;
   /** Min numeric value (inclusive) */
@@ -123,12 +133,12 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   ebook_delivery_system:   { type: "text" },
   student_info_system:     { type: "text" },
   lms_system:              { type: "text" },
-  payment_options:         { type: "multiselect" },
-  social_media_platforms:  { type: "multiselect", options: ["X (Twitter)", "Facebook", "Instagram", "TikTok", "BlueSky", "LinkedIn", "YouTube", "Other"] },
+  payment_options:         { type: "multiselect", allowOther: true, options: ["Gift Cards", "Accept Campus Card", "Loyalty / Frequent Shopper Program"] },
+  social_media_platforms:  { type: "multiselect", allowOther: true, options: ["Instagram", "Facebook", "TikTok", "Twitter (X)", "Threads", "YouTube", "BlueSky"] },
   social_media_frequency:  { type: "select", options: ["Daily", "Several times a week", "Weekly", "Monthly", "Rarely", "Never"] },
   social_media_run_by:     { type: "select", options: ["In-house", "Outsourced", "Mix", "N/A"] },
-  services_offered:        { type: "multiselect" },
-  shopping_services:       { type: "multiselect" },
+  services_offered:        { type: "multiselect", allowOther: true, options: ["Sponsorships", "Transit or Parking Pass Sales", "Locker Sales", "Print / Photocopy Service", "Campus Card Services", "Post Office", "Student Mail Services", "Campus Mail"] },
+  shopping_services:       { type: "multiselect", allowOther: true, options: ["In-Store Pick-up", "Ship from Store", "Order on Web", "Custom Orders", "Return to Store", "Special Orders", "Customer Service Kiosk", "Graduation Regalia", "Residence Delivery", "Locker Pick-up", "Competitive Price Guarantee", "Personal Shopper"] },
   store_in_stores:         { type: "text_long" },
   physical_inventory_schedule: { type: "text" },
 
@@ -239,7 +249,7 @@ function validateFieldValue(
       // Only enforce membership where a vocabulary actually exists. The other
       // three take free text until the committee agrees their lists — an
       // invented taxonomy is worse than an honest open field.
-      if (def.options) {
+      if (def.options && !def.allowOther) {
         const unknown = list.filter((v) => !def.options!.includes(v));
         if (unknown.length > 0) {
           return {

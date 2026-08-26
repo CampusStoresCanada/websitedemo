@@ -1004,13 +1004,17 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "payment_options",
-          label: "Payment Options",
-          type: "text",
+          label: "Payment & Loyalty Programs",
+          type: "multiselect",
           order: 5,
           visible: true,
-          placeholder:
-            "e.g., Cash, Credit, Debit, Student Account, Campus Card",
-          helpText: "List all payment methods accepted, separated by commas",
+          options: [
+            "Gift Cards",
+            "Accept Campus Card",
+            "Loyalty / Frequent Shopper Program",
+          ],
+          helpText:
+            "Programs your store runs or accepts — not card brands. Everyone takes Visa; this asks what else you offer. In 2025 this was worded as \"payment methods accepted\" and several stores listed Debit and Mastercard, which is not what the question is for.",
         },
         // Social Media & Marketing group
         {
@@ -1019,15 +1023,17 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "multiselect",
           order: 6,
           visible: true,
+          // Ordered by how many stores actually use each, and spelled the way
+          // the 2025 data already spells them — "Twitter (X)", not "X (Twitter)".
+          // A new spelling of an existing value silently splits the answer.
           options: [
-            "X (Twitter)",
-            "Facebook",
             "Instagram",
+            "Facebook",
             "TikTok",
-            "BlueSky",
-            "LinkedIn",
+            "Twitter (X)",
+            "Threads",
             "YouTube",
-            "Other",
+            "BlueSky",
           ],
           helpText:
             "Tick every platform your store posts to itself. Not the institution's central accounts — only the ones you run.",
@@ -1072,23 +1078,46 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           name: "services_offered",
           label: "Services Offered",
-          type: "text",
+          type: "multiselect",
           order: 9,
           visible: true,
-          placeholder: "e.g., Grad Photos, Print/Copy, Engraving, Regalia",
-          helpText: "List services offered, separated by commas",
+          options: [
+            "Sponsorships",
+            "Transit or Parking Pass Sales",
+            "Locker Sales",
+            "Print / Photocopy Service",
+            "Campus Card Services",
+            "Post Office",
+            "Student Mail Services",
+            "Campus Mail",
+          ],
+          helpText:
+            "Non-retail services your store runs on behalf of the campus. Tick what applies and add anything else you do — this list came from what stores reported last year, not from a rulebook.",
           group: "Services & Operations",
           indent: true,
         },
         {
           name: "shopping_services",
           label: "Shopping Services",
-          type: "text",
+          type: "multiselect",
+          options: [
+            "In-Store Pick-up",
+            "Ship from Store",
+            "Order on Web",
+            "Custom Orders",
+            "Return to Store",
+            "Special Orders",
+            "Customer Service Kiosk",
+            "Graduation Regalia",
+            "Residence Delivery",
+            "Locker Pick-up",
+            "Competitive Price Guarantee",
+            "Personal Shopper",
+          ],
           helpText:
-            "Services you offer around the buying experience, such as price matching, personal shopping or curbside pickup.",
+            "Services around the buying experience itself. Tick what applies and add anything else — this list came from what stores reported last year.",
           order: 10,
           visible: true,
-          placeholder: "e.g., Curbside Pickup, Same-day Delivery, Ship to Home",
           group: "Services & Operations",
           indent: true,
         },

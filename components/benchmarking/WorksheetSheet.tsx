@@ -54,6 +54,17 @@ function WriteBox({ line }: { line: WorksheetLine }) {
             {opt}
           </span>
         ))}
+        {/*
+          These lists are a prompt, not a closed set — every one of them has a
+          tail of things stores added themselves. Leaving somewhere to write
+          that is the difference between capturing it and losing it.
+        */}
+        {many && (
+          <span className="inline-flex min-w-[160px] flex-1 items-end gap-1">
+            <span className="shrink-0">Other:</span>
+            <span className="inline-block flex-1 border-b border-black/70">&nbsp;</span>
+          </span>
+        )}
         {(line.options ?? []).length === 0 && (
           <span className="inline-block min-w-[120px] flex-1 border-b border-black/70">
             &nbsp;
