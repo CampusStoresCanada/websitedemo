@@ -138,29 +138,49 @@ export default async function ElectionReviewPage({
     await requestWithdrawalAction(String(formData.get("nominationId")));
   }
 
+  // Every one of these refuses for real reasons — an already-sent call, an
+  // unpublished event page, an empty electorate. Discarding the Result made a
+  // refusal indistinguishable from success: the POST returned 200, the page
+  // re-rendered unchanged, and the only way to find out nothing had happened
+  // was to read the database. Surface it the way `close` and `circulate` do.
   async function sendCall() {
     "use server";
-    await sendCallForNominationsAction(slug);
+    const r = await sendCallForNominationsAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?callSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   async function chase() {
     "use server";
-    await chaseIncompleteAction(slug);
+    const r = await chaseIncompleteAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?chased=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   async function mintTasks() {
     "use server";
-    await mintElectionActionItemsAction(slug);
+    const r = await mintElectionActionItemsAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?tasksMinted=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   async function sendNotice(formData: FormData) {
     "use server";
-    await sendAgmNoticeAction(slug, formData);
+    const r = await sendAgmNoticeAction(slug, formData);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?noticeSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   async function sendProxy() {
     "use server";
-    await sendProxyFormAction(slug);
+    const r = await sendProxyFormAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?proxySent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   async function circulate() {
@@ -298,11 +318,13 @@ export default async function ElectionReviewPage({
           stages={timeline}
           actions={{
             sendCall,
-            closeNominations: close,
+            // Not `close` — that form needs its confirmation ticked, so the
+            // timeline sends you to it rather than posting an empty one.
+            closeNominations: "close-nominations",
             circulateBallots: circulate,
-            sendAgmNotice: sendNotice,
+            sendAgmNotice: "agm-notice",
             sendProxyForm: sendProxy,
-            sendAgmPackage: sendPackage,
+            sendAgmPackage: "agm-package",
           }}
         />
       )}
@@ -344,7 +366,9 @@ export default async function ElectionReviewPage({
       )}
 
       {noticeState && (
-        <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
+        <div id="agm-notice" className="scroll-mt-24">
+          <AgmNoticePanel state={noticeState} sendNotice={sendNotice} sendProxy={sendProxy} />
+        </div>
       )}
 
       {/* The election's obligations belong on the board's own list, assigned to
@@ -441,6 +465,7 @@ export default async function ElectionReviewPage({
       </section>
 
       {agmPackage && (
+        <div id="agm-package" className="scroll-mt-24">
         <AgmPackagePanel
           items={agmPackage.items}
           outstanding={agmPackage.outstanding}
@@ -461,6 +486,7 @@ export default async function ElectionReviewPage({
           sent={Boolean(packageSent)}
           agendaGenerated={Boolean(agendaGenerated)}
         />
+        </div>
       )}
 
       <ReminderSchedulePanel
@@ -495,7 +521,7 @@ export default async function ElectionReviewPage({
 
         {election.status === "nominating" &&
           (closeReadiness.ready ? (
-            <form action={close} className="mt-4 border-t border-gray-200 pt-4">
+            <form id="close-nominations" action={close} className="mt-4 border-t border-gray-200 pt-4 scroll-mt-24">
               <p className="text-sm font-medium text-gray-900">Close nominations</p>
               <p className="mt-1 text-sm text-gray-600">
                 {willValidate} nominee{willValidate === 1 ? "" : "s"} will be frozen onto the

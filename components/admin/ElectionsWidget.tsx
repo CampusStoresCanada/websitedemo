@@ -146,10 +146,19 @@ export function ElectionsWidget({ data }: { data: ElectionsWidgetData }) {
           <Bar done={data.ballotsReturned} total={data.electorate} tone="bg-gray-900" />
           <Sparkline daily={data.daily} />
           <p className="mt-1 text-xs text-gray-500">{rateLine(data, "ballots")}</p>
+          {/* Clamped, because the electorate is re-derived on every render while
+              the ballots are a fixed historical count. An institution can vote
+              in September and be ineligible in October — a lapsed renewal, an
+              archived org — at which point the raw subtraction goes NEGATIVE and
+              the widget reads "-1 still to vote". Never show the operator a
+              number that cannot exist; when more have voted than are currently
+              eligible, say that plainly instead. */}
           <p className="mt-2 text-xs text-gray-600">
-            {data.projected === null
-              ? `${data.electorate - data.ballotsReturned} still to vote.`
-              : `At this pace, about ${data.projected} of ${data.electorate} by close.`}
+            {data.ballotsReturned > data.electorate
+              ? `${data.ballotsReturned} ballots are in from ${data.electorate} currently eligible institutions — some voted before their eligibility changed.`
+              : data.projected === null
+                ? `${data.electorate - data.ballotsReturned} still to vote.`
+                : `At this pace, about ${data.projected} of ${data.electorate} by close.`}
           </p>
         </>
       )}

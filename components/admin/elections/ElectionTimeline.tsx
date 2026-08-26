@@ -42,8 +42,18 @@ export default function ElectionTimeline({
   actions,
 }: {
   stages: TimelineStage[];
-  /** Server actions keyed the same way the stages are. */
-  actions: Record<string, ((formData: FormData) => Promise<void>) | undefined>;
+  /**
+   * Keyed the same way the stages are. A function is run directly from the
+   * timeline; a STRING is the id of the panel that owns the real form.
+   *
+   * Some stages cannot be a one-click button and should not be: closing
+   * nominations needs its confirmation ticked, and the AGM notice needs the
+   * meeting's time typed in. The timeline used to render a bare submit for
+   * those too, which posted an empty form and failed every single time — a
+   * button that cannot succeed is worse than no button, because it reads as
+   * broken software rather than as a step with a form attached.
+   */
+  actions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined>;
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
@@ -89,7 +99,7 @@ export default function ElectionTimeline({
                   <p className="mt-0.5 text-xs text-gray-600">{stage.detail}</p>
                 )}
 
-                {act && runnable && (
+                {act && typeof runnable === "function" && (
                   <form action={runnable} className="mt-2">
                     <button
                       type="submit"
@@ -98,6 +108,15 @@ export default function ElectionTimeline({
                       {act.label}
                     </button>
                   </form>
+                )}
+
+                {act && typeof runnable === "string" && (
+                  <a
+                    href={`#${runnable}`}
+                    className="mt-2 inline-block rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+                  >
+                    {act.label} →
+                  </a>
                 )}
 
                 {/* Blocked reads as a sentence. A disabled button would invite a
