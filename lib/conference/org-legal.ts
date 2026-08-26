@@ -1,5 +1,6 @@
 import "server-only";
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuthenticated, canManageOrganization } from "@/lib/auth/guards";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import { loadPolicyTargeting } from "./legal-acceptance";
 import { requiredPolicyEntityIds } from "./legal-policies";
@@ -69,6 +70,15 @@ export async function loadOrgLegalStatus(
   organizationId: string,
   viewerUserId: string
 ): Promise<OrgLegalStatus> {
+  // Defence in depth. Today the only caller is a page that has already run
+  // requireOrgAdminOrSuperAdmin, but this returns payment and agreement data
+  // for a named organisation — if it is ever called from a route that forgets
+  // to guard, that is a leak with no error to notice. Cheap to re-check.
+  const auth = await requireAuthenticated();
+  if (!auth.ok || !canManageOrganization(auth.ctx, organizationId)) {
+    throw new Error("Not authorized for this organization");
+  }
+
   const nowIso = new Date().toISOString();
   const { data: versions } = await db
     .from("conference_legal_versions")

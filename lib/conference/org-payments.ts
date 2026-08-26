@@ -1,5 +1,6 @@
 import "server-only";
 import type { createAdminClient } from "@/lib/supabase/admin";
+import { requireAuthenticated, canManageOrganization } from "@/lib/auth/guards";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -32,7 +33,16 @@ export type OrgPaymentSummary = {
   orders: OrgOrder[];
   /** Orders still awaiting payment — the only thing that makes this a to-do. */
   outstanding: OrgOrder[];
-  settledCents: number;
+  /**
+   * What is still owed. A meaningful sum: these are debts of the same kind.
+   *
+   * ⚠️ There is deliberately NO "total settled" counterpart. Summing settled
+   * orders produces a number nobody should act on — Varsity Collection has a
+   * $13,560 order, partially refunded to a $9,040 net, carrying NO line items,
+   * beside a $9,040 order that accounts for every booth and registration they
+   * hold. Adding those gave "$18,080 settled" for $9,040 of things. A figure
+   * that disagrees with a company's own accounting is worse than no figure.
+   */
   outstandingCents: number;
   currency: string;
 };
@@ -47,6 +57,15 @@ export async function loadOrgPayments(
   conferenceId: string,
   organizationId: string
 ): Promise<OrgPaymentSummary> {
+  // Defence in depth. Today the only caller is a page that has already run
+  // requireOrgAdminOrSuperAdmin, but this returns payment and agreement data
+  // for a named organisation — if it is ever called from a route that forgets
+  // to guard, that is a leak with no error to notice. Cheap to re-check.
+  const auth = await requireAuthenticated();
+  if (!auth.ok || !canManageOrganization(auth.ctx, organizationId)) {
+    throw new Error("Not authorized for this organization");
+  }
+
   const { data: rows } = await db
     .from("conference_orders")
     .select("id, status, subtotal_cents, tax_cents, total_cents, currency, refund_amount_cents, created_at")
@@ -91,14 +110,10 @@ export async function loadOrgPayments(
     }));
 
   const outstanding = orders.filter((o) => !SETTLED.has(o.status));
-  const settledCents = orders
-    .filter((o) => SETTLED.has(o.status))
-    .reduce((sum, o) => sum + o.totalCents - o.refundedCents, 0);
 
   return {
     orders,
     outstanding,
-    settledCents,
     outstandingCents: outstanding.reduce((sum, o) => sum + o.totalCents, 0),
     currency: orders[0]?.currency ?? "CAD",
   };

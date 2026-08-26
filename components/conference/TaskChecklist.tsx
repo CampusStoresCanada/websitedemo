@@ -144,9 +144,20 @@ function StateBadge({ task }: { task: PersonalTask }) {
   if (task.state === "not_applicable") {
     return <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-semibold text-gray-500">Not applicable</span>;
   }
-  return (
+  // "Waiting on you" told a company the system was waiting, but not what for
+  // and not whether they had to come back and say so. The useful distinction
+  // is whether there is a button to press: a monitored task ticks itself once
+  // the underlying thing is true, a self-reported one never will.
+  return task.source === "monitored" ? (
+    <span
+      title="We check this automatically — do it and this updates on its own."
+      className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700"
+    >
+      Not done yet
+    </span>
+  ) : (
     <span className="rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-700">
-      {task.source === "monitored" ? "Waiting on you" : "To do"}
+      Tick when done
     </span>
   );
 }

@@ -13,7 +13,7 @@ import { formatMoney, type OrgPaymentSummary } from "@/lib/conference/org-paymen
  * collects money.
  */
 export default function OrgPayments({ summary }: { summary: OrgPaymentSummary }) {
-  const { orders, outstanding, settledCents, outstandingCents, currency } = summary;
+  const { orders, outstanding, outstandingCents, currency } = summary;
   if (orders.length === 0) return null;
 
   return (
@@ -22,7 +22,7 @@ export default function OrgPayments({ summary }: { summary: OrgPaymentSummary })
         <h2 className="text-base font-semibold text-gray-900">Payment</h2>
         <p className="text-sm text-gray-500">
           {outstanding.length === 0
-            ? `${formatMoney(settledCents, currency)} settled`
+            ? "Nothing outstanding"
             : `${formatMoney(outstandingCents, currency)} outstanding`}
         </p>
       </div>
@@ -48,8 +48,16 @@ export default function OrgPayments({ summary }: { summary: OrgPaymentSummary })
           <li key={order.id} className="flex flex-wrap items-start justify-between gap-3 px-3 py-2">
             <div className="min-w-0">
               <p className="text-sm text-gray-900">
-                {order.bought.length > 0 ? order.bought.join(", ") : "Conference purchase"}
+                {order.bought.length > 0 ? order.bought.join(", ") : "Nothing itemised"}
               </p>
+              {order.bought.length === 0 && (
+                // Silence here reads as "a purchase"; naming it lets someone
+                // ask the question. Varsity Collection has a $9,040 net order
+                // with nothing attached to it.
+                <p className="text-xs text-amber-800">
+                  We can&rsquo;t show what this order covered — ask us and we&rsquo;ll check it.
+                </p>
+              )}
               <p className="text-xs text-gray-500">
                 {new Date(order.orderedOn).toLocaleDateString("en-CA", {
                   year: "numeric",
