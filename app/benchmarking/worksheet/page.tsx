@@ -89,6 +89,25 @@ export default async function BenchmarkingWorksheetPage() {
 
   return (
     <div className="min-h-screen bg-neutral-100 py-8 print:bg-white print:py-0">
+      {/*
+        Scoped to this page rather than added to the shared Header and Footer,
+        which are mid-edit elsewhere and are not mine to change for every route.
+
+        The site chrome sits OUTSIDE <main>; the worksheet's own header and
+        footer sit inside it. So: hide every header and footer for print, then
+        put back the ones belonging to the document. Blanket-hiding by tag alone
+        would take the worksheet's letterhead and its footnotes with it.
+
+        Fixed-position furniture is hidden too — floating buttons render on
+        paper as a grey blob in the corner of page one.
+      */}
+      <style>{`
+        @media print {
+          header, footer { display: none !important; }
+          main header, main footer { display: block !important; }
+          .fixed, [style*="position: fixed"] { display: none !important; }
+        }
+      `}</style>
       <WorksheetSheet worksheet={worksheet} />
     </div>
   );

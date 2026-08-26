@@ -46,6 +46,19 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
       </div>
 
       <header className="mb-5 border-b-2 border-black pb-3">
+        {/*
+          The logo belongs to the DOCUMENT, not to the site chrome around it.
+          A printed worksheet wants a letterhead; it does not want a cart icon,
+          a notification bell or a hamburger menu, which is what printing the
+          navbar gives you. Plain <img> rather than next/image: this has to be
+          painted before the print dialog fires, and lazy loading is exactly the
+          wrong behaviour for a page whose purpose is to become paper.
+        */}
+        <img
+          src="/logos/csc-logo.svg"
+          alt="Campus Stores Canada"
+          className="mb-3 h-8 w-auto"
+        />
         <h1 className="text-xl font-bold leading-tight">
           {worksheet.fiscalYear} CSC Benchmarking Survey — gathering worksheet
         </h1>
