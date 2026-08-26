@@ -126,6 +126,49 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
       title: "Institution Profile",
       order: 1,
       fields: [
+        // Ordered 0.x so they lead the section: a reviewer's first question in
+        // November is "who do I ring about this", and it should be the first
+        // thing the store tells us, not the last.
+        {
+          name: "respondent_name",
+          label: "Who compiled these figures",
+          type: "text",
+          order: 0.1,
+          visible: true,
+          required: true,
+          group: "Who to contact about this submission",
+          helpText:
+            "The person who actually pulled these numbers together. Often not the account holder — if a colleague did the work, put their name here so a question in November reaches them and not you.",
+        },
+        {
+          name: "respondent_title",
+          label: "Their job title",
+          type: "text",
+          order: 0.2,
+          visible: true,
+          group: "Who to contact about this submission",
+          helpText: "How they would introduce themselves. It tells a reviewer whether to ask about the POS export or the P&L.",
+        },
+        {
+          name: "respondent_email",
+          label: "Their email",
+          type: "text",
+          order: 0.3,
+          visible: true,
+          required: true,
+          group: "Who to contact about this submission",
+          helpText: "Where a question about these figures should go.",
+        },
+        {
+          name: "respondent_phone",
+          label: "Their phone",
+          type: "text",
+          order: 0.4,
+          visible: true,
+          group: "Who to contact about this submission",
+          helpText:
+            "Most flags are settled in a two-minute call rather than a thread. A direct line or extension saves a reviewer going through the switchboard.",
+        },
         {
           name: "organization_name_display",
           label: "Institution Name",

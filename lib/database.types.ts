@@ -602,6 +602,10 @@ export type Database = {
           physical_inventory_schedule: string[] | null
           pos_runs_inventory: boolean | null
           pos_system: string | null
+          respondent_email: string | null
+          respondent_name: string | null
+          respondent_phone: string | null
+          respondent_title: string | null
           respondent_user_id: string | null
           sales_apparel: number | null
           sales_apparel_imprint: number | null
@@ -716,6 +720,10 @@ export type Database = {
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
           pos_system?: string | null
+          respondent_email?: string | null
+          respondent_name?: string | null
+          respondent_phone?: string | null
+          respondent_title?: string | null
           respondent_user_id?: string | null
           sales_apparel?: number | null
           sales_apparel_imprint?: number | null
@@ -830,6 +838,10 @@ export type Database = {
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
           pos_system?: string | null
+          respondent_email?: string | null
+          respondent_name?: string | null
+          respondent_phone?: string | null
+          respondent_title?: string | null
           respondent_user_id?: string | null
           sales_apparel?: number | null
           sales_apparel_imprint?: number | null

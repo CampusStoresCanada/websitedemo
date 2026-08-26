@@ -1,8 +1,10 @@
 import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
+import RegionAssignment from "@/components/benchmarking/recipients/RegionAssignment";
 
 export const metadata = {
   title: "Recipient Confirmation | Campus Stores Canada",
@@ -114,6 +116,10 @@ export default async function RecipientsPage() {
     );
     return {
       id: r.id as string,
+      // The recipient row id and the organization id are different things and
+      // both are needed: the queue acts on the row, region assignment matches
+      // on the org.
+      orgId: r.organization_id as string,
       status: r.status as string,
       note: (r.note as string) ?? null,
       contactId: (r.contact_id as string) ?? null,
@@ -145,6 +151,50 @@ export default async function RecipientsPage() {
     return d !== 0 ? d : a.orgName.localeCompare(b.orgName);
   });
 
+  // Who can hold a region, and what each region currently looks like. Only
+  // people who actually carry the capability are offerable — otherwise the
+  // dropdown invites you to assign someone whose queue will refuse them.
+  const adminDb = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [{ data: repRows }, { data: assignedRows }] = (await Promise.all([
+    (adminDb as any)
+      .from("capability_contributions")
+      .select("subject_id, display_name")
+      .eq("capability", "benchmarking.recipient_confirm")
+      .eq("is_active", true),
+    (adminDb as any)
+      .from("benchmarking_recipients")
+      .select("organization_id, assigned_to")
+      .eq("survey_id", survey.id)
+      .not("assigned_to", "is", null),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ])) as { data: any[] | null }[];
+
+  const reps = [
+    ...new Map(
+      (repRows ?? []).map((r: any) => [
+        r.subject_id as string,
+        { id: r.subject_id as string, name: (r.display_name as string) ?? "Unknown" },
+      ]),
+    ).values(),
+  ];
+
+  const assignedByOrg = new Map(
+    (assignedRows ?? []).map((r: any) => [r.organization_id as string, r.assigned_to as string]),
+  );
+  const repNameById = new Map(reps.map((r) => [r.id, r.name]));
+
+  const regionRows = ["Atlantic", "Quebec", "Ontario", "Prairies", "West"].map((region) => {
+    const inRegion = items.filter((i) => i.region === region);
+    const repId = inRegion.map((i) => assignedByOrg.get(i.orgId)).find(Boolean) ?? null;
+    return {
+      region,
+      storeCount: inRegion.length,
+      repId,
+      repName: repId ? repNameById.get(repId) ?? null : null,
+    };
+  });
+
   return (
     <>
       <RecipientQueue
@@ -158,7 +208,14 @@ export default async function RecipientsPage() {
         person is comes first; sending is what you do once that work is done.
       */}
       {admin && (
-        <div className="mx-auto mt-8 max-w-5xl px-4 pb-12">
+        <div className="mx-auto mt-8 max-w-5xl space-y-8 px-4 pb-12">
+          {/* Regions before sending: an unassigned region means a rep who sees
+              an empty queue and concludes there is nothing to do. */}
+          <RegionAssignment
+            surveyId={survey.id}
+            regions={regionRows}
+            people={reps}
+          />
           <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
         </div>
       )}

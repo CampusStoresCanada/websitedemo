@@ -17,6 +17,15 @@ const NAV_ITEMS = [
     adminOnly: false,
   },
   {
+    // Sits next to Flag Review because it is the other half of the same job:
+    // a reviewer explains a flag here, the lead decides what happens to the
+    // explanation there.
+    href: "/benchmarking/admin/notes",
+    label: "Explanations",
+    icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
+    adminOnly: false,
+  },
+  {
     href: "/benchmarking/admin/flags",
     label: "Flag Review",
     icon: "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",

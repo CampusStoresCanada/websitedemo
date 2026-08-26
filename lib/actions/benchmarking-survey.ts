@@ -59,6 +59,17 @@ interface FieldDef {
 // ─────────────────────────────────────────────────────────────────
 
 const FIELD_REGISTRY: Record<string, FieldDef> = {
+  // ── Who to phone about these figures (brief §1) ──
+  //
+  // Editable by the store, unlike respondent_user_id which records who pressed
+  // submit and is system-only. The person who compiled the numbers is often not
+  // the account holder, and a reviewer ringing the wrong desk in November is how
+  // a flag goes unanswered.
+  respondent_name:         { type: "text", maxLength: 120 },
+  respondent_title:        { type: "text", maxLength: 120 },
+  respondent_email:        { type: "text", maxLength: 200 },
+  respondent_phone:        { type: "text", maxLength: 60 },
+
   // ── Section 1: Institution Profile ──
   store_name:              { type: "text" },
   institution_type:        { type: "select", options: ["University", "College", "Polytechnic", "CEGEP"] },

@@ -5,6 +5,7 @@ import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
+import RespondentNotes from "@/components/benchmarking/RespondentNotes";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -189,6 +190,26 @@ export default async function BenchmarkingSurveyPage() {
     .select("*")
     .eq("benchmarking_id", currentRow!.id)) as { data: any[] | null };
 
+  // 7b. Notes a reviewer has written about this store and the lead approved,
+  // now waiting on the store itself. Read with the service role for the same
+  // reason the draft row is: `authenticated` holds SELECT on benchmarking_notes
+  // and the page has already established this is their org.
+  const { data: noteRows } = await db
+    .from("benchmarking_notes")
+    .select("id, field_name, note")
+    .eq("organization_id", organization.id)
+    .eq("survey_id", activeSurvey.id)
+    .eq("status", "respondent_review")
+    .order("created_at", { ascending: true });
+
+  const respondentNotes = (noteRows ?? []).map((n) => ({
+    id: n.id as string,
+    fieldLabel: (n.field_name as string)
+      .replace(/_/g, " ")
+      .replace(/\b\w/g, (c) => c.toUpperCase()),
+    note: n.note as string,
+  }));
+
   // 8. Get the field config for this survey (or DEFAULT if null)
   const fieldConfig = getFieldConfig(activeSurvey);
 
@@ -205,6 +226,13 @@ export default async function BenchmarkingSurveyPage() {
         surveyClosesAt={activeSurvey.closes_at}
         fieldConfig={fieldConfig}
       />
+
+      {/* Anything a reviewer has written about this store, awaiting their yes. */}
+      {respondentNotes.length > 0 && (
+        <div className="mx-auto max-w-5xl px-4">
+          <RespondentNotes notes={respondentNotes} />
+        </div>
+      )}
 
       {/*
         Below the form, not buried in it. This is a consent decision about the
