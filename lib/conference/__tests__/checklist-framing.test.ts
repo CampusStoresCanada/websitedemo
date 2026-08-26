@@ -129,7 +129,7 @@ describe("people can track this without keeping the email", () => {
     // problem started.
     expect(source).toContain("your organisation's page");
     expect(source).toContain("your own conference page");
-    expect(source).toContain("/me/conference/");
+    expect(source).toContain("/me#conference_checklist");
     expect(source).toContain("/org/${org.slug}#conference_checklist");
   });
 

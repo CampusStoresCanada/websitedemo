@@ -284,7 +284,7 @@ export async function buildChecklistDigest(
         `You don't need to keep this email — ${escapeHtml(org.name)}'s list is always at ` +
         `<a href="${appUrl}/org/${org.slug}#conference_checklist" style="color:#163D6D">your organisation's page</a>, ` +
         `and anything that's yours personally is at ` +
-        `<a href="${appUrl}/me/conference/${checklist.conference_id}" style="color:#163D6D">your own conference page</a>.` +
+        `<a href="${appUrl}/me#conference_checklist" style="color:#163D6D">your own conference page</a>.` +
         `</p>`,
       org_name: org.name,
       checklist_name: checklist.name,

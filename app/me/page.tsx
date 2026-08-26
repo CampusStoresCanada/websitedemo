@@ -6,6 +6,7 @@ import { getMyPendingChanges } from "@/lib/actions/pending-content-changes";
 import { getUserBookmarks } from "@/lib/actions/bookmarks";
 import MyPendingChanges from "@/components/me/MyPendingChanges";
 import SelfEditModal, { type OrgEditData } from "@/components/me/SelfEditModal";
+import MyConferenceSection from "@/components/me/MyConferenceSection";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { getMemberSupplierData, type SupplierData } from "@/lib/actions/member-suppliers";
 import { getPartnerMarketData, checkNudgeCooldown, type MarketData } from "@/lib/actions/partner-market";
@@ -260,6 +261,10 @@ export default async function MyAccountPage() {
         </div>
       </div>
 
+      {/* Conference to-dos sit above the stat tiles: they are the only thing on
+          this page with a deadline attached. */}
+      <MyConferenceSection />
+
       {/* ── Stats row ── */}
       <div className="grid grid-cols-3 gap-4">
         <Link
@@ -366,7 +371,7 @@ export default async function MyAccountPage() {
                 <p className="text-xs text-gray-400 mt-0.5">{conf.year} · {conf.editionCode}</p>
               </div>
               <Link
-                href={`/me/conference/${conf.id}`}
+                href="#conference_checklist"
                 className="flex items-center gap-1 text-xs font-medium text-[#EE2A2E] hover:text-[#D92327] transition-colors"
               >
                 Open

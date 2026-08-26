@@ -29,14 +29,32 @@ export interface OrgEditData {
 
 import { loadContactConferenceObligations } from "@/lib/actions/conference-access";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
-import { isPersonalObligation } from "@/lib/conference/access";
 
 type ConferenceObligations = {
   personId: string;
   conferenceId: string;
   fields: { key: string; label: string }[];
+  missing: string[];
   values: Record<string, string | null>;
 };
+
+/**
+ * Everything a person may set about their own conference record, in the order
+ * it makes sense to read. Labels match what /me/conference used before this
+ * moved; the obligations engine supplies its own labels for the ones it owns,
+ * and these fill in for the travel fields it has no opinion about.
+ */
+const SELF_CONFERENCE_FIELDS: { key: string; label: string; kind?: "select" }[] = [
+  { key: "dietary_restrictions", label: "Dietary restrictions" },
+  { key: "accessibility_needs", label: "Accessibility needs" },
+  { key: "emergency_contact_name", label: "Emergency contact name" },
+  { key: "emergency_contact_phone", label: "Emergency contact phone" },
+  { key: "mobile_phone", label: "Mobile phone" },
+  { key: "travel_mode", label: "Travel mode", kind: "select" },
+  { key: "preferred_departure_airport", label: "Preferred departure airport" },
+  { key: "road_origin_address", label: "Road origin address" },
+  { key: "seat_preference", label: "Seat preference" },
+];
 
 interface SelfEditModalProps {
   orgEditData: OrgEditData[];
@@ -184,11 +202,13 @@ function SelfEditModalInner({
     setConferenceObligations(null);
     void loadContactConferenceObligations(contactId, activeOrgId).then((result) => {
       if (cancelled || !result.success || !result.data) return;
-      const mine = result.data.fields.filter((f) => isPersonalObligation(f.key));
-      if (mine.length === 0) return;
-      setConferenceObligations({ ...result.data, fields: mine });
+      // The tab appears when this person is on a conference at all — they may
+      // want to correct a seat preference nobody has asked them for.
+      setConferenceObligations(result.data);
       setConferenceFields(
-        Object.fromEntries(mine.map((f) => [f.key, result.data!.values[f.key] ?? ""]))
+        Object.fromEntries(
+          SELF_CONFERENCE_FIELDS.map((f) => [f.key, result.data!.values[f.key] ?? ""])
+        )
       );
     });
     return () => { cancelled = true; };
@@ -434,25 +454,49 @@ function SelfEditModalInner({
           {activeTab === "conference" && conferenceObligations && (
             <div className="px-6 py-5 space-y-4">
               <p className="text-xs text-gray-500">
-                Only you can answer these. They go to catering and the on-site team for
-                {" "}{activeOrg.orgName} — never into the printed directory, and your
-                colleagues can see whether you&rsquo;ve answered but not change it.
+                Only you can set these. They go to catering, travel and the on-site
+                team — never into the printed directory. Your colleagues can see
+                whether you&rsquo;ve answered, not what you said or how to change it.
               </p>
-              {conferenceObligations.fields.map((f) => (
-                <div key={f.key}>
-                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
-                    {f.label}
-                  </label>
-                  <input
-                    value={conferenceFields[f.key] ?? ""}
-                    onChange={(e) =>
-                      setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
-                    }
-                    placeholder={SELF_CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
-                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
-                  />
-                </div>
-              ))}
+              {SELF_CONFERENCE_FIELDS.map((f) => {
+                // Marked, not filtered. Someone who owes a dietary answer sees
+                // it flagged; someone who does not can still set one.
+                const outstanding = conferenceObligations.missing.includes(f.key);
+                return (
+                  <div key={f.key}>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      {f.label}
+                      {outstanding && (
+                        <span className="ml-2 normal-case tracking-normal text-[11px] font-medium text-amber-700">
+                          still needed
+                        </span>
+                      )}
+                    </label>
+                    {f.kind === "select" ? (
+                      <select
+                        value={conferenceFields[f.key] ?? ""}
+                        onChange={(e) =>
+                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                      >
+                        <option value="">Not sure yet</option>
+                        <option value="flight">Flight</option>
+                        <option value="road">Road</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={conferenceFields[f.key] ?? ""}
+                        onChange={(e) =>
+                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        placeholder={SELF_CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                      />
+                    )}
+                  </div>
+                );
+              })}
               <p className="text-xs text-gray-400">
                 Leave one blank if it doesn&rsquo;t apply — we&rsquo;d rather keep asking than
                 record a guess.
@@ -637,4 +681,8 @@ const SELF_CONFERENCE_PLACEHOLDERS: Record<string, string> = {
   accessibility_needs: "Step-free access, seating near the front…",
   emergency_contact_name: "Who we call if something happens",
   emergency_contact_phone: "Mobile is best",
+  mobile_phone: "How the on-site team reaches you",
+  preferred_departure_airport: "YYC, YYZ…",
+  road_origin_address: "Where you're driving from",
+  seat_preference: "Aisle, window, extra legroom…",
 };

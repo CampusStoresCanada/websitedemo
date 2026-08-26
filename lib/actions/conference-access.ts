@@ -2,6 +2,7 @@
 
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { SELF_EDITABLE_PERSON_FIELDS } from "@/lib/conference/person-fields";
 import {
   computePersonObligations,
   type PersonObligationFields,
@@ -158,6 +159,7 @@ export async function loadContactConferenceObligations(
   personId: string;
   conferenceId: string;
   fields: { key: string; label: string }[];
+  missing: string[];
   values: Record<string, string | null>;
 } | null>> {
   const auth = await requireAuthenticated();
@@ -167,9 +169,15 @@ export async function loadContactConferenceObligations(
   }
 
   const db = createAdminClient();
+  // Everything this person may edit about themselves, not just what is
+  // outstanding — the modal shows the whole set so someone can correct a
+  // seat preference they already gave without waiting to be asked for it.
+  const columns = [
+    ...new Set([...PERSON_OBLIGATION_FIELDS, ...SELF_EDITABLE_PERSON_FIELDS]),
+  ];
   const { data: person, error } = await db
     .from("conference_people")
-    .select(`id, conference_id, ${PERSON_OBLIGATION_FIELDS.join(", ")}`)
+    .select(`id, conference_id, ${columns.join(", ")}`)
     .eq("contact_id", contactId)
     .eq("organization_id", organizationId)
     .neq("assignment_status", "canceled")
@@ -185,7 +193,7 @@ export async function loadContactConferenceObligations(
   if (status.obligations.length === 0) return { success: true, data: null };
 
   const values: Record<string, string | null> = {};
-  for (const field of PERSON_OBLIGATION_FIELDS) {
+  for (const field of columns) {
     values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
   }
 
@@ -195,6 +203,8 @@ export async function loadContactConferenceObligations(
       personId: row.id,
       conferenceId: row.conference_id,
       fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
+      /** Outstanding right now — used to mark a field, never to hide one. */
+      missing: status.missing.map((o) => o.key),
       values,
     },
   };

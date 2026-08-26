@@ -61,7 +61,7 @@ export async function triggerConferenceRegistrationConfirmation(params: {
       registration_role: registrationRole,
       conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
       conference_location: conferenceLocation,
-      my_conference_url: `${appUrl}/me/conference/${conferenceId}`,
+      my_conference_url: `${appUrl}/me#conference_checklist`,
     },
   });
 }
@@ -112,7 +112,7 @@ export async function triggerConferencePaymentConfirmation(params: {
       conference_year: String(conference.year),
       amount_paid: formatCents(order.total_cents ?? 0),
       order_ref: orderId.slice(0, 8).toUpperCase(),
-      my_conference_url: `${appUrl}/me/conference/${conferenceId}`,
+      my_conference_url: `${appUrl}/me#conference_checklist`,
     },
   });
 }
