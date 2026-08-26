@@ -647,6 +647,16 @@ export async function submitBenchmarkingSurvey(
       }
     }
 
+    // Refresh the derived metrics for this store. Fire and forget: the table
+    // is rebuildable by recomputeYear, and a store must never see "failed to
+    // submit" because a derived row could not be written.
+    try {
+      const { syncMetricsFor } = await import("@/lib/actions/benchmarking-metrics");
+      await syncMetricsFor(benchmarkingId);
+    } catch (err) {
+      console.warn("[submitBenchmarkingSurvey] metrics sync failed:", err);
+    }
+
     // Confirm receipt, and tell them what happens to their figures next. Fire
     // and forget on purpose: the submission is saved either way, and a store
     // must never see "failed to submit" because Resend was having a bad day.

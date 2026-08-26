@@ -1,4 +1,7 @@
 import { markValue } from "@/lib/benchmarking/canary";
+import { computeMetrics, effectiveFte, type MetricSourceRow } from "./metrics";
+
+export { effectiveFte };
 import {
   resolveCut,
   explainSuppression,
@@ -96,30 +99,6 @@ const revenue = (r: BenchmarkingRow): number | null => {
   return (inStore ?? 0) + (online ?? 0);
 };
 
-/**
- * The one FTE figure everything divides by.
- *
- * ONE NUMBER EVERYWHERE. The FTE a store reports through benchmarking is what
- * sets its dues for the year ahead — submitBenchmarkingSurvey writes it
- * straight onto organizations.fte — so organizations.fte is not a second
- * opinion, it is that same answer after any deliberate correction an admin has
- * made on top (flagged by fte_is_manual_override, and cleared by the next
- * submission).
- *
- * So the org figure wins. Dividing by the raw survey answer while the store is
- * banded and billed on the corrected one publishes a ratio that contradicts
- * the store's own invoice — Kwantlen answered 2,792 against a corrected 12,000
- * and appeared at $1,157 revenue per student against a $315 median, an
- * outlier invented entirely by the denominator.
- *
- * Falls back to the row's own answer only when the org has no figure at all.
- */
-export function effectiveFte(orgFte: unknown, rowFte: unknown): number | null {
-  const o = num(orgFte);
-  if (o !== null) return o;
-  return num(rowFte);
-}
-
 export interface MetricContext {
   /** Resolved by effectiveFte — never read enrollment_fte directly. */
   fte: number | null;
@@ -132,33 +111,72 @@ export interface MetricContext {
  * smaller than a bigger store. Revenue per student is the figure that says
  * something a director can act on.
  */
+/**
+ * ONE DEFINITION. Every ratio here comes from computeMetrics — the same
+ * function that fills the computed_metrics table — so the page a member reads
+ * and the figures an export ships can never disagree about what a margin is.
+ * Before this, the comparison recomputed four ratios inline while the table
+ * held ten, and nothing kept the two in step.
+ */
+const of = (
+  key: keyof ReturnType<typeof computeMetrics>,
+): ((r: BenchmarkingRow, ctx: MetricContext) => number | null) =>
+  (r, ctx) => computeMetrics(r as MetricSourceRow, { orgFte: ctx.fte })[key];
+
 export const METRICS: MetricDef[] = [
   {
     key: "revenue",
     label: "Total revenue",
     format: "currency",
-    compute: revenue,
+    compute: of("total_revenue"),
     hint: "In-store and online combined.",
   },
   {
     key: "revenue_per_student",
     label: "Revenue per student",
     format: "currency",
-    compute: (r, ctx) => ratio(revenue(r), ctx.fte),
+    compute: of("sales_per_fte"),
     hint: "Total revenue divided by FTE enrolment — the comparison that survives a size difference.",
   },
   {
     key: "revenue_per_sqft",
     label: "Revenue per square foot",
     format: "currency",
-    compute: (r) => ratio(revenue(r), num(r.total_square_footage)),
+    compute: of("sales_per_sqft"),
     hint: "How hard the floor space works.",
   },
   {
-    key: "revenue_per_employee",
-    label: "Revenue per full-time employee",
+    key: "gross_margin_pct",
+    label: "Gross margin",
+    format: "percent",
+    compute: of("gross_margin_pct"),
+    hint: "What is left after the cost of goods.",
+  },
+  {
+    key: "net_margin_pct",
+    label: "Net margin",
+    format: "percent",
+    compute: of("net_margin_pct"),
+  },
+  {
+    key: "hr_pct",
+    label: "Staffing as a share of revenue",
+    format: "percent",
+    compute: of("hr_pct"),
+    hint: "A cost measure — lower is the better result here, unlike the rest of this table.",
+  },
+  {
+    key: "online_pct",
+    label: "Online share of sales",
+    format: "percent",
+    compute: of("online_pct"),
+    hint: "Context rather than a score; neither direction is better.",
+  },
+  {
+    key: "cm_sales_per_fte",
+    label: "Course materials per student",
     format: "currency",
-    compute: (r) => ratio(revenue(r), num(r.fulltime_employees)),
+    compute: of("cm_sales_per_fte"),
   },
 ];
 
