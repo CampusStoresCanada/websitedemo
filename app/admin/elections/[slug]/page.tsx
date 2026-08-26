@@ -135,7 +135,10 @@ export default async function ElectionReviewPage({
 
   async function askToWithdraw(formData: FormData) {
     "use server";
-    await requestWithdrawalAction(String(formData.get("nominationId")));
+    const r = await requestWithdrawalAction(String(formData.get("nominationId")));
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?withdrawalAsked=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
   }
 
   // Every one of these refuses for real reasons — an already-sent call, an
@@ -632,19 +635,28 @@ export default async function ElectionReviewPage({
                   )}
 
                   <div className="mt-3 flex items-center gap-3">
+                    {/* The ask appears on the nominee's own page — requestWithdrawal
+                        stamps the nomination and the accept page then reads "the
+                        nominating committee has asked whether you would consider
+                        withdrawing". What it does NOT do is deliver it: there is no
+                        withdrawal email template, so the nominee sees the question
+                        only if they happen to reopen their link. The old label,
+                        "Ask if they would withdraw", let the committee believe
+                        somebody had been told. Say where the ask actually lands. */}
                     {n.withdrawalRequestedAt ? (
                       <span className="text-xs text-gray-500">
-                        Withdrawal asked {formatDate(n.withdrawalRequestedAt)} — awaiting the
-                        nominee&apos;s decision.
+                        Asked on their page {formatDate(n.withdrawalRequestedAt)} — awaiting the
+                        nominee&apos;s decision. No message was sent; follow up directly.
                       </span>
                     ) : (
                       <form action={askToWithdraw}>
                         <input type="hidden" name="nominationId" value={n.id} />
                         <button
                           type="submit"
+                          title="Puts the question on the nominee's own nomination page. It sends no email — tell them yourself as well."
                           className="rounded border border-gray-300 px-2.5 py-1 text-xs font-medium text-gray-700 hover:bg-gray-50"
                         >
-                          Ask if they would withdraw
+                          Ask on their nomination page
                         </button>
                       </form>
                     )}

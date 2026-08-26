@@ -79,7 +79,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "submit_slate",
-    title: "Submit the continuing directors and the Nominating Committee's slate",
+    title: "Submit the continuing directors and the Nominating Committee's slate for {year}",
     description:
       "By-Law Part V S2(a): no fewer than 120 days before the AGM, the Nominating Committee submits the list of continuing directors and a slate of nominees for the vacant positions.\n\nThe slate must contain exactly the number of seats being filled. More than that and the acclamation branch is incoherent — you cannot acclaim five people into four seats.",
     dueOn: (e) => e.schedule.nominationsOpenAt,
@@ -87,7 +87,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "issue_call",
-    title: "Send the call for nominations to the membership",
+    title: "Send the call for nominations to the membership for {year}",
     description:
       "By-Law Part V S2(b): the call goes to every member institution no fewer than 120 days before the AGM, and must include the slate and a nomination form.\n\nSend it from the election review page in the admin area — it emails every administrator at each currently eligible institution and records that it was sent, so it cannot go out twice. Check the eligibility figure before pressing it: institutions that have not completed their renewal cannot nominate, co-sign or vote, and they are not counted in the reach.",
     dueOn: (e) => e.schedule.nominationsOpenAt,
@@ -95,7 +95,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "chase_incomplete",
-    title: "Chase incomplete nominations before they lapse",
+    title: "Chase incomplete {year} nominations before they lapse",
     description:
       "A nomination reaches the ballot only when the nominee has accepted, their institution has granted permission for them to serve (Part V S2(d)), and the required co-signatures are in. Anything short of that on the closing date does not go forward.\n\nThe election review page lists exactly what each nomination is missing and will send a reminder to the nominees. Some of the gaps need someone other than the nominee to act, so they are worth a phone call rather than a second email.",
     dueOn: (e) => e.schedule.nominationsCloseAt,
@@ -103,7 +103,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "close_nominations",
-    title: "Close nominations and confirm whether a ballot is needed",
+    title: "Close {year} nominations and confirm whether a ballot is needed",
     description:
       "By-Law Part V S2(c): additional nominations may be submitted up to 90 days before the AGM. After that the field is fixed.\n\nIf more nominees stand than there are seats, a ballot goes out. If not, the nominees are acclaimed and there is no vote. Closing nominations in the admin area writes the field down — after this point the ballot cannot change, which is the whole point: a member who votes early must be looking at the same ballot as one who votes late.",
     dueOn: (e) => e.schedule.nominationsCloseAt,
@@ -111,7 +111,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "appoint_scrutineer",
-    title: "Appoint a scrutineer to receive and count the ballots",
+    title: "Appoint a scrutineer to receive and count the {year} ballots",
     description:
       "By-Law Part V S3(b): the President appoints a scrutineer to receive and count the ballots.\n\nThis is the audit role. The scrutineer can see which institutions returned a ballot and the totals per candidate, and can confirm the two reconcile — but not how any institution voted. That link is destroyed when the ballots are sealed, deliberately and irreversibly.",
     dueOn: (e) => e.schedule.ballotsOpenAt,
@@ -119,7 +119,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "circulate_ballots",
-    title: "Circulate ballots to the membership",
+    title: "Circulate {year} ballots to the membership",
     description:
       "By-Law Part V S3(a): if additional nominations were received, ballots are circulated no less than 60 days before the AGM, listing candidates alphabetically and stating how many directors are to be elected.\n\nEach institution gets one ballot regardless of how many administrators it has, and any of them can change it until it closes.",
     dueOn: (e) => e.schedule.ballotsOpenAt,
@@ -127,7 +127,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "chase_turnout",
-    title: "Chase institutions that have not returned a ballot",
+    title: "Chase institutions that have not returned a {year} ballot",
     description:
       "Ballots are due back no less than 30 days before the AGM (Part V S3(c)).\n\nTurnout is measured from ballots actually returned, not from whether anyone opened an email — delivery tracking is not currently recording anything, so the returned count is the only figure worth acting on. Every director is also an administrator of their own institution; if turnout is limited to them, the board has effectively re-elected itself, and that is worth a round of phone calls.",
     dueOn: (e) => e.schedule.ballotsCloseAt,
@@ -151,7 +151,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "certify_result",
-    title: "Seal the ballots, count, and certify the result",
+    title: "Seal the {year} ballots, count, and certify the result",
     description:
       "Sealing removes the link between every ballot and the institution that cast it. It is irreversible, and afterwards a disputed ballot cannot be traced back — that is the point of it, but it should be done knowingly.\n\nIf two candidates tie for the last seat the count will stop and name them rather than picking one, and certification stays blocked until a human records how the tie was resolved and on what authority.",
     dueOn: (e) => e.schedule.ballotsCloseAt,
@@ -159,7 +159,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
   },
   {
     key: "announce_result",
-    title: "Announce the result at the annual general meeting",
+    title: "Announce the result at the {year} annual general meeting",
     description:
       "By-Law Part V S3(d): the Chair of the Nominating Committee announces the ballot results, or the acclaimed candidates where no additional nominations were received. Under S3(e) the members then elect the directors who had the most votes.\n\nIf a tie went to the floor, this is where it is settled.",
     dueOn: (e) => e.schedule.agmDate,
@@ -249,6 +249,13 @@ export async function mintElectionActionItems(
 
     const meeting = await meetingBefore(dueDate);
 
+    // Deduped by title across EVERY action item, with no election or year
+    // scoping — which is why every title above must carry {year}. Nine of them
+    // did not, and the effect was silent: opening a second cycle while the
+    // previous one's items still existed matched those rows and skipped nine of
+    // the twelve obligations, so the board was simply never told to send the
+    // call, close nominations, or circulate ballots for that cycle. Nothing
+    // errored; the tasks just were not there.
     const { data: existing } = await db
       .from("board_action_items")
       .select("id")
