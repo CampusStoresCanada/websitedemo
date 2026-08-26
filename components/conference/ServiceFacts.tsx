@@ -58,6 +58,35 @@ export default function ServiceFacts({
         </ul>
       )}
 
+      {service.formMissing && (
+        // Named, not hidden. An exhibitor told to "complete their order form"
+        // with no form attached needs to know the gap is ours, not theirs.
+        <p className="mt-3 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">
+          We don&rsquo;t have {service.name}&rsquo;s order form on file yet. Email{" "}
+          <a href="mailto:info@campusstorescanada.ca" className="underline">
+            info@campusstorescanada.ca
+          </a>{" "}
+          and we&rsquo;ll send it — don&rsquo;t go hunting for it.
+        </p>
+      )}
+
+      {service.documents.length > 0 && (
+        <ul className="mt-3 space-y-1">
+          {service.documents.map((d) => (
+            <li key={d.url}>
+              <a
+                href={d.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-sm font-medium text-[#163D6D] hover:underline"
+              >
+                {d.label} &darr;
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="mt-3 flex flex-wrap items-center gap-3">
         {service.actionUrl && (
           <a

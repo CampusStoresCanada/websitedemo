@@ -30,6 +30,18 @@ export type ServiceDetails = {
   contactName: string | null;
   contactEmail: string | null;
   deadlines: ServiceDeadline[];
+  /** Forms and kits attached to this supplier. */
+  documents: { label: string; url: string }[];
+  /**
+   * True when the task says to submit a form and we hold neither the form nor
+   * a link to it — the exhibitor is being told to complete something we have
+   * not given them.
+   *
+   * Surfaced rather than hidden. The alternative is a card that looks finished
+   * while the one thing it exists to provide is missing, which is how a made-up
+   * URL survives: it fills the hole that would otherwise be visible.
+   */
+  formMissing: boolean;
 };
 
 const str = (v: unknown): string | null =>
@@ -56,6 +68,16 @@ export function parseServiceDetails(
   // Soonest first: the one that costs money is usually the nearest.
   deadlines.sort((x, y) => x.date.localeCompare(y.date));
 
+  const rawDocs = Array.isArray(a.documents) ? a.documents : [];
+  const documents: { label: string; url: string }[] = [];
+  for (const entry of rawDocs) {
+    if (!entry || typeof entry !== "object") continue;
+    const d = entry as Record<string, unknown>;
+    const label = str(d.label);
+    const url = str(d.url);
+    if (label && url) documents.push({ label, url });
+  }
+
   const details: ServiceDetails = {
     name,
     what: str(a.what),
@@ -65,10 +87,14 @@ export function parseServiceDetails(
     contactName: str(a.contact_name),
     contactEmail: str(a.contact_email),
     deadlines,
+    documents,
+    formMissing:
+      str(a.submit_by) !== null && !str(a.action_url) && documents.length === 0,
   };
 
   // An entity with none of this is not a service card, it is an empty box.
   const hasAnything =
-    details.actionUrl || details.showCode || details.contactEmail || deadlines.length > 0;
+    details.actionUrl || details.showCode || details.contactEmail ||
+    deadlines.length > 0 || documents.length > 0;
   return hasAnything ? details : null;
 }

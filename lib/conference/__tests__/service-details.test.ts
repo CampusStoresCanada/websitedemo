@@ -38,3 +38,41 @@ describe("service details", () => {
     expect(d?.actionUrl).toBe("https://x.test");
   });
 });
+
+describe("a missing form is a visible gap, not a silent one", () => {
+  it("flags a service that says to submit a form but supplies none", () => {
+    // Encore: "complete their order form and email it to…" with no form on
+    // file. The first version of this filled the hole with an invented URL to
+    // the supplier's homepage, labelled "order form".
+    const d = parseServiceDetails("Encore", {
+      submit_by: "email",
+      contact_email: "someone@example.test",
+    });
+    expect(d?.formMissing).toBe(true);
+  });
+
+  it("does not flag one that links out to place the order", () => {
+    const d = parseServiceDetails("Stronco", {
+      submit_by: "web",
+      action_url: "https://example.test/order",
+    });
+    expect(d?.formMissing).toBe(false);
+  });
+
+  it("does not flag one whose form is attached as a document", () => {
+    const d = parseServiceDetails("Encore", {
+      submit_by: "email",
+      documents: [{ label: "Order form", url: "https://example.test/form.pdf" }],
+    });
+    expect(d?.formMissing).toBe(false);
+    expect(d?.documents).toHaveLength(1);
+  });
+
+  it("drops a document missing its url rather than rendering a dead link", () => {
+    const d = parseServiceDetails("X", {
+      show_code: "1",
+      documents: [{ label: "No url" }, { label: "Real", url: "https://example.test/a.pdf" }],
+    });
+    expect(d?.documents).toEqual([{ label: "Real", url: "https://example.test/a.pdf" }]);
+  });
+});
