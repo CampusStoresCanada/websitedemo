@@ -221,3 +221,27 @@ export function yoyDeltas(
   }
   return out;
 }
+
+
+/**
+ * Statuses after which a year's stored metrics are history, not working data.
+ *
+ * Read from the survey's own status rather than a year number or a date, so
+ * the rule keeps working every year without anyone remembering to move a
+ * cutoff.
+ */
+export const CLOSED_TO_WRITES = ["complete"] as const;
+
+/**
+ * May this year's computed_metrics still be rewritten?
+ *
+ * A completed cycle's figures have gone out to members in a package. Rewriting
+ * them from today's corrected source would leave the database quietly
+ * disagreeing with the report people were sent, with nothing recording that it
+ * ever matched. Restating a published year is a decision with a covering note,
+ * not a side effect of refreshing a table.
+ */
+export function isYearClosedToWrites(surveyStatus: string | null | undefined): boolean {
+  if (!surveyStatus) return false;
+  return (CLOSED_TO_WRITES as readonly string[]).includes(surveyStatus);
+}

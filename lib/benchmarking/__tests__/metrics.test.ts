@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { computeMetrics, yoyDeltas, type ComputedMetrics } from "../metrics";
+import {
+  computeMetrics,
+  yoyDeltas,
+  isYearClosedToWrites,
+  type ComputedMetrics,
+} from "../metrics";
 
 /**
  * The anchor tests are two REAL 2025 stores whose raw data has not been
@@ -143,5 +148,28 @@ describe("year over year", () => {
   it("refuses a percent change from zero rather than reporting infinity", () => {
     const from = { ...prior, total_revenue: 0 };
     expect(yoyDeltas(prior, from).yoy_total_revenue_delta).toBeNull();
+  });
+});
+
+describe("a published year is closed to writes", () => {
+  it("closes a completed cycle", () => {
+    // FY2025 is 'complete'. Its figures went out in a package; recomputing
+    // them from today's corrected source would change 33 of 39 stores.
+    expect(isYearClosedToWrites("complete")).toBe(true);
+  });
+
+  it("leaves every earlier stage writable", () => {
+    // Including 'closed' and 'processing' — collection has stopped but the
+    // package has not gone out, which is exactly when a correction should
+    // still reach the numbers.
+    for (const s of ["draft", "beta", "open", "closed", "processing"]) {
+      expect(isYearClosedToWrites(s)).toBe(false);
+    }
+  });
+
+  it("does not close a year that has no survey row at all", () => {
+    // Absence of a record is not evidence of publication.
+    expect(isYearClosedToWrites(null)).toBe(false);
+    expect(isYearClosedToWrites(undefined)).toBe(false);
   });
 });

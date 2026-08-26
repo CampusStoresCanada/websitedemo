@@ -2,7 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAdmin } from "@/lib/auth/guards";
-import { computeMetrics, yoyDeltas, type ComputedMetrics } from "@/lib/benchmarking/metrics";
+import {
+  computeMetrics,
+  yoyDeltas,
+  isYearClosedToWrites,
+  type ComputedMetrics,
+} from "@/lib/benchmarking/metrics";
 import { resolveSizeBand, getSizeBands } from "@/lib/benchmarking/size-band";
 import { REGION_OF } from "@/lib/benchmarking/comparison";
 
@@ -26,6 +31,33 @@ import { REGION_OF } from "@/lib/benchmarking/comparison";
  * changes nothing; running it after a data correction is how the correction
  * reaches the reports.
  */
+
+/**
+ * A completed year is closed to writes. Permanently.
+ *
+ * The 2025 figures went out to members in a package. Recomputing them from
+ * today's corrected source data would change 33 of the 39 stores — every
+ * revised square footage, Algonquin's FTE, Capilano's ten-million slip — so
+ * the database would quietly stop matching the report people were sent, with
+ * no record that it ever did.
+ *
+ * That is not a correction anyone asked for. If a published year genuinely
+ * needs restating, that is a decision with a covering note to members, not a
+ * side effect of someone refreshing a table.
+ *
+ * The rule reads the survey's own status rather than a year number or a date,
+ * so it keeps working every year without anyone remembering to move a cutoff:
+ * once a cycle is marked complete, its stored metrics are history.
+ */
+async function yearIsClosed(fiscalYear: number): Promise<boolean> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("benchmarking_surveys")
+    .select("status")
+    .eq("fiscal_year", fiscalYear)
+    .maybeSingle();
+  return isYearClosedToWrites(data?.status as string | null);
+}
 
 export interface RecomputeSummary {
   fiscalYear: number;
@@ -97,6 +129,16 @@ export async function recomputeYear(
   if (!guard.ok) return { success: false, error: "Not authorized" };
 
   const dryRun = options.dryRun ?? false;
+
+  if (!dryRun && (await yearIsClosed(fiscalYear))) {
+    return {
+      success: false,
+      error:
+        `FY${fiscalYear} is complete — its figures have already gone out to members, ` +
+        `so the stored metrics are a record of what was published and cannot be ` +
+        `rewritten here. Run with dryRun to see what current source data would produce.`,
+    };
+  }
 
   try {
     const { db, rows, orgs, priorRows } = await loadYear(fiscalYear);
@@ -216,6 +258,10 @@ export async function syncMetricsFor(benchmarkingId: string): Promise<void> {
     .eq("fiscal_year", (row.fiscal_year as number) - 1)
     .neq("status", "draft")
     .maybeSingle();
+
+  // A closed year is closed to every writer, not just the bulk one — otherwise
+  // re-submitting a single 2025 row walks straight past the rule.
+  if (await yearIsClosed(row.fiscal_year as number)) return;
 
   const bands = await getSizeBands();
   const metrics = computeMetrics(row, {
