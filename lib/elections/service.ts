@@ -2200,7 +2200,20 @@ export interface NoticeState {
   eventPage: { slug: string; status: string | null; readyForNotice: boolean };
 }
 
-export async function getNoticeState(slug: string): Promise<NoticeState | null> {
+/**
+ * `onDate` follows the same convention as `nominationsOpen` above: it defaults
+ * to the real clock and exists so the notice window can be evaluated for a date
+ * other than today.
+ *
+ * That is not decoration. The 21-35 day window is the ONE election path that
+ * cannot be rehearsed against a scratch election on the real clock: narrowing
+ * the electorate to a single institution needs an AGM far enough out that every
+ * real membership has lapsed, and the notice window needs an AGM about a month
+ * out. Those pull the AGM date roughly a year apart. Being able to pass the date
+ * closes that gap without either mailing the whole membership or leaving the
+ * legally significant send as the only thing nobody ever ran.
+ */
+export async function getNoticeState(slug: string, onDate = today()): Promise<NoticeState | null> {
   const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return null;
@@ -2240,7 +2253,6 @@ export async function getNoticeState(slug: string): Promise<NoticeState | null> 
     .eq("slug", eventSlug)
     .maybeSingle();
 
-  const onDate = today();
   return {
     window: resolveNoticeWindow(election.schedule.agmDate),
     notice: evaluateNoticeWindow(election.schedule.agmDate, onDate),
@@ -2274,13 +2286,15 @@ export async function sendAgmNotice(
     location?: string | null;
     /** Send the proxy form in the same run where the dates allow it. */
     includeProxyForm: boolean;
+    /** Testing seam only — see getNoticeState. Callers in the app omit it. */
+    onDate?: string;
   }
 ): Promise<Result<{ sent: number; failed: number; problems: string[]; proxyIncluded: boolean }>> {
   const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return fail("That election does not exist.");
 
-  const state = await getNoticeState(slug);
+  const state = await getNoticeState(slug, input.onDate ?? today());
   if (!state) return fail("Could not evaluate the notice window.");
 
   if (state.noticeSentAt)
