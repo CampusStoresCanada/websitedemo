@@ -119,14 +119,14 @@ try {
   // store — the foreign keys require it, and using placeholders would only
   // prove that the constraints work. Nothing about these orgs is modified; the
   // signature rows live in the scratch election and cascade away with it.
-  const invites: { organizationId: string; contactId: string; profileId: string }[] = [];
+  const adminPool: { organizationId: string; contactId: string; profileId: string }[] = [];
   // Drawn from the election's OWN eligibility verdicts, not an ad-hoc query.
   // Picking "any member with a non-null expiry" once selected a store whose
   // membership lapses before this election's AGM — the service rightly refused
   // it, and the fixture was what was wrong.
   const eligibleForCosign = await svc.listCosignerOrganizations(election.id, []);
   for (const o of eligibleForCosign) {
-    if (invites.length === 2) break;
+    if (adminPool.length === 6) break;
     if (o.organizationId === testOrg.id) continue;
     const admin = (
       await db
@@ -147,13 +147,40 @@ try {
         .limit(1)
     ).data?.[0];
     if (!c) continue;
-    invites.push({
+    adminPool.push({
       organizationId: o.organizationId,
       contactId: c.id as string,
       profileId: admin.user_id as string,
     });
   }
+  const invites = adminPool.slice(0, 2);
   check("found two co-signer institutions with admins", invites.length === 2, `${invites.length}`);
+
+  // The nominee stands in for a FIRST-TIME candidate, and acceptance stamps
+  // whichever profile signs in onto nominee_profile_id — which is what
+  // countConsecutiveTerms then reads. Borrowing a co-signer's login once picked
+  // a SITTING DIRECTOR, so the service correctly found a term on record and the
+  // "unverifiable term history" assertions below inverted. The service was
+  // right; the fixture was wrong. Exclude anyone with a term on this body.
+  const withTermHistory = new Set(
+    (
+      (
+        await db
+          .from("governance_role_assignments")
+          .select("person_profile_id")
+          .eq("body_id", body.id)
+          .eq("role_key", "director")
+      ).data ?? []
+    )
+      .map((r) => r.person_profile_id as string | null)
+      .filter((id): id is string => Boolean(id))
+  );
+  const freshLogin = adminPool.find((a) => !withTermHistory.has(a.profileId));
+  check(
+    "found a stand-in login with no director history",
+    !!freshLogin,
+    `${adminPool.length} admins scanned, all with terms on record`
+  );
 
   const created = await svc.createNomination({
     electionSlug: SLUG,
@@ -219,7 +246,7 @@ try {
   }
 
   step("Acceptance requires the bio and statement");
-  const nomineeLogin = invites[0].profileId; // stands in for the nominee's own login
+  const nomineeLogin = freshLogin!.profileId; // stands in for the nominee's own login
   const thin = await svc.acceptNomination(created.data.acceptToken, nomineeLogin, {
     bio: "",
     platform: "",
