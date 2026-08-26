@@ -209,3 +209,62 @@ export async function loadContactConferenceObligations(
     },
   };
 }
+
+/**
+ * The signed-in person's own conference details, keyed on WHO THEY ARE.
+ *
+ * The org-side loader keys on (contact, organisation) because an admin is
+ * looking at one specific contact row. That is the wrong key for a person
+ * looking at themselves: a seat belongs to the human, and it is held through
+ * whichever organisation happened to seat them. Steve holds a seat through a
+ * partner org while his contact record on /me is the CSC one — keyed on
+ * contact, his own details were invisible to him.
+ *
+ * `user_id` is also the key `updateConferencePersonSelf` guards on, so read
+ * and write now agree about who the person is.
+ */
+export async function loadMyConferenceObligations(): Promise<Result<{
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  missing: string[];
+  values: Record<string, string | null>;
+} | null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const columns = [
+    ...new Set([...PERSON_OBLIGATION_FIELDS, ...SELF_EDITABLE_PERSON_FIELDS]),
+  ];
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select(`id, conference_id, ${columns.join(", ")}`)
+    .eq("user_id", auth.ctx.userId)
+    .neq("assignment_status", "canceled")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person) return { success: true, data: null };
+
+  const row = person as unknown as { id: string; conference_id: string };
+  const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
+  const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
+
+  const values: Record<string, string | null> = {};
+  for (const field of columns) {
+    values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
+  }
+
+  return {
+    success: true,
+    data: {
+      personId: row.id,
+      conferenceId: row.conference_id,
+      fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
+      missing: status.missing.map((o) => o.key),
+      values,
+    },
+  };
+}

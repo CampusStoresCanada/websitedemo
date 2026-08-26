@@ -27,7 +27,7 @@ export interface OrgEditData {
   procurementInfo: ProcurementInfo | null;
 }
 
-import { loadContactConferenceObligations } from "@/lib/actions/conference-access";
+import { loadMyConferenceObligations } from "@/lib/actions/conference-access";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
 
 type ConferenceObligations = {
@@ -195,12 +195,11 @@ function SelfEditModalInner({
     useState<ConferenceObligations | null>(null);
   const [conferenceFields, setConferenceFields] = useState<Record<string, string>>({});
 
+  // Not scoped to the active org tab: a conference seat belongs to the person,
+  // whichever organisation seated them. Loaded once, not per org switch.
   useEffect(() => {
-    const contactId = activeOrg?.contact?.id;
-    if (!contactId) return;
     let cancelled = false;
-    setConferenceObligations(null);
-    void loadContactConferenceObligations(contactId, activeOrgId).then((result) => {
+    void loadMyConferenceObligations().then((result) => {
       if (cancelled || !result.success || !result.data) return;
       // The tab appears when this person is on a conference at all — they may
       // want to correct a seat preference nobody has asked them for.
@@ -212,7 +211,7 @@ function SelfEditModalInner({
       );
     });
     return () => { cancelled = true; };
-  }, [activeOrgId, activeOrg?.contact?.id]);
+  }, []);
 
   const showConference = conferenceObligations !== null;
   const activeTab: Tab =
