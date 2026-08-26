@@ -18,7 +18,9 @@ import { assignRegion } from "@/lib/actions/benchmarking-recipients";
  * theirs.
  */
 
-const REGIONS = ["Atlantic", "Quebec", "Ontario", "Prairies", "West"] as const;
+// Four patches, not the five the comparison uses. Quebec's two stores ride
+// with Atlantic: a province is a peer group, but it is not a rep's round.
+const REGIONS = ["Atlantic & Quebec", "Ontario", "Prairies", "West"] as const;
 
 interface Person {
   id: string;

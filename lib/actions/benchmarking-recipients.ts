@@ -127,15 +127,24 @@ export async function assignRegion(
     .eq("type", "Member")
     .eq("membership_status", "active");
 
-  // Region is derived from province; do it here rather than a round trip.
+  // Rep patches, which are NOT the same buckets the comparison uses.
+  //
+  // Comparison groups by province because a province is a regulatory
+  // jurisdiction — Ontario stores operate under Ontario rules, and that is a
+  // real peer group whatever the headcount. A rep patch is a different thing
+  // entirely: it is a workload and a set of relationships, and Quebec's two
+  // member stores are not a patch. They ride with Atlantic.
+  //
+  // Keep these two maps separate. Collapsing them would either give a rep a
+  // two-store round or destroy a legitimate comparison group.
   const REGION: Record<string, string[]> = {
-    Atlantic: [
+    "Atlantic & Quebec": [
       "Newfoundland and Labrador",
       "Nova Scotia",
       "New Brunswick",
       "Prince Edward Island",
+      "Quebec",
     ],
-    Quebec: ["Quebec"],
     Ontario: ["Ontario"],
     Prairies: ["Manitoba", "Saskatchewan", "Alberta"],
     West: ["British Columbia", "Yukon", "Northwest Territories", "Nunavut"],

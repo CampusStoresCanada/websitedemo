@@ -11,12 +11,20 @@ export const metadata = {
   description: "Confirm who should receive the benchmarking survey.",
 };
 
+/**
+ * Rep patches, not comparison groups.
+ *
+ * The comparison view keeps Quebec separate because a province is a regulatory
+ * jurisdiction and that is a real peer group. A rep patch is a workload, and
+ * two stores is not one — so Quebec rides with Atlantic here and only here.
+ * See lib/benchmarking/comparison.ts for the other map.
+ */
 const REGION_OF: Record<string, string> = {
-  "Newfoundland and Labrador": "Atlantic",
-  "Nova Scotia": "Atlantic",
-  "New Brunswick": "Atlantic",
-  "Prince Edward Island": "Atlantic",
-  Quebec: "Quebec",
+  "Newfoundland and Labrador": "Atlantic & Quebec",
+  "Nova Scotia": "Atlantic & Quebec",
+  "New Brunswick": "Atlantic & Quebec",
+  "Prince Edward Island": "Atlantic & Quebec",
+  Quebec: "Atlantic & Quebec",
   Ontario: "Ontario",
   Manitoba: "Prairies",
   Saskatchewan: "Prairies",

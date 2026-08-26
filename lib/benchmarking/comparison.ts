@@ -246,7 +246,18 @@ export function formatMetric(value: number | null, format: MetricFormat): string
   }
 }
 
-/** Region a province belongs to. Same buckets the recipient queue uses. */
+/**
+ * Comparison regions. NOT the same buckets the recipient queue uses.
+ *
+ * A province is a regulatory jurisdiction — Ontario stores operate under
+ * Ontario tuition rules, Ontario procurement and Ontario funding — so it is a
+ * genuine peer group whatever its headcount. Quebec stays its own group here
+ * even though it is only two stores, and those two will be perfectly aware they
+ * are an odd pair; that is not a fact worth hiding from them.
+ *
+ * The rep patches merge Quebec into Atlantic, because a patch is a workload
+ * rather than a jurisdiction. See app/benchmarking/recipients/page.tsx.
+ */
 export const REGION_OF: Record<string, string> = {
   "Newfoundland and Labrador": "Atlantic",
   "Nova Scotia": "Atlantic",
