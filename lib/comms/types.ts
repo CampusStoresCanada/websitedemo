@@ -45,6 +45,14 @@ export type TemplateCategory =
   // member benefit, not a commercial message, so these bypass suppressions on
   // the same reasoning as election mail. See lib/benchmarking/notify.ts.
   | "benchmarking"
+  /**
+   * Board elections and other governance business. Kept separate from
+   * "general" because these are the association's constitutional
+   * correspondence: they are transactional under CASL (a nomination is not a
+   * commercial electronic message), and a member must not be able to
+   * unsubscribe from being told they have been nominated.
+   */
+  | "governance"
   | "general";
 
 // ── Template key registry (all known keys) ────────────────────────
@@ -89,6 +97,24 @@ export type TemplateKey =
   | "event_registration_confirmation"
   | "event_reminder"
   | "event_cancelled"
+  // Elections
+  | "election_call_for_nominations"
+  | "election_nomination_received"
+  | "election_cosign_request"
+  | "election_store_permission_request"
+  | "election_nomination_ready"
+  | "election_nomination_incomplete"
+  // Balloting. The ballot is never in the email — these drive members back to
+  // the site, where the session identifies them. See lib/elections/notify.ts.
+  | "election_ballots_open"
+  | "election_ballot_reminder"
+  // Post-AGM. The members elect at the meeting (Part V S3(e)), so this cannot
+  // be sent before it — see lib/elections/documents/results-announcement.ts.
+  | "election_results_announced"
+  // AGM — By-Law Part VII notices, both date-bound
+  | "agm_notice_of_meeting"
+  | "agm_proxy_form"
+  | "agm_package_available"
   | "event_waitlist_promoted";
 
 export interface MessageTemplate {

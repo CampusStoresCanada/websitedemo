@@ -10,11 +10,30 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * not listed here is ignored rather than rendered as a blank slot.
  */
 
+/**
+ * The dashboard is a four-slot grid. Most widgets occupy one slot; the board
+ * action list needs two, because a checklist squeezed into a quarter-width
+ * column is a list of truncated sentences.
+ *
+ * ⚠️ Four across is wider than it sounds. Membership Renewals is a fixed 330px
+ * card and The Conference is a fixed 372px one — both are designed SVGs, not
+ * fluid layouts — so a genuine four-slot row needs about 1,560px of content
+ * width, which with the sidebar means a ~1,900px viewport. Below that the grid
+ * drops to two slots and the spans halve with it. That is a property of those
+ * two cards, not of this grid: making them fluid is what would let four fit on
+ * a laptop.
+ */
 export const DASHBOARD_WIDGETS = [
-  { key: "membership", label: "Membership Renewals" },
-  { key: "board_checklist", label: "Board Action Items" },
-  { key: "conference", label: "The Conference" },
+  { key: "membership", label: "Membership Renewals", span: 1 },
+  { key: "board_checklist", label: "Board Action Items", span: 2 },
+  { key: "conference", label: "The Conference", span: 1 },
+  { key: "elections", label: "Board Election", span: 1 },
 ] as const;
+
+/** How many of the four slots a widget occupies. */
+export function widgetSpan(key: DashboardWidgetKey): 1 | 2 {
+  return (DASHBOARD_WIDGETS.find((w) => w.key === key)?.span ?? 1) as 1 | 2;
+}
 
 export type DashboardWidgetKey = (typeof DASHBOARD_WIDGETS)[number]["key"];
 
