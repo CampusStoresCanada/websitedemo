@@ -14,6 +14,1142 @@ export type Database = {
   }
   public: {
     Tables: {
+      nominations: {
+        Row: {
+          accept_token: string
+          bio: string | null
+          candidate_accepted_at: string | null
+          candidate_declined_at: string | null
+          created_at: string
+          election_id: string
+          eligibility: Json | null
+          id: string
+          nominated_by_contact_id: string | null
+          nominee_contact_id: string
+          nominee_organization_id: string
+          nominee_profile_id: string | null
+          platform: string | null
+          source: string
+          status: string
+          store_permission_granted_at: string | null
+          store_permission_granted_by_contact_id: string | null
+          updated_at: string
+          withdrawal_requested_at: string | null
+          withdrawal_requested_by: string | null
+          withdrawn_at: string | null
+          withdrawn_reason: string | null
+        }
+        Insert: {
+          accept_token: string
+          bio?: string | null
+          candidate_accepted_at?: string | null
+          candidate_declined_at?: string | null
+          created_at?: string
+          election_id: string
+          eligibility?: Json | null
+          id?: string
+          nominated_by_contact_id?: string | null
+          nominee_contact_id: string
+          nominee_organization_id: string
+          nominee_profile_id?: string | null
+          platform?: string | null
+          source: string
+          status?: string
+          store_permission_granted_at?: string | null
+          store_permission_granted_by_contact_id?: string | null
+          updated_at?: string
+          withdrawal_requested_at?: string | null
+          withdrawal_requested_by?: string | null
+          withdrawn_at?: string | null
+          withdrawn_reason?: string | null
+        }
+        Update: {
+          accept_token?: string
+          bio?: string | null
+          candidate_accepted_at?: string | null
+          candidate_declined_at?: string | null
+          created_at?: string
+          election_id?: string
+          eligibility?: Json | null
+          id?: string
+          nominated_by_contact_id?: string | null
+          nominee_contact_id?: string
+          nominee_organization_id?: string
+          nominee_profile_id?: string | null
+          platform?: string | null
+          source?: string
+          status?: string
+          store_permission_granted_at?: string | null
+          store_permission_granted_by_contact_id?: string | null
+          updated_at?: string
+          withdrawal_requested_at?: string | null
+          withdrawal_requested_by?: string | null
+          withdrawn_at?: string | null
+          withdrawn_reason?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nominations_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominated_by_contact_id_fkey"
+            columns: ["nominated_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominated_by_contact_id_fkey"
+            columns: ["nominated_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominated_by_contact_id_fkey"
+            columns: ["nominated_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominated_by_contact_id_fkey"
+            columns: ["nominated_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_contact_id_fkey"
+            columns: ["nominee_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_contact_id_fkey"
+            columns: ["nominee_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_contact_id_fkey"
+            columns: ["nominee_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_contact_id_fkey"
+            columns: ["nominee_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_organization_id_fkey"
+            columns: ["nominee_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_organization_id_fkey"
+            columns: ["nominee_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_nominee_profile_id_fkey"
+            columns: ["nominee_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_store_permission_granted_by_contact_id_fkey"
+            columns: ["store_permission_granted_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_store_permission_granted_by_contact_id_fkey"
+            columns: ["store_permission_granted_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_store_permission_granted_by_contact_id_fkey"
+            columns: ["store_permission_granted_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_store_permission_granted_by_contact_id_fkey"
+            columns: ["store_permission_granted_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nominations_withdrawal_requested_by_fkey"
+            columns: ["withdrawal_requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      nomination_cosignatures: {
+        Row: {
+          contact_id: string
+          created_at: string
+          id: string
+          nomination_id: string
+          organization_id: string
+          profile_id: string | null
+          revoked_at: string | null
+          sign_token: string
+          signed_at: string | null
+        }
+        Insert: {
+          contact_id: string
+          created_at?: string
+          id?: string
+          nomination_id: string
+          organization_id: string
+          profile_id?: string | null
+          revoked_at?: string | null
+          sign_token: string
+          signed_at?: string | null
+        }
+        Update: {
+          contact_id?: string
+          created_at?: string
+          id?: string
+          nomination_id?: string
+          organization_id?: string
+          profile_id?: string | null
+          revoked_at?: string | null
+          sign_token?: string
+          signed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "nomination_cosignatures_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_nomination_id_fkey"
+            columns: ["nomination_id"]
+            isOneToOne: false
+            referencedRelation: "nominations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "nomination_cosignatures_profile_id_fkey"
+            columns: ["profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      meeting_proxies: {
+        Row: {
+          created_at: string
+          created_by: string | null
+          document_path: string | null
+          form_source: string
+          grantor_contact_id: string | null
+          grantor_organization_id: string
+          id: string
+          meeting_id: string
+          proxyholder_contact_id: string
+          revocation_reason: string | null
+          revoked_at: string | null
+          revoked_by: string | null
+          signed_at: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          created_by?: string | null
+          document_path?: string | null
+          form_source?: string
+          grantor_contact_id?: string | null
+          grantor_organization_id: string
+          id?: string
+          meeting_id: string
+          proxyholder_contact_id: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          signed_at?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          created_by?: string | null
+          document_path?: string | null
+          form_source?: string
+          grantor_contact_id?: string | null
+          grantor_organization_id?: string
+          id?: string
+          meeting_id?: string
+          proxyholder_contact_id?: string
+          revocation_reason?: string | null
+          revoked_at?: string | null
+          revoked_by?: string | null
+          signed_at?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_contact_id_fkey"
+            columns: ["grantor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_organization_id_fkey"
+            columns: ["grantor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_grantor_organization_id_fkey"
+            columns: ["grantor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "meeting_proxies_proxyholder_contact_id_fkey"
+            columns: ["proxyholder_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      governance_role_capabilities: {
+        Row: {
+          appointable: boolean
+          can_delegate: boolean
+          capability: string
+          role_key: string
+        }
+        Insert: {
+          appointable?: boolean
+          can_delegate?: boolean
+          capability: string
+          role_key: string
+        }
+        Update: {
+          appointable?: boolean
+          can_delegate?: boolean
+          capability?: string
+          role_key?: string
+        }
+        Relationships: []
+      }
+      governance_role_assignments: {
+        Row: {
+          appointing_resolution: string | null
+          body_id: string
+          counts_toward_cap: boolean
+          created_at: string
+          elected_at_election_id: string | null
+          id: string
+          notes: string | null
+          organization_id: string | null
+          person_contact_id: string | null
+          person_profile_id: string | null
+          role_key: string
+          seat_key: string | null
+          term_end: string | null
+          term_start: string
+          updated_at: string
+        }
+        Insert: {
+          appointing_resolution?: string | null
+          body_id: string
+          counts_toward_cap?: boolean
+          created_at?: string
+          elected_at_election_id?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string | null
+          person_contact_id?: string | null
+          person_profile_id?: string | null
+          role_key: string
+          seat_key?: string | null
+          term_end?: string | null
+          term_start: string
+          updated_at?: string
+        }
+        Update: {
+          appointing_resolution?: string | null
+          body_id?: string
+          counts_toward_cap?: boolean
+          created_at?: string
+          elected_at_election_id?: string | null
+          id?: string
+          notes?: string | null
+          organization_id?: string | null
+          person_contact_id?: string | null
+          person_profile_id?: string | null
+          role_key?: string
+          seat_key?: string | null
+          term_end?: string | null
+          term_start?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "governance_role_assignments_body_id_fkey"
+            columns: ["body_id"]
+            isOneToOne: false
+            referencedRelation: "governance_bodies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_person_contact_id_fkey"
+            columns: ["person_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_person_contact_id_fkey"
+            columns: ["person_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_person_contact_id_fkey"
+            columns: ["person_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_person_contact_id_fkey"
+            columns: ["person_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "governance_role_assignments_person_profile_id_fkey"
+            columns: ["person_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      governance_bodies: {
+        Row: {
+          created_at: string
+          id: string
+          key: string
+          max_consecutive_terms: number | null
+          min_seat_count: number | null
+          name: string
+          seat_count: number | null
+          term_length_years: number | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          key: string
+          max_consecutive_terms?: number | null
+          min_seat_count?: number | null
+          name: string
+          seat_count?: number | null
+          term_length_years?: number | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          key?: string
+          max_consecutive_terms?: number | null
+          min_seat_count?: number | null
+          name?: string
+          seat_count?: number | null
+          term_length_years?: number | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      elections: {
+        Row: {
+          agm_date: string
+          ballots_close_at: string
+          ballots_open_at: string
+          body_id: string
+          config: Json
+          created_at: string
+          cycle_year: number
+          id: string
+          nominations_close_at: string
+          nominations_open_at: string
+          outcome: string | null
+          policy_set_id: string | null
+          sealed_at: string | null
+          seats_available: number
+          slug: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          agm_date: string
+          ballots_close_at: string
+          ballots_open_at: string
+          body_id: string
+          config: Json
+          created_at?: string
+          cycle_year: number
+          id?: string
+          nominations_close_at: string
+          nominations_open_at: string
+          outcome?: string | null
+          policy_set_id?: string | null
+          sealed_at?: string | null
+          seats_available: number
+          slug: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          agm_date?: string
+          ballots_close_at?: string
+          ballots_open_at?: string
+          body_id?: string
+          config?: Json
+          created_at?: string
+          cycle_year?: number
+          id?: string
+          nominations_close_at?: string
+          nominations_open_at?: string
+          outcome?: string | null
+          policy_set_id?: string | null
+          sealed_at?: string | null
+          seats_available?: number
+          slug?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "elections_body_id_fkey"
+            columns: ["body_id"]
+            isOneToOne: false
+            referencedRelation: "governance_bodies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_seats: {
+        Row: {
+          election_id: string
+          id: string
+          incumbent_contact_id: string | null
+          incumbent_organization_id: string | null
+          incumbent_profile_id: string | null
+          seat_key: string
+        }
+        Insert: {
+          election_id: string
+          id?: string
+          incumbent_contact_id?: string | null
+          incumbent_organization_id?: string | null
+          incumbent_profile_id?: string | null
+          seat_key: string
+        }
+        Update: {
+          election_id?: string
+          id?: string
+          incumbent_contact_id?: string | null
+          incumbent_organization_id?: string | null
+          incumbent_profile_id?: string | null
+          seat_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_seats_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_contact_id_fkey"
+            columns: ["incumbent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_contact_id_fkey"
+            columns: ["incumbent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_contact_id_fkey"
+            columns: ["incumbent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_contact_id_fkey"
+            columns: ["incumbent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_organization_id_fkey"
+            columns: ["incumbent_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_organization_id_fkey"
+            columns: ["incumbent_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_seats_incumbent_profile_id_fkey"
+            columns: ["incumbent_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_results: {
+        Row: {
+          elected: boolean
+          election_id: string
+          id: string
+          nomination_id: string
+          rank: number
+          votes: number
+        }
+        Insert: {
+          elected?: boolean
+          election_id: string
+          id?: string
+          nomination_id: string
+          rank: number
+          votes: number
+        }
+        Update: {
+          elected?: boolean
+          election_id?: string
+          id?: string
+          nomination_id?: string
+          rank?: number
+          votes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_results_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_results_nomination_id_fkey"
+            columns: ["nomination_id"]
+            isOneToOne: false
+            referencedRelation: "nominations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_participation: {
+        Row: {
+          abstained: boolean
+          cast_by_profile_ids: string[]
+          edit_count: number
+          election_id: string
+          first_cast_at: string
+          id: string
+          last_edited_at: string
+          organization_id: string
+        }
+        Insert: {
+          abstained?: boolean
+          cast_by_profile_ids?: string[]
+          edit_count?: number
+          election_id: string
+          first_cast_at: string
+          id?: string
+          last_edited_at: string
+          organization_id: string
+        }
+        Update: {
+          abstained?: boolean
+          cast_by_profile_ids?: string[]
+          edit_count?: number
+          election_id?: string
+          first_cast_at?: string
+          id?: string
+          last_edited_at?: string
+          organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_participation_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_participation_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_participation_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_eligibility: {
+        Row: {
+          election_id: string
+          evaluated_at: string
+          facts: Json | null
+          id: string
+          is_eligible: boolean
+          organization_id: string
+          reason: string
+          reason_code: string
+          rule_key: string
+        }
+        Insert: {
+          election_id: string
+          evaluated_at?: string
+          facts?: Json | null
+          id?: string
+          is_eligible: boolean
+          organization_id: string
+          reason: string
+          reason_code: string
+          rule_key: string
+        }
+        Update: {
+          election_id?: string
+          evaluated_at?: string
+          facts?: Json | null
+          id?: string
+          is_eligible?: boolean
+          organization_id?: string
+          reason?: string
+          reason_code?: string
+          rule_key?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_eligibility_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_eligibility_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_eligibility_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_certifications: {
+        Row: {
+          appointed_by_profile_id: string | null
+          ballots_returned: number
+          ballots_sealed: number
+          certified_at: string | null
+          certified_by_profile_id: string | null
+          created_at: string
+          election_id: string
+          id: string
+          reconciled: boolean
+          scrutineer_contact_id: string | null
+          tie_at_cutoff: boolean
+          tie_candidates: string[]
+          tie_resolution_method: string | null
+          tie_resolution_note: string | null
+          tie_resolved_at: string | null
+          tie_resolved_by_profile_id: string | null
+        }
+        Insert: {
+          appointed_by_profile_id?: string | null
+          ballots_returned: number
+          ballots_sealed: number
+          certified_at?: string | null
+          certified_by_profile_id?: string | null
+          created_at?: string
+          election_id: string
+          id?: string
+          reconciled: boolean
+          scrutineer_contact_id?: string | null
+          tie_at_cutoff?: boolean
+          tie_candidates?: string[]
+          tie_resolution_method?: string | null
+          tie_resolution_note?: string | null
+          tie_resolved_at?: string | null
+          tie_resolved_by_profile_id?: string | null
+        }
+        Update: {
+          appointed_by_profile_id?: string | null
+          ballots_returned?: number
+          ballots_sealed?: number
+          certified_at?: string | null
+          certified_by_profile_id?: string | null
+          created_at?: string
+          election_id?: string
+          id?: string
+          reconciled?: boolean
+          scrutineer_contact_id?: string | null
+          tie_at_cutoff?: boolean
+          tie_candidates?: string[]
+          tie_resolution_method?: string | null
+          tie_resolution_note?: string | null
+          tie_resolved_at?: string | null
+          tie_resolved_by_profile_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_certifications_appointed_by_profile_id_fkey"
+            columns: ["appointed_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_certified_by_profile_id_fkey"
+            columns: ["certified_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: true
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_scrutineer_contact_id_fkey"
+            columns: ["scrutineer_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_scrutineer_contact_id_fkey"
+            columns: ["scrutineer_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_scrutineer_contact_id_fkey"
+            columns: ["scrutineer_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_scrutineer_contact_id_fkey"
+            columns: ["scrutineer_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_certifications_tie_resolved_by_profile_id_fkey"
+            columns: ["tie_resolved_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_ballots_sealed: {
+        Row: {
+          abstain: boolean
+          election_id: string
+          id: string
+          seal_order: number
+          selections: string[]
+        }
+        Insert: {
+          abstain?: boolean
+          election_id: string
+          id?: string
+          seal_order: number
+          selections?: string[]
+        }
+        Update: {
+          abstain?: boolean
+          election_id?: string
+          id?: string
+          seal_order?: number
+          selections?: string[]
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_ballots_sealed_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_ballots: {
+        Row: {
+          abstain: boolean
+          edit_count: number
+          election_id: string
+          first_cast_at: string
+          id: string
+          last_edited_at: string
+          last_edited_by_profile_id: string | null
+          organization_id: string
+          sealed_at: string | null
+        }
+        Insert: {
+          abstain?: boolean
+          edit_count?: number
+          election_id: string
+          first_cast_at?: string
+          id?: string
+          last_edited_at?: string
+          last_edited_by_profile_id?: string | null
+          organization_id: string
+          sealed_at?: string | null
+        }
+        Update: {
+          abstain?: boolean
+          edit_count?: number
+          election_id?: string
+          first_cast_at?: string
+          id?: string
+          last_edited_at?: string
+          last_edited_by_profile_id?: string | null
+          organization_id?: string
+          sealed_at?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_ballots_election_id_fkey"
+            columns: ["election_id"]
+            isOneToOne: false
+            referencedRelation: "elections"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_ballots_last_edited_by_profile_id_fkey"
+            columns: ["last_edited_by_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_ballots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_ballots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      election_ballot_selections: {
+        Row: {
+          ballot_id: string
+          id: string
+          nomination_id: string
+        }
+        Insert: {
+          ballot_id: string
+          id?: string
+          nomination_id: string
+        }
+        Update: {
+          ballot_id?: string
+          id?: string
+          nomination_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "election_ballot_selections_ballot_id_fkey"
+            columns: ["ballot_id"]
+            isOneToOne: false
+            referencedRelation: "election_ballots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "election_ballot_selections_nomination_id_fkey"
+            columns: ["nomination_id"]
+            isOneToOne: false
+            referencedRelation: "nominations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       _prisma_migrations: {
         Row: {
           applied_steps_count: number
@@ -6317,6 +7453,7 @@ export type Database = {
           embedding_updated_at: string | null
           files: Json
           fte: number | null
+          institution_type: string | null
           fte_is_manual_override: boolean
           grace_period_started_at: string | null
           hero_image_url: string | null
@@ -6423,6 +7560,7 @@ export type Database = {
           embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
+          institution_type?: string | null
           fte_is_manual_override?: boolean
           grace_period_started_at?: string | null
           hero_image_url?: string | null
@@ -6529,6 +7667,7 @@ export type Database = {
           embedding_updated_at?: string | null
           files?: Json
           fte?: number | null
+          institution_type?: string | null
           fte_is_manual_override?: boolean
           grace_period_started_at?: string | null
           hero_image_url?: string | null
@@ -10488,6 +11627,21 @@ export type Database = {
       }
     }
     Functions: {
+      seal_election: {
+        Args: { p_election_id: string }
+        Returns: {
+          participation_count: number
+          sealed_count: number
+        }[]
+      }
+      max_delegable_until: {
+        Args: { p_child_capability: string; p_subject: string }
+        Returns: string
+      }
+      has_capability: {
+        Args: { p_capability: string; p_scope_id?: string; p_subject: string }
+        Returns: boolean
+      }
       approve_booth_request: {
         Args: { p_approval_id: string; p_notes?: string }
         Returns: string

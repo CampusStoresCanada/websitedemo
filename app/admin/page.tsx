@@ -6,7 +6,8 @@ import { getLatestFinancialSummary } from "@/lib/quickbooks/reports";
 import { getRenewalProgressData } from "@/lib/renewal/renewal-progress";
 import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
 import { getBoardChecklist } from "@/lib/board/checklist";
-import { getDashboardWidgetLayout } from "@/lib/admin/dashboard-widgets";
+import { getElectionsWidgetData } from "@/lib/elections/dashboard-widget";
+import { getDashboardWidgetLayout, widgetSpan } from "@/lib/admin/dashboard-widgets";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
@@ -14,6 +15,7 @@ import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
 import { ConferenceWidget } from "@/components/admin/ConferenceWidget";
 import { BoardChecklist } from "@/components/admin/board/BoardChecklist";
+import { ElectionsWidget } from "@/components/admin/ElectionsWidget";
 
 export const metadata = {
   title: "Admin Console | Campus Stores Canada",
@@ -166,6 +168,7 @@ export default async function AdminConsolePage() {
     conferenceStats,
     widgetLayout,
     boardChecklist,
+    electionsWidget,
   ] = await Promise.all([
     // Current conference
     db.from("conference_instances")
@@ -242,6 +245,16 @@ export default async function AdminConsolePage() {
 
     // Board action-item checklist
     getBoardChecklist(auth.ok ? auth.ctx.userId : null),
+
+    // Board election — nominations or turnout, null outside a live cycle.
+    getElectionsWidgetData(
+      new Intl.DateTimeFormat("en-CA", {
+        timeZone: "America/Edmonton",
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date())
+    ),
   ]);
 
   const conf         = conferenceResult.data;
@@ -391,25 +404,64 @@ export default async function AdminConsolePage() {
            checklist takes the remaining width, scrolling vertically inside a
            card-height box rather than growing the page. Order comes from
            dashboard_widget_config. */}
-      <div className="mb-8 flex flex-wrap items-start gap-6">
+      {/* Four slots per row. Spans come from the registry: most widgets take
+          one, the action list takes two. The four-slot tier is gated on a wide
+          viewport because two of these cards are fixed-width designed SVGs
+          (330px and 372px) — below ~1800px the grid drops to two slots and the
+          spans halve with it rather than overflowing. */}
+      {/* Slots, not breakpoints. `auto-fit` with a 330px floor makes as many
+          columns as genuinely fit — 330 because Membership Renewals carries a
+          hard inline width:330 and will not shrink (The Conference already has
+          maxWidth:100% and scales). Fixed tiers guessed at the viewport and got
+          it wrong; this measures.
+
+          `dense` matters: the two-slot task list cannot sit beside a one-slot
+          card in a two-column row, so without it the row above is left with a
+          hole and Membership Renewals sits alone next to dead space. Dense lets
+          a later one-slot widget backfill that gap. */}
+      <div className="mb-8 overflow-x-auto">
+        <div className="grid grid-flow-row-dense items-start gap-6 grid-cols-[repeat(auto-fit,minmax(330px,1fr))]">
         {widgetLayout.map((key) => {
+          // Literal class strings — Tailwind cannot see interpolated ones.
+          // A two-slot span stays one slot until there are two columns to span;
+          // otherwise it would force a second column into a one-column grid and
+          // push the row off the side.
+          const cell =
+            widgetSpan(key) === 2 ? "col-span-1 lg:col-span-2" : "col-span-1";
+
           if (key === "membership") {
-            return renewalProgress
-              ? <MembershipRenewalsWidget key={key} data={renewalProgress} />
-              : null;
+            return renewalProgress ? (
+              <div key={key} className={cell}>
+                <MembershipRenewalsWidget data={renewalProgress} />
+              </div>
+            ) : null;
           }
           if (key === "board_checklist") {
-            return boardChecklist.rows.length > 0
-              ? <div key={key} className="min-w-[420px] flex-1"><BoardChecklist data={boardChecklist} /></div>
-              : null;
+            return boardChecklist.rows.length > 0 ? (
+              <div key={key} className={cell}>
+                <BoardChecklist data={boardChecklist} />
+              </div>
+            ) : null;
           }
           if (key === "conference") {
-            return conferenceStats
-              ? <ConferenceWidget key={key} data={conferenceStats} />
-              : null;
+            return conferenceStats ? (
+              <div key={key} className={cell}>
+                <ConferenceWidget data={conferenceStats} />
+              </div>
+            ) : null;
           }
-          return null;
-        })}
+          // Renders only while nominations or voting are open; null otherwise,
+          // so the dashboard does not carry a dead election slot all year.
+          if (key === "elections") {
+            return electionsWidget ? (
+              <div key={key} className={cell}>
+                <ElectionsWidget data={electionsWidget} />
+              </div>
+            ) : null;
+          }
+            return null;
+          })}
+        </div>
       </div>
 
       {/* ── Conference quick access ─────────────────────────────── */}
