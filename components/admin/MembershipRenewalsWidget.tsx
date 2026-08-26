@@ -273,7 +273,21 @@ export function MembershipRenewalsWidget({ data }: { data: RenewalProgressData }
   return (
     <div
       className="relative"
-      style={{ width: 330, height: 300, background: CARD_BG, borderRadius: 8, padding: "22px 24px", overflow: "hidden" }}
+      // Fills its dashboard slot rather than sitting at a fixed 330 inside a
+      // wider cell. Everything within already adapts: the title flows, the view
+      // menu is anchored to the right edge, the chart SVG is inset-0 with
+      // preserveAspectRatio="none", and the two pills are a centred flex row.
+      // minWidth keeps the designed proportions as the floor — and matches the
+      // dashboard grid's own 330px column minimum, so it never has to crush.
+      style={{
+        width: "100%",
+        minWidth: 330,
+        height: 300,
+        background: CARD_BG,
+        borderRadius: 8,
+        padding: "22px 24px",
+        overflow: "hidden",
+      }}
       onClick={() => setFocusedType(null)}
     >
       <p style={{ fontFamily: FONT, fontWeight: 700, fontSize: 15, color: INK, margin: 0 }}>

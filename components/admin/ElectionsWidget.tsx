@@ -12,6 +12,49 @@
 
 import Link from "next/link";
 import type { ElectionsWidgetData } from "@/lib/elections/dashboard-widget";
+import { splinePath } from "@/lib/utils/spline";
+
+/**
+ * Arrivals per day, in the same idiom as the renewals card. The shape is the
+ * point: a ballot that is still coming in looks different from one that stalled
+ * a fortnight ago, and the count alone cannot tell you which you have.
+ */
+function Sparkline({ daily }: { daily: { date: string; count: number }[] }) {
+  if (daily.length < 2) return null;
+  const max = Math.max(1, ...daily.map((d) => d.count));
+  const pts = daily.map((d, i) => ({
+    x: (i / (daily.length - 1)) * 100,
+    y: 100 - (d.count / max) * 100,
+  }));
+  return (
+    <svg
+      viewBox="0 0 100 100"
+      preserveAspectRatio="none"
+      className="mt-3 h-10 w-full"
+      aria-hidden
+    >
+      <path
+        d={splinePath(pts)}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth={1.5}
+        vectorEffect="non-scaling-stroke"
+        className="text-gray-400"
+      />
+    </svg>
+  );
+}
+
+/** "3 in the last 7 days · 0.4 a day" — rate, not just total. */
+function rateLine(d: ElectionsWidgetData, noun: string): string {
+  const total = d.phase === "nominating" ? d.nominationsReceived : d.ballotsReturned;
+  if (total === 0) return `No ${noun} yet.`;
+  const recent =
+    d.recent7 === 0
+      ? `nothing in the last 7 days`
+      : `${d.recent7} in the last 7 days`;
+  return `${recent} · ${d.perDay} a day`;
+}
 
 function Bar({ done, total, tone }: { done: number; total: number; tone: string }) {
   const pct = total > 0 ? Math.min(100, Math.round((done / total) * 100)) : 0;
@@ -36,7 +79,9 @@ export function ElectionsWidget({ data }: { data: ElectionsWidgetData }) {
   const nominating = data.phase === "nominating";
 
   return (
-    <div className="min-w-[380px] flex-1 rounded-xl border border-gray-200 bg-white p-5">
+    // Sizing belongs to the grid cell, not the card — the dashboard decides
+    // how many slots this occupies.
+    <div className="h-full rounded-xl border border-gray-200 bg-white p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <p className="text-xs font-medium uppercase tracking-wide text-gray-500">
@@ -78,7 +123,9 @@ export function ElectionsWidget({ data }: { data: ElectionsWidgetData }) {
               <p className="text-xs text-gray-500">seats</p>
             </div>
           </div>
-          <p className="mt-3 text-xs text-gray-600">
+          <Sparkline daily={data.daily} />
+          <p className="mt-1 text-xs text-gray-500">{rateLine(data, "nominations")}</p>
+          <p className="mt-2 text-xs text-gray-600">
             {data.validatedNominees > data.seats
               ? "More nominees than seats — a ballot will be required."
               : data.validatedNominees === data.seats
@@ -97,9 +144,12 @@ export function ElectionsWidget({ data }: { data: ElectionsWidgetData }) {
             </p>
           </div>
           <Bar done={data.ballotsReturned} total={data.electorate} tone="bg-gray-900" />
-          <p className="mt-2 text-xs text-gray-500">
-            {data.electorate - data.ballotsReturned} still to vote. How each institution voted is
-            not recorded anywhere this page can reach.
+          <Sparkline daily={data.daily} />
+          <p className="mt-1 text-xs text-gray-500">{rateLine(data, "ballots")}</p>
+          <p className="mt-2 text-xs text-gray-600">
+            {data.projected === null
+              ? `${data.electorate - data.ballotsReturned} still to vote.`
+              : `At this pace, about ${data.projected} of ${data.electorate} by close.`}
           </p>
         </>
       )}
