@@ -70,6 +70,8 @@ vi.mock("@/lib/comms/send", () => ({
 import {
   sendBenchmarkingInvitations,
   sendBenchmarkingReminders,
+  planInvitations,
+  planReminders,
 } from "../notify";
 
 function recipient(over: Record<string, unknown> = {}) {
@@ -120,15 +122,17 @@ describe("benchmarking invitations", () => {
     expect(state.updates[0].patch.last_send_error).toBe("Bounced");
   });
 
-  it("reports a store with no address rather than pretending it went out", async () => {
+  it("blocks a store with no address instead of attempting it", async () => {
     state.recipients = [
       recipient({ contacts: { name: "Pat", first_name: "Pat", email: null, work_email: null } }),
     ];
 
     const result = await sendBenchmarkingInvitations("survey-1");
 
+    // Blocked at plan time rather than attempted and reported as a failure.
+    // The operator sees it in the preview BEFORE sending, which is the point.
     expect(result.sent).toBe(0);
-    expect(result.outcomes[0].error).toMatch(/No email address/);
+    expect(result.skipped).toBe(1);
     expect(state.sends).toHaveLength(0);
   });
 
@@ -193,5 +197,62 @@ describe("benchmarking reminders", () => {
     await sendBenchmarkingReminders("survey-1");
 
     expect(state.updates[0].patch.reminder_count).toBe(3);
+  });
+});
+
+describe("the plan the operator is shown", () => {
+  it("is the same list the send uses — not a second, similar query", async () => {
+    state.recipients = [
+      recipient({ id: "a", organization_id: "org-a" }),
+      recipient({ id: "b", organization_id: "org-b", invited_at: "2026-10-08T12:00:00Z" }),
+      recipient({
+        id: "c",
+        organization_id: "org-c",
+        contacts: { name: "No Mail", first_name: "No", email: null, work_email: null },
+      }),
+    ];
+
+    const plan = await planInvitations("survey-1");
+    await sendBenchmarkingInvitations("survey-1");
+
+    expect(plan!.willSend.map((l) => l.organizationId)).toEqual(["org-a"]);
+    expect(state.sends).toHaveLength(1);
+  });
+
+  it("says WHY each blocked store is blocked", async () => {
+    state.recipients = [
+      recipient({ id: "b", invited_at: "2026-10-08T12:00:00Z" }),
+      recipient({
+        id: "c",
+        contacts: { name: "No Mail", first_name: "No", email: null, work_email: null },
+      }),
+    ];
+
+    const plan = await planInvitations("survey-1");
+    expect(plan!.blocked.map((l) => l.blockedReason).sort()).toEqual([
+      "already_invited",
+      "no_address",
+    ]);
+  });
+
+  it("surfaces the kill switch, so a no-op send is never mistaken for a real one", async () => {
+    process.env.BENCHMARKING_SUPPRESS_EMAIL = "1";
+    const plan = await planInvitations("survey-1");
+    expect(plan!.killSwitchOn).toBe(true);
+  });
+
+  it("reminder plan separates submitted from never-invited", async () => {
+    state.recipients = [
+      recipient({ id: "s", organization_id: "org-s", invited_at: "2026-10-08T12:00:00Z" }),
+      recipient({ id: "n", organization_id: "org-n", invited_at: null }),
+    ];
+    state.submissions = [{ organization_id: "org-s", status: "submitted" }];
+
+    const plan = await planReminders("survey-1");
+    expect(plan!.willSend).toHaveLength(0);
+    expect(plan!.blocked.map((l) => l.blockedReason).sort()).toEqual([
+      "already_submitted",
+      "never_invited",
+    ]);
   });
 });

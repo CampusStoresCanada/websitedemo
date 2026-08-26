@@ -285,3 +285,60 @@ export async function sendReminders(input: { surveyId: string }): Promise<{
       .map((o) => ({ organizationName: o.organizationName, error: o.error })),
   };
 }
+
+/**
+ * Who would be mailed, without mailing anyone.
+ *
+ * Reads the same plan the send consumes, so what the operator approves is
+ * literally the list that goes out — not a similar list built by a second
+ * query that could drift from it.
+ */
+export async function previewSend(input: {
+  surveyId: string;
+  kind: "invitation" | "reminder";
+  betaOnly?: boolean;
+}): Promise<{
+  success: boolean;
+  error?: string;
+  plan?: {
+    fiscalYear: number;
+    surveyStatus: string;
+    templateKey: string;
+    killSwitchOn: boolean;
+    willSend: { organizationName: string; contactName: string; to: string | null }[];
+    blocked: { organizationName: string; blockedReason?: string }[];
+  };
+}> {
+  const auth = await verifyRep();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!auth.isAdmin) {
+    return { success: false, error: "Only an administrator can send the survey invitations." };
+  }
+
+  const { planInvitations, planReminders } = await import("@/lib/benchmarking/notify");
+  const plan =
+    input.kind === "reminder"
+      ? await planReminders(input.surveyId)
+      : await planInvitations(input.surveyId, { betaOnly: input.betaOnly });
+
+  if (!plan) return { success: false, error: "No survey found." };
+
+  return {
+    success: true,
+    plan: {
+      fiscalYear: plan.fiscalYear,
+      surveyStatus: plan.surveyStatus,
+      templateKey: plan.templateKey,
+      killSwitchOn: plan.killSwitchOn,
+      willSend: plan.willSend.map((l) => ({
+        organizationName: l.organizationName,
+        contactName: l.contactName,
+        to: l.to,
+      })),
+      blocked: plan.blocked.map((l) => ({
+        organizationName: l.organizationName,
+        blockedReason: l.blockedReason,
+      })),
+    },
+  };
+}

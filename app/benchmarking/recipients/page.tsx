@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
+import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 
 export const metadata = {
   title: "Recipient Confirmation | Campus Stores Canada",
@@ -36,7 +37,7 @@ export default async function RecipientsPage() {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: surveys } = (await (supabase as any)
     .from("benchmarking_surveys")
-    .select("id, title, fiscal_year")
+    .select("id, title, fiscal_year, status")
     .order("fiscal_year", { ascending: false })
     .limit(1)) as { data: any[] | null };
   const survey = surveys?.[0] ?? null;
@@ -145,11 +146,22 @@ export default async function RecipientsPage() {
   });
 
   return (
-    <RecipientQueue
-      surveyTitle={survey.title}
-      fiscalYear={survey.fiscal_year}
-      isAdmin={admin}
-      items={items}
-    />
+    <>
+      <RecipientQueue
+        surveyTitle={survey.title}
+        fiscalYear={survey.fiscal_year}
+        isAdmin={admin}
+        items={items}
+      />
+      {/*
+        Admin only, and below the queue on purpose. Confirming who the right
+        person is comes first; sending is what you do once that work is done.
+      */}
+      {admin && (
+        <div className="mx-auto mt-8 max-w-5xl px-4 pb-12">
+          <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
+        </div>
+      )}
+    </>
   );
 }

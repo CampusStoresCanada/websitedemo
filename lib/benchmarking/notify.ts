@@ -241,6 +241,119 @@ function summarise(outcomes: NotifyOutcome[], skipped: number): SendSummary {
   };
 }
 
+export type BlockedReason =
+  | "already_invited"
+  | "already_submitted"
+  | "never_invited"
+  | "no_address";
+
+export interface PlannedSend {
+  recipientId: string;
+  organizationId: string;
+  organizationName: string;
+  contactName: string;
+  to: string | null;
+  willSend: boolean;
+  blockedReason?: BlockedReason;
+}
+
+export interface SendPlan {
+  surveyId: string;
+  fiscalYear: number;
+  surveyStatus: string;
+  templateKey: string;
+  /** BENCHMARKING_SUPPRESS_EMAIL is set — a "send" would mail nobody. */
+  killSwitchOn: boolean;
+  willSend: PlannedSend[];
+  blocked: PlannedSend[];
+}
+
+function planLine(r: RecipientRow, blockedReason?: BlockedReason): PlannedSend {
+  const to = recipientEmail(r);
+  return {
+    recipientId: r.id,
+    organizationId: r.organization_id,
+    organizationName: r.organizations?.name ?? "Unknown store",
+    contactName: recipientName(r),
+    to,
+    willSend: !blockedReason,
+    blockedReason,
+  };
+}
+
+/**
+ * Who WOULD be mailed, and who would not, and why.
+ *
+ * This is the single source of truth for both the preview and the send. A dry
+ * run that derives its list separately is worse than no dry run at all: it
+ * would reassure someone with a list that the real send does not use, and the
+ * first time the two disagree is the time it matters.
+ */
+export async function planInvitations(
+  surveyId: string,
+  options: { betaOnly?: boolean } = {},
+): Promise<SendPlan | null> {
+  const survey = await loadSurvey(surveyId);
+  if (!survey) return null;
+
+  // Deliberately NOT filtered to uninvited in the query — the preview should
+  // show the already-invited stores too, so the operator can see that running
+  // it again is safe rather than having to trust that it is.
+  const recipients = await loadRecipients(surveyId, { betaOnly: options.betaOnly });
+
+  const willSend: PlannedSend[] = [];
+  const blocked: PlannedSend[] = [];
+
+  for (const r of recipients) {
+    if (r.invited_at) blocked.push(planLine(r, "already_invited"));
+    else if (!recipientEmail(r)) blocked.push(planLine(r, "no_address"));
+    else willSend.push(planLine(r));
+  }
+
+  return {
+    surveyId,
+    fiscalYear: survey.fiscal_year,
+    surveyStatus: survey.status,
+    templateKey: options.betaOnly
+      ? "benchmarking_beta_invitation"
+      : "benchmarking_invitation",
+    killSwitchOn: emailSuppressed(),
+    willSend,
+    blocked,
+  };
+}
+
+/** The same, for the chase. */
+export async function planReminders(surveyId: string): Promise<SendPlan | null> {
+  const survey = await loadSurvey(surveyId);
+  if (!survey) return null;
+
+  const [recipients, done] = await Promise.all([
+    loadRecipients(surveyId),
+    submittedOrgIds(survey.fiscal_year),
+  ]);
+
+  const willSend: PlannedSend[] = [];
+  const blocked: PlannedSend[] = [];
+
+  for (const r of recipients) {
+    if (done.has(r.organization_id)) blocked.push(planLine(r, "already_submitted"));
+    else if (!r.invited_at) blocked.push(planLine(r, "never_invited"));
+    else if (!recipientEmail(r)) blocked.push(planLine(r, "no_address"));
+    else willSend.push(planLine(r));
+  }
+
+  return {
+    surveyId,
+    fiscalYear: survey.fiscal_year,
+    surveyStatus: survey.status,
+    templateKey: "benchmarking_reminder",
+    killSwitchOn: emailSuppressed(),
+    willSend,
+    blocked,
+  };
+}
+
 /**
  * Invite the stores whose survey is open.
  *
@@ -256,32 +369,32 @@ export async function sendBenchmarkingInvitations(
   const survey = await loadSurvey(surveyId);
   if (!survey) return summarise([], 0);
 
-  const recipients = await loadRecipients(surveyId, {
-    betaOnly: options.betaOnly,
-    uninvitedOnly: true,
-  });
+  // Same plan the operator was shown. Not a second, similar query.
+  const plan = await planInvitations(surveyId, options);
+  if (!plan) return summarise([], 0);
 
   const outcomes: NotifyOutcome[] = [];
-  for (const r of recipients) {
-    const orgName = r.organizations?.name ?? "your store";
-    const templateKey = (
-      options.betaOnly ? "benchmarking_beta_invitation" : "benchmarking_invitation"
-    ) as TemplateKey;
+  for (const line of plan.willSend) {
+    const outcome = await send(
+      plan.templateKey as TemplateKey,
+      line.to,
+      line.organizationId,
+      line.organizationName,
+      {
+        contact_name: line.contactName,
+        organization_name: line.organizationName,
+        fiscal_year: survey.fiscal_year,
+        opens_date: formatOpening(survey.opens_at) ?? "",
+        closes_date: formatDeadline(survey.closes_at) ?? "",
+        survey_url: `${appUrl()}/benchmarking/survey`,
+      },
+    );
 
-    const outcome = await send(templateKey, recipientEmail(r), r.organization_id, orgName, {
-      contact_name: recipientName(r),
-      organization_name: orgName,
-      fiscal_year: survey.fiscal_year,
-      opens_date: formatOpening(survey.opens_at) ?? "",
-      closes_date: formatDeadline(survey.closes_at) ?? "",
-      survey_url: `${appUrl()}/benchmarking/survey`,
-    });
-
-    await markInvited(r.id, outcome);
+    await markInvited(line.recipientId, outcome);
     outcomes.push(outcome);
   }
 
-  return summarise(outcomes, 0);
+  return summarise(outcomes, plan.blocked.length);
 }
 
 /**
@@ -296,31 +409,24 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
   const survey = await loadSurvey(surveyId);
   if (!survey) return summarise([], 0);
 
-  const [recipients, done] = await Promise.all([
-    loadRecipients(surveyId),
-    submittedOrgIds(survey.fiscal_year),
-  ]);
+  const plan = await planReminders(surveyId);
+  if (!plan) return summarise([], 0);
 
   const daysRemaining = daysUntilDeadline(survey.closes_at);
+  const counts = new Map(
+    (await loadRecipients(surveyId)).map((r) => [r.id, r.reminder_count ?? 0]),
+  );
 
   const outcomes: NotifyOutcome[] = [];
-  let skipped = 0;
-
-  for (const r of recipients) {
-    if (done.has(r.organization_id) || !r.invited_at) {
-      skipped++;
-      continue;
-    }
-
-    const orgName = r.organizations?.name ?? "your store";
+  for (const line of plan.willSend) {
     const outcome = await send(
       "benchmarking_reminder" as TemplateKey,
-      recipientEmail(r),
-      r.organization_id,
-      orgName,
+      line.to,
+      line.organizationId,
+      line.organizationName,
       {
-        contact_name: recipientName(r),
-        organization_name: orgName,
+        contact_name: line.contactName,
+        organization_name: line.organizationName,
         fiscal_year: survey.fiscal_year,
         closes_date: formatDeadline(survey.closes_at) ?? "",
         days_remaining: daysRemaining,
@@ -328,11 +434,11 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
       },
     );
 
-    await markReminded(r.id, r.reminder_count ?? 0, outcome);
+    await markReminded(line.recipientId, counts.get(line.recipientId) ?? 0, outcome);
     outcomes.push(outcome);
   }
 
-  return summarise(outcomes, skipped);
+  return summarise(outcomes, plan.blocked.length);
 }
 
 /**
