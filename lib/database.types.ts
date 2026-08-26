@@ -1984,92 +1984,6 @@ export type Database = {
         }
         Relationships: []
       }
-      capability_grants: {
-        Row: {
-          can_delegate: boolean
-          capability: string
-          created_at: string
-          delegated_from: string | null
-          ends_at: string
-          granted_by: string | null
-          id: string
-          reason: string
-          revoked_at: string | null
-          revoked_by: string | null
-          revoked_reason: string | null
-          scope_id: string | null
-          scope_type: string | null
-          starts_at: string
-          subject_id: string
-          updated_at: string
-        }
-        Insert: {
-          can_delegate?: boolean
-          capability: string
-          created_at?: string
-          delegated_from?: string | null
-          ends_at: string
-          granted_by?: string | null
-          id?: string
-          reason: string
-          revoked_at?: string | null
-          revoked_by?: string | null
-          revoked_reason?: string | null
-          scope_id?: string | null
-          scope_type?: string | null
-          starts_at?: string
-          subject_id: string
-          updated_at?: string
-        }
-        Update: {
-          can_delegate?: boolean
-          capability?: string
-          created_at?: string
-          delegated_from?: string | null
-          ends_at?: string
-          granted_by?: string | null
-          id?: string
-          reason?: string
-          revoked_at?: string | null
-          revoked_by?: string | null
-          revoked_reason?: string | null
-          scope_id?: string | null
-          scope_type?: string | null
-          starts_at?: string
-          subject_id?: string
-          updated_at?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "capability_grants_delegated_from_fkey"
-            columns: ["delegated_from"]
-            isOneToOne: false
-            referencedRelation: "capability_grants"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "capability_grants_granted_by_fkey"
-            columns: ["granted_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "capability_grants_revoked_by_fkey"
-            columns: ["revoked_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "capability_grants_subject_id_fkey"
-            columns: ["subject_id"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       cart_items: {
         Row: {
           conference_id: string
@@ -6375,16 +6289,19 @@ export type Database = {
       }
       governance_role_capabilities: {
         Row: {
+          appointable: boolean
           can_delegate: boolean
           capability: string
           role_key: string
         }
         Insert: {
+          appointable?: boolean
           can_delegate?: boolean
           capability: string
           role_key: string
         }
         Update: {
+          appointable?: boolean
           can_delegate?: boolean
           capability?: string
           role_key?: string
@@ -8083,6 +8000,7 @@ export type Database = {
           profile_visibility: string | null
           province: string | null
           public_code: string | null
+          public_contact_confirmed_at: string | null
           purolator_account: string | null
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
@@ -8191,6 +8109,7 @@ export type Database = {
           profile_visibility?: string | null
           province?: string | null
           public_code?: string | null
+          public_contact_confirmed_at?: string | null
           purolator_account?: string | null
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
@@ -8299,6 +8218,7 @@ export type Database = {
           profile_visibility?: string | null
           province?: string | null
           public_code?: string | null
+          public_contact_confirmed_at?: string | null
           purolator_account?: string | null
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
@@ -11967,6 +11887,8 @@ export type Database = {
       }
       capability_contributions: {
         Row: {
+          appointable: boolean | null
+          assignment_id: string | null
           body_name: string | null
           capability: string | null
           display_name: string | null
@@ -12484,6 +12406,7 @@ export type Database = {
           profile_visibility: string | null
           province: string | null
           public_code: string | null
+          public_contact_confirmed_at: string | null
           purolator_account: string | null
           qbo_invoice_id: string | null
           qbo_updated_at: string | null

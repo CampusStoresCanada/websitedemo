@@ -1179,19 +1179,22 @@ async function evaluateBenchmarkingNoCommitteeLead(): Promise<CandidateAlert | n
   // Only nag inside the window where it is still actionable.
   if (daysUntilOpen > 42) return null;
 
-  const nowIso = new Date().toISOString();
+  // Read the view that actually governs. This used to query capability_grants,
+  // which nothing resolves against — so it could not see the secretary, who
+  // holds this capability ex officio, and it was satisfied instead by a grant
+  // that granted nothing. Both directions were wrong: it would have reported
+  // "no committee lead" while Sean held it, and stayed quiet on the strength of
+  // a record with no effect.
   const { data: leads, error: leadError } = await db
-    .from("capability_grants")
-    .select("id")
+    .from("capability_contributions")
+    .select("subject_id")
     .eq("capability", "benchmarking.committee_lead")
-    .is("revoked_at", null)
-    .lte("starts_at", nowIso)
-    .gt("ends_at", nowIso)
+    .eq("is_active", true)
     .limit(1);
 
   if (leadError) {
     throw new Error(
-      `Failed to read committee lead grants: ${leadError.message}`,
+      `Failed to read committee lead capabilities: ${leadError.message}`,
     );
   }
   if ((leads ?? []).length > 0) return null;

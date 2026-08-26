@@ -3,21 +3,25 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import {
-  grantCapability,
-  revokeCapability,
-  searchPeopleForGrant,
-} from "@/lib/actions/capability-grants";
+  appointToCapability,
+  endAppointment,
+  searchPeopleForAppointment,
+} from "@/lib/actions/capability-appointments";
 
 interface Row {
+  /** governance_role_assignments.id — what end/extend act on. */
   id: string;
   subjectId: string;
   name: string;
   capability: string;
+  /** The role carrying it: `secretary` ex officio, or an appointed one. */
+  roleKey: string;
+  /** False for ex-officio holders, who cannot be ended from this page. */
+  appointable: boolean;
+  bodyName: string | null;
   reason: string;
-  grantedByName: string | null;
   startsAt: string;
-  endsAt: string;
-  revokedAt: string | null;
+  endsAt: string | null;
   isActive: boolean;
 }
 
@@ -38,7 +42,15 @@ function fmt(iso: string) {
     day: "numeric",
   });
 }
-function daysLeft(iso: string) {
+/**
+ * Days until an appointment lapses.
+ *
+ * Null means no end date, which is what an office has — the secretary holds
+ * their capabilities until they stop being the secretary, not until a date.
+ * Infinity keeps those out of "expiring soon" without pretending they expire.
+ */
+function daysLeft(iso: string | null) {
+  if (!iso) return Infinity;
   return Math.ceil((new Date(iso).getTime() - Date.now()) / 86_400_000);
 }
 
@@ -63,7 +75,9 @@ export default function AccessGrantsBoard({
     const end = new Date(`${year + 1}-01-01T00:00:00Z`).getTime();
     const inYear = rows.filter((r) => {
       const s = new Date(r.startsAt).getTime();
-      const e = new Date(r.endsAt).getTime();
+      // An open-ended term is still running, so it overlaps any year after it
+      // began — it has not ended, rather than ending at an unknown time.
+      const e = r.endsAt ? new Date(r.endsAt).getTime() : Infinity;
       return s < end && e > start;
     });
     const byPerson = new Map<string, { name: string; items: Row[] }>();
@@ -80,7 +94,7 @@ export default function AccessGrantsBoard({
   const revoke = async (id: string) => {
     setBusy(id);
     setError(null);
-    const result = await revokeCapability(id);
+    const result = await endAppointment(id);
     if (result.success) router.refresh();
     else setError(result.error ?? "Failed");
     setBusy(null);
@@ -161,17 +175,21 @@ export default function AccessGrantsBoard({
                       </div>
                       <p className="text-sm text-gray-600 mt-1">{r.reason}</p>
                       <p className="text-xs text-gray-400 mt-1">
-                        Until {fmt(r.endsAt)} ·{" "}
-                        <span
-                          className={
-                            left <= 14 ? "text-amber-700 font-medium" : ""
-                          }
-                        >
-                          {left} day{left === 1 ? "" : "s"} left
-                        </span>
-                        {r.grantedByName
-                          ? ` · granted by ${r.grantedByName}`
-                          : ""}
+                        {r.endsAt ? (
+                          <>
+                            Until {fmt(r.endsAt)} ·{" "}
+                            <span
+                              className={
+                                left <= 14 ? "text-amber-700 font-medium" : ""
+                              }
+                            >
+                              {left} day{left === 1 ? "" : "s"} left
+                            </span>
+                          </>
+                        ) : (
+                          <>Ongoing — held as {r.roleKey.replace(/_/g, " ")}</>
+                        )}
+                        {r.bodyName ? ` · ${r.bodyName}` : ""}
                       </p>
                     </div>
                     <button
@@ -216,7 +234,7 @@ export default function AccessGrantsBoard({
                         {CAPABILITY_LABEL[i.capability] ?? i.capability} —{" "}
                         {i.reason}{" "}
                         <span className="text-gray-400">
-                          ({fmt(i.startsAt)} to {fmt(i.endsAt)})
+                          ({fmt(i.startsAt)} to {i.endsAt ? fmt(i.endsAt) : "ongoing"})
                         </span>
                       </li>
                     ))}
@@ -244,7 +262,7 @@ function GrantForm({
   const [subjectId, setSubjectId] = useState("");
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<
-    { id: string; name: string; globalRole: string }[]
+    { id: string; name: string; email: string | null }[]
   >([]);
   const [picked, setPicked] = useState<{ id: string; name: string } | null>(
     null,
@@ -252,7 +270,6 @@ function GrantForm({
   const [capability, setCapability] = useState("benchmarking.content_review");
   const [reason, setReason] = useState("");
   const [endsAt, setEndsAt] = useState("");
-  const [canDelegate, setCanDelegate] = useState(false);
   const [saving, setSaving] = useState(false);
 
   // Search as you type. An Enter-only binding is invisible, and this form is
@@ -264,9 +281,7 @@ function GrantForm({
       return;
     }
     const t = setTimeout(async () => {
-      const result = await searchPeopleForGrant(q);
-      if (result.success && result.people) setResults(result.people);
-      else setResults([]);
+      setResults(await searchPeopleForAppointment(q));
     }, 250);
     return () => clearTimeout(t);
   }, [search, picked]);
@@ -279,12 +294,11 @@ function GrantForm({
     const iso = endsAt
       ? new Date(`${endsAt}T23:59:59-06:00`).toISOString()
       : "";
-    const result = await grantCapability({
+    const result = await appointToCapability({
       subjectId: subjectId.trim(),
       capability,
       reason,
       endsAt: iso,
-      canDelegate,
     });
     setSaving(false);
     if (result.success) {
@@ -294,7 +308,6 @@ function GrantForm({
       setResults([]);
       setReason("");
       setEndsAt("");
-      setCanDelegate(false);
       setOpen(false);
       onDone();
     } else {
@@ -355,7 +368,7 @@ function GrantForm({
                       >
                         {p.name}{" "}
                         <span className="text-xs text-gray-400">
-                          {p.globalRole}
+                          {p.email ?? ""}
                         </span>
                       </button>
                     </li>
@@ -404,22 +417,12 @@ function GrantForm({
           className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
         />
       </div>
-      <label className="flex items-start gap-2 text-sm text-gray-700">
-        <input
-          type="checkbox"
-          checked={canDelegate}
-          onChange={(e) => setCanDelegate(e.target.checked)}
-          className="mt-0.5"
-        />
-        <span>
-          Can hand this work out to others
-          <span className="block text-xs text-gray-500">
-            For committee leads. They may issue the working capabilities
-            themselves, but never past their own end date, and never another
-            lead.
-          </span>
-        </span>
-      </label>
+      {/*
+        The delegation checkbox lived here and set state that nothing sent.
+        can_delegate is a property of the ROLE (governance_role_capabilities),
+        not of one person's appointment — a lead can hand out work because
+        leads can, not because someone ticked a box for them.
+      */}
 
       <div className="flex gap-2">
         <button

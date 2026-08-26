@@ -4,9 +4,9 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  grantCapability,
-  searchPeopleForGrant,
-} from "@/lib/actions/capability-grants";
+  appointToCapability,
+  searchPeopleForAppointment,
+} from "@/lib/actions/capability-appointments";
 import { WORKSTREAMS } from "@/lib/benchmarking/committee-workstreams";
 
 interface Holder {
@@ -253,7 +253,7 @@ function AssignPanel({
   const router = useRouter();
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<
-    { id: string; name: string; globalRole: string }[]
+    { id: string; name: string; email: string | null }[]
   >([]);
   const [picked, setPicked] = useState<{ id: string; name: string } | null>(
     null,
@@ -274,8 +274,7 @@ function AssignPanel({
       return;
     }
     const t = setTimeout(async () => {
-      const r = await searchPeopleForGrant(q);
-      setResults(r.success && r.people ? r.people : []);
+      setResults(await searchPeopleForAppointment(q));
     }, 250);
     return () => clearTimeout(t);
   }, [search, picked]);
@@ -286,7 +285,7 @@ function AssignPanel({
     const iso = endsAt
       ? new Date(`${endsAt}T23:59:59-06:00`).toISOString()
       : "";
-    const result = await grantCapability({
+    const result = await appointToCapability({
       subjectId: picked?.id ?? "",
       capability,
       reason,
