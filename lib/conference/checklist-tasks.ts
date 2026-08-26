@@ -42,6 +42,13 @@ export type PersonalTask = {
   evidence: string | null;
   /** True when the state came from real captured data, not a tick. */
   derived: boolean;
+  /**
+   * Which check answers this task. Exposed so a surface can drop tasks it
+   * already owns a control for — the org conference page has sections for
+   * payment, agreements and seating, and listing those tasks above the
+   * buttons that do them is a table of contents written as prose.
+   */
+  checkType: string;
   /** ISO date this closes, from the task's checklist. */
   deadline: string | null;
   source: TaskSource;
@@ -133,13 +140,13 @@ export async function loadPersonalTasks(
   const [{ data: checklists }, { data: person }] = await Promise.all([
     db
       .from("conference_checklists")
-      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience)")
+      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
     db.from("conference_people").select("hotel_confirmation_code").eq("id", personId).maybeSingle(),
   ]);
 
-  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string };
+  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
@@ -167,7 +174,7 @@ export async function loadPersonalTasks(
       if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
         return { taskId: task.id, name: task.name, description: task.description,
                  state: "done", evidence: derivedValue, derived: true, deadline,
-                 source: "self_reported" };
+                 source: "self_reported", checkType: task.check_type };
       }
       const ack = ackByTask.get(task.id);
       return {
@@ -178,7 +185,7 @@ export async function loadPersonalTasks(
         evidence: ack?.evidence ?? null,
         derived: false,
         deadline,
-        source: "self_reported",
+        source: "self_reported", checkType: task.check_type,
       };
     });
 }
@@ -240,7 +247,7 @@ export async function loadOrgTasks(
             taskId: task.id, name: task.name, description: task.description,
             state: ack ? (ack.state as PersonalTaskState) : "pending",
             evidence: ack?.evidence ?? null, derived: false, deadline,
-            source: "self_reported",
+            source: "self_reported", checkType: task.check_type,
           };
         }
         const complete = await evaluateChecklistTaskCheck(
@@ -249,7 +256,7 @@ export async function loadOrgTasks(
         return {
           taskId: task.id, name: task.name, description: task.description,
           state: complete ? "done" : "pending",
-          evidence: null, derived: true, deadline, source: "monitored",
+          evidence: null, derived: true, deadline, source: "monitored", checkType: task.check_type,
         };
       })
   );

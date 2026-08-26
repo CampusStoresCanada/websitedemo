@@ -171,6 +171,29 @@ export default async function OrgConferencePage({
     };
   }
 
+  // Staff already on file. The picker used to offer only conference_people,
+  // of which every org has NONE — so it demanded someone retype colleagues the
+  // system already knows. Contacts are the list to choose from; a
+  // conference_people row is created from the chosen contact on seating.
+  //
+  // Deliberately NOT deduplicated: two rows for one name are two rows, and
+  // collapsing people is not this feature's call to make.
+  const { data: contactRows } = await adminClient
+    .from("contacts")
+    .select("id, name, role_title, work_email, email")
+    .eq("organization_id", orgId)
+    .is("archived_at", null)
+    .order("name");
+
+  const contactOptions = (contactRows ?? [])
+    .filter((c) => c.name?.trim())
+    .map((c) => ({
+      id: `contact:${c.id}`,
+      name: c.name!.trim(),
+      detail: c.role_title?.trim() || c.work_email?.trim() || c.email?.trim() || null,
+      email: c.work_email?.trim() || c.email?.trim() || null,
+    }));
+
   const attendeeOptions = people
     .filter((row) => row.assignment_status !== "canceled")
     .map((row) => ({
@@ -182,7 +205,23 @@ export default async function OrgConferencePage({
   // The company's list: monitored items (payment, seats, directory listing) and
   // self-reported ones (Stronco, Encore) in a single view. A partner shouldn't
   // have to know which half we can see — they want what's outstanding.
-  const orgTasks = await loadOrgTasks(createAdminClient(), conferenceId, orgId);
+  const allOrgTasks = await loadOrgTasks(createAdminClient(), conferenceId, orgId);
+
+  /**
+   * A task earns a place in the list only if the list is where you act on it.
+   *
+   * Payment, agreements and seating each own a section further down with the
+   * actual controls. Naming them up here too was a table of contents written
+   * as prose: it restated work the reader could already see, above the buttons
+   * that do it. What is left is the tasks with nowhere else to live — the
+   * self-reported ones you tick, and anything pointing off this page.
+   */
+  const HANDLED_BY_A_SECTION = new Set([
+    "payment_complete",
+    "legal_document_accepted",
+    "seat_assigned",
+  ]);
+  const orgTasks = allOrgTasks.filter((t) => !HANDLED_BY_A_SECTION.has(t.checkType ?? ""));
 
   async function handleOrgTaskAnswer(
     taskId: string,
@@ -251,6 +290,7 @@ export default async function OrgConferencePage({
       <SeatAssignment
         seats={seatRows}
         people={attendeeOptions}
+        contacts={contactOptions}
         statusByPerson={statusByPerson}
         conferenceId={conferenceId}
         organizationId={orgId}

@@ -38,6 +38,22 @@ export interface AttendeeOption {
 }
 
 /**
+ * Someone already on file at this organisation.
+ *
+ * The picker originally offered only people already attending the conference —
+ * a table that is empty for every org — so seating a colleague meant typing
+ * their name and email from scratch. These are the people the system already
+ * knows; choosing one creates their conference record from what is on file.
+ */
+export interface ContactOption {
+  id: string;
+  name: string;
+  /** Role or email, to tell two people of the same name apart. */
+  detail: string | null;
+  email: string | null;
+}
+
+/**
  * What is true about a person, in the reader's words.
  *
  * The page used to carry a separate eight-column table of `person_kind`,
@@ -58,12 +74,14 @@ export interface PersonStatus {
 export default function SeatAssignment({
   seats,
   people,
+  contacts,
   statusByPerson,
   conferenceId,
   organizationId,
 }: {
   seats: SeatRow[];
   people: AttendeeOption[];
+  contacts: ContactOption[];
   statusByPerson: Record<string, PersonStatus>;
   conferenceId: string;
   organizationId: string;
@@ -113,6 +131,7 @@ export default function SeatAssignment({
             name={name}
             rows={rows}
             people={people}
+            contacts={contacts}
             statusByPerson={statusByPerson}
             conferenceId={conferenceId}
             organizationId={organizationId}
@@ -127,6 +146,7 @@ function EntityGroup({
   name,
   rows,
   people,
+  contacts,
   statusByPerson,
   conferenceId,
   organizationId,
@@ -134,6 +154,7 @@ function EntityGroup({
   name: string;
   rows: SeatRow[];
   people: AttendeeOption[];
+  contacts: ContactOption[];
   statusByPerson: Record<string, PersonStatus>;
   conferenceId: string;
   organizationId: string;
@@ -156,6 +177,7 @@ function EntityGroup({
               key={seat.id}
               seat={seat}
               people={people}
+              contacts={contacts}
               status={seat.holderPersonId ? statusByPerson[seat.holderPersonId] ?? null : null}
               conferenceId={conferenceId}
               organizationId={organizationId}
@@ -199,12 +221,14 @@ function PersonFlags({ status }: { status: PersonStatus }) {
 function SeatLine({
   seat,
   people,
+  contacts,
   status,
   conferenceId,
   organizationId,
 }: {
   seat: SeatRow;
   people: AttendeeOption[];
+  contacts: ContactOption[];
   status: PersonStatus | null;
   conferenceId: string;
   organizationId: string;
@@ -216,6 +240,34 @@ function SeatLine({
   const [addingNew, setAddingNew] = useState(false);
   const [newName, setNewName] = useState("");
   const [newEmail, setNewEmail] = useState("");
+
+  function seatContact(contactId: string) {
+    const contact = contacts.find((c) => c.id === contactId);
+    if (!contact) return;
+    setError(null);
+    setNotice(null);
+    startTransition(async () => {
+      const created = await addConferenceAttendee(conferenceId, organizationId, {
+        displayName: contact.name,
+        contactEmail: contact.email,
+      });
+      if (!created.success) {
+        setError(created.error);
+        return;
+      }
+      const seated = await allocateSeat(seat.id, created.data.id);
+      if (!seated.success) {
+        setError(seated.error);
+        return;
+      }
+      if (!contact.email) {
+        // No address on file, so no invitation went anywhere. Say it here
+        // rather than let someone wait for a message that cannot arrive.
+        setNotice(`${contact.name} has no email on file — they can't be invited until one is added.`);
+      }
+      router.refresh();
+    });
+  }
 
   function assign(personId: string) {
     setError(null);
@@ -336,17 +388,33 @@ function SeatLine({
               defaultValue=""
               disabled={pending}
               onChange={(e) => {
-                if (e.target.value === "__new") setAddingNew(true);
-                else if (e.target.value) assign(e.target.value);
+                const value = e.target.value;
+                if (value === "__new") setAddingNew(true);
+                else if (value.startsWith("contact:")) seatContact(value);
+                else if (value) assign(value);
               }}
               className="flex-1 rounded-md border border-gray-300 px-2 py-1 text-sm text-gray-700 disabled:opacity-50"
             >
               <option value="">Nobody yet — choose someone</option>
-              {people.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
+              {people.length > 0 && (
+                <optgroup label="Already attending">
+                  {people.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {contacts.length > 0 && (
+                <optgroup label="Your team">
+                  {contacts.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                      {c.detail ? ` — ${c.detail}` : ""}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
               <option value="__new">+ Someone not on this list…</option>
             </select>
           </>
