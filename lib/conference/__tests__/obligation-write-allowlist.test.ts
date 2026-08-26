@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computePersonObligations } from "../access";
+import { computePersonObligations, isPersonalObligation } from "../access";
 import { grantTypesForKinds } from "../entity-obligations";
 
 /**
@@ -64,5 +64,32 @@ describe("who actually gets asked for dietary restrictions", () => {
     // Whether an event leaves the venue is per-entity, not per-kind.
     const keys = computePersonObligations(grantTypesForKinds(["event", "registration"]), {}).obligations.map((o) => o.key);
     expect(keys).not.toContain("emergency_contact_name");
+  });
+});
+
+describe("who may answer which obligation", () => {
+  it("marks the facts about a person as theirs alone", () => {
+    expect(isPersonalObligation("dietary_restrictions")).toBe(true);
+    expect(isPersonalObligation("accessibility_needs")).toBe(true);
+    expect(isPersonalObligation("emergency_contact_name")).toBe(true);
+    expect(isPersonalObligation("emergency_contact_phone")).toBe(true);
+  });
+
+  it("leaves the badge to the organisation that bought the seat", () => {
+    expect(isPersonalObligation("display_name")).toBe(false);
+    expect(isPersonalObligation("contact_email")).toBe(false);
+  });
+
+  it("covers every obligation a social-ticket holder owes", () => {
+    // If a new personal-sounding obligation is added to a grant type and not
+    // to PERSONAL_OBLIGATION_KEYS, an org admin silently gains the ability to
+    // answer it for someone else. This is the test that notices.
+    const keys = computePersonObligations(
+      grantTypesForKinds(["registration", "event"]), {}
+    ).obligations.map((o) => o.key);
+    const unclassified = keys.filter(
+      (k) => !isPersonalObligation(k) && !["display_name", "contact_email"].includes(k)
+    );
+    expect(unclassified).toEqual([]);
   });
 });

@@ -15,6 +15,7 @@ import {
   type ContactLoginStatus,
 } from "@/lib/actions/user-management";
 import type { VisibleContact } from "@/lib/visibility/data";
+import { isPersonalObligation } from "@/lib/conference/access";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { CONTACT_TAGS, hasNonMemberTag } from "@/lib/contacts/tags";
@@ -99,6 +100,9 @@ export default function ContactEditModal({
     });
     return () => { cancelled = true; };
   }, [isCreate, contact?.id, organizationId]);
+
+  const contactEmailForNudge =
+    ((contact?.work_email as string | null) ?? (contact?.email as string | null) ?? "").trim() || null;
 
   const showConference = conferenceObligations !== null && conferenceObligations.fields.length > 0;
 
@@ -356,10 +360,15 @@ export default function ContactEditModal({
     if (!conferenceObligations) return;
     setSaving(true);
     setError(null);
+    // Personal answers are stripped here as well as refused server-side, so
+    // the request says what it means.
+    const orgOwned = Object.fromEntries(
+      Object.entries(conferenceFields).filter(([key]) => !isPersonalObligation(key))
+    );
     const result = await saveConferenceObligations(
       conferenceObligations.personId,
       conferenceObligations.conferenceId,
-      conferenceFields
+      orgOwned
     );
     setSaving(false);
     if (result.success) onClose();
@@ -657,21 +666,80 @@ export default function ContactEditModal({
                   into. Goes to catering and the on-site team — never into the printed
                   directory.
                 </p>
-                {conferenceObligations.fields.map((f) => (
-                  <div key={f.key}>
-                    <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
-                      {f.label}
-                    </label>
-                    <input
-                      value={conferenceFields[f.key] ?? ""}
-                      onChange={(e) =>
-                        setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
-                      }
-                      placeholder={CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
-                    />
-                  </div>
-                ))}
+                {conferenceObligations.fields
+                  .filter((f) => !isPersonalObligation(f.key))
+                  .map((f) => (
+                    <div key={f.key}>
+                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
+                        {f.label}
+                      </label>
+                      <input
+                        value={conferenceFields[f.key] ?? ""}
+                        onChange={(e) =>
+                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        placeholder={CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                      />
+                    </div>
+                  ))}
+
+                {/* Theirs to answer, not yours. Listed so you know what is
+                    holding the roster up and can chase the right person — but
+                    with no input, because a colleague's guess at an allergy
+                    reads as confirmed and is worse than a blank. The server
+                    refuses these from anyone but the person themselves. */}
+                {(() => {
+                  const theirs = conferenceObligations.fields.filter((f) =>
+                    isPersonalObligation(f.key)
+                  );
+                  if (theirs.length === 0) return null;
+                  const outstanding = theirs.filter(
+                    (f) => !(conferenceObligations.values[f.key] ?? "").trim()
+                  );
+                  const who = (contact?.name as string | null) ?? "This person";
+                  const mailto = contactEmailForNudge
+                    ? `mailto:${contactEmailForNudge}?subject=${encodeURIComponent(
+                        "Your conference details"
+                      )}&body=${encodeURIComponent(
+                        `Hi,\n\nCould you add your conference details before the show? Sign in and open your profile, click Edit, and fill in: ${outstanding
+                          .map((f) => f.label.toLowerCase())
+                          .join(", ")}.\n\nThanks!`
+                      )}`
+                    : null;
+                  return (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                        {who} adds these themselves
+                      </p>
+                      <ul className="mt-1.5 space-y-1">
+                        {theirs.map((f) => {
+                          const value = (conferenceObligations.values[f.key] ?? "").trim();
+                          return (
+                            <li key={f.key} className="text-sm text-gray-700">
+                              {f.label}:{" "}
+                              {value ? (
+                                <span className="text-gray-900">{value}</span>
+                              ) : (
+                                <span className="text-amber-800">not answered yet</span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {outstanding.length > 0 && (
+                        <p className="mt-2 text-xs text-gray-500">
+                          They sign in, open their own profile and click Edit.{" "}
+                          {mailto && (
+                            <a href={mailto} className="font-medium text-[#EE2A2E] hover:underline">
+                              Email them a reminder
+                            </a>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
               </div>
             )}
 

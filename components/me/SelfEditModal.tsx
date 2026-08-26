@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { updateField } from "@/lib/actions/update-field";
 import { setContactHidden } from "@/lib/actions/user-management";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
@@ -26,6 +26,19 @@ export interface OrgEditData {
   contact: ContactEditData;
   procurementInfo: ProcurementInfo | null;
 }
+
+import {
+  loadContactConferenceObligations,
+  saveConferenceObligations,
+} from "@/lib/actions/conference-access";
+import { isPersonalObligation } from "@/lib/conference/access";
+
+type ConferenceObligations = {
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  values: Record<string, string | null>;
+};
 
 interface SelfEditModalProps {
   orgEditData: OrgEditData[];
@@ -145,7 +158,7 @@ function SelfEditModalInner({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  type Tab = "details" | "procurement";
+  type Tab = "details" | "procurement" | "conference";
   const [tab, setTab] = useState<Tab>("details");
 
   const activeOrg = orgEditData.find((o) => o.orgId === activeOrgId)!;
@@ -153,7 +166,41 @@ function SelfEditModalInner({
   const isHidden = hiddenStates[activeOrgId];
   const procState = procStates[activeOrgId];
   const showProcurement = !!procState;
-  const activeTab: Tab = showProcurement ? tab : "details";
+
+  /**
+   * The conference details only this person can answer.
+   *
+   * An org admin sees these as outstanding on the roster and is given a way to
+   * chase; the answer itself is typed here, by the person the answer is about.
+   * Loaded per active org, because someone may hold seats through more than
+   * one of them.
+   */
+  const [conferenceObligations, setConferenceObligations] =
+    useState<ConferenceObligations | null>(null);
+  const [conferenceFields, setConferenceFields] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    const contactId = activeOrg?.contact?.id;
+    if (!contactId) return;
+    let cancelled = false;
+    setConferenceObligations(null);
+    void loadContactConferenceObligations(contactId, activeOrgId).then((result) => {
+      if (cancelled || !result.success || !result.data) return;
+      const mine = result.data.fields.filter((f) => isPersonalObligation(f.key));
+      if (mine.length === 0) return;
+      setConferenceObligations({ ...result.data, fields: mine });
+      setConferenceFields(
+        Object.fromEntries(mine.map((f) => [f.key, result.data!.values[f.key] ?? ""]))
+      );
+    });
+    return () => { cancelled = true; };
+  }, [activeOrgId, activeOrg?.contact?.id]);
+
+  const showConference = conferenceObligations !== null;
+  const activeTab: Tab =
+    (tab === "procurement" && !showProcurement) || (tab === "conference" && !showConference)
+      ? "details"
+      : tab;
 
   function switchOrg(orgId: string) {
     setActiveOrgId(orgId);
@@ -176,6 +223,21 @@ function SelfEditModalInner({
   async function handleSave() {
     setSaving(true);
     setError(null);
+
+    // The conference tab writes to conference_people, not contacts, so it
+    // saves on its own path and returns — the contact/procurement work below
+    // has nothing to do with it.
+    if (activeTab === "conference" && conferenceObligations) {
+      const result = await saveConferenceObligations(
+        conferenceObligations.personId,
+        conferenceObligations.conferenceId,
+        conferenceFields
+      );
+      setSaving(false);
+      if (result.success) onClose();
+      else setError(result.error);
+      return;
+    }
 
     const contact = activeOrg.contact;
     const original = initFieldState(contact);
@@ -324,8 +386,8 @@ function SelfEditModalInner({
             </div>
           )}
 
-          {/* Details / Procurement sub-tabs — only when procurement is available for this org */}
-          {showProcurement && (
+          {/* Sub-tabs — shown when this org has anything beyond details. */}
+          {(showProcurement || showConference) && (
             <div className="flex border-b border-gray-100 shrink-0">
               <button
                 onClick={() => { setTab("details"); setError(null); }}
@@ -337,21 +399,64 @@ function SelfEditModalInner({
               >
                 Details
               </button>
-              <button
-                onClick={() => { setTab("procurement"); setError(null); }}
-                className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  activeTab === "procurement"
-                    ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
-                    : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                Procurement
-              </button>
+              {showProcurement && (
+                <button
+                  onClick={() => { setTab("procurement"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    activeTab === "procurement"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Procurement
+                </button>
+              )}
+              {showConference && (
+                <button
+                  onClick={() => { setTab("conference"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    activeTab === "conference"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Conference
+                </button>
+              )}
             </div>
           )}
 
           {/* Body */}
           <div className="overflow-y-auto flex-1">
+          {activeTab === "conference" && conferenceObligations && (
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-xs text-gray-500">
+                Only you can answer these. They go to catering and the on-site team for
+                {" "}{activeOrg.orgName} — never into the printed directory, and your
+                colleagues can see whether you&rsquo;ve answered but not change it.
+              </p>
+              {conferenceObligations.fields.map((f) => (
+                <div key={f.key}>
+                  <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                    {f.label}
+                  </label>
+                  <input
+                    value={conferenceFields[f.key] ?? ""}
+                    onChange={(e) =>
+                      setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                    }
+                    placeholder={SELF_CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
+                    className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                  />
+                </div>
+              ))}
+              <p className="text-xs text-gray-400">
+                Leave one blank if it doesn&rsquo;t apply — we&rsquo;d rather keep asking than
+                record a guess.
+              </p>
+            </div>
+          )}
+
           {activeTab === "details" && (
           <div className="px-6 py-5 space-y-4">
 
@@ -521,3 +626,12 @@ function SelfEditModalInner({
     </>
   );
 }
+
+/** Same examples the org-side modal uses; "Dietary restrictions" alone gets
+ *  answered "none" by people who do need a gluten-free plate. */
+const SELF_CONFERENCE_PLACEHOLDERS: Record<string, string> = {
+  dietary_restrictions: "Vegetarian, celiac, nut allergy…",
+  accessibility_needs: "Step-free access, seating near the front…",
+  emergency_contact_name: "Who we call if something happens",
+  emergency_contact_phone: "Mobile is best",
+};

@@ -4,6 +4,7 @@ import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/li
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
   computePersonObligations,
+  isPersonalObligation,
   type PersonObligationFields,
   type PersonObligationStatus,
 } from "@/lib/conference/access";
@@ -189,6 +190,12 @@ export async function saveConferenceObligations(
   const patch: Record<string, string | null> = {};
   for (const [key, value] of Object.entries(values)) {
     if (!owed.has(key)) continue;
+    // ⛔ An org admin may not answer a personal obligation on someone's behalf.
+    // Refused here, not merely hidden in the UI: a dietary restriction or an
+    // emergency contact entered by a colleague who assumed is worse than a
+    // blank one, because it reads as confirmed. The admin's affordance is to
+    // send the person to their own profile.
+    if (!isOwner && isPersonalObligation(key)) continue;
     // Empty means "I have none" — stored as NULL so the obligation reads as
     // outstanding rather than silently satisfied by a blank string. Someone
     // with no dietary needs answers by leaving it empty, and we keep asking;
