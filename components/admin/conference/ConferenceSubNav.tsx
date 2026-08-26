@@ -27,6 +27,7 @@ const STAGES: Array<{ label: string; tabs: Tab[] }> = [
       { segment: "build", label: "Catalog" },
       { segment: "floor-plan", label: "Floor Plan" },
       { segment: "schedule", label: "Schedule" },
+      { segment: "hotel", label: "Hotel" },
       { segment: "documents", label: "Documents" },
     ],
   },

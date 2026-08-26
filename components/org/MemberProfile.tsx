@@ -873,7 +873,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg
                     ? <span className="flex flex-col gap-0.5">
                         <span>{organization.email || "—"}</span>
-                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                        <span className="text-xs text-gray-400">Public record — printed in the directory. Use a shared inbox, never a personal address</span>
                       </span>
                     : renderOrgField(organization.email, "email")}
                 </span>
@@ -1475,7 +1475,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg
                     ? <span className="flex flex-col gap-0.5">
                         <span>{organization.email || "—"}</span>
-                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                        <span className="text-xs text-gray-400">Public record — printed in the directory. Use a shared inbox, never a personal address</span>
                       </span>
                     : renderOrgField(organization.email, "email")}
                 </span>

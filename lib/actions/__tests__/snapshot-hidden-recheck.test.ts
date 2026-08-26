@@ -9,48 +9,54 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 // snapshots.ts pulls in capture.ts -> contacts/directory.ts, which is server-only.
 vi.mock("server-only", () => ({}));
 
-let hiddenNames: string[] = [];
-let shouldError = false;
-
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => ({
-    from: () => ({
-      select: () => ({
-        in: () => ({
-          eq: async () =>
-            shouldError
-              ? { data: null, error: { message: "boom" } }
-              : { data: hiddenNames.map((name) => ({ name })), error: null },
-        }),
-      }),
-    }),
-  }),
+const state = vi.hoisted(() => ({
+  hiddenNames: [] as string[],
+  shouldError: false,
+  snapshotRow: {
+    id: "s1",
+    type: "org_profile",
+    page_url: "/org/x",
+    page_title: "X",
+    note: null,
+    created_by: "u1",
+    recipient_email: null,
+    expires_at: new Date(Date.now() + 86_400_000).toISOString(),
+    created_at: new Date().toISOString(),
+    snapshot: {
+      type: "org_profile",
+      organization: { id: "o1", name: "X" },
+      contacts: [{ name: "Stays Visible" }, { name: "Asked To Be Hidden" }],
+    },
+  },
 }));
 
-const snapshotRow = {
-  id: "s1",
-  type: "org_profile",
-  page_url: "/org/x",
-  page_title: "X",
-  note: null,
-  created_by: "u1",
-  recipient_email: null,
-  expires_at: new Date(Date.now() + 86_400_000).toISOString(),
-  created_at: new Date().toISOString(),
-  snapshot: {
-    type: "org_profile",
-    organization: { id: "o1", name: "X" },
-    contacts: [{ name: "Stays Visible" }, { name: "Asked To Be Hidden" }],
-  },
-};
-
-vi.mock("@/lib/supabase/server", () => ({
-  createClient: async () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({ maybeSingle: async () => ({ data: snapshotRow, error: null }) }),
-      }),
-    }),
+// resolveSnapshot reads BOTH the snapshot and the hidden re-check with the
+// service role — anon can no longer select page_snapshots directly, which is
+// what forces every read through the expiry and withdrawal checks.
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminClient: () => ({
+    from: (table: string) => {
+      if (table === "page_snapshots") {
+        return {
+          select: () => ({
+            eq: () => ({
+              maybeSingle: async () => ({ data: state.snapshotRow, error: null }),
+            }),
+          }),
+        };
+      }
+      // contacts — who has since asked to be hidden
+      return {
+        select: () => ({
+          in: () => ({
+            eq: async () =>
+              state.shouldError
+                ? { data: null, error: { message: "boom" } }
+                : { data: state.hiddenNames.map((name) => ({ name })), error: null },
+          }),
+        }),
+      };
+    },
   }),
 }));
 
@@ -63,8 +69,8 @@ const names = (r: unknown) =>
     ?.snapshot?.contacts ?? []).map((c) => c.name);
 
 beforeEach(() => {
-  hiddenNames = [];
-  shouldError = false;
+  state.hiddenNames = [];
+  state.shouldError = false;
 });
 
 describe("resolveSnapshot hidden re-check", () => {
@@ -75,14 +81,14 @@ describe("resolveSnapshot hidden re-check", () => {
   });
 
   it("drops someone who asked to be hidden after capture", async () => {
-    hiddenNames = ["Asked To Be Hidden"];
+    state.hiddenNames = ["Asked To Be Hidden"];
     const result = await resolveSnapshot("s1");
     expect(result.valid).toBe(true);
     expect(names(result)).toEqual(["Stays Visible"]);
   });
 
   it("fails closed — an unreadable check publishes nobody", async () => {
-    shouldError = true;
+    state.shouldError = true;
     const result = await resolveSnapshot("s1");
     expect(names(result)).toEqual([]);
   });

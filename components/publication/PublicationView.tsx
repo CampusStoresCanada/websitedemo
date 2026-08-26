@@ -329,6 +329,14 @@ function Listing({ entry, style = "full" }: { entry: ComposedEntry; style?: List
           {entry.primaryContact.phone ? ` · ${entry.primaryContact.phone}` : ""}
           {entry.primaryContact.email ? ` · ${entry.primaryContact.email}` : ""}
         </p>
+      ) : entry.publicEmail || entry.publicPhone ? (
+        // Nobody has agreed to be named, but the ORGANISATION has affirmed a
+        // public-record contact. That is the company's own decision to publish,
+        // and needs nobody's personal permission — unlike the raw email column,
+        // which is a named person's address in most rows and is never used here.
+        <p className="pub-contact">
+          {[entry.publicPhone, entry.publicEmail].filter(Boolean).join(" · ")}
+        </p>
       ) : null}
 
       {entry.classes.length > 0 ? <p className="pub-classes">{entry.classes.join(" · ")}</p> : null}

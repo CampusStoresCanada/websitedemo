@@ -91,16 +91,47 @@ export async function listProxyCandidates(
   const grantor = await loadGrantorFacts(db, grantorOrganizationId);
   if (!grantor) return fail("That organization does not exist.");
 
-  // Own-store colleagues, plus the primary contact of every other member store.
-  // Two routes, one query: anything else would need a second round trip and the
-  // set is small (roughly one row per member store plus the store's own staff).
+  // Who counts as a "Primary Store contact" (By-Law Part VII S7) is the
+  // org_admin role, NOT `contacts.is_primary`. Confirmed by the ED 2026-08-26:
+  // the admins ARE the primary store contacts, and the flag is stale data that
+  // lags reality — reading it turned away 9 real admins and left 3 member
+  // stores with nobody able to hold another store's proxy.
+  const { data: adminRows } = await db
+    .from("user_organizations")
+    .select("user_id, organization_id")
+    .eq("role", "org_admin")
+    .eq("status", "active");
+
+  const adminProfilesByOrg = new Map<string, Set<string>>();
+  for (const r of adminRows ?? []) {
+    const set = adminProfilesByOrg.get(r.organization_id as string) ?? new Set<string>();
+    set.add(r.user_id as string);
+    adminProfilesByOrg.set(r.organization_id as string, set);
+  }
+
+  // Scoped to member stores. Loading every contact would pull vendor partner
+  // staff in only to refuse them one by one — ~950 rows to explain 70.
+  const { data: memberOrgs } = await db
+    .from("organizations")
+    .select("id")
+    .eq("type", "Member")
+    .in("membership_status", ["active", "reactivated"])
+    .is("archived_at", null);
+
+  const scope = [
+    ...new Set([grantorOrganizationId, ...(memberOrgs ?? []).map((o) => o.id as string)]),
+  ];
+
+  // Own-store colleagues, plus every member store's administrators. One query:
+  // a store's own staff plus a handful per member store is a small set, and
+  // splitting it would cost a round trip per organization.
   const { data, error } = await db
     .from("contacts")
     .select(
-      "id, name, first_name, last_name, organization_id, is_primary, archived_at, organizations(name, type, membership_status)"
+      "id, name, first_name, last_name, profile_id, organization_id, archived_at, organizations(name, type, membership_status)"
     )
     .is("archived_at", null)
-    .or(`organization_id.eq.${grantorOrganizationId},is_primary.eq.true`);
+    .in("organization_id", scope);
 
   if (error) return fail(`Could not load contacts: ${error.message}`);
 
@@ -120,7 +151,10 @@ export async function listProxyCandidates(
       organizationId: row.organization_id,
       organizationType: org?.type ?? null,
       organizationMembershipStatus: org?.membership_status ?? null,
-      isPrimaryContact: row.is_primary === true,
+      isPrimaryContact:
+        row.profile_id !== null &&
+        (adminProfilesByOrg.get(row.organization_id as string)?.has(row.profile_id as string) ??
+          false),
       active: row.archived_at === null,
     };
 
@@ -189,11 +223,23 @@ export async function appointProxy(
   const { data: holder } = await db
     .from("contacts")
     .select(
-      "id, name, first_name, last_name, organization_id, is_primary, archived_at, organizations(type, membership_status)"
+      "id, name, first_name, last_name, profile_id, organization_id, archived_at, organizations(type, membership_status)"
     )
     .eq("id", input.proxyholderContactId)
     .maybeSingle();
   if (!holder) return fail("That contact does not exist.");
+
+  // Same rule as the picker: org_admin is the Primary Store contact.
+  const { data: holderAdmin } = holder.profile_id
+    ? await db
+        .from("user_organizations")
+        .select("user_id")
+        .eq("organization_id", holder.organization_id as string)
+        .eq("user_id", holder.profile_id as string)
+        .eq("role", "org_admin")
+        .eq("status", "active")
+        .maybeSingle()
+    : { data: null };
 
   const holderOrg = embedded(holder.organizations as never) as
     | { type: string | null; membership_status: string | null }
@@ -205,7 +251,7 @@ export async function appointProxy(
     organizationId: holder.organization_id,
     organizationType: holderOrg?.type ?? null,
     organizationMembershipStatus: holderOrg?.membership_status ?? null,
-    isPrimaryContact: holder.is_primary === true,
+    isPrimaryContact: holderAdmin !== null,
     active: holder.archived_at === null,
   });
 

@@ -259,12 +259,21 @@ export async function updateField({
     // the org's public/priced number until the org's next benchmarking
     // submission naturally refreshes it (see submitBenchmarkingSurvey).
     const isManualFteEdit = table === "organizations" && column === "fte";
+    // Editing the org's contact slot IS the affirmation that it is a public
+    // record. Every existing value predates that promise — they were collected
+    // as "how do we reach you" and are a named person's details in 102 of 110
+    // rows — so none of them may be printed until someone sets them again
+    // under the label that now says so. Stamping here is what makes the value
+    // publishable; nothing backfills it.
+    const isPublicContactEdit =
+      table === "organizations" && (column === "email" || column === "phone");
     const adminClient = createAdminClient();
     const { error: updateError } = await adminClient
       .from(table)
       .update({
         [column]: newValue,
         ...(isManualFteEdit ? { fte_is_manual_override: true } : {}),
+        ...(isPublicContactEdit ? { public_contact_confirmed_at: new Date().toISOString() } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", entityId);

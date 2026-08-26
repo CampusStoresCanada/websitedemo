@@ -302,6 +302,15 @@ export type DirectoryEntry = {
   city: string | null;
   province: string | null;
   website: string | null;
+  /**
+   * The organisation's own public-record contact — publishable only because an
+   * admin affirmed it as such. Null when never affirmed, which is every row
+   * until someone does: `organizations.email` and `.phone` were collected as
+   * "how do we reach you" and are a named person's details in 102 of 110 cases,
+   * so they cannot be printed on the strength of existing data.
+   */
+  publicEmail: string | null;
+  publicPhone: string | null;
   orgPhone: string | null;
   /**
    * What kind of institution, from the latest benchmarking response —
@@ -659,4 +668,30 @@ function buildBoothIndex(entries: ComposedEntry[]): Array<{ booth: string; entry
   return entries
     .flatMap((entry) => entry.boothNumbers.map((booth) => ({ booth, entry })))
     .sort((a, b) => compareBoothNumbers(a.booth, b.booth));
+}
+
+/**
+ * The organisation's own contact details, but only once affirmed as a public
+ * record.
+ *
+ * `organizations.email` and `.phone` were collected as "how do we reach you"
+ * and hold a named person's details in 102 of 110 rows. Printing one as a
+ * company contact would route around the per-person consent gate through a
+ * different column, so the value alone is never enough — the affirmation is
+ * what makes it publishable.
+ *
+ * A function rather than an inline ternary because the last consent filter
+ * that lived inline was computed and never read, and shipped an unconsented
+ * name onto a page. This one is exercised by tests.
+ */
+export function publishablePublicContact(org: {
+  email?: string | null;
+  phone?: string | null;
+  public_contact_confirmed_at?: string | null;
+}): { publicEmail: string | null; publicPhone: string | null } {
+  if (!org.public_contact_confirmed_at) return { publicEmail: null, publicPhone: null };
+  return {
+    publicEmail: org.email?.trim() || null,
+    publicPhone: org.phone?.trim() || null,
+  };
 }

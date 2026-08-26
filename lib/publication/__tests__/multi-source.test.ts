@@ -20,7 +20,7 @@ const entry = (orgId: string, orgName: string, over: Partial<DirectoryEntry> = {
   catalogueUrl: null, rawCategories: "Apparel, Headwear", boothNumbers: [],
   publicCode: `CODE${orgId}`, orgType: "Vendor Partner",
   city: null, province: null, website: null, orgPhone: null,
-  institutionType: null, fte: null,
+  publicEmail: null, publicPhone: null, institutionType: null, fte: null,
   primaryContact: null,
   contacts: [{ name: `${orgName} Person`, roleTitle: "Rep", email: "p@x.test", phone: "555" }],
   completeness: computeOrgCompleteness({
@@ -39,7 +39,7 @@ const MEMBERS = { kind: "organizations", orgType: "Member" } as const;
 // Sock Rocket exhibits AND is a partner — the overlap the book has to handle.
 const sockRocket = entry("o1", "Sock Rocket", { boothNumbers: ["101"] });
 const quietPartner = entry("o2", "Quiet Partner");
-const memberStore = entry("o3", "Acme College", { orgType: "Member", institutionType: "College", fte: 8000 });
+const memberStore = entry("o3", "Acme College", { orgType: "Member", publicEmail: null, publicPhone: null, institutionType: "College", fte: 8000 });
 
 const bySource = new Map<string, DirectoryEntry[]>([
   [sourceKey(CONF), [sockRocket]],

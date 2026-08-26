@@ -23,13 +23,15 @@ export interface StripeReconcileDetail {
   stripeInvoiceId: string;
   localStatusBefore: string;
   stripeStatus: string;
-  action: "activated" | "still_unpaid" | "error";
+  action: "activated" | "voided" | "still_unpaid" | "error";
   error?: string;
 }
 
 export interface StripeReconcileJobResult {
   checked: number;
   activated: number;
+  /** Local invoices brought into line with a void that happened in Stripe. */
+  voided: number;
   stillUnpaid: number;
   errors: string[];
   details: StripeReconcileDetail[];
@@ -42,6 +44,7 @@ export async function stripeInboundReconcileRun(): Promise<StripeReconcileJobRes
   const result: StripeReconcileJobResult = {
     checked: 0,
     activated: 0,
+    voided: 0,
     stillUnpaid: 0,
     errors: [],
     details: [],
@@ -64,6 +67,40 @@ export async function stripeInboundReconcileRun(): Promise<StripeReconcileJobRes
 
     try {
       const stripeInvoice = await stripe.invoices.retrieve(row.stripe_invoice_id);
+
+      // A void is as settled as a payment — it means nobody is collecting this.
+      // Previously it fell into "still unpaid" and the local row stayed
+      // "invoiced" indefinitely, which is how Shoes for Crews sat voided in
+      // Stripe and open here. The webhook now catches these going forward;
+      // this catches the ones that already drifted.
+      if (stripeInvoice.status === "void") {
+        const voidEvent = {
+          id: `manual_reconcile_void_${stripeInvoice.id}_${Date.now()}`,
+          type: "invoice.voided",
+          data: { object: stripeInvoice },
+        } as unknown as Stripe.Event;
+
+        await processStripeWebhookEvent(voidEvent, db);
+
+        await db.from("stripe_webhook_events").insert({
+          id: voidEvent.id,
+          type: voidEvent.type,
+          result: "success",
+          payload: toWebhookPayloadJson(voidEvent),
+          processed_at: new Date().toISOString(),
+        });
+
+        result.voided++;
+        result.details.push({
+          invoiceId: row.id,
+          organizationId: row.organization_id,
+          stripeInvoiceId: row.stripe_invoice_id,
+          localStatusBefore: row.status,
+          stripeStatus: "void",
+          action: "voided",
+        });
+        continue;
+      }
 
       if (stripeInvoice.status !== "paid") {
         result.stillUnpaid++;

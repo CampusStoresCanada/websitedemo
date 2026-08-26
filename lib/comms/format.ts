@@ -17,6 +17,30 @@ export function formatConferenceDates(startDate: string | null, endDate: string 
 }
 
 /**
+ * A single date, written the way a person would write it.
+ *
+ * Exists because `renewal_date` was being passed straight through as
+ * "2026-09-01" and rendering that way in every renewal reminder the membership
+ * receives. A stored date is not a written date, and the gap between them is
+ * invisible in code and obvious in an inbox.
+ *
+ * UTC throughout: these are calendar dates (a renewal date, a deadline), not
+ * moments, and reading them in the server's timezone is how a September 1st
+ * becomes an August 31st.
+ */
+export function formatMemberFacingDate(date: string | null | undefined): string {
+  if (!date) return "";
+  const iso = date.slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return date;
+  return new Date(`${iso}T00:00:00Z`).toLocaleDateString("en-CA", {
+    timeZone: "UTC",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+}
+
+/**
  * Baseline {{recipient_name}}/{{first_name}}/{{email}} for any resolved
  * recipient — falls back to the email's local part when there's no real
  * name on file, so the template never renders a literal empty string.

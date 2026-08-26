@@ -21,6 +21,7 @@ import {
 } from "./completeness";
 import {
   compareBoothNumbers,
+  publishablePublicContact,
   sourceKey,
   type DirectoryContact,
   type DirectoryEntry,
@@ -278,6 +279,8 @@ export async function loadDirectoryEntries(
         city: o.city ?? null,
         province: o.province ?? null,
         website: o.website ?? null,
+        // ⛔ Gated on the affirmation, never on the value being present.
+        ...publishablePublicContact(o),
         orgPhone: o.phone ?? null,
         institutionType: institutionTypes.get(o.id) ?? null,
         fte: typeof o.fte === "number" ? o.fte : null,

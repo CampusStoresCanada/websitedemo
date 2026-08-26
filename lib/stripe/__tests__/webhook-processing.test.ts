@@ -103,7 +103,7 @@ import {
   processStripeWebhookEvent,
   recordConferenceWebhookEvent,
 } from "../webhook-processing";
-import { makeFakeDb } from "../../test/fake-supabase";
+import { callsFor, makeFakeDb } from "../../test/fake-supabase";
 
 function checkoutSessionEvent(overrides: {
   metadata?: Record<string, string>;
@@ -162,13 +162,29 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("isHandledStripeWebhookEvent", () => {
-  it("handles exactly the four money-path event types", () => {
+  it("handles exactly the five money-path event types", () => {
     expect(isHandledStripeWebhookEvent("checkout.session.completed")).toBe(true);
     expect(isHandledStripeWebhookEvent("invoice.paid")).toBe(true);
     expect(isHandledStripeWebhookEvent("invoice.payment_failed")).toBe(true);
     expect(isHandledStripeWebhookEvent("charge.refunded")).toBe(true);
     expect(isHandledStripeWebhookEvent("payment_intent.succeeded")).toBe(false);
     expect(isHandledStripeWebhookEvent("customer.created")).toBe(false);
+  });
+
+  it("handles invoice.voided", () => {
+    // Without this a dashboard void never reached us: invoices.status stayed
+    // "invoiced" forever, the renewal chase kept treating the org as owing, and
+    // receivables totalled from that column over-counted. Shoes for Crews sat
+    // voided in Stripe and open here for weeks before anyone noticed.
+    expect(isHandledStripeWebhookEvent("invoice.voided")).toBe(true);
+  });
+
+  it("still ignores the other invoice lifecycle events", () => {
+    // Narrow on purpose — finalization and creation say nothing about whether
+    // money is owed.
+    expect(isHandledStripeWebhookEvent("invoice.created")).toBe(false);
+    expect(isHandledStripeWebhookEvent("invoice.finalized")).toBe(false);
+    expect(isHandledStripeWebhookEvent("invoice.marked_uncollectible")).toBe(false);
   });
 });
 
@@ -454,5 +470,67 @@ describe("recordConferenceWebhookEvent", () => {
     });
 
     expect(from).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// invoice.voided — a void must never read as a cancellation
+// ---------------------------------------------------------------------------
+
+function invoiceVoidedEvent(id: string): Stripe.Event {
+  return {
+    id: `evt_${id}`,
+    type: "invoice.voided",
+    data: { object: { id, object: "invoice" } },
+  } as unknown as Stripe.Event;
+}
+
+describe("processStripeWebhookEvent — invoice.voided", () => {
+  it("no-ops on the echo from a bundled booth/partnership checkout", async () => {
+    // The partner-pays-booth-and-partnership-together case.
+    // activateMembershipRenewal() voids the org's leftover standalone
+    // membership invoice LOCALLY FIRST (renewal-activation.ts), then calls
+    // stripe.invoices.voidInvoice() — which Stripe echoes straight back here
+    // as invoice.voided. They paid in a different lane; the echo must not
+    // rewrite the row and must not touch their membership.
+    const { db, recorded } = makeFakeDb({
+      invoices: [{ data: { id: "inv-1", status: "voided", organization_id: "org-1" } }],
+    });
+
+    await processStripeWebhookEvent(invoiceVoidedEvent("in_bundled"), db as never);
+
+    expect(callsFor(recorded, "invoices").filter((c) => c.method === "update")).toEqual([]);
+    expect(transitionMembershipStateMock).not.toHaveBeenCalled();
+  });
+
+  it("voids a live invoice without touching membership status", async () => {
+    // Membership state is driven by expiry dates and payments, never by
+    // invoice status. Voiding stops the chase; it does not cancel anybody.
+    const { db, recorded } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-2", status: "invoiced", organization_id: "org-2" } },
+        { data: null, error: null },
+      ],
+    });
+
+    await processStripeWebhookEvent(invoiceVoidedEvent("in_live"), db as never);
+
+    const update = callsFor(recorded, "invoices").find((c) => c.method === "update");
+    expect(update?.args[0]).toMatchObject({ status: "voided" });
+    expect(transitionMembershipStateMock).not.toHaveBeenCalled();
+    expect(recorded.some((r) => r.table === "organizations")).toBe(false);
+  });
+
+  it("refuses to overwrite an invoice that is already paid", async () => {
+    // A void landing on settled money is a contradiction to surface, not to
+    // resolve by fiat — otherwise a stray dashboard click erases real revenue.
+    const { db, recorded } = makeFakeDb({
+      invoices: [{ data: { id: "inv-3", status: "paid", organization_id: "org-3" } }],
+    });
+
+    await processStripeWebhookEvent(invoiceVoidedEvent("in_paid"), db as never);
+
+    expect(callsFor(recorded, "invoices").filter((c) => c.method === "update")).toEqual([]);
+    expect(transitionMembershipStateMock).not.toHaveBeenCalled();
   });
 });

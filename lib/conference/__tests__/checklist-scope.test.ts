@@ -41,7 +41,7 @@ describe("publication scoping resolves the whole listed network", () => {
       featuredProduct: null, featuredProductDetail: null, catalogueUrl: null,
       rawCategories: null, boothNumbers: [], publicCode: null, orgType: null,
       city: null, province: null, website: null, orgPhone: null,
-      institutionType: null, fte: null, primaryContact: null, contacts: [],
+      publicEmail: null, publicPhone: null, institutionType: null, fte: null, primaryContact: null, contacts: [],
       completeness: { orgId, orgName: orgId, orgSlug: null, fields: [], requiredFilled: 0,
         requiredTotal: 0, enhancedFilled: 0, enhancedTotal: 0, overallPct: 0,
         missing: [], isPrintReady: false },

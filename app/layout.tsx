@@ -14,6 +14,7 @@ import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
 import OnboardingGate from "@/components/layout/OnboardingGate";
 import { getPlatformIdentity } from "@/lib/data";
+import { canPauseCircleBadge, isCircleBadgePaused } from "@/lib/circle/badge-preference";
 
 export async function generateMetadata(): Promise<Metadata> {
   const identity = await getPlatformIdentity();
@@ -54,6 +55,14 @@ export default async function RootLayout({
     ),
   };
 
+  // Personal off-switch for the Circle badge poll. Seeded server-side so a
+  // paused account never fires the first poll on load; isCircleBadgePaused()
+  // returns false without touching the database for anyone not allow-listed.
+  const showCirclePauseToggle = canPauseCircleBadge(serverAuth.user?.email);
+  const circleBadgePaused = serverAuth.user
+    ? await isCircleBadgePaused(serverAuth.user.id, serverAuth.user.email ?? null)
+    : false;
+
   // True for any user who has a qualifying persona (all 4 journeys)
   const serverHasOnboarding =
     serverAuth.user != null && serverAuth.organizations.length > 0;
@@ -70,7 +79,11 @@ export default async function RootLayout({
         >
           <ToolkitProvider>
             <Suspense>
-              <Header identity={identity} />
+              <Header
+                identity={identity}
+                circleBadgePaused={circleBadgePaused}
+                showCirclePauseToggle={showCirclePauseToggle}
+              />
             </Suspense>
             <OnboardingGate serverHasOnboarding={serverHasOnboarding}>
               <main className="min-h-screen">{children}</main>

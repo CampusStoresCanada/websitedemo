@@ -33,7 +33,7 @@ const entry = () => ({
   catalogueUrl: null, rawCategories: "Apparel", boothNumbers: ["101"],
   publicCode: "AAAA0001", orgType: "Vendor Partner",
   city: "Ottawa", province: "ON", website: "acme.test", orgPhone: "555",
-  institutionType: null, fte: null,
+  publicEmail: null, publicPhone: null, institutionType: null, fte: null,
   primaryContact: { name: "Dana", roleTitle: "Sales", email: "d@a.test", phone: "555" },
   contacts: [{ name: "Dana Fox", roleTitle: "Sales", email: "d@a.test", phone: "555" }],
   completeness: computeOrgCompleteness({

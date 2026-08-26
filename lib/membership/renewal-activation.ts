@@ -171,7 +171,7 @@ export interface ActivateMembershipRenewalParams {
   newExpiresAt: string;
   /** ISO date (YYYY-MM-DD) the new membership period starts. */
   billingPeriodStart: string;
-  triggeredBy: "stripe_webhook" | "conference_checkout";
+  triggeredBy: "stripe_webhook" | "conference_checkout" | "out_of_band";
   /** Idempotency key — e.g. the Stripe invoice id, or `conference_order:<id>`. */
   idempotencyKey: string;
   /** Local invoices.id this activation is settling, if any. */
@@ -234,15 +234,16 @@ export async function activateMembershipRenewal(
     // org stayed stuck on "approved" forever — masked as if logged out,
     // with no way for its own admin to edit the profile.
     const nextStatus = org.membership_status === "locked" ? "reactivated" : "active";
-    // Both activation sources are ultimately driven by a Stripe webhook
-    // (the invoice-paid event, or the conference-checkout-session-completed
-    // event) — the state machine's trigger vocabulary doesn't distinguish
-    // further, so both map to "stripe_webhook" here. The richer
+    // The Stripe-driven sources (the invoice-paid event, the
+    // conference-checkout-session-completed event) both map to
+    // "stripe_webhook"; a payment recorded outside Stripe entirely — a
+    // cheque or EFT settled through markInvoicePaidOutOfBand — has no
+    // webhook behind it, so it logs as "system". The richer
     // params.triggeredBy is preserved in the renewal_events metadata below.
     const transitionResult = await transitionMembershipState(
       params.organizationId,
       nextStatus,
-      "stripe_webhook",
+      params.triggeredBy === "out_of_band" ? "system" : "stripe_webhook",
       null,
       org.membership_status === "approved" ? "First payment received" : "Renewal payment received"
     );
@@ -303,4 +304,89 @@ export async function activateMembershipRenewal(
   );
 
   return { success: true };
+}
+
+/**
+ * Settle a just-paid membership/partnership invoice into the org's
+ * membership state. The single shared tail for every way an invoice can be
+ * paid — the Stripe `invoice.paid` webhook, the Stripe reconcile sweeper,
+ * and out-of-band settlement (cheque/EFT recorded in QuickBooks) via
+ * markInvoicePaidOutOfBand — so no payment channel can quietly take money
+ * without advancing the year it bought.
+ *
+ * Invoices carrying a billing period (everything createProgramInvoice makes)
+ * advance `membership_expires_at` through activateMembershipRenewal.
+ * Invoices without one were created outside the renewal flow — a GST/HST
+ * correction, a hand-made Stripe invoice — and deliberately buy no time:
+ * they only lift an org out of `grace`, exactly as before.
+ *
+ * Never throws. A failure here must not unwind an invoice that is already
+ * genuinely paid, so problems are reported back to the caller (and logged)
+ * rather than raised.
+ */
+export async function settlePaidInvoiceMembership(params: {
+  organizationId: string;
+  invoiceId?: string | null;
+  billingPeriodStart: string | null;
+  billingPeriodEnd: string | null;
+  triggeredBy: ActivateMembershipRenewalParams["triggeredBy"];
+  /** Stripe invoice id where one exists, so the webhook and out-of-band
+   *  paths dedupe against each other rather than double-activating. */
+  idempotencyKey: string;
+  metadata?: Record<string, unknown>;
+}): Promise<{ activated: boolean; error?: string }> {
+  const db = createAdminClient();
+
+  if (params.billingPeriodEnd) {
+    const result = await activateMembershipRenewal({
+      organizationId: params.organizationId,
+      newExpiresAt: params.billingPeriodEnd,
+      billingPeriodStart: params.billingPeriodStart ?? params.billingPeriodEnd,
+      triggeredBy: params.triggeredBy,
+      idempotencyKey: params.idempotencyKey,
+      invoiceId: params.invoiceId ?? null,
+      metadata: params.metadata,
+    });
+
+    if (!result.success) {
+      console.error(
+        `[membership] activation failed for org ${params.organizationId} (${params.triggeredBy}): ${result.error}`
+      );
+      return { activated: false, error: result.error };
+    }
+    return { activated: true };
+  }
+
+  // No billing period — buys no time. Only lift an org out of grace.
+  const { data: org, error } = await db
+    .from("organizations")
+    .select("membership_status")
+    .eq("id", params.organizationId)
+    .single();
+
+  if (error || !org) {
+    const message = error?.message ?? "Organization not found.";
+    console.error(
+      `[membership] could not read status for org ${params.organizationId} (${params.triggeredBy}): ${message}`
+    );
+    return { activated: false, error: message };
+  }
+
+  if (org.membership_status === "grace") {
+    const transition = await transitionMembershipState(
+      params.organizationId,
+      "active",
+      params.triggeredBy === "out_of_band" ? "system" : "stripe_webhook",
+      null,
+      "Renewal payment received"
+    );
+    if (!transition.success) {
+      console.error(
+        `[membership] grace→active failed for org ${params.organizationId} (${params.triggeredBy}): ${transition.error}`
+      );
+      return { activated: false, error: transition.error };
+    }
+  }
+
+  return { activated: false };
 }

@@ -39,7 +39,11 @@ import {
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
 import { enqueueCircleSync } from "@/lib/circle/sync";
-import { markVoteExecuted } from "@/lib/board/vote-service";
+import { markVoteExecuted, withdrawVoteForApplication } from "@/lib/board/vote-service";
+import { extractDomain } from "@/lib/applications/duplicate-match";
+import { raiseAlertIfNotOpen, resolveAlertsByRuleKey } from "@/lib/ops/alerts";
+import { logAuditEventSafe } from "@/lib/ops/audit";
+import { revalidatePath } from "next/cache";
 
 // ─────────────────────────────────────────────────────────────────
 // Types
@@ -91,16 +95,8 @@ export interface DuplicateOrgMatch {
 // Duplicate organization / duplicate charge detection
 // ─────────────────────────────────────────────────────────────────
 
-function extractDomain(value: string | null | undefined): string | null {
-  if (!value) return null;
-  const trimmed = value.trim().toLowerCase();
-  if (!trimmed) return null;
-  const atIdx = trimmed.indexOf("@");
-  if (atIdx !== -1) return trimmed.slice(atIdx + 1) || null;
-  const withoutProtocol = trimmed.replace(/^https?:\/\//, "").replace(/^www\./, "");
-  const domain = withoutProtocol.split(/[/?#]/)[0];
-  return domain || null;
-}
+// extractDomain lives in lib/applications/duplicate-match.ts so it can be unit
+// tested — nothing exported from this "use server" file can be.
 
 /**
  * Invoice statuses that mean "this org still owes us money", matching the set
@@ -194,6 +190,225 @@ async function findDuplicateOrganizations(
   }
 
   return Array.from(byId.values());
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Possible-duplicate hold
+// ─────────────────────────────────────────────────────────────────
+//
+// An application that looks like an organization we already have stops here
+// until a human says otherwise. Nothing automatic may act on it — in
+// particular the hourly board-vote cron, which otherwise opens a board vote
+// and posts it to Board Stuff as Butler. That happened for real: an existing,
+// already-approved partner re-applied through the booth checkout, and nine
+// directors were asked to vote on admitting an organization CSC had been
+// billing for years.
+//
+// The hold is a separate axis from `status`. The application genuinely is
+// pending_review and every admin surface should keep showing it that way;
+// what's suspended is the automation.
+//
+// Note this is a module-private helper, not an export — this is a "use server"
+// file, where a non-async export breaks the whole module at runtime.
+
+function duplicateHoldRuleKey(applicationId: string): string {
+  return `application_duplicate_suspected:${applicationId}`;
+}
+
+/**
+ * Screens an application that has just reached pending_review, and puts it on
+ * hold if it looks like an organization we already have.
+ *
+ * Best-effort by design: screening failure must not strand an applicant who
+ * has already paid, so a thrown error leaves the application un-held and is
+ * logged rather than surfaced. The un-held case is the pre-existing behaviour,
+ * not a new risk.
+ */
+async function screenApplicationForDuplicates(
+  applicationId: string
+): Promise<DuplicateOrgMatch[]> {
+  try {
+    const db = createAdminClient();
+
+    const { data: app } = await db
+      .from("signup_applications")
+      .select("id, applicant_email, applicant_name, application_data, duplicate_hold_at, duplicate_cleared_at")
+      .eq("id", applicationId)
+      .maybeSingle();
+
+    if (!app) return [];
+    // Already screened — don't re-hold something an admin has cleared.
+    if (app.duplicate_hold_at || app.duplicate_cleared_at) return [];
+
+    const appData = (app.application_data ?? {}) as Record<string, unknown>;
+    const orgName =
+      (appData.organization_name as string) || (appData.company_name as string) || "";
+    if (!orgName) return [];
+
+    const matches = await findDuplicateOrganizations(db, {
+      name: orgName,
+      email: app.applicant_email,
+      website: (appData.website as string) || null,
+    });
+
+    if (matches.length === 0) return [];
+
+    const heldAt = new Date().toISOString();
+
+    // A plain snapshot of what the matcher saw at screening time — the same
+    // shape goes in the column and in the alert. Kept explicit rather than
+    // storing the DuplicateOrgMatch objects directly, so a later change to
+    // that interface can't silently alter the historical record.
+    const matchSnapshot = matches.map((m) => ({
+      id: m.id,
+      name: m.name,
+      type: m.type,
+      membershipStatus: m.membershipStatus,
+      matchReasons: m.matchReasons,
+      hasPaidInvoice: m.hasPaidInvoice,
+      hasOutstandingInvoice: m.hasOutstandingInvoice,
+    }));
+
+    await db
+      .from("signup_applications")
+      .update({
+        duplicate_hold_at: heldAt,
+        duplicate_matches: matchSnapshot,
+        updated_at: heldAt,
+      })
+      .eq("id", applicationId);
+
+    const baseUrl = process.env.NEXT_PUBLIC_APP_URL || "https://websitedemo-khaki.vercel.app";
+    const withMoney = matches.filter((m) => m.hasPaidInvoice || m.hasOutstandingInvoice);
+
+    await raiseAlertIfNotOpen({
+      ruleKey: duplicateHoldRuleKey(applicationId),
+      // Money already on the other side means approving could double-charge a
+      // real organization, which is worse than a stalled application.
+      severity: withMoney.length > 0 ? "critical" : "warning",
+      // Deliberately no counts of anything that moves — an ops_alert message is
+      // frozen at creation, and a stale number reads as a current fact.
+      message:
+        `Application from ${app.applicant_name ?? "an applicant"} for "${orgName}" is on hold: ` +
+        `it matches ${matches.length === 1 ? "an organization" : "organizations"} we already have ` +
+        `(${matches.map((m) => m.name).join(", ")}). No board vote will open and nothing will be ` +
+        `created until an admin clears or resolves it at ${baseUrl}/admin/applications`,
+      details: {
+        applicationId,
+        applicantEmail: app.applicant_email,
+        submittedOrgName: orgName,
+        heldAt,
+        matches: matchSnapshot,
+      },
+    });
+
+    return matches;
+  } catch (err) {
+    console.error(
+      `[applications] duplicate screening failed for ${applicationId}; leaving un-held:`,
+      err
+    );
+    return [];
+  }
+}
+
+/**
+ * Releases the hold once a human has dealt with the matches.
+ *
+ * Called automatically when the application reaches a resolved state (approve,
+ * merge, reject), and directly by an admin who has looked at the matches and
+ * judged them false positives.
+ */
+async function releaseDuplicateHold(
+  applicationId: string,
+  clearedBy: string,
+  how: string
+): Promise<void> {
+  try {
+    const db = createAdminClient();
+    const now = new Date().toISOString();
+
+    const { data: app } = await db
+      .from("signup_applications")
+      .select("duplicate_hold_at, duplicate_cleared_at")
+      .eq("id", applicationId)
+      .maybeSingle();
+
+    if (!app?.duplicate_hold_at || app.duplicate_cleared_at) return;
+
+    await db
+      .from("signup_applications")
+      .update({
+        duplicate_cleared_at: now,
+        duplicate_cleared_by: clearedBy,
+        updated_at: now,
+      })
+      .eq("id", applicationId);
+
+    await resolveAlertsByRuleKey(duplicateHoldRuleKey(applicationId));
+
+    await logAuditEventSafe({
+      action: "application_duplicate_hold_cleared",
+      entityType: "signup_application",
+      entityId: applicationId,
+      actorId: clearedBy,
+      actorType: "user",
+      details: { how },
+    });
+  } catch (err) {
+    console.error(`[applications] failed to release duplicate hold for ${applicationId}:`, err);
+  }
+}
+
+/**
+ * Admin action: the matches were looked at and are not the same organization.
+ * Releases the hold so the normal flow (board vote, approval) can resume.
+ */
+export async function clearApplicationDuplicateHold(
+  applicationId: string,
+  note: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const trimmed = note.trim();
+  if (trimmed.length < 8) {
+    return { success: false, error: "A note is required (minimum 8 characters)." };
+  }
+
+  const db = createAdminClient();
+  const { data: app } = await db
+    .from("signup_applications")
+    .select("id, duplicate_hold_at, duplicate_cleared_at")
+    .eq("id", applicationId)
+    .maybeSingle();
+
+  if (!app) return { success: false, error: "Application not found." };
+  if (!app.duplicate_hold_at) return { success: false, error: "This application is not on hold." };
+  if (app.duplicate_cleared_at) return { success: false, error: "This hold has already been cleared." };
+
+  await releaseDuplicateHold(
+    applicationId,
+    auth.ctx.userId,
+    `Cleared by admin as not a duplicate: ${trimmed}`
+  );
+
+  revalidatePath("/admin/applications");
+  return { success: true };
+}
+
+/**
+ * True while an application is held for possible-duplicate review. Automation
+ * must check this before acting on a pending_review application.
+ */
+export async function isApplicationOnDuplicateHold(applicationId: string): Promise<boolean> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("signup_applications")
+    .select("duplicate_hold_at, duplicate_cleared_at")
+    .eq("id", applicationId)
+    .maybeSingle();
+  return Boolean(data?.duplicate_hold_at && !data.duplicate_cleared_at);
 }
 
 /**
@@ -378,6 +593,11 @@ export async function verifyApplicationEmail(
     })
     .eq("id", app.id);
 
+  // Screen before anything automatic can pick this up. pending_review is the
+  // state the board-vote cron watches, so the hold has to be in place from the
+  // moment the application enters it.
+  await screenApplicationForDuplicates(app.id as string);
+
   // Send "application received" to applicant
   const receivedContent = await applicationReceivedEmail(
     app.applicant_name ?? "Applicant",
@@ -454,6 +674,10 @@ export async function fastTrackApplicationVerification(
       updated_at: new Date().toISOString(),
     })
     .eq("id", applicationId);
+
+  // Same screening as the emailed-link path — fast-tracking skips the
+  // applicant's click, not the duplicate check.
+  await screenApplicationForDuplicates(applicationId);
 
   // Let the applicant know their application is moving forward, same
   // email they'd have gotten had they clicked the verification link.
@@ -598,6 +822,14 @@ export async function approveApplication(
   // when there wasn't one, so approvals that never went to the board (or that
   // predate the vote system) are unaffected.
   await markVoteExecuted(applicationId, userId);
+
+  // The admin confirmed past the duplicate warning to get here, so the hold is
+  // resolved by that decision.
+  await releaseDuplicateHold(
+    applicationId,
+    userId,
+    "Approved as a new organization past the duplicate warning"
+  );
 
   // 2. Create contact record for primary contact
   const knownPerson = await ensureKnownPerson({
@@ -913,6 +1145,22 @@ export async function mergeApplicationIntoOrganization(
     })
     .eq("id", applicationId);
 
+  await releaseDuplicateHold(
+    applicationId,
+    userId,
+    `Merged into existing organization "${target.name}" (${targetOrgId})`
+  );
+
+  // A merge means this was never a new partner, so any board vote the cron
+  // opened for it was asking the wrong question — withdraw it rather than
+  // leave nine directors being reminded about a decision that no longer
+  // exists. markVoteExecuted only touches carried votes, so it can't do this.
+  await withdrawVoteForApplication(
+    applicationId,
+    userId,
+    `Application merged into existing organization "${target.name}" — already an approved partner, so no board decision was required.`
+  );
+
   // 3. Record/refresh the applicant as a known contact on the org.
   const knownPerson = await ensureKnownPerson({
     organizationId: targetOrgId,
@@ -1101,6 +1349,15 @@ export async function rejectApplication(
       updated_at: new Date().toISOString(),
     })
     .eq("id", applicationId);
+
+  // A rejected application is resolved, so its hold and ops alert must not
+  // outlive it — and any open vote is moot.
+  await releaseDuplicateHold(applicationId, userId, "Application rejected");
+  await withdrawVoteForApplication(
+    applicationId,
+    userId,
+    "Application rejected by staff before the vote closed."
+  );
 
   // Send rejection email
   if (app.applicant_email) {

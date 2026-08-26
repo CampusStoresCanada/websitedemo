@@ -128,6 +128,11 @@ function listingXml(entry: ComposedEntry, indent: string, style: ListingStyle): 
   }
   if (entry.classes.length > 0) out += tag("Classes", entry.classes.join(" · "), inner);
   out += contactXml();
+  // Only when affirmed as a public record, and only when no person is named.
+  if (!entry.primaryContact && (entry.publicPhone || entry.publicEmail)) {
+    out += tag("PublicContactPhone", entry.publicPhone, inner);
+    out += tag("PublicContactEmail", entry.publicEmail, inner);
+  }
   out += tag("Catalogue", entry.catalogueUrl, inner);
   out += assetsXml();
   out += `${indent}</${compact ? "CompactListing" : "Listing"}>\n`;

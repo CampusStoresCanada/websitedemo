@@ -24,7 +24,7 @@ const entry = (over: Partial<DirectoryEntry> = {}): DirectoryEntry => ({
   catalogueUrl: "https://x.test/cat.pdf", rawCategories: "Apparel, Headwear",
   boothNumbers: ["101"], publicCode: "AAAA0001", orgType: "Member",
   city: "Hamilton", province: "ON", website: "https://acme.test", orgPhone: "905-555-0100",
-  institutionType: "University", fte: 24500,
+  publicEmail: null, publicPhone: null, institutionType: "University", fte: 24500,
   primaryContact: { name: "Dana Fox", roleTitle: "Manager", email: "d@a.test", phone: "555" },
   contacts: [
     { name: "Dana Fox", roleTitle: "Manager", email: "d@a.test", phone: "555" },

@@ -150,7 +150,7 @@ type ApplicationPaymentState = {
   onboarded: boolean;
 };
 
-type PaymentFailureRow = {
+type OpenInvoiceRow = {
   id: string;
   status: string;
   total_cents: number;
@@ -372,7 +372,7 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     stripeWebhookRes,
     conferenceWebhookRes,
     pendingAppsRes,
-    failedInvoicesRes,
+    openInvoicesRes,
     qboReconPendingRes,
     qboExportFailedRes,
     qboExportPendingCountRes,
@@ -464,14 +464,26 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
       .in("status", ["pending", "pending_review", "pending_verification", "approved"])
       .order("created_at", { ascending: false })
       .limit(12),
+    // Open money, oldest first.
+    //
+    // This used to filter ["failed", "overdue", "pending_settlement"]. Nothing
+    // in this codebase ever writes "failed" or "overdue" to invoices — the only
+    // statuses written are draft / invoiced / pending_settlement / paid /
+    // voided / refunded_full — so the panel was permanently empty. That mattered
+    // beyond the display: the void-invoice control renders only inside this
+    // list, so no invoice could be voided anywhere in the app.
+    //
+    // Ordered ascending because the oldest unpaid invoice is the one that needs
+    // triage, and the list below is capped.
     adminClient
       .from("invoices")
       .select(
-        "id, status, total_cents, due_date, created_at, organization_id, organization:organizations(name, slug, email)"
+        "id, status, total_cents, due_date, created_at, organization_id, organization:organizations(name, slug, email)",
+        { count: "exact" }
       )
-      .in("status", ["failed", "overdue", "pending_settlement"])
-      .order("created_at", { ascending: false })
-      .limit(12),
+      .in("status", ["pending_settlement", "invoiced", "draft"])
+      .order("created_at", { ascending: true })
+      .limit(50),
     adminClient
       .from("qbo_reconciliation_queue")
       .select("id, qbo_payment_id, amount_cents, currency, paid_at, status, notes, created_at")
@@ -852,7 +864,8 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
     owing: "bg-amber-50 text-amber-800",
     unknown: "bg-gray-100 text-gray-600",
   };
-  const paymentFailures = (failedInvoicesRes.data ?? []) as PaymentFailureRow[];
+  const openInvoices = (openInvoicesRes.data ?? []) as OpenInvoiceRow[];
+  const openInvoiceTotal = openInvoicesRes.count ?? openInvoices.length;
   const qbReconPendingRows = (qboReconPendingRes.data ?? []) as QBReconPendingRow[];
   const qboExportFailedRows = (qboExportFailedRes.data ?? []) as QBExportFailureRow[];
   const qboExportPendingCount = qboExportPendingCountRes.count ?? 0;
@@ -1085,11 +1098,19 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
 
   const failedStripe = stripeEvents.filter((row) => row.result !== "success").length;
   const failedConference = conferenceEvents.filter((row) => !row.success).length;
-  const settlementAtRisk = paymentFailures.filter((row) => {
-    if (row.status !== "pending_settlement" || !row.due_date) return false;
-    const due = new Date(row.due_date).getTime();
-    const daysUntilDue = (due - now.getTime()) / (1000 * 60 * 60 * 24);
-    return daysUntilDue <= 3;
+  // Settlement that has been in flight too long.
+  //
+  // This previously keyed off due_date, which nothing in the app ever populates
+  // on invoices — so it could only ever evaluate to 0, and the "Settlement at
+  // risk" figure on the QB card below was a constant dressed as a measurement.
+  // Age since created_at is the signal that actually exists: pending_settlement
+  // means Stripe took the payment and hasn't confirmed, which should resolve in
+  // hours, not days.
+  const SETTLEMENT_STALE_DAYS = 3;
+  const settlementAtRisk = openInvoices.filter((row) => {
+    if (row.status !== "pending_settlement") return false;
+    const ageDays = (now.getTime() - new Date(row.created_at).getTime()) / (1000 * 60 * 60 * 24);
+    return ageDays >= SETTLEMENT_STALE_DAYS;
   });
   const qbBacklogCount = qbReconPendingRows.length;
   const qbCard = cards.find((card) => card.key === "qb-reconciliation");
@@ -2008,22 +2029,30 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
         </article>
 
         <article className="rounded-xl border border-gray-200 bg-white p-4">
-          <h2 className="text-base font-semibold text-gray-900">Payment Failures</h2>
+          <h2 className="text-base font-semibold text-gray-900">Open Invoices</h2>
           <p className="mt-1 text-sm text-gray-600">
-            Failed/overdue/pending-settlement invoices requiring triage.
+            Unpaid and in-flight invoices — draft, invoiced and pending-settlement —
+            oldest first. This is also the only place an invoice can be voided.
           </p>
 
           <ul className="mt-3 space-y-2">
-            {paymentFailures.length === 0 ? (
-              <li className="text-sm text-gray-500">No payment failures in the current query window.</li>
+            {openInvoices.length === 0 ? (
+              <li className="text-sm text-gray-500">No open invoices.</li>
             ) : (
-              paymentFailures.slice(0, 8).map((row) => (
+              openInvoices.slice(0, 8).map((row) => (
                 <li key={row.id} className="rounded-lg border border-gray-100 p-2 text-sm">
                   <p className="font-medium text-gray-900">
                     {row.organization?.name ?? row.organization_id}
                   </p>
                   <p className="text-gray-600">
-                    {row.status} • ${(row.total_cents / 100).toFixed(2)} • Due <Timestamp iso={row.due_date} />
+                    {row.status} • ${(row.total_cents / 100).toFixed(2)} • Raised{" "}
+                    <Timestamp iso={row.created_at} />
+                    {row.due_date ? (
+                      <>
+                        {" "}
+                        • Due <Timestamp iso={row.due_date} />
+                      </>
+                    ) : null}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     {row.organization?.slug ? (
@@ -2093,6 +2122,14 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
               ))
             )}
           </ul>
+
+          {/* Never let the cap read as "that's all of them". */}
+          {openInvoiceTotal > Math.min(openInvoices.length, 8) ? (
+            <p className="mt-2 text-xs text-gray-500">
+              Showing the {Math.min(openInvoices.length, 8)} oldest of {openInvoiceTotal} open
+              invoices.
+            </p>
+          ) : null}
         </article>
 
         <article className="rounded-xl border border-gray-200 bg-white p-4">

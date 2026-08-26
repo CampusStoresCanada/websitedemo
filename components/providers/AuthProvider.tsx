@@ -391,7 +391,6 @@ export function AuthProvider({
 
   const fetchUserData = useCallback(
     async (userId: string) => {
-      const nowIso = new Date().toISOString();
       const [profileResult, orgsResult, grantsResult] = await Promise.all([
         supabase.from("profiles").select("*").eq("id", userId).single(),
         supabase
@@ -409,13 +408,8 @@ export function AuthProvider({
           )
           .eq("user_id", userId)
           .eq("status", "active"),
-        supabase
-          .from("capability_grants")
-          .select("capability")
-          .eq("subject_id", userId)
-          .is("revoked_at", null)
-          .lte("starts_at", nowIso)
-          .gt("ends_at", nowIso),
+        // Capabilities follow the roles this person currently holds.
+        supabase.rpc("current_capabilities", { p_subject: userId }),
       ]);
 
       if (profileResult.error || orgsResult.error) {
@@ -522,8 +516,8 @@ export function AuthProvider({
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
       const heldCapabilities = new Set(
-        ((grantsResult.data ?? []) as { capability: string }[]).map(
-          (g) => g.capability,
+        ((grantsResult.data ?? []) as (string | { capability: string })[]).map(
+          (g) => (typeof g === "string" ? g : g.capability),
         ),
       );
       const holdsQaVerify = heldCapabilities.has("benchmarking.qa_verify");

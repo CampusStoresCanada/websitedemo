@@ -7,6 +7,7 @@ import {
   rejectApplication,
   fastTrackApplicationVerification,
   mergeApplicationIntoOrganization,
+  clearApplicationDuplicateHold,
 } from "@/lib/actions/applications";
 import type { DuplicateOrgMatch } from "@/lib/actions/applications";
 import { parseUTC } from "@/lib/utils";
@@ -28,6 +29,24 @@ interface Application {
   paid_at: string | null;
   paid_amount_cents: number | null;
   paid_for: string | null;
+  duplicate_hold_at: string | null;
+  duplicate_matches: Json;
+  duplicate_cleared_at: string | null;
+}
+
+/** Held while screening found matches and no admin has cleared them yet. */
+function isOnDuplicateHold(app: Application): boolean {
+  return Boolean(app.duplicate_hold_at && !app.duplicate_cleared_at);
+}
+
+/**
+ * The match snapshot stored at screening time. Read defensively — it is
+ * historical JSON, not a live join, and its shape may predate later changes.
+ */
+function heldMatches(app: Application): Array<{ name?: string; matchReasons?: string[] }> {
+  return Array.isArray(app.duplicate_matches)
+    ? (app.duplicate_matches as Array<{ name?: string; matchReasons?: string[] }>)
+    : [];
 }
 
 function formatCentsDisplay(cents: number): string {
@@ -77,6 +96,29 @@ export function ApplicationsReview({
     matches: DuplicateOrgMatch[];
   } | null>(null);
   const [fastTrackConfirmId, setFastTrackConfirmId] = useState<string | null>(null);
+  const [clearHoldNote, setClearHoldNote] = useState("");
+
+  async function handleClearHold(id: string) {
+    setError(null);
+    setActionLoading(id);
+
+    const result = await clearApplicationDuplicateHold(id, clearHoldNote);
+
+    setActionLoading(null);
+
+    if (!result.success) {
+      setError(result.error || "Failed to clear the duplicate hold");
+      return;
+    }
+
+    setClearHoldNote("");
+    setApplications((prev) =>
+      prev.map((a) =>
+        a.id === id ? { ...a, duplicate_cleared_at: new Date().toISOString() } : a
+      )
+    );
+    router.refresh();
+  }
 
   const filtered = applications.filter((app) => {
     if (filterType !== "all" && app.application_type !== filterType) return false;
@@ -304,10 +346,14 @@ export function ApplicationsReview({
                           onStartFastTrack={() => setFastTrackConfirmId(app.id)}
                           onCancelFastTrack={() => setFastTrackConfirmId(null)}
                           onConfirmFastTrack={() => handleFastTrack(app.id)}
+                          clearHoldNote={clearHoldNote}
+                          onClearHoldNoteChange={setClearHoldNote}
+                          onClearHold={() => handleClearHold(app.id)}
                           onCollapse={() => {
                             setExpandedId(null);
                             setDuplicateWarning(null);
                             setFastTrackConfirmId(null);
+                            setClearHoldNote("");
                           }}
                         />
                       ) : (
@@ -339,6 +385,14 @@ export function ApplicationsReview({
                               title={`Paid ${app.paid_amount_cents != null ? formatCentsDisplay(app.paid_amount_cents) : ""} for ${app.paid_for ?? "booth"} before applying`}
                             >
                               PAID{app.paid_amount_cents != null ? ` — ${formatCentsDisplay(app.paid_amount_cents)}` : ""}
+                            </span>
+                          ) : null}
+                          {isOnDuplicateHold(app) ? (
+                            <span
+                              className="ml-1.5 inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-amber-100 text-amber-900"
+                              title="Possible duplicate — no board vote will open and Butler will post nothing until an admin resolves it"
+                            >
+                              ON HOLD — POSSIBLE DUPLICATE
                             </span>
                           ) : null}
                         </td>
@@ -397,6 +451,9 @@ function ExpandedView({
   onCancelFastTrack,
   onConfirmFastTrack,
   onCollapse,
+  clearHoldNote,
+  onClearHoldNoteChange,
+  onClearHold,
 }: {
   app: Application;
   orgName: string;
@@ -420,11 +477,16 @@ function ExpandedView({
   onCancelFastTrack: () => void;
   onConfirmFastTrack: () => void;
   onCollapse: () => void;
+  clearHoldNote: string;
+  onClearHoldNoteChange: (v: string) => void;
+  onClearHold: () => void;
 }) {
   const data = (app.application_data as Record<string, unknown>) || {};
   const isLoading = actionLoading === app.id;
   const isRejecting = rejectingId === app.id;
   const canAct = app.status === "pending_review";
+  const onDuplicateHold = isOnDuplicateHold(app);
+  const holdMatches = heldMatches(app);
 
   const fields = Object.entries(data).map(([key, value]) => ({
     label: key.replace(/_/g, " ").replace(/\b\w/g, (l) => l.toUpperCase()),
@@ -624,6 +686,53 @@ function ExpandedView({
               className="px-4 py-1.5 text-sm text-gray-600 hover:text-gray-800"
             >
               Cancel
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Possible-duplicate hold. Automation is suspended while this shows —
+          no board vote opens and Butler posts nothing — so the admin needs to
+          see both the reason and the way out. */}
+      {canAct && !duplicateWarning && onDuplicateHold && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 p-4 space-y-3">
+          <p className="text-sm font-semibold text-amber-900">
+            On hold — possible duplicate
+          </p>
+          <p className="text-sm text-amber-900">
+            This looks like an organization we already have, so nothing automatic will
+            act on it: no board vote will open and Butler will post nothing until this is
+            resolved.
+          </p>
+          {holdMatches.length > 0 && (
+            <ul className="text-sm text-amber-900 list-disc pl-5 space-y-0.5">
+              {holdMatches.map((m, i) => (
+                <li key={i}>
+                  <span className="font-medium">{m.name ?? "Unknown organization"}</span>
+                  {m.matchReasons?.length ? ` — matched on ${m.matchReasons.join(", ")}` : null}
+                </li>
+              ))}
+            </ul>
+          )}
+          <p className="text-sm text-amber-900">
+            If it is the same organization, use <span className="font-medium">Approve</span> and
+            merge into it. Only clear the hold if you have checked and these are genuinely
+            different organizations.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <input
+              type="text"
+              value={clearHoldNote}
+              onChange={(e) => onClearHoldNoteChange(e.target.value)}
+              placeholder="Why is this not a duplicate? (required)"
+              className="flex-1 min-w-[16rem] rounded-md border border-amber-300 px-2 py-1 text-sm"
+            />
+            <button
+              onClick={onClearHold}
+              disabled={isLoading || clearHoldNote.trim().length < 8}
+              className="rounded-md border border-amber-400 px-3 py-1 text-sm font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+            >
+              {isLoading ? "Clearing…" : "Not a duplicate — clear hold"}
             </button>
           </div>
         </div>

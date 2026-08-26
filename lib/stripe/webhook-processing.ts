@@ -4,7 +4,11 @@ import { parseUTC } from "@/lib/utils";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 // Relative import: vitest has no @/ alias resolver for real (non-mocked)
 // runtime imports — see project notes on the test setup.
-import { activateMembershipRenewal, computeNewExpiresAt } from "../membership/renewal-activation";
+import {
+  activateMembershipRenewal,
+  computeNewExpiresAt,
+  settlePaidInvoiceMembership,
+} from "../membership/renewal-activation";
 import { createSponsorAgreementFromBoothPurchase } from "../sponsorship/booth-agreement";
 import { mintRegistrationAttendeesFromOrder } from "../conference/registration-mint";
 import {
@@ -32,6 +36,7 @@ export const HANDLED_STRIPE_WEBHOOK_EVENTS = new Set([
   "checkout.session.completed",
   "invoice.paid",
   "invoice.payment_failed",
+  "invoice.voided",
   "charge.refunded",
 ]);
 
@@ -119,11 +124,81 @@ export async function processStripeWebhookEvent(
     case "invoice.payment_failed":
       await handleInvoicePaymentFailed(event.data.object as Stripe.Invoice, db);
       return { conferenceOrderId: null };
+    case "invoice.voided":
+      await handleInvoiceVoided(event.data.object as Stripe.Invoice, db);
+      return { conferenceOrderId: null };
     case "charge.refunded":
       return handleChargeRefunded(event.data.object as Stripe.Charge, db);
     default:
       return { conferenceOrderId: null };
   }
+}
+
+/**
+ * An invoice voided in Stripe — usually from the dashboard, when someone
+ * decides a bill should not be collected.
+ *
+ * Until this existed the void never reached us: `invoices.status` stayed
+ * "invoiced" indefinitely, the renewal chase kept treating the org as owing,
+ * and anything totalling receivables from that column over-counted. Found via
+ * Shoes for Crews on 2026-08-24 — voided in Stripe weeks earlier, still showing
+ * open here.
+ *
+ * Deliberately narrow:
+ *  - It only ever moves an invoice INTO "voided", and only from a live status.
+ *    A paid or refunded invoice is left alone; if Stripe reports a void against
+ *    one of those, our record disagrees in a way a person should look at rather
+ *    than have silently overwritten.
+ *  - It does NOT touch membership status. Voiding a bill is not cancelling a
+ *    membership — those are separate decisions, and `optOutOfRenewal()` is where
+ *    the second one is made.
+ *  - It suppresses reminders, because the whole point of voiding is to stop
+ *    asking for the money.
+ */
+async function handleInvoiceVoided(stripeInvoice: Stripe.Invoice, db: AdminClient) {
+  if (!stripeInvoice.id) return;
+
+  const { data: localInvoice } = await db
+    .from("invoices")
+    .select("id, status, organization_id")
+    .eq("stripe_invoice_id", stripeInvoice.id)
+    .maybeSingle();
+
+  if (!localInvoice) {
+    console.info(`invoice.voided: no local invoice for ${stripeInvoice.id}`);
+    return;
+  }
+
+  // Terminal money states win. A void arriving against a settled invoice is a
+  // contradiction worth surfacing, not resolving by fiat.
+  const settled = ["paid", "refunded_full", "refunded_partial"];
+  if (settled.includes(localInvoice.status)) {
+    console.warn(
+      `invoice.voided: Stripe voided ${stripeInvoice.id} but local invoice ${localInvoice.id} is "${localInvoice.status}" — left unchanged`
+    );
+    return;
+  }
+
+  if (localInvoice.status === "voided") return;
+
+  const now = new Date().toISOString();
+  const { error } = await db
+    .from("invoices")
+    .update({
+      status: "voided",
+      reminder_suppressed_at: now,
+      updated_at: now,
+    })
+    .eq("id", localInvoice.id);
+
+  if (error) {
+    console.error(`invoice.voided: failed to void local invoice ${localInvoice.id}: ${error.message}`);
+    return;
+  }
+
+  console.info(
+    `invoice.voided: local invoice ${localInvoice.id} (org ${localInvoice.organization_id}) marked voided from Stripe`
+  );
 }
 
 async function processEventTicketPurchase(
@@ -717,42 +792,19 @@ async function handleInvoicePaid(
 
   if (!orgId) return;
 
-  // Invoices created by createMembershipInvoice/createPartnershipInvoice
-  // always set billing_period_start/end — when present, advance the org's
-  // membership_expires_at through the shared activation helper (this is the
-  // actual fix: previously this webhook only flipped status, never expiry).
-  if (updatedInvoice?.billing_period_end) {
-    const result = await activateMembershipRenewal({
-      organizationId: orgId,
-      newExpiresAt: updatedInvoice.billing_period_end,
-      billingPeriodStart: updatedInvoice.billing_period_start ?? updatedInvoice.billing_period_end,
-      triggeredBy: "stripe_webhook",
-      idempotencyKey: stripeInvoice.id,
-      invoiceId: updatedInvoice.id,
-    });
-    if (!result.success) {
-      console.error(`invoice.paid: membership activation failed for org ${orgId}: ${result.error}`);
-    }
-    return;
-  }
-
-  // No billing period on this invoice (created outside the normal renewal
-  // flow) — preserve exactly today's behavior rather than guessing a date.
-  const { data: org } = await db
-    .from("organizations")
-    .select("membership_status")
-    .eq("id", orgId)
-    .single();
-
-  if (org?.membership_status === "grace") {
-    await transitionMembershipState(
-      orgId,
-      "active",
-      "stripe_webhook",
-      null,
-      "Renewal payment received"
-    );
-  }
+  // Advance membership state through the shared settlement helper — the same
+  // one markInvoicePaidOutOfBand uses, so a cheque settled in QuickBooks and
+  // a card paid through Stripe buy the year identically. Invoices created by
+  // createProgramInvoice always carry billing_period_start/end; ones without
+  // a period buy no time and only lift an org out of grace.
+  await settlePaidInvoiceMembership({
+    organizationId: orgId,
+    invoiceId: updatedInvoice?.id ?? null,
+    billingPeriodStart: updatedInvoice?.billing_period_start ?? null,
+    billingPeriodEnd: updatedInvoice?.billing_period_end ?? null,
+    triggeredBy: "stripe_webhook",
+    idempotencyKey: stripeInvoice.id,
+  });
 }
 
 async function handleInvoicePaymentFailed(

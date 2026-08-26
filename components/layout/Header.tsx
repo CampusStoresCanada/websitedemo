@@ -74,8 +74,19 @@ function isGlobalAdmin(role: string): boolean {
   return role === "admin" || role === "super_admin";
 }
 
-export default function Header({ identity }: { identity: PlatformIdentity }) {
+export default function Header({
+  identity,
+  circleBadgePaused = false,
+  showCirclePauseToggle = false,
+}: {
+  identity: PlatformIdentity;
+  /** Seeded by the root layout so a paused account never fires poll #1. */
+  circleBadgePaused?: boolean;
+  /** Whether to render the pause control at all — allow-listed accounts only. */
+  showCirclePauseToggle?: boolean;
+}) {
   const [isScrolled, setIsScrolled] = useState(false);
+  const [circlePaused, setCirclePaused] = useState(circleBadgePaused);
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showMobileMenu, setShowMobileMenu] = useState(false);
   const [hadSession, setHadSession] = useState(false);
@@ -387,8 +398,34 @@ export default function Header({ identity }: { identity: PlatformIdentity }) {
       }
     },
     { intervalMs: BADGE_POLL_INTERVAL_MS, maxIntervalMs: BADGE_IDLE_MAX_INTERVAL_MS },
-    Boolean(user)
+    Boolean(user) && !circlePaused
   );
+
+  // Personal Circle off-switch. Optimistic: flip the local state first so the
+  // poll stops (or restarts) on this tab immediately, and roll back if the
+  // write fails. Clearing the Circle-sourced state on pause stops a stale
+  // badge count from sitting there unrefreshed.
+  const toggleCirclePause = async () => {
+    const next = !circlePaused;
+    setCirclePaused(next);
+    if (next) {
+      setCircleNotifications([]);
+      setCircleReplies([]);
+      setCircleDms([]);
+      setDmUnreadCount(0);
+      circleSignatureRef.current = null;
+    }
+    try {
+      const response = await fetch("/api/circle/badge-preference", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paused: next }),
+      });
+      if (!response.ok) setCirclePaused(!next);
+    } catch {
+      setCirclePaused(!next);
+    }
+  };
 
   useVisiblePolling(
     async (signal) => {
@@ -625,7 +662,9 @@ export default function Header({ identity }: { identity: PlatformIdentity }) {
                           </a>
                         ))
                       ) : (
-                        <p className="px-2 py-2 text-xs text-gray-500">No messages yet.</p>
+                        <p className="px-2 py-2 text-xs text-gray-500">
+                          {circlePaused ? "Circle updates are paused for your account." : "No messages yet."}
+                        </p>
                       )
                     ) : null}
                     </div>
@@ -664,6 +703,37 @@ export default function Header({ identity }: { identity: PlatformIdentity }) {
                         Notification settings
                       </Link>
                     </div>
+
+                    {showCirclePauseToggle ? (
+                      <div className="mt-2 border-t border-gray-100 pt-2">
+                        <button
+                          type="button"
+                          onClick={() => { void toggleCirclePause(); }}
+                          className="flex w-full items-start justify-between gap-2 rounded px-2 py-1.5 text-left text-xs text-gray-600 hover:bg-gray-50"
+                        >
+                          <span>
+                            {circlePaused ? "Resume Circle updates" : "Pause Circle updates"}
+                            <span className="mt-0.5 block text-[10px] text-gray-400">
+                              {circlePaused
+                                ? "Not polling Circle. Website alerts still arrive."
+                                : "Stops the 5-minute Circle poll for your account."}
+                            </span>
+                          </span>
+                          <span
+                            className={`mt-0.5 inline-flex h-4 w-7 shrink-0 items-center rounded-full transition-colors ${
+                              circlePaused ? "bg-gray-300" : "bg-[var(--brand-red)]"
+                            }`}
+                            aria-hidden="true"
+                          >
+                            <span
+                              className={`inline-block h-3 w-3 transform rounded-full bg-white transition-transform ${
+                                circlePaused ? "translate-x-0.5" : "translate-x-3.5"
+                              }`}
+                            />
+                          </span>
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ) : null}
               </div>

@@ -4,6 +4,7 @@ import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supa
 import { enqueueQBExportRefund } from "@/lib/quickbooks/export";
 import { getBillingConfig, getEffectivePolicy, getRenewalConfig, getProgramsConfig } from "@/lib/policy/engine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
+import { settlePaidInvoiceMembership } from "@/lib/membership/renewal-activation";
 import { effectiveProrationDiscountPct, applyDiscountPct } from "@/lib/policy/proration";
 import { resolveMembershipStripeTaxRateId } from "@/lib/stripe/tax";
 import type { MembershipProgramDef } from "@/lib/policy/types";
@@ -496,14 +497,26 @@ export async function savePaymentMethod(
 
 /**
  * Mark an invoice as paid outside of Stripe (e.g., cheque via QuickBooks).
- * Suppresses Stripe reminder emails if a linked Stripe invoice exists.
+ * Suppresses Stripe reminder emails if a linked Stripe invoice exists, and
+ * settles the payment into the org's membership state.
+ *
+ * That last part used to be missing: this path flipped the invoice row and
+ * stopped there, so a renewal settled by cheque or EFT left
+ * membership_expires_at untouched — the org read "paid" with no year bought,
+ * and every expiry-driven surface (the conference renewal gate, election
+ * eligibility) still treated them as owing. It now runs the same
+ * settlePaidInvoiceMembership() the Stripe webhook does.
+ *
+ * Activation is keyed on the Stripe invoice id where one exists, so this and
+ * a late-arriving `invoice.paid` for the same invoice dedupe against each
+ * other instead of activating twice.
  */
 export async function markInvoicePaidOutOfBand(
   invoiceId: string,
   source: "quickbooks" | "manual",
   externalPaymentId: string,
   paidAt: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; activationError?: string }> {
   const db = createAdminClient();
 
   // 1. Load invoice
@@ -562,5 +575,22 @@ export async function markInvoicePaidOutOfBand(
     }
   }
 
-  return { success: true };
+  // 4. Settle into membership state — advance the expiry for invoices that
+  // carry a billing period, lift grace for those that don't. Deliberately
+  // does not fail the settlement: the money is real and the invoice is
+  // already marked paid, so an activation problem is reported alongside
+  // success rather than unwinding it.
+  const settlement = await settlePaidInvoiceMembership({
+    organizationId: invoice.organization_id,
+    invoiceId: invoice.id,
+    billingPeriodStart: invoice.billing_period_start,
+    billingPeriodEnd: invoice.billing_period_end,
+    triggeredBy: "out_of_band",
+    idempotencyKey: invoice.stripe_invoice_id ?? `invoice:${invoice.id}`,
+    metadata: { payment_source: source, external_payment_id: externalPaymentId },
+  });
+
+  return settlement.error
+    ? { success: true, activationError: settlement.error }
+    : { success: true };
 }

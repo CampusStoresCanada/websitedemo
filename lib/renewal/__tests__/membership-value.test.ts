@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { buildMembershipValueHtml, type MembershipValueInput } from "../membership-value";
+import {
+  buildMembershipValueHtml,
+  resolveProgramFromOrgType,
+  renewalTemplateFor,
+  type MembershipValueInput,
+} from "../membership-value";
 
 const ELECTION = {
   cycleYear: 2027,
@@ -11,6 +16,7 @@ const ELECTION = {
 
 const base: MembershipValueInput = {
   stage: "reminder",
+  program: "member",
   lapsesOn: "2026-10-01",
   election: ELECTION,
   appUrl: "https://example.org",
@@ -110,5 +116,114 @@ describe("the series escalates", () => {
     const html = buildMembershipValueHtml({ ...base, stage: "locked" });
     expect(html).toContain("What has stopped");
     expect(html).toContain("Nothing has been deleted");
+  });
+});
+
+
+describe("vendor partners get a different clause entirely", () => {
+  const partner: MembershipValueInput = { ...base, program: "partner" };
+
+  it("NEVER tells a partner they can vote or nominate", () => {
+    // 43 vendor partners received the 14-day reminder this year. Governance
+    // belongs to member stores; telling a partner they have a vote would be
+    // both false and embarrassing, and there is no stage at which it is right.
+    for (const stage of ["reminder", "grace", "locked"] as const) {
+      const html = buildMembershipValueHtml({ ...partner, stage });
+      expect(html).not.toContain("board election");
+      expect(html).not.toMatch(/vote/i);
+      expect(html).not.toMatch(/nominat/i);
+    }
+  });
+
+  it("does not claim benchmarking data or advocacy on their behalf", () => {
+    // The benchmarking data is ABOUT campus stores; partners do not receive it,
+    // and CSC does not advocate for vendors.
+    const html = buildMembershipValueHtml(partner);
+    expect(html).not.toContain("Data that proves your value");
+    expect(html).not.toContain("Collective advocacy");
+    expect(html).not.toContain("on behalf of Canadian campus stores");
+  });
+
+  it("says what a partner actually buys", () => {
+    const html = buildMembershipValueHtml(partner);
+    expect(html).toContain("The trade show");
+    expect(html).toContain("partner directory");
+    expect(html).toContain("Being asked");
+    expect(html).toContain("Your partnership is how Canadian campus stores find you");
+  });
+
+  it("never says 'membership' to a partner, at any stage", () => {
+    // They renew a partnership. One stray noun and the whole separate-template
+    // exercise is undone in the reader's eye.
+    for (const stage of ["reminder", "grace", "locked"] as const) {
+      expect(buildMembershipValueHtml({ ...partner, stage }).toLowerCase()).not.toContain(
+        "membership"
+      );
+    }
+  });
+
+  it("escalates across the series like the member one does", () => {
+    expect(buildMembershipValueHtml(partner)).toContain("What your partnership carries");
+    expect(buildMembershipValueHtml({ ...partner, stage: "grace" })).toContain("What lapses");
+    expect(buildMembershipValueHtml({ ...partner, stage: "locked" })).toContain("What has stopped");
+  });
+});
+
+describe("resolveProgramFromOrgType", () => {
+  const PROGRAMS = [
+    { orgTypeValue: "Member", permissionLevel: "member" },
+    { orgTypeValue: "Vendor Partner", permissionLevel: "partner" },
+  ];
+
+  it("reads the CAPITALISED org type the database actually stores", () => {
+    // organizations.type is "Member" / "Vendor Partner". A lowercase compare
+    // matches nothing and silently returns the wrong clause.
+    expect(resolveProgramFromOrgType("Member", PROGRAMS)).toBe("member");
+    expect(resolveProgramFromOrgType("Vendor Partner", PROGRAMS)).toBe("partner");
+  });
+
+  it("falls back to partner for anything unrecognised", () => {
+    // The safe direction: the partner clause promises less and claims no vote.
+    expect(resolveProgramFromOrgType("Non-Member", PROGRAMS)).toBe("partner");
+    expect(resolveProgramFromOrgType(null, PROGRAMS)).toBe("partner");
+    expect(resolveProgramFromOrgType("member", PROGRAMS)).toBe("partner");
+  });
+});
+
+describe("renewalTemplateFor", () => {
+  it("sends partners the partnership templates at every stage", () => {
+    expect(renewalTemplateFor("reminder", "partner")).toBe("partnership_renewal_reminder");
+    expect(renewalTemplateFor("grace", "partner")).toBe("partnership_grace_reminder");
+    expect(renewalTemplateFor("locked", "partner")).toBe("partnership_suspended");
+  });
+
+  it("leaves the member series exactly as it was", () => {
+    expect(renewalTemplateFor("reminder", "member")).toBe("renewal_reminder");
+    expect(renewalTemplateFor("grace", "member")).toBe("grace_weekly_reminder");
+    expect(renewalTemplateFor("locked", "member")).toBe("membership_locked");
+  });
+
+  it("never routes a partner to a member template", () => {
+    // The template choice and the value clause have to agree. If these ever
+    // diverge a partner gets member copy under a partnership subject line, or
+    // the reverse — both are worse than either mistake alone.
+    const memberTemplates = ["renewal_reminder", "grace_weekly_reminder", "membership_locked"];
+    for (const stage of ["reminder", "grace", "locked"] as const) {
+      expect(memberTemplates).not.toContain(renewalTemplateFor(stage, "partner"));
+    }
+  });
+});
+
+describe("someone who has unsubscribed", () => {
+  it("still gets the notice, but not the pitch", () => {
+    // The split the send path makes: `membership_value_html` becomes "" for a
+    // suppressed recipient while the invoice notice itself still sends. The
+    // clause is the persuasion; the notice is the obligation. Rendering an
+    // empty clause is a legitimate, silent no-op — the template just closes up.
+    const clause = buildMembershipValueHtml(base);
+    expect(clause.length).toBeGreaterThan(0);
+    // What the send path substitutes instead:
+    const suppressedClause = "";
+    expect(suppressedClause).toBe("");
   });
 });

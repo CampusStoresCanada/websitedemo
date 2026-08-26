@@ -4,6 +4,7 @@ import {
   composePublication,
   compareBoothNumbers,
   conferenceDirectory,
+  publishablePublicContact,
   type DirectoryEntry,
   type Publication,
 } from "../composition";
@@ -22,7 +23,7 @@ const entry = (name: string, cats: string | null, booths: string[] = [], printRe
   catalogueUrl: null, rawCategories: cats, boothNumbers: booths,
   publicCode: "AAAA0001", primaryContact: null, contacts: [],
   orgType: "Vendor Partner", city: null, province: null, website: null, orgPhone: null,
-  institutionType: null, fte: null,
+  publicEmail: null, publicPhone: null, institutionType: null, fte: null,
   completeness: completeness(printReady ? {} : { logo_url: null }),
 });
 
@@ -275,5 +276,29 @@ describe("listing styles", () => {
       if (s.type !== "listings") throw new Error("wrong section");
       expect(s.style).toBe(style);
     }
+  });
+});
+
+describe("public-record contact slot", () => {
+  const org = { email: "  info@example.ca ", phone: "555-0100" };
+
+  it("publishes nothing until the org affirms the slot is a public record", () => {
+    // Every org is in this state today. The values exist — they were collected
+    // as "how do we reach you" and are a named person's address in 102 of 110
+    // rows — and none of them may be printed on the strength of that.
+    expect(publishablePublicContact({ ...org, public_contact_confirmed_at: null }))
+      .toEqual({ publicEmail: null, publicPhone: null });
+    expect(publishablePublicContact(org))
+      .toEqual({ publicEmail: null, publicPhone: null });
+  });
+
+  it("publishes once affirmed", () => {
+    expect(publishablePublicContact({ ...org, public_contact_confirmed_at: "2026-09-01T00:00:00Z" }))
+      .toEqual({ publicEmail: "info@example.ca", publicPhone: "555-0100" });
+  });
+
+  it("an affirmation over an empty slot publishes nothing, not an empty string", () => {
+    expect(publishablePublicContact({ email: "", phone: null, public_contact_confirmed_at: "2026-09-01T00:00:00Z" }))
+      .toEqual({ publicEmail: null, publicPhone: null });
   });
 });

@@ -40,7 +40,15 @@ export interface ProxyPersonFacts {
   organizationType: string | null;
   /** `organizations.membership_status`. */
   organizationMembershipStatus: string | null;
-  /** `contacts.is_primary` for their organization. */
+  /**
+   * Whether this person is their store's Primary Store contact in the by-law's
+   * sense — which at CSC means holding org_admin, NOT the `contacts.is_primary`
+   * flag. Confirmed by the ED 2026-08-26: admins and org admins ARE the primary
+   * store contacts, and `is_primary` is stale data that lags reality.
+   *
+   * Reading the flag instead turned away 9 legitimate admins and left 3 member
+   * stores with nobody able to hold another store's proxy at all.
+   */
   isPrimaryContact: boolean;
   /** `contacts.archived_at is null`. */
   active: boolean;
