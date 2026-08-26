@@ -1077,7 +1077,7 @@ export default function PartnerProfile({
               bypass={isOwnOrgPage}
               requiredPermission="member"
             >
-              <div>
+              <div id="team" className="scroll-mt-20">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
                   Staffing
                 </h3>

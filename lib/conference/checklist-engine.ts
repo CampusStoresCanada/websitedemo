@@ -28,10 +28,12 @@ function getTaskCta(
   const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
   switch (checkType) {
     case "seat_assigned":
-      // The bare org page has no seat UI on it; the conference page now does.
+      // The org page's team roster has had a checkbox per conference entity
+      // all along — that is where seats are assigned. A separate panel on a
+      // separate route was a second way to do the same thing.
       return {
         label: "Choose who's going",
-        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#whos-going`,
+        url: `${appUrl}/org/${ctx.orgSlug}#team`,
       };
     case "entity_purchased":
       return {
@@ -39,19 +41,18 @@ function getTaskCta(
         url: `${appUrl}/conference/${ctx.conferenceYear}/${ctx.conferenceEdition}/offers?org=${ctx.organizationId}`,
       };
     case "travel_info_submitted":
-      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
+      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
     case "payment_complete":
-      // The bare org page shows nothing about conference money.
       return {
         label: "See what's owed",
-        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#payment`,
+        url: `${appUrl}/org/${ctx.orgSlug}#payment`,
       };
     case "legal_document_accepted":
       // Was "View readiness & travel status" pointing at this same page, which
       // then had no acceptance on it — a CTA that led nowhere twice over.
       return {
         label: "Read and accept",
-        url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}#agreements`,
+        url: `${appUrl}/org/${ctx.orgSlug}#agreements`,
       };
     case "directory_profile_complete":
       // Straight to the org's own page, where every field this checks is edited.
@@ -59,8 +60,8 @@ function getTaskCta(
     case "directory_profile_enriched":
       return { label: "Add your product details", url: `${appUrl}/org/${ctx.orgSlug}` };
     case "self_reported":
-      // The org's conference page is where the tick-off list lives.
-      return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}/conference/${ctx.conferenceId}` };
+      // The tick-off list moved onto the org page with everything else.
+      return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
 
   }
 }
@@ -281,7 +282,7 @@ export async function buildChecklistDigest(
       where_to_track:
         `<p style="margin:18px 0 0;font-size:13px;color:#6b7280;line-height:1.55">` +
         `You don't need to keep this email — ${escapeHtml(org.name)}'s list is always at ` +
-        `<a href="${appUrl}/org/${org.slug}/conference/${checklist.conference_id}" style="color:#163D6D">your organisation's conference page</a>, ` +
+        `<a href="${appUrl}/org/${org.slug}#conference_checklist" style="color:#163D6D">your organisation's page</a>, ` +
         `and anything that's yours personally is at ` +
         `<a href="${appUrl}/me/conference/${checklist.conference_id}" style="color:#163D6D">your own conference page</a>.` +
         `</p>`,

@@ -127,10 +127,10 @@ describe("people can track this without keeping the email", () => {
     // company's (which is what the email is) and their own. Sending them to
     // one and letting them find the other is how the overlapping-messages
     // problem started.
-    expect(source).toContain("your organisation's conference page");
+    expect(source).toContain("your organisation's page");
     expect(source).toContain("your own conference page");
     expect(source).toContain("/me/conference/");
-    expect(source).toContain("/org/${org.slug}/conference/");
+    expect(source).toContain("/org/${org.slug}#conference_checklist");
   });
 
   it("escapes the org name in the pointer", () => {

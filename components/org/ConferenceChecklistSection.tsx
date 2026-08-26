@@ -101,6 +101,15 @@ export default async function ConferenceChecklistSection({
 
       <OrgPayments summary={payments} />
       <OrgAgreements status={legalStatus} />
+
+      <p className="text-sm">
+        <a
+          href={`/org/${slug}/conference/${conferenceId}/listing`}
+          className="font-medium text-[#163D6D] hover:underline"
+        >
+          See your printed directory listing &rarr;
+        </a>
+      </p>
     </section>
   );
 }

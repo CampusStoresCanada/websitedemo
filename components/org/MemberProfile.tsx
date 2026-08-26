@@ -980,7 +980,7 @@ export default function MemberProfile({
               ctaText="Sign In"
               ctaLink="/login"
             >
-              <div data-onboarding="contacts_section">
+              <div id="team" data-onboarding="contacts_section" className="scroll-mt-20">
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Staffing</h3>
                   {editMode && canEditThisOrg && (
