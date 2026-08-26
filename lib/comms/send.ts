@@ -49,6 +49,8 @@ export interface ExecuteSendResult {
   recipientCount: number;
   sentCount: number;
   failedCount: number;
+  /** True when the send was refused because the campaign had already left draft/scheduled. Not a failure — nothing was sent twice. */
+  alreadySent?: boolean;
   errors: string[];
 }
 
@@ -79,12 +81,33 @@ export async function executeCampaignSend(
     };
   }
 
-  // Mark as sending
+  // Claim the send atomically. Only a draft or scheduled campaign may go out,
+  // and this conditional UPDATE *is* the lock — a read-then-write check would
+  // still let two rapid Send Now clicks (or two overlapping cron ticks) both
+  // observe "draft" and both blast the full audience. That is not theoretical:
+  // on 2026-08-26 a Send Now that gave no visible feedback was clicked three
+  // times and delivered three copies to every partner on the list.
   if (!options.dryRun) {
-    await supabase
+    const { data: claimed, error: claimErr } = await supabase
       .from("message_campaigns")
       .update({ status: "sending", sent_at: new Date().toISOString() })
-      .eq("id", campaignId);
+      .eq("id", campaignId)
+      .in("status", ["draft", "scheduled"])
+      .select("id");
+
+    if (claimErr || !claimed || claimed.length === 0) {
+      return {
+        campaignId,
+        recipientCount: 0,
+        sentCount: 0,
+        failedCount: 0,
+        alreadySent: !claimErr,
+        errors: [
+          claimErr?.message ??
+            `Campaign is already ${campaign.status} — send skipped (a campaign sends once).`,
+        ],
+      };
+    }
   }
 
   // Load template up front — needed both for rendering and for its

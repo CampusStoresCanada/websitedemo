@@ -10,7 +10,9 @@ import type {
   DeliveryStatus,
   MessageTemplate,
 } from "@/lib/comms/types";
+import { revalidatePath } from "next/cache";
 import CampaignPreviewButton from "@/components/comms/CampaignPreviewButton";
+import PendingSubmitButton from "@/components/ui/PendingSubmitButton";
 import CampaignClickMapButton from "@/components/comms/CampaignClickMapButton";
 import RescheduleCampaignForm from "@/components/comms/RescheduleCampaignForm";
 import LocalDateTime from "@/components/comms/LocalDateTime";
@@ -33,14 +35,20 @@ const STATUS_COLORS: Record<DeliveryStatus, string> = {
   complained: "bg-orange-100 text-orange-700",
 };
 
+// Every one of these mutates the campaign this page is rendering. Without the
+// revalidatePath the route is not re-rendered, so the page comes back byte-for-byte
+// identical — same status, same Send Now button — and a real send looks like a
+// no-op. That is how one campaign got sent three times on 2026-08-26.
 async function sendCampaignAction(campaignId: string) {
   "use server";
   await executeCampaignSend(campaignId);
+  revalidatePath(`/admin/comms/${campaignId}`);
 }
 
 async function cancelCampaignAction(campaignId: string) {
   "use server";
   await cancelScheduledCampaign(campaignId);
+  revalidatePath(`/admin/comms/${campaignId}`);
 }
 
 async function scheduleCampaignAction(formData: FormData) {
@@ -49,6 +57,7 @@ async function scheduleCampaignAction(formData: FormData) {
   const scheduledAtRaw = formData.get("scheduled_at") as string;
   if (!scheduledAtRaw) return;
   await scheduleCampaign(campaignId, new Date(scheduledAtRaw));
+  revalidatePath(`/admin/comms/${campaignId}`);
 }
 
 export default async function CampaignDetailPage({
@@ -183,12 +192,11 @@ export default async function CampaignDetailPage({
                 await cancelCampaignAction(id);
               }}
             >
-              <button
-                type="submit"
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
-              >
-                Cancel Schedule
-              </button>
+              <PendingSubmitButton
+                label="Cancel Schedule"
+                pendingLabel="Cancelling…"
+                variant="secondary"
+              />
             </form>
           )}
           {canSendNow && (
@@ -198,12 +206,7 @@ export default async function CampaignDetailPage({
                 await sendCampaignAction(id);
               }}
             >
-              <button
-                type="submit"
-                className="rounded-lg bg-accent px-4 py-2 text-sm font-medium text-white hover:bg-accent-hover transition-colors"
-              >
-                Send Now
-              </button>
+              <PendingSubmitButton label="Send Now" pendingLabel="Sending…" />
             </form>
           )}
         </div>

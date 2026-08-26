@@ -700,6 +700,17 @@ export async function fastTrackApplicationVerification(
 // Approve Application (admin only)
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Both admin surfaces that list applications. Without this, an approve/reject
+ * submitted from the ops page re-renders nothing: the row stays "pending_review"
+ * on screen, the buttons stay live, and the action looks like it failed. That is
+ * what makes an operator click again — see the comms Send Now incident.
+ */
+function revalidateApplicationSurfaces() {
+  revalidatePath("/admin/ops");
+  revalidatePath("/admin/applications");
+}
+
 export async function approveApplication(
   applicationId: string,
   options?: { confirmDuplicates?: boolean }
@@ -1045,6 +1056,7 @@ export async function approveApplication(
     });
   }
 
+  revalidateApplicationSurfaces();
   return { success: true };
 }
 
@@ -1339,7 +1351,10 @@ export async function rejectApplication(
     return { success: false, error: `Cannot reject application in ${app.status} status` };
   }
 
-  await db
+  // The status write is this function's first mutation, so making it conditional
+  // turns it into the lock for free: two admins (or two tabs) racing the Reject
+  // button cannot both get past it, and only the winner mails the applicant.
+  const { data: claimed } = await db
     .from("signup_applications")
     .update({
       status: "rejected",
@@ -1348,7 +1363,13 @@ export async function rejectApplication(
       reviewed_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     })
-    .eq("id", applicationId);
+    .eq("id", applicationId)
+    .eq("status", "pending_review")
+    .select("id");
+
+  if (!claimed || claimed.length === 0) {
+    return { success: false, error: "This application was already resolved by someone else." };
+  }
 
   // A rejected application is resolved, so its hold and ops alert must not
   // outlive it — and any open vote is moot.
@@ -1373,6 +1394,7 @@ export async function rejectApplication(
     });
   }
 
+  revalidateApplicationSurfaces();
   return { success: true };
 }
 
