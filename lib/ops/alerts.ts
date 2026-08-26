@@ -848,6 +848,50 @@ export async function raiseAlertIfNotOpen(candidate: CandidateAlert): Promise<vo
   }
 }
 
+/**
+ * Closes any open/acknowledged alerts for one rule key.
+ *
+ * The counterpart to raiseAlertIfNotOpen, for event-driven alerts whose
+ * condition is cleared by a person doing something rather than by a candidate
+ * check going quiet — the resolve sweep in evaluateOpsAlerts() only auto-closes
+ * rule keys that its own candidates emit, so those alerts would otherwise sit
+ * open forever. Same best-effort contract: never throws.
+ */
+export async function resolveAlertsByRuleKey(ruleKey: string): Promise<void> {
+  try {
+    const readDb = createAdminClient() as unknown as {
+      from: (table: string) => {
+        select: (columns: string) => {
+          eq: (
+            col: string,
+            val: string,
+          ) => {
+            neq: (
+              col: string,
+              val: string,
+            ) => Promise<{
+              data: unknown[] | null;
+              error: { message: string } | null;
+            }>;
+          };
+        };
+      };
+    };
+
+    const { data } = await readDb
+      .from("ops_alerts")
+      .select("id")
+      .eq("rule_key", ruleKey)
+      .neq("status", "resolved");
+
+    for (const row of (data ?? []) as Array<{ id: string }>) {
+      await resolveAlert(row.id, ruleKey);
+    }
+  } catch {
+    console.error(`[ops] resolveAlertsByRuleKey failed for rule_key=${ruleKey}`);
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Board process rules
 //

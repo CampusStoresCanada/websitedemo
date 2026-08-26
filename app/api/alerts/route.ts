@@ -42,16 +42,12 @@ function orgHrefFromSlug(slug: string | null | undefined): string {
   return slug ? `/org/${slug}` : "/me";
 }
 
+// Only the statuses this app actually writes. "overdue" and "failed" were
+// handled here too, but nothing ever sets them on an invoice — see the note on
+// the query below.
 function invoiceTitle(status: string): string {
-  if (status === "overdue") return "Invoice overdue";
-  if (status === "failed") return "Invoice payment failed";
   if (status === "pending_settlement") return "Invoice pending settlement";
   return "Invoice requires action";
-}
-
-function formatDateLabel(date: string | null): string {
-  if (!date) return "No due date";
-  return date;
 }
 
 function renewalTitle(eventType: string): string {
@@ -191,7 +187,12 @@ export async function GET() {
             `id, status, due_date, total_cents, created_at, organization_id, organization:organizations(name, slug)`
           )
           .in("organization_id", activeOrgIds)
-          .in("status", ["invoiced", "pending_settlement", "overdue", "failed"])
+          // "overdue" and "failed" were listed here but are never written to
+          // invoices — the statuses this app writes are draft / invoiced /
+          // pending_settlement / paid / voided / refunded_full. They matched
+          // nothing, so removing them changes no results. `draft` stays out on
+          // purpose: an unissued invoice shouldn't alarm an org admin.
+          .in("status", ["invoiced", "pending_settlement"])
           .order("created_at", { ascending: false })
           .limit(8)
       : Promise.resolve({ data: [], error: null }),
@@ -292,7 +293,13 @@ export async function GET() {
         id: `invoice:${row.id}`,
         kind: "invoice",
         title: invoiceTitle(row.status),
-        message: `${orgName}: $${total} CAD due ${formatDateLabel(row.due_date)}.`,
+        // invoices.due_date is never populated by anything in this app, so the
+        // old unconditional "due ${date}" rendered as "due No due date." for
+        // every org admin with an open invoice. Drop the clause when there's no
+        // date rather than narrating its absence mid-sentence.
+        message: row.due_date
+          ? `${orgName}: $${total} CAD due ${row.due_date}.`
+          : `${orgName}: $${total} CAD outstanding.`,
         href: orgHrefFromSlug(orgSlug),
         createdAt: row.created_at,
       });

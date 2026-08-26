@@ -23,6 +23,7 @@ import {
   type VoteStatus,
 } from "@/lib/board/vote-tally";
 import { loadBoardRoster, isSittingDirector } from "@/lib/board/vote-roster";
+import { logAuditEventSafe } from "@/lib/ops/audit";
 import type { PartnerApplicationData, DuplicateOrgMatch } from "@/lib/actions/applications";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca";
@@ -552,21 +553,32 @@ export async function findApplicationsNeedingVote(): Promise<string[]> {
   const db = createAdminClient();
   const { data: apps } = await db
     .from("signup_applications")
-    .select("id")
+    .select("id, duplicate_hold_at, duplicate_cleared_at")
     .eq("application_type", "partner")
     .eq("status", "pending_review");
   if (!apps?.length) return [];
+
+  // Held applications are skipped entirely — Butler opens nothing, posts
+  // nothing and reminds nobody until a human has looked at the matches. The
+  // hold is released by setting duplicate_cleared_at, so an application with
+  // both timestamps set is eligible again; only hold-without-clear blocks.
+  const eligible = (apps as Array<{
+    id: string;
+    duplicate_hold_at: string | null;
+    duplicate_cleared_at: string | null;
+  }>).filter((a) => !(a.duplicate_hold_at && !a.duplicate_cleared_at));
+  if (!eligible.length) return [];
 
   const { data: votes } = await db
     .from("board_votes")
     .select("application_id")
     .in(
       "application_id",
-      apps.map((a) => a.id as string)
+      eligible.map((a) => a.id)
     );
 
   const covered = new Set((votes ?? []).map((v) => v.application_id as string));
-  return apps.map((a) => a.id as string).filter((id) => !covered.has(id));
+  return eligible.map((a) => a.id).filter((id) => !covered.has(id));
 }
 
 // ─── Admin + minutes surfaces ─────────────────────────────────────────────────
@@ -655,6 +667,57 @@ export async function markVoteExecuted(applicationId: string, actorProfileId: st
     .eq("application_id", applicationId)
     .eq("status", "carried")
     .is("executed_at", null);
+}
+
+/**
+ * Withdraws a still-open vote whose question turned out not to exist — the
+ * application was a duplicate of an organization the board had already
+ * approved, so there was never anything to decide.
+ *
+ * Distinct from closeVote(), which tallies a vote that ran its course, and from
+ * markVoteExecuted(), which only touches votes that already carried. Neither
+ * can retire an open vote, so before this an orphaned vote sat open until its
+ * deadline, reminding directors about a resolved application.
+ *
+ * `decided_at` is deliberately left null: nothing was decided, and
+ * getDecisionsBetween() would otherwise report this to the minutes as a board
+ * decision. The reason goes to the audit log, since board_votes has no notes
+ * column.
+ */
+export async function withdrawVoteForApplication(
+  applicationId: string,
+  actorProfileId: string,
+  reason: string
+): Promise<void> {
+  const db = createAdminClient();
+
+  const { data: votes } = await db
+    .from("board_votes")
+    .select("id, status")
+    .eq("application_id", applicationId)
+    .eq("status", "open");
+
+  for (const vote of (votes ?? []) as Array<{ id: string }>) {
+    const { error } = await db
+      .from("board_votes")
+      .update({ status: "withdrawn", updated_at: new Date().toISOString() })
+      .eq("id", vote.id)
+      .eq("status", "open");
+
+    if (error) {
+      console.error(`[board] failed to withdraw vote ${vote.id}: ${error.message}`);
+      continue;
+    }
+
+    await logAuditEventSafe({
+      action: "board_vote_withdrawn",
+      entityType: "board_vote",
+      entityId: vote.id,
+      actorId: actorProfileId,
+      actorType: "user",
+      details: { previousStatus: "open", applicationId, reason },
+    });
+  }
 }
 
 export interface DecisionRecord {
