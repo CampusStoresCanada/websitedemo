@@ -30,6 +30,7 @@ import {
   evaluateCosignatures,
   evaluateCandidateEligibility,
   evaluateNominationCompleteness,
+  resolveBoardInvitations,
   type CosignatureStatus,
   type CandidateEligibility,
 } from "./nomination";
@@ -507,6 +508,18 @@ export async function createNomination(input: {
   nominatedByContactId?: string | null;
   /** Organizations invited to co-sign; each gets its own signing token. */
   cosignerOrganizationIds?: { organizationId: string; contactId: string }[];
+  /**
+   * Also invite every sitting director to co-sign.
+   *
+   * By-Law Part V S2(c) wants two Primary Store contacts behind a nomination,
+   * which assumes the nominee knows two to ask. A first-time nominee from a
+   * small store often does not, and that ignorance is not supposed to be the
+   * filter. Inviting the board fans the ask out to people whose job includes
+   * being asked; the first two to sign satisfy the requirement and the rest
+   * lapse unsigned, which costs nothing — evaluateCosignatures counts only
+   * signatures, never invitations.
+   */
+  requestBoardCosignature?: boolean;
 }): Promise<Result<{ nominationId: string; acceptToken: string; cosignTokens: { organizationId: string; token: string }[] }>> {
   const db = createAdminClient();
   const election = await getElection(input.electionSlug);
@@ -548,8 +561,50 @@ export async function createNomination(input: {
     return fail(`Could not record the nomination: ${error.message}`);
   }
 
+  // Directors are invited as themselves — their own contact and their own
+  // store — so a board co-signature is still a Primary Store contact of a
+  // member institution, exactly as S2(c) requires. It is a wider ask, not a
+  // different rule, and `signedByDirectors` already records which of them
+  // signed so the committee can see when a nomination leaned on the board.
+  const invitations = [...(input.cosignerOrganizationIds ?? [])];
+
+  if (input.requestBoardCosignature) {
+    const { data: directors } = await db
+      .from("governance_role_assignments")
+      .select("person_contact_id")
+      .eq("body_id", election.bodyId)
+      .eq("role_key", "director")
+      .is("term_end", null);
+
+    const directorContactIds = (directors ?? [])
+      .map((d) => d.person_contact_id as string)
+      .filter(Boolean);
+
+    if (directorContactIds.length > 0) {
+      const { data: directorContacts } = await db
+        .from("contacts")
+        .select("id, organization_id")
+        .in("id", directorContactIds)
+        .is("archived_at", null);
+
+      invitations.push(
+        ...resolveBoardInvitations(
+          (directorContacts ?? []).map((c) => ({
+            contactId: c.id as string,
+            organizationId: c.organization_id as string,
+          })),
+          invitations,
+          {
+            contactId: input.nomineeContactId,
+            organizationId: input.nomineeOrganizationId,
+          }
+        )
+      );
+    }
+  }
+
   const cosignTokens: { organizationId: string; token: string }[] = [];
-  for (const c of input.cosignerOrganizationIds ?? []) {
+  for (const c of invitations) {
     const token = mintToken();
     const { error: sigError } = await db.from("nomination_cosignatures").insert({
       nomination_id: data.id,
@@ -1142,6 +1197,12 @@ export async function submitMemberNomination(input: {
   nomineeContactId: string;
   nominator: { profileId: string; contactId: string; organizationId: string };
   inviteOrganizationIds: string[];
+  /**
+   * Also ask the board. For a nominator who does not know two Primary Store
+   * contacts to approach, this fans the ask out to people whose role includes
+   * being asked, rather than letting that ignorance decide who can stand.
+   */
+  requestBoardCosignature?: boolean;
   /** Skip email — used by the end-to-end check so it never mails a real person. */
   suppressNotifications?: boolean;
 }): Promise<
@@ -1209,6 +1270,7 @@ export async function submitMemberNomination(input: {
     source: "member",
     nominatedByContactId: input.nominator.contactId,
     cosignerOrganizationIds: inviteTargets,
+    requestBoardCosignature: input.requestBoardCosignature ?? false,
   });
   if (!created.ok) return created;
 

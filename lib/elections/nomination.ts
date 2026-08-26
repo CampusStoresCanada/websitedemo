@@ -209,3 +209,43 @@ export function evaluateNominationCompleteness(
 
   return { complete: missing.length === 0, missing };
 }
+
+
+/**
+ * Who, of the sitting board, should be invited to co-sign a nomination.
+ *
+ * By-Law Part V S2(c) wants two Primary Store contacts behind a name, which
+ * assumes the nominee knows two to ask. A first-time nominee from a small store
+ * often does not, and that ignorance was never meant to be the filter — so the
+ * ask can be fanned out to the board, whose job includes being asked.
+ *
+ * It is a wider ask, not a different rule. Each director is invited as
+ * themselves, at their own store, so a board co-signature is still a Primary
+ * Store contact of a member institution.
+ *
+ * Three exclusions, all from S2(c) rather than taste:
+ *   - a director at the nominee's own store, because the two co-signatures must
+ *     come from institutions other than the one already putting the name
+ *     forward;
+ *   - the nominee, if they happen to sit on the board;
+ *   - anyone already invited directly, so the same person is not asked twice
+ *     through two routes.
+ */
+export function resolveBoardInvitations(
+  directors: readonly { contactId: string; organizationId: string }[],
+  alreadyInvited: readonly { contactId: string }[],
+  nominee: { contactId: string; organizationId: string }
+): { contactId: string; organizationId: string }[] {
+  const invited = new Set(alreadyInvited.map((i) => i.contactId));
+  const out: { contactId: string; organizationId: string }[] = [];
+
+  for (const d of directors) {
+    if (!d.contactId || !d.organizationId) continue;
+    if (d.organizationId === nominee.organizationId) continue;
+    if (d.contactId === nominee.contactId) continue;
+    if (invited.has(d.contactId)) continue;
+    invited.add(d.contactId);
+    out.push(d);
+  }
+  return out;
+}

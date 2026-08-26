@@ -206,6 +206,7 @@ export async function submitNominationAction(
       organizationId: nominatorOrganizationId,
     },
     inviteOrganizationIds: invites,
+    requestBoardCosignature: formData.get("requestBoardCosignature") === "1",
   });
   if (!result.ok) return { ok: false, error: result.error };
 

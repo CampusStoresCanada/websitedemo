@@ -263,6 +263,26 @@ export default async function NominatePage({
                 </label>
               ))}
             </div>
+
+            {/* For a nominator who does not know two Primary Store contacts to
+                approach. Not knowing anyone was never meant to be the filter on
+                who can stand. */}
+            <label className="mt-3 flex cursor-pointer items-start gap-3 rounded-lg border border-gray-200 bg-gray-50 px-3 py-3 text-sm">
+              <input
+                type="checkbox"
+                name="requestBoardCosignature"
+                value="1"
+                className="mt-0.5 h-4 w-4 rounded border-gray-300"
+              />
+              <span className="text-gray-800">
+                <strong className="font-medium">Ask the board as well.</strong>{" "}
+                <span className="text-gray-600">
+                  Every sitting director is invited, and the first two to sign complete the
+                  nomination. Useful if you don&apos;t know two stores to ask — supporting a
+                  nomination is part of what the board is there for.
+                </span>
+              </span>
+            </label>
           </fieldset>
 
           {error && <Notice tone="error">{error}</Notice>}

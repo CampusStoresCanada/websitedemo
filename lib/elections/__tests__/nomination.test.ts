@@ -4,6 +4,7 @@ import {
   evaluateCosignatures,
   evaluateCandidateEligibility,
   evaluateNominationCompleteness,
+  resolveBoardInvitations,
 } from "../nomination";
 
 const sig = (org: string, contact: string, signed = true) => ({
@@ -235,5 +236,65 @@ describe("a store in its grace period", () => {
     void institutionRenewedThroughAgm;
     void renewalReason;
     expect(evaluateCandidateEligibility(unaware, CSC_ELECTIONS_CONFIG).eligible).toBe(true);
+  });
+});
+
+describe("resolveBoardInvitations — fanning the ask out to the board", () => {
+  const board = [
+    { contactId: "d1", organizationId: "org-a" },
+    { contactId: "d2", organizationId: "org-b" },
+    { contactId: "d3", organizationId: "org-c" },
+  ];
+
+  it("invites every director at another institution", () => {
+    const out = resolveBoardInvitations(board, [], {
+      contactId: "nom",
+      organizationId: "org-z",
+    });
+    expect(out.map((d) => d.contactId)).toEqual(["d1", "d2", "d3"]);
+  });
+
+  it("skips a director at the nominee's own store", () => {
+    // S2(c) wants the two co-signatures from institutions other than the one
+    // already putting the name forward.
+    const out = resolveBoardInvitations(board, [], {
+      contactId: "nom",
+      organizationId: "org-b",
+    });
+    expect(out.map((d) => d.contactId)).toEqual(["d1", "d3"]);
+  });
+
+  it("skips the nominee when the nominee is a sitting director", () => {
+    const out = resolveBoardInvitations(board, [], {
+      contactId: "d2",
+      organizationId: "org-z",
+    });
+    expect(out.map((d) => d.contactId)).toEqual(["d1", "d3"]);
+  });
+
+  it("does not ask someone twice who was already invited directly", () => {
+    const out = resolveBoardInvitations(board, [{ contactId: "d1" }], {
+      contactId: "nom",
+      organizationId: "org-z",
+    });
+    expect(out.map((d) => d.contactId)).toEqual(["d2", "d3"]);
+  });
+
+  it("ignores directors with no contact or no store on record", () => {
+    const out = resolveBoardInvitations(
+      [{ contactId: "", organizationId: "org-a" }, { contactId: "d9", organizationId: "" }],
+      [],
+      { contactId: "nom", organizationId: "org-z" }
+    );
+    expect(out).toEqual([]);
+  });
+
+  it("returns nothing when the whole board sits at the nominee's store", () => {
+    // Then the ask genuinely cannot be fanned out, and the caller is left with
+    // whatever direct invitations it had — not a false sense of coverage.
+    const sameStore = board.map((d) => ({ ...d, organizationId: "org-a" }));
+    expect(
+      resolveBoardInvitations(sameStore, [], { contactId: "nom", organizationId: "org-a" })
+    ).toEqual([]);
   });
 });
