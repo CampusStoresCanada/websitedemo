@@ -63,7 +63,7 @@ async function secretaryOrAdmin(): Promise<Actor> {
 
 
 /**
- * §5D. Nothing about a sealed year may change — not the note, not the
+ * Consent seal: Nothing about a sealed year may change — not the note, not the
  * approval, not the store's answer.
  *
  * Checked in every action rather than once at a chokepoint, because there is no

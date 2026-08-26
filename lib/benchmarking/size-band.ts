@@ -2,7 +2,7 @@ import { getEffectivePolicies } from "@/lib/policy/engine";
 import type { BillingConfig } from "@/lib/policy/types";
 
 /**
- * Which size band a store compares in (launch plan §8).
+ * Which size band a store compares in (the size-band rule).
  *
  * DERIVED FROM THE DUES TIERS, NOT A SECOND LIST. The boundaries already exist
  * as `billing.membership_tiers` in policy — 2,500 / 5,000 / 10,000 / 20,000 FTE

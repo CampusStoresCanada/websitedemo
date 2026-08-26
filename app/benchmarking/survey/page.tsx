@@ -210,7 +210,7 @@ export default async function BenchmarkingSurveyPage() {
     note: n.note as string,
   }));
 
-  // 7c. §5D — is this year still changeable? Derived from whether a later
+  // 7c. the consent seal — is this year still changeable? Derived from whether a later
   // survey has opened, never from a stored flag.
   const { isYearSealed, sealMessage } = await import("@/lib/benchmarking/seal");
   const sealState = await isYearSealed(activeSurvey.fiscal_year);

@@ -74,7 +74,7 @@ export default function ComparisonView({
       </p>
 
       {/*
-        Said plainly and up front, not in a footer. This is the half of §5A that
+        Said plainly and up front, not in a footer. This is the half of the attribution-mark rule that
         actually prevents leaks: a member deciding whether to forward this should
         know it is traceable BEFORE they do it, and should equally know their own
         numbers are untouched so they never wonder whether we altered their data.

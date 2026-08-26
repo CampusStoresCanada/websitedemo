@@ -23,7 +23,7 @@ export default function DisclosureChoice({
 }: {
   benchmarkingId: string;
   initialLevel: DisclosureLevel;
-  /** §5D. Set once the successor survey has opened; the choice is then frozen. */
+  /** Consent seal: Set once the successor survey has opened; the choice is then frozen. */
   sealedMessage?: string | null;
 }) {
   const [level, setLevel] = useState<DisclosureLevel>(initialLevel);

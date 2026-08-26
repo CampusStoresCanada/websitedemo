@@ -1,5 +1,5 @@
 /**
- * Per-recipient traceable figures (launch plan §5A).
+ * Per-recipient traceable figures (the attribution-mark rule).
  *
  * Every copy of the report carries a fingerprint in its least significant
  * digits. A store's revenue reads $6,489,350 in one member's copy and

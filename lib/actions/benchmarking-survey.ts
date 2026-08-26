@@ -59,7 +59,7 @@ interface FieldDef {
 // ─────────────────────────────────────────────────────────────────
 
 const FIELD_REGISTRY: Record<string, FieldDef> = {
-  // ── Who to phone about these figures (brief §1) ──
+  // ── Who to phone about these figures (brief, Institution Profile) ──
   //
   // Editable by the store, unlike respondent_user_id which records who pressed
   // submit and is system-only. The person who compiled the numbers is often not
@@ -831,7 +831,7 @@ export async function saveDeltaFlag(
 }
 
 // ─────────────────────────────────────────────────────────────────
-// Server Action: set disclosure level (launch plan §5B / §5D)
+// Server Action: set disclosure level (disclosure choice + consent seal)
 // ─────────────────────────────────────────────────────────────────
 
 /**
@@ -840,7 +840,7 @@ export async function saveDeltaFlag(
  * `requireDraft: false` on purpose. Consent here is live, not a gate at
  * submission: a store may change its mind after filing and everything
  * downstream reads the current value. The only hard stop is the seal when the
- * successor survey opens, and nothing computes that yet — see §5D. Until it
+ * successor survey opens, and nothing computes that yet — see Consent seal: Until it
  * does, a change is always allowed, which is the permissive direction and the
  * right one to be wrong in.
  */
@@ -858,7 +858,7 @@ export async function setDisclosureLevel(
       return { success: false, error: auth.error };
     }
 
-    // §5D. Live consent has an end: once the successor survey opened, these
+    // Consent seal: Live consent has an end: once the successor survey opened, these
     // figures are published beside this year's as the reference value, and
     // withdrawing now would retroactively change comparisons other stores have
     // already read.

@@ -1,7 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
- * When a year's consent stops being changeable (launch plan §5D).
+ * When a year's consent stops being changeable (the consent seal rule).
  *
  * Consent is not a gate at submission. A store can change its mind about how it
  * is described for as long as the cycle is live — that is what makes a late

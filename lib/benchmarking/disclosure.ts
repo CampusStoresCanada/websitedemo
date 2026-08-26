@@ -61,7 +61,7 @@ export interface CutView {
   named: CutMember[];
   /**
    * Everyone whose figures feed the aggregate — including the opted-out.
-   * Withdrawal governs attribution, never whether the numbers count (§5D).
+   * Withdrawal governs attribution, never whether the numbers count (the consent seal).
    */
   contributing: CutMember[];
   /** Named rows withheld from THIS viewer because they do not reciprocate. */

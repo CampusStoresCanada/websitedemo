@@ -157,7 +157,7 @@ export default async function BenchmarkingComparePage() {
     );
   }
 
-  // By size (§8). The boundaries are the DUES tiers, read from policy — see
+  // By size (size bands). The boundaries are the DUES tiers, read from policy — see
   // lib/benchmarking/size-band.ts for why this is not its own list of numbers.
   //
   // Banded on organizations.fte, the same figure billing charges against, so a
@@ -183,7 +183,7 @@ export default async function BenchmarkingComparePage() {
     );
   }
 
-  // Record that a copy was made (§5A). Fire and forget: a member must never be
+  // Record that a copy was made (attribution marks). Fire and forget: a member must never be
   // refused their own report because the log was unavailable, and a missing row
   // is a smaller problem than a blocked page.
   const namedPeerCount = cuts.reduce((n, c) => n + c.named.length, 0);
