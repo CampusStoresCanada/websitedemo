@@ -18,6 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getCircleClient } from "@/lib/circle/client";
 import { getCircleConfig } from "@/lib/circle/config";
 import type { CircleEvent } from "@/lib/circle/types";
+import { parseSupabaseTimestamp, isValidDate } from "@/lib/time/supabase-timestamp";
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -84,6 +85,43 @@ function circleBodyToContent(body: string | null): { description: string | null;
     .join("\n");
 
   return { description, body_html };
+}
+
+/**
+ * How long an event stays in the hourly RSVP reconciliation loop.
+ *
+ * Without this, every event ever pushed to or pulled from Circle kept its slot
+ * in the loop forever — `status` stays 'published' after an event ends, so the
+ * cron re-fetched the attendee list of finished events once an hour, for good.
+ * At 42 events that was ~1,000 Circle calls a day, all of them asking about
+ * RSVPs that could no longer change, and the number only ever grew.
+ */
+const RSVP_SYNC_LEAD_MS = 60 * 24 * 60 * 60 * 1000; // start syncing 60 days out
+const RSVP_SYNC_TRAIL_MS = 1 * 24 * 60 * 60 * 1000; // stop 1 day after it ends
+
+/**
+ * True while an event's Circle RSVPs are still worth re-reading.
+ *
+ * Fails open: an event missing both timestamps keeps syncing, since we cannot
+ * prove it is over. A missing `ends_at` falls back to `starts_at` rather than
+ * dropping the event out of the window silently.
+ */
+export function isInRsvpSyncWindow(
+  event: { starts_at: string | null; ends_at: string | null },
+  now: number
+): boolean {
+  const parse = (v: string | null): number | null => {
+    if (!v) return null;
+    const d = parseSupabaseTimestamp(v);
+    return isValidDate(d) ? d.getTime() : null;
+  };
+
+  const startsAt = parse(event.starts_at);
+  const endsAt = parse(event.ends_at) ?? startsAt;
+
+  if (endsAt !== null && endsAt < now - RSVP_SYNC_TRAIL_MS) return false;
+  if (startsAt !== null && startsAt > now + RSVP_SYNC_LEAD_MS) return false;
+  return true;
 }
 
 /** Read circle_event_id from event metadata safely. */
@@ -562,23 +600,31 @@ export async function pushRsvpToCircle(
 
 export async function runFullCircleEventSync(): Promise<{
   pull: { inserted: number; updated: number; skipped: number; errors: number };
-  rsvps: { events: number; synced: number; created: number; errors: number };
+  rsvps: { events: number; outOfWindow: number; synced: number; created: number; errors: number };
 }> {
   // 1. Pull Circle events → website
   const pull = await pullCircleEvents();
 
-  // 2. Sync RSVPs for all events that have a circle_event_id
+  // 2. Sync RSVPs for events that have a circle_event_id AND are still live
+  //    enough for their attendee list to change. One Circle call per event per
+  //    run, so the window is what keeps this from growing without bound.
   const db = createAdminClient();
   const { data: events } = await db
     .from("events")
-    .select("id, metadata")
+    .select("id, metadata, starts_at, ends_at")
     .eq("status", "published");
 
-  const rsvps = { events: 0, synced: 0, created: 0, errors: 0 };
+  const rsvps = { events: 0, outOfWindow: 0, synced: 0, created: 0, errors: 0 };
+  const now = Date.now();
 
   for (const event of events ?? []) {
     const circleEventId = getCircleEventId(event.metadata);
     if (!circleEventId) continue;
+
+    if (!isInRsvpSyncWindow(event, now)) {
+      rsvps.outOfWindow++;
+      continue;
+    }
 
     rsvps.events++;
     const result = await syncEventRsvps(event.id, circleEventId);

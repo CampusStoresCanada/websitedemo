@@ -137,3 +137,73 @@ export async function resolvePersonObligations(
   const fields = person as unknown as PersonObligationFields;
   return { success: true, data: computePersonObligations(grantTypes, fields) };
 }
+
+/**
+ * Record the data a person owes because of what they hold.
+ *
+ * `conference_people.dietary_restrictions` has existed since the v2 schema and
+ * was written by nothing. The readiness list rendered "Missing: Dietary
+ * restrictions" as a bullet with no control anywhere in the app — a statement
+ * of a problem the reader had no way to solve. This is the control.
+ *
+ * ⛔ The obligation set is resolved SERVER-SIDE from the person's own grants,
+ * and only those keys are written. A column name arriving from the client is
+ * never trusted into the update payload: `conference_people` also carries
+ * badge status, check-in state and assignment status, and a handler that
+ * forwarded arbitrary keys would let an attendee rewrite any of them.
+ */
+export async function saveConferenceObligations(
+  personId: string,
+  conferenceId: string,
+  values: Record<string, string>
+): Promise<Result<{ saved: string[] }>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data: person, error: personError } = await db
+    .from("conference_people")
+    .select(`user_id, organization_id, ${PERSON_OBLIGATION_FIELDS.join(", ")}`)
+    .eq("id", personId)
+    .eq("conference_id", conferenceId)
+    .maybeSingle();
+  if (personError) return { success: false, error: personError.message };
+  if (!person) return { success: false, error: "Person not found." };
+
+  // Same three-way test the read path uses: the person, their org's managers,
+  // or a global admin. Kept identical on purpose — a viewer who can see this
+  // data and cannot correct it just files a support ticket instead.
+  const row = person as unknown as { user_id: string | null; organization_id: string | null };
+  const isOwner = row.user_id === auth.ctx.userId;
+  const managesOrg = row.organization_id ? canManageOrganization(auth.ctx, row.organization_id) : false;
+  if (!isOwner && !managesOrg && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized to update this person's details." };
+  }
+
+  const grantTypes = await loadV3HeldGrantTypes(db, personId, conferenceId);
+  const owed = new Set(
+    computePersonObligations(grantTypes, person as unknown as PersonObligationFields)
+      .obligations.map((o) => o.key)
+  );
+
+  const patch: Record<string, string | null> = {};
+  for (const [key, value] of Object.entries(values)) {
+    if (!owed.has(key)) continue;
+    // Empty means "I have none" — stored as NULL so the obligation reads as
+    // outstanding rather than silently satisfied by a blank string. Someone
+    // with no dietary needs answers by leaving it empty, and we keep asking;
+    // that is the correct trade against a catering list that quietly loses an
+    // allergy. See the checklist's own "doesn't apply to me" for the opposite
+    // case, where saying so is the answer.
+    patch[key] = value.trim() || null;
+  }
+  if (Object.keys(patch).length === 0) return { success: true, data: { saved: [] } };
+
+  const { error: updateError } = await db
+    .from("conference_people")
+    .update({ ...patch, updated_at: new Date().toISOString() })
+    .eq("id", personId);
+  if (updateError) return { success: false, error: updateError.message };
+
+  return { success: true, data: { saved: Object.keys(patch) } };
+}
