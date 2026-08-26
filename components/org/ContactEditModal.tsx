@@ -5,10 +5,7 @@ import { updateField } from "@/lib/actions/update-field";
 import { addContact } from "@/lib/actions/add-contact";
 import { updateContactTags } from "@/lib/actions/update-contact-tags";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
-import {
-  loadContactConferenceObligations,
-  saveConferenceObligations,
-} from "@/lib/actions/conference-access";
+import { loadContactConferenceObligations } from "@/lib/actions/conference-access";
 import {
   getContactLoginStatus,
   inviteExistingContact,
@@ -84,7 +81,6 @@ export default function ContactEditModal({
   // ── Conference tab — resolved on open, absent for anyone not attending ────
   const [conferenceObligations, setConferenceObligations] =
     useState<ConferenceObligationInfo | null>(null);
-  const [conferenceFields, setConferenceFields] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (isCreate || !contact?.id) return;
@@ -94,9 +90,6 @@ export default function ContactEditModal({
       // name must not depend on the conference lookup succeeding.
       if (cancelled || !result.success || !result.data) return;
       setConferenceObligations(result.data);
-      setConferenceFields(
-        Object.fromEntries(result.data.fields.map((f) => [f.key, result.data!.values[f.key] ?? ""]))
-      );
     });
     return () => { cancelled = true; };
   }, [isCreate, contact?.id, organizationId]);
@@ -356,32 +349,15 @@ export default function ContactEditModal({
     }
   }
 
-  async function handleConferenceSave() {
-    if (!conferenceObligations) return;
-    setSaving(true);
-    setError(null);
-    // Personal answers are stripped here as well as refused server-side, so
-    // the request says what it means.
-    const orgOwned = Object.fromEntries(
-      Object.entries(conferenceFields).filter(([key]) => !isPersonalObligation(key))
-    );
-    const result = await saveConferenceObligations(
-      conferenceObligations.personId,
-      conferenceObligations.conferenceId,
-      orgOwned
-    );
-    setSaving(false);
-    if (result.success) onClose();
-    else setError(result.error);
-  }
-
   function handleSave() {
     if (tab === "details") return handleDetailsSave();
-    if (tab === "conference") return handleConferenceSave();
     return handleProcurementSave();
   }
 
   const saveLabel = saving ? "Saving…" : isCreate ? "Add contact" : "Save";
+  // The Conference tab is a read-out with a chase link; there is nothing on it
+  // this viewer is permitted to write, so it gets no Save.
+  const showSaveButton = tab !== "conference";
 
   return (
     <>
@@ -662,28 +638,11 @@ export default function ContactEditModal({
             {tab === "conference" && conferenceObligations && (
               <div className="px-6 py-5 space-y-4">
                 <p className="text-xs text-gray-500">
-                  What the organisers need from this person, based on what they&rsquo;re booked
-                  into. Goes to catering and the on-site team — never into the printed
-                  directory.
+                  What the organisers still need from this person, based on what
+                  they&rsquo;re booked into. Every one of these is theirs to answer — the
+                  badge name comes from the Details tab, and the rest only they can
+                  give us.
                 </p>
-                {conferenceObligations.fields
-                  .filter((f) => !isPersonalObligation(f.key))
-                  .map((f) => (
-                    <div key={f.key}>
-                      <label className="block text-[11px] font-semibold uppercase tracking-wider text-gray-500 mb-1.5">
-                        {f.label}
-                      </label>
-                      <input
-                        value={conferenceFields[f.key] ?? ""}
-                        onChange={(e) =>
-                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
-                        }
-                        placeholder={CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
-                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
-                      />
-                    </div>
-                  ))}
-
                 {/* Theirs to answer, not yours. Listed so you know what is
                     holding the roster up and can chase the right person — but
                     with no input, because a colleague's guess at an allergy
@@ -828,13 +787,15 @@ export default function ContactEditModal({
             >
               Cancel
             </button>
-            <button
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="px-4 py-2 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
-            >
-              {saveLabel}
-            </button>
+            {showSaveButton && (
+              <button
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="px-4 py-2 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
+              >
+                {saveLabel}
+              </button>
+            )}
           </div>
 
         </div>

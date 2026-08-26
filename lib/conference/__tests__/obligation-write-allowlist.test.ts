@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { computePersonObligations, isPersonalObligation } from "../access";
+import {
+  SELF_EDITABLE_PERSON_FIELDS,
+  isIdentityProjectionField,
+  isSelfEditablePersonField,
+} from "../person-fields";
 import { grantTypesForKinds } from "../entity-obligations";
 
 /**
@@ -12,6 +17,24 @@ import { grantTypesForKinds } from "../entity-obligations";
  * assignment_status. If the obligation set ever widened to include one of
  * those, an attendee could check themselves in by typing.
  */
+describe("identity fields never reach the conference projection", () => {
+  it("refuses badge name, contact email and title on conference_people", () => {
+    // conference_people is a projection; contacts is the canonical record.
+    // Writing a name here forks it into a second place that never syncs back,
+    // which is why updateConferencePersonSelf rejects these outright and the
+    // contact modal edits the contact instead.
+    for (const key of ["display_name", "contact_email", "role_title"]) {
+      expect(isIdentityProjectionField(key)).toBe(true);
+      expect(isSelfEditablePersonField(key)).toBe(false);
+    }
+  });
+
+  it("keeps the two policies disjoint", () => {
+    const overlap = SELF_EDITABLE_PERSON_FIELDS.filter(isIdentityProjectionField);
+    expect(overlap).toEqual([]);
+  });
+});
+
 describe("obligation write allowlist", () => {
   const OPERATIONAL_COLUMNS = [
     "badge_print_status",
@@ -82,8 +105,8 @@ describe("who may answer which obligation", () => {
 
   it("covers every obligation a social-ticket holder owes", () => {
     // If a new personal-sounding obligation is added to a grant type and not
-    // to PERSONAL_OBLIGATION_KEYS, an org admin silently gains the ability to
-    // answer it for someone else. This is the test that notices.
+    // to SELF_EDITABLE_PERSON_FIELDS, the UI would offer it to an org admin
+    // while the server refused the write. This is the test that notices.
     const keys = computePersonObligations(
       grantTypesForKinds(["registration", "event"]), {}
     ).obligations.map((o) => o.key);

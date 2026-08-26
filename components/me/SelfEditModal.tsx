@@ -27,10 +27,8 @@ export interface OrgEditData {
   procurementInfo: ProcurementInfo | null;
 }
 
-import {
-  loadContactConferenceObligations,
-  saveConferenceObligations,
-} from "@/lib/actions/conference-access";
+import { loadContactConferenceObligations } from "@/lib/actions/conference-access";
+import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
 import { isPersonalObligation } from "@/lib/conference/access";
 
 type ConferenceObligations = {
@@ -228,14 +226,19 @@ function SelfEditModalInner({
     // saves on its own path and returns — the contact/procurement work below
     // has nothing to do with it.
     if (activeTab === "conference" && conferenceObligations) {
-      const result = await saveConferenceObligations(
+      // updateConferencePersonSelf has guarded this since the v2 projection:
+      // it writes only SELF_EDITABLE fields and only when the signed-in user IS
+      // the person. Empty means "none on file", stored as NULL so the
+      // obligation stays outstanding rather than reading as answered.
+      const result = await updateConferencePersonSelf(
         conferenceObligations.personId,
-        conferenceObligations.conferenceId,
-        conferenceFields
+        Object.fromEntries(
+          Object.entries(conferenceFields).map(([k, v]) => [k, v.trim() || null])
+        )
       );
       setSaving(false);
       if (result.success) onClose();
-      else setError(result.error);
+      else setError(result.error ?? "Could not save that.");
       return;
     }
 

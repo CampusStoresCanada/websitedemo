@@ -11,6 +11,7 @@
  */
 
 import { collectDataObligations, type DataObligation, type GrantType } from "./grants";
+import { isSelfEditablePersonField } from "./person-fields";
 
 export type PersonObligationStatus = {
   obligations: DataObligation[];
@@ -46,25 +47,12 @@ export function computePersonObligations(
 /**
  * Which obligations belong to the PERSON rather than the organisation.
  *
- * An org admin buys the seat and knows the badge name, so those are theirs to
- * fill. What someone is allergic to, what they need to get around the venue,
- * and who to phone if something happens are facts about a person, and the
- * organisation is not a reliable narrator of any of them. Getting this wrong
- * is not a UI nicety: a guessed allergy is a medical risk and a stale
- * emergency contact is worse than none.
- *
- * So these are shown to an admin as outstanding, never as an input — the
- * affordance on that side is to send the person to their own profile, and the
- * write is refused server-side, not just hidden.
+ * Delegates to the field policy the server has enforced all along
+ * (lib/conference/person-fields.ts) rather than restating it. An earlier
+ * version of this file listed the four keys again, which is how a policy
+ * quietly drifts: the list that decides what the UI shows must be the list
+ * that decides what the write accepts.
  */
-export const PERSONAL_OBLIGATION_KEYS: readonly string[] = [
-  "dietary_restrictions",
-  "accessibility_needs",
-  "emergency_contact_name",
-  "emergency_contact_phone",
-];
-
-/** True when only the person themselves may answer this. */
 export function isPersonalObligation(key: string): boolean {
-  return PERSONAL_OBLIGATION_KEYS.includes(key);
+  return isSelfEditablePersonField(key);
 }

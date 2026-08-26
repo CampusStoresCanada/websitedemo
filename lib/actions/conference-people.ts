@@ -1,6 +1,11 @@
 "use server";
 
 import {
+  SELF_EDITABLE_PERSON_FIELDS,
+  IDENTITY_PROJECTION_PERSON_FIELDS,
+} from "@/lib/conference/person-fields";
+
+import {
   canManageOrganization,
   isGlobalAdmin,
   requireAdmin,
@@ -406,23 +411,11 @@ export async function listConferencePeople(
   return { success: true, data: scoped };
 }
 
-const SELF_EDITABLE_FIELDS = new Set([
-  "travel_mode",
-  "road_origin_address",
-  "seat_preference",
-  "preferred_departure_airport",
-  "dietary_restrictions",
-  "accessibility_needs",
-  "mobile_phone",
-  "emergency_contact_name",
-  "emergency_contact_phone",
-]);
-
-const IDENTITY_PROJECTION_FIELDS = new Set([
-  "display_name",
-  "contact_email",
-  "role_title",
-]);
+// Moved to lib/conference/person-fields.ts so the UI can read the same policy
+// the server enforces. A "use server" module cannot export a const, which is
+// why these were trapped here and duplicated elsewhere.
+const SELF_EDITABLE_FIELDS = new Set(SELF_EDITABLE_PERSON_FIELDS);
+const IDENTITY_PROJECTION_FIELDS = new Set(IDENTITY_PROJECTION_PERSON_FIELDS);
 
 export async function updateConferencePersonSelf(
   personId: string,
