@@ -179,3 +179,28 @@ export function projectPeerRows<T extends PeerRowInput>(
     return out;
   });
 }
+
+/**
+ * May this viewer receive the peer set at all?
+ *
+ * Separate from the disclosure rules above, and checked first, because those
+ * ask "how much detail" while this asks "are they inside the exchange".
+ *
+ * A logged-out visitor is not a member who failed to file — they are not a
+ * member. Treating them as an unnamed-aggregate case put 39 stores' net
+ * profit, cost of goods and payroll into a public page as unattributed rows.
+ * Unattributed is not anonymous: enrolment and square footage travel in the
+ * same payload, and between them they identify most of the membership.
+ *
+ * This surface reads with the service role, so RLS is not the backstop here
+ * and cannot be. This function is.
+ */
+export function mayReceivePeerSet(
+  viewerLevel: string | null | undefined,
+  viewerOrgIds: string[],
+): boolean {
+  if (viewerLevel === "admin" || viewerLevel === "super_admin") return true;
+  // Membership in the exchange is what buys the peer set — an account with no
+  // active organisation is a visitor with a login, not a member store.
+  return viewerOrgIds.length > 0 && viewerLevel !== "public";
+}

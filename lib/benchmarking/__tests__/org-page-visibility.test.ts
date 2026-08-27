@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveOrgPageBenchmarking, projectPeerRows } from "../org-page-visibility";
+import {
+  resolveOrgPageBenchmarking,
+  projectPeerRows,
+  mayReceivePeerSet,
+} from "../org-page-visibility";
 
 /**
  * The costly failure is showing a store's net profit to someone who was never
@@ -136,5 +140,36 @@ describe("the projected peer row", () => {
     const [theirs] = projectPeerRows(optedOut, { nameThem: true, viewerOrgIds: ["z"] });
     expect(mine.organization).not.toBeNull();
     expect(theirs.organization).toBeNull();
+  });
+});
+
+describe("who is inside the exchange at all", () => {
+  it("gives a logged-out visitor nothing", () => {
+    // The regression this exists to prevent: 39 stores' net profit, cost of
+    // goods and payroll served as unattributed rows on a public page.
+    expect(mayReceivePeerSet("public", [])).toBe(false);
+    expect(mayReceivePeerSet(null, [])).toBe(false);
+    expect(mayReceivePeerSet(undefined, [])).toBe(false);
+  });
+
+  it("gives an account with no organisation nothing", () => {
+    // A login is not membership.
+    expect(mayReceivePeerSet("member", [])).toBe(false);
+  });
+
+  it("admits a member store", () => {
+    expect(mayReceivePeerSet("member", ["org-1"])).toBe(true);
+    expect(mayReceivePeerSet("org_admin", ["org-1"])).toBe(true);
+  });
+
+  it("admits staff, who have no org of their own", () => {
+    expect(mayReceivePeerSet("super_admin", [])).toBe(true);
+    expect(mayReceivePeerSet("admin", [])).toBe(true);
+  });
+
+  it("never admits public even with an org attached", () => {
+    // Belt and braces: viewerLevel is downgraded to public when an org's
+    // access has lapsed, and a lapsed member is outside the exchange.
+    expect(mayReceivePeerSet("public", ["org-1"])).toBe(false);
   });
 });
