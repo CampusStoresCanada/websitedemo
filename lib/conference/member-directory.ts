@@ -74,6 +74,10 @@ export async function loadMemberDirectory(conferenceId: string): Promise<MemberD
       description: org.company_description ?? null,
       booths: entity.name ? [entity.name] : [],
       departments: parseOrgCategories(org.primary_category).departments,
+      classes: parseOrgCategories(org.primary_category).classes,
+      // Person search needs consented names; none exist yet, so this is empty
+      // by construction until the directory-consent ask goes out.
+      people: [],
     });
   }
 

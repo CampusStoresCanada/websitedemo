@@ -1,5 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { parseOrgCategories } from "@/lib/publication/categories";
 import {
   defaultSurfaceId,
   resolvePlacements,
@@ -38,6 +39,23 @@ export type MappedThing = {
   /** Who is there, when the thing is held by an organisation. */
   orgName: string | null;
   orgSlug: string | null;
+  /** Carried so the map answers the same questions the directory does. */
+  orgDescription: string | null;
+  departments: string[];
+  classes: string[];
+  /**
+   * People at this org who may be named publicly.
+   *
+   * ⛔ Filtered to `directory_visibility = 'public'` — NOT 'members'. This map
+   * is reachable by anyone once the conference is visible, and making someone
+   * findable by name is publishing them. Consent to be listed is per person,
+   * and the person who agreed to appear in the members' directory did not
+   * thereby agree to be searchable by the open web.
+   *
+   * Empty for every org today: 910 contacts have never set a visibility and 40
+   * are hidden, so nobody has opted in yet.
+   */
+  people: string[];
 };
 
 export type MemberMap = {
@@ -58,7 +76,8 @@ export async function loadMemberMap(conferenceId: string): Promise<MemberMap> {
         .eq("conference_id", conferenceId).neq("kind", "floorplan"),
       db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role")
         .eq("conference_id", conferenceId),
-      db.from("entity_balances").select("entity_id, organizations(name, slug)")
+      db.from("entity_balances")
+        .select("entity_id, organization_id, organizations(name, slug, company_description, primary_category)")
         .eq("conference_id", conferenceId),
     ]);
 
@@ -68,11 +87,54 @@ export async function loadMemberMap(conferenceId: string): Promise<MemberMap> {
   const bySurface = resolvePlacements(refs ?? [], surfaces);
   const fallback = defaultSurfaceId(surfaces);
 
-  const orgByEntity = new Map<string, { name: string; slug: string | null }>();
+  type OrgHere = {
+    name: string; slug: string | null;
+    description: string | null; departments: string[]; classes: string[];
+  };
+  const orgByEntity = new Map<string, OrgHere>();
+  const orgIdByEntity = new Map<string, string>();
   for (const row of balances ?? []) {
-    const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
+    if (row.entity_id && row.organization_id) orgIdByEntity.set(row.entity_id, row.organization_id);
+    const org = (Array.isArray(row.organizations) ? row.organizations[0] : row.organizations) as
+      | { name: string; slug: string | null; company_description: string | null; primary_category: string | null }
+      | null;
     if (row.entity_id && org?.name && !orgByEntity.has(row.entity_id)) {
-      orgByEntity.set(row.entity_id, { name: org.name, slug: org.slug ?? null });
+      // Same parse the directory and the printed index use, so "apparel"
+      // finds the same companies on all three.
+      const parsed = parseOrgCategories(org.primary_category);
+      orgByEntity.set(row.entity_id, {
+        name: org.name,
+        slug: org.slug ?? null,
+        description: org.company_description ?? null,
+        // Same parse the directory and the printed index use, so "apparel"
+        // finds the same companies on all three.
+        departments: parsed.departments,
+        classes: parsed.classes,
+      });
+    }
+  }
+
+  /**
+   * Only people who have said yes, and only the strongest yes.
+   *
+   * `public` and not `members`: this page is reachable by anyone once the
+   * conference is visible, and being findable by name here is being published.
+   * Someone who agreed to the members' directory did not agree to that.
+   */
+  const orgIds = [...new Set(orgIdByEntity.values())];
+  const peopleByOrgId = new Map<string, string[]>();
+  if (orgIds.length > 0) {
+    const { data: contacts } = await db
+      .from("contacts")
+      .select("organization_id, name")
+      .in("organization_id", orgIds)
+      .is("archived_at", null)
+      .eq("directory_visibility", "public");
+    for (const c of contacts ?? []) {
+      if (!c.organization_id || !c.name) continue;
+      const list = peopleByOrgId.get(c.organization_id) ?? [];
+      list.push(c.name);
+      peopleByOrgId.set(c.organization_id, list);
     }
   }
 
@@ -97,6 +159,10 @@ export async function loadMemberMap(conferenceId: string): Promise<MemberMap> {
       rotation: num(a.rotation) ?? 0,
       orgName: org?.name ?? null,
       orgSlug: org?.slug ?? null,
+      orgDescription: org?.description ?? null,
+      departments: org?.departments ?? [],
+      classes: org?.classes ?? [],
+      people: peopleByOrgId.get(orgIdByEntity.get(e.id) ?? "") ?? [],
     });
   }
 

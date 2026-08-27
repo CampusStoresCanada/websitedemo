@@ -9,12 +9,27 @@ import type { HomeMapOrg } from "@/lib/homepage";
  */
 
 /** Bare "402", or "booth 402" / "Booths 402" → "402". Anything else → null. */
-function boothToken(query: string): string | null {
+export function boothToken(query: string): string | null {
   const match = query.trim().match(/^(?:booths?\s+)?([a-z]?\d{1,4}[a-z]?)$/i);
   return match ? match[1].toLowerCase() : null;
 }
 
-const EXHIBITOR_WORDS = /^(exhibitor|exhibitors|exhibiting|booth|booths)$/i;
+export const EXHIBITOR_WORDS = /^(exhibitor|exhibitors|exhibiting|booth|booths)$/i;
+
+/**
+ * Does this set of booth numbers answer the query?
+ *
+ * Exported so every surface that searches booths uses ONE rule. The conference
+ * map and the exhibitor directory each grew their own prefix-matching version,
+ * which reintroduced exactly the noise this whole-token rule exists to stop:
+ * typing "40" returning booths 40, 400, 402 and 408 at once.
+ */
+export function boothsMatch(booths: readonly string[], rawQuery: string): boolean {
+  if (booths.length === 0) return false;
+  if (EXHIBITOR_WORDS.test(rawQuery.trim())) return true;
+  const token = boothToken(rawQuery);
+  return token !== null && booths.some((b) => b.toLowerCase() === token);
+}
 
 export function orgMatchesQuery(org: HomeMapOrg, rawQuery: string): boolean {
   const query = rawQuery.trim().toLowerCase();
@@ -27,12 +42,8 @@ export function orgMatchesQuery(org: HomeMapOrg, rawQuery: string): boolean {
   const booths = org.exhibitorBooths ?? [];
   if (booths.length === 0) return false;
 
-  // "exhibitors" / "booths" surfaces everyone with a booth.
-  if (EXHIBITOR_WORDS.test(query)) return true;
-
   // Booth numbers match WHOLE, not by substring: someone with a printed floor
   // plan types "402" to find who's there, and a substring match would make
   // "40" return booths 40, 400, 402 and 408 at once — noise, not an answer.
-  const token = boothToken(query);
-  return token !== null && booths.some((b) => b.toLowerCase() === token);
+  return boothsMatch(booths, rawQuery);
 }

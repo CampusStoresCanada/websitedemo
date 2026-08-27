@@ -3,7 +3,7 @@ import { filterListings, type DirectoryListing } from "../member-directory-filte
 
 const listing = (over: Partial<DirectoryListing>): DirectoryListing => ({
   orgId: over.name ?? "id", name: "Acme", slug: "acme", logoUrl: null,
-  description: null, booths: [], departments: [], ...over,
+  description: null, booths: [], departments: [], classes: [], people: [], ...over,
 });
 
 const FLOOR: DirectoryListing[] = [
@@ -22,12 +22,12 @@ describe("directory filtering", () => {
     expect(filterListings(FLOOR, "outerwear", new Set()).map((l) => l.name)).toEqual(["Roots"]);
   });
 
-  it("matches a booth number from the start, not mid-string", () => {
-    // Typing "5" should offer booth 5 and 502 — not 105 and 305, which merely
-    // contain a 5 and are nowhere near it on the floor.
-    expect(filterListings(FLOOR, "5", new Set()).map((l) => l.name).sort())
-      .toEqual(["Merangue", "Sock Rocket"]);
+  it("matches a booth number WHOLE, never partially", () => {
+    // Now lib/explore's rule, shared with the map and the partners page.
+    // Someone holding a printed floor plan types the number they can see.
+    expect(filterListings(FLOOR, "5", new Set()).map((l) => l.name)).toEqual(["Sock Rocket"]);
     expect(filterListings(FLOOR, "305", new Set()).map((l) => l.name)).toEqual(["Boxercraft"]);
+    expect(filterListings(FLOOR, "30", new Set())).toEqual([]);
   });
 
   it("treats several chips as OR, never AND", () => {
