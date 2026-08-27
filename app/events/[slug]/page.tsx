@@ -355,6 +355,7 @@ export default async function EventDetailPage({
           currentUserId={authCtx?.userId ?? null}
           financialReport={boardMeetingData.financialReport}
           renewalReport={boardMeetingData.renewalReport}
+          eventSlug={slug}
           reportPeriod={boardMeetingData.reportPeriod}
           isSA={isSA}
         />

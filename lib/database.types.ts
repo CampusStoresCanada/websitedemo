@@ -9057,6 +9057,123 @@ export type Database = {
           },
         ]
       }
+      renewal_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          assigned_to: string | null
+          id: string
+          organization_id: string
+          renewal_year: number
+          updated_at: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_to?: string | null
+          id?: string
+          organization_id: string
+          renewal_year: number
+          updated_at?: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_to?: string | null
+          id?: string
+          organization_id?: string
+          renewal_year?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      renewal_contact_log: {
+        Row: {
+          channel: string
+          contacted_at: string
+          contacted_by: string | null
+          created_at: string
+          id: string
+          note: string | null
+          organization_id: string
+          outcome: string
+          renewal_year: number
+        }
+        Insert: {
+          channel: string
+          contacted_at?: string
+          contacted_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id: string
+          outcome: string
+          renewal_year: number
+        }
+        Update: {
+          channel?: string
+          contacted_at?: string
+          contacted_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id?: string
+          outcome?: string
+          renewal_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_contact_log_contacted_by_fkey"
+            columns: ["contacted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_contact_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_contact_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       renewal_events: {
         Row: {
           created_at: string

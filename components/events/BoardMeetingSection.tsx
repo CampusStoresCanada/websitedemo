@@ -57,6 +57,7 @@ interface Props {
   financialReport: ComparativeReport | null;
   /** Null when the meeting falls outside the board renewal window — tab is hidden. */
   renewalReport: BoardRenewalReport | null;
+  eventSlug: string;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
 }
@@ -428,6 +429,7 @@ export default function BoardMeetingSection({
   currentUserId,
   financialReport,
   renewalReport,
+  eventSlug,
   reportPeriod,
   isSA,
 }: Props) {
@@ -556,7 +558,11 @@ export default function BoardMeetingSection({
       )}
 
       {activeTab === "renewals" && renewalReport && (
-        <MeetingRenewalsTab report={renewalReport} meetingDate={meeting.meeting_date} />
+        <MeetingRenewalsTab
+          report={renewalReport}
+          meetingDate={meeting.meeting_date}
+          eventSlug={eventSlug}
+        />
       )}
     </div>
   );

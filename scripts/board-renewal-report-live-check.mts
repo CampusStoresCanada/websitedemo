@@ -108,5 +108,55 @@ if (!widget) {
   }
 }
 
+console.log("\n── Outreach write path (Test Org fixture only, self-cleaning) ──");
+// NEVER against a real member: a probe that writes to a live org is how real
+// records get damaged. This uses the is_test fixture and deletes what it wrote.
+const TEST_ORG = "f7b3fee0-339f-404a-b77d-ec95f40e8f89"; // Test Org (Member)
+const { logRenewalContact, setRenewalAssignment, getOutreachByOrg } = await import(
+  "../lib/renewal/outreach"
+);
+const { createAdminClient } = await import("../lib/supabase/admin");
+const wdb = createAdminClient();
+const PROBE_YEAR = 2999; // far outside any real cycle, so it can never pollute a report
+
+const logged = await logRenewalContact({
+  organizationId: TEST_ORG,
+  renewalYear: PROBE_YEAR,
+  contactedBy: null,
+  channel: "call",
+  outcome: "undecided",
+  note: "live-check probe",
+});
+check("logRenewalContact reports success", logged.success === true,
+  logged.success ? logged.id : (logged as { error: string }).error);
+
+const assigned = await setRenewalAssignment({
+  organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: null, assignedBy: null,
+});
+check("setRenewalAssignment reports success", assigned.success === true);
+
+// The point of this section: a grant without a policy returns zero rows with a
+// null error, so "success" proves nothing. Read it back.
+const readBack = await getOutreachByOrg(wdb, [TEST_ORG], PROBE_YEAR);
+const row = readBack.get(TEST_ORG);
+check("the logged contact actually persisted", row?.contactCount === 1,
+  `contactCount=${row?.contactCount ?? 0}`);
+check("the note round-tripped", row?.lastContact?.note === "live-check probe",
+  row?.lastContact?.note ?? "(nothing)");
+check("channel and outcome round-tripped",
+  row?.lastContact?.channel === "call" && row?.lastContact?.outcome === "undecided");
+
+const badChannel = await logRenewalContact({
+  organizationId: TEST_ORG, renewalYear: PROBE_YEAR, contactedBy: null,
+  channel: "carrier-pigeon" as never, outcome: "undecided", note: null,
+});
+check("an unknown channel is rejected", badChannel.success === false);
+
+// Clean up — leave the database exactly as found.
+await wdb.from("renewal_contact_log").delete().eq("organization_id", TEST_ORG).eq("renewal_year", PROBE_YEAR);
+await wdb.from("renewal_assignments").delete().eq("organization_id", TEST_ORG).eq("renewal_year", PROBE_YEAR);
+const afterClean = await getOutreachByOrg(wdb, [TEST_ORG], PROBE_YEAR);
+check("probe rows cleaned up", !afterClean.has(TEST_ORG));
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

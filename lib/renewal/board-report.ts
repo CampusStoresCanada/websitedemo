@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getPartnershipRateCents } from "@/lib/stripe/billing";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { getExpectedAmountsByOrg } from "./expected-amounts";
+import { getOutreachByOrg, type OrgOutreach } from "./outreach";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import type { RenewalOrgType } from "./renewal-progress";
 
@@ -13,6 +14,12 @@ export interface BoardRenewalOrgRow {
   name: string;
   amountCents: number;
   renewedAt: string | null;
+  /** Who owns the conversation this cycle, if anyone has been assigned. */
+  assignedTo: string | null;
+  /** When a human last actually spoke to them — not the reminder cron. */
+  lastContactedAt: string | null;
+  lastOutcome: string | null;
+  contactCount: number;
 }
 
 export interface BoardRenewalTypeReport {
@@ -24,6 +31,11 @@ export interface BoardRenewalTypeReport {
   outstandingCents: number;
   /** Named, alphabetical — the call list the board is being asked to divide up. */
   outstanding: BoardRenewalOrgRow[];
+  /** Of the outstanding orgs: how many have an owner, and how many have been
+   *  spoken to. Coverage is the board-facing measure — it is the part the board
+   *  controls, where the paid count is largely the members' decision. */
+  assignedCount: number;
+  contactedCount: number;
 }
 
 export interface BoardRenewalReport {
@@ -37,6 +49,8 @@ export interface BoardRenewalReport {
     collectedCents: number;
     outstandingCents: number;
     outstandingCount: number;
+    assignedCount: number;
+    contactedCount: number;
   };
 }
 
@@ -110,6 +124,8 @@ async function getTypeReport(
     collectedCents: 0,
     outstandingCents: 0,
     outstanding: [],
+    assignedCount: 0,
+    contactedCount: 0,
   };
   if (orgIds.length === 0) return empty;
 
@@ -133,7 +149,11 @@ async function getTypeReport(
     }
   }
 
-  const expectedByOrg = await getExpectedAmountsByOrg(db, orgIds, renewalYear);
+  const [expectedByOrg, outreachByOrg] = await Promise.all([
+    getExpectedAmountsByOrg(db, orgIds, renewalYear),
+    getOutreachByOrg(db, orgIds, renewalYear),
+  ]);
+  const noOutreach: OrgOutreach = { assignedTo: null, lastContact: null, contactCount: 0 };
 
   // Vendor Partner dues are a flat rate, so this fallback is exact rather than
   // an estimate. Member dues are FTE-tiered with no cheap equivalent, but every
@@ -153,12 +173,19 @@ async function getTypeReport(
       report.renewedCount++;
       report.collectedCents += expectedCents;
     } else {
+      const outreach = outreachByOrg.get(org.id) ?? noOutreach;
+      if (outreach.assignedTo) report.assignedCount++;
+      if (outreach.lastContact) report.contactedCount++;
       report.outstandingCents += expectedCents;
       report.outstanding.push({
         organizationId: org.id,
         name: org.name,
         amountCents: expectedCents,
         renewedAt: null,
+        assignedTo: outreach.assignedTo,
+        lastContactedAt: outreach.lastContact?.contactedAt ?? null,
+        lastOutcome: outreach.lastContact?.outcome ?? null,
+        contactCount: outreach.contactCount,
       });
     }
   }
@@ -199,6 +226,8 @@ export async function getBoardRenewalReport(
       collectedCents: all.reduce((n, t) => n + t.collectedCents, 0),
       outstandingCents: all.reduce((n, t) => n + t.outstandingCents, 0),
       outstandingCount: all.reduce((n, t) => n + t.outstanding.length, 0),
+      assignedCount: all.reduce((n, t) => n + t.assignedCount, 0),
+      contactedCount: all.reduce((n, t) => n + t.contactedCount, 0),
     },
   };
 }
