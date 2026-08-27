@@ -98,15 +98,45 @@ export default function MemberMap({
   const guessOnly = hereMatches.length > 0 && hereMatches.every((t) => t.reason === "guess");
 
   /**
+   * One entry per company, not per booth.
+   *
+   * A company holding two adjacent booths is one answer to "who sells
+   * hoodies", not two. Ungrouped, a 21-booth result listed MV Sport, Hotline
+   * Apparel and four others twice each and pushed the map off a phone screen —
+   * so the thing you searched for was the thing you could not see.
+   */
+  const groups = useMemo(() => {
+    const byCompany = new Map<string, { key: string; name: string; things: typeof hereMatches }>();
+    for (const t of hereMatches) {
+      // Unsold booths have no company, so each stands alone under its number.
+      const key = t.orgName ?? `booth:${t.entityId}`;
+      const existing = byCompany.get(key);
+      if (existing) existing.things.push(t);
+      else byCompany.set(key, { key, name: t.orgName ?? t.label, things: [t] });
+    }
+    return [...byCompany.values()];
+  }, [hereMatches]);
+
+  /** Every booth belonging to whatever is selected — a company lights up whole. */
+  const selectedIds = useMemo(() => {
+    if (!selected) return new Set<string>();
+    if (!selected.orgName) return new Set([selected.entityId]);
+    return new Set(
+      onThisSurface.filter((t) => t.orgName === selected.orgName).map((t) => t.entityId)
+    );
+  }, [selected, onThisSurface]);
+
+  /**
    * One match is an answer, so show it. Several are a shortlist, so let them
    * choose. Highlighting a box red and leaving it at that assumes the reader
    * can see the whole floor at once — on a phone, held at arm's length in a
    * hall, they cannot.
    */
   useEffect(() => {
-    if (hereMatches.length === 1) setSelected(hereMatches[0]);
-    else if (hereMatches.length === 0) setSelected(null);
-  }, [hereMatches]);
+    // One COMPANY is an answer, even when it holds three booths.
+    if (groups.length === 1) setSelected(groups[0].things[0]);
+    else if (groups.length === 0) setSelected(null);
+  }, [groups]);
 
   if (!surface) {
     return <p className="text-sm text-gray-500">No floor plan has been published yet.</p>;
@@ -184,25 +214,32 @@ export default function MemberMap({
 
           {/* A shortlist, not a filter of the map: the boxes stay where they
               are so the reader keeps their bearings. */}
-          {hereMatches.length > 1 && (
-            <ul className="flex flex-wrap gap-2">
-              {hereMatches.map((t) => (
-                <li key={t.entityId}>
-                  <button
-                    type="button"
-                    onClick={() => setSelected(t)}
-                    aria-pressed={selected?.entityId === t.entityId}
-                    className={`rounded-full px-3 py-1.5 text-sm font-medium ${
-                      selected?.entityId === t.entityId
-                        ? "bg-[#EE2A2E] text-white"
-                        : "border border-gray-300 text-gray-700 hover:border-gray-400"
-                    }`}
-                  >
-                    {t.orgName ?? t.label}
-                    {t.orgName && <span className="ml-1 tabular-nums opacity-70">{t.label}</span>}
-                  </button>
-                </li>
-              ))}
+          {groups.length > 1 && (
+            // Scrolls rather than growing: the map must stay on screen, which
+            // is the whole reason someone is looking at this page.
+            <ul className="flex max-h-32 flex-wrap gap-2 overflow-y-auto">
+              {groups.map((g) => {
+                const on = g.things.some((t) => selectedIds.has(t.entityId));
+                return (
+                  <li key={g.key}>
+                    <button
+                      type="button"
+                      onClick={() => setSelected(g.things[0])}
+                      aria-pressed={on}
+                      className={`rounded-full px-3 py-1.5 text-sm font-medium ${
+                        on
+                          ? "bg-[#EE2A2E] text-white"
+                          : "border border-gray-300 text-gray-700 hover:border-gray-400"
+                      }`}
+                    >
+                      {g.name}
+                      <span className="ml-1 tabular-nums opacity-70">
+                        {g.things.map((t) => t.label).join(", ")}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
             </ul>
           )}
         </div>
@@ -224,20 +261,30 @@ export default function MemberMap({
         {onThisSurface.map((t) => {
           const x = t.x * VIEW_W, y = t.y * VIEW_H, w = t.w * VIEW_W, h = t.h * VIEW_H;
           const isMatch = matches.has(t.entityId);
-          const dimmed = q.length > 0 && !isMatch;
-          const isSelected = selected?.entityId === t.entityId;
+          // De-emphasise by COLOUR, never by opacity. Fading a box to 25%
+          // makes it translucent, and the background artwork's own serif booth
+          // numbers show through underneath ours — which is why the map went
+          // back to numbers-on-numbers the moment anyone searched. Every fill
+          // here stays opaque; quiet booths just go grey.
+          const muted = q.length > 0 && !isMatch;
+          const isSelected = selectedIds.has(t.entityId);
           // Held booths carry the brand navy, matches the accent red, free
           // booths stay white. `onDark` keeps the label legible on whichever
           // of those it lands on.
-          const fill = isMatch || isSelected ? "#EE2A2E" : t.orgName ? "#163D6D" : "#FFFFFF";
-          const onDark = isMatch || isSelected || !!t.orgName;
+          const fill = muted
+            ? "#EDEEF0"
+            : isMatch || isSelected
+              ? "#EE2A2E"
+              : t.orgName
+                ? "#163D6D"
+                : "#FFFFFF";
+          const onDark = !muted && (isMatch || isSelected || !!t.orgName);
           return (
             <g
               key={t.entityId}
               transform={t.rotation ? `rotate(${t.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
               onClick={() => setSelected(t)}
               className="cursor-pointer"
-              opacity={dimmed ? 0.25 : 1}
             >
               {/* The background artwork draws each booth as a filled box with
                   its number set in the venue's own serif. Two earlier attempts
@@ -252,14 +299,14 @@ export default function MemberMap({
               <rect
                 x={x} y={y} width={w} height={h} rx={2}
                 fill={fill}
-                stroke={isSelected ? "#1A1A1A" : isMatch ? "#B81E22" : "#163D6D"}
+                stroke={muted ? "#D5D7DB" : isSelected ? "#1A1A1A" : isMatch ? "#B81E22" : "#163D6D"}
                 strokeWidth={isSelected ? 3 : isMatch ? 2 : 1}
               />
               <text
                 x={x + w / 2} y={y + h / 2}
                 textAnchor="middle" dominantBaseline="central"
                 fontSize={Math.max(9, Math.min(w, h) * 0.44)}
-                fill={onDark ? "#ffffff" : "#163D6D"}
+                fill={onDark ? "#ffffff" : muted ? "#9AA0A8" : "#163D6D"}
                 fontWeight={700}
                 fontFamily="var(--font-primary)"
                 pointerEvents="none"
