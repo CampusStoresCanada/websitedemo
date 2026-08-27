@@ -92,6 +92,68 @@ async function send(
   }
 }
 
+/**
+ * The many-recipient form of `send`, with the same guarantees.
+ *
+ * Every election broadcast goes through here rather than awaiting `send` in a
+ * loop. Suppression is still checked once at the top, contacts with no email
+ * are still reported rather than silently dropped, and the outcome array is
+ * still one entry per intended recipient in the order given — callers and
+ * `summarizeOutcomes` see no difference. What changes is that the messages
+ * leave in one request per hundred instead of one request each.
+ */
+async function sendMany(
+  templateKey: TemplateKey,
+  recipients: { to: string | null | undefined; variables: Record<string, string | number | null | undefined> }[]
+): Promise<NotifyOutcome[]> {
+  if (emailSuppressed()) {
+    return recipients.map((r) => ({
+      template: templateKey, to: r.to ?? "", sent: false, error: "suppressed",
+    }));
+  }
+
+  // Addressable and unaddressable are separated so a contact with no email on
+  // record is reported as exactly that, not folded into a delivery failure.
+  const outcomes: NotifyOutcome[] = new Array(recipients.length);
+  const sendable: { index: number; to: string; variables: Record<string, string | number | null | undefined> }[] = [];
+  recipients.forEach((r, index) => {
+    if (!r.to?.trim()) {
+      outcomes[index] = {
+        template: templateKey, to: "", sent: false,
+        error: "No email address on record.",
+      };
+      return;
+    }
+    sendable.push({ index, to: r.to, variables: r.variables });
+  });
+
+  if (sendable.length === 0) return outcomes;
+
+  try {
+    // Imported here for the same reason as in `send`: lib/comms/send builds a
+    // Resend client on load and throws without an API key.
+    const { sendTransactionalBatch } = await import("@/lib/comms/send");
+    const results = await sendTransactionalBatch({
+      templateKey,
+      recipients: sendable.map((r) => ({ to: r.to, variables: r.variables })),
+    });
+    sendable.forEach((r, i) => {
+      outcomes[r.index] = {
+        template: templateKey, to: r.to,
+        sent: results[i]?.success ?? false,
+        error: results[i]?.error,
+      };
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Send failed.";
+    for (const r of sendable) {
+      outcomes[r.index] = { template: templateKey, to: r.to, sent: false, error: message };
+    }
+  }
+
+  return outcomes;
+}
+
 interface ContactRow {
   id: string;
   email: string | null;
@@ -191,28 +253,34 @@ export async function notifyCosigners(
   invitations: { organizationId: string; contactId: string; token: string }[]
 ): Promise<NotifyOutcome[]> {
   const db = createAdminClient();
-  const outcomes: NotifyOutcome[] = [];
 
-  for (const invite of invitations) {
-    const contact = await loadContact(invite.contactId);
-    const { data: org } = await db
-      .from("organizations")
-      .select("name")
-      .eq("id", invite.organizationId)
-      .maybeSingle();
+  // Usually two, but requestBoardCosignature invites every sitting director as
+  // well — so this fans out to a dozen people on a nomination that asked the
+  // board for help, not the two the by-law's minimum implies.
+  const resolved = await Promise.all(
+    invitations.map(async (invite) => {
+      const [contact, orgRow] = await Promise.all([
+        loadContact(invite.contactId),
+        db.from("organizations").select("name").eq("id", invite.organizationId).maybeSingle(),
+      ]);
+      return { invite, contact, organizationName: (orgRow.data?.name as string) ?? "your institution" };
+    })
+  );
 
-    outcomes.push(
-      await send("election_cosign_request", contact?.email, {
+  return sendMany(
+    "election_cosign_request",
+    resolved.map(({ invite, contact, organizationName }) => ({
+      to: contact?.email,
+      variables: {
         contact_name: contact?.name ?? "there",
-        organization_name: (org?.name as string) ?? "your institution",
+        organization_name: organizationName,
         nominee_name: nominee.name,
         nominee_org: nominee.organizationName,
         cosign_url: `${appUrl()}/elections/cosign/${invite.token}`,
         nominations_close: formatDate(election.schedule.nominationsCloseAt),
-      })
-    );
-  }
-  return outcomes;
+      },
+    }))
+  );
 }
 
 /**
@@ -302,23 +370,25 @@ export async function notifyCallForNominations(
   election: Election,
   organizationIds: string[]
 ): Promise<NotifyOutcome[]> {
-  const outcomes: NotifyOutcome[] = [];
-  for (const orgId of organizationIds) {
-    const admins = await loadOrgAdminContacts(orgId);
-    for (const admin of admins) {
-      outcomes.push(
-        await send("election_call_for_nominations", admin.email, {
-          contact_name: admin.name,
-          cycle_year: election.cycleYear,
-          seats_available: election.seatsAvailable,
-          agm_date: formatDate(election.schedule.agmDate),
-          nominations_close: formatDate(election.schedule.nominationsCloseAt),
-          nominate_url: `${appUrl()}/elections/${election.slug}/nominate`,
-        })
-      );
-    }
-  }
-  return outcomes;
+  // Resolve every recipient first, then send once. The institutions are read
+  // in parallel because each is an independent lookup.
+  const perOrg = await Promise.all(organizationIds.map((id) => loadOrgAdminContacts(id)));
+  const admins = perOrg.flat();
+
+  return sendMany(
+    "election_call_for_nominations",
+    admins.map((admin) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        cycle_year: election.cycleYear,
+        seats_available: election.seatsAvailable,
+        agm_date: formatDate(election.schedule.agmDate),
+        nominations_close: formatDate(election.schedule.nominationsCloseAt),
+        nominate_url: `${appUrl()}/elections/${election.slug}/nominate`,
+      },
+    }))
+  );
 }
 
 /** Variables are member-supplied in places; never interpolate them raw. */
@@ -372,44 +442,53 @@ export async function notifyAgmNotice(
   details: { agmTime: string; location: string | null; agmUrl: string }
 ): Promise<NotifyOutcome[]> {
   const db = createAdminClient();
-  const outcomes: NotifyOutcome[] = [];
 
-  for (const orgId of organizationIds) {
-    const { data: org } = await db.from("organizations").select("name").eq("id", orgId).maybeSingle();
-    const admins = await loadOrgAdminContacts(orgId);
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [orgRow, admins] = await Promise.all([
+        db.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+        loadOrgAdminContacts(orgId),
+      ]);
+      return { orgId, organizationName: (orgRow.data?.name as string) ?? null, admins };
+    })
+  );
 
-    if (admins.length === 0) {
-      // A member with nobody to give notice to is a compliance problem, not a
-      // send failure — it must be visible before the window closes.
-      outcomes.push({
-        template: "agm_notice_of_meeting",
-        to: "",
-        sent: false,
-        error: `${(org?.name as string) ?? orgId} has no administrator to give notice to. Notice cannot be given to this member electronically.`,
-      });
-      continue;
-    }
+  // A member with nobody to give notice to is a compliance problem, not a send
+  // failure — it must be visible before the window closes, so it is reported
+  // whether or not anything was dispatched.
+  const unreachable: NotifyOutcome[] = perOrg
+    .filter((o) => o.admins.length === 0)
+    .map((o) => ({
+      template: "agm_notice_of_meeting" as TemplateKey,
+      to: "",
+      sent: false,
+      error: `${o.organizationName ?? o.orgId} has no administrator to give notice to. Notice cannot be given to this member electronically.`,
+    }));
 
-    for (const admin of admins) {
-      outcomes.push(
-        await send("agm_notice_of_meeting", admin.email, {
+  const sent = await sendMany(
+    "agm_notice_of_meeting",
+    perOrg.flatMap((o) =>
+      o.admins.map((admin) => ({
+        to: admin.email,
+        variables: {
           contact_name: admin.name,
-          organization_name: (org?.name as string) ?? "your institution",
+          organization_name: o.organizationName ?? "your institution",
           cycle_year: election.cycleYear,
           agm_date: election.schedule.agmDate,
           agm_date_long: formatLongDate(election.schedule.agmDate),
           agm_time: details.agmTime,
-          // The renderer has no inline conditionals that sendTransactional can
+          // The renderer has no inline conditionals the transactional path can
           // reach ({{#if}} needs a flags map it does not pass), so optionality
           // is baked into the value rather than the template.
           location_clause: details.location ? `, ${details.location}` : "",
           seats_available: election.seatsAvailable,
           agm_url: details.agmUrl,
-        })
-      );
-    }
-  }
-  return outcomes;
+        },
+      }))
+    )
+  );
+
+  return [...unreachable, ...sent];
 }
 
 /** The proxy form. Separate obligation, separate date — Part VII S7(b). */
@@ -419,24 +498,32 @@ export async function notifyProxyForm(
   details: { proxyFormUrl: string; lateNote?: string | null }
 ): Promise<NotifyOutcome[]> {
   const db = createAdminClient();
-  const outcomes: NotifyOutcome[] = [];
 
-  for (const orgId of organizationIds) {
-    const { data: org } = await db.from("organizations").select("name").eq("id", orgId).maybeSingle();
-    for (const admin of await loadOrgAdminContacts(orgId)) {
-      outcomes.push(
-        await send("agm_proxy_form", admin.email, {
-          contact_name: admin.name,
-          organization_name: (org?.name as string) ?? "your institution",
-          cycle_year: election.cycleYear,
-          agm_date_long: formatLongDate(election.schedule.agmDate),
-          proxy_form_url: details.proxyFormUrl,
-          late_note: details.lateNote ?? null,
-        })
-      );
-    }
-  }
-  return outcomes;
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [orgRow, admins] = await Promise.all([
+        db.from("organizations").select("name").eq("id", orgId).maybeSingle(),
+        loadOrgAdminContacts(orgId),
+      ]);
+      const organizationName = (orgRow.data?.name as string) ?? "your institution";
+      return admins.map((admin) => ({ admin, organizationName }));
+    })
+  );
+
+  return sendMany(
+    "agm_proxy_form",
+    perOrg.flat().map(({ admin, organizationName }) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        organization_name: organizationName,
+        cycle_year: election.cycleYear,
+        agm_date_long: formatLongDate(election.schedule.agmDate),
+        proxy_form_url: details.proxyFormUrl,
+        late_note: details.lateNote ?? null,
+      },
+    }))
+  );
 }
 
 /**
@@ -465,29 +552,34 @@ export async function notifyBallotsOpen(
   organizationIds: string[],
   opts: { candidateCount: number; reminder?: boolean }
 ): Promise<NotifyOutcome[]> {
-  const outcomes: NotifyOutcome[] = [];
   const templateKey = opts.reminder ? "election_ballot_reminder" : "election_ballots_open";
 
-  for (const orgId of organizationIds) {
-    const admins = await loadOrgAdminContacts(orgId);
-    const organizationName = await loadOrgName(orgId);
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [admins, organizationName] = await Promise.all([
+        loadOrgAdminContacts(orgId),
+        loadOrgName(orgId),
+      ]);
+      return admins.map((admin) => ({ admin, organizationName }));
+    })
+  );
 
-    for (const admin of admins) {
-      outcomes.push(
-        await send(templateKey, admin.email, {
-          contact_name: admin.name,
-          organization_name: organizationName,
-          cycle_year: election.cycleYear,
-          candidate_count: opts.candidateCount,
-          seats_available: election.seatsAvailable,
-          agm_date: formatDate(election.schedule.agmDate),
-          ballots_close: formatDate(election.schedule.ballotsCloseAt),
-          ballot_url: `${appUrl()}/elections/${election.slug}/ballot`,
-        })
-      );
-    }
-  }
-  return outcomes;
+  return sendMany(
+    templateKey,
+    perOrg.flat().map(({ admin, organizationName }) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        organization_name: organizationName,
+        cycle_year: election.cycleYear,
+        candidate_count: opts.candidateCount,
+        seats_available: election.seatsAvailable,
+        agm_date: formatDate(election.schedule.agmDate),
+        ballots_close: formatDate(election.schedule.ballotsCloseAt),
+        ballot_url: `${appUrl()}/elections/${election.slug}/ballot`,
+      },
+    }))
+  );
 }
 
 /**
@@ -509,24 +601,30 @@ export async function notifyAgmPackage(
   organizationIds: string[],
   opts: { stillToCome: string }
 ): Promise<NotifyOutcome[]> {
-  const outcomes: NotifyOutcome[] = [];
-  for (const orgId of organizationIds) {
-    const admins = await loadOrgAdminContacts(orgId);
-    const organizationName = await loadOrgName(orgId);
-    for (const admin of admins) {
-      outcomes.push(
-        await send("agm_package_available", admin.email, {
-          contact_name: admin.name,
-          organization_name: organizationName,
-          cycle_year: election.cycleYear,
-          agm_date: formatDate(election.schedule.agmDate),
-          package_url: `${appUrl()}/elections/${election.slug}/package`,
-          still_to_come: opts.stillToCome,
-        })
-      );
-    }
-  }
-  return outcomes;
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [admins, organizationName] = await Promise.all([
+        loadOrgAdminContacts(orgId),
+        loadOrgName(orgId),
+      ]);
+      return admins.map((admin) => ({ admin, organizationName }));
+    })
+  );
+
+  return sendMany(
+    "agm_package_available",
+    perOrg.flat().map(({ admin, organizationName }) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        organization_name: organizationName,
+        cycle_year: election.cycleYear,
+        agm_date: formatDate(election.schedule.agmDate),
+        package_url: `${appUrl()}/elections/${election.slug}/package`,
+        still_to_come: opts.stillToCome,
+      },
+    }))
+  );
 }
 
 /**
@@ -543,21 +641,27 @@ export async function notifyElectionResults(
   organizationIds: string[],
   announcement: { subject: string; html: string }
 ): Promise<NotifyOutcome[]> {
-  const outcomes: NotifyOutcome[] = [];
-  for (const orgId of organizationIds) {
-    const admins = await loadOrgAdminContacts(orgId);
-    const organizationName = await loadOrgName(orgId);
-    for (const admin of admins) {
-      outcomes.push(
-        await send("election_results_announced", admin.email, {
-          contact_name: admin.name,
-          organization_name: organizationName,
-          subject_line: announcement.subject,
-          heading: `Your ${election.cycleYear} Board of Directors`,
-          announcement_html: announcement.html,
-        })
-      );
-    }
-  }
-  return outcomes;
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [admins, organizationName] = await Promise.all([
+        loadOrgAdminContacts(orgId),
+        loadOrgName(orgId),
+      ]);
+      return admins.map((admin) => ({ admin, organizationName }));
+    })
+  );
+
+  return sendMany(
+    "election_results_announced",
+    perOrg.flat().map(({ admin, organizationName }) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        organization_name: organizationName,
+        subject_line: announcement.subject,
+        heading: `Your ${election.cycleYear} Board of Directors`,
+        announcement_html: announcement.html,
+      },
+    }))
+  );
 }

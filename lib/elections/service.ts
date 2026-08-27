@@ -224,8 +224,22 @@ export async function evaluateElectionEligibility(
       })),
       { onConflict: "election_id,organization_id" }
     );
-    if (upsertError)
-      throw new Error(`[elections] failed to store eligibility: ${upsertError.message}`);
+    if (upsertError) {
+      // The stored verdicts are not a cache — searchNominatableContacts and
+      // listCosignerOrganizations read this table to decide who may be
+      // nominated and who may co-sign. Continuing past a failed write would
+      // leave those decisions running on stale eligibility, so this throws
+      // rather than warning. Do not soften it into a console.error.
+      //
+      // 23503 is the one case worth naming: the election was deleted while it
+      // was being evaluated. A foreign key constraint string tells the reader
+      // nothing, and it is the shape a stale open tab produces.
+      throw new Error(
+        upsertError.code === "23503"
+          ? "That election no longer exists — it was removed while this page was loading."
+          : `[elections] failed to store eligibility: ${upsertError.message}`
+      );
+    }
   }
 
   return { verdicts, summary: summarizeEligibility(verdicts) };
@@ -1126,6 +1140,81 @@ export async function getNominatableContact(
 }
 
 /** Institutions that could be asked to co-sign, minus the ones already counted. */
+/**
+ * People who can be named as the scrutineer at certification.
+ *
+ * By-Law Part V S3(b) has the President appoint someone to receive and count
+ * the ballots, and certification records who that was. The field used to be a
+ * raw contact id typed into a text box, which is not a thing any President can
+ * be expected to know — so the appointment simply went unrecorded.
+ *
+ * Scoped to administrators of member institutions plus CSC's own staff, which
+ * is who the role is ever filled from, rather than every contact in the
+ * database. Sorted by name so the list is scannable.
+ */
+export async function listScrutineerCandidates(): Promise<
+  { contactId: string; name: string; organizationName: string }[]
+> {
+  const db = createAdminClient();
+
+  // Member stores and CSC's own staff. `type` is CAPITALISED in this database,
+  // so a lowercase comparison would match nothing and silently empty the list.
+  // Vendor partners are excluded deliberately: the electorate is member stores,
+  // and a supplier counting the members' ballots is not the role Part V S3(b)
+  // describes.
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id")
+    .in("type", ["Member", "Staff"]);
+  const allowedOrgIds = new Set((orgs ?? []).map((o) => o.id as string));
+  if (allowedOrgIds.size === 0) return [];
+
+  const { data: admins } = await db
+    .from("user_organizations")
+    .select("user_id, organization_id")
+    .eq("role", "org_admin")
+    .eq("status", "active");
+
+  const byOrg = new Map<string, string[]>();
+  for (const a of admins ?? []) {
+    const orgId = a.organization_id as string;
+    if (!allowedOrgIds.has(orgId)) continue;
+    byOrg.set(orgId, [...(byOrg.get(orgId) ?? []), a.user_id as string]);
+  }
+  if (byOrg.size === 0) return [];
+
+  const { data: contacts } = await db
+    .from("contacts")
+    .select("id, first_name, last_name, name, organization_id, profile_id, organizations(name)")
+    .in("organization_id", [...byOrg.keys()])
+    .is("archived_at", null);
+
+  return (contacts ?? [])
+    .filter((c) => {
+      const allowed = byOrg.get(c.organization_id as string) ?? [];
+      return c.profile_id && allowed.includes(c.profile_id as string);
+    })
+    .map((c) => ({
+      contactId: c.id as string,
+      name:
+        [c.first_name, c.last_name].filter(Boolean).join(" ") ||
+        (c.name as string) ||
+        "Unnamed contact",
+      organizationName:
+        ((c.organizations as { name: string } | null)?.name as string) ?? "Unknown institution",
+    }))
+    // Deduped for DISPLAY only, on (person, institution). Some people hold more
+    // than one contact row at the same store, and two identical lines in a
+    // picker is just a coin toss for whoever is reading it. Nothing is merged
+    // in the database — the duplicate rows are left exactly as they are.
+    .filter((c, i, all) =>
+      i === all.findIndex((o) => o.name === c.name && o.organizationName === c.organizationName)
+    )
+    .sort((a, b) =>
+      a.name.localeCompare(b.name) || a.organizationName.localeCompare(b.organizationName)
+    );
+}
+
 export async function listCosignerOrganizations(
   electionId: string,
   excludeOrganizationIds: string[]
@@ -1417,18 +1506,27 @@ export async function sendCallForNominations(
   const eligible = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
   if (eligible.length === 0) return fail("No institutions are currently eligible, so there is nobody to send to.");
 
-  const outcomes = await notifyCallForNominations(election, eligible);
-  const summary = summarizeOutcomes(outcomes);
-
-  // Sending the call is what OPENS nominations — they are the same act. A
+  // ⚠️ CLAIMED BEFORE THE SEND, deliberately.
+  //
+  // The guard above refuses a second send once callSentAt is set, but that only
+  // helps if the stamp survives. Stamping AFTER the send meant that anything
+  // which killed the request part way — and a whole-electorate send is the most
+  // likely thing in this codebase to do that — left no stamp at all: the
+  // operator saw no confirmation, pressed again, and everyone who had already
+  // received the call received it a second time. That is not hypothetical; the
+  // comms campaign send did exactly this to five partners on 2026-08-26.
+  //
+  // Claiming first inverts the failure. A crash now leaves an election marked
+  // sent with a partial delivery, which the returned summary reports and a
+  // human can chase — recoverable, and quiet. The other order silently mails
+  // the entire membership twice.
+  //
+  // Sending the call is also what OPENS nominations — they are the same act. A
   // separate button would create two states that are both wrong: nominations
   // "open" that nobody was told about, or a call sent while the form still says
-  // closed. Until this existed nothing moved an election off `draft`, so the
-  // nominate page — which requires status `nominating` — refused every member.
-  //
-  // Opening early is harmless: the page also checks the SCHEDULE, so a call sent
-  // ahead of nominationsOpenAt announces the dates without opening the form
-  // before them.
+  // closed. Opening early is harmless: the page also checks the SCHEDULE, so a
+  // call sent ahead of nominationsOpenAt announces the dates without opening
+  // the form before them.
   await db
     .from("elections")
     .update({
@@ -1441,6 +1539,9 @@ export async function sendCallForNominations(
       updated_at: new Date().toISOString(),
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyCallForNominations(election, eligible);
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({ institutions: eligible.length, ...summary });
 }
@@ -2332,32 +2433,12 @@ export async function sendAgmNotice(
     );
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const outcomes = await notifyAgmNotice(election, eligible, {
-    agmTime: input.agmTime,
-    location: input.location ?? null,
-    agmUrl: `${appUrl}/events/${eventSlug}`,
-  });
-
-  let proxyIncluded = false;
-  if (input.includeProxyForm && !state.proxySentAt) {
-    const proxyOutcomes = await notifyProxyForm(election, eligible, {
-      // The appointment page, not the events listing. The old URL pointed at
-      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
-      // an event that is created as a DRAFT. This email discharges a Part VII
-      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
-      // members are not permitted to see.
-      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
-      lateNote: state.proxy.overdue
-        ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
-        : null,
-    });
-    outcomes.push(...proxyOutcomes);
-    proxyIncluded = true;
-  }
-
-  const summary = summarizeOutcomes(outcomes);
+  // Claimed before the send — see sendCallForNominations for why. Notice is the
+  // one send where a duplicate is worse than a miss: two notices for the same
+  // meeting, possibly stating different times, leave the meeting arguably
+  // improperly called under Part VII S4.
+  const proxyIncluded = Boolean(input.includeProxyForm && !state.proxySentAt);
   const now = new Date().toISOString();
-
   await db
     .from("elections")
     .update({
@@ -2370,6 +2451,29 @@ export async function sendAgmNotice(
       updated_at: now,
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyAgmNotice(election, eligible, {
+    agmTime: input.agmTime,
+    location: input.location ?? null,
+    agmUrl: `${appUrl}/events/${eventSlug}`,
+  });
+
+  if (proxyIncluded) {
+    const proxyOutcomes = await notifyProxyForm(election, eligible, {
+      // The appointment page, not the events listing. The old URL pointed at
+      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+      // an event that is created as a DRAFT. This email discharges a Part VII
+      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+      // members are not permitted to see.
+      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
+      lateNote: state.proxy.overdue
+        ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+        : null,
+    });
+    outcomes.push(...proxyOutcomes);
+  }
+
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({ ...summary, proxyIncluded });
 }
@@ -2393,18 +2497,8 @@ export async function sendProxyForm(
   if (eligible.length === 0) return fail("No institutions are currently eligible to vote.");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const outcomes = await notifyProxyForm(election, eligible, {
-    // The appointment page, not the events listing. The old URL pointed at
-      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
-      // an event that is created as a DRAFT. This email discharges a Part VII
-      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
-      // members are not permitted to see.
-      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
-    lateNote: state.proxy.overdue
-      ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
-      : null,
-  });
 
+  // Claimed before the send — see sendCallForNominations.
   const now = new Date().toISOString();
   await db
     .from("elections")
@@ -2417,6 +2511,18 @@ export async function sendProxyForm(
       updated_at: now,
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyProxyForm(election, eligible, {
+    // The appointment page, not the events listing. The old URL pointed at
+    // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+    // an event that is created as a DRAFT. This email discharges a Part VII
+    // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+    // members are not permitted to see.
+    proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
+    lateNote: state.proxy.overdue
+      ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+      : null,
+  });
 
   return ok({ ...summarizeOutcomes(outcomes), wasLate: state.proxy.overdue });
 }
@@ -2732,12 +2838,13 @@ export async function circulateBallots(
         : "No institutions are currently eligible, so there is nobody to send to."
     );
 
-  const outcomes = await notifyBallotsOpen(election, targets, {
-    candidateCount: candidates.length,
-    reminder: previouslyCirculated,
-  });
-  const summary = summarizeOutcomes(outcomes);
-
+  // Claimed before the send. This one is re-runnable on purpose — a second
+  // press is a REMINDER, and it already excludes anyone who has voted — but
+  // only once ballotsCirculatedAt exists. Stamping afterwards meant a send that
+  // died part way left no stamp, so the retry was not a reminder at all: it was
+  // a second "voting is open" to the entire electorate, including everyone who
+  // had already received the first. Claiming first makes the retry do the
+  // harmless thing instead of the loud one.
   await db
     .from("elections")
     .update({
@@ -2750,6 +2857,12 @@ export async function circulateBallots(
       updated_at: new Date().toISOString(),
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyBallotsOpen(election, targets, {
+    candidateCount: candidates.length,
+    reminder: previouslyCirculated,
+  });
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({
     reminder: previouslyCirculated,

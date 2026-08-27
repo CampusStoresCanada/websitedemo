@@ -97,7 +97,12 @@ export async function loadViewerBenchmarkingStanding(
 ): Promise<{ filed: boolean; disclosureLevel: string | null }> {
   if (viewerOrgIds.length === 0) return { filed: false, disclosureLevel: null };
 
-  const db = createAdminClient();
+  // Cast: the column is live in the database, but this branch's generated
+  // types predate the migration that added it (shipped alongside, and
+  // idempotent). Regenerating the whole types file inside a production fix
+  // would bury a six-file change in four thousand lines of generated diff.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
   const { data } = await db
     .from("benchmarking")
     .select("disclosure_level, fiscal_year")
@@ -124,6 +129,10 @@ const PEER_FIELDS = [
   "fiscal_year",
   "enrollment_fte",
   "institution_type",
+  // Drives the "Mandate" peer-group tab — filters the set and labels the tab.
+  // Missed on the first pass because the field list was guessed rather than
+  // read off the component, which would have broken that tab silently.
+  "operations_mandate",
   "total_square_footage",
   "total_gross_sales_instore",
   "total_online_sales",
@@ -169,4 +178,29 @@ export function projectPeerRows<T extends PeerRowInput>(
       : null;
     return out;
   });
+}
+
+/**
+ * May this viewer receive the peer set at all?
+ *
+ * Separate from the disclosure rules above, and checked first, because those
+ * ask "how much detail" while this asks "are they inside the exchange".
+ *
+ * A logged-out visitor is not a member who failed to file — they are not a
+ * member. Treating them as an unnamed-aggregate case put 39 stores' net
+ * profit, cost of goods and payroll into a public page as unattributed rows.
+ * Unattributed is not anonymous: enrolment and square footage travel in the
+ * same payload, and between them they identify most of the membership.
+ *
+ * This surface reads with the service role, so RLS is not the backstop here
+ * and cannot be. This function is.
+ */
+export function mayReceivePeerSet(
+  viewerLevel: string | null | undefined,
+  viewerOrgIds: string[],
+): boolean {
+  if (viewerLevel === "admin" || viewerLevel === "super_admin") return true;
+  // Membership in the exchange is what buys the peer set — an account with no
+  // active organisation is a visitor with a login, not a member store.
+  return viewerOrgIds.length > 0 && viewerLevel !== "public";
 }

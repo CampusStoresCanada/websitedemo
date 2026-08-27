@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { resolveOrgPageBenchmarking } from "../org-page-visibility";
+import {
+  resolveOrgPageBenchmarking,
+  projectPeerRows,
+  mayReceivePeerSet,
+} from "../org-page-visibility";
 
 /**
  * The costly failure is showing a store's net profit to someone who was never
@@ -81,5 +85,91 @@ describe("failing closed", () => {
     expect(
       resolveOrgPageBenchmarking({ ...base, viewerFiled: false, viewerDisclosureLevel: null }).show,
     ).toBe("aggregate");
+  });
+});
+
+describe("the projected peer row", () => {
+  const rows = [
+    {
+      organization_id: "a",
+      disclosure_level: "full",
+      operations_mandate: "self-funded",
+      net_profit: 100_000,
+      marketing_spend: 9_999,
+      sales_apparel: 12_345,
+      organization: { id: "a", name: "Store A", slug: "store-a" },
+    },
+  ];
+
+  it("carries every field the peer table actually renders", () => {
+    // Derived from the component, not guessed: operations_mandate drives the
+    // Mandate tab and its absence broke that tab silently.
+    const [r] = projectPeerRows(rows, { nameThem: true, viewerOrgIds: [] });
+    for (const f of [
+      "organization_id",
+      "enrollment_fte",
+      "institution_type",
+      "operations_mandate",
+      "total_square_footage",
+      "total_gross_sales_instore",
+      "total_online_sales",
+      "total_cogs",
+      "net_profit",
+      "expense_hr",
+    ]) {
+      expect(Object.prototype.hasOwnProperty.call(r, f)).toBe(true);
+    }
+  });
+
+  it("drops everything the table does not render", () => {
+    const [r] = projectPeerRows(rows, { nameThem: true, viewerOrgIds: [] });
+    expect(r.marketing_spend).toBeUndefined();
+    expect(r.sales_apparel).toBeUndefined();
+  });
+
+  it("strips names when the viewer is not entitled to them", () => {
+    const [r] = projectPeerRows(rows, { nameThem: false, viewerOrgIds: [] });
+    expect(r.organization).toBeNull();
+    // The row survives, because the store still counts toward every figure.
+    expect(r.net_profit).toBe(100_000);
+  });
+
+  it("keeps a store's own name even when it opted out to everyone else", () => {
+    const optedOut = [{ ...rows[0], disclosure_level: "aggregate_only" }];
+    const [mine] = projectPeerRows(optedOut, { nameThem: true, viewerOrgIds: ["a"] });
+    const [theirs] = projectPeerRows(optedOut, { nameThem: true, viewerOrgIds: ["z"] });
+    expect(mine.organization).not.toBeNull();
+    expect(theirs.organization).toBeNull();
+  });
+});
+
+describe("who is inside the exchange at all", () => {
+  it("gives a logged-out visitor nothing", () => {
+    // The regression this exists to prevent: 39 stores' net profit, cost of
+    // goods and payroll served as unattributed rows on a public page.
+    expect(mayReceivePeerSet("public", [])).toBe(false);
+    expect(mayReceivePeerSet(null, [])).toBe(false);
+    expect(mayReceivePeerSet(undefined, [])).toBe(false);
+  });
+
+  it("gives an account with no organisation nothing", () => {
+    // A login is not membership.
+    expect(mayReceivePeerSet("member", [])).toBe(false);
+  });
+
+  it("admits a member store", () => {
+    expect(mayReceivePeerSet("member", ["org-1"])).toBe(true);
+    expect(mayReceivePeerSet("org_admin", ["org-1"])).toBe(true);
+  });
+
+  it("admits staff, who have no org of their own", () => {
+    expect(mayReceivePeerSet("super_admin", [])).toBe(true);
+    expect(mayReceivePeerSet("admin", [])).toBe(true);
+  });
+
+  it("never admits public even with an org attached", () => {
+    // Belt and braces: viewerLevel is downgraded to public when an org's
+    // access has lapsed, and a lapsed member is outside the exchange.
+    expect(mayReceivePeerSet("public", ["org-1"])).toBe(false);
   });
 });

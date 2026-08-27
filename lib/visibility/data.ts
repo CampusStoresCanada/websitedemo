@@ -22,6 +22,7 @@ import {
   resolveOrgPageBenchmarking,
   loadViewerBenchmarkingStanding,
   projectPeerRows,
+  mayReceivePeerSet,
 } from "@/lib/benchmarking/org-page-visibility";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
@@ -201,6 +202,15 @@ export async function getOrganizationForViewer(
   // is withheld: the point is that a store counts toward the middle either way,
   // so the comparison should remain readable.
   let benchmarkingWithheldReason: string | null = null;
+
+  // Checked before anything else: the peer set is for members of the exchange.
+  // This path reads with the service role, so RLS is not a backstop here and
+  // an ungated peer set is a public financial disclosure.
+  if (!mayReceivePeerSet(viewer.viewerLevel, viewer.viewerOrgIds ?? [])) {
+    visibleAllBenchmarking = [];
+    visibleBenchmarking = null;
+  }
+
   if (visibleBenchmarking) {
     const standing = await loadViewerBenchmarkingStanding(viewer.viewerOrgIds ?? []);
     const decision = resolveOrgPageBenchmarking({
