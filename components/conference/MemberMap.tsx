@@ -48,6 +48,34 @@ export default function MemberMap({
   })();
   const [surfaceId, setSurfaceId] = useState(initialSurface);
   const [query, setQuery] = useState(initialQuery);
+
+  /**
+   * Keep ?find= in step with the box, so a search can be shared, bookmarked,
+   * and survives switching apps on a phone and coming back.
+   *
+   * replaceState, not push: one history entry per keystroke would turn the
+   * back button into an undo-typing button and bury whatever page they came
+   * from. And history.replaceState rather than router.replace, because the
+   * latter re-runs the server component — a round trip per character to
+   * re-render a map whose data has not changed.
+   *
+   * Debounced so the address bar is not rewritten mid-word.
+   */
+  const urlTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (urlTimer.current) clearTimeout(urlTimer.current);
+    urlTimer.current = setTimeout(() => {
+      const url = new URL(window.location.href);
+      const q = query.trim();
+      // Other params are preserved — this owns `find` and nothing else.
+      if (q) url.searchParams.set("find", q);
+      else url.searchParams.delete("find");
+      if (url.toString() !== window.location.href) {
+        window.history.replaceState(window.history.state, "", url.toString());
+      }
+    }, 300);
+    return () => { if (urlTimer.current) clearTimeout(urlTimer.current); };
+  }, [query]);
   const [selected, setSelected] = useState<MappedThing | null>(null);
 
   const surface = surfaces.find((s) => s.id === surfaceId) ?? surfaces[0];
@@ -264,6 +292,22 @@ export default function MemberMap({
           // on focus, which throws away the map position.
           className="w-full rounded-lg border border-gray-300 px-3 py-2.5 pr-10 text-base"
           aria-label="Find a company, booth number or what they sell"
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              // Take the top result. With one match it is already selected, so
+              // this is for the shortlist case — Enter should not require
+              // choosing between fifteen chips before anything happens.
+              e.preventDefault();
+              if (groups.length > 0) setSelected(groups[0].things[0]);
+            } else if (e.key === "Escape") {
+              // Clear rather than blur. On a phone the keyboard is covering
+              // the map, and getting rid of the search is what someone wants
+              // when they hit Escape — an empty box with focus is fine.
+              e.preventDefault();
+              setQuery("");
+              setSelected(null);
+            }
+          }}
         />
         {query && (
           <button
