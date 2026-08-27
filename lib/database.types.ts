@@ -6131,9 +6131,11 @@ export type Database = {
           email_campaign_id: string | null
           id: string
           kind: string
-          organization_id: string
+          meeting_id: string | null
+          organization_id: string | null
           published_at: string | null
           skip_reason: string | null
+          source_block: string | null
           status: string
           summary_text: string | null
           title: string | null
@@ -6150,9 +6152,11 @@ export type Database = {
           email_campaign_id?: string | null
           id?: string
           kind?: string
-          organization_id: string
+          meeting_id?: string | null
+          organization_id?: string | null
           published_at?: string | null
           skip_reason?: string | null
+          source_block?: string | null
           status?: string
           summary_text?: string | null
           title?: string | null
@@ -6169,9 +6173,11 @@ export type Database = {
           email_campaign_id?: string | null
           id?: string
           kind?: string
-          organization_id?: string
+          meeting_id?: string | null
+          organization_id?: string | null
           published_at?: string | null
           skip_reason?: string | null
+          source_block?: string | null
           status?: string
           summary_text?: string | null
           title?: string | null
@@ -6183,6 +6189,13 @@ export type Database = {
             columns: ["approved_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ghost_announcements_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
             referencedColumns: ["id"]
           },
           {
@@ -9860,6 +9873,61 @@ export type Database = {
           status?: string
         }
         Relationships: []
+      }
+      renewal_snapshots: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          data_json: Json
+          id: string
+          meeting_id: string
+          pulled_at: string
+          pulled_by: string | null
+          renewal_year: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          data_json: Json
+          id?: string
+          meeting_id: string
+          pulled_at?: string
+          pulled_by?: string | null
+          renewal_year: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          data_json?: Json
+          id?: string
+          meeting_id?: string
+          pulled_at?: string
+          pulled_by?: string | null
+          renewal_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_snapshots_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_snapshots_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_snapshots_pulled_by_fkey"
+            columns: ["pulled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       retention_jobs: {
         Row: {

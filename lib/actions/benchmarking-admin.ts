@@ -1,7 +1,11 @@
 "use server";
 
-import { requireAdmin, requireReviewerOrAdmin } from "@/lib/auth/guards";
+import {
+  requireAdmin,
+  requireReviewerOrAdmin,
+} from "@/lib/auth/guards";
 import type { AuthContext } from "@/lib/auth/guards";
+import { GOVERNANCE_BODY, GOVERNANCE_ROLE } from "@/lib/constants/capabilities";
 import type { Json } from "@/lib/database.types";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
@@ -65,7 +69,7 @@ export async function createBenchmarkingSurvey(
   fiscalYear: number,
   title: string,
   opensAt: string | null,
-  closesAt: string | null,
+  closesAt: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -111,7 +115,7 @@ export async function createBenchmarkingSurvey(
 
 export async function updateSurveyStatus(
   surveyId: string,
-  newStatus: string,
+  newStatus: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -152,7 +156,7 @@ export async function updateSurveyStatus(
 export async function updateSurveyDates(
   surveyId: string,
   opensAt: string | null,
-  closesAt: string | null,
+  closesAt: string | null
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -176,7 +180,7 @@ export async function updateSurveyDates(
 // ─────────────────────────────────────────────────────────────────
 
 export async function verifySubmission(
-  benchmarkingId: string,
+  benchmarkingId: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -203,10 +207,7 @@ export async function verifySubmission(
   });
 
   if (!promotion.success) {
-    console.error(
-      "[benchmarking-admin] verifySubmission promotion error:",
-      promotion.error,
-    );
+    console.error("[benchmarking-admin] verifySubmission promotion error:", promotion.error);
     await auth.supabase
       .from("benchmarking")
       .update({ verified_by: null, verified_at: null })
@@ -221,7 +222,7 @@ export async function verifySubmission(
 }
 
 export async function unverifySubmission(
-  benchmarkingId: string,
+  benchmarkingId: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -247,7 +248,7 @@ export async function unverifySubmission(
 export async function reviewDeltaFlag(
   flagId: string,
   decision: "approved" | "rejected",
-  committeeNotes: string,
+  committeeNotes: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyReviewerAccess();
   if (!auth.authorized || !auth.supabase)
@@ -279,14 +280,143 @@ export async function reviewDeltaFlag(
 // Reviewer Management (admin-only)
 // ─────────────────────────────────────────────────────────────────
 
-/**
- * Two distinct capabilities, two different groups, two different times of year:
- *   "qa"      — board committee, Nov/Dec, resolves delta flags and verifies
- *               submissions. Sees every store's data.
- *   "content" — store directors, Sept, correct question wording and author
- *               worked examples. Must never reach submission data.
- * Defaults to "qa" so existing call sites keep their meaning.
- */
+export async function toggleBenchmarkingReviewer(
+  userId: string,
+  enabled: boolean
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyAdminAccess();
+  if (!auth.authorized || !auth.supabase)
+    return { success: false, error: auth.error };
+
+  // Reviewer status is a ROLE on the Benchmarking Committee, resolved through
+  // governance_role_capabilities — not a flag on the profile row. A previous
+  // version wrote profiles.is_benchmarking_reviewer, a column that was never
+  // created, so this always returned "Failed to update reviewer status" and
+  // nobody could ever be made a reviewer.
+  const { data: body, error: bodyError } = await auth.supabase
+    .from("governance_bodies")
+    .select("id")
+    .eq("key", GOVERNANCE_BODY.benchmarkingCommittee)
+    .maybeSingle();
+
+  if (bodyError || !body) {
+    console.error("[benchmarking-admin] benchmarking committee body missing:", bodyError);
+    return { success: false, error: "Benchmarking Committee is not set up" };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Active is exactly has_capability()'s test: term_start on or before today,
+  // and no term_end or one still in the future.
+  const { data: existing, error: readError } = await auth.supabase
+    .from("governance_role_assignments")
+    .select("id")
+    .eq("person_profile_id", userId)
+    .eq("role_key", GOVERNANCE_ROLE.benchmarkingReviewer)
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  if (readError) {
+    console.error("[benchmarking-admin] toggleReviewer read error:", readError);
+    return { success: false, error: "Failed to read reviewer status" };
+  }
+
+  const isCurrentlyReviewer = (existing ?? []).length > 0;
+
+  if (enabled) {
+    if (isCurrentlyReviewer) return { success: true };
+    const { error } = await auth.supabase.from("governance_role_assignments").insert({
+      body_id: body.id,
+      person_profile_id: userId,
+      role_key: GOVERNANCE_ROLE.benchmarkingReviewer,
+      term_start: today,
+      term_end: null,
+      // A committee appointment is NOT a board seat. counts_toward_cap
+      // defaults to true, and leaving it would burn one of the four
+      // consecutive terms the by-laws allow a director — corrupting election
+      // eligibility for someone who merely reviewed a survey.
+      counts_toward_cap: false,
+      appointing_resolution: "Appointed by an administrator via the benchmarking dashboard",
+    });
+    if (error) {
+      console.error("[benchmarking-admin] toggleReviewer insert error:", error);
+      return { success: false, error: "Failed to update reviewer status" };
+    }
+    return { success: true };
+  }
+
+  if (!isCurrentlyReviewer) return { success: true };
+  // End the term rather than delete the row — who held a capability and when
+  // is exactly the sort of thing a governance record should keep.
+  const { error } = await auth.supabase
+    .from("governance_role_assignments")
+    .update({ term_end: today, updated_at: new Date().toISOString() })
+    .in("id", (existing ?? []).map((r: { id: string }) => r.id));
+
+  if (error) {
+    console.error("[benchmarking-admin] toggleReviewer revoke error:", error);
+    return { success: false, error: "Failed to update reviewer status" };
+  }
+
+  return { success: true };
+}
+
+export async function searchUsersForReviewer(
+  query: string
+): Promise<{
+  success: boolean;
+  users?: { id: string; displayName: string; globalRole: string; isReviewer: boolean }[];
+  error?: string;
+}> {
+  const auth = await verifyAdminAccess();
+  if (!auth.authorized || !auth.supabase)
+    return { success: false, error: auth.error };
+
+  if (!query || query.trim().length < 2) {
+    return { success: false, error: "Search query too short" };
+  }
+
+  const searchTerm = `%${query.trim()}%`;
+
+  // Search profiles by display_name
+  const { data: profiles, error } = await auth.supabase
+    .from("profiles")
+    .select("id, display_name, global_role")
+    .ilike("display_name", searchTerm)
+    .limit(10);
+
+  if (error) {
+    console.error("[benchmarking-admin] searchUsers error:", error);
+    return { success: false, error: "Search failed" };
+  }
+
+  const rows = profiles ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Reviewer status comes from the role assignment, not the profile row.
+  // One query for the whole page of results rather than one per user.
+  const { data: assignments } = await auth.supabase
+    .from("governance_role_assignments")
+    .select("person_profile_id")
+    .eq("role_key", GOVERNANCE_ROLE.benchmarkingReviewer)
+    .in("person_profile_id", rows.map((p: { id: string }) => p.id))
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  const reviewerIds = new Set(
+    (assignments ?? []).map((a: { person_profile_id: string | null }) => a.person_profile_id)
+  );
+
+  const users = rows.map((p: { id: string; display_name: string | null; global_role: string }) => ({
+    id: p.id,
+    displayName: p.display_name ?? "Unknown",
+    globalRole: p.global_role,
+    isReviewer: reviewerIds.has(p.id),
+  }));
+
+  return { success: true, users };
+}
+
 // ─────────────────────────────────────────────────────────────────
 // Field Config Management (admin-only)
 // ─────────────────────────────────────────────────────────────────
@@ -296,45 +426,27 @@ export async function reviewDeltaFlag(
  */
 export async function saveFieldConfig(
   surveyId: string,
-  config: SurveyFieldConfig,
+  config: SurveyFieldConfig
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
     return { success: false, error: auth.error };
 
   // Basic validation: must have sections array
-  if (
-    !config ||
-    !Array.isArray(config.sections) ||
-    config.sections.length === 0
-  ) {
-    return {
-      success: false,
-      error: "Invalid field config: must have at least one section",
-    };
+  if (!config || !Array.isArray(config.sections) || config.sections.length === 0) {
+    return { success: false, error: "Invalid field config: must have at least one section" };
   }
 
   // Validate each section has required fields
   for (const section of config.sections) {
     if (!section.id || !section.title || typeof section.order !== "number") {
-      return {
-        success: false,
-        error: `Invalid section: missing id, title, or order`,
-      };
+      return { success: false, error: `Invalid section: missing id, title, or order` };
     }
     if (!Array.isArray(section.fields)) {
-      return {
-        success: false,
-        error: `Section "${section.title}" must have a fields array`,
-      };
+      return { success: false, error: `Section "${section.title}" must have a fields array` };
     }
     for (const field of section.fields) {
-      if (
-        !field.name ||
-        !field.label ||
-        !field.type ||
-        typeof field.order !== "number"
-      ) {
+      if (!field.name || !field.label || !field.type || typeof field.order !== "number") {
         return {
           success: false,
           error: `Invalid field in section "${section.title}": missing name, label, type, or order`,
@@ -361,7 +473,7 @@ export async function saveFieldConfig(
  */
 export async function initializeFieldConfig(
   surveyId: string,
-  fromSurveyId?: string,
+  fromSurveyId?: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
@@ -388,7 +500,7 @@ export async function initializeFieldConfig(
  * Reset a survey's field_config to NULL (revert to DEFAULT).
  */
 export async function resetFieldConfig(
-  surveyId: string,
+  surveyId: string
 ): Promise<{ success: boolean; error?: string }> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)

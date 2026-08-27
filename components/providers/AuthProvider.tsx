@@ -11,6 +11,7 @@ import {
 } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { derivePermissionState } from "@/lib/auth/permissions";
+import { CAPABILITY } from "@/lib/constants/capabilities";
 import type { User } from "@supabase/supabase-js";
 import type {
   GlobalRole,
@@ -447,7 +448,13 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       setGlobalRole(role);
       setPermissionState(resolvedPermissionState);
       setIsSurveyParticipant(hasSurveyData);
-      setIsBenchmarkingReviewer(initialAuth?.isBenchmarkingReviewer ?? false);
+      // Resolved through the capability system rather than a profile flag —
+      // SECURITY DEFINER, so the client may ask about itself without needing
+      // read access to governance_role_assignments.
+      const { data: capsData } = await supabase.rpc("current_capabilities", { p_subject: userId });
+      const capabilities = Array.isArray(capsData) ? (capsData as string[]) : [];
+      const resolvedReviewer = capabilities.includes(CAPABILITY.benchmarkingContentReview);
+      setIsBenchmarkingReviewer(resolvedReviewer);
       setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
       setReauthMessage(null);
@@ -460,7 +467,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         permissionState: resolvedPermissionState,
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
-        isBenchmarkingReviewer: initialAuth?.isBenchmarkingReviewer ?? false,
+        isBenchmarkingReviewer: resolvedReviewer,
         isCancollMember: hasCANCOLL,
       };
 

@@ -3,6 +3,7 @@ import { getIdentitySnapshot } from "./guards";
 import { derivePermissionState } from "./permissions";
 import { generateSessionKey, exportKeyToBase64 } from "./crypto";
 import { getProgramsConfig } from "@/lib/policy/engine";
+import { CAPABILITY } from "@/lib/constants/capabilities";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import type {
   GlobalRole,
@@ -90,9 +91,14 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
     encryptionKey,
     encryptionKeyBase64,
     capabilities,
-    isBenchmarkingReviewer: capabilities.includes("benchmarking.qa_verify"),
+    // Resolved from governance_role_capabilities, never a flag on the profile
+    // row. Either capability admits you to the reviewer surfaces; content
+    // review is checked separately below because it is the narrower right.
+    isBenchmarkingReviewer:
+      capabilities.includes(CAPABILITY.benchmarkingContentReview) ||
+      capabilities.includes(CAPABILITY.benchmarkingQaVerify),
     isBenchmarkingContentReviewer: capabilities.includes(
-      "benchmarking.content_review",
+      CAPABILITY.benchmarkingContentReview,
     ),
   };
 });
