@@ -224,8 +224,22 @@ export async function evaluateElectionEligibility(
       })),
       { onConflict: "election_id,organization_id" }
     );
-    if (upsertError)
-      throw new Error(`[elections] failed to store eligibility: ${upsertError.message}`);
+    if (upsertError) {
+      // The stored verdicts are not a cache — searchNominatableContacts and
+      // listCosignerOrganizations read this table to decide who may be
+      // nominated and who may co-sign. Continuing past a failed write would
+      // leave those decisions running on stale eligibility, so this throws
+      // rather than warning. Do not soften it into a console.error.
+      //
+      // 23503 is the one case worth naming: the election was deleted while it
+      // was being evaluated. A foreign key constraint string tells the reader
+      // nothing, and it is the shape a stale open tab produces.
+      throw new Error(
+        upsertError.code === "23503"
+          ? "That election no longer exists — it was removed while this page was loading."
+          : `[elections] failed to store eligibility: ${upsertError.message}`
+      );
+    }
   }
 
   return { verdicts, summary: summarizeEligibility(verdicts) };
