@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import type { FloorPlanSurface } from "@/lib/conference/floor-surfaces";
 import type { MappedThing } from "@/lib/conference/member-map";
 import { explainMatch, type MatchReason } from "@/lib/explore/intent-search";
+import {
+  boundsOf, fitView, frameRect, isFitted, panBy, zoomAt, type ViewBox,
+} from "@/lib/conference/map-view";
 
 /**
  * Finding something at the conference, on a phone, standing up.
@@ -151,6 +154,101 @@ export default function MemberMap({
     else if (groups.length === 0) setSelected(null);
   }, [groups]);
 
+  /**
+   * Pan and zoom.
+   *
+   * Pointer events rather than separate mouse/touch paths, so one set of
+   * handlers covers a finger, a trackpad and a mouse. `touch-action: none` on
+   * the svg only — the browser must stop scrolling the PAGE when a drag starts
+   * on the map, but everywhere else on the page still scrolls normally.
+   */
+  const [view, setView] = useState<ViewBox>(() => fitView(VIEW_W, VIEW_H));
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinchDist = useRef<number | null>(null);
+  // Distinguishes a tap from the end of a drag, so panning never selects a
+  // booth the reader was only sliding past.
+  const dragged = useRef(false);
+
+  /** Client pixels → world units, via the rendered size. */
+  const toWorld = useCallback((clientX: number, clientY: number) => {
+    const el = svgRef.current;
+    if (!el) return { x: 0, y: 0 };
+    const r = el.getBoundingClientRect();
+    return {
+      x: view.x + ((clientX - r.left) / r.width) * view.w,
+      y: view.y + ((clientY - r.top) / r.height) * view.h,
+    };
+  }, [view]);
+
+  const onPointerDown = (e: React.PointerEvent<SVGSVGElement>) => {
+    // Capture on the svg, not the box under the finger, so a drag that leaves
+    // the map still tracks. And guarded: setPointerCapture throws
+    // NotFoundError if the pointer has already been released — which is a
+    // race, not a failure, and must not take the page down with it.
+    try {
+      e.currentTarget.setPointerCapture(e.pointerId);
+    } catch {
+      // Nothing to capture; the gesture simply ends early.
+    }
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    dragged.current = false;
+    pinchDist.current = null;
+  };
+
+  const onPointerMove = (e: React.PointerEvent<SVGSVGElement>) => {
+    const prev = pointers.current.get(e.pointerId);
+    if (!prev) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const pts = [...pointers.current.values()];
+    const el = svgRef.current;
+    if (!el) return;
+    const r = el.getBoundingClientRect();
+
+    if (pts.length >= 2) {
+      const [a, b] = pts;
+      const dist = Math.hypot(a.x - b.x, a.y - b.y);
+      if (pinchDist.current != null && dist > 0) {
+        const mid = toWorld((a.x + b.x) / 2, (a.y + b.y) / 2);
+        setView((v) => zoomAt(v, dist / pinchDist.current!, mid.x, mid.y, VIEW_W, VIEW_H));
+        dragged.current = true;
+      }
+      pinchDist.current = dist;
+      return;
+    }
+
+    const dx = ((e.clientX - prev.x) / r.width) * view.w;
+    const dy = ((e.clientY - prev.y) / r.height) * view.h;
+    if (Math.abs(dx) + Math.abs(dy) > 0) dragged.current = true;
+    setView((v) => panBy(v, -dx, -dy, VIEW_W, VIEW_H));
+  };
+
+  const endPointer = (e: React.PointerEvent<SVGSVGElement>) => {
+    pointers.current.delete(e.pointerId);
+    if (pointers.current.size < 2) pinchDist.current = null;
+  };
+
+  const onWheel = (e: React.WheelEvent<SVGSVGElement>) => {
+    const at = toWorld(e.clientX, e.clientY);
+    setView((v) => zoomAt(v, e.deltaY < 0 ? 1.15 : 1 / 1.15, at.x, at.y, VIEW_W, VIEW_H));
+  };
+
+  /**
+   * Selecting something takes you TO it.
+   *
+   * Auto-select used to tell the reader the answer existed without moving the
+   * map, which on a phone means the highlighted booth can be off screen —
+   * knowing it is somewhere is not knowing where.
+   */
+  useEffect(() => {
+    if (!selected) return;
+    const rects = onThisSurface
+      .filter((t) => selectedIds.has(t.entityId))
+      .map((t) => ({ x: t.x * VIEW_W, y: t.y * VIEW_H, w: t.w * VIEW_W, h: t.h * VIEW_H }));
+    const bounds = boundsOf(rects);
+    if (bounds) setView(frameRect(bounds, VIEW_W, VIEW_H));
+  }, [selected, selectedIds, onThisSurface]);
+
   if (!surface) {
     return <p className="text-sm text-gray-500">No floor plan has been published yet.</p>;
   }
@@ -258,87 +356,107 @@ export default function MemberMap({
         </div>
       )}
 
-      <svg
-        viewBox={`0 0 ${VIEW_W} ${VIEW_H}`}
-        className="w-full rounded-lg border border-gray-200 bg-white"
-        role="img"
-        aria-label={`Map: ${surface.name}`}
-      >
-        {surface.imageUrl ? (
-          <image href={surface.imageUrl} x={0} y={0} width={VIEW_W} height={VIEW_H}
-                 preserveAspectRatio="none" />
-        ) : (
-          <rect x={0} y={0} width={VIEW_W} height={VIEW_H} fill="#f7f7f6" />
+      <div className="relative">
+        {!isFitted(view, VIEW_W) && (
+          <button
+            type="button"
+            onClick={() => setView(fitView(VIEW_W, VIEW_H))}
+            className="absolute right-2 top-2 z-10 rounded-md border border-gray-300 bg-white/95 px-2.5 py-1.5 text-xs font-semibold text-gray-700 shadow-sm hover:border-gray-400"
+          >
+            Whole floor
+          </button>
         )}
+        <svg
+          ref={svgRef}
+          viewBox={`${view.x} ${view.y} ${view.w} ${view.h}`}
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={endPointer}
+          onPointerCancel={endPointer}
+          onWheel={onWheel}
+          // touch-action:none stops the browser scrolling the page out from
+          // under a drag that started on the map. Scoped to the svg, so the
+          // rest of the page still scrolls with a finger as normal.
+          className="w-full touch-none rounded-lg border border-gray-200 bg-white"
+          role="img"
+          aria-label={`Map: ${surface.name}`}
+        >
+          {surface.imageUrl ? (
+            <image href={surface.imageUrl} x={0} y={0} width={VIEW_W} height={VIEW_H}
+                   preserveAspectRatio="none" />
+          ) : (
+            <rect x={0} y={0} width={VIEW_W} height={VIEW_H} fill="#f7f7f6" />
+          )}
 
-        {onThisSurface.map((t) => {
-          const x = t.x * VIEW_W, y = t.y * VIEW_H, w = t.w * VIEW_W, h = t.h * VIEW_H;
-          const isMatch = matches.has(t.entityId);
-          // De-emphasise by COLOUR, never by opacity. Fading a box to 25%
-          // makes it translucent, and the background artwork's own serif booth
-          // numbers show through underneath ours — which is why the map went
-          // back to numbers-on-numbers the moment anyone searched. Every fill
-          // here stays opaque; quiet booths just go grey.
-          const muted = q.length > 0 && !isMatch;
-          const isSelected = selectedIds.has(t.entityId);
-          // Held booths carry the brand navy, matches the accent red, free
-          // booths stay white. `onDark` keeps the label legible on whichever
-          // of those it lands on.
-          // Three states that have to be told apart at arm's length on a
-          // phone: quiet, found, and the one you are looking at. Matched and
-          // selected were both #EE2A2E, distinguished only by a stroke width
-          // that vanishes at this scale — so selection now changes HUE, and
-          // keeps a red ring to stay visibly part of the result set.
-          const fill = isSelected
-            ? "#1A1A1A"
-            : muted
-              ? "#EDEEF0"
-              : isMatch
-                ? "#EE2A2E"
-                : t.orgName
-                  ? "#163D6D"
-                  : "#FFFFFF";
-          const onDark = isSelected || (!muted && (isMatch || !!t.orgName));
-          return (
-            <g
-              key={t.entityId}
-              transform={t.rotation ? `rotate(${t.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
-              onClick={() => setSelected(t)}
-              className="cursor-pointer"
-            >
-              {/* The background artwork draws each booth as a filled box with
-                  its number set in the venue's own serif. Two earlier attempts
-                  both failed on that: an opaque box with our label on top read
-                  as numbers-on-numbers, and a translucent tint left the printed
-                  number showing through while washing out the state colour.
-
-                  So the fill is OPAQUE and covers the artwork's number
-                  completely, and we redraw the number ourselves. One number per
-                  booth, in the site's own face, and the fill is free to carry
-                  state because nothing has to show through it. */}
-              <rect
-                x={x} y={y} width={w} height={h} rx={2}
-                fill={fill}
-                stroke={
-                  isSelected ? "#EE2A2E" : muted ? "#D5D7DB" : isMatch ? "#B81E22" : "#163D6D"
-                }
-                strokeWidth={isSelected ? 4 : isMatch ? 2 : 1}
-              />
-              <text
-                x={x + w / 2} y={y + h / 2}
-                textAnchor="middle" dominantBaseline="central"
-                fontSize={Math.max(9, Math.min(w, h) * 0.44)}
-                fill={onDark ? "#ffffff" : muted ? "#9AA0A8" : "#163D6D"}
-                fontWeight={700}
-                fontFamily="var(--font-primary)"
-                pointerEvents="none"
+          {onThisSurface.map((t) => {
+            const x = t.x * VIEW_W, y = t.y * VIEW_H, w = t.w * VIEW_W, h = t.h * VIEW_H;
+            const isMatch = matches.has(t.entityId);
+            // De-emphasise by COLOUR, never by opacity. Fading a box to 25%
+            // makes it translucent, and the background artwork's own serif booth
+            // numbers show through underneath ours — which is why the map went
+            // back to numbers-on-numbers the moment anyone searched. Every fill
+            // here stays opaque; quiet booths just go grey.
+            const muted = q.length > 0 && !isMatch;
+            const isSelected = selectedIds.has(t.entityId);
+            // Held booths carry the brand navy, matches the accent red, free
+            // booths stay white. `onDark` keeps the label legible on whichever
+            // of those it lands on.
+            // Three states that have to be told apart at arm's length on a
+            // phone: quiet, found, and the one you are looking at. Matched and
+            // selected were both #EE2A2E, distinguished only by a stroke width
+            // that vanishes at this scale — so selection now changes HUE, and
+            // keeps a red ring to stay visibly part of the result set.
+            const fill = isSelected
+              ? "#1A1A1A"
+              : muted
+                ? "#EDEEF0"
+                : isMatch
+                  ? "#EE2A2E"
+                  : t.orgName
+                    ? "#163D6D"
+                    : "#FFFFFF";
+            const onDark = isSelected || (!muted && (isMatch || !!t.orgName));
+            return (
+              <g
+                key={t.entityId}
+                transform={t.rotation ? `rotate(${t.rotation} ${x + w / 2} ${y + h / 2})` : undefined}
+                onClick={() => { if (!dragged.current) setSelected(t); }}
+                className="cursor-pointer"
               >
-                {t.label}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
+                {/* The background artwork draws each booth as a filled box with
+                    its number set in the venue's own serif. Two earlier attempts
+                    both failed on that: an opaque box with our label on top read
+                    as numbers-on-numbers, and a translucent tint left the printed
+                    number showing through while washing out the state colour.
+
+                    So the fill is OPAQUE and covers the artwork's number
+                    completely, and we redraw the number ourselves. One number per
+                    booth, in the site's own face, and the fill is free to carry
+                    state because nothing has to show through it. */}
+                <rect
+                  x={x} y={y} width={w} height={h} rx={2}
+                  fill={fill}
+                  stroke={
+                    isSelected ? "#EE2A2E" : muted ? "#D5D7DB" : isMatch ? "#B81E22" : "#163D6D"
+                  }
+                  strokeWidth={isSelected ? 4 : isMatch ? 2 : 1}
+                />
+                <text
+                  x={x + w / 2} y={y + h / 2}
+                  textAnchor="middle" dominantBaseline="central"
+                  fontSize={Math.max(9, Math.min(w, h) * 0.44)}
+                  fill={onDark ? "#ffffff" : muted ? "#9AA0A8" : "#163D6D"}
+                  fontWeight={700}
+                  fontFamily="var(--font-primary)"
+                  pointerEvents="none"
+                >
+                  {t.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
 
       {selected ? (
         <div className="rounded-lg border border-gray-200 bg-white p-3">
