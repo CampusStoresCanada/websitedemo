@@ -73,7 +73,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "appoint_nominating_committee",
     title: "Appoint the Nominating Committee for the {year} election",
     description:
-      "By-Law Part V S1: the board appoints a Nominating Committee annually, and sets its size and duties in terms of reference. Recent practice has been for the Executive Director to fill it, which is a divergence from the by-law worth resolving one way or the other — either bring the appointment back to the board, or amend the by-law to match what the association actually does.\n\nWhile the committee is being appointed, agree what happens if two candidates tie for the last seat. By-Law No. 1 prescribes nothing. Two readings are defensible: the members elect at the AGM (Part V S3(e)), so the tie goes to the floor; or the motion is defeated (Part VII S8), the seat is vacant, and the board appoints (Part IV S3). The software will stop and ask rather than break a tie, so the answer has to exist before December.",
+      "By-Law Part V S1: the board appoints a Nominating Committee annually, and sets its size and duties in terms of reference. Recent practice has been for the Executive Director to fill it, which is a divergence from the by-law worth resolving one way or the other — either bring the appointment back to the board, or amend the by-law to match what the association actually does.\n\nWhile the committee is being appointed, agree what happens if two candidates tie for the last seat. By-Law No. 1 prescribes nothing. Two readings are defensible: the members elect at the AGM (Part V S3(e)), so the tie goes to the floor; or the motion is defeated (Part VII S8), the seat is vacant, and the board appoints (Part IV S3). The software will stop and ask rather than break a tie, so the answer has to exist before December.\n\nHOW: the appointment itself is a board decision and happens in the room, not in the software. To give the committee access to the review screens afterwards, grant them the Nominating Committee role under Admin → Pages & Permissions; the election screens read that role, so nothing else needs doing.",
     dueOn: (e) => e.schedule.nominationsOpenAt,
     owners: ["past_president", "president", "executive_director"],
   },
@@ -81,7 +81,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "submit_slate",
     title: "Submit the continuing directors and the Nominating Committee's slate for {year}",
     description:
-      "By-Law Part V S2(a): no fewer than 120 days before the AGM, the Nominating Committee submits the list of continuing directors and a slate of nominees for the vacant positions.\n\nThe slate must contain exactly the number of seats being filled. More than that and the acclamation branch is incoherent — you cannot acclaim five people into four seats.",
+      "By-Law Part V S2(a): no fewer than 120 days before the AGM, the Nominating Committee submits the list of continuing directors and a slate of nominees for the vacant positions.\n\nThe slate must contain exactly the number of seats being filled. More than that and the acclamation branch is incoherent — you cannot acclaim five people into four seats.\n\nHOW: the cycle has to exist before anything else can happen. Admin → Elections → \"Open a cycle\", check the seat count against the term register, and open it. That creates the election, publishes the members-only AGM event, and puts these obligations on the board's list. Committee nominations are then entered on the election screen; a nomination the committee puts forward does not need co-signatures, unlike one from a member.",
     dueOn: (e) => e.schedule.nominationsOpenAt,
     owners: ["past_president", "president", "executive_director"],
   },
@@ -89,7 +89,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "issue_call",
     title: "Send the call for nominations to the membership for {year}",
     description:
-      "By-Law Part V S2(b): the call goes to every member institution no fewer than 120 days before the AGM, and must include the slate and a nomination form.\n\nSend it from the election review page in the admin area — it emails every administrator at each currently eligible institution and records that it was sent, so it cannot go out twice. Check the eligibility figure before pressing it: institutions that have not completed their renewal cannot nominate, co-sign or vote, and they are not counted in the reach.",
+      "By-Law Part V S2(b): the call goes to every member institution no fewer than 120 days before the AGM, and must include the slate and a nomination form.\n\nHOW: Admin → Elections → the cycle → \"Send the call for nominations\" on the timeline. It emails every administrator at each currently eligible institution, and the same press is what OPENS nominations — the nomination form turns members away until it has gone out. It records that it was sent and refuses to send a second time.\n\nCheck the electorate figure on that screen before pressing it. Institutions that have not completed their renewal cannot nominate, co-sign or vote and are not in the count, so sending before the renewal cycle has landed reaches far fewer stores than the membership list suggests. Members nominate at /elections/<cycle>/nominate, which the email links to.",
     dueOn: (e) => e.schedule.nominationsOpenAt,
     owners: ["executive_director"],
   },
@@ -97,7 +97,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "chase_incomplete",
     title: "Chase incomplete {year} nominations before they lapse",
     description:
-      "A nomination reaches the ballot only when the nominee has accepted, their institution has granted permission for them to serve (Part V S2(d)), and the required co-signatures are in. Anything short of that on the closing date does not go forward.\n\nThe election review page lists exactly what each nomination is missing and will send a reminder to the nominees. Some of the gaps need someone other than the nominee to act, so they are worth a phone call rather than a second email.",
+      "A nomination reaches the ballot only when the nominee has accepted, their institution has granted permission for them to serve (Part V S2(d)), and the required co-signatures are in. Anything short of that on the closing date does not go forward.\n\nHOW: the cycle's review screen lists every nomination with exactly what it is still missing, and \"Chase incomplete nominations\" emails those nominees. That button only appears while something is actually outstanding.\n\nSome gaps cannot be closed by the nominee: the store's permission has to come from a colleague at the same institution, and co-signatures from administrators at two other member stores. Those are worth a phone call rather than a second email. If the committee wants to ask someone to stand down, \"Ask on their nomination page\" puts the question on the nominee's own page — it sends nothing, so tell them directly as well.",
     dueOn: (e) => e.schedule.nominationsCloseAt,
     owners: ["executive_director"],
   },
@@ -105,7 +105,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "close_nominations",
     title: "Close {year} nominations and confirm whether a ballot is needed",
     description:
-      "By-Law Part V S2(c): additional nominations may be submitted up to 90 days before the AGM. After that the field is fixed.\n\nIf more nominees stand than there are seats, a ballot goes out. If not, the nominees are acclaimed and there is no vote. Closing nominations in the admin area writes the field down — after this point the ballot cannot change, which is the whole point: a member who votes early must be looking at the same ballot as one who votes late.",
+      "By-Law Part V S2(c): additional nominations may be submitted up to 90 days before the AGM. After that the field is fixed.\n\nIf more nominees stand than there are seats, a ballot goes out. If not, the nominees are acclaimed and there is no vote. HOW: on the cycle's timeline, \"Close nominations\" takes you down to the panel that does it, where a confirmation has to be ticked before the button will work. It refuses before the published closing date — the window was announced to members and cannot be shortened after the fact — but it will let you close late.\n\nClosing writes the field down: after this the ballot cannot change, which is the whole point, since a member who votes early must be looking at the same ballot as one who votes late. The screen states whether the outcome is a ballot or an acclamation before you commit.",
     dueOn: (e) => e.schedule.nominationsCloseAt,
     owners: ["past_president", "president", "executive_director"],
   },
@@ -113,7 +113,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "appoint_scrutineer",
     title: "Appoint a scrutineer to receive and count the {year} ballots",
     description:
-      "By-Law Part V S3(b): the President appoints a scrutineer to receive and count the ballots.\n\nThis is the audit role. The scrutineer can see which institutions returned a ballot and the totals per candidate, and can confirm the two reconcile — but not how any institution voted. That link is destroyed when the ballots are sealed, deliberately and irreversibly.",
+      "By-Law Part V S3(b): the President appoints a scrutineer to receive and count the ballots.\n\nThis is the audit role. The scrutineer can see which institutions returned a ballot and the totals per candidate, and can confirm the two reconcile — but not how any institution voted. That link is destroyed when the ballots are sealed, deliberately and irreversibly.\n\nHOW: the appointment is the President's and happens in the room. It is recorded on the cycle's \"Ballots & audit\" screen at the moment of certification, where the scrutineer is chosen from a list of member-store administrators. Their working view is that same screen: the roll of institutions that voted, the totals, and whether the two reconcile.",
     dueOn: (e) => e.schedule.ballotsOpenAt,
     owners: ["president", "past_president"],
   },
@@ -121,7 +121,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "circulate_ballots",
     title: "Circulate {year} ballots to the membership",
     description:
-      "By-Law Part V S3(a): if additional nominations were received, ballots are circulated no less than 60 days before the AGM, listing candidates alphabetically and stating how many directors are to be elected.\n\nEach institution gets one ballot regardless of how many administrators it has, and any of them can change it until it closes.",
+      "By-Law Part V S3(a): if additional nominations were received, ballots are circulated no less than 60 days before the AGM, listing candidates alphabetically and stating how many directors are to be elected.\n\nHOW: on the cycle's timeline, \"Tell members voting is open\". It emails every eligible institution a link to /elections/<cycle>/ballot.\n\nEach institution gets ONE ballot however many administrators it has, and any of them can open it and change it until voting closes. Pressing the button again later does not repeat the announcement — it becomes a reminder, and it skips every institution that has already voted.",
     dueOn: (e) => e.schedule.ballotsOpenAt,
     owners: ["executive_director"],
   },
@@ -129,7 +129,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "chase_turnout",
     title: "Chase institutions that have not returned a {year} ballot",
     description:
-      "Ballots are due back no less than 30 days before the AGM (Part V S3(c)).\n\nTurnout is measured from ballots actually returned, not from whether anyone opened an email — delivery tracking is not currently recording anything, so the returned count is the only figure worth acting on. Every director is also an administrator of their own institution; if turnout is limited to them, the board has effectively re-elected itself, and that is worth a round of phone calls.",
+      "Ballots are due back no less than 30 days before the AGM (Part V S3(c)).\n\nTurnout is measured from ballots actually returned, not from whether anyone opened an email — delivery tracking is not currently recording anything, so the returned count is the only figure worth acting on. HOW: \"Remind those who have not voted\" on the cycle's timeline. It goes only to institutions with no ballot returned. The reminder schedule itself is configurable further down that screen — labelled steps, each with its own audience and how many days before close it fires, and it moves off weekends and holidays rather than landing on them.\n\nTurnout is measured from ballots actually returned, not from whether anyone opened an email — delivery tracking records nothing at present, so the returned count is the only figure worth acting on. Every director is also an administrator of their own institution; if turnout is limited to them, the board has effectively re-elected itself, and that is worth a round of phone calls.",
     dueOn: (e) => e.schedule.ballotsCloseAt,
     owners: ["executive_director"],
   },
@@ -137,7 +137,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "agm_notice",
     title: "Give notice of the {year} annual general meeting",
     description:
-      "By-Law Part VII S4(b): notice of the time and place must reach every member entitled to vote, by electronic means, during a period of 21 to 35 days before the meeting.\n\nThis is a WINDOW, not a deadline — too early is as defective as too late. Miss the 21-day floor and notice was not given as the by-laws require, which leaves the meeting improperly called and everything decided at it open to challenge, including the election of directors.\n\nThe due date on this item is the day the window OPENS, not the day it closes, and that is deliberate. Campus stores close from the third Friday of December until the new year, so for a January meeting almost the whole window falls into a period when notice is legally given and read by nobody. Send it on the opening day — which is this board meeting — and the membership actually sees it.\n\nUnlike the ballot dates, this window cannot be moved earlier: it is fixed relative to the meeting. The election screen shows how many usable days remain and will not let notice go out on the wrong side of the window.\n\nSending it also sends the proxy form where the dates allow, which discharges both obligations in one go.",
+      "By-Law Part VII S4(b): notice of the time and place must reach every member entitled to vote, by electronic means, during a period of 21 to 35 days before the meeting.\n\nThis is a WINDOW, not a deadline — too early is as defective as too late. Miss the 21-day floor and notice was not given as the by-laws require, which leaves the meeting improperly called and everything decided at it open to challenge, including the election of directors.\n\nThe due date on this item is the day the window OPENS, not the day it closes, and that is deliberate. Campus stores close from the third Friday of December until the new year, so for a January meeting almost the whole window falls into a period when notice is legally given and read by nobody. Send it on the opening day — which is this board meeting — and the membership actually sees it.\n\nUnlike the ballot dates, this window cannot be moved earlier: it is fixed relative to the meeting. HOW: \"Give notice of the meeting\" on the cycle's timeline. It needs the meeting's TIME — Part VII S4 requires the time and place, so it refuses without one — and it will not send while the meeting's event page is still a draft, because the link in the notice would show members nothing. Publish the event first under Admin → Events.\n\nThe screen shows how many usable days remain and refuses on the wrong side of the window. It also reports any institution with no administrator to give notice TO: that is a compliance problem rather than a delivery failure, and it has to be fixed before the window closes, not after.\n\nSending this also sends the proxy form where the dates allow, discharging both obligations in one press.",
     dueOn: (e) => noticeShouldGoOut(e),
     owners: ["executive_director"],
   },
@@ -145,7 +145,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "agm_proxy_form",
     title: "Send the proxy form for the {year} annual general meeting",
     description:
-      "By-Law Part VII S7(b): members eligible to vote must be provided with the proxy form 30 days before the meeting.\n\nA proxyholder must be an employee of the member's own store or the primary contact of another member store, and a proxy is valid only for the meeting it was given for.\n\nIf this went out with the notice of meeting it is already done — the election screen will say so. Unlike the notice, a late proxy form is still worth sending: it leaves a member worse off but does not invalidate the meeting.",
+      "By-Law Part VII S7(b): members eligible to vote must be provided with the proxy form 30 days before the meeting.\n\nA proxyholder must be an employee of the member's own store or the primary contact of another member store, and a proxy is valid only for the meeting it was given for.\n\nHOW: \"Send the proxy form\" on the cycle's timeline, if it did not already go with the notice — the screen says \"Sent\" and the date when it has. It links members to /elections/<cycle>/proxy, where they appoint someone directly; appointments appear on the cycle's \"Proxy register\" screen, which is also where a paper or faxed form gets entered.\n\nUnlike the notice, a late proxy form is still worth sending: it leaves a member worse off but does not invalidate the meeting, and it goes out with a note saying so.",
     dueOn: (e) => proxyFormDue(e),
     owners: ["executive_director"],
   },
@@ -153,7 +153,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "certify_result",
     title: "Seal the {year} ballots, count, and certify the result",
     description:
-      "Sealing removes the link between every ballot and the institution that cast it. It is irreversible, and afterwards a disputed ballot cannot be traced back — that is the point of it, but it should be done knowingly.\n\nIf two candidates tie for the last seat the count will stop and name them rather than picking one, and certification stays blocked until a human records how the tie was resolved and on what authority.",
+      "Sealing removes the link between every ballot and the institution that cast it. It is irreversible, and afterwards a disputed ballot cannot be traced back — that is the point of it, but it should be done knowingly.\n\nHOW: both happen on the cycle's \"Ballots & audit\" screen. Sealing asks you to type SEAL, because it cannot be undone. Certifying is the button beneath it, and that is where the scrutineer is recorded.\n\nIf two candidates tie for the last seat the count stops and names them rather than picking one, and certification stays blocked until someone records how the tie was resolved and on what authority — that text becomes the association's precedent, so write it as something a future board would be content to be bound by.",
     dueOn: (e) => e.schedule.ballotsCloseAt,
     owners: ["president", "past_president", "executive_director"],
   },
@@ -161,7 +161,7 @@ export const ELECTION_TASKS: ElectionTaskTemplate[] = [
     key: "announce_result",
     title: "Announce the result at the {year} annual general meeting",
     description:
-      "By-Law Part V S3(d): the Chair of the Nominating Committee announces the ballot results, or the acclaimed candidates where no additional nominations were received. Under S3(e) the members then elect the directors who had the most votes.\n\nIf a tie went to the floor, this is where it is settled.",
+      "By-Law Part V S3(d): the Chair of the Nominating Committee announces the ballot results, or the acclaimed candidates where no additional nominations were received. Under S3(e) the members then elect the directors who had the most votes.\n\nHOW: the certified result and a written announcement are on the cycle's \"Ballots & audit\" screen, in the past tense of a meeting that has happened — it names who was elected and the turnout, never the vote counts, and it cannot go out before the meeting.\n\nIf a tie went to the floor, this is where it is settled.",
     dueOn: (e) => e.schedule.agmDate,
     owners: ["nominating_committee_chair", "past_president", "president"],
   },
@@ -258,12 +258,30 @@ export async function mintElectionActionItems(
     // errored; the tasks just were not there.
     const { data: existing } = await db
       .from("board_action_items")
-      .select("id")
+      .select("id, status")
       .eq("title", title)
       .limit(1);
 
     const alreadyThere = (existing?.length ?? 0) > 0;
     let created = false;
+
+    // "Create or REFRESH" — and refresh used to mean nothing. An item that
+    // already existed was skipped entirely, so its description was frozen at
+    // whatever the software could do on the day it was first raised. These
+    // descriptions carry the instructions for actually doing the job, and they
+    // go stale every time the tooling changes; an officer following a
+    // year-old one would be told to look for buttons that have moved.
+    //
+    // Only the description, and only while the item is still open: due dates
+    // may have been moved to suit a meeting and assignees reassigned by a
+    // person, and a completed item is a record of what was done under the
+    // guidance of the day. Neither is ours to rewrite.
+    if (alreadyThere && !options.dryRun && existing?.[0]?.status === "open") {
+      await db
+        .from("board_action_items")
+        .update({ description: task.description })
+        .eq("id", existing[0].id as string);
+    }
 
     if (!alreadyThere && !options.dryRun && meeting) {
       const { data: last } = await db

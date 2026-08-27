@@ -1140,6 +1140,81 @@ export async function getNominatableContact(
 }
 
 /** Institutions that could be asked to co-sign, minus the ones already counted. */
+/**
+ * People who can be named as the scrutineer at certification.
+ *
+ * By-Law Part V S3(b) has the President appoint someone to receive and count
+ * the ballots, and certification records who that was. The field used to be a
+ * raw contact id typed into a text box, which is not a thing any President can
+ * be expected to know — so the appointment simply went unrecorded.
+ *
+ * Scoped to administrators of member institutions plus CSC's own staff, which
+ * is who the role is ever filled from, rather than every contact in the
+ * database. Sorted by name so the list is scannable.
+ */
+export async function listScrutineerCandidates(): Promise<
+  { contactId: string; name: string; organizationName: string }[]
+> {
+  const db = createAdminClient();
+
+  // Member stores and CSC's own staff. `type` is CAPITALISED in this database,
+  // so a lowercase comparison would match nothing and silently empty the list.
+  // Vendor partners are excluded deliberately: the electorate is member stores,
+  // and a supplier counting the members' ballots is not the role Part V S3(b)
+  // describes.
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id")
+    .in("type", ["Member", "Staff"]);
+  const allowedOrgIds = new Set((orgs ?? []).map((o) => o.id as string));
+  if (allowedOrgIds.size === 0) return [];
+
+  const { data: admins } = await db
+    .from("user_organizations")
+    .select("user_id, organization_id")
+    .eq("role", "org_admin")
+    .eq("status", "active");
+
+  const byOrg = new Map<string, string[]>();
+  for (const a of admins ?? []) {
+    const orgId = a.organization_id as string;
+    if (!allowedOrgIds.has(orgId)) continue;
+    byOrg.set(orgId, [...(byOrg.get(orgId) ?? []), a.user_id as string]);
+  }
+  if (byOrg.size === 0) return [];
+
+  const { data: contacts } = await db
+    .from("contacts")
+    .select("id, first_name, last_name, name, organization_id, profile_id, organizations(name)")
+    .in("organization_id", [...byOrg.keys()])
+    .is("archived_at", null);
+
+  return (contacts ?? [])
+    .filter((c) => {
+      const allowed = byOrg.get(c.organization_id as string) ?? [];
+      return c.profile_id && allowed.includes(c.profile_id as string);
+    })
+    .map((c) => ({
+      contactId: c.id as string,
+      name:
+        [c.first_name, c.last_name].filter(Boolean).join(" ") ||
+        (c.name as string) ||
+        "Unnamed contact",
+      organizationName:
+        ((c.organizations as { name: string } | null)?.name as string) ?? "Unknown institution",
+    }))
+    // Deduped for DISPLAY only, on (person, institution). Some people hold more
+    // than one contact row at the same store, and two identical lines in a
+    // picker is just a coin toss for whoever is reading it. Nothing is merged
+    // in the database — the duplicate rows are left exactly as they are.
+    .filter((c, i, all) =>
+      i === all.findIndex((o) => o.name === c.name && o.organizationName === c.organizationName)
+    )
+    .sort((a, b) =>
+      a.name.localeCompare(b.name) || a.organizationName.localeCompare(b.organizationName)
+    );
+}
+
 export async function listCosignerOrganizations(
   electionId: string,
   excludeOrganizationIds: string[]
