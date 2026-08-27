@@ -14,7 +14,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
-import { getAuditView, getResultsAnnouncement } from "@/lib/elections/service";
+import { getAuditView, getResultsAnnouncement, listScrutineerCandidates } from "@/lib/elections/service";
 import {
   sealElectionAction,
   recordTieResolutionAction,
@@ -47,7 +47,10 @@ export default async function ElectionAuditPage({
 }) {
   const { slug } = await params;
   const { error, announced } = await searchParams;
-  const audit = await getAuditView(slug);
+  const [audit, scrutineers] = await Promise.all([
+    getAuditView(slug),
+    listScrutineerCandidates(),
+  ]);
   if (!audit) notFound();
   const results = await getResultsAnnouncement(slug);
 
@@ -243,12 +246,26 @@ export default async function ElectionAuditPage({
         <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
           <h2 className="text-sm font-semibold text-gray-900">Certify</h2>
           <form action={certify} className="mt-3 flex flex-wrap items-end gap-3">
+            {/* A named list, not an id. By-Law Part V S3(b) makes the scrutineer
+                a real appointment, and this is the record of it — but the field
+                was a raw contact id typed into a text box, so in practice it was
+                always left blank and the appointment went unrecorded. */}
             <label className="text-xs text-gray-600">
-              <span className="block font-medium text-gray-900">Scrutineer contact id (optional)</span>
-              <input
+              <span className="block font-medium text-gray-900">
+                Scrutineer <span className="font-normal text-gray-500">(optional)</span>
+              </span>
+              <select
                 name="scrutineerContactId"
+                defaultValue=""
                 className="mt-1 w-80 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-              />
+              >
+                <option value="">Not recorded</option>
+                {scrutineers.map((s) => (
+                  <option key={s.contactId} value={s.contactId}>
+                    {s.name} — {s.organizationName}
+                  </option>
+                ))}
+              </select>
             </label>
             <button
               type="submit"
