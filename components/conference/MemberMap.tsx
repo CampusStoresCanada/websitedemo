@@ -117,7 +117,7 @@ export default function MemberMap({
     return [...byCompany.values()];
   }, [hereMatches]);
 
-  /** Every booth belonging to whatever is selected — a company lights up whole. */
+  /** The booths the selection covers, in floor order, for the card to name. */
   const selectedIds = useMemo(() => {
     if (!selected) return new Set<string>();
     if (!selected.orgName) return new Set([selected.entityId]);
@@ -125,6 +125,19 @@ export default function MemberMap({
       onThisSurface.filter((t) => t.orgName === selected.orgName).map((t) => t.entityId)
     );
   }, [selected, onThisSurface]);
+
+  const selectedBooths = useMemo(
+    () =>
+      onThisSurface
+        .filter((t) => selectedIds.has(t.entityId))
+        .map((t) => t.label)
+        .sort((a, b) => {
+          // "10" after "9" on a floor; compare numerically when both are.
+          const na = Number(a), nb = Number(b);
+          return Number.isFinite(na) && Number.isFinite(nb) ? na - nb : a.localeCompare(b);
+        }),
+    [onThisSurface, selectedIds]
+  );
 
   /**
    * One match is an answer, so show it. Several are a shortlist, so let them
@@ -271,14 +284,21 @@ export default function MemberMap({
           // Held booths carry the brand navy, matches the accent red, free
           // booths stay white. `onDark` keeps the label legible on whichever
           // of those it lands on.
-          const fill = muted
-            ? "#EDEEF0"
-            : isMatch || isSelected
-              ? "#EE2A2E"
-              : t.orgName
-                ? "#163D6D"
-                : "#FFFFFF";
-          const onDark = !muted && (isMatch || isSelected || !!t.orgName);
+          // Three states that have to be told apart at arm's length on a
+          // phone: quiet, found, and the one you are looking at. Matched and
+          // selected were both #EE2A2E, distinguished only by a stroke width
+          // that vanishes at this scale — so selection now changes HUE, and
+          // keeps a red ring to stay visibly part of the result set.
+          const fill = isSelected
+            ? "#1A1A1A"
+            : muted
+              ? "#EDEEF0"
+              : isMatch
+                ? "#EE2A2E"
+                : t.orgName
+                  ? "#163D6D"
+                  : "#FFFFFF";
+          const onDark = isSelected || (!muted && (isMatch || !!t.orgName));
           return (
             <g
               key={t.entityId}
@@ -299,8 +319,10 @@ export default function MemberMap({
               <rect
                 x={x} y={y} width={w} height={h} rx={2}
                 fill={fill}
-                stroke={muted ? "#D5D7DB" : isSelected ? "#1A1A1A" : isMatch ? "#B81E22" : "#163D6D"}
-                strokeWidth={isSelected ? 3 : isMatch ? 2 : 1}
+                stroke={
+                  isSelected ? "#EE2A2E" : muted ? "#D5D7DB" : isMatch ? "#B81E22" : "#163D6D"
+                }
+                strokeWidth={isSelected ? 4 : isMatch ? 2 : 1}
               />
               <text
                 x={x + w / 2} y={y + h / 2}
@@ -326,7 +348,9 @@ export default function MemberMap({
                 {selected.orgName ?? selected.label}
               </p>
               <p className="text-sm text-gray-500">
-                {selected.orgName ? `${selected.kind} ${selected.label}` : selected.kind}
+                {selected.orgName
+                  ? `${selected.kind}${selectedBooths.length === 1 ? "" : "s"} ${selectedBooths.join(", ")}`
+                  : selected.kind}
                 {" · "}{surface.name}
               </p>
             </div>
