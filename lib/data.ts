@@ -225,7 +225,12 @@ export async function getLatestBenchmarking(
   organizationId: string
 ): Promise<Benchmarking | null> {
   const result = await withTimeout(
-    supabase
+    // Service role. This used to read through the anon singleton, and anon lost
+    // SELECT on benchmarking in the 2026-08-24 lockdown — so it returned null
+    // on every org page from that day, logging an error and rendering nothing.
+    // Who may SEE these figures is decided in lib/visibility/data.ts, before
+    // the payload is built; it is not, and never was, an RLS decision.
+    createAdminClient()
       .from("benchmarking")
       .select("*")
       .eq("organization_id", organizationId)
@@ -255,8 +260,9 @@ export type BenchmarkingWithOrg = Benchmarking & {
 };
 
 export async function getAllBenchmarking(): Promise<BenchmarkingWithOrg[]> {
+  // Service role, not the anon singleton — see the note on getLatestBenchmarking.
   const result = await withTimeout(
-    supabase
+    createAdminClient()
       .from("benchmarking")
       .select(`
         *,

@@ -18,6 +18,11 @@ import type {
 import { loadVisibilityConfig, applyFieldMask } from "./engine";
 import type { ViewerContext } from "./viewer";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  resolveOrgPageBenchmarking,
+  loadViewerBenchmarkingStanding,
+  projectPeerRows,
+} from "@/lib/benchmarking/org-page-visibility";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
 
@@ -43,6 +48,8 @@ export interface VisibleOrganizationProfile {
   contacts: VisibleContact[];
   brandColors: BrandColor[];
   benchmarking: Benchmarking | null;
+  /** Set when detail is withheld, so the page can say why instead of going blank. */
+  benchmarkingWithheldReason?: string | null;
   allBenchmarking: BenchmarkingWithOrg[];
 }
 
@@ -58,7 +65,11 @@ export interface VisibleOrganizationProfile {
  * - Set to null (fully hidden)
  *
  * Brand colors are always fully visible.
- * Benchmarking is passed through (has its own gating via GreyBlur/survey_participant).
+ *
+ * Benchmarking is decided HERE, not passed through. It used to be sent to
+ * every viewer and gated in the browser by GreyBlur, which meant a member who
+ * had never filed still received another store's net profit in the page
+ * payload. See lib/benchmarking/org-page-visibility.ts for the three rules.
  */
 export async function getOrganizationForViewer(
   slug: string,
@@ -73,6 +84,7 @@ export async function getOrganizationForViewer(
       brandColors: [],
       benchmarking: null,
       allBenchmarking: [],
+      benchmarkingWithheldReason: null,
     };
   }
 
@@ -184,6 +196,39 @@ export async function getOrganizationForViewer(
     visibleBenchmarking = null;
   }
 
+  // Reciprocity and disclosure, decided before anything is serialised. The
+  // aggregate set (allBenchmarking) is deliberately still returned when detail
+  // is withheld: the point is that a store counts toward the middle either way,
+  // so the comparison should remain readable.
+  let benchmarkingWithheldReason: string | null = null;
+  if (visibleBenchmarking) {
+    const standing = await loadViewerBenchmarkingStanding(viewer.viewerOrgIds ?? []);
+    const decision = resolveOrgPageBenchmarking({
+      targetDisclosureLevel: (visibleBenchmarking as { disclosure_level?: string | null })
+        .disclosure_level,
+      viewerFiled: standing.filed,
+      viewerDisclosureLevel: standing.disclosureLevel,
+      isOwnOrg: (viewer.viewerOrgIds ?? []).includes(targetOrgId),
+      isStaff: isStaffViewer,
+    });
+    if (decision.show === "aggregate") {
+      visibleBenchmarking = null;
+      benchmarkingWithheldReason = decision.reason;
+    }
+
+    // The peer table is a NAMED league table of every store, not an aggregate,
+    // and it was shipping whole benchmarking rows for all of them. Project it
+    // under the same rules: only the fields that render, and names only for a
+    // viewer entitled to them.
+    visibleAllBenchmarking = projectPeerRows(
+      visibleAllBenchmarking as unknown as Parameters<typeof projectPeerRows>[0],
+      {
+        nameThem: decision.show === "detail",
+        viewerOrgIds: viewer.viewerOrgIds ?? [],
+      },
+    ) as unknown as typeof visibleAllBenchmarking;
+  }
+
   if (viewer.viewerLevel !== "admin" && viewer.viewerLevel !== "super_admin") {
     // Filter opted-out orgs from the comparison set
     try {
@@ -209,5 +254,6 @@ export async function getOrganizationForViewer(
     brandColors: visibleBrandColors,
     benchmarking: visibleBenchmarking,
     allBenchmarking: visibleAllBenchmarking,
+    benchmarkingWithheldReason,
   };
 }

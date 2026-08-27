@@ -273,7 +273,7 @@ export default function BenchmarkingComparison({
                             isCurrentOrg ? 'font-semibold text-[#163D6D]' : 'text-[#1A1A1A]'
                           }`}
                         >
-                          {row.organization?.name || 'Unknown'}
+                          {row.organization?.name || 'A member store'}
                         </Link>
                         {isCurrentOrg && (
                           <span className="ml-1.5 text-[10px] font-semibold bg-[#163D6D] text-white px-1.5 py-0.5 rounded-full align-middle">

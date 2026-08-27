@@ -125,7 +125,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
     ? { ...viewer, viewerLevel: "org_admin" as const }
     : viewer;
 
-  const { organization, contacts, brandColors, benchmarking, allBenchmarking } =
+  const { organization, contacts, brandColors, benchmarking, allBenchmarking, benchmarkingWithheldReason } =
     await getOrganizationForViewer(slug, effectiveViewer);
 
   if (!organization) {
@@ -527,6 +527,7 @@ export default async function OrgProfilePage({ params }: PageProps) {
         brandColors={brandColors}
         benchmarking={benchmarking}
         allBenchmarking={allBenchmarking}
+        benchmarkingWithheldReason={benchmarkingWithheldReason}
         viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
