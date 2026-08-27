@@ -124,6 +124,10 @@ const PEER_FIELDS = [
   "fiscal_year",
   "enrollment_fte",
   "institution_type",
+  // Drives the "Mandate" peer-group tab — filters the set and labels the tab.
+  // Missed on the first pass because the field list was guessed rather than
+  // read off the component, which would have broken that tab silently.
+  "operations_mandate",
   "total_square_footage",
   "total_gross_sales_instore",
   "total_online_sales",
