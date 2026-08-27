@@ -1,6 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getPartnershipRateCents } from "@/lib/stripe/billing";
 import { getRenewalConfig } from "@/lib/policy/engine";
+import { getExpectedAmountsByOrg } from "./expected-amounts";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import type { RenewalOrgType } from "./renewal-progress";
 
@@ -117,20 +118,12 @@ async function getTypeReport(
   // pre-signup booth payment) and the bundled paths void the standalone invoice
   // rather than paying it. Every path logs charge_succeeded. Verified against a
   // three-path reconstruction on 2026-08-27: identical counts.
-  const [chargeEventsRes, invoiceEventsRes] = await Promise.all([
-    db
-      .from("renewal_events")
-      .select("organization_id, created_at")
-      .eq("event_type", "charge_succeeded")
-      .eq("renewal_year", renewalYear)
-      .in("organization_id", orgIds),
-    db
-      .from("renewal_events")
-      .select("organization_id, invoice_id")
-      .eq("event_type", "invoice_generated")
-      .eq("renewal_year", renewalYear)
-      .in("organization_id", orgIds),
-  ]);
+  const chargeEventsRes = await db
+    .from("renewal_events")
+    .select("organization_id, created_at")
+    .eq("event_type", "charge_succeeded")
+    .eq("renewal_year", renewalYear)
+    .in("organization_id", orgIds);
 
   const renewedAtByOrg = new Map<string, string>();
   for (const row of chargeEventsRes.data ?? []) {
@@ -140,47 +133,7 @@ async function getTypeReport(
     }
   }
 
-  const invoiceIdByOrg = new Map<string, string>();
-  for (const row of invoiceEventsRes.data ?? []) {
-    if (row.invoice_id) invoiceIdByOrg.set(row.organization_id, row.invoice_id);
-  }
-
-  const invoiceIds = Array.from(new Set(invoiceIdByOrg.values()));
-  const amountByInvoiceId = new Map<string, number>();
-  if (invoiceIds.length > 0) {
-    const { data: invoices } = await db
-      .from("invoices")
-      .select("id, amount_cents")
-      .in("id", invoiceIds);
-    for (const inv of invoices ?? []) amountByInvoiceId.set(inv.id, inv.amount_cents);
-  }
-
-  // The LIVE invoice for the cycle wins over the one the invoice_generated
-  // event points at. When dues are re-issued at a corrected amount the original
-  // is voided and a new row written, but the event still references the void —
-  // so an event-only lookup quotes a figure the member will never be asked to
-  // pay. Observed 2026-08-27: Royal Roads $525 (voided) vs $420 (live), and
-  // Kwantlen Polytechnic $525 (voided) vs $895 (live).
-  //
-  // Prefer paid, then anything not a draft, then whatever is newest.
-  const { data: liveInvoices } = await db
-    .from("invoices")
-    .select("organization_id, amount_cents, status, created_at")
-    .in("organization_id", orgIds)
-    .in("type", ["membership", "partnership"])
-    .neq("status", "voided")
-    .gte("billing_period_end", `${renewalYear}-01-01`)
-    .lte("billing_period_end", `${renewalYear}-12-31`)
-    .order("created_at", { ascending: false });
-
-  const liveAmountByOrg = new Map<string, { amountCents: number; rank: number }>();
-  for (const inv of liveInvoices ?? []) {
-    const rank = inv.status === "paid" ? 2 : inv.status === "draft" ? 0 : 1;
-    const existing = liveAmountByOrg.get(inv.organization_id);
-    if (!existing || rank > existing.rank) {
-      liveAmountByOrg.set(inv.organization_id, { amountCents: inv.amount_cents, rank });
-    }
-  }
+  const expectedByOrg = await getExpectedAmountsByOrg(db, orgIds, renewalYear);
 
   // Vendor Partner dues are a flat rate, so this fallback is exact rather than
   // an estimate. Member dues are FTE-tiered with no cheap equivalent, but every
@@ -191,11 +144,7 @@ async function getTypeReport(
   const report: BoardRenewalTypeReport = { ...empty, orgType, populationCount: orgRows.length };
 
   for (const org of orgRows) {
-    const invoiceId = invoiceIdByOrg.get(org.id);
-    const expectedCents =
-      liveAmountByOrg.get(org.id)?.amountCents ??
-      (invoiceId ? amountByInvoiceId.get(invoiceId) : undefined) ??
-      partnerFallbackCents;
+    const expectedCents = expectedByOrg.get(org.id) ?? partnerFallbackCents;
     const renewedAt = renewedAtByOrg.get(org.id) ?? null;
 
     report.totalExpectedCents += expectedCents;

@@ -99,14 +99,12 @@ if (!widget) {
       `${b.populationCount} vs ${w.populationCount}`);
     check(`${key}: renewed matches widget`, b.renewedCount === w.renewedCount,
       `${b.renewedCount} vs ${w.renewedCount}`);
-    // Dollar figures may legitimately differ: the board report prices from the
-    // LIVE cycle invoice, the widget from the invoice the invoice_generated
-    // event points at, which goes stale after a re-issue. Counts must match.
-    if (b.totalExpectedCents !== w.totalExpectedCents) {
-      console.log(`  ⚠ ${key}: expected differs from widget — board ${money(b.totalExpectedCents)} ` +
-        `vs widget ${money(w.totalExpectedCents)} (board prices from the live invoice; ` +
-        `renewal-progress.ts needs the same fix)`);
-    }
+    // Both surfaces price through getExpectedAmountsByOrg, so these must agree
+    // exactly. A divergence means one of them stopped using the shared helper.
+    check(`${key}: collected matches widget`, b.collectedCents === w.collectedCents,
+      `${money(b.collectedCents)} vs ${money(w.collectedCents)}`);
+    check(`${key}: total expected matches widget`, b.totalExpectedCents === w.totalExpectedCents,
+      `${money(b.totalExpectedCents)} vs ${money(w.totalExpectedCents)}`);
   }
 }
 
