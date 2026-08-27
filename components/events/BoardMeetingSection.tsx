@@ -4,6 +4,8 @@ import { useState, useTransition, useRef } from "react";
 import { useRouter } from "next/navigation";
 import DocumentDownloadLink from "@/components/admin/board/DocumentDownloadLink";
 import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
+import MeetingRenewalsTab from "@/components/events/MeetingRenewalsTab";
+import type { BoardRenewalReport } from "@/lib/renewal/board-report";
 import { uploadBoardDocument } from "@/lib/actions/board-meeting-event";
 import type { ComparativeReport } from "@/lib/quickbooks/types";
 
@@ -53,6 +55,8 @@ interface Props {
   profiles:        Profile[];
   currentUserId:   string | null;
   financialReport: ComparativeReport | null;
+  /** Null when the meeting falls outside the board renewal window — tab is hidden. */
+  renewalReport: BoardRenewalReport | null;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
 }
@@ -77,6 +81,7 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   agenda:     "Agenda",
   minutes:    "Minutes",
   financials: "Financials",
+  renewals: "Renewals",
   other:      "Other",
 };
 
@@ -325,7 +330,7 @@ function DocumentsView({ meetingId, initialDocs }: { meetingId: string; initialD
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-type TabKey = "agenda" | "minutes" | "actions" | "documents" | "financials";
+type TabKey = "agenda" | "minutes" | "actions" | "documents" | "financials" | "renewals";
 
 // ─── Minutes subtabs view ─────────────────────────────────────────────────────
 
@@ -422,6 +427,7 @@ export default function BoardMeetingSection({
   profiles,
   currentUserId,
   financialReport,
+  renewalReport,
   reportPeriod,
   isSA,
 }: Props) {
@@ -434,12 +440,22 @@ export default function BoardMeetingSection({
     ? actionItems.filter((i) => (i.status === "open" || i.status === "in_progress") && i.assignees.includes(currentUserId)).length
     : 0;
 
+  // Renewals is the first conditional tab — it appears only for meetings inside
+  // the board renewal window (see resolveBoardRenewalWindow). Every other tab
+  // renders unconditionally, so this is a filter rather than a push.
   const allTabs: { key: TabKey; label: string; count?: number; badge?: number }[] = [
     { key: "agenda",     label: "Agenda" },
     { key: "minutes",    label: "Minutes" },
     { key: "actions",    label: "Action Items", count: actionItems.length, badge: myOpenCount },
     { key: "documents",  label: "Documents",    count: docs.length },
     { key: "financials", label: "Financials" },
+    ...(renewalReport
+      ? [{
+          key: "renewals" as TabKey,
+          label: "Renewals",
+          count: renewalReport.totals.outstandingCount,
+        }]
+      : []),
   ];
 
   const firstWithContent: TabKey =
@@ -447,6 +463,7 @@ export default function BoardMeetingSection({
     meeting.minutes_html   ? "minutes"  :
     actionItems.length > 0 ? "actions"  :
     docs.length > 0        ? "documents":
+    renewalReport          ? "renewals" :
     "financials";
 
   const [activeTab, setActiveTab] = useState<TabKey>(firstWithContent);
@@ -536,6 +553,10 @@ export default function BoardMeetingSection({
           isSA={isSA}
           compact
         />
+      )}
+
+      {activeTab === "renewals" && renewalReport && (
+        <MeetingRenewalsTab report={renewalReport} meetingDate={meeting.meeting_date} />
       )}
     </div>
   );

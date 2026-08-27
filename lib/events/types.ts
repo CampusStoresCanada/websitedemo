@@ -47,6 +47,9 @@ export interface Event {
   ends_at: string | null;
   location: string | null;
   virtual_link: string | null;
+  /** Auto-populated by the Google Calendar sync; `virtual_link` is the
+   *  manually-entered override. Join links must read `virtual_link ?? google_meet_link`. */
+  google_meet_link: string | null;
   is_virtual: boolean;
   audience_mode: EventAudienceMode;
   capacity: number | null;

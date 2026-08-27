@@ -12,7 +12,9 @@ import TicketSelector from "@/components/events/TicketSelector";
 import EventDetailBanner from "@/components/events/EventDetailBanner";
 import OrgMemberRegistrationPanel from "@/components/events/OrgMemberRegistrationPanel";
 import BoardMeetingSection from "@/components/events/BoardMeetingSection";
-import LocalDate from "@/components/ui/LocalDate";
+import { getBoardRenewalReport } from "@/lib/renewal/board-report";
+import type { BoardRenewalReport } from "@/lib/renewal/board-report";
+import { DateTimeRange } from "@/components/ui/LocalDate";
 
 export const revalidate = 30;
 
@@ -98,6 +100,7 @@ export default async function EventDetailPage({
     docs:           { id: string; title: string; document_type: string; mime_type: string | null; file_size_bytes: number | null }[];
     profiles:       { id: string; display_name: string | null }[];
     financialReport: ComparativeReport | null;
+    renewalReport:  BoardRenewalReport | null;
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -115,7 +118,7 @@ export default async function EventDetailPage({
     if (meeting) {
       const reportPeriod = getLastFullMonth(meeting.meeting_date);
 
-      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, { data: prevMeetingRow }] = await Promise.all([
+      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, { data: prevMeetingRow }] = await Promise.all([
         adminDb
           .from("board_action_items")
           .select("id, title, description, assignees, due_date, status, sort_order, complete_token")
@@ -133,6 +136,8 @@ export default async function EventDetailPage({
           .select("id, display_name")
           .in("global_role", ["admin", "super_admin"]),
         getMeetingFinancialReport(meeting.id),
+        // Null outside the board renewal window — hides the Renewals tab entirely.
+        getBoardRenewalReport(meeting.meeting_date),
         // Previous meeting (for Past Meeting subtab in Minutes)
         adminDb
           .from("board_meetings")
@@ -152,13 +157,16 @@ export default async function EventDetailPage({
         docs:            docs ?? [],
         profiles:        profiles ?? [],
         financialReport: financialReport ?? null,
+        renewalReport:   renewalReport ?? null,
         reportPeriod,
       };
     }
   }
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
+    // Board meetings carry wide material (comparative financial tables, action-item
+    // grids) that is unreadable in the 4xl content column sized for ordinary events.
+    <div className={`${boardMeetingData ? "max-w-6xl" : "max-w-4xl"} mx-auto px-4 sm:px-6 py-12`}>
       <div className="mb-6">
         <Link
           href="/events"
@@ -235,20 +243,6 @@ export default async function EventDetailPage({
             </div>
           ) : null}
 
-          {/* Board Meeting Materials — sits in the content column, admin-only */}
-          {boardMeetingData && (
-            <BoardMeetingSection
-              meeting={boardMeetingData.meeting}
-              prevMinutes={boardMeetingData.prevMinutes}
-              actionItems={boardMeetingData.actionItems}
-              docs={boardMeetingData.docs}
-              profiles={boardMeetingData.profiles}
-              currentUserId={authCtx?.userId ?? null}
-              financialReport={boardMeetingData.financialReport}
-              reportPeriod={boardMeetingData.reportPeriod}
-              isSA={isSA}
-            />
-          )}
         </div>
 
         {/* Sidebar */}
@@ -259,12 +253,7 @@ export default async function EventDetailPage({
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                 Date & Time
               </p>
-              <p className="text-sm text-gray-700 font-medium"><LocalDate iso={event.starts_at} /></p>
-              {event.ends_at && (
-                <p className="text-sm text-gray-500 mt-0.5">
-                  Until <LocalDate iso={event.ends_at} />
-                </p>
-              )}
+              <DateTimeRange start={event.starts_at} end={event.ends_at} />
             </div>
 
             {/* Location — in-person only; virtual events use the Join button */}
@@ -328,7 +317,7 @@ export default async function EventDetailPage({
                 isAuthenticated={isAuthenticated}
                 isMembersOnly={!isPublic}
                 isVirtual={event.is_virtual}
-                meetLink={event.virtual_link}
+                meetLink={event.virtual_link ?? event.google_meet_link}
               />
             )}
 
@@ -353,6 +342,23 @@ export default async function EventDetailPage({
           </div>
         </div>
       </div>
+
+      {/* Board Meeting Materials — full page width, outside the 2-col grid.
+          Financial tables and action-item grids need the room; admin-only. */}
+      {boardMeetingData && (
+        <BoardMeetingSection
+          meeting={boardMeetingData.meeting}
+          prevMinutes={boardMeetingData.prevMinutes}
+          actionItems={boardMeetingData.actionItems}
+          docs={boardMeetingData.docs}
+          profiles={boardMeetingData.profiles}
+          currentUserId={authCtx?.userId ?? null}
+          financialReport={boardMeetingData.financialReport}
+          renewalReport={boardMeetingData.renewalReport}
+          reportPeriod={boardMeetingData.reportPeriod}
+          isSA={isSA}
+        />
+      )}
 
       {/* Who's Coming */}
       {attendeeData && attendeeData.total > 0 && (
