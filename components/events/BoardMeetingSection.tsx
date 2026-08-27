@@ -344,7 +344,12 @@ function MinutesView({
   meeting:     MeetingMeta;
   prevMinutes: { meeting_date: string; minutes_html: string | null } | null;
 }) {
-  const [sub, setSub] = useState<MinutesSubtab>("current");
+  // Until this meeting has minutes there is nothing to read on "Current" — and
+  // the thing people actually want in that window is the last meeting's
+  // minutes, which is what item 3 of every agenda asks them to approve.
+  const [sub, setSub] = useState<MinutesSubtab>(
+    meeting.minutes_html ? "current" : prevMinutes?.minutes_html ? "past" : "current"
+  );
 
   const subtabs: { key: MinutesSubtab; label: string }[] = [
     { key: "current",    label: "Current Meeting" },
@@ -449,8 +454,6 @@ export default function BoardMeetingSection({
     { key: "agenda",     label: "Agenda" },
     { key: "minutes",    label: "Minutes" },
     { key: "actions",    label: "Action Items", count: actionItems.length, badge: myOpenCount },
-    { key: "documents",  label: "Documents",    count: docs.length },
-    { key: "financials", label: "Financials" },
     ...(renewalReport
       ? [{
           key: "renewals" as TabKey,
@@ -458,14 +461,18 @@ export default function BoardMeetingSection({
           count: renewalReport.totals.outstandingCount,
         }]
       : []),
+    { key: "financials", label: "Financials" },
+    { key: "documents",  label: "Documents",    count: docs.length },
   ];
 
+  // Falls through in the same order the tabs are shown, so the first tab with
+  // anything in it is also the leftmost one that has anything in it.
   const firstWithContent: TabKey =
     meeting.agenda_html    ? "agenda"   :
     meeting.minutes_html   ? "minutes"  :
     actionItems.length > 0 ? "actions"  :
-    docs.length > 0        ? "documents":
     renewalReport          ? "renewals" :
+    docs.length > 0        ? "documents":
     "financials";
 
   const [activeTab, setActiveTab] = useState<TabKey>(firstWithContent);
