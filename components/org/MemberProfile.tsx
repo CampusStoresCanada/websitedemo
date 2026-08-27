@@ -64,6 +64,8 @@ interface MemberProfileProps {
   brandColors: BrandColor[];
   benchmarking: Benchmarking | null;
   allBenchmarking: BenchmarkingWithOrg[];
+  /** Set when detail is withheld — reciprocity or the store's disclosure choice. */
+  benchmarkingWithheldReason?: string | null;
   viewerLevel: ViewerLevel;
   conferenceAttendance: Array<{
     id: string;
@@ -115,6 +117,7 @@ export default function MemberProfile({
   brandColors,
   benchmarking,
   allBenchmarking,
+  benchmarkingWithheldReason,
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
@@ -1204,11 +1207,30 @@ export default function MemberProfile({
           organization={organization}
           contacts={contacts}
         />
+      ) : !editMode && benchmarkingWithheldReason && allBenchmarking.length > 0 ? (
+        <div className="bg-white border-t border-gray-200">
+          <div className="max-w-7xl mx-auto px-8 py-12">
+            <p className="max-w-2xl rounded-lg bg-gray-50 p-4 text-sm text-gray-700">
+              {benchmarkingWithheldReason}
+            </p>
+            <div className="mt-8">
+              <BenchmarkingComparison
+                allBenchmarking={allBenchmarking}
+                currentOrgId={organization.id}
+              />
+            </div>
+          </div>
+        </div>
       ) : !editMode && (
         benchmarking && allBenchmarking.length > 0 && (
           <div className="bg-white border-t border-gray-200">
             <div className="max-w-7xl mx-auto px-8 py-12">
-              {editMode && canEditThisOrg && (
+              {/*
+                Was `editMode && canEditThisOrg` — but this whole block only renders
+                when !editMode, so the toggle could never appear and every member
+                org still reads show_in_benchmarking = true. Nobody could click it.
+              */}
+              {canEditThisOrg && (
                 <div className="flex items-center gap-2 mb-6">
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Benchmarking</h3>
                   <button

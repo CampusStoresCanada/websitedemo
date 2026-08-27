@@ -333,6 +333,38 @@ export async function updateField({
       }
     }
 
+    // 5b. Record what changed. previousValue was already read for the FYI
+    // email and then thrown away, so an edit to a priced field — FTE decides
+    // dues and next year's comparison — left nothing behind but a console
+    // line on whichever server happened to handle it. A secretary asking in
+    // two years who set KPU to 12,000, and on what basis, had no way to find
+    // out. Fire and forget: a lost audit row is bad, a refused edit is worse.
+    void adminClient
+      .from("audit_log")
+      .insert({
+        action: "field.update",
+        entity_type: table,
+        entity_id: entityId,
+        actor_id: auth.ctx.userId ?? null,
+        actor_type: "user",
+        details: {
+          table,
+          column,
+          previous_value: previousValue,
+          new_value: newValue,
+          organization_id: resolvedOrgId,
+          entity_name: resolvedDisplayName,
+          changed_by_email: userEmail ?? null,
+          // The two writes that reach beyond this row, recorded so the effect
+          // is legible without re-deriving it from the column name.
+          set_manual_override: isManualFteEdit || undefined,
+          mirrored_to_membership: isManualFteEdit || undefined,
+        },
+      })
+      .then(({ error }) => {
+        if (error) console.warn("[update-field] audit write failed:", error.message);
+      });
+
     // 6. Passive FYI notification for Tier 2 fields on org pages
     if (isTier2(table, column) && isOrgPageEdit) {
       void sendContentChangeFyi({
