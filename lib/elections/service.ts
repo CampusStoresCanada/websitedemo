@@ -1417,18 +1417,27 @@ export async function sendCallForNominations(
   const eligible = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
   if (eligible.length === 0) return fail("No institutions are currently eligible, so there is nobody to send to.");
 
-  const outcomes = await notifyCallForNominations(election, eligible);
-  const summary = summarizeOutcomes(outcomes);
-
-  // Sending the call is what OPENS nominations — they are the same act. A
+  // ⚠️ CLAIMED BEFORE THE SEND, deliberately.
+  //
+  // The guard above refuses a second send once callSentAt is set, but that only
+  // helps if the stamp survives. Stamping AFTER the send meant that anything
+  // which killed the request part way — and a whole-electorate send is the most
+  // likely thing in this codebase to do that — left no stamp at all: the
+  // operator saw no confirmation, pressed again, and everyone who had already
+  // received the call received it a second time. That is not hypothetical; the
+  // comms campaign send did exactly this to five partners on 2026-08-26.
+  //
+  // Claiming first inverts the failure. A crash now leaves an election marked
+  // sent with a partial delivery, which the returned summary reports and a
+  // human can chase — recoverable, and quiet. The other order silently mails
+  // the entire membership twice.
+  //
+  // Sending the call is also what OPENS nominations — they are the same act. A
   // separate button would create two states that are both wrong: nominations
   // "open" that nobody was told about, or a call sent while the form still says
-  // closed. Until this existed nothing moved an election off `draft`, so the
-  // nominate page — which requires status `nominating` — refused every member.
-  //
-  // Opening early is harmless: the page also checks the SCHEDULE, so a call sent
-  // ahead of nominationsOpenAt announces the dates without opening the form
-  // before them.
+  // closed. Opening early is harmless: the page also checks the SCHEDULE, so a
+  // call sent ahead of nominationsOpenAt announces the dates without opening
+  // the form before them.
   await db
     .from("elections")
     .update({
@@ -1441,6 +1450,9 @@ export async function sendCallForNominations(
       updated_at: new Date().toISOString(),
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyCallForNominations(election, eligible);
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({ institutions: eligible.length, ...summary });
 }
@@ -2332,32 +2344,12 @@ export async function sendAgmNotice(
     );
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const outcomes = await notifyAgmNotice(election, eligible, {
-    agmTime: input.agmTime,
-    location: input.location ?? null,
-    agmUrl: `${appUrl}/events/${eventSlug}`,
-  });
-
-  let proxyIncluded = false;
-  if (input.includeProxyForm && !state.proxySentAt) {
-    const proxyOutcomes = await notifyProxyForm(election, eligible, {
-      // The appointment page, not the events listing. The old URL pointed at
-      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
-      // an event that is created as a DRAFT. This email discharges a Part VII
-      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
-      // members are not permitted to see.
-      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
-      lateNote: state.proxy.overdue
-        ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
-        : null,
-    });
-    outcomes.push(...proxyOutcomes);
-    proxyIncluded = true;
-  }
-
-  const summary = summarizeOutcomes(outcomes);
+  // Claimed before the send — see sendCallForNominations for why. Notice is the
+  // one send where a duplicate is worse than a miss: two notices for the same
+  // meeting, possibly stating different times, leave the meeting arguably
+  // improperly called under Part VII S4.
+  const proxyIncluded = Boolean(input.includeProxyForm && !state.proxySentAt);
   const now = new Date().toISOString();
-
   await db
     .from("elections")
     .update({
@@ -2370,6 +2362,29 @@ export async function sendAgmNotice(
       updated_at: now,
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyAgmNotice(election, eligible, {
+    agmTime: input.agmTime,
+    location: input.location ?? null,
+    agmUrl: `${appUrl}/events/${eventSlug}`,
+  });
+
+  if (proxyIncluded) {
+    const proxyOutcomes = await notifyProxyForm(election, eligible, {
+      // The appointment page, not the events listing. The old URL pointed at
+      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+      // an event that is created as a DRAFT. This email discharges a Part VII
+      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+      // members are not permitted to see.
+      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
+      lateNote: state.proxy.overdue
+        ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+        : null,
+    });
+    outcomes.push(...proxyOutcomes);
+  }
+
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({ ...summary, proxyIncluded });
 }
@@ -2393,18 +2408,8 @@ export async function sendProxyForm(
   if (eligible.length === 0) return fail("No institutions are currently eligible to vote.");
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
-  const outcomes = await notifyProxyForm(election, eligible, {
-    // The appointment page, not the events listing. The old URL pointed at
-      // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
-      // an event that is created as a DRAFT. This email discharges a Part VII
-      // S7(b) obligation with a 30-day deadline, so it cannot land on a page
-      // members are not permitted to see.
-      proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
-    lateNote: state.proxy.overdue
-      ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
-      : null,
-  });
 
+  // Claimed before the send — see sendCallForNominations.
   const now = new Date().toISOString();
   await db
     .from("elections")
@@ -2417,6 +2422,18 @@ export async function sendProxyForm(
       updated_at: now,
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyProxyForm(election, eligible, {
+    // The appointment page, not the events listing. The old URL pointed at
+    // `/events/...#proxy` — an anchor that exists nowhere in the codebase, on
+    // an event that is created as a DRAFT. This email discharges a Part VII
+    // S7(b) obligation with a 30-day deadline, so it cannot land on a page
+    // members are not permitted to see.
+    proxyFormUrl: `${appUrl}/elections/${election.slug}/proxy`,
+    lateNote: state.proxy.overdue
+      ? "This form is being sent later than the by-laws provide for; it remains valid for appointing a proxy."
+      : null,
+  });
 
   return ok({ ...summarizeOutcomes(outcomes), wasLate: state.proxy.overdue });
 }
@@ -2732,12 +2749,13 @@ export async function circulateBallots(
         : "No institutions are currently eligible, so there is nobody to send to."
     );
 
-  const outcomes = await notifyBallotsOpen(election, targets, {
-    candidateCount: candidates.length,
-    reminder: previouslyCirculated,
-  });
-  const summary = summarizeOutcomes(outcomes);
-
+  // Claimed before the send. This one is re-runnable on purpose — a second
+  // press is a REMINDER, and it already excludes anyone who has voted — but
+  // only once ballotsCirculatedAt exists. Stamping afterwards meant a send that
+  // died part way left no stamp, so the retry was not a reminder at all: it was
+  // a second "voting is open" to the entire electorate, including everyone who
+  // had already received the first. Claiming first makes the retry do the
+  // harmless thing instead of the loud one.
   await db
     .from("elections")
     .update({
@@ -2750,6 +2768,12 @@ export async function circulateBallots(
       updated_at: new Date().toISOString(),
     })
     .eq("id", election.id);
+
+  const outcomes = await notifyBallotsOpen(election, targets, {
+    candidateCount: candidates.length,
+    reminder: previouslyCirculated,
+  });
+  const summary = summarizeOutcomes(outcomes);
 
   return ok({
     reminder: previouslyCirculated,
