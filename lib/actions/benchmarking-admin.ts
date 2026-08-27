@@ -5,6 +5,7 @@ import {
   requireReviewerOrAdmin,
 } from "@/lib/auth/guards";
 import type { AuthContext } from "@/lib/auth/guards";
+import { GOVERNANCE_BODY, GOVERNANCE_ROLE } from "@/lib/constants/capabilities";
 import type { Json } from "@/lib/database.types";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
@@ -287,13 +288,73 @@ export async function toggleBenchmarkingReviewer(
   if (!auth.authorized || !auth.supabase)
     return { success: false, error: auth.error };
 
+  // Reviewer status is a ROLE on the Benchmarking Committee, resolved through
+  // governance_role_capabilities — not a flag on the profile row. A previous
+  // version wrote profiles.is_benchmarking_reviewer, a column that was never
+  // created, so this always returned "Failed to update reviewer status" and
+  // nobody could ever be made a reviewer.
+  const { data: body, error: bodyError } = await auth.supabase
+    .from("governance_bodies")
+    .select("id")
+    .eq("key", GOVERNANCE_BODY.benchmarkingCommittee)
+    .maybeSingle();
+
+  if (bodyError || !body) {
+    console.error("[benchmarking-admin] benchmarking committee body missing:", bodyError);
+    return { success: false, error: "Benchmarking Committee is not set up" };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Active is exactly has_capability()'s test: term_start on or before today,
+  // and no term_end or one still in the future.
+  const { data: existing, error: readError } = await auth.supabase
+    .from("governance_role_assignments")
+    .select("id")
+    .eq("person_profile_id", userId)
+    .eq("role_key", GOVERNANCE_ROLE.benchmarkingReviewer)
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  if (readError) {
+    console.error("[benchmarking-admin] toggleReviewer read error:", readError);
+    return { success: false, error: "Failed to read reviewer status" };
+  }
+
+  const isCurrentlyReviewer = (existing ?? []).length > 0;
+
+  if (enabled) {
+    if (isCurrentlyReviewer) return { success: true };
+    const { error } = await auth.supabase.from("governance_role_assignments").insert({
+      body_id: body.id,
+      person_profile_id: userId,
+      role_key: GOVERNANCE_ROLE.benchmarkingReviewer,
+      term_start: today,
+      term_end: null,
+      // A committee appointment is NOT a board seat. counts_toward_cap
+      // defaults to true, and leaving it would burn one of the four
+      // consecutive terms the by-laws allow a director — corrupting election
+      // eligibility for someone who merely reviewed a survey.
+      counts_toward_cap: false,
+      appointing_resolution: "Appointed by an administrator via the benchmarking dashboard",
+    });
+    if (error) {
+      console.error("[benchmarking-admin] toggleReviewer insert error:", error);
+      return { success: false, error: "Failed to update reviewer status" };
+    }
+    return { success: true };
+  }
+
+  if (!isCurrentlyReviewer) return { success: true };
+  // End the term rather than delete the row — who held a capability and when
+  // is exactly the sort of thing a governance record should keep.
   const { error } = await auth.supabase
-    .from("profiles")
-    .update({ is_benchmarking_reviewer: enabled })
-    .eq("id", userId);
+    .from("governance_role_assignments")
+    .update({ term_end: today, updated_at: new Date().toISOString() })
+    .in("id", (existing ?? []).map((r: { id: string }) => r.id));
 
   if (error) {
-    console.error("[benchmarking-admin] toggleReviewer error:", error);
+    console.error("[benchmarking-admin] toggleReviewer revoke error:", error);
     return { success: false, error: "Failed to update reviewer status" };
   }
 
@@ -320,7 +381,7 @@ export async function searchUsersForReviewer(
   // Search profiles by display_name
   const { data: profiles, error } = await auth.supabase
     .from("profiles")
-    .select("id, display_name, global_role, is_benchmarking_reviewer")
+    .select("id, display_name, global_role")
     .ilike("display_name", searchTerm)
     .limit(10);
 
@@ -329,11 +390,28 @@ export async function searchUsersForReviewer(
     return { success: false, error: "Search failed" };
   }
 
-  const users = (profiles ?? []).map((p: { id: string; display_name: string | null; global_role: string; is_benchmarking_reviewer: boolean }) => ({
+  const rows = profiles ?? [];
+  const today = new Date().toISOString().slice(0, 10);
+
+  // Reviewer status comes from the role assignment, not the profile row.
+  // One query for the whole page of results rather than one per user.
+  const { data: assignments } = await auth.supabase
+    .from("governance_role_assignments")
+    .select("person_profile_id")
+    .eq("role_key", GOVERNANCE_ROLE.benchmarkingReviewer)
+    .in("person_profile_id", rows.map((p: { id: string }) => p.id))
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  const reviewerIds = new Set(
+    (assignments ?? []).map((a: { person_profile_id: string | null }) => a.person_profile_id)
+  );
+
+  const users = rows.map((p: { id: string; display_name: string | null; global_role: string }) => ({
     id: p.id,
     displayName: p.display_name ?? "Unknown",
     globalRole: p.global_role,
-    isReviewer: p.is_benchmarking_reviewer ?? false,
+    isReviewer: reviewerIds.has(p.id),
   }));
 
   return { success: true, users };

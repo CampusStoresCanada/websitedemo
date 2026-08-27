@@ -8540,7 +8540,6 @@ export type Database = {
           display_name: string | null
           global_role: string
           id: string
-          is_benchmarking_reviewer: boolean
           preferences: Json
           updated_at: string | null
         }
@@ -8550,7 +8549,6 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id: string
-          is_benchmarking_reviewer?: boolean
           preferences?: Json
           updated_at?: string | null
         }
@@ -8560,7 +8558,6 @@ export type Database = {
           display_name?: string | null
           global_role?: string
           id?: string
-          is_benchmarking_reviewer?: boolean
           preferences?: Json
           updated_at?: string | null
         }
@@ -11755,6 +11752,7 @@ export type Database = {
         Args: { p_child_capability: string; p_subject: string }
         Returns: string
       }
+      current_capabilities: { Args: { p_subject: string }; Returns: string[] }
       has_capability: {
         Args: { p_capability: string; p_scope_id?: string; p_subject: string }
         Returns: boolean

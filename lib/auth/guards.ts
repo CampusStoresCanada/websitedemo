@@ -4,6 +4,7 @@ import { unstable_rethrow } from "next/navigation";
 import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { CAPABILITY } from "@/lib/constants/capabilities";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import type { GlobalRole, UserOrganization, UserProfile } from "./types";
 
@@ -55,6 +56,10 @@ export type IdentitySnapshot =
       profileError: unknown;
       organizations: UserOrganization[] | null;
       orgsError: unknown;
+      /** Capabilities resolved from governance_role_assignments. Empty rather
+       *  than null on failure — a capability is a grant, so the safe direction
+       *  when we cannot resolve one is "not held". */
+      capabilities: string[];
     };
 
 export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => {
@@ -73,9 +78,10 @@ export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => 
 
   let profileResult: { data: UserProfile | null; error: unknown } | null = null;
   let orgsResult: { data: UserOrganization[] | null; error: unknown } | null = null;
+  let capabilities: string[] = [];
 
   for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
-    const [profileRes, orgsRes] = await Promise.all([
+    const [profileRes, orgsRes, capsRes] = await Promise.all([
       client.from("profiles").select("*").eq("id", userId).maybeSingle(),
       client
         .from("user_organizations")
@@ -92,10 +98,18 @@ export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => 
         )
         .eq("user_id", userId)
         .eq("status", "active"),
+      // Capabilities come from governance_role_assignments via a SECURITY
+      // DEFINER function, NOT from a flag on profiles. Roles are the single
+      // place authority is recorded, so a capability follows the office and
+      // expires with the term instead of needing to be revoked by hand.
+      client.rpc("current_capabilities", { p_subject: userId }),
     ]);
 
     profileResult = profileRes as unknown as { data: UserProfile | null; error: unknown };
     orgsResult = orgsRes as unknown as { data: UserOrganization[] | null; error: unknown };
+    // Deliberately not part of the retry condition below: a capability lookup
+    // that fails should degrade to "holds nothing", never block sign-in.
+    capabilities = Array.isArray(capsRes.data) ? (capsRes.data as string[]) : [];
 
     if (!profileRes.error && !orgsRes.error) {
       break;
@@ -113,6 +127,7 @@ export const getIdentitySnapshot = cache(async (): Promise<IdentitySnapshot> => 
     userEmail,
     profile: profileResult?.error ? null : (profileResult?.data ?? null),
     profileError: profileResult?.error ?? null,
+    capabilities,
     organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
     orgsError: orgsResult?.error ?? null,
   };
@@ -137,7 +152,12 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
   const client = supabase ?? (await createClient());
   const organizations = snapshot.organizations ?? [];
   const globalRole = (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
-  const isBenchmarkingReviewer = snapshot.profile?.is_benchmarking_reviewer === true;
+  // Resolved from the benchmarking_reviewer role via governance_role_capabilities
+  // — the same mechanism the Benchmarking Committee and Nominating Committee
+  // already use. There is no is_benchmarking_reviewer column; a previous
+  // version of this line read one that was never created, so this was
+  // permanently false and only global admins could ever review.
+  const isBenchmarkingReviewer = snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview);
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
     .filter((uo) => uo.role === "org_admin")

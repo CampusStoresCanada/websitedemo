@@ -3,6 +3,7 @@ import { getIdentitySnapshot } from "./guards";
 import { derivePermissionState } from "./permissions";
 import { generateSessionKey, exportKeyToBase64 } from "./crypto";
 import { getProgramsConfig } from "@/lib/policy/engine";
+import { CAPABILITY } from "@/lib/constants/capabilities";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import type {
   GlobalRole,
@@ -19,6 +20,9 @@ export interface ServerAuthState {
   globalRole: GlobalRole;
   permissionState: PermissionState;
   organizations: UserOrganization[];
+  /** Resolved from the benchmarking_reviewer role through
+   *  governance_role_capabilities — never a flag on the profile row. */
+  isBenchmarkingReviewer: boolean;
   /** Resolved once per request, threaded into AuthProvider's initialAuth so
    *  client-side permission re-derivation (on auth-state-change) reuses this
    *  instead of re-fetching — see components/providers/AuthProvider.tsx. */
@@ -43,6 +47,7 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
       globalRole: "user",
       permissionState: "public",
       organizations: [],
+      isBenchmarkingReviewer: false,
       programs,
       encryptionKey: null,
       encryptionKeyBase64: null,
@@ -64,6 +69,7 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
     globalRole,
     permissionState,
     organizations,
+    isBenchmarkingReviewer: snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview),
     programs,
     encryptionKey,
     encryptionKeyBase64,
