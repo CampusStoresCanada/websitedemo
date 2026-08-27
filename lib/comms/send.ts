@@ -42,6 +42,53 @@ export async function sendTransactional(options: {
   return sendEmail({ to: options.to, subject, html: bodyHtml });
 }
 
+/**
+ * The same transactional send, for many recipients at once.
+ *
+ * Identical rendering to sendTransactional — same template, same variable
+ * substitution, same app_url injection — but the template is fetched ONCE and
+ * the messages go to Resend's batch endpoint instead of one request each.
+ *
+ * This exists because election sends address the whole electorate. Looping
+ * sendTransactional over 26 admins meant 26 template reads from the database
+ * and 26 sequential HTTP round trips inside a single serverless invocation;
+ * at the ~52 institutions a renewed year brings, that is well past the time
+ * budget. A send that dies half way is not just slow — it is a send nobody can
+ * tell apart from one that never happened.
+ *
+ * Per-recipient content is preserved: each item carries its own variables, so
+ * the greeting, institution name and links are still personal.
+ */
+export async function sendTransactionalBatch(options: {
+  templateKey: TemplateKey;
+  recipients: {
+    to: string;
+    variables: Record<string, string | number | boolean | null | undefined>;
+  }[];
+}): Promise<{ success: boolean; error?: string }[]> {
+  if (options.recipients.length === 0) return [];
+
+  const template = await getTemplate(options.templateKey);
+  if (!template) {
+    const err = { success: false, error: `Template '${options.templateKey}' not found` };
+    return options.recipients.map(() => ({ ...err }));
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const items = options.recipients.map((r) => {
+    const { subject, bodyHtml } = renderTemplateContent(template, {
+      app_url: appUrl,
+      ...r.variables,
+    });
+    // No manageUrl: these are transactional, and governance mail carries no
+    // unsubscribe — a member cannot opt out of being told they are nominated.
+    return { to: r.to, subject, html: bodyHtml };
+  });
+
+  const results = await sendEmailBatch(items);
+  return results.map((r) => ({ success: r.success, error: r.error }));
+}
+
 // ── Campaign send ─────────────────────────────────────────────────
 
 export interface ExecuteSendResult {
