@@ -10,6 +10,8 @@ import {
 } from "@/lib/conference/access";
 import type { GrantType } from "@/lib/conference/grants";
 import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
+import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
+import { resolveAccess } from "@/lib/conference/entity-commerce";
 
 /**
  * Conference fulfillment obligations — derived from a person's v3 holdings.
@@ -33,16 +35,53 @@ const PERSON_OBLIGATION_FIELDS = [
 ] as const;
 
 /** Distinct grant types implied by the kinds of seats a person occupies. */
+/**
+ * What a person effectively holds — following the graph, not one hop.
+ *
+ * ⚠️ This read the KIND of the entity each seat points at and stopped there,
+ * which was wrong in a way that mattered. A Connected Exhibitor Staff
+ * Registration is kind `registration`, and it `includes` twelve meals across
+ * Tuesday, Wednesday and Thursday. Reading one hop saw `registration` only, so
+ * `meal` never entered the set, so `meal_access` never fired — and CSC fed
+ * those exhibitors twelve times without ever asking whether they could eat it.
+ * Plain Exhibitor Staff Registration was the same with eight.
+ *
+ * The relationship was expressed correctly in the graph the whole time; the
+ * resolver just did not follow it. Same shape as the seat_assigned bug that
+ * checked one entity instead of every entity of its kind.
+ *
+ * `resolveAccess` is the walker the storefront already uses to price day
+ * passes, so entitlement and obligation now come from ONE traversal at ONE
+ * depth rather than two functions disagreeing about how far to look.
+ */
 async function loadV3HeldGrantTypes(db: AdminDb, personId: string, conferenceId: string): Promise<GrantType[]> {
-  const { data } = await db
-    .from("entity_balance_seats")
-    .select("entity:conference_entities!entity_balance_seats_entity_id_fkey(kind)")
-    .eq("conference_id", conferenceId)
-    .eq("holder_person_id", personId);
+  const [{ data: seats }, { data: entityRows }, { data: refRows }] = await Promise.all([
+    db
+      .from("entity_balance_seats")
+      .select("entity_id")
+      .eq("conference_id", conferenceId)
+      .eq("holder_person_id", personId),
+    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
+    db
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, role, quantity")
+      .eq("conference_id", conferenceId),
+  ]);
+
+  const heldIds = [...new Set((seats ?? []).map((s) => s.entity_id).filter((id): id is string => !!id))];
+  if (heldIds.length === 0) return [];
+
+  const byId = new Map(
+    buildEntityGraph(entityRows ?? [], refRows ?? []).map((e) => [e.id, e])
+  );
+
+  // Held things AND everything reachable from them. The seat itself counts —
+  // a directly bought Meet & Greet ticket is an `event` in its own right, not
+  // something reached through an offer.
   const kinds = new Set<string>();
-  for (const row of data ?? []) {
-    const entity = Array.isArray(row.entity) ? row.entity[0] : row.entity;
-    if (entity?.kind) kinds.add(entity.kind);
+  for (const id of resolveAccess(heldIds, byId)) {
+    const kind = byId.get(id)?.kind;
+    if (kind) kinds.add(kind);
   }
   return grantTypesForKinds(kinds);
 }
