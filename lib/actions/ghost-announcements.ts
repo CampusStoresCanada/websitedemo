@@ -61,11 +61,16 @@ export async function listAnnouncements(): Promise<AnnouncementRow[]> {
   if (!auth.ok) return [];
 
   const db = createAdminClient();
+  // Scoped to new_partner deliberately. Board recap rows live in the same
+  // table but have no organization_id, and every field on this screen is an
+  // org field — an unscoped read would render them as "Unknown organization".
+  // They have their own review surface at /admin/board/recaps.
   const { data } = await db
     .from("ghost_announcements")
     .select(
       "id, organization_id, status, title, summary_text, skip_reason, circle_post_url, published_at, created_at"
     )
+    .eq("kind", "new_partner")
     .order("created_at", { ascending: false });
 
   if (!data?.length) return [];

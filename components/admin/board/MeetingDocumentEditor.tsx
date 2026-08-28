@@ -21,6 +21,35 @@ const LABELS: Record<DocType, { title: string; placeholder: string }> = {
   minutes: { title: "Minutes", placeholder: "Start writing the minutes…" },
 };
 
+interface RecapResponse {
+  drafted: boolean;
+  id: string | null;
+  counts: { decided: number; outstanding: number; nextMeeting: number };
+  note: string | null;
+}
+
+/**
+ * What Butler has to say about the save, if anything.
+ *
+ * `note` carries the reason nothing was consumed — a locked draft, a failed
+ * write. Those matter more than the happy path, because in each of them the
+ * tag block is still sitting in the minutes and the person needs to know why.
+ */
+function recapNotice(recap: RecapResponse | null | undefined): string | null {
+  if (!recap) return null;
+  if (recap.note) return recap.note;
+  if (!recap.drafted) return null;
+
+  const { decided, outstanding, nextMeeting } = recap.counts;
+  const parts = [
+    decided ? `${decided} decided` : null,
+    outstanding ? `${outstanding} outstanding` : null,
+    nextMeeting ? `${nextMeeting} for next meeting` : null,
+  ].filter(Boolean);
+
+  return `Butler Ghost drafted a recap (${parts.join(", ")}) and removed the tags from the minutes. It is waiting for your review.`;
+}
+
 export default function MeetingDocumentEditor({
   meetingId,
   docType,
@@ -33,6 +62,7 @@ export default function MeetingDocumentEditor({
   const [dirty,   setDirty]   = useState(false);
   const [saving,  setSaving]  = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
+  const [recapMsg, setRecapMsg] = useState<string | null>(null);
 
   const { title, placeholder } = LABELS[docType];
 
@@ -40,6 +70,7 @@ export default function MeetingDocumentEditor({
     setHtml(value);
     setDirty(true);
     setSaveMsg(null);
+    setRecapMsg(null);
   }, []);
 
   async function handleSave() {
@@ -51,12 +82,19 @@ export default function MeetingDocumentEditor({
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({ docType, html }),
       });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error ?? "Save failed");
-      }
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Save failed");
+
+      // The server normalises what it stores: it rewrites bare names to
+      // canonical @mentions, and it REMOVES the DECIDED / OUTSTANDING /
+      // NEXT MEETING tags once Butler has them. Local state would otherwise
+      // keep showing a block that no longer exists in the database, which
+      // reads as a failed save and invites a pointless re-save.
+      if (typeof data.html === "string") setHtml(data.html);
+
       setDirty(false);
       setSaveMsg("Saved");
+      setRecapMsg(recapNotice(data.recap));
       router.refresh();
     } catch (err) {
       setSaveMsg(err instanceof Error ? err.message : "Save failed");
@@ -99,6 +137,16 @@ export default function MeetingDocumentEditor({
           </div>
         )}
       </div>
+
+      {recapMsg && (
+        <div className="mb-3 rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-3 py-2 text-xs text-[#163D6D]">
+          {recapMsg}
+          {" "}
+          <a href="/admin/board/recaps" className="font-medium underline underline-offset-2">
+            Review it
+          </a>
+        </div>
+      )}
 
       {/* Editor or read-only view */}
       {isSA ? (

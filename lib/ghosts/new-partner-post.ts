@@ -9,8 +9,22 @@
  *
  * Node vocabulary is limited to what Circle's API actually renders, verified
  * empirically: `heading`, `paragraph`, `text` (bold / link marks),
- * `horizontalRule`, `cta`. `poll` nodes are accepted with HTTP 200 and
- * silently discarded — see lib/board/vote-post.ts.
+ * `horizontalRule`, `cta`, and `bulletList` / `listItem` (verified 2026-08-27
+ * against the Board Stuff space — bullets round-trip with a nested `paragraph`
+ * and link marks intact). `poll` nodes are accepted with HTTP 200 and silently
+ * discarded — see lib/board/vote-post.ts.
+ *
+ * VERIFYING A NEW NODE TYPE — two traps, both of which look exactly like "the
+ * node was rejected":
+ *   1. `GET /posts/{id}` does NOT hydrate `body.body`; it returns "" for every
+ *      post, including ones built purely from the verified list above. It can
+ *      never confirm anything. Read back from the POST response itself (it
+ *      echoes the rendered HTML) or from `GET /posts?space_id=…`.
+ *   2. `tiptap_body` must be sent in the NESTED form this file returns —
+ *      `{ body: { type: "doc", content } }`. A bare `{ type: "doc", content }`
+ *      is accepted with HTTP 200 and stored empty.
+ * Always run a control post built only from known-good nodes alongside the
+ * one under test; without it, either trap reads as a false negative.
  *
  * VOICE — Helpful Ghost, not Butler. Butler states facts about the reader's
  * own situation ("we know"); Suggestion makes recommendations ("we're
