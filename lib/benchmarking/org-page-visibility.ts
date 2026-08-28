@@ -97,12 +97,7 @@ export async function loadViewerBenchmarkingStanding(
 ): Promise<{ filed: boolean; disclosureLevel: string | null }> {
   if (viewerOrgIds.length === 0) return { filed: false, disclosureLevel: null };
 
-  // Cast: the column is live in the database, but this branch's generated
-  // types predate the migration that added it (shipped alongside, and
-  // idempotent). Regenerating the whole types file inside a production fix
-  // would bury a six-file change in four thousand lines of generated diff.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const db = createAdminClient() as any;
+  const db = createAdminClient();
   const { data } = await db
     .from("benchmarking")
     .select("disclosure_level, fiscal_year")
