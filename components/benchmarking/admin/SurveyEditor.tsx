@@ -27,25 +27,33 @@ export default function SurveyEditor({
   initialConfig,
 }: SurveyEditorProps) {
   const [config, setConfig] = useState<SurveyFieldConfig>(
-    JSON.parse(JSON.stringify(initialConfig))
+    JSON.parse(JSON.stringify(initialConfig)),
   );
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [saving, setSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<{ type: "success" | "error"; text: string } | null>(null);
+  const [saveMsg, setSaveMsg] = useState<{
+    type: "success" | "error";
+    text: string;
+  } | null>(null);
   const [expandedField, setExpandedField] = useState<string | null>(null);
 
-  const activeSection = config.sections.sort((a, b) => a.order - b.order)[activeSectionIdx];
+  const activeSection = config.sections.sort((a, b) => a.order - b.order)[
+    activeSectionIdx
+  ];
 
   // ─── Helpers ───
 
-  const updateConfig = useCallback((updater: (draft: SurveyFieldConfig) => void) => {
-    setConfig((prev) => {
-      const next = JSON.parse(JSON.stringify(prev)) as SurveyFieldConfig;
-      updater(next);
-      return next;
-    });
-    setSaveMsg(null);
-  }, []);
+  const updateConfig = useCallback(
+    (updater: (draft: SurveyFieldConfig) => void) => {
+      setConfig((prev) => {
+        const next = JSON.parse(JSON.stringify(prev)) as SurveyFieldConfig;
+        updater(next);
+        return next;
+      });
+      setSaveMsg(null);
+    },
+    [],
+  );
 
   const findSection = (cfg: SurveyFieldConfig, sectionId: string) =>
     cfg.sections.find((s) => s.id === sectionId);
@@ -97,7 +105,7 @@ export default function SurveyEditor({
     sectionId: string,
     fieldName: string,
     prop: keyof FieldConfig,
-    value: unknown
+    value: unknown,
   ) => {
     updateConfig((cfg) => {
       const s = findSection(cfg, sectionId);
@@ -136,17 +144,22 @@ export default function SurveyEditor({
   const moveFieldToSection = (
     fromSectionId: string,
     fieldName: string,
-    toSectionId: string
+    toSectionId: string,
   ) => {
     updateConfig((cfg) => {
       const fromSection = findSection(cfg, fromSectionId);
       const toSection = findSection(cfg, toSectionId);
       if (!fromSection || !toSection) return;
-      const fieldIdx = fromSection.fields.findIndex((f) => f.name === fieldName);
+      const fieldIdx = fromSection.fields.findIndex(
+        (f) => f.name === fieldName,
+      );
       if (fieldIdx === -1) return;
       const [field] = fromSection.fields.splice(fieldIdx, 1);
       // Set order to end of target section
-      const maxOrder = toSection.fields.reduce((max, f) => Math.max(max, f.order), 0);
+      const maxOrder = toSection.fields.reduce(
+        (max, f) => Math.max(max, f.order),
+        0,
+      );
       field.order = maxOrder + 1;
       toSection.fields.push(field);
     });
@@ -168,7 +181,8 @@ export default function SurveyEditor({
   };
 
   const handleReset = async () => {
-    if (!confirm("Reset all field config to defaults? This cannot be undone.")) return;
+    if (!confirm("Reset all field config to defaults? This cannot be undone."))
+      return;
     setSaving(true);
     const result = await resetFieldConfig(surveyId);
     if (result.success) {
@@ -315,16 +329,27 @@ export default function SurveyEditor({
                       isExpanded={expandedField === field.name}
                       onToggleExpand={() =>
                         setExpandedField(
-                          expandedField === field.name ? null : field.name
+                          expandedField === field.name ? null : field.name,
                         )
                       }
                       onUpdateProp={(prop, value) =>
-                        updateFieldProp(activeSection.id, field.name, prop, value)
+                        updateFieldProp(
+                          activeSection.id,
+                          field.name,
+                          prop,
+                          value,
+                        )
                       }
                       onMoveUp={() => moveFieldUp(activeSection.id, fieldIdx)}
-                      onMoveDown={() => moveFieldDown(activeSection.id, fieldIdx)}
+                      onMoveDown={() =>
+                        moveFieldDown(activeSection.id, fieldIdx)
+                      }
                       onMoveToSection={(toSectionId) =>
-                        moveFieldToSection(activeSection.id, field.name, toSectionId)
+                        moveFieldToSection(
+                          activeSection.id,
+                          field.name,
+                          toSectionId,
+                        )
                       }
                       isFirst={fieldIdx === 0}
                       isLast={fieldIdx === activeSection.fields.length - 1}
@@ -374,9 +399,7 @@ function FieldRow({
 
   return (
     <div
-      className={`px-4 py-3 ${
-        !field.visible ? "opacity-50 bg-gray-50" : ""
-      }`}
+      className={`px-4 py-3 ${!field.visible ? "opacity-50 bg-gray-50" : ""}`}
     >
       {/* Compact row */}
       <div className="flex items-center gap-3">
@@ -431,7 +454,9 @@ function FieldRow({
               ? "border-green-300 text-green-700 bg-green-50"
               : "border-gray-300 text-gray-500 bg-gray-50"
           }`}
-          title={field.visible ? "Visible — click to hide" : "Hidden — click to show"}
+          title={
+            field.visible ? "Visible — click to hide" : "Hidden — click to show"
+          }
         >
           {field.visible ? "Visible" : "Hidden"}
         </button>
@@ -449,7 +474,11 @@ function FieldRow({
             strokeWidth={1.5}
             stroke="currentColor"
           >
-            <path strokeLinecap="round" strokeLinejoin="round" d="M19.5 8.25l-7.5 7.5-7.5-7.5" />
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M19.5 8.25l-7.5 7.5-7.5-7.5"
+            />
           </svg>
         </button>
       </div>
@@ -477,7 +506,9 @@ function FieldRow({
             </label>
             <select
               value={field.type}
-              onChange={(e) => onUpdateProp("type", e.target.value as FieldType)}
+              onChange={(e) =>
+                onUpdateProp("type", e.target.value as FieldType)
+              }
               disabled={isCalculated}
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50"
             >
@@ -497,7 +528,9 @@ function FieldRow({
             <input
               type="text"
               value={field.tooltip ?? ""}
-              onChange={(e) => onUpdateProp("tooltip", e.target.value || undefined)}
+              onChange={(e) =>
+                onUpdateProp("tooltip", e.target.value || undefined)
+              }
               placeholder="Help text shown in tooltip popup"
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
@@ -511,8 +544,38 @@ function FieldRow({
             <input
               type="text"
               value={field.helpText ?? ""}
-              onChange={(e) => onUpdateProp("helpText", e.target.value || undefined)}
+              onChange={(e) =>
+                onUpdateProp("helpText", e.target.value || undefined)
+              }
               placeholder="Inline description below the label"
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
+            />
+          </div>
+
+          {/* Worked example — authored by store directors, shown beside the question */}
+          <div className="col-span-2 rounded border border-slate-200 bg-slate-50 p-2">
+            <label className="block text-xs font-medium text-gray-500 mb-1">
+              Worked Example
+            </label>
+            <textarea
+              rows={2}
+              value={field.example ?? ""}
+              onChange={(e) =>
+                onUpdateProp("example", e.target.value || undefined)
+              }
+              placeholder="For us this is $X, which includes A and B but not C."
+              className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
+            />
+            <label className="block text-xs font-medium text-gray-500 mt-2 mb-1">
+              Credit (optional)
+            </label>
+            <input
+              type="text"
+              value={field.exampleCredit ?? ""}
+              onChange={(e) =>
+                onUpdateProp("exampleCredit", e.target.value || undefined)
+              }
+              placeholder="e.g. Conestoga College — leave blank for no attribution"
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
@@ -525,7 +588,9 @@ function FieldRow({
             <input
               type="text"
               value={field.placeholder ?? ""}
-              onChange={(e) => onUpdateProp("placeholder", e.target.value || undefined)}
+              onChange={(e) =>
+                onUpdateProp("placeholder", e.target.value || undefined)
+              }
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
           </div>
@@ -538,7 +603,9 @@ function FieldRow({
             <input
               type="text"
               value={field.suffix ?? ""}
-              onChange={(e) => onUpdateProp("suffix", e.target.value || undefined)}
+              onChange={(e) =>
+                onUpdateProp("suffix", e.target.value || undefined)
+              }
               placeholder="e.g., sq ft, years, %"
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
@@ -549,7 +616,9 @@ function FieldRow({
             <input
               type="checkbox"
               checked={field.required ?? false}
-              onChange={(e) => onUpdateProp("required", e.target.checked || undefined)}
+              onChange={(e) =>
+                onUpdateProp("required", e.target.checked || undefined)
+              }
               className="rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E]"
             />
             <label className="text-xs font-medium text-gray-500">
@@ -565,7 +634,9 @@ function FieldRow({
             <input
               type="text"
               value={field.group ?? ""}
-              onChange={(e) => onUpdateProp("group", e.target.value || undefined)}
+              onChange={(e) =>
+                onUpdateProp("group", e.target.value || undefined)
+              }
               placeholder="Visual group heading"
               className="w-full px-2 py-1.5 border border-gray-300 rounded text-sm focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent"
             />
@@ -585,7 +656,7 @@ function FieldRow({
                     e.target.value
                       .split("\n")
                       .map((s) => s.trim())
-                      .filter(Boolean)
+                      .filter(Boolean),
                   )
                 }
                 rows={4}

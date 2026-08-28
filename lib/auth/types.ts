@@ -95,6 +95,7 @@ export interface AuthState {
   isSurveyParticipant: boolean;
   /** True if the user is tagged as a benchmarking reviewer */
   isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
 }
 
 // Shape descriptor for encrypted content placeholders

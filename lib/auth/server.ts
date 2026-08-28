@@ -12,7 +12,9 @@ import type {
   UserProfile,
 } from "./types";
 
-const ENCRYPTION_SECRET = process.env.CONTENT_ENCRYPTION_SECRET || "csc-demo-secret-change-in-production";
+const ENCRYPTION_SECRET =
+  process.env.CONTENT_ENCRYPTION_SECRET ||
+  "csc-demo-secret-change-in-production";
 
 export interface ServerAuthState {
   user: { id: string; email: string | undefined } | null;
@@ -20,15 +22,16 @@ export interface ServerAuthState {
   globalRole: GlobalRole;
   permissionState: PermissionState;
   organizations: UserOrganization[];
-  /** Resolved from the benchmarking_reviewer role through
-   *  governance_role_capabilities — never a flag on the profile row. */
-  isBenchmarkingReviewer: boolean;
   /** Resolved once per request, threaded into AuthProvider's initialAuth so
    *  client-side permission re-derivation (on auth-state-change) reuses this
    *  instead of re-fetching — see components/providers/AuthProvider.tsx. */
   programs: MembershipProgramDef[];
   encryptionKey: CryptoKey | null;
   encryptionKeyBase64: string | null;
+  /** Capabilities held right now via unexpired, unrevoked grants. */
+  capabilities: string[];
+  isBenchmarkingReviewer: boolean;
+  isBenchmarkingContentReviewer: boolean;
 }
 
 /**
@@ -38,7 +41,10 @@ export interface ServerAuthState {
  * instead of querying directly — cheap even if called more than once per request.
  */
 export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
-  const [snapshot, programs] = await Promise.all([getIdentitySnapshot(), getProgramsConfig()]);
+  const [snapshot, programs] = await Promise.all([
+    getIdentitySnapshot(),
+    getProgramsConfig(),
+  ]);
 
   if (snapshot.status === "anonymous") {
     return {
@@ -47,20 +53,32 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
       globalRole: "user",
       permissionState: "public",
       organizations: [],
-      isBenchmarkingReviewer: false,
       programs,
       encryptionKey: null,
       encryptionKeyBase64: null,
+      capabilities: [],
+      isBenchmarkingReviewer: false,
+      isBenchmarkingContentReviewer: false,
     };
   }
 
   const profile = snapshot.profileError ? null : snapshot.profile;
-  const organizations = snapshot.orgsError ? [] : (snapshot.organizations ?? []);
+  const organizations = snapshot.orgsError
+    ? []
+    : (snapshot.organizations ?? []);
   const globalRole: GlobalRole = profile?.global_role || "user";
-  const permissionState = derivePermissionState(globalRole, organizations, programs);
+  const permissionState = derivePermissionState(
+    globalRole,
+    organizations,
+    programs,
+  );
+  const capabilities = snapshot.capabilities ?? [];
 
   // Generate encryption key for this session
-  const encryptionKey = await generateSessionKey(snapshot.userId, ENCRYPTION_SECRET);
+  const encryptionKey = await generateSessionKey(
+    snapshot.userId,
+    ENCRYPTION_SECRET,
+  );
   const encryptionKeyBase64 = await exportKeyToBase64(encryptionKey);
 
   return {
@@ -69,9 +87,18 @@ export const getServerAuthState = cache(async (): Promise<ServerAuthState> => {
     globalRole,
     permissionState,
     organizations,
-    isBenchmarkingReviewer: snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview),
     programs,
     encryptionKey,
     encryptionKeyBase64,
+    capabilities,
+    // Resolved from governance_role_capabilities, never a flag on the profile
+    // row. Either capability admits you to the reviewer surfaces; content
+    // review is checked separately below because it is the narrower right.
+    isBenchmarkingReviewer:
+      capabilities.includes(CAPABILITY.benchmarkingContentReview) ||
+      capabilities.includes(CAPABILITY.benchmarkingQaVerify),
+    isBenchmarkingContentReviewer: capabilities.includes(
+      CAPABILITY.benchmarkingContentReview,
+    ),
   };
 });

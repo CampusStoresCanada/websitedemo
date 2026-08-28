@@ -4,10 +4,12 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { reviewDeltaFlag } from "@/lib/actions/benchmarking-admin";
+import { writeNote } from "@/lib/actions/benchmarking-notes";
 
 interface Flag {
   id: string;
   benchmarkingId: string;
+  organizationId: string;
   organizationName: string;
   fieldName: string;
   previousValue: number | null;
@@ -23,9 +25,27 @@ interface Flag {
 
 type Filter = "all" | "pending" | "approved" | "rejected";
 
+interface StoreContact {
+  id: string;
+  name: string;
+  roleTitle: string | null;
+  email: string | null;
+  phone: string | null;
+  isPrimary: boolean;
+}
+
+interface StoreContactCard {
+  organizationId: string;
+  organizationName: string;
+  respondentContactId: string | null;
+  contacts: StoreContact[];
+}
+
 interface DeltaFlagsTableProps {
   flags: Flag[];
   fiscalYear: number;
+  surveyId: string;
+  contactsByOrg: Record<string, StoreContactCard>;
 }
 
 function formatFieldName(field: string): string {
@@ -47,12 +67,54 @@ function formatValue(val: number | null): string {
   return val.toLocaleString("en-CA");
 }
 
-export default function DeltaFlagsTable({ flags, fiscalYear }: DeltaFlagsTableProps) {
+export default function DeltaFlagsTable({
+  flags,
+  fiscalYear,
+  surveyId,
+  contactsByOrg,
+}: DeltaFlagsTableProps) {
   const router = useRouter();
   const [filter, setFilter] = useState<Filter>("pending");
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<string | null>(null);
+  // The published explanation is a different thing from the committee's private
+  // note, so it gets its own box and its own state.
+  const [explanations, setExplanations] = useState<Record<string, string>>({});
+  const [sendingNote, setSendingNote] = useState<string | null>(null);
+  const [noteResult, setNoteResult] = useState<Record<string, string>>({});
+
+  /**
+   * Write the explanation the members will eventually read.
+   *
+   * Deliberately separate from accept/follow-up/exclude, and never required by
+   * them. A reviewer usually cannot explain a figure until they have phoned the
+   * store, so a flag has to be able to sit in follow-up and gain its note days
+   * later — forcing the note at review time would only produce guesses.
+   */
+  const sendExplanation = async (flag: Flag, submit: boolean) => {
+    const text = (explanations[flag.id] ?? "").trim();
+    if (!text) return;
+    setSendingNote(flag.id);
+    const res = await writeNote({
+      surveyId,
+      organizationId: flag.organizationId,
+      fieldName: flag.fieldName,
+      note: text,
+      deltaFlagId: flag.id,
+      submit,
+    });
+    setSendingNote(null);
+    setNoteResult((p) => ({
+      ...p,
+      [flag.id]: res.success
+        ? submit
+          ? "Sent to the committee lead."
+          : "Saved as a draft."
+        : res.error ?? "Could not save that.",
+    }));
+    if (res.success) setExplanations((p) => ({ ...p, [flag.id]: "" }));
+  };
 
   const filtered = flags.filter((f) => {
     if (filter === "all") return true;
@@ -201,6 +263,97 @@ export default function DeltaFlagsTable({ flags, fiscalYear }: DeltaFlagsTablePr
                       <p className="text-sm text-gray-700">{flag.committeeNotes}</p>
                     </div>
                   )}
+
+                  {/* Who to ring. A flag is usually settled in a two-minute
+                      call, and the person who filed the survey is listed first
+                      because they are the one who knows why the number moved. */}
+                  {(() => {
+                    const card = contactsByOrg[flag.organizationId];
+                    if (!card || card.contacts.length === 0) {
+                      return (
+                        <div className="mb-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+                          Nobody on file for {flag.organizationName}. This one has to go
+                          back to the office before it can be chased.
+                        </div>
+                      );
+                    }
+                    return (
+                      <div className="mb-3 rounded-lg bg-gray-50 p-3">
+                        <p className="mb-1 text-xs font-medium text-gray-500">
+                          Who to ask at {card.organizationName}
+                        </p>
+                        <ul className="space-y-1">
+                          {card.contacts.slice(0, 3).map((c) => (
+                            <li key={c.id} className="text-sm text-gray-800">
+                              <span className="font-medium">{c.name}</span>
+                              {c.roleTitle && (
+                                <span className="text-gray-500"> · {c.roleTitle}</span>
+                              )}
+                              {c.id === card.respondentContactId && (
+                                <span className="ml-1 rounded bg-gray-200 px-1.5 py-0.5 text-[10px] uppercase text-gray-700">
+                                  filed this
+                                </span>
+                              )}
+                              <span className="block text-xs">
+                                {c.email && (
+                                  <a href={`mailto:${c.email}`} className="text-[#163D6D] underline">
+                                    {c.email}
+                                  </a>
+                                )}
+                                {c.email && c.phone && " · "}
+                                {c.phone && (
+                                  <a href={`tel:${c.phone.replace(/[^+\d]/g, "")}`} className="text-[#163D6D] underline">
+                                    {c.phone}
+                                  </a>
+                                )}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    );
+                  })()}
+
+                  {/* The explanation members will read, if the store agrees. */}
+                  <div className="mb-3 rounded-lg border border-gray-200 p-3">
+                    <p className="text-xs font-medium text-gray-700">
+                      Explain this figure to other members
+                    </p>
+                    <p className="mt-0.5 text-xs text-gray-500">
+                      Only published if {flag.organizationName} agrees to the wording. Write
+                      it after you have spoken to them — a flag can sit here for days.
+                    </p>
+                    <textarea
+                      value={explanations[flag.id] ?? ""}
+                      onChange={(e) =>
+                        setExplanations((prev) => ({ ...prev, [flag.id]: e.target.value }))
+                      }
+                      rows={2}
+                      placeholder="e.g. Second location opened in September, so the floor space and sales both step up mid-year."
+                      className="mt-2 w-full resize-none rounded-lg border border-gray-200 px-3 py-2 text-sm"
+                    />
+                    <div className="mt-2 flex flex-wrap items-center gap-2">
+                      <button
+                        type="button"
+                        disabled={sendingNote === flag.id || !(explanations[flag.id] ?? "").trim()}
+                        onClick={() => sendExplanation(flag, true)}
+                        className="rounded-lg bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+                      >
+                        Send to the lead
+                      </button>
+                      <button
+                        type="button"
+                        disabled={sendingNote === flag.id || !(explanations[flag.id] ?? "").trim()}
+                        onClick={() => sendExplanation(flag, false)}
+                        className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm text-gray-700 disabled:opacity-40"
+                      >
+                        Save a draft
+                      </button>
+                      {noteResult[flag.id] && (
+                        <span className="text-xs text-gray-600">{noteResult[flag.id]}</span>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Review actions (only for pending) */}
                   {flag.committeeStatus === "pending" && (

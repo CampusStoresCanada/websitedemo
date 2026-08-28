@@ -16,6 +16,11 @@ export interface AuthContext {
   userEmail: string | null;
   globalRole: GlobalRole;
   isBenchmarkingReviewer: boolean;
+  /** Narrower than isBenchmarkingReviewer: content review only, not QA verify. */
+  isBenchmarkingContentReviewer: boolean;
+  /** Every capability held right now. Surfaces that gate on something other
+   *  than the two benchmarking flags read this rather than growing a boolean. */
+  capabilities: string[];
   orgAdminOrgIds: string[];
   activeOrgIds: string[];
 }
@@ -157,7 +162,17 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
   // already use. There is no is_benchmarking_reviewer column; a previous
   // version of this line read one that was never created, so this was
   // permanently false and only global admins could ever review.
-  const isBenchmarkingReviewer = snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview);
+  // Either capability lets you into the reviewer surfaces at all.
+  const isBenchmarkingReviewer =
+    snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview) ||
+    snapshot.capabilities.includes(CAPABILITY.benchmarkingQaVerify);
+  // Content review is the narrower right, and the question-review surfaces ask
+  // it specifically: someone who verifies submitted figures is not thereby
+  // entitled to rewrite the questions. Kept separate rather than folded into
+  // the flag above, because collapsing them would silently widen QA verifiers.
+  const isBenchmarkingContentReviewer = snapshot.capabilities.includes(
+    CAPABILITY.benchmarkingContentReview,
+  );
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
     .filter((uo) => uo.role === "org_admin")
@@ -169,6 +184,8 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     userEmail: snapshot.userEmail,
     globalRole,
     isBenchmarkingReviewer,
+    isBenchmarkingContentReviewer,
+    capabilities: snapshot.capabilities,
     orgAdminOrgIds,
     activeOrgIds,
   };
