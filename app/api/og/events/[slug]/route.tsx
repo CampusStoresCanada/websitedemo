@@ -15,7 +15,11 @@ export async function GET(
     .from("events")
     .select("id, title, description, starts_at, is_virtual, location, created_by, audience_mode")
     .eq("slug", slug)
-    .eq("status", "published")
+    // Must match getEventBySlugWithOrgContext. The page serves 'completed'
+    // events, so filtering to 'published' here left every finished event with
+    // a 200 page and a 404 preview image — a broken card wherever the link is
+    // shared, which is precisely when a past event gets linked to.
+    .in("status", ["published", "completed"])
     .single();
 
   if (!event) {
