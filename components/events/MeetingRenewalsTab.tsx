@@ -13,6 +13,7 @@ import {
   type ContactOutcome,
 } from "@/lib/renewal/outreach";
 import { logRenewalContactAction, setRenewalAssignmentAction } from "@/lib/actions/renewal-outreach";
+import { syncRenewalActionItemsAction } from "@/lib/actions/renewal-call-list";
 import {
   pullRenewalSnapshotAction,
   approveRenewalSnapshotAction,
@@ -99,6 +100,76 @@ function AssignControl({
       </select>
       {error && <span className="text-xs text-[#9C0006]">{error}</span>}
     </span>
+  );
+}
+
+/**
+ * Turning assignments into obligations.
+ *
+ * The board divides the list in the room; this is the step that makes each
+ * share land somewhere a director will actually see it again. It writes ONE
+ * board action item per person — not per store — so the checklist keeps
+ * holding governance rather than becoming a renewal queue. Everything after
+ * that is the existing action-item machinery: reminders, the emailed
+ * one-click completion, the calendar entry.
+ */
+function HandOutBar({
+  meetingId,
+  renewalYear,
+  eventSlug,
+  assignedCount,
+}: {
+  meetingId: string;
+  renewalYear: number;
+  eventSlug: string;
+  assignedCount: number;
+}) {
+  const [msg, setMsg] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const run = () => {
+    setMsg(null);
+    setError(null);
+    startTransition(async () => {
+      const res = await syncRenewalActionItemsAction({ meetingId, renewalYear, eventSlug });
+      if (!res.success) {
+        setError(res.error ?? "Could not create the action items.");
+        return;
+      }
+      const parts = [
+        res.created ? `${res.created} created` : null,
+        res.updated ? `${res.updated} updated` : null,
+        res.closed ? `${res.closed} closed out` : null,
+      ].filter(Boolean);
+      setMsg(parts.length ? parts.join(" · ") : "Nothing to do — no one is assigned yet.");
+    });
+  };
+
+  return (
+    <div className="rounded-lg border border-gray-200 p-3 mb-4 flex flex-wrap items-center justify-between gap-3">
+      <div className="text-xs text-gray-600">
+        <span className="font-semibold text-gray-700">Hand out the list.</span>{" "}
+        {assignedCount === 0
+          ? "Assign stores below first, then this creates one action item per person."
+          : `${assignedCount} assigned. Creates one board action item per person — reminders, calendar and one-click completion come with it.`}
+        {msg && <span className="block text-green-800 mt-1">{msg}</span>}
+        {error && <span className="block text-[#9C0006] mt-1">{error}</span>}
+      </div>
+      <div className="flex items-center gap-3 shrink-0">
+        <a href="/admin/renewals" className="text-xs font-semibold text-[#EE2A2E] hover:underline">
+          My calls →
+        </a>
+        <button
+          type="button"
+          onClick={run}
+          disabled={pending || assignedCount === 0}
+          className="text-xs font-semibold px-3 py-1.5 rounded bg-[#163D6D] text-white disabled:opacity-40"
+        >
+          {pending ? "Working…" : "Create action items"}
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -482,6 +553,7 @@ export default function MeetingRenewalsTab({
   // the bar above rather than left for the reader to guess.
   const shown = snapshot?.report ?? report;
   const { totals } = shown;
+  const assignedLive = Object.keys(assignmentsByOrg).length;
   const orgTypes = Object.keys(shown.types) as RenewalOrgType[];
 
   return (
@@ -554,6 +626,13 @@ export default function MeetingRenewalsTab({
           />
         </div>
       </div>
+
+      <HandOutBar
+        meetingId={meetingId}
+        renewalYear={shown.renewalYear}
+        eventSlug={eventSlug}
+        assignedCount={assignedLive}
+      />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {orgTypes.map((key) => (

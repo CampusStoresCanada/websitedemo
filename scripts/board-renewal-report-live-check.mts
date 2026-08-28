@@ -302,5 +302,82 @@ const { count: leftoverSnaps } = await wdb
   .eq("meeting_id", SCRATCH_ID);
 check("no scratch snapshot rows left behind", (leftoverSnaps ?? 0) === 0, `${leftoverSnaps ?? 0} rows`);
 
+console.log("\n── Call list + action items (scratch meeting + fixture org) ──");
+const { syncRenewalActionItems } = await import("../lib/renewal/action-items");
+const { getRenewalCallList } = await import("../lib/renewal/call-list");
+
+const { data: scratch2 } = await wdb
+  .from("board_meetings")
+  .insert({
+    title: "SCRATCH — action item probe (safe to delete)",
+    meeting_type: "regular", meeting_date: "2099-02-01", status: "upcoming",
+  })
+  .select("id").single();
+const M2: string = scratch2!.id;
+const WHO = members[0]!.profileId;
+
+try {
+  await setRenewalAssignment({
+    organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: WHO, assignedBy: null,
+  });
+
+  const first = await syncRenewalActionItems({ meetingId: M2, renewalYear: PROBE_YEAR });
+  check("one action item created per assignee, not per org", first.created === 1,
+    JSON.stringify(first));
+
+  const { data: items } = await wdb
+    .from("board_action_items")
+    .select("title, assignees, source, status, priority")
+    .eq("meeting_id", M2);
+  check("item is attributed to source 'renewal'", items?.[0]?.source === "renewal");
+  check("item is assigned to the right person",
+    (items?.[0]?.assignees as string[])?.[0] === WHO);
+  check("title states the count", /1 assigned store/.test(items?.[0]?.title ?? ""),
+    items?.[0]?.title ?? "");
+
+  // Re-running must not produce a second item for the same person.
+  const second = await syncRenewalActionItems({ meetingId: M2, renewalYear: PROBE_YEAR });
+  check("re-sync updates rather than duplicating",
+    second.created === 0 && second.updated === 1, JSON.stringify(second));
+  const { count: itemCount } = await wdb
+    .from("board_action_items").select("id", { count: "exact", head: true }).eq("meeting_id", M2);
+  check("still exactly one item", (itemCount ?? 0) === 1, `${itemCount ?? 0}`);
+
+  // The call list the item points at.
+  const list = await getRenewalCallList(WHO, PROBE_YEAR);
+  check("call list returns the assigned org", list.entries.length === 1,
+    `${list.entries.length}`);
+  const entry = list.entries[0];
+  check("call list entry names the org and its amount",
+    entry?.organizationName === "Test Org (Member)" && typeof entry?.amountCents === "number",
+    `${entry?.organizationName} / ${entry?.amountCents}`);
+  // The contact block is the point of the page, so assert it agrees with the
+  // database rather than asserting it is "either present or absent".
+  const { count: realContacts } = await wdb
+    .from("contacts").select("id", { count: "exact", head: true })
+    .eq("organization_id", TEST_ORG).is("archived_at", null);
+  check("contact block matches what the org actually has",
+    (realContacts ?? 0) > 0 ? entry?.contact !== null : entry?.contact === null,
+    `${realContacts ?? 0} contacts on file → ${entry?.contact ? entry.contact.name : "null"}`);
+
+  // Unassigning should close the obligation, not leave it asserting work.
+  await setRenewalAssignment({
+    organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: null, assignedBy: null,
+  });
+  const third = await syncRenewalActionItems({ meetingId: M2, renewalYear: PROBE_YEAR });
+  check("unassigning closes the action item out", third.closed === 1, JSON.stringify(third));
+  const { data: after } = await wdb
+    .from("board_action_items").select("status, dropped_reason").eq("meeting_id", M2);
+  check("closed item records why", after?.[0]?.status === "dropped" && !!after?.[0]?.dropped_reason,
+    after?.[0]?.dropped_reason ?? "");
+} finally {
+  await wdb.from("board_action_items").delete().eq("meeting_id", M2);
+  await wdb.from("renewal_assignments").delete().eq("organization_id", TEST_ORG).eq("renewal_year", PROBE_YEAR);
+  await wdb.from("board_meetings").delete().eq("id", M2);
+}
+
+const { data: leftM2 } = await wdb.from("board_meetings").select("id").eq("id", M2).maybeSingle();
+check("scratch action-item meeting cleaned up", !leftM2);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);
