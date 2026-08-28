@@ -4,6 +4,8 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { answerPersonalTask } from "@/lib/actions/conference-tasks";
 import { loadPersonalTasks } from "@/lib/conference/checklist-tasks";
 import TaskChecklist from "@/components/conference/TaskChecklist";
+import AgendaView from "@/components/me/AgendaView";
+import { loadPersonAgenda } from "@/lib/conference/person-agenda";
 
 /**
  * The attendee's own conference to-dos, on the page they already use.
@@ -36,7 +38,11 @@ export default async function MyConferenceSection() {
   } | undefined;
   if (!person) return null;
 
-  const tasks = await loadPersonalTasks(db, person.conference_id, person.id);
+  const [tasks, agendaResult] = await Promise.all([
+    loadPersonalTasks(db, person.conference_id, person.id),
+    loadPersonAgenda(person.id, person.conference_id),
+  ]);
+  const agenda = agendaResult.success ? agendaResult.data : null;
   const conference = person.conference_instances;
 
   // No tasks and nothing to link to is not a section, it is a heading.
@@ -67,6 +73,13 @@ export default async function MyConferenceSection() {
           </Link>
         )}
       </div>
+
+      {agenda && agenda.items.length > 0 && conference && (
+        <AgendaView
+          agenda={agenda}
+          mapHref={`/conference/${conference.year}/${conference.edition_code}/map`}
+        />
+      )}
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">
         <h3 className="text-base font-semibold text-gray-900">Things to confirm</h3>
