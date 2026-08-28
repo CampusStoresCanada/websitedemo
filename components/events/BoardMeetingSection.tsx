@@ -7,6 +7,7 @@ import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFin
 import MeetingRenewalsTab from "@/components/events/MeetingRenewalsTab";
 import type { BoardRenewalReport } from "@/lib/renewal/board-report";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
+import type { AssignableMember } from "@/lib/renewal/outreach";
 import { uploadBoardDocument } from "@/lib/actions/board-meeting-event";
 import type { ComparativeReport } from "@/lib/quickbooks/types";
 
@@ -60,6 +61,8 @@ interface Props {
   renewalReport: BoardRenewalReport | null;
   renewalSnapshot: RenewalSnapshot | null;
   renewalDelta: RenewalDelta | null;
+  assignableMembers: AssignableMember[];
+  assignmentsByOrg: Record<string, string>;
   eventSlug: string;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
@@ -439,6 +442,8 @@ export default function BoardMeetingSection({
   renewalReport,
   renewalSnapshot,
   renewalDelta,
+  assignableMembers,
+  assignmentsByOrg,
   eventSlug,
   reportPeriod,
   isSA,
@@ -577,6 +582,8 @@ export default function BoardMeetingSection({
           meetingId={meeting.id}
           meetingDate={meeting.meeting_date}
           eventSlug={eventSlug}
+          assignableMembers={assignableMembers}
+          assignmentsByOrg={assignmentsByOrg}
         />
       )}
     </div>

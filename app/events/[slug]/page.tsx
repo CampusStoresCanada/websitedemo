@@ -14,6 +14,8 @@ import OrgMemberRegistrationPanel from "@/components/events/OrgMemberRegistratio
 import BoardMeetingSection from "@/components/events/BoardMeetingSection";
 import { getBoardRenewalReport } from "@/lib/renewal/board-report";
 import { getRenewalSnapshot, getRenewalDelta } from "@/lib/renewal/snapshot";
+import { getAssignableBoardMembers, getAssignmentsByOrg } from "@/lib/renewal/outreach";
+import type { AssignableMember } from "@/lib/renewal/outreach";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import type { BoardRenewalReport } from "@/lib/renewal/board-report";
 import { DateTimeRange } from "@/components/ui/LocalDate";
@@ -105,6 +107,8 @@ export default async function EventDetailPage({
     renewalReport:  BoardRenewalReport | null;
     renewalSnapshot: RenewalSnapshot | null;
     renewalDelta:   RenewalDelta | null;
+    assignableMembers: AssignableMember[];
+    assignmentsByOrg:  Record<string, string>;
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -122,7 +126,7 @@ export default async function EventDetailPage({
     if (meeting) {
       const reportPeriod = getLastFullMonth(meeting.meeting_date);
 
-      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, renewalSnapshot, { data: prevMeetingRow }] = await Promise.all([
+      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, renewalSnapshot, assignableMembers, { data: prevMeetingRow }] = await Promise.all([
         adminDb
           .from("board_action_items")
           .select("id, title, description, assignees, due_date, status, sort_order, complete_token")
@@ -143,6 +147,7 @@ export default async function EventDetailPage({
         // Null outside the board renewal window — hides the Renewals tab entirely.
         getBoardRenewalReport(meeting.meeting_date),
         getRenewalSnapshot(meeting.id),
+        getAssignableBoardMembers(adminDb),
         // Previous meeting (for Past Meeting subtab in Minutes)
         adminDb
           .from("board_meetings")
@@ -164,6 +169,11 @@ export default async function EventDetailPage({
         financialReport: financialReport ?? null,
         renewalReport:   renewalReport ?? null,
         renewalSnapshot: renewalSnapshot ?? null,
+        assignableMembers: assignableMembers ?? [],
+        // Live, never off the snapshot — see getAssignmentsByOrg.
+        assignmentsByOrg: renewalReport
+          ? await getAssignmentsByOrg(adminDb, renewalReport.renewalYear)
+          : {},
         // Delta is computed against whichever figures are being shown — the
         // frozen ones if this meeting has a snapshot, otherwise live.
         renewalDelta:    renewalReport
@@ -373,6 +383,8 @@ export default async function EventDetailPage({
           renewalReport={boardMeetingData.renewalReport}
           renewalSnapshot={boardMeetingData.renewalSnapshot}
           renewalDelta={boardMeetingData.renewalDelta}
+          assignableMembers={boardMeetingData.assignableMembers}
+          assignmentsByOrg={boardMeetingData.assignmentsByOrg}
           eventSlug={slug}
           reportPeriod={boardMeetingData.reportPeriod}
           isSA={isSA}

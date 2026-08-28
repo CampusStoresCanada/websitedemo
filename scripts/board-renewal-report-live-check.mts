@@ -146,6 +146,45 @@ check("the note round-tripped", row?.lastContact?.note === "live-check probe",
 check("channel and outcome round-tripped",
   row?.lastContact?.channel === "call" && row?.lastContact?.outcome === "undecided");
 
+// Assignment: the control added on the board tab writes through this.
+const { getAssignableBoardMembers, getAssignmentsByOrg } = await import("../lib/renewal/outreach");
+const members = await getAssignableBoardMembers(wdb);
+check("assignable board members resolve from governance roles", members.length > 0,
+  `${members.length}: ${members.slice(0, 3).map((m) => `${m.displayName} (${m.roleLabel})`).join(", ")}…`);
+check("nobody appears twice in the assignee list",
+  new Set(members.map((m) => m.profileId)).size === members.length);
+check("an officer shows their office, not just 'Director'",
+  members.some((m) => m.roleLabel !== "Director"));
+
+const assignee = members[0]?.profileId ?? null;
+check("assigning records the owner",
+  (await setRenewalAssignment({
+    organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: assignee, assignedBy: null,
+  })).success === true);
+const assignedMap = await getAssignmentsByOrg(wdb, PROBE_YEAR);
+check("assignment reads back live", assignedMap[TEST_ORG] === assignee,
+  assignedMap[TEST_ORG] ?? "(none)");
+
+// Re-assigning must REPLACE, not accumulate — one owner per org per cycle.
+const second = members[1]?.profileId ?? null;
+await setRenewalAssignment({
+  organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: second, assignedBy: null,
+});
+const reassigned = await getAssignmentsByOrg(wdb, PROBE_YEAR);
+check("re-assigning replaces rather than duplicating", reassigned[TEST_ORG] === second,
+  reassigned[TEST_ORG] ?? "(none)");
+const { count: assignRows } = await wdb
+  .from("renewal_assignments").select("id", { count: "exact", head: true })
+  .eq("organization_id", TEST_ORG).eq("renewal_year", PROBE_YEAR);
+check("exactly one assignment row for the org", (assignRows ?? 0) === 1, `${assignRows ?? 0}`);
+
+// Clearing it is how you hand an org back to nobody.
+await setRenewalAssignment({
+  organizationId: TEST_ORG, renewalYear: PROBE_YEAR, assignedTo: null, assignedBy: null,
+});
+check("clearing the assignment works",
+  (await getAssignmentsByOrg(wdb, PROBE_YEAR))[TEST_ORG] === undefined);
+
 const badChannel = await logRenewalContact({
   organizationId: TEST_ORG, renewalYear: PROBE_YEAR, contactedBy: null,
   channel: "carrier-pigeon" as never, outcome: "undecided", note: null,
@@ -221,16 +260,32 @@ try {
   check("double approve is refused",
     (await approveRenewalSnapshot({ meetingId: SCRATCH_ID, approvedBy: null })).success === false);
 
-  // Delta needs a PRIOR meeting's snapshot; this scratch meeting is the only
-  // one in the year, so there is nothing earlier to compare against.
+  // Delta against a real earlier snapshot in the same cycle, if one exists.
+  // This assertion deliberately adapts: whether a prior snapshot exists depends
+  // on whether anyone has frozen a real meeting, which is not the test's to
+  // control. Both branches are meaningful.
   const delta = await getRenewalDelta({
     meetingId: SCRATCH_ID,
     meetingDate: "2099-01-01",
     renewalYear: report.renewalYear,
     current: report,
   });
-  check("delta is null with no earlier snapshot (not a zero baseline)", delta === null,
-    delta ? JSON.stringify(delta) : "null");
+  if (delta) {
+    check("delta references an EARLIER meeting", delta.sinceMeetingDate < "2099-01-01",
+      delta.sinceMeetingDate);
+    check("delta against an identical report is all zeroes",
+      delta.renewedDelta === 0 && delta.collectedCentsDelta === 0,
+      `${delta.renewedDelta} / ${delta.collectedCentsDelta}`);
+  } else {
+    check("no prior snapshot in this cycle, so no delta", true, "none frozen yet");
+  }
+
+  // The zero-baseline guard, in a year nothing has ever been frozen against.
+  check("delta is null when nothing earlier exists (not a zero baseline)",
+    (await getRenewalDelta({
+      meetingId: SCRATCH_ID, meetingDate: "2099-01-01",
+      renewalYear: 2999, current: report,
+    })) === null);
 } finally {
   // Cascades to renewal_snapshots. Deleting strictly by the id we created.
   await wdb.from("renewal_snapshots").delete().eq("meeting_id", SCRATCH_ID);
@@ -240,9 +295,12 @@ try {
 const { data: leftoverMeeting } = await wdb
   .from("board_meetings").select("id").eq("id", SCRATCH_ID).maybeSingle();
 check("scratch meeting cleaned up", !leftoverMeeting);
+// Scoped to the scratch meeting. A global count would fail the moment anyone
+// legitimately freezes a real meeting — which is the feature working, not a leak.
 const { count: leftoverSnaps } = await wdb
-  .from("renewal_snapshots").select("id", { count: "exact", head: true });
-check("no snapshot rows left behind", (leftoverSnaps ?? 0) === 0, `${leftoverSnaps ?? 0} rows`);
+  .from("renewal_snapshots").select("id", { count: "exact", head: true })
+  .eq("meeting_id", SCRATCH_ID);
+check("no scratch snapshot rows left behind", (leftoverSnaps ?? 0) === 0, `${leftoverSnaps ?? 0} rows`);
 
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

@@ -168,3 +168,85 @@ export async function logRenewalContact(params: {
   if (error) return { success: false, error: error.message };
   return { success: true, id: data.id };
 }
+
+export interface AssignableMember {
+  profileId: string;
+  displayName: string;
+  roleLabel: string;
+}
+
+const ROLE_LABEL: Record<string, string> = {
+  president: "President",
+  vice_president: "Vice-President",
+  treasurer: "Treasurer",
+  secretary: "Secretary",
+  past_president: "Past President",
+  executive_director: "Executive Director",
+  director: "Director",
+};
+
+/**
+ * Who a renewal conversation can be handed to: whoever currently holds a seat
+ * or an office, resolved from governance_role_assignments rather than from a
+ * list of admins. A director is not necessarily an admin of this site, and the
+ * people who should be making these calls are defined by the board, not by
+ * who happens to have a login role.
+ *
+ * Deduped by person — several officers also hold a director seat — preferring
+ * the office label over the plain seat, since that is how they'd be addressed.
+ */
+export async function getAssignableBoardMembers(
+  db: ReturnType<typeof createAdminClient>
+): Promise<AssignableMember[]> {
+  const today = new Date().toISOString().slice(0, 10);
+  const { data } = await db
+    .from("governance_role_assignments")
+    .select("role_key, person_profile_id, profiles:person_profile_id(id, display_name)")
+    .in("role_key", Object.keys(ROLE_LABEL))
+    .lte("term_start", today)
+    .or(`term_end.is.null,term_end.gt.${today}`);
+
+  const byProfile = new Map<string, AssignableMember>();
+  for (const row of data ?? []) {
+    const profile = row.profiles as unknown as { id: string; display_name: string | null } | null;
+    if (!profile?.id) continue;
+    const label = ROLE_LABEL[row.role_key] ?? row.role_key;
+    const existing = byProfile.get(profile.id);
+    // An office beats a plain director seat when the same person holds both.
+    if (!existing || (existing.roleLabel === "Director" && label !== "Director")) {
+      byProfile.set(profile.id, {
+        profileId: profile.id,
+        displayName: profile.display_name ?? "Unknown",
+        roleLabel: label,
+      });
+    }
+  }
+
+  return Array.from(byProfile.values()).sort((a, b) =>
+    a.displayName.localeCompare(b.displayName)
+  );
+}
+
+/**
+ * Current assignment per organization, independent of any frozen snapshot.
+ *
+ * The FIGURES freeze to a meeting; who owns the conversation does not. A board
+ * looking at October's frozen numbers still needs to see — and change — who is
+ * calling whom today.
+ */
+export async function getAssignmentsByOrg(
+  db: ReturnType<typeof createAdminClient>,
+  renewalYear: number
+): Promise<Record<string, string>> {
+  const { data } = await db
+    .from("renewal_assignments")
+    .select("organization_id, assigned_to")
+    .eq("renewal_year", renewalYear)
+    .not("assigned_to", "is", null);
+
+  const out: Record<string, string> = {};
+  for (const row of data ?? []) {
+    if (row.assigned_to) out[row.organization_id] = row.assigned_to;
+  }
+  return out;
+}

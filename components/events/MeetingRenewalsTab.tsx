@@ -12,12 +12,13 @@ import {
   type ContactChannel,
   type ContactOutcome,
 } from "@/lib/renewal/outreach";
-import { logRenewalContactAction } from "@/lib/actions/renewal-outreach";
+import { logRenewalContactAction, setRenewalAssignmentAction } from "@/lib/actions/renewal-outreach";
 import {
   pullRenewalSnapshotAction,
   approveRenewalSnapshotAction,
 } from "@/lib/actions/renewal-snapshot";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
+import type { AssignableMember } from "@/lib/renewal/outreach";
 
 interface Props {
   report: BoardRenewalReport;
@@ -28,6 +29,77 @@ interface Props {
   meetingId: string;
   meetingDate: string;
   eventSlug: string;
+  /** Current board and officers, from governance_role_assignments. */
+  assignableMembers: AssignableMember[];
+  /** LIVE assignment per org id — deliberately not read off the snapshot. The
+   *  figures freeze to a meeting; who owns the conversation does not. */
+  assignmentsByOrg: Record<string, string>;
+}
+
+/**
+ * Hand one organization's renewal conversation to somebody.
+ *
+ * Lives on the row rather than on a separate screen because this is what a
+ * board actually does in the room — someone says "I'll take Algonquin" while
+ * the list is on the projector, and it has to be one click to record that.
+ */
+function AssignControl({
+  organizationId,
+  renewalYear,
+  assignedTo,
+  members,
+  eventSlug,
+}: {
+  organizationId: string;
+  renewalYear: number;
+  assignedTo: string | null;
+  members: AssignableMember[];
+  eventSlug: string;
+}) {
+  const [value, setValue] = useState<string>(assignedTo ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const change = (next: string) => {
+    const previous = value;
+    setValue(next);
+    setError(null);
+    startTransition(async () => {
+      const res = await setRenewalAssignmentAction({
+        organizationId,
+        renewalYear,
+        assignedTo: next || null,
+        eventSlug,
+      });
+      if (!res.success) {
+        setValue(previous);
+        setError(res.error ?? "Could not save.");
+      }
+    });
+  };
+
+  return (
+    <span className="inline-flex items-center gap-1">
+      <label className="sr-only" htmlFor={`as-${organizationId}`}>Assign to</label>
+      <select
+        id={`as-${organizationId}`}
+        value={value}
+        disabled={pending}
+        onChange={(e) => change(e.target.value)}
+        className={`text-xs rounded border px-1.5 py-0.5 max-w-[11rem] ${
+          value ? "border-gray-300 bg-white text-gray-700" : "border-dashed border-gray-300 bg-transparent text-gray-400"
+        }`}
+      >
+        <option value="">Unassigned</option>
+        {members.map((m) => (
+          <option key={m.profileId} value={m.profileId}>
+            {m.displayName}
+          </option>
+        ))}
+      </select>
+      {error && <span className="text-xs text-[#9C0006]">{error}</span>}
+    </span>
+  );
 }
 
 function signed(n: number): string {
@@ -267,13 +339,20 @@ function TypePanel({
   type,
   renewalYear,
   eventSlug,
+  members,
+  assignmentsByOrg,
 }: {
   type: BoardRenewalTypeReport;
   renewalYear: number;
   eventSlug: string;
+  members: AssignableMember[];
+  assignmentsByOrg: Record<string, string>;
 }) {
   const [open, setOpen] = useState(false);
   const [logging, setLogging] = useState<string | null>(null);
+  // Counted from live assignments rather than type.assignedCount, which is
+  // frozen into the snapshot alongside the figures.
+  const assignedNow = type.outstanding.filter((o) => assignmentsByOrg[o.organizationId]).length;
   const renewedPct = type.populationCount === 0 ? 0 : type.renewedCount / type.populationCount;
 
   return (
@@ -314,7 +393,7 @@ function TypePanel({
         <div>
           <p className="text-xs text-gray-500 mb-2">
             {type.contactedCount} of {type.outstanding.length} spoken to
-            {type.assignedCount > 0 && ` · ${type.assignedCount} assigned`}
+            {assignedNow > 0 && ` · ${assignedNow} assigned`}
             {type.contactedCount === 0 && type.outstanding.length > 0 && (
               <span className="text-[#9C0006] font-medium"> — nobody has been called yet</span>
             )}
@@ -350,11 +429,14 @@ function TypePanel({
                         >
                           spoken to
                         </span>
-                      ) : org.assignedTo ? (
-                        <span className="text-xs px-1.5 py-0.5 rounded bg-amber-50 text-amber-800">
-                          assigned
-                        </span>
                       ) : null}
+                      <AssignControl
+                        organizationId={org.organizationId}
+                        renewalYear={renewalYear}
+                        assignedTo={assignmentsByOrg[org.organizationId] ?? null}
+                        members={members}
+                        eventSlug={eventSlug}
+                      />
                       <span className="text-gray-500 tabular-nums">{money(org.amountCents)}</span>
                       <button
                         type="button"
@@ -392,6 +474,8 @@ export default function MeetingRenewalsTab({
   meetingId,
   meetingDate,
   eventSlug,
+  assignableMembers,
+  assignmentsByOrg,
 }: Props) {
   // The frozen figures win wherever they exist. The live report stays the
   // fallback for a meeting nobody has frozen yet, and the source is stated in
@@ -478,6 +562,8 @@ export default function MeetingRenewalsTab({
             type={shown.types[key]}
             renewalYear={shown.renewalYear}
             eventSlug={eventSlug}
+            members={assignableMembers}
+            assignmentsByOrg={assignmentsByOrg}
           />
         ))}
       </div>
