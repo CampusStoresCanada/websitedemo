@@ -979,11 +979,20 @@ export async function listPublishedEventsWithOrgContext(
 ): Promise<{ success: true; data: EventWithOrgContext[] } | { success: false; error: string }> {
   const adminClient = createAdminClient();
 
-  // 1. Fetch all published events
+  // 1. Fetch events that are live or have run.
+  //
+  // 'completed' belongs here, not just 'published'. /events splits past from
+  // upcoming purely on starts_at (app/events/page.tsx:85), so filtering to
+  // 'published' alone meant the Past tab listed events nobody had closed out
+  // and hid the ones that were properly marked completed — exactly backwards,
+  // and the reason yesterday's board meeting vanished from ?tab=past.
+  //
+  // 'draft' and 'cancelled' stay out. Matches getEventBySlugWithOrgContext, so
+  // a listing and its detail page agree about what exists.
   const { data: events, error: eventsErr } = await adminClient
     .from("events")
     .select("*")
-    .eq("status", "published")
+    .in("status", ["published", "completed"])
     .order("starts_at", { ascending: true });
 
   if (eventsErr || !events) {
