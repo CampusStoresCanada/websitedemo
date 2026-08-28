@@ -158,5 +158,91 @@ await wdb.from("renewal_assignments").delete().eq("organization_id", TEST_ORG).e
 const afterClean = await getOutreachByOrg(wdb, [TEST_ORG], PROBE_YEAR);
 check("probe rows cleaned up", !afterClean.has(TEST_ORG));
 
+console.log("\n── Snapshot freezing (scratch meeting, self-cleaning) ──");
+// Creates its OWN board_meetings row and deletes it by id at the end. Never
+// touches a real meeting — board minutes have been destroyed by a test probe
+// in this project before.
+const { getRenewalSnapshot, saveRenewalSnapshot, approveRenewalSnapshot, getRenewalDelta } =
+  await import("../lib/renewal/snapshot");
+
+const { data: scratch, error: scratchErr } = await wdb
+  .from("board_meetings")
+  .insert({
+    title: "SCRATCH — live-check snapshot probe (safe to delete)",
+    meeting_type: "regular",
+    // Far future: board_meetings has a UNIQUE constraint on meeting_date, so a
+    // scratch row cannot share a date with a real meeting.
+    meeting_date: "2099-01-01",
+    status: "upcoming",
+  })
+  .select("id")
+  .single();
+
+if (scratchErr || !scratch) {
+  console.log(`  ✗ could not create scratch meeting — ${scratchErr?.message}`);
+  process.exit(1);
+}
+const SCRATCH_ID: string = scratch.id;
+
+try {
+  check("no snapshot before freezing", (await getRenewalSnapshot(SCRATCH_ID)) === null);
+
+  const frozen = await saveRenewalSnapshot({
+    meetingId: SCRATCH_ID, report, pulledBy: null,
+  });
+  check("saveRenewalSnapshot reports success", frozen.success === true);
+
+  const readBack = await getRenewalSnapshot(SCRATCH_ID);
+  check("snapshot persisted", readBack !== null);
+  check("frozen totals match what was passed in",
+    readBack?.report.totals.renewedCount === report.totals.renewedCount &&
+    readBack?.report.totals.collectedCents === report.totals.collectedCents,
+    `${readBack?.report.totals.renewedCount}/${readBack?.report.totals.collectedCents}`);
+  check("named outstanding list survives the round trip",
+    (readBack?.report.types["Vendor Partner"].outstanding.length ?? 0) ===
+      report.types["Vendor Partner"].outstanding.length);
+  check("not approved yet", readBack?.approvedAt === null);
+
+  // Re-pull before approval is allowed and replaces the draft.
+  check("re-pull before approval is allowed",
+    (await saveRenewalSnapshot({ meetingId: SCRATCH_ID, report, pulledBy: null })).success === true);
+
+  const approved = await approveRenewalSnapshot({ meetingId: SCRATCH_ID, approvedBy: null });
+  check("approve succeeds", approved.success === true);
+  check("approval is recorded", (await getRenewalSnapshot(SCRATCH_ID))?.approvedAt !== null);
+
+  // The point of the table: an approved figure cannot be silently replaced.
+  const afterApproval = await saveRenewalSnapshot({
+    meetingId: SCRATCH_ID, report, pulledBy: null,
+  });
+  check("re-pull AFTER approval is refused", afterApproval.success === false,
+    afterApproval.success ? "it was allowed" : afterApproval.error);
+
+  check("double approve is refused",
+    (await approveRenewalSnapshot({ meetingId: SCRATCH_ID, approvedBy: null })).success === false);
+
+  // Delta needs a PRIOR meeting's snapshot; this scratch meeting is the only
+  // one in the year, so there is nothing earlier to compare against.
+  const delta = await getRenewalDelta({
+    meetingId: SCRATCH_ID,
+    meetingDate: "2099-01-01",
+    renewalYear: report.renewalYear,
+    current: report,
+  });
+  check("delta is null with no earlier snapshot (not a zero baseline)", delta === null,
+    delta ? JSON.stringify(delta) : "null");
+} finally {
+  // Cascades to renewal_snapshots. Deleting strictly by the id we created.
+  await wdb.from("renewal_snapshots").delete().eq("meeting_id", SCRATCH_ID);
+  await wdb.from("board_meetings").delete().eq("id", SCRATCH_ID);
+}
+
+const { data: leftoverMeeting } = await wdb
+  .from("board_meetings").select("id").eq("id", SCRATCH_ID).maybeSingle();
+check("scratch meeting cleaned up", !leftoverMeeting);
+const { count: leftoverSnaps } = await wdb
+  .from("renewal_snapshots").select("id", { count: "exact", head: true });
+check("no snapshot rows left behind", (leftoverSnaps ?? 0) === 0, `${leftoverSnaps ?? 0} rows`);
+
 console.log(`\n${pass} passed, ${fail} failed\n`);
 process.exit(fail === 0 ? 0 : 1);

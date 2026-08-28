@@ -13,6 +13,8 @@ import EventDetailBanner from "@/components/events/EventDetailBanner";
 import OrgMemberRegistrationPanel from "@/components/events/OrgMemberRegistrationPanel";
 import BoardMeetingSection from "@/components/events/BoardMeetingSection";
 import { getBoardRenewalReport } from "@/lib/renewal/board-report";
+import { getRenewalSnapshot, getRenewalDelta } from "@/lib/renewal/snapshot";
+import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import type { BoardRenewalReport } from "@/lib/renewal/board-report";
 import { DateTimeRange } from "@/components/ui/LocalDate";
 
@@ -101,6 +103,8 @@ export default async function EventDetailPage({
     profiles:       { id: string; display_name: string | null }[];
     financialReport: ComparativeReport | null;
     renewalReport:  BoardRenewalReport | null;
+    renewalSnapshot: RenewalSnapshot | null;
+    renewalDelta:   RenewalDelta | null;
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -118,7 +122,7 @@ export default async function EventDetailPage({
     if (meeting) {
       const reportPeriod = getLastFullMonth(meeting.meeting_date);
 
-      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, { data: prevMeetingRow }] = await Promise.all([
+      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, renewalSnapshot, { data: prevMeetingRow }] = await Promise.all([
         adminDb
           .from("board_action_items")
           .select("id, title, description, assignees, due_date, status, sort_order, complete_token")
@@ -138,6 +142,7 @@ export default async function EventDetailPage({
         getMeetingFinancialReport(meeting.id),
         // Null outside the board renewal window — hides the Renewals tab entirely.
         getBoardRenewalReport(meeting.meeting_date),
+        getRenewalSnapshot(meeting.id),
         // Previous meeting (for Past Meeting subtab in Minutes)
         adminDb
           .from("board_meetings")
@@ -158,6 +163,17 @@ export default async function EventDetailPage({
         profiles:        profiles ?? [],
         financialReport: financialReport ?? null,
         renewalReport:   renewalReport ?? null,
+        renewalSnapshot: renewalSnapshot ?? null,
+        // Delta is computed against whichever figures are being shown — the
+        // frozen ones if this meeting has a snapshot, otherwise live.
+        renewalDelta:    renewalReport
+          ? await getRenewalDelta({
+              meetingId: meeting.id,
+              meetingDate: meeting.meeting_date,
+              renewalYear: (renewalSnapshot?.report ?? renewalReport).renewalYear,
+              current: renewalSnapshot?.report ?? renewalReport,
+            })
+          : null,
         reportPeriod,
       };
     }
@@ -355,6 +371,8 @@ export default async function EventDetailPage({
           currentUserId={authCtx?.userId ?? null}
           financialReport={boardMeetingData.financialReport}
           renewalReport={boardMeetingData.renewalReport}
+          renewalSnapshot={boardMeetingData.renewalSnapshot}
+          renewalDelta={boardMeetingData.renewalDelta}
           eventSlug={slug}
           reportPeriod={boardMeetingData.reportPeriod}
           isSA={isSA}

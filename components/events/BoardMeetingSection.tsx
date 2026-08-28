@@ -6,6 +6,7 @@ import DocumentDownloadLink from "@/components/admin/board/DocumentDownloadLink"
 import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
 import MeetingRenewalsTab from "@/components/events/MeetingRenewalsTab";
 import type { BoardRenewalReport } from "@/lib/renewal/board-report";
+import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import { uploadBoardDocument } from "@/lib/actions/board-meeting-event";
 import type { ComparativeReport } from "@/lib/quickbooks/types";
 
@@ -57,6 +58,8 @@ interface Props {
   financialReport: ComparativeReport | null;
   /** Null when the meeting falls outside the board renewal window — tab is hidden. */
   renewalReport: BoardRenewalReport | null;
+  renewalSnapshot: RenewalSnapshot | null;
+  renewalDelta: RenewalDelta | null;
   eventSlug: string;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
@@ -434,6 +437,8 @@ export default function BoardMeetingSection({
   currentUserId,
   financialReport,
   renewalReport,
+  renewalSnapshot,
+  renewalDelta,
   eventSlug,
   reportPeriod,
   isSA,
@@ -567,6 +572,9 @@ export default function BoardMeetingSection({
       {activeTab === "renewals" && renewalReport && (
         <MeetingRenewalsTab
           report={renewalReport}
+          snapshot={renewalSnapshot}
+          delta={renewalDelta}
+          meetingId={meeting.id}
           meetingDate={meeting.meeting_date}
           eventSlug={eventSlug}
         />

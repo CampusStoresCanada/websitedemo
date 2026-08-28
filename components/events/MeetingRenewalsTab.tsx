@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import LocalDate from "@/components/ui/LocalDate";
 import type { BoardRenewalReport, BoardRenewalTypeReport } from "@/lib/renewal/board-report";
 import type { RenewalOrgType } from "@/lib/renewal/renewal-progress";
 import {
@@ -12,11 +13,130 @@ import {
   type ContactOutcome,
 } from "@/lib/renewal/outreach";
 import { logRenewalContactAction } from "@/lib/actions/renewal-outreach";
+import {
+  pullRenewalSnapshotAction,
+  approveRenewalSnapshotAction,
+} from "@/lib/actions/renewal-snapshot";
+import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 
 interface Props {
   report: BoardRenewalReport;
+  /** When present, THIS is what the board sees — the live report is only the
+   *  fallback for a meeting nobody has frozen yet. */
+  snapshot: RenewalSnapshot | null;
+  delta: RenewalDelta | null;
+  meetingId: string;
   meetingDate: string;
   eventSlug: string;
+}
+
+function signed(n: number): string {
+  return n > 0 ? `+${n}` : String(n);
+}
+
+function signedMoney(cents: number): string {
+  const v = money(Math.abs(cents));
+  return cents < 0 ? `−${v}` : `+${v}`;
+}
+
+/**
+ * Where the figures on this tab came from, and what to do about it.
+ *
+ * A board document that silently recomputes is worse than no document: the
+ * minutes cite a number, the cycle moves, and the page stops agreeing with the
+ * record. So provenance is stated on the face of it rather than implied.
+ */
+function SnapshotBar({
+  snapshot,
+  meetingId,
+  meetingDate,
+  eventSlug,
+}: {
+  snapshot: RenewalSnapshot | null;
+  meetingId: string;
+  meetingDate: string;
+  eventSlug: string;
+}) {
+  const [error, setError] = useState<string | null>(null);
+  const [pending, startTransition] = useTransition();
+
+  const run = (fn: () => Promise<{ success: boolean; error?: string }>) => {
+    setError(null);
+    startTransition(async () => {
+      const res = await fn();
+      if (!res.success) setError(res.error ?? "Something went wrong.");
+    });
+  };
+
+  const approved = Boolean(snapshot?.approvedAt);
+
+  return (
+    <div
+      className={`rounded-lg border p-3 mb-4 flex flex-wrap items-center justify-between gap-3 ${
+        approved
+          ? "border-green-200 bg-green-50/60"
+          : snapshot
+            ? "border-gray-200 bg-gray-50"
+            : "border-amber-200 bg-amber-50/60"
+      }`}
+    >
+      <div className="text-xs">
+        {approved ? (
+          <>
+            <span className="font-semibold text-green-800">Approved figure of record.</span>{" "}
+            <span className="text-gray-600">
+              Frozen <LocalDate iso={snapshot!.pulledAt} format="short" />, approved{" "}
+              <LocalDate iso={snapshot!.approvedAt!} format="short" />. It will not change again.
+            </span>
+          </>
+        ) : snapshot ? (
+          <>
+            <span className="font-semibold text-gray-700">Frozen for this meeting.</span>{" "}
+            <span className="text-gray-600">
+              Pulled <LocalDate iso={snapshot.pulledAt} format="short" />. Re-pull to refresh,
+              or approve to fix it as the figure of record.
+            </span>
+          </>
+        ) : (
+          <>
+            <span className="font-semibold text-amber-900">Live figures, not yet frozen.</span>{" "}
+            <span className="text-gray-700">
+              These move as payments arrive. Freeze them before citing any number in the
+              minutes, or it won&rsquo;t reproduce later.
+            </span>
+          </>
+        )}
+        {error && <span className="block text-[#9C0006] mt-1">{error}</span>}
+      </div>
+
+      {!approved && (
+        <div className="flex gap-2 shrink-0">
+          <button
+            type="button"
+            disabled={pending}
+            onClick={() =>
+              run(() =>
+                pullRenewalSnapshotAction({ meetingId, meetingDate, eventSlug })
+              )
+            }
+            className="text-xs font-semibold px-3 py-1.5 rounded bg-[#163D6D] text-white disabled:opacity-50"
+          >
+            {pending ? "Working…" : snapshot ? "Re-pull" : "Freeze these figures"}
+          </button>
+          {snapshot && (
+            <button
+              type="button"
+              disabled={pending}
+              onClick={() => run(() => approveRenewalSnapshotAction({ meetingId, eventSlug }))}
+              className="text-xs font-semibold px-3 py-1.5 rounded border border-gray-300 text-gray-700 disabled:opacity-50"
+            >
+              Approve
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /**
@@ -265,20 +385,60 @@ function TypePanel({
   );
 }
 
-export default function MeetingRenewalsTab({ report, meetingDate, eventSlug }: Props) {
-  const { totals } = report;
-  const orgTypes = Object.keys(report.types) as RenewalOrgType[];
+export default function MeetingRenewalsTab({
+  report,
+  snapshot,
+  delta,
+  meetingId,
+  meetingDate,
+  eventSlug,
+}: Props) {
+  // The frozen figures win wherever they exist. The live report stays the
+  // fallback for a meeting nobody has frozen yet, and the source is stated in
+  // the bar above rather than left for the reader to guess.
+  const shown = snapshot?.report ?? report;
+  const { totals } = shown;
+  const orgTypes = Object.keys(shown.types) as RenewalOrgType[];
 
   return (
     <div className="mb-8">
       <div className="mb-4">
         <h2 className="text-sm font-semibold text-gray-700">
-          Renewal Progress — {report.cycleLabel} cycle
+          Renewal Progress — {shown.cycleLabel} cycle
         </h2>
         <p className="text-xs text-gray-400 mt-0.5">
-          Live as of this page load · meeting {meetingDate}. Figures exclude tax.
+          Meeting {meetingDate}. Figures exclude tax.
         </p>
       </div>
+
+      <SnapshotBar
+        snapshot={snapshot}
+        meetingId={meetingId}
+        meetingDate={meetingDate}
+        eventSlug={eventSlug}
+      />
+
+      {delta && (
+        <div className="rounded-lg border border-gray-200 p-3 mb-4">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1.5">
+            Since the {delta.sinceMeetingDate} meeting
+          </p>
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">
+            <span className="text-gray-700">
+              <strong className="text-[#163D6D] tabular-nums">{signed(delta.renewedDelta)}</strong> renewed
+            </span>
+            <span className="text-gray-700">
+              <strong className="text-[#163D6D] tabular-nums">{signedMoney(delta.collectedCentsDelta)}</strong> collected
+            </span>
+            <span className="text-gray-700">
+              <strong className="text-[#163D6D] tabular-nums">{signed(delta.contactedDelta)}</strong> spoken to
+            </span>
+            <span className="text-gray-500">
+              {signed(delta.outstandingCountDelta)} outstanding
+            </span>
+          </div>
+        </div>
+      )}
 
       {/* Headline — the number the board is being asked to act on */}
       <div className="rounded-xl border border-gray-200 bg-gray-50/60 p-5 mb-4">
@@ -315,8 +475,8 @@ export default function MeetingRenewalsTab({ report, meetingDate, eventSlug }: P
         {orgTypes.map((key) => (
           <TypePanel
             key={key}
-            type={report.types[key]}
-            renewalYear={report.renewalYear}
+            type={shown.types[key]}
+            renewalYear={shown.renewalYear}
             eventSlug={eventSlug}
           />
         ))}
