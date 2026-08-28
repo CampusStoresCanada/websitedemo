@@ -9783,61 +9783,6 @@ export type Database = {
           },
         ]
       }
-      renewal_snapshots: {
-        Row: {
-          approved_at: string | null
-          approved_by: string | null
-          data_json: Json
-          id: string
-          meeting_id: string
-          pulled_at: string
-          pulled_by: string | null
-          renewal_year: number
-        }
-        Insert: {
-          approved_at?: string | null
-          approved_by?: string | null
-          data_json: Json
-          id?: string
-          meeting_id: string
-          pulled_at?: string
-          pulled_by?: string | null
-          renewal_year: number
-        }
-        Update: {
-          approved_at?: string | null
-          approved_by?: string | null
-          data_json?: Json
-          id?: string
-          meeting_id?: string
-          pulled_at?: string
-          pulled_by?: string | null
-          renewal_year?: number
-        }
-        Relationships: [
-          {
-            foreignKeyName: "renewal_snapshots_approved_by_fkey"
-            columns: ["approved_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "renewal_snapshots_meeting_id_fkey"
-            columns: ["meeting_id"]
-            isOneToOne: true
-            referencedRelation: "board_meetings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "renewal_snapshots_pulled_by_fkey"
-            columns: ["pulled_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       renewal_events: {
         Row: {
           created_at: string
