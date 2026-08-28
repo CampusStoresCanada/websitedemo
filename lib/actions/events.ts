@@ -1124,11 +1124,24 @@ export async function getEventBySlugWithOrgContext(
 > {
   const adminClient = createAdminClient();
 
+  // 'completed' is viewable, not just 'published'. Marking a past event
+  // completed used to 404 its page — and for a board meeting that took the
+  // agenda, minutes, action items, financials and the frozen renewal snapshot
+  // with it. A figure cited in the minutes has to stay reachable after the
+  // meeting, which is the whole point of freezing it.
+  //
+  // Registration is guarded independently (lib/actions/event-registration.ts:53
+  // and :497 both refuse anything that is not 'published'), so viewing a
+  // completed event cannot reopen sign-ups for it.
+  //
+  // 'draft' and 'cancelled' stay hidden. getEventBySlug above deliberately
+  // keeps the narrower published-only filter — the elections AGM notice logic
+  // depends on that behaviour (lib/elections/service.ts:2296).
   const { data: event, error } = await adminClient
     .from("events")
     .select("*")
     .eq("slug", slug)
-    .eq("status", "published")
+    .in("status", ["published", "completed"])
     .single();
 
   if (error || !event) return { success: false, error: "Event not found" };

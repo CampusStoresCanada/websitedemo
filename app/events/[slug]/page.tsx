@@ -93,6 +93,11 @@ export default async function EventDetailPage({
   const isPublic    = event.audience_mode === "public";
   const isBoardOnly = event.audience_mode === "board";
   const canViewFull = isPublic || isAuthenticated;
+  // A completed event is readable but closed. Registration actions refuse
+  // anything that is not 'published' (lib/actions/event-registration.ts:53,
+  // :497), so showing the controls here would only offer a button that errors
+  // — or, for cancellation, act on an event that has already happened.
+  const isOpenForRegistration = event.status === "published";
 
   // Board meeting data — admin-only, fetched if this event has a linked board meeting
   const isBoardAdmin = authCtx ? isGlobalAdmin(authCtx.globalRole) : false;
@@ -327,7 +332,14 @@ export default async function EventDetailPage({
             )}
 
             {/* Registration CTA */}
-            {hasTickets && !event.user_registration_status ? (
+            {!isOpenForRegistration ? (
+              <div className="rounded-lg bg-gray-100 px-4 py-3 text-center">
+                <p className="text-sm font-medium text-gray-600">This event has finished</p>
+                {event.user_registration_status === "registered" && (
+                  <p className="text-xs text-gray-500 mt-0.5">You attended.</p>
+                )}
+              </div>
+            ) : hasTickets && !event.user_registration_status ? (
               <TicketSelector
                 eventId={event.id}
                 available={tickets!.available}
@@ -348,7 +360,7 @@ export default async function EventDetailPage({
             )}
 
             {/* Org admin: register members from their org */}
-            {orgAdminOrgId && orgAdminOrgName && (
+            {isOpenForRegistration && orgAdminOrgId && orgAdminOrgName && (
               <OrgMemberRegistrationPanel
                 eventId={event.id}
                 orgId={orgAdminOrgId}
