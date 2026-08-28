@@ -14,6 +14,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { parseRecapLines, groupRecapLines } from "@/lib/board/action-mint";
 import { buildBoardRecapPost } from "@/lib/ghosts/board-recap-post";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import { butlerDm, dmText, dmLink, dmPara, REVIEW_URL, type DmNode } from "@/lib/ghosts/butler-dm";
 
 /**
  * Base URL for links that end up inside a Circle post.
@@ -215,46 +216,6 @@ export async function draftBoardRecapFromMinutes(params: {
  * The ops alert survives only as a fallback for when the DM cannot be
  * delivered. A report that silently fails is the same as no report at all.
  */
-
-const REVIEW_URL = `${process.env.NEXT_PUBLIC_APP_URL ?? "https://campusstores.ca"}/admin/board/recaps`;
-
-type DmNode = Record<string, unknown>;
-
-const dmText = (text: string, bold = false): DmNode =>
-  bold ? { type: "text", text, marks: [{ type: "bold" }] } : { type: "text", text };
-
-const dmLink = (label: string, href: string): DmNode => ({
-  type: "text",
-  text: label,
-  marks: [{ type: "link", attrs: { href, target: "_blank" } }],
-});
-
-const dmPara = (...content: DmNode[]): DmNode => ({ type: "paragraph", content });
-
-/**
- * Try Butler's DM. Returns false on any failure so the caller can fall back
- * rather than assume the person was told.
- */
-async function butlerDm(
-  recipientEmail: string | null | undefined,
-  content: DmNode[],
-  fallbackText: string
-): Promise<boolean> {
-  if (!recipientEmail) return false;
-  try {
-    const { getCircleGhostClient } = await import("@/lib/circle/client");
-    const ghost = getCircleGhostClient();
-    if (!ghost) return false;
-    const result = await ghost.sendDirectMessageRich(recipientEmail, content, fallbackText);
-    if (!result.success) {
-      console.warn("[ghosts/board-recap] Butler DM failed", recipientEmail, result.error ?? (result.selfDm ? "self-DM" : ""));
-    }
-    return result.success;
-  } catch (err) {
-    console.error("[ghosts/board-recap] Butler DM threw", err);
-    return false;
-  }
-}
 
 /**
  * "A recap draft is waiting on the website."

@@ -19,6 +19,7 @@
     "backfill:invoice-pdf-urls": "node scripts/backfill-invoice-pdf-urls.mjs"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@googlemaps/js-api-loader": "^2.0.2",
