@@ -7,6 +7,12 @@ import {
   getConferenceScheduleTimeline,
   type ConferenceScheduleItem,
 } from "@/lib/conference/schedule-service";
+import { computePersonObligations } from "@/lib/conference/access";
+import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
+import {
+  DEADLINE_WAITING_ON,
+  resolveObligationDeadline,
+} from "@/lib/conference/obligation-deadlines";
 
 /**
  * One person's conference, not the programme.
@@ -38,6 +44,23 @@ export type AgendaItem = ConferenceScheduleItem & {
   reason: "held" | "granted" | "meeting";
 };
 
+/**
+ * Something the person owes, with a date where one exists.
+ *
+ * Distinct from the checklist tasks below it on the page, which they tick off
+ * themselves. These are facts about them that only they can supply, and the
+ * only place to enter them is Edit — so this block reports and points, it does
+ * not offer controls of its own.
+ */
+export type AgendaDeadline = {
+  key: string;
+  label: string;
+  /** YYYY-MM-DD, or null when the schema has no date for this obligation. */
+  dueOn: string | null;
+  /** What an undated one is waiting on, in words. */
+  waitingOn: string;
+};
+
 export type PersonAgenda = {
   personId: string;
   displayName: string | null;
@@ -48,6 +71,8 @@ export type PersonAgenda = {
   dayKeys: string[];
   /** Pairs that overlap in time. Rendered as a warning, never auto-resolved. */
   conflicts: Array<{ a: string; b: string }>;
+  /** Outstanding only — a deadline you have met is not a deadline. */
+  deadlines: AgendaDeadline[];
 };
 
 /**
@@ -153,10 +178,57 @@ export async function loadPersonAgenda(
     }
   }
 
+  // What she still owes, dated where the schema can answer. Same traversal as
+  // the entitlement above — the meals bundled in a registration are what make
+  // dietary her obligation, so the two must not resolve at different depths.
+  const heldKinds = new Set<string>();
+  for (const id of entitled) {
+    const kind = byId.get(id)?.kind;
+    if (kind) heldKinds.add(kind);
+  }
+  const { data: confDates } = await db
+    .from("conference_instances")
+    .select("start_date, registration_close_at, hotel_booking_cutoff")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  const { data: fields } = await db
+    .from("conference_people")
+    .select("display_name, contact_email, dietary_restrictions, accessibility_needs, emergency_contact_name, emergency_contact_phone")
+    .eq("id", personId)
+    .maybeSingle();
+
+  const status = computePersonObligations(
+    grantTypesForKinds(heldKinds),
+    (fields ?? {}) as Record<string, unknown>
+  );
+  const dates = {
+    startDate: confDates?.start_date ?? null,
+    registrationCloseAt: confDates?.registration_close_at ?? null,
+    hotelBookingCutoff: confDates?.hotel_booking_cutoff ?? null,
+  };
+  const deadlines: AgendaDeadline[] = status.missing.map((o) => {
+    const resolved = resolveObligationDeadline(o.deadline, dates);
+    return {
+      key: o.key,
+      label: o.label,
+      dueOn: resolved.dueOn,
+      waitingOn: DEADLINE_WAITING_ON[resolved.symbol],
+    };
+  });
+  // Dated first, soonest first; undated last rather than sorted to the top by
+  // an empty string.
+  deadlines.sort((a, b) => {
+    if (a.dueOn && b.dueOn) return a.dueOn.localeCompare(b.dueOn);
+    if (a.dueOn) return -1;
+    if (b.dueOn) return 1;
+    return a.label.localeCompare(b.label);
+  });
+
   return {
     success: true,
     data: {
       personId,
+      deadlines,
       displayName: person.display_name,
       timeZone: timeline.timeZone,
       items,

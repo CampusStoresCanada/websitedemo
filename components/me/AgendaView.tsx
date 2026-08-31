@@ -29,6 +29,32 @@ export default function AgendaView({
 
   return (
     <div className="space-y-4">
+      {agenda.deadlines.length > 0 && (
+        // Before the days, because these are all due before the conference —
+        // a timeline that starts now and ends when the doors open.
+        <div className="rounded-lg border border-gray-200 bg-white p-3">
+          <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">
+            Before you go
+          </h3>
+          <p className="mt-0.5 text-sm text-gray-500">
+            Only you can answer these — they&rsquo;re under Edit on this page.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {agenda.deadlines.map((d) => (
+              <li key={d.key} className="text-sm">
+                <span className="font-medium text-gray-900">{d.label}</span>
+                {d.dueOn ? (
+                  <span className="text-gray-600"> — by {formatDayHeading(d.dueOn)}</span>
+                ) : (
+                  // Named rather than dated. We do not have this date, and
+                  // inventing one would read as a promise.
+                  <span className="text-gray-500"> — needed {d.waitingOn}</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
       {agenda.conflicts.length > 0 && (
         // Flagged, never resolved for them. Two things at once is sometimes
         // deliberate — you leave the session early to get to your booth — and
