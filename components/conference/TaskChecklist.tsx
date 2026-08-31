@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
+import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgency";
 import type { PersonalTask } from "@/lib/conference/checklist-tasks";
 import ServiceFacts from "./ServiceFacts";
 
@@ -100,31 +101,29 @@ function TaskRow({
               Reference: <span className="font-medium text-gray-700">{task.evidence}</span>
             </p>
           ) : null}
-          {task.deadline ? (
-            <p className="mt-1 text-xs text-gray-500">
-              {/* A date on its own is an invitation to wait — "closes 11
-                  January" tells someone they have until January. What actually
-                  helps is the consequence: the date is when this gets PAINFUL
-                  to change, not when to start. Steve: "We want that stuff to
-                  lead in, not be fall out."
-
-                  Calendar date off the front: deadlines are stored at UTC
-                  midnight and re-reading them in a timezone loses a day. */}
-              <span className="font-medium text-gray-700">Do this now.</span>{" "}
-              {task.hardensBecause ? (
-                <>
-                  After{" "}
-                  {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}
-                  , {task.hardensBecause}.
-                </>
-              ) : (
-                <>
-                  Harder to change after{" "}
-                  {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}.
-                </>
-              )}
-            </p>
-          ) : null}
+          {task.deadline ? (() => {
+            /* Gently, then accelerating. "Do this now" on something 133 days
+               out is noise, and noise in August is what teaches people to skip
+               the message that matters in January. The lead sentence and the
+               colour both follow the distance; the consequence is always
+               stated, because knowing a deadline EXISTS is the point of the
+               early contact. Calendar date off the front — these are stored at
+               UTC midnight and re-reading them in a zone loses a day. */
+            const day = task.deadline.slice(0, 10);
+            const urgency = describeUrgency(day, new Date().toISOString().slice(0, 10));
+            return (
+              <p className={`mt-1 text-xs ${URGENCY_CLASS[urgency.tone]}`}>
+                <span className="font-medium">{urgency.lead}</span>{" "}
+                {task.hardensBecause ? (
+                  <>
+                    By {formatCalendarDate(day) ?? day}, or {task.hardensBecause}.
+                  </>
+                ) : (
+                  <>Due {formatCalendarDate(day) ?? day}.</>
+                )}
+              </p>
+            );
+          })() : null}
           {task.service ? (
             <ServiceFacts service={task.service} boothNumbers={boothNumbers} />
           ) : null}

@@ -1,5 +1,6 @@
 import Link from "next/link";
 import type { PersonAgenda } from "@/lib/conference/person-agenda";
+import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgency";
 
 /**
  * A person's days, in order.
@@ -26,6 +27,8 @@ export default function AgendaView({
   }
 
   const conflicted = new Set(agenda.conflicts.flatMap((c) => [c.a, c.b]));
+  // One "today" for the whole render, so two rows cannot disagree about it.
+  const todayISO = new Date().toISOString().slice(0, 10);
 
   return (
     <div className="space-y-4">
@@ -44,7 +47,7 @@ export default function AgendaView({
               <li key={d.key} className="text-sm">
                 <span className="font-medium text-gray-900">{d.label}</span>
                 {d.dueOn ? (
-                  <span className="text-gray-600">
+                  <span className={URGENCY_CLASS[describeUrgency(d.dueOn, todayISO).tone]}>
                     {" "}— by {formatDayHeading(d.dueOn)}
                     {d.hardensBecause && (
                       // The consequence, not just the date. "By 11 January" is
