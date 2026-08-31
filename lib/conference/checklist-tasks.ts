@@ -50,8 +50,18 @@ export type PersonalTask = {
    * buttons that do them is a table of contents written as prose.
    */
   checkType: string;
-  /** ISO date this closes, from the task's checklist. */
+  /**
+   * When this HARDENS — not when to start asking.
+   *
+   * Steve, 2026-08-27: "the due date isn't when we should start reminding
+   * people... its when the results become a bigger pain in the ass to change.
+   * We want that stuff to lead in, not be fall out."
+   */
   deadline: string | null;
+  /** What changes on that date, in the reader's terms. */
+  hardensBecause: string | null;
+  /** True once we are actively asking — drives ordering, not visibility. */
+  askingNow: boolean;
   source: TaskSource;
   /**
    * Supplier facts for a task that is really "go and order this from someone
@@ -119,6 +129,19 @@ async function writeAnswer(
 
 
 /**
+ * Are we asking for this yet?
+ *
+ * `ask_from` is deliberately separate from the deadline. Seating staff is
+ * wanted NOW and merely hardens in January; treating the deadline as the cue
+ * to start asking is what put "assign your booth staff" and "check your badge
+ * details" on the same day, with 148 of 150 seats unnamed.
+ */
+function isAsking(task: { ask_from: string | null }): boolean {
+  if (!task.ask_from) return true;
+  return task.ask_from <= new Date().toISOString().slice(0, 10);
+}
+
+/**
  * Soonest deadline first, then the checklist's own order.
  *
  * Tasks come from several checklists at once — the directory closes in
@@ -146,13 +169,13 @@ export async function loadPersonalTasks(
   const [{ data: checklists }, { data: person }] = await Promise.all([
     db
       .from("conference_checklists")
-      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at)")
+      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, ask_from, hardens_because)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
     db.from("conference_people").select("hotel_confirmation_code").eq("id", personId).maybeSingle(),
   ]);
 
-  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; deadline_at: string | null };
+  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
@@ -187,7 +210,8 @@ export async function loadPersonalTasks(
       if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
         return { taskId: task.id, name: task.name, description: task.description,
                  state: "done", evidence: derivedValue, derived: true, deadline,
-                 source: "self_reported", checkType: task.check_type, service: null };
+                 source: "self_reported", checkType: task.check_type, service: null,
+                 hardensBecause: task.hardens_because, askingNow: isAsking(task) };
       }
       const ack = ackByTask.get(task.id);
       return {
@@ -199,6 +223,7 @@ export async function loadPersonalTasks(
         derived: false,
         deadline,
         source: "self_reported", checkType: task.check_type, service: null,
+        hardensBecause: task.hardens_because, askingNow: isAsking(task),
       };
     });
 }
@@ -222,7 +247,7 @@ export async function loadOrgTasks(
 ): Promise<PersonalTask[]> {
   let q = db
     .from("conference_checklists")
-    .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at)")
+    .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at, ask_from, hardens_because)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
   if (checklistId) q = q.eq("id", checklistId);
@@ -231,7 +256,7 @@ export async function loadOrgTasks(
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;
     active: boolean; audience: string; check_type: string; check_entity_id: string | null;
-    deadline_at: string | null;
+    deadline_at: string | null; ask_from: string | null; hardens_because: string | null;
   };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
@@ -300,6 +325,7 @@ export async function loadOrgTasks(
             state: ack ? (ack.state as PersonalTaskState) : "pending",
             evidence: ack?.evidence ?? null, derived: false, deadline,
             source: "self_reported", checkType: task.check_type, service,
+            hardensBecause: task.hardens_because, askingNow: isAsking(task),
           };
         }
         const complete = await evaluateChecklistTaskCheck(
@@ -310,6 +336,7 @@ export async function loadOrgTasks(
           state: complete ? "done" : "pending",
           evidence: null, derived: true, deadline, source: "monitored",
           checkType: task.check_type, service,
+          hardensBecause: task.hardens_because, askingNow: isAsking(task),
         };
       })
   );

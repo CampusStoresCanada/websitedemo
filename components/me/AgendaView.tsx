@@ -46,6 +46,14 @@ export default function AgendaView({
                 {d.dueOn ? (
                   <span className="text-gray-600">
                     {" "}— by {formatDayHeading(d.dueOn)}
+                    {d.hardensBecause && (
+                      // The consequence, not just the date. "By 11 January" is
+                      // a fact; "after that, badges go to print and you collect
+                      // yours at the desk" is a reason to act today.
+                      <span className="block text-xs text-gray-500">
+                        After that, {d.hardensBecause}.
+                      </span>
+                    )}
                     {/* Soft, and saying so matters: someone who reads a passed
                         date as a closed door stops telling us about an allergy,
                         which is the opposite of what the deadline is for. */}

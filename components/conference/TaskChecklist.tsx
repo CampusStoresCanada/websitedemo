@@ -101,16 +101,28 @@ function TaskRow({
             </p>
           ) : null}
           {task.deadline ? (
-            <p className="mt-1 text-xs text-gray-400">
-              {/* A checklist deadline is a DAY, not an instant. It is stored as
-                  a timestamptz at UTC midnight — "Your Conference" is
-                  2027-01-08 00:00:00+00, meaning the 8th — and rendering that
-                  in Toronto moved it back to the 7th, so the hotel row told
-                  people their cutoff was a day earlier than it is. The previous
-                  comment here fixed the opposite case, assuming deadlines were
-                  stored as 23:59 ET; they are not all stored that way. Taking
-                  the calendar date off the front never shifts. */}
-              Closes {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}
+            <p className="mt-1 text-xs text-gray-500">
+              {/* A date on its own is an invitation to wait — "closes 11
+                  January" tells someone they have until January. What actually
+                  helps is the consequence: the date is when this gets PAINFUL
+                  to change, not when to start. Steve: "We want that stuff to
+                  lead in, not be fall out."
+
+                  Calendar date off the front: deadlines are stored at UTC
+                  midnight and re-reading them in a timezone loses a day. */}
+              <span className="font-medium text-gray-700">Do this now.</span>{" "}
+              {task.hardensBecause ? (
+                <>
+                  After{" "}
+                  {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}
+                  , {task.hardensBecause}.
+                </>
+              ) : (
+                <>
+                  Harder to change after{" "}
+                  {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}.
+                </>
+              )}
             </p>
           ) : null}
           {task.service ? (

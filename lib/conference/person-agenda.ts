@@ -76,6 +76,8 @@ export type AgendaDeadline = {
    * person two separate lists of things they owe before the same conference.
    */
   how: "field" | "answer";
+  /** What changes on the date — the reason it matters, not just when. */
+  hardensBecause?: string | null;
   /** For answers: the task, and where it currently stands. */
   taskId?: string;
   state?: "done" | "not_applicable" | "pending";
@@ -277,6 +279,7 @@ export async function loadPersonAgenda(
       how: "answer" as const,
       taskId: task.taskId,
       state: task.state,
+      hardensBecause: task.hardensBecause,
     });
   }
   // Dated first, soonest first; undated last rather than sorted to the top by
