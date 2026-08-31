@@ -9,6 +9,7 @@ import {
 } from "@/lib/conference/schedule-service";
 import { computePersonObligations } from "@/lib/conference/access";
 import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
+import { PERSON_OBLIGATION_FIELDS } from "@/lib/conference/person-fields";
 import {
   DEADLINE_WAITING_ON,
   resolveObligationDeadline,
@@ -193,7 +194,7 @@ export async function loadPersonAgenda(
     .maybeSingle();
   const { data: fields } = await db
     .from("conference_people")
-    .select("display_name, contact_email, dietary_restrictions, accessibility_needs, emergency_contact_name, emergency_contact_phone")
+    .select(PERSON_OBLIGATION_FIELDS.join(", "))
     .eq("id", personId)
     .maybeSingle();
 

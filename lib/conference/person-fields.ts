@@ -34,6 +34,24 @@ export const SELF_EDITABLE_PERSON_FIELDS: readonly string[] = [
   "emergency_contact_phone",
 ];
 
+/**
+ * Every column the obligation engine reads about a person.
+ *
+ * The union of self-editable facts and the identity fields a badge needs. Lives
+ * here for the same reason the two sets below do: `lib/actions/conference-access.ts`
+ * is `"use server"` and cannot export a const, so anything that needed this
+ * list copied it. The personal agenda had its own hardcoded copy within hours
+ * of the policy being consolidated — a fourth list of the same six columns.
+ */
+export const PERSON_OBLIGATION_FIELDS: readonly string[] = [
+  "display_name",
+  "contact_email",
+  "dietary_restrictions",
+  "accessibility_needs",
+  "emergency_contact_name",
+  "emergency_contact_phone",
+];
+
 export const IDENTITY_PROJECTION_PERSON_FIELDS: readonly string[] = [
   "display_name",
   "contact_email",

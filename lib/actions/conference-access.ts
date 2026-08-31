@@ -2,7 +2,10 @@
 
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { SELF_EDITABLE_PERSON_FIELDS } from "@/lib/conference/person-fields";
+import {
+  PERSON_OBLIGATION_FIELDS,
+  SELF_EDITABLE_PERSON_FIELDS,
+} from "@/lib/conference/person-fields";
 import {
   computePersonObligations,
   type PersonObligationFields,
@@ -25,14 +28,7 @@ import { resolveAccess } from "@/lib/conference/entity-commerce";
 type AdminDb = ReturnType<typeof createAdminClient>;
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
-const PERSON_OBLIGATION_FIELDS = [
-  "display_name",
-  "contact_email",
-  "dietary_restrictions",
-  "accessibility_needs",
-  "emergency_contact_name",
-  "emergency_contact_phone",
-] as const;
+
 
 /** Distinct grant types implied by the kinds of seats a person occupies. */
 /**
