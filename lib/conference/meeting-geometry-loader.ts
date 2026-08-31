@@ -21,7 +21,7 @@ export async function loadConferenceMeetingGeometry(
   const db = createAdminClient();
   const [{ data: dayRows }, { data: suiteRows }] = await Promise.all([
     db.from("conference_entities").select("id, attributes").eq("conference_id", conferenceId).eq("kind", "day"),
-    db.from("conference_entities").select("id, attributes").eq("conference_id", conferenceId).eq("kind", "suite"),
+    db.from("conference_entities").select("id, name, attributes").eq("conference_id", conferenceId).eq("kind", "suite"),
   ]);
 
   const days = (dayRows ?? []).map((r) => {
@@ -31,8 +31,30 @@ export async function loadConferenceMeetingGeometry(
 
   const suiteEntities = (suiteRows ?? []).map((r, index) => {
     const a = (r.attributes ?? {}) as Record<string, unknown>;
-    const parsed = Number(a.suite_number);
-    const suiteNumber = Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : index + 1;
+    /**
+     * The NAME is the suite number. `attributes.suite_number` is only set on
+     * suites that syncSuiteCount created; 29 of the 31 on CSC 2027 were made
+     * by hand and have it null.
+     *
+     * ⚠️ The old fallback was `index + 1`, i.e. array position. That would have
+     * seeded conference_suites with suites 100 and 101 correct and the other 29
+     * numbered 3, 4, 5… — colliding with each other and bearing no relation to
+     * the booth a member actually walks to. A suite is the meeting use of a
+     * booth of the same number (booth --includes--> suite), so the name is the
+     * only thing tying the two together, and it was the one field never read.
+     *
+     * Position is kept as the last resort for a suite named something
+     * non-numeric, which no conference has yet. Better a made-up number than a
+     * crash, but it must never be reached ahead of a real one.
+     */
+    const fromAttribute = Number(a.suite_number);
+    const fromName = Number(r.name);
+    const suiteNumber =
+      Number.isFinite(fromAttribute) && fromAttribute > 0
+        ? Math.floor(fromAttribute)
+        : Number.isFinite(fromName) && fromName > 0
+          ? Math.floor(fromName)
+          : index + 1;
     const org = typeof a.organization_id === "string" && a.organization_id.trim() ? a.organization_id.trim() : null;
     return { id: r.id, suiteNumber, organizationId: org, attributes: a };
   });
