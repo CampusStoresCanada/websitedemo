@@ -70,3 +70,36 @@ export function isSelfEditablePersonField(key: string): boolean {
 export function isIdentityProjectionField(key: string): boolean {
   return IDENTITY_PROJECTION_PERSON_FIELDS.includes(key);
 }
+
+
+/**
+ * The values the obligation engine should judge, with identity taken from the
+ * canonical record.
+ *
+ * ⛔ This existed as a contradiction. `contact_email` and `display_name` are
+ * IDENTITY_PROJECTION fields — refused on `conference_people` by everybody,
+ * because `contacts` is the canonical record and writing here forks a person's
+ * name into a second place. But the obligation checked the PROJECTION, found
+ * null, and asked. So we asked people for an email we already had, and the only
+ * way to satisfy it was a write the policy forbids. It could never be cleared.
+ *
+ * An identity obligation is met when the canonical record answers it. The
+ * projection is used only when it has been explicitly set — a badge name that
+ * differs from the contact's legal name is a real case.
+ */
+export function resolveObligationValues(
+  projection: Record<string, unknown> | null,
+  contact: { name?: string | null; work_email?: string | null; email?: string | null } | null
+): Record<string, unknown> {
+  const values: Record<string, unknown> = { ...(projection ?? {}) };
+  const present = (v: unknown) => typeof v === "string" && v.trim().length > 0;
+
+  if (!present(values.display_name) && present(contact?.name)) {
+    values.display_name = contact!.name;
+  }
+  if (!present(values.contact_email)) {
+    const email = present(contact?.work_email) ? contact!.work_email : contact?.email;
+    if (present(email)) values.contact_email = email;
+  }
+  return values;
+}

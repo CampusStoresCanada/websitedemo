@@ -44,7 +44,15 @@ export default function AgendaView({
               <li key={d.key} className="text-sm">
                 <span className="font-medium text-gray-900">{d.label}</span>
                 {d.dueOn ? (
-                  <span className="text-gray-600"> — by {formatDayHeading(d.dueOn)}</span>
+                  <span className="text-gray-600">
+                    {" "}— by {formatDayHeading(d.dueOn)}
+                    {/* Soft, and saying so matters: someone who reads a passed
+                        date as a closed door stops telling us about an allergy,
+                        which is the opposite of what the deadline is for. */}
+                    {d.key === "dietary_restrictions" && (
+                      <span className="text-gray-500">, or as soon as you can after</span>
+                    )}
+                  </span>
                 ) : (
                   // Named rather than dated. We do not have this date, and
                   // inventing one would read as a promise.

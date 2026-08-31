@@ -5,6 +5,7 @@ const CSC_2027 = {
   startDate: "2027-02-01",
   registrationCloseAt: "2027-01-31T04:59:59+00:00",
   hotelBookingCutoff: "2027-01-08",
+  cateringCutoff: "2027-01-18",
 };
 
 describe("resolving what can be resolved", () => {
@@ -15,6 +16,14 @@ describe("resolving what can be resolved", () => {
   it("takes the date part rather than shifting it across a timezone", () => {
     // A due DATE is not an instant. Re-interpreting the stored timestamp in a
     // zone is how a deadline quietly loses a day.
+    expect(resolveObligationDeadline("registration_close", CSC_2027).dueOn).toBe("2027-01-31");
+  });
+
+  it("dates dietary from the caterer, not from registration closing", () => {
+    // These are thirteen days apart for CSC 2027. Borrowing registration_close
+    // showed people 31 January when the caterer needs numbers by the 18th — a
+    // deadline wrong in the generous direction, which people plan to.
+    expect(resolveObligationDeadline("catering_cutoff", CSC_2027).dueOn).toBe("2027-01-18");
     expect(resolveObligationDeadline("registration_close", CSC_2027).dueOn).toBe("2027-01-31");
   });
 
@@ -31,7 +40,7 @@ describe("resolving what can be resolved", () => {
   });
 
   it("returns null rather than guessing when the conference has no dates", () => {
-    const empty = { startDate: null, registrationCloseAt: null, hotelBookingCutoff: null };
+    const empty = { startDate: null, registrationCloseAt: null, hotelBookingCutoff: null, cateringCutoff: null };
     expect(resolveObligationDeadline("registration_close", empty).dueOn).toBeNull();
   });
 });

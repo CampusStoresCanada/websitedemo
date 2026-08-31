@@ -23,6 +23,8 @@ export type ConferenceDates = {
   registrationCloseAt: string | null;
   /** YYYY-MM-DD. */
   hotelBookingCutoff: string | null;
+  /** YYYY-MM-DD. When the caterer needs final dietary counts. */
+  cateringCutoff: string | null;
 };
 
 export type ResolvedDeadline = {
@@ -46,6 +48,8 @@ export function resolveObligationDeadline(
   switch (symbol) {
     case "registration_close":
       return { dueOn: dayOf(dates.registrationCloseAt), symbol };
+    case "catering_cutoff":
+      return { dueOn: dates.cateringCutoff, symbol };
     // No column, no derivation. See the note above.
     case "badge_print":
     case "offsite_lock":
@@ -63,6 +67,7 @@ export function resolveObligationDeadline(
  */
 export const DEADLINE_WAITING_ON: Record<DataObligation["deadline"], string> = {
   registration_close: "when registration closes",
+  catering_cutoff: "before the caterer needs final numbers",
   badge_print: "before badges are printed",
   offsite_lock: "before the offsite numbers are locked",
   travel_cutoff: "before the travel cutoff",

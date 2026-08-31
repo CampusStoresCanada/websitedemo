@@ -9,7 +9,10 @@ import {
 } from "@/lib/conference/schedule-service";
 import { computePersonObligations } from "@/lib/conference/access";
 import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
-import { PERSON_OBLIGATION_FIELDS } from "@/lib/conference/person-fields";
+import {
+  PERSON_OBLIGATION_FIELDS,
+  resolveObligationValues,
+} from "@/lib/conference/person-fields";
 import {
   DEADLINE_WAITING_ON,
   resolveObligationDeadline,
@@ -106,7 +109,7 @@ export async function loadPersonAgenda(
   const db = createAdminClient();
   const { data: person } = await db
     .from("conference_people")
-    .select("id, display_name, user_id, organization_id, registration_id, person_kind")
+    .select("id, display_name, user_id, organization_id, registration_id, person_kind, contact_id")
     .eq("id", personId)
     .eq("conference_id", conferenceId)
     .maybeSingle();
@@ -187,25 +190,44 @@ export async function loadPersonAgenda(
     const kind = byId.get(id)?.kind;
     if (kind) heldKinds.add(kind);
   }
-  const { data: confDates } = await db
+  // Cast because lib/database.types.ts has not been regenerated since
+  // catering_cutoff was added — and today it must not be. Four sessions share
+  // this checkout and that file already carries another session's hand-edits;
+  // a regeneration here would discard them. The column exists in the database;
+  // the types are simply behind, and this is the pattern the rest of the
+  // conference code already uses for exactly that gap.
+  const { data: confDates } = (await db
     .from("conference_instances")
-    .select("start_date, registration_close_at, hotel_booking_cutoff")
+    .select("start_date, registration_close_at, hotel_booking_cutoff, catering_cutoff")
     .eq("id", conferenceId)
-    .maybeSingle();
-  const { data: fields } = await db
-    .from("conference_people")
-    .select(PERSON_OBLIGATION_FIELDS.join(", "))
-    .eq("id", personId)
-    .maybeSingle();
+    .maybeSingle()) as unknown as {
+    data: {
+      start_date: string | null;
+      registration_close_at: string | null;
+      hotel_booking_cutoff: string | null;
+      catering_cutoff: string | null;
+    } | null;
+  };
+  const [{ data: fields }, { data: contact }] = await Promise.all([
+    db.from("conference_people").select(PERSON_OBLIGATION_FIELDS.join(", "))
+      .eq("id", personId).maybeSingle(),
+    person.contact_id
+      ? db.from("contacts").select("name, work_email, email")
+          .eq("id", person.contact_id).maybeSingle()
+      : Promise.resolve({ data: null }),
+  ]);
 
   const status = computePersonObligations(
     grantTypesForKinds(heldKinds),
-    (fields ?? {}) as Record<string, unknown>
+    // Identity comes from the contact record when the projection is silent, so
+    // we stop asking for an email we already hold.
+    resolveObligationValues(fields as Record<string, unknown> | null, contact)
   );
   const dates = {
     startDate: confDates?.start_date ?? null,
     registrationCloseAt: confDates?.registration_close_at ?? null,
     hotelBookingCutoff: confDates?.hotel_booking_cutoff ?? null,
+    cateringCutoff: confDates?.catering_cutoff ?? null,
   };
   const deadlines: AgendaDeadline[] = status.missing.map((o) => {
     const resolved = resolveObligationDeadline(o.deadline, dates);
