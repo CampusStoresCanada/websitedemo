@@ -27,6 +27,10 @@ import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
 import { isOrgAccessActive } from "@/lib/membership/status";
+import {
+  getManualEditMarks,
+  surveyYearIsPublished,
+} from "@/lib/benchmarking/manual-edit";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 type OrgConferenceAttendanceRow = {
@@ -131,6 +135,17 @@ export default async function OrgProfilePage({ params }: PageProps) {
   if (!organization) {
     notFound();
   }
+
+  // Which of this store's figures were corrected outside the survey. Read here
+  // rather than in the component because it is a database read, and only for a
+  // row the viewer is already entitled to see — getOrganizationForViewer has
+  // decided that above, and returns null when they are not.
+  const benchmarkingManualEdits = benchmarking
+    ? await getManualEditMarks(benchmarking.id)
+    : {};
+  const benchmarkingYearIsPublished = benchmarking
+    ? await surveyYearIsPublished(benchmarking.fiscal_year)
+    : false;
 
   // Check for active sponsorship
   const today = new Date().toISOString().slice(0, 10);
@@ -528,6 +543,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
         benchmarking={benchmarking}
         allBenchmarking={allBenchmarking}
         benchmarkingWithheldReason={benchmarkingWithheldReason}
+        benchmarkingManualEdits={benchmarkingManualEdits}
+        benchmarkingYearIsPublished={benchmarkingYearIsPublished}
         viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}

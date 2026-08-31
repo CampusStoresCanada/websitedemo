@@ -18,6 +18,10 @@ import { queueTier2Change } from "@/lib/actions/pending-content-changes";
 import { sendContentChangeFyi } from "@/lib/email/send";
 import { enqueueCircleSync } from "@/lib/circle/sync";
 import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
+import {
+  resolveBenchmarkingEdit,
+  type BenchmarkingEditDecision,
+} from "@/lib/benchmarking/manual-edit";
 
 interface UpdateFieldParams {
   table: EditableTable;
@@ -134,6 +138,9 @@ export async function updateField({
     let previousValue: string | number | null = null;
     let resolvedOrgId: string | null = orgId ?? null;
     let resolvedDisplayName: string = entityDisplayName ?? "";
+    // Set only on the benchmarking path; carries the amendment facts from the
+    // permission check down to the write and the audit row.
+    let benchmarkingEdit: BenchmarkingEditDecision | null = null;
 
     if (table === "organizations") {
       const { data: org } = await supabase
@@ -189,7 +196,7 @@ export async function updateField({
       const adminClient = createAdminClient();
       const { data: benchmark } = await adminClient
         .from("benchmarking")
-        .select("id, organization_id, " + column)
+        .select("id, organization_id, fiscal_year, " + column)
         .eq("id", entityId)
         .single();
 
@@ -199,6 +206,21 @@ export async function updateField({
       const bOrgId = benchmarkData.organization_id as string;
       resolvedOrgId = resolvedOrgId ?? bOrgId;
       canEdit = canManageOrganization(auth.ctx, bOrgId);
+
+      // Permission is not the only question for these figures. The survey owns
+      // them while a cycle is live, and only the newest year may be corrected
+      // at all. Decided before the write, and it refuses with the reason so the
+      // store is told where to go rather than that it "cannot".
+      if (canEdit) {
+        benchmarkingEdit = await resolveBenchmarkingEdit({
+          id: entityId,
+          organization_id: bOrgId,
+          fiscal_year: benchmarkData.fiscal_year as number,
+        });
+        if (!benchmarkingEdit.allowed) {
+          return { success: false, error: benchmarkingEdit.reason };
+        }
+      }
     } else if (table === "site_content") {
       // site_content requires admin or super_admin
       const role = auth.ctx.globalRole;
@@ -267,6 +289,10 @@ export async function updateField({
     // publishable; nothing backfills it.
     const isPublicContactEdit =
       table === "organizations" && (column === "email" || column === "phone");
+    // A benchmarking figure changed here did not come from the survey. Stamping
+    // amended_at is what stops it from reading, a year later, as what the store
+    // originally filed — the same column the survey's own amend flow sets.
+    const isBenchmarkingAmendment = table === "benchmarking";
     const adminClient = createAdminClient();
     const { error: updateError } = await adminClient
       .from(table)
@@ -274,6 +300,7 @@ export async function updateField({
         [column]: newValue,
         ...(isManualFteEdit ? { fte_is_manual_override: true } : {}),
         ...(isPublicContactEdit ? { public_contact_confirmed_at: new Date().toISOString() } : {}),
+        ...(isBenchmarkingAmendment ? { amended_at: new Date().toISOString() } : {}),
         updated_at: new Date().toISOString(),
       })
       .eq("id", entityId);
@@ -296,6 +323,29 @@ export async function updateField({
           { fte: mirroredFte },
           { source: "update-field" }
         );
+      }
+    }
+
+    // Derived metrics are what the peer comparison actually reads. Changing a
+    // source figure without refreshing them leaves the comparison quietly
+    // disagreeing with the profile it sits under — which is where this path has
+    // been since the four inline fields shipped, because only
+    // submitBenchmarkingSurvey ever called this.
+    //
+    // syncMetricsFor declines to touch a year whose survey is `complete`, on
+    // purpose: those figures went out to members in a package, and restating a
+    // published year is a decision someone makes with a covering note, not a
+    // side effect of an edit. So for a completed year the source row changes
+    // here and the published metrics deliberately do not — which is what
+    // metrics_frozen in the audit row above is recording, and what the org page
+    // tells the store.
+    if (table === "benchmarking") {
+      try {
+        const { syncMetricsFor } = await import("@/lib/actions/benchmarking-metrics");
+        await syncMetricsFor(entityId);
+      } catch (err) {
+        // Recoverable by recomputeYear; never worth failing a saved edit over.
+        console.warn("[update-field] benchmarking metrics sync failed:", err);
       }
     }
 
@@ -368,6 +418,18 @@ export async function updateField({
           // is legible without re-deriving it from the column name.
           set_manual_override: isManualFteEdit || undefined,
           mirrored_to_membership: isManualFteEdit || undefined,
+          // What makes a benchmarking figure legible a year from now: that it
+          // was changed outside the survey, and what the cycle was doing at the
+          // time. Without the status, a reader has to reconstruct the calendar
+          // to tell a between-cycles correction from an in-cycle one.
+          manual_amendment: benchmarkingEdit?.allowed || undefined,
+          survey_status: benchmarkingEdit?.allowed
+            ? benchmarkingEdit.surveyStatus
+            : undefined,
+          // True when the year's published metrics were left alone on purpose.
+          metrics_frozen: benchmarkingEdit?.allowed
+            ? benchmarkingEdit.metricsFrozen || undefined
+            : undefined,
         },
       })
       .then(({ error }) => {

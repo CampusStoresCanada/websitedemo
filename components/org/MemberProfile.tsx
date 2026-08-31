@@ -16,6 +16,7 @@ import ColorizedImage from "@/components/ui/ColorizedImage";
 import { ProtectedSection } from "@/components/ui/GreyBlur";
 import BlurredField from "@/components/ui/BlurredField";
 import BenchmarkingDetails from "./BenchmarkingDetails";
+import type { ManualEditMark } from "@/lib/benchmarking/manual-edit";
 import BenchmarkingComparison from "./BenchmarkingComparison";
 import PartnerViewOfMember from "./PartnerViewOfMember";
 import EditableProcurementSection from "./EditableProcurementSection";
@@ -66,6 +67,8 @@ interface MemberProfileProps {
   allBenchmarking: BenchmarkingWithOrg[];
   /** Set when detail is withheld — reciprocity or the store's disclosure choice. */
   benchmarkingWithheldReason?: string | null;
+  benchmarkingManualEdits?: Record<string, ManualEditMark>;
+  benchmarkingYearIsPublished?: boolean;
   viewerLevel: ViewerLevel;
   conferenceAttendance: Array<{
     id: string;
@@ -118,6 +121,8 @@ export default function MemberProfile({
   benchmarking,
   allBenchmarking,
   benchmarkingWithheldReason,
+  benchmarkingManualEdits = {},
+  benchmarkingYearIsPublished = false,
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
@@ -1227,8 +1232,14 @@ export default function MemberProfile({
             </div>
           </div>
         </div>
-      ) : !editMode && (
-        benchmarking && allBenchmarking.length > 0 && (
+      ) : (
+        // Edit mode used to drop this whole section — the wrapper was
+        // `!editMode &&`, so the moment a store turned the Toolkit on, its own
+        // figures left the page. That, not a missing input, is why there was no
+        // way to correct them: you cannot click what is not rendered. Same
+        // shape of fault as the opt-out toggle noted below, one level further
+        // out. In edit mode it now renders for whoever may actually edit it.
+        benchmarking && allBenchmarking.length > 0 && (!editMode || canEditThisOrg) && (
           <div className="bg-white border-t border-gray-200">
             <div className="max-w-7xl mx-auto px-8 py-12">
               {/*
@@ -1256,6 +1267,10 @@ export default function MemberProfile({
               <BenchmarkingDetails
                 benchmarking={benchmarking}
                 organizationName={organization.name}
+                editable={editMode && canEditThisOrg}
+                organizationId={organization.id}
+                manualEdits={benchmarkingManualEdits}
+                yearIsPublished={benchmarkingYearIsPublished}
               />
               <div className="mt-12 pt-8 border-t border-gray-200">
                 <BenchmarkingComparison
