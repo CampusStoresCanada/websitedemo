@@ -44,7 +44,13 @@ type ConferenceObligations = {
     description: string;
     state: "done" | "not_applicable" | "pending";
   }[];
-  badge: { name: string | null; title: string | null; organisation: string | null };
+  badge: {
+    displayName: string | null;
+    roleTitle: string | null;
+    organizationName: string | null;
+    role: "delegate" | "exhibitor";
+    template: unknown | null;
+  };
 };
 
 /**
@@ -589,7 +595,13 @@ function SelfEditModalInner({
                           invisible in a form. */}
                       {c.name.toLowerCase().includes("badge") && (
                         <div className="mt-2">
-                          <BadgePreview {...conferenceObligations.badge} />
+                          <BadgePreview
+                            template={
+                              conferenceObligations.badge.template as never
+                            }
+                            role={conferenceObligations.badge.role}
+                            person={conferenceObligations.badge}
+                          />
                         </div>
                       )}
                       <div className="mt-1.5 flex flex-wrap gap-1.5">

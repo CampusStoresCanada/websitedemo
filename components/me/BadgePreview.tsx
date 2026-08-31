@@ -1,48 +1,93 @@
+import { renderBadgeHtml } from "@/lib/conference/badges/render-html";
+import type { BadgeTemplateConfigV1, BadgeRole } from "@/lib/conference/badges/template";
+
 /**
- * What their badge will actually say.
+ * What their badge will actually say — rendered by the badge system itself.
  *
- * "Check your details are right" asks someone to audit a record they cannot
- * see, in a format they have to imagine. Showing the badge turns that into a
- * glance: a misspelling, a stale job title or the wrong organisation is
- * obvious at a look and nearly invisible in a form.
+ * ⛔ The first version of this drew a badge I invented: a centred white card
+ * with three lines of my choosing. That is the worst possible place to
+ * fabricate, because the whole purpose is "confirm this is correct" — a
+ * preview that does not match the print run gets someone to sign off on a
+ * layout that is not theirs. The real renderer splits first and last name into
+ * separate slots and uppercases the organisation across two lines; mine did
+ * neither.
  *
- * Deliberately not pixel-exact to the printed stock — a rough likeness that is
- * honest about being a preview beats a facsimile that implies a precision the
- * print template may not match. What matters is that the WORDS are the words.
+ * So this calls `renderBadgeHtml` with the same template the print run uses,
+ * resolved the same way `conference-badges.ts` resolves it: active version,
+ * else the newest draft.
+ *
+ * When there is NO template — true for CSC 2027 right now — it shows the
+ * values as data and says so. An honest field list beats a convincing drawing
+ * of something that does not exist yet.
  */
 export default function BadgePreview({
-  name,
-  title,
-  organisation,
+  template,
+  role,
+  person,
 }: {
-  name: string | null;
-  title: string | null;
-  organisation: string | null;
+  template: BadgeTemplateConfigV1 | null;
+  role: BadgeRole;
+  person: {
+    displayName: string | null;
+    roleTitle: string | null;
+    organizationName: string | null;
+  };
 }) {
+  if (!template) {
+    return (
+      <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+          What your badge will say
+        </p>
+        <dl className="mt-2 space-y-1 text-sm">
+          <Row label="Name" value={person.displayName} />
+          <Row label="Job title" value={person.roleTitle} />
+          <Row label="Organisation" value={person.organizationName} />
+        </dl>
+        <p className="mt-2 text-xs text-gray-500">
+          The badge design isn&rsquo;t finalised yet, so this is the wording rather than
+          the layout. These are the words that will be printed.
+        </p>
+      </div>
+    );
+  }
+
+  // Authored by CSC admins in the badge template editor, and rendered by the
+  // same function the print pipeline uses — not a second interpretation of it.
+  const html = renderBadgeHtml({
+    template,
+    role,
+    side: "front",
+    person: {
+      displayName: person.displayName ?? "",
+      roleTitle: person.roleTitle ?? "",
+      organizationName: person.organizationName ?? "",
+    } as Parameters<typeof renderBadgeHtml>[0]["person"],
+  });
+
   return (
     <div className="rounded-lg border border-gray-200 bg-gray-50 p-3">
       <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
         Your badge
       </p>
-      <div className="mt-2 rounded-md border border-gray-300 bg-white px-4 py-5 text-center shadow-sm">
-        <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-[#163D6D]">
-          Campus Stores Conference
-        </p>
-        <p className="mt-3 text-xl font-bold leading-tight text-gray-900 [font-family:var(--font-primary)]">
-          {name?.trim() || (
-            // Never render an empty badge as if it were fine.
-            <span className="text-amber-700">Your name is missing</span>
-          )}
-        </p>
-        {title?.trim() && <p className="mt-1 text-sm text-gray-600">{title}</p>}
-        <p className="mt-1 text-sm font-medium text-gray-800">
-          {organisation?.trim() || <span className="text-amber-700">No organisation</span>}
-        </p>
-      </div>
+      <div
+        className="mt-2 overflow-hidden rounded-md border border-gray-300 bg-white"
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
       <p className="mt-2 text-xs text-gray-500">
-        Printed from your contact details. Anything wrong here is wrong on the badge —
-        fix it in Details, above.
+        Printed from your contact details. Anything wrong here is wrong on the badge.
       </p>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string | null }) {
+  return (
+    <div className="flex gap-2">
+      <dt className="w-28 shrink-0 text-gray-500">{label}</dt>
+      <dd className={value?.trim() ? "text-gray-900" : "text-amber-800"}>
+        {value?.trim() || "missing"}
+      </dd>
     </div>
   );
 }

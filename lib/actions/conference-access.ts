@@ -300,8 +300,21 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     description: string;
     state: "done" | "not_applicable" | "pending";
   }[];
-  /** Exactly what a badge would say, so "check it" can show rather than ask. */
-  badge: { name: string | null; title: string | null; organisation: string | null };
+  /**
+   * What the badge will say, plus the template the print run will use.
+   *
+   * Resolved the same way lib/actions/conference-badges.ts resolves it —
+   * active version, else the newest draft — so the preview and the print
+   * cannot disagree about which layout applies. Null template means none has
+   * been designed yet, and the preview says so rather than drawing one.
+   */
+  badge: {
+    displayName: string | null;
+    roleTitle: string | null;
+    organizationName: string | null;
+    role: "delegate" | "exhibitor";
+    template: unknown | null;
+  };
 } | null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -312,7 +325,7 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   ];
   const { data: person, error } = await db
     .from("conference_people")
-    .select(`id, conference_id, contact_id, ${columns.join(", ")}`)
+    .select(`id, conference_id, contact_id, person_kind, ${columns.join(", ")}`)
     .eq("user_id", auth.ctx.userId)
     .neq("assignment_status", "canceled")
     .order("updated_at", { ascending: false })
@@ -321,7 +334,8 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   if (error) return { success: false, error: error.message };
   if (!person) return { success: true, data: null };
 
-  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null };
+  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null; person_kind: string | null };
+  const personKind = row.person_kind;
   const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
   const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
 
@@ -345,10 +359,35 @@ export async function loadMyConferenceObligations(): Promise<Result<{
         ? ((contactRow as Record<string, unknown>).organizations as { name: string }[])[0]
         : ((contactRow as Record<string, unknown>).organizations as { name: string } | null))
     : null;
+  const templateQuery = db
+    .from("badge_template_configs")
+    .select("field_mapping")
+    .eq("conference_id", row.conference_id);
+  let templateRow = await templateQuery
+    .eq("status", "active")
+    .order("config_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // Same fallback the badge pipeline uses: a draft is still the design that
+  // would print today.
+  if (!templateRow.data) {
+    templateRow = await db
+      .from("badge_template_configs")
+      .select("field_mapping")
+      .eq("conference_id", row.conference_id)
+      .order("config_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  }
+
   const badgeFor = {
-    name: (values.display_name as string | null) ?? contactRow?.name ?? null,
-    title: contactRow?.role_title ?? null,
-    organisation: org?.name ?? null,
+    displayName: (values.display_name as string | null) ?? contactRow?.name ?? null,
+    roleTitle: contactRow?.role_title ?? null,
+    organizationName: org?.name ?? null,
+    role: (personKind === "exhibitor" ? "exhibitor" : "delegate") as
+      | "delegate"
+      | "exhibitor",
+    template: (templateRow.data?.field_mapping as unknown) ?? null,
   };
 
   return {
