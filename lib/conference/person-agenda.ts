@@ -59,10 +59,27 @@ export type AgendaItem = ConferenceScheduleItem & {
 export type AgendaDeadline = {
   key: string;
   label: string;
-  /** YYYY-MM-DD, or null when the schema has no date for this obligation. */
+  /** YYYY-MM-DD, or null when nothing in the schema dates it. */
   dueOn: string | null;
   /** What an undated one is waiting on, in words. */
   waitingOn: string;
+  /**
+   * How it gets answered.
+   *
+   *   field  — a value only they can give (dietary, emergency contact). Opens
+   *            the editor.
+   *   answer — a question where "doesn't apply" is a complete answer (a hotel
+   *            they booked elsewhere). Ticked in place.
+   *
+   * The two are stored differently and always were — a column versus an
+   * acknowledgement row — but that is a storage fact, not a reason to show a
+   * person two separate lists of things they owe before the same conference.
+   */
+  how: "field" | "answer";
+  /** For answers: the task, and where it currently stands. */
+  taskId?: string;
+  state?: "done" | "not_applicable" | "pending";
+  description?: string;
 };
 
 export type PersonAgenda = {
@@ -236,8 +253,30 @@ export async function loadPersonAgenda(
       label: o.label,
       dueOn: resolved.dueOn,
       waitingOn: DEADLINE_WAITING_ON[resolved.symbol],
+      how: "field" as const,
     };
   });
+
+  // The person's own check-ins join the same list. Lodging is not a different
+  // KIND of thing to owe before a conference just because "I'm staying with
+  // family" is a complete answer to it — that difference belongs in the
+  // control, not in a second section further down the page.
+  const { loadPersonalTasks } = await import("@/lib/conference/checklist-tasks");
+  for (const task of await loadPersonalTasks(db, conferenceId, personId)) {
+    if (task.state !== "pending") continue;
+    deadlines.push({
+      key: `task:${task.taskId}`,
+      label: task.name,
+      description: task.description,
+      // A checklist deadline is a DAY stored at UTC midnight; the date part is
+      // the answer and re-reading it in a timezone loses one.
+      dueOn: task.deadline ? task.deadline.slice(0, 10) : null,
+      waitingOn: "before the conference",
+      how: "answer" as const,
+      taskId: task.taskId,
+      state: task.state,
+    });
+  }
   // Dated first, soonest first; undated last rather than sorted to the top by
   // an empty string.
   deadlines.sort((a, b) => {

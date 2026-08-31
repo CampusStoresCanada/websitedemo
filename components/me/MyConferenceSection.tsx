@@ -78,18 +78,20 @@ export default async function MyConferenceSection() {
         <AgendaView
           agenda={agenda}
           mapHref={`/conference/${conference.year}/${conference.edition_code}/map`}
+          onAnswer={handleTaskAnswer}
         />
       )}
 
       <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <h3 className="text-base font-semibold text-gray-900">Things to confirm</h3>
+        <h3 className="text-base font-semibold text-gray-900">Already answered</h3>
         <p className="mt-0.5 text-sm text-gray-500">
-          Tick them off as you go — or tell us one doesn&rsquo;t apply and we&rsquo;ll stop
-          asking. Dietary needs, travel and your emergency contact are under Edit.
+          Change any of these if something moves. Anything still outstanding is in
+          Before you go, above.
         </p>
         <div className="mt-2">
-          <TaskChecklist tasks={tasks} onAnswer={handleTaskAnswer}
-            emptyLabel="Nothing to confirm right now." />
+          <TaskChecklist tasks={tasks.filter((t) => t.state !== "pending")}
+            onAnswer={handleTaskAnswer}
+            emptyLabel="Nothing answered yet." />
         </div>
       </div>
     </section>

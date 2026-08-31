@@ -1,4 +1,8 @@
+"use client";
+
 import Link from "next/link";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import type { PersonAgenda } from "@/lib/conference/person-agenda";
 
 /**
@@ -12,9 +16,15 @@ import type { PersonAgenda } from "@/lib/conference/person-agenda";
 export default function AgendaView({
   agenda,
   mapHref,
+  onAnswer,
 }: {
   agenda: PersonAgenda;
   mapHref: string;
+  /** Ticks off a check-in in place — same action the old separate list used. */
+  onAnswer: (
+    taskId: string,
+    state: "done" | "not_applicable" | "pending"
+  ) => Promise<{ success: boolean; error?: string }>;
 }) {
   if (agenda.items.length === 0) {
     return (
@@ -39,7 +49,7 @@ export default function AgendaView({
           <p className="mt-0.5 text-sm text-gray-500">
             Only you can answer these.
           </p>
-          <ul className="mt-2 space-y-1">
+          <ul className="mt-2 space-y-2">
             {agenda.deadlines.map((d) => (
               <li key={d.key} className="text-sm">
                 <span className="font-medium text-gray-900">{d.label}</span>
@@ -54,21 +64,24 @@ export default function AgendaView({
                     )}
                   </span>
                 ) : (
-                  // Named rather than dated. We do not have this date, and
-                  // inventing one would read as a promise.
                   <span className="text-gray-500"> — needed {d.waitingOn}</span>
+                )}
+                {d.how === "answer" && d.taskId && (
+                  <AnswerButtons taskId={d.taskId} onAnswer={onAnswer} hint={d.description} />
                 )}
               </li>
             ))}
           </ul>
-          {/* The control, not a description of where the control lives. Opens
-              the editor already on the Conference tab. */}
+          {agenda.deadlines.some((d) => d.how === "field") && (
           <a
             href="#edit-conference"
             className="mt-3 inline-block rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
           >
-            {agenda.deadlines.length === 1 ? "Add it" : "Add these"}
+            {agenda.deadlines.filter((d) => d.how === "field").length === 1
+              ? "Add it"
+              : "Add these"}
           </a>
+          )}
         </div>
       )}
       {agenda.conflicts.length > 0 && (
@@ -170,4 +183,62 @@ function clockOf(iso: string, timeZone: string): string | null {
   return new Intl.DateTimeFormat("en-GB", {
     timeZone, hour: "2-digit", minute: "2-digit", hour12: false,
   }).format(date);
+}
+
+/**
+ * Three answers in place, for the check-ins where "doesn't apply" is real.
+ *
+ * A hotel is the case: booked, not yet, or staying with family — all complete
+ * answers. The field-backed obligations above have no equivalent, which is
+ * exactly why they get a link to the editor and these get buttons.
+ */
+function AnswerButtons({
+  taskId,
+  hint,
+  onAnswer,
+}: {
+  taskId: string;
+  hint?: string;
+  onAnswer: (
+    taskId: string,
+    state: "done" | "not_applicable" | "pending"
+  ) => Promise<{ success: boolean; error?: string }>;
+}) {
+  const router = useRouter();
+  const [pending, startTransition] = useTransition();
+  const [error, setError] = useState<string | null>(null);
+
+  const answer = (state: "done" | "not_applicable") => {
+    setError(null);
+    startTransition(async () => {
+      const result = await onAnswer(taskId, state);
+      if (!result.success) setError(result.error ?? "Couldn't save that.");
+      else router.refresh();
+    });
+  };
+
+  return (
+    <>
+      {hint && <span className="mt-0.5 block text-xs text-gray-500">{hint}</span>}
+      <span className="mt-1.5 flex flex-wrap gap-1.5">
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => answer("done")}
+          className="rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:border-gray-400 disabled:opacity-50"
+        >
+          Booked it
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => answer("not_applicable")}
+          className="rounded-full border border-gray-300 px-3 py-1 text-xs font-semibold text-gray-700 hover:border-gray-400 disabled:opacity-50"
+        >
+          Doesn&rsquo;t apply
+        </button>
+      </span>
+      {error && <span className="block text-xs text-red-600">{error}</span>}
+    </>
+  );
 }

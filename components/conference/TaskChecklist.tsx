@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
+import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
 import type { PersonalTask } from "@/lib/conference/checklist-tasks";
 import ServiceFacts from "./ServiceFacts";
 
@@ -101,11 +102,15 @@ function TaskRow({
           ) : null}
           {task.deadline ? (
             <p className="mt-1 text-xs text-gray-400">
-              {/* Eastern, not UTC. The Exhibitor deadline is 10 January 23:59
-                  ET, which is 11 January in UTC — formatting it there told a
-                  company it had a day it does not have. Same off-by-one the
-                  admin calendar had. */}
-              Closes {new Date(task.deadline).toLocaleDateString("en-CA", { month: "long", day: "numeric", year: "numeric", timeZone: "America/Toronto" })}
+              {/* A checklist deadline is a DAY, not an instant. It is stored as
+                  a timestamptz at UTC midnight — "Your Conference" is
+                  2027-01-08 00:00:00+00, meaning the 8th — and rendering that
+                  in Toronto moved it back to the 7th, so the hotel row told
+                  people their cutoff was a day earlier than it is. The previous
+                  comment here fixed the opposite case, assuming deadlines were
+                  stored as 23:59 ET; they are not all stored that way. Taking
+                  the calendar date off the front never shifts. */}
+              Closes {formatCalendarDate(task.deadline.slice(0, 10)) ?? task.deadline.slice(0, 10)}
             </p>
           ) : null}
           {task.service ? (
