@@ -22,7 +22,23 @@ import { isBusinessDay, BOARD_TIMEZONE } from "@/lib/board/vote-schedule";
 
 export type PostingClass = "timely" | "ambient";
 
-export type PipelineKey = "new_partner";
+export type PipelineKey = "new_partner" | "board_recap";
+
+/**
+ * Which class each pipeline belongs to.
+ *
+ * `board_recap` is TIMELY: one recap a month into a private board space, read
+ * by twelve people who were in the room. Delay is the only thing that could
+ * spoil it, and the daily caps below exist to protect member attention from
+ * ambient news — a different problem entirely. Timely pipelines never call
+ * `canPublishAmbient`, so the cap entry for them is inert; it exists so the
+ * Record stays exhaustive and a new pipeline cannot be added without deciding
+ * which class it is.
+ */
+export const PIPELINE_CLASS: Record<PipelineKey, PostingClass> = {
+  new_partner: "ambient",
+  board_recap: "timely",
+};
 
 /**
  * The window a post may land in, local Eastern. Outside it the item simply
@@ -37,6 +53,8 @@ export const SPACE_DAILY_CEILING = 3;
 /** Per-pipeline daily caps. Sit underneath the space ceiling. */
 export const PIPELINE_DAILY_CAP: Record<PipelineKey, number> = {
   new_partner: 1,
+  // Inert — board_recap is timely and never reaches canPublishAmbient.
+  board_recap: 1,
 };
 
 /**

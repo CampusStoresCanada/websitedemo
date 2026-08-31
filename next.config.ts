@@ -11,6 +11,17 @@ const nextConfig: NextConfig = {
     // Temporary unblock for deploys while DB-generated types are resynced.
     ignoreBuildErrors: true,
   },
+  // The drafting contract is READ FROM DISK at runtime, so it must be traced
+  // into the serverless bundle or it works in dev and fails in production.
+  // (build_html.js is not listed: it is imported statically and therefore
+  // already in the module graph — see lib/board/minutes-render.ts.)
+  // Without this, they are not traced into the serverless bundle and the read
+  // fails in production while working perfectly in dev.
+  outputFileTracingIncludes: {
+    "/**": [
+      "./skills/csc-board-minutes/references/**",
+    ],
+  },
   experimental: {
     serverActions: {
       // uploadCommsImage (lib/actions/upload-comms-image.ts) enforces its own

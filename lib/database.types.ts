@@ -1604,6 +1604,56 @@ export type Database = {
           },
         ]
       }
+      board_minutes_drafts: {
+        Row: {
+          batch_id: string | null
+          completed_at: string | null
+          consumed_at: string | null
+          created_at: string
+          data_json: Json | null
+          error: string | null
+          id: string
+          meeting_id: string
+          requested_by: string | null
+          requested_by_email: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Update: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id?: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       board_meetings: {
         Row: {
           agenda_html: string | null
