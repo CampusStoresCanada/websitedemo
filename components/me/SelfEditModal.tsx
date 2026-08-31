@@ -30,6 +30,7 @@ export interface OrgEditData {
 import { loadMyConferenceObligations } from "@/lib/actions/conference-access";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
 import { answerPersonalTask } from "@/lib/actions/conference-tasks";
+import BadgePreview from "@/components/me/BadgePreview";
 
 type ConferenceObligations = {
   personId: string;
@@ -43,6 +44,7 @@ type ConferenceObligations = {
     description: string;
     state: "done" | "not_applicable" | "pending";
   }[];
+  badge: { name: string | null; title: string | null; organisation: string | null };
 };
 
 /**
@@ -582,6 +584,14 @@ function SelfEditModalInner({
                         {c.name}
                       </p>
                       <p className="mt-0.5 text-xs text-gray-500">{c.description}</p>
+                      {/* Show the badge rather than ask them to picture it. A
+                          misspelling is obvious at a glance and nearly
+                          invisible in a form. */}
+                      {c.name.toLowerCase().includes("badge") && (
+                        <div className="mt-2">
+                          <BadgePreview {...conferenceObligations.badge} />
+                        </div>
+                      )}
                       <div className="mt-1.5 flex flex-wrap gap-1.5">
                         {CHECK_IN_ANSWERS.map((a) => (
                           <button

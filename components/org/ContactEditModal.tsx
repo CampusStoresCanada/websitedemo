@@ -45,6 +45,8 @@ export interface ConferenceObligationInfo {
   /** Ordered as they should be shown; label is already reader-facing. */
   fields: { key: string; label: string }[];
   values: Record<string, string | null>;
+  /** False for an org admin — they get answered-or-not, never the answer. */
+  canSeeValues: boolean;
 }
 
 interface FieldState {
@@ -677,10 +679,15 @@ export default function ContactEditModal({
                           return (
                             <li key={f.key} className="text-sm text-gray-700">
                               {f.label}:{" "}
-                              {value ? (
+                              {!value ? (
+                                <span className="text-amber-800">not answered yet</span>
+                              ) : conferenceObligations.canSeeValues ? (
                                 <span className="text-gray-900">{value}</span>
                               ) : (
-                                <span className="text-amber-800">not answered yet</span>
+                                // A manager needs to know whether to chase, not
+                                // what the allergy is. The value never reaches
+                                // this browser — the server sends a marker.
+                                <span className="text-green-700">answered</span>
                               )}
                             </li>
                           );

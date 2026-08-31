@@ -3,6 +3,7 @@
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  isIdentityProjectionField,
   PERSON_OBLIGATION_FIELDS,
   SELF_EDITABLE_PERSON_FIELDS,
 } from "@/lib/conference/person-fields";
@@ -196,12 +197,26 @@ export async function loadContactConferenceObligations(
   fields: { key: string; label: string }[];
   missing: string[];
   values: Record<string, string | null>;
+  /** False for an org admin: they see answered-or-not, never the answer. */
+  canSeeValues: boolean;
 } | null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
   if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
     return { success: false, error: "Not authorized for this organization." };
   }
+
+  /**
+   * An org admin may know WHETHER their colleague has answered. They may not
+   * read the answer.
+   *
+   * Steve, 2026-08-27: "we aren't displaying the conference information to
+   * everyone, just the staff and the member". Dietary restrictions and
+   * accessibility needs are health information about a named person; a manager
+   * needs to know whether to chase, not what the allergy is. CSC staff running
+   * the event do need the values — they are the ones telling the caterer.
+   */
+  const canSeeValues = isGlobalAdmin(auth.ctx.globalRole);
 
   const db = createAdminClient();
   // Everything this person may edit about themselves, not just what is
@@ -229,7 +244,13 @@ export async function loadContactConferenceObligations(
 
   const values: Record<string, string | null> = {};
   for (const field of columns) {
-    values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
+    const raw = (person as unknown as Record<string, string | null>)[field] ?? null;
+    // Blanked at the SOURCE, not hidden in the component — a value that never
+    // leaves the server cannot leak through a payload someone inspects.
+    // Identity fields are not private; a badge name is printed on a badge.
+    values[field] = canSeeValues || isIdentityProjectionField(field)
+      ? raw
+      : raw && raw.trim() ? "__answered__" : null;
   }
 
   return {
@@ -241,6 +262,7 @@ export async function loadContactConferenceObligations(
       /** Outstanding right now — used to mark a field, never to hide one. */
       missing: status.missing.map((o) => o.key),
       values,
+      canSeeValues,
     },
   };
 }
@@ -278,6 +300,8 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     description: string;
     state: "done" | "not_applicable" | "pending";
   }[];
+  /** Exactly what a badge would say, so "check it" can show rather than ask. */
+  badge: { name: string | null; title: string | null; organisation: string | null };
 } | null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -288,7 +312,7 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   ];
   const { data: person, error } = await db
     .from("conference_people")
-    .select(`id, conference_id, ${columns.join(", ")}`)
+    .select(`id, conference_id, contact_id, ${columns.join(", ")}`)
     .eq("user_id", auth.ctx.userId)
     .neq("assignment_status", "canceled")
     .order("updated_at", { ascending: false })
@@ -297,7 +321,7 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   if (error) return { success: false, error: error.message };
   if (!person) return { success: true, data: null };
 
-  const row = person as unknown as { id: string; conference_id: string };
+  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null };
   const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
   const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
 
@@ -309,6 +333,24 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   const { loadPersonalTasks } = await import("@/lib/conference/checklist-tasks");
   const tasks = await loadPersonalTasks(db, row.conference_id, row.id);
 
+  // The badge prints from the canonical contact, falling back to the
+  // projection only where it has been deliberately set — the same precedence
+  // the obligations use, so the preview cannot disagree with the print run.
+  const { data: contactRow } = row.contact_id
+    ? await db.from("contacts").select("name, role_title, organization_id, organizations(name)")
+        .eq("id", row.contact_id).maybeSingle()
+    : { data: null };
+  const org = contactRow
+    ? (Array.isArray((contactRow as Record<string, unknown>).organizations)
+        ? ((contactRow as Record<string, unknown>).organizations as { name: string }[])[0]
+        : ((contactRow as Record<string, unknown>).organizations as { name: string } | null))
+    : null;
+  const badgeFor = {
+    name: (values.display_name as string | null) ?? contactRow?.name ?? null,
+    title: contactRow?.role_title ?? null,
+    organisation: org?.name ?? null,
+  };
+
   return {
     success: true,
     data: {
@@ -317,6 +359,7 @@ export async function loadMyConferenceObligations(): Promise<Result<{
       fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
       missing: status.missing.map((o) => o.key),
       values,
+      badge: badgeFor,
       checkIns: tasks
         .filter((t) => t.source === "self_reported")
         .map((t) => ({
