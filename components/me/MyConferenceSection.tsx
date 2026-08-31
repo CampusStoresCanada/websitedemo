@@ -51,7 +51,7 @@ export default async function MyConferenceSection() {
   const personId = person.id;
   async function handleTaskAnswer(
     taskId: string,
-    state: "done" | "not_applicable",
+    state: "done" | "not_applicable" | "pending",
     evidence?: string
   ) {
     "use server";

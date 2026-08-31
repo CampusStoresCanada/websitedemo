@@ -300,14 +300,54 @@ export async function loadOrgTasks(
   );
 }
 
+/**
+ * Take an answer back to "not yet".
+ *
+ * `pending` is the ABSENCE of an acknowledgement — the table's CHECK allows
+ * only done and not_applicable — so un-answering is a delete, not a third
+ * value. That is also the honest semantic: someone who says they have not
+ * booked after all has withdrawn their answer, not given a new one.
+ *
+ * For a task backed by a real field, the field goes too. Keeping a hotel
+ * confirmation code on someone who has just told us they have not booked would
+ * leave the derived state contradicting them, and the checklist would silently
+ * re-tick itself.
+ */
+async function clearAnswer(
+  db: AdminClient,
+  opts: { taskId: string; organizationId: string; personId: string | null }
+): Promise<{ success: true } | { success: false; error: string }> {
+  let q = db.from("conference_task_acknowledgements").delete().eq("task_id", opts.taskId);
+  q = opts.personId
+    ? q.eq("person_id", opts.personId)
+    : q.eq("organization_id", opts.organizationId).is("person_id", null);
+  const { error } = await q;
+  if (error) return { success: false, error: error.message };
+
+  if (opts.personId) {
+    const { data: task } = await db
+      .from("conference_checklist_tasks").select("name").eq("id", opts.taskId).maybeSingle();
+    const field = task?.name ? DERIVED_FROM_FIELD[task.name] : undefined;
+    if (field) {
+      const { error: fieldError } = await db
+        .from("conference_people").update({ [field]: null }).eq("id", opts.personId);
+      if (fieldError) return { success: false, error: fieldError.message };
+    }
+  }
+  return { success: true };
+}
+
 /** Record the company's answer to a self-reported task. */
 export async function recordOrgTaskAnswer(
   db: AdminClient,
   input: {
     conferenceId: string; taskId: string; organizationId: string;
-    state: "done" | "not_applicable"; evidence?: string | null; userId?: string | null;
+    state: "done" | "not_applicable" | "pending"; evidence?: string | null; userId?: string | null;
   }
 ): Promise<{ success: true } | { success: false; error: string }> {
+  if (input.state === "pending") {
+    return clearAnswer(db, { taskId: input.taskId, organizationId: input.organizationId, personId: null });
+  }
   return writeAnswer(db, {
     conference_id: input.conferenceId,
     task_id: input.taskId,
@@ -335,11 +375,19 @@ export async function recordPersonalTaskAnswer(
     taskId: string;
     personId: string;
     organizationId: string;
-    state: "done" | "not_applicable";
+    state: "done" | "not_applicable" | "pending";
     evidence?: string | null;
     userId?: string | null;
   }
 ): Promise<{ success: true } | { success: false; error: string }> {
+  if (input.state === "pending") {
+    return clearAnswer(db, {
+      taskId: input.taskId,
+      organizationId: input.organizationId,
+      personId: input.personId,
+    });
+  }
+
   const { data: task } = await db
     .from("conference_checklist_tasks").select("name").eq("id", input.taskId).maybeSingle();
 

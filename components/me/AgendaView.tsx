@@ -37,7 +37,7 @@ export default function AgendaView({
             Before you go
           </h3>
           <p className="mt-0.5 text-sm text-gray-500">
-            Only you can answer these — they&rsquo;re under Edit on this page.
+            Only you can answer these.
           </p>
           <ul className="mt-2 space-y-1">
             {agenda.deadlines.map((d) => (
@@ -53,6 +53,14 @@ export default function AgendaView({
               </li>
             ))}
           </ul>
+          {/* The control, not a description of where the control lives. Opens
+              the editor already on the Conference tab. */}
+          <a
+            href="#edit-conference"
+            className="mt-3 inline-block rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
+          >
+            {agenda.deadlines.length === 1 ? "Add it" : "Add these"}
+          </a>
         </div>
       )}
       {agenda.conflicts.length > 0 && (

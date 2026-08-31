@@ -15,6 +15,14 @@ import DirectoryVisibilityPanel, { type VisibilityRow } from "@/components/me/Di
 import type { DirectoryVisibility } from "@/lib/contacts/visibility";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
 
+/**
+ * Never cached. This page shows a person their own conference answers, and a
+ * cached render served them a state they had already changed — the buttons
+ * showed the previous answer, which then made the "already selected, ignore
+ * the click" guard swallow their next one. Two answers lost, no error.
+ */
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "My Account | Campus Stores Canada",
 };

@@ -47,15 +47,15 @@ type ConferenceObligations = {
 const SELF_CONFERENCE_FIELDS: { key: string; label: string; kind?: "select" }[] = [
   { key: "dietary_restrictions", label: "Dietary restrictions" },
   { key: "accessibility_needs", label: "Accessibility needs" },
+  { key: "mobile_phone", label: "Mobile phone" },
   { key: "emergency_contact_name", label: "Emergency contact name" },
   { key: "emergency_contact_phone", label: "Emergency contact phone" },
-  { key: "mobile_phone", label: "Mobile phone" },
-  { key: "travel_mode", label: "Travel mode", kind: "select" },
-  { key: "preferred_departure_airport", label: "Preferred departure airport" },
-  { key: "road_origin_address", label: "Road origin address" },
-  { key: "seat_preference", label: "Seat preference" },
+  // Travel — travel_mode, preferred_departure_airport, road_origin_address,
+  // seat_preference — is deliberately absent. Those fields exist and are
+  // self-editable at the server, but CSC is not running travel yet and asking
+  // for a departure airport before anyone can act on it collects data we have
+  // no plan for. Add them back when travel is a thing, not before.
 ];
-
 interface SelfEditModalProps {
   orgEditData: OrgEditData[];
 }
@@ -94,8 +94,40 @@ function initProcurementState(contactId: string, info: ProcurementInfo | null): 
   return { buyerCategories, subcategoryMap };
 }
 
+/**
+ * Opens this modal straight onto the Conference tab from elsewhere on the page.
+ *
+ * A deadline that says "these are under Edit" is a signpost, not a control —
+ * the reader still has to find the button, open it, and pick the right tab. A
+ * hash link does the whole journey in one click, and it survives being
+ * bookmarked or sent to someone.
+ */
+export const EDIT_CONFERENCE_HASH = "#edit-conference";
+
 export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfEditModalProps) {
   const [open, setOpen] = useState(false);
+  const [openToConference, setOpenToConference] = useState(false);
+
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash === EDIT_CONFERENCE_HASH) {
+        setOpenToConference(true);
+        setOpen(true);
+      }
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, []);
+
+  function closeAndClearHash() {
+    setOpen(false);
+    setOpenToConference(false);
+    // Leave the address bar clean, or the same link cannot be used twice.
+    if (window.location.hash === EDIT_CONFERENCE_HASH) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+    }
+  }
   // Lifted, mutable copy of the server-rendered prop. The page is a server
   // component, so `initialOrgEditData` is fixed at request time — without this,
   // closing and reopening the modal would re-derive state from stale data and
@@ -126,7 +158,7 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
       </button>
 
       {open && (
-        <SelfEditModalInner orgEditData={orgEditData} onClose={() => setOpen(false)} onSaved={handleSaved} />
+        <SelfEditModalInner orgEditData={orgEditData} onClose={closeAndClearHash} onSaved={handleSaved} initialTab={openToConference ? "conference" : "details"} />
       )}
     </>
   );
@@ -134,10 +166,12 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
 
 function SelfEditModalInner({
   orgEditData,
+  initialTab = "details",
   onClose,
   onSaved,
 }: {
   orgEditData: OrgEditData[];
+  initialTab?: "details" | "conference";
   onClose: () => void;
   onSaved: (orgId: string, patch: { contact: ContactEditData; procurementInfo: ProcurementInfo | null }) => void;
 }) {
@@ -175,7 +209,7 @@ function SelfEditModalInner({
   const [error, setError] = useState<string | null>(null);
 
   type Tab = "details" | "procurement" | "conference";
-  const [tab, setTab] = useState<Tab>("details");
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   const activeOrg = orgEditData.find((o) => o.orgId === activeOrgId)!;
   const fields = fieldStates[activeOrgId];

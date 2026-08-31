@@ -77,7 +77,7 @@ export default async function ConferenceChecklistSection({
 
   async function handleOrgTaskAnswer(
     taskId: string,
-    state: "done" | "not_applicable",
+    state: "done" | "not_applicable" | "pending",
     evidence?: string
   ) {
     "use server";

@@ -17,7 +17,7 @@ type Result = { success: true } | { success: false; error: string };
 export async function answerPersonalTask(input: {
   personId: string;
   taskId: string;
-  state: "done" | "not_applicable";
+  state: "done" | "not_applicable" | "pending";
   evidence?: string | null;
   revalidate?: string;
 }): Promise<Result> {
@@ -59,7 +59,7 @@ export async function answerOrgTask(input: {
   organizationId: string;
   conferenceId: string;
   taskId: string;
-  state: "done" | "not_applicable";
+  state: "done" | "not_applicable" | "pending";
   evidence?: string | null;
   revalidate?: string;
 }): Promise<Result> {

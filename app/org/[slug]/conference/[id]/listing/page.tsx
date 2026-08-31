@@ -64,7 +64,11 @@ export default async function OrgListingProofPage({
     ? (await loadOrgTasks(db, conferenceId, orgId, checklist.id)).filter((t) => t.source === "self_reported")
     : [];
 
-  async function handleAnswer(taskId: string, state: "done" | "not_applicable", evidence?: string) {
+  async function handleAnswer(
+    taskId: string,
+    state: "done" | "not_applicable" | "pending",
+    evidence?: string
+  ) {
     "use server";
     return answerOrgTask({
       organizationId: orgId, conferenceId, taskId, state, evidence,
