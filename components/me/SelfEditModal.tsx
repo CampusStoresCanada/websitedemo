@@ -29,6 +29,7 @@ export interface OrgEditData {
 
 import { loadMyConferenceObligations } from "@/lib/actions/conference-access";
 import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
+import { answerPersonalTask } from "@/lib/actions/conference-tasks";
 
 type ConferenceObligations = {
   personId: string;
@@ -36,6 +37,12 @@ type ConferenceObligations = {
   fields: { key: string; label: string }[];
   missing: string[];
   values: Record<string, string | null>;
+  checkIns: {
+    taskId: string;
+    name: string;
+    description: string;
+    state: "done" | "not_applicable" | "pending";
+  }[];
 };
 
 /**
@@ -269,6 +276,34 @@ function SelfEditModalInner({
 
   function setProcState(updater: (p: ProcurementState) => ProcurementState) {
     setProcStates((prev) => ({ ...prev, [activeOrgId]: updater(prev[activeOrgId]) }));
+  }
+
+  async function answerCheckIn(
+    taskId: string,
+    state: "done" | "not_applicable" | "pending"
+  ) {
+    setSaving(true);
+    setError(null);
+    const result = await answerPersonalTask({
+      personId: conferenceObligations!.personId,
+      taskId,
+      state,
+      revalidate: "/me",
+    });
+    setSaving(false);
+    if (!result.success) {
+      setError(result.error ?? "Could not save that.");
+      return;
+    }
+    // Reflect it without closing — someone may be answering several at once.
+    setConferenceObligations((prev) =>
+      prev
+        ? {
+            ...prev,
+            checkIns: prev.checkIns.map((c) => (c.taskId === taskId ? { ...c, state } : c)),
+          }
+        : prev
+    );
   }
 
   async function handleSave() {
@@ -534,6 +569,41 @@ function SelfEditModalInner({
                 Leave one blank if it doesn&rsquo;t apply — we&rsquo;d rather keep asking than
                 record a guess.
               </p>
+
+              {conferenceObligations.checkIns.length > 0 && (
+                // Same tab as the fields above, because "things only you can
+                // tell us about yourself" is one job. A hotel is answered with
+                // buttons rather than typed, which is a difference in the
+                // control, not a reason for a second place to go.
+                <div className="border-t border-gray-100 pt-4">
+                  {conferenceObligations.checkIns.map((c) => (
+                    <div key={c.taskId} className="mb-3 last:mb-0">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        {c.name}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-500">{c.description}</p>
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {CHECK_IN_ANSWERS.map((a) => (
+                          <button
+                            key={a.state}
+                            type="button"
+                            disabled={saving}
+                            aria-pressed={c.state === a.state}
+                            onClick={() => void answerCheckIn(c.taskId, a.state)}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
+                              c.state === a.state
+                                ? "bg-[#163D6D] text-white"
+                                : "border border-gray-300 text-gray-600 hover:border-gray-400"
+                            }`}
+                          >
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
@@ -719,3 +789,13 @@ const SELF_CONFERENCE_PLACEHOLDERS: Record<string, string> = {
   road_origin_address: "Where you're driving from",
   seat_preference: "Aisle, window, extra legroom…",
 };
+
+/** The three answers a check-in can take, first-person like the fields above. */
+const CHECK_IN_ANSWERS: {
+  state: "pending" | "done" | "not_applicable";
+  label: string;
+}[] = [
+  { state: "pending", label: "Not yet" },
+  { state: "done", label: "Done" },
+  { state: "not_applicable", label: "Doesn't apply" },
+];

@@ -264,6 +264,20 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   fields: { key: string; label: string }[];
   missing: string[];
   values: Record<string, string | null>;
+  /**
+   * The person's own check-ins, answered here too.
+   *
+   * A hotel booking is not a field — "I'm staying with family" is a complete
+   * answer — but it IS a thing only this person can tell us about themselves,
+   * which is the same reason dietary lives here. Collecting it somewhere else
+   * because the control looks different was two ways to do one job.
+   */
+  checkIns: {
+    taskId: string;
+    name: string;
+    description: string;
+    state: "done" | "not_applicable" | "pending";
+  }[];
 } | null>> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -292,6 +306,9 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
   }
 
+  const { loadPersonalTasks } = await import("@/lib/conference/checklist-tasks");
+  const tasks = await loadPersonalTasks(db, row.conference_id, row.id);
+
   return {
     success: true,
     data: {
@@ -300,6 +317,14 @@ export async function loadMyConferenceObligations(): Promise<Result<{
       fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
       missing: status.missing.map((o) => o.key),
       values,
+      checkIns: tasks
+        .filter((t) => t.source === "self_reported")
+        .map((t) => ({
+          taskId: t.taskId,
+          name: t.name,
+          description: t.description,
+          state: t.state,
+        })),
     },
   };
 }

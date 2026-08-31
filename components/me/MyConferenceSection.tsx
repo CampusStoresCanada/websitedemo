@@ -1,9 +1,6 @@
 import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
-import { answerPersonalTask } from "@/lib/actions/conference-tasks";
-import { loadPersonalTasks } from "@/lib/conference/checklist-tasks";
-import TaskChecklist from "@/components/conference/TaskChecklist";
 import AgendaView from "@/components/me/AgendaView";
 import { loadPersonAgenda } from "@/lib/conference/person-agenda";
 
@@ -38,25 +35,15 @@ export default async function MyConferenceSection() {
   } | undefined;
   if (!person) return null;
 
-  const [tasks, agendaResult] = await Promise.all([
-    loadPersonalTasks(db, person.conference_id, person.id),
-    loadPersonAgenda(person.id, person.conference_id),
-  ]);
+  // Check-ins are no longer loaded here — they arrive with the obligations in
+  // the edit modal, which is the one place a person answers anything about
+  // themselves. The agenda still lists them as outstanding.
+  const agendaResult = await loadPersonAgenda(person.id, person.conference_id);
   const agenda = agendaResult.success ? agendaResult.data : null;
   const conference = person.conference_instances;
 
-  // No tasks and nothing to link to is not a section, it is a heading.
-  if (tasks.length === 0 && !conference) return null;
-
-  const personId = person.id;
-  async function handleTaskAnswer(
-    taskId: string,
-    state: "done" | "not_applicable" | "pending",
-    evidence?: string
-  ) {
-    "use server";
-    return answerPersonalTask({ personId, taskId, state, evidence, revalidate: "/me" });
-  }
+  // Nothing to show and nothing to link to is not a section, it is a heading.
+  if (!agenda?.items.length && !agenda?.deadlines.length && !conference) return null;
 
   return (
     <section id="conference_checklist" className="scroll-mt-20 space-y-3">
@@ -78,22 +65,9 @@ export default async function MyConferenceSection() {
         <AgendaView
           agenda={agenda}
           mapHref={`/conference/${conference.year}/${conference.edition_code}/map`}
-          onAnswer={handleTaskAnswer}
         />
       )}
 
-      <div className="rounded-xl border border-gray-200 bg-white p-4">
-        <h3 className="text-base font-semibold text-gray-900">Already answered</h3>
-        <p className="mt-0.5 text-sm text-gray-500">
-          Change any of these if something moves. Anything still outstanding is in
-          Before you go, above.
-        </p>
-        <div className="mt-2">
-          <TaskChecklist tasks={tasks.filter((t) => t.state !== "pending")}
-            onAnswer={handleTaskAnswer}
-            emptyLabel="Nothing answered yet." />
-        </div>
-      </div>
     </section>
   );
 }
