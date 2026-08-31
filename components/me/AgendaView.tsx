@@ -123,16 +123,34 @@ export default function AgendaView({
                       <span className="ml-2 text-xs font-semibold text-amber-700">overlaps</span>
                     )}
                   </span>
-                  {item.locationLabel && item.locationLabel !== "TBD" && (
-                    // Straight to the map with the place already searched —
-                    // "where is that" is the next question every single time.
-                    <Link
-                      href={`${mapHref}?find=${encodeURIComponent(item.locationLabel)}`}
-                      className="text-xs font-medium text-[#163D6D] hover:underline"
-                    >
-                      Find it
-                    </Link>
-                  )}
+                  {(() => {
+                    /**
+                     * "Where is that" is the next question every single time —
+                     * but only ask the map something it can answer.
+                     *
+                     * A MEETING is findable: it happens in a suite, a suite is
+                     * the meeting use of a booth of the same number, and the
+                     * map draws every booth. So link by the suite number, not
+                     * by the venue.
+                     *
+                     * A VENUE is not. Vista Salon, Mississauga Ballroom A&D and
+                     * the Trade Show Hall are rooms elsewhere in the property,
+                     * and nothing is placed on a hotel floor plan because no
+                     * such surface exists yet. Linking them sent people to a
+                     * search that silently returned nothing, which is worse
+                     * than not offering the link.
+                     */
+                    const suite = item.meetingAssignment?.suiteNumber;
+                    if (suite == null) return null;
+                    return (
+                      <Link
+                        href={`${mapHref}?find=${encodeURIComponent(String(suite))}`}
+                        className="text-xs font-medium text-[#163D6D] hover:underline"
+                      >
+                        Find it
+                      </Link>
+                    );
+                  })()}
                 </li>
               ))}
             </ul>
