@@ -215,7 +215,7 @@ export async function loadPersonAgenda(
   // conference code already uses for exactly that gap.
   const { data: confDates } = (await db
     .from("conference_instances")
-    .select("start_date, registration_close_at, hotel_booking_cutoff, catering_cutoff")
+    .select("start_date, registration_close_at, hotel_booking_cutoff, catering_cutoff, badge_preprint_at")
     .eq("id", conferenceId)
     .maybeSingle()) as unknown as {
     data: {
@@ -223,6 +223,7 @@ export async function loadPersonAgenda(
       registration_close_at: string | null;
       hotel_booking_cutoff: string | null;
       catering_cutoff: string | null;
+      badge_preprint_at: string | null;
     } | null;
   };
   const [{ data: fields }, { data: contact }] = await Promise.all([
@@ -245,6 +246,7 @@ export async function loadPersonAgenda(
     registrationCloseAt: confDates?.registration_close_at ?? null,
     hotelBookingCutoff: confDates?.hotel_booking_cutoff ?? null,
     cateringCutoff: confDates?.catering_cutoff ?? null,
+    badgePreprintAt: confDates?.badge_preprint_at ?? null,
   };
   const deadlines: AgendaDeadline[] = status.missing.map((o) => {
     const resolved = resolveObligationDeadline(o.deadline, dates);

@@ -146,19 +146,26 @@ export async function loadPersonalTasks(
   const [{ data: checklists }, { data: person }] = await Promise.all([
     db
       .from("conference_checklists")
-      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type)")
+      .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
     db.from("conference_people").select("hotel_confirmation_code").eq("id", personId).maybeSingle(),
   ]);
 
-  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string };
+  type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; deadline_at: string | null };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
     for (const task of tasks) {
       if (!task.active || task.audience !== "person") continue;
-      rows.push({ task, deadline: (cl as { deadline_at: string | null }).deadline_at });
+      // A task's own date beats the list's. Stronco's pre-show pricing ends 10
+      // January and Encore's advance rate 18 January, on one list that said 11
+      // January for both — the row header contradicted the supplier facts
+      // printed directly beneath it.
+      rows.push({
+        task,
+        deadline: task.deadline_at ?? (cl as { deadline_at: string | null }).deadline_at,
+      });
     }
   }
   if (rows.length === 0) return [];
@@ -215,7 +222,7 @@ export async function loadOrgTasks(
 ): Promise<PersonalTask[]> {
   let q = db
     .from("conference_checklists")
-    .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id)")
+    .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
   if (checklistId) q = q.eq("id", checklistId);
@@ -224,13 +231,21 @@ export async function loadOrgTasks(
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;
     active: boolean; audience: string; check_type: string; check_entity_id: string | null;
+    deadline_at: string | null;
   };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
     for (const task of tasks) {
       if (!task.active || task.audience !== "org") continue;
-      rows.push({ task, deadline: (cl as { deadline_at: string | null }).deadline_at });
+      // A task's own date beats the list's. Stronco's pre-show pricing ends 10
+      // January and Encore's advance rate 18 January, on one list that said 11
+      // January for both — the row header contradicted the supplier facts
+      // printed directly beneath it.
+      rows.push({
+        task,
+        deadline: task.deadline_at ?? (cl as { deadline_at: string | null }).deadline_at,
+      });
     }
   }
   if (rows.length === 0) return [];

@@ -25,6 +25,8 @@ export type ConferenceDates = {
   hotelBookingCutoff: string | null;
   /** YYYY-MM-DD. When the caterer needs final dietary counts. */
   cateringCutoff: string | null;
+  /** YYYY-MM-DD. The day the pre-printed badge run goes. */
+  badgePreprintAt: string | null;
 };
 
 export type ResolvedDeadline = {
@@ -50,9 +52,16 @@ export function resolveObligationDeadline(
       return { dueOn: dayOf(dates.registrationCloseAt), symbol };
     case "catering_cutoff":
       return { dueOn: dates.cateringCutoff, symbol };
-    // No column, no derivation. See the note above.
     case "badge_print":
+      return { dueOn: dates.badgePreprintAt, symbol };
+    // Nobody at CSC could say what this gated separately, and it covers dietary
+    // and emergency contact for offsite events — which the caterer's date
+    // already governs. Same date, same softness, rather than a symbol standing
+    // for a deadline no one owns.
     case "offsite_lock":
+      return { dueOn: dates.cateringCutoff, symbol };
+    // No column, no derivation. See the note above.
+    // Travel is not being run yet, so there is nothing to date it against.
     case "travel_cutoff":
       return { dueOn: null, symbol };
   }
@@ -68,7 +77,7 @@ export function resolveObligationDeadline(
 export const DEADLINE_WAITING_ON: Record<DataObligation["deadline"], string> = {
   registration_close: "when registration closes",
   catering_cutoff: "before the caterer needs final numbers",
-  badge_print: "before badges are printed",
-  offsite_lock: "before the offsite numbers are locked",
+  badge_print: "before the badges are printed",
+  offsite_lock: "before the caterer needs final numbers",
   travel_cutoff: "before the travel cutoff",
 };
