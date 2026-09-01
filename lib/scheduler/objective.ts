@@ -58,6 +58,15 @@ import type { MeetingSlotInput, ScheduleAssignment } from "./types";
  * input. Any ordering built on the objective needs a deterministic secondary key
  * — `breakTie(seed, …)` in ./tiebreak.ts, which the greedy already uses.
  *
+ * ⛔ THAT TIEBREAK IS FOR TIES IN THE PRODUCT, NOT A DEMOTION OF THE SCORE.
+ * "Occupancy first, score as tiebreaker" is a DIFFERENT and wrong objective: a
+ * lexicographic order lets occupancy win every comparison and the score speak
+ * only when two options are already exactly equal. That removes the trade this
+ * product exists to express — a solver should give up some room-time for a much
+ * better pairing, and take a worse pairing to fill a dead slot. I described it
+ * that way in a handoff and Steve caught it. The score being coarse today is a
+ * reason to sharpen the score, never to take it out of the objective.
+ *
  * ⛔ Maximize `total`, never `score`. `score` is raw fit that ignores how much we
  * know: there are edges at score=100 with confidence=0.03 — one axis agreeing
  * loudly and nothing else known about the pair. `total` is fit already
