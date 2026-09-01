@@ -144,6 +144,33 @@ describe("generateSchedule", () => {
     expect(hasBlackout).toBe(false);
   });
 
+  it("NEVER puts an exhibitor in a suite they do not hold", () => {
+    /**
+     * The regression that started this: Boxercraft bought booth 305 ($4,000, no
+     * suite) and the solver sat them in unsold suite 107 ($6,000). A suite is
+     * part of a booth — `booth --includes--> suite` — so holding the booth is
+     * the ONLY way to get one. A solver does not give away inventory.
+     */
+    const delegates = fixtureDelegates();
+    const exhibitors = fixtureExhibitors();
+
+    const result = generateSchedule({
+      delegates,
+      exhibitors,
+      meetingSlots: [{ id: "s1", dayNumber: 1, slotNumber: 1, suiteId: "suite-nobody-holds" }],
+      matchScores: computeAllMatchScores(delegates, exhibitors),
+      policy,
+      // Nobody is pinned: nobody holds this suite.
+      suitePinnedExhibitorBySuiteId: {},
+      seed: 7,
+    });
+
+    expect(result.assignments).toEqual([]);
+    expect(
+      result.diagnostics.violations.some((v) => v.code === "EXHIBITOR_WITHOUT_SUITE")
+    ).toBe(true);
+  });
+
   it("reports soft warnings when targets are not fully met", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
@@ -161,6 +188,10 @@ describe("generateSchedule", () => {
         delegateCoveragePct: 1,
         meetingGroupMax: 1,
       },
+      // One suite, held by one exhibitor. The others hold none, so they are not
+      // scheduled — and are reported as EXHIBITOR_WITHOUT_SUITE rather than
+      // being dealt into rooms they did not buy.
+      suitePinnedExhibitorBySuiteId: { "suite-1": exhibitors[0].registrationId },
       seed: 12,
     });
 

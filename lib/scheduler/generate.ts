@@ -33,7 +33,7 @@ function selectActiveExhibitorsBySuite(
   seed: number,
   suitePinnedExhibitorBySuiteId?: Record<string, string>,
   reservedSuiteIds?: ReadonlySet<string>
-): Map<string, ExhibitorProfile> {
+): { bySuiteId: Map<string, ExhibitorProfile>; suitelessExhibitors: string[] } {
   const orderedSuites = [...suiteIds].sort((a, b) => a.localeCompare(b));
   const exhibitorById = new Map(exhibitors.map((row) => [row.registrationId, row] as const));
 
@@ -48,29 +48,32 @@ function selectActiveExhibitorsBySuite(
     pinnedRegistrationIds.add(pinnedRegistrationId);
   }
 
-  const orderedExhibitors = deterministicOrder(
-    exhibitors.filter((item) => !pinnedRegistrationIds.has(item.registrationId)),
-    seed,
-    (item) => item.registrationId
-  );
-  let exhibitorIndex = 0;
-  for (const suiteId of orderedSuites) {
-    if (map.has(suiteId)) continue;
-    /**
-     * ⛔ A suite that belongs to somebody is never free-filled.
-     *
-     * It reaches here only when its holder had no spare exhibitor registration
-     * to staff it — an org running two suites with one person, or a booth holder
-     * with nobody registered. Without this the deterministic fill below would
-     * hand that room to the next exhibitor in line, i.e. seat a competitor in a
-     * booth someone else paid for. An empty room is the correct outcome.
-     */
-    if (reservedSuiteIds?.has(suiteId)) continue;
-    if (exhibitorIndex >= orderedExhibitors.length) break;
-    map.set(suiteId, orderedExhibitors[exhibitorIndex]);
-    exhibitorIndex += 1;
-  }
-  return map;
+  /**
+   * ⛔ NO FREE-FILL. A suite is only ever hosted by the org that holds it.
+   *
+   * This used to deal the leftover exhibitors round-robin into whatever suites
+   * were unpinned — `deterministicOrder(...)` then one exhibitor per empty
+   * suite. That is the v2 model showing through: suites were N anonymous rooms
+   * from a count, and CSC allocated them. The seeding was ported to real Suite
+   * entities ("1:1 from the Suite entities … instead of N anonymous rows from a
+   * count"); the ALLOCATION never was.
+   *
+   * Under v3 a suite is part of a booth — `booth --includes--> suite` — so you
+   * hold it by holding the booth, and nothing else can grant it. The free-fill
+   * handed a $6,000 suite to an exhibitor who had not bought one: on the first
+   * real run it put Boxercraft (booth 305, $4,000, no suite) into unsold suite
+   * 107. That is inventory given away by a solver, which is not a decision a
+   * solver gets to make.
+   *
+   * An exhibitor with no suite now gets no suite. If CSC wants to lend one out,
+   * that is a deliberate manual assignment (`is_manual`), visible and
+   * attributable — not a silent side effect of the seed.
+   */
+  const suitelessExhibitors = exhibitors
+    .filter((item) => !pinnedRegistrationIds.has(item.registrationId))
+    .map((item) => item.registrationId);
+
+  return { bySuiteId: map, suitelessExhibitors };
 }
 
 function scoreMap(matchScores: MatchScoreRecord[]): Map<string, MatchScoreRecord> {
@@ -105,7 +108,7 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     return a.suiteId.localeCompare(b.suiteId);
   });
   const suiteIds = [...new Set(orderedSlots.map((slot) => slot.suiteId))];
-  const suiteToExhibitor = selectActiveExhibitorsBySuite(
+  const { bySuiteId: suiteToExhibitor, suitelessExhibitors } = selectActiveExhibitorsBySuite(
     input.exhibitors,
     suiteIds,
     input.seed,
@@ -231,6 +234,26 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     exhibitorTargetMeetings,
     policy: input.policy,
   });
+
+  /**
+   * An exhibitor with no suite is now UNSCHEDULED, not quietly given someone
+   * else's room. Say so out loud: silently dropping a paid exhibitor from the
+   * run is the same failure mode as reporting an unreadable roster as an empty
+   * one. It is a warning, not infeasible — the schedule is valid, it just does
+   * not include them, and whether a booth without a suite should get meetings
+   * at all is a business decision, not the solver's.
+   */
+  if (suitelessExhibitors.length > 0) {
+    diagnostics.violations.push({
+      code: "EXHIBITOR_WITHOUT_SUITE",
+      severity: "soft",
+      message:
+        `${suitelessExhibitors.length} exhibitor(s) hold no suite, so they have no room to meet in and are not scheduled. ` +
+        `A suite comes from a booth that includes one; assign a suite manually if CSC intends to lend them one.`,
+      details: { exhibitorRegistrationIds: suitelessExhibitors },
+    });
+    if (diagnostics.status === "completed") diagnostics.status = "completed_with_warnings";
+  }
 
   return {
     status: diagnostics.status,

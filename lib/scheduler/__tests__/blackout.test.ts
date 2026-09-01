@@ -62,6 +62,11 @@ function scheduleWith(d: DelegateProfile, e: ExhibitorProfile) {
     meetingSlots: slots,
     matchScores: computeAllMatchScores([d], [e]),
     policy,
+    // The exhibitor has to HOLD the suite to be in it. Previously any exhibitor
+    // was dealt into any empty suite, so this fixture worked without saying so
+    // — which is exactly the free-fill that gave a $4,000 booth an unsold
+    // $6,000 suite on the first real run.
+    suitePinnedExhibitorBySuiteId: { "suite-1": e.registrationId },
     seed: 1,
   });
 }
