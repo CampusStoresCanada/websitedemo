@@ -3,6 +3,7 @@
 import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadBlackoutListsByOrg } from "@/lib/org/meeting-refusals";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { computeAllMatchScores } from "@/lib/scheduler/scoring";
@@ -113,31 +114,44 @@ async function ensureMeetingScaffolding(
 
   const { data: existingSuites, error: suitesError } = await adminClient
     .from("conference_suites")
-    .select("id, suite_number")
+    .select("id, suite_number, entity_id")
     .eq("conference_id", conferenceId)
     .order("suite_number", { ascending: true });
 
   if (suitesError) throw new Error(suitesError.message);
 
+  /**
+   * Fill the GAPS, do not seed-once.
+   *
+   * This used to be `if (suites.length === 0)`, which made the whole function a
+   * one-shot bootstrap wearing an "ensure" name: the first run froze the grid,
+   * and a booth sold afterwards got no suite row and no meeting slots — not
+   * late, never. Selling a booth is the normal case, not the setup case.
+   *
+   * Rows are matched on entity_id (the Suite thing), so re-running is a no-op
+   * when nothing new has sold.
+   */
   let suites = existingSuites ?? [];
-  if (suites.length === 0) {
-    // Seed the operational suite rows 1:1 from the Suite entities (carry their
-    // number + a link back), instead of N anonymous rows from a count.
-    const suiteRows = geometry.suites.map((s) => ({
+  const haveSuiteEntityIds = new Set(suites.map((s) => s.entity_id).filter(Boolean));
+  const missingSuiteRows = geometry.suites
+    .filter((s) => !haveSuiteEntityIds.has(s.id))
+    .map((s) => ({
       conference_id: conferenceId,
       suite_number: s.suiteNumber,
       entity_id: s.id,
       is_active: true,
     }));
 
+  if (missingSuiteRows.length > 0) {
     const { data: insertedSuites, error: insertSuitesError } = await adminClient
       .from("conference_suites")
-      .insert(suiteRows)
-      .select("id, suite_number")
-      .order("suite_number", { ascending: true });
+      .insert(missingSuiteRows)
+      .select("id, suite_number, entity_id");
 
     if (insertSuitesError) throw new Error(insertSuitesError.message);
-    suites = insertedSuites ?? [];
+    suites = [...suites, ...(insertedSuites ?? [])].sort(
+      (a, b) => a.suite_number - b.suite_number
+    );
   }
 
   const { data: existingSlots, error: slotsError } = await adminClient
@@ -148,19 +162,19 @@ async function ensureMeetingScaffolding(
     .order("slot_number", { ascending: true });
 
   if (slotsError) throw new Error(slotsError.message);
-  if (existingSlots && existingSlots.length > 0) {
-    const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
-      adminClient,
-      suites,
-      geometry.suiteOrgAssignmentsBySuiteNumber
-    );
-    return {
-      suitesCount: suites.length,
-      meetingSlots: existingSlots,
-      suites,
-      suiteOrgAssignmentsBySuiteId,
-    };
-  }
+
+  /**
+   * Same rule as the suites above: build the full intended grid every time, then
+   * insert only what is absent. A suite that appears later (a booth sold after
+   * the first run) gets its meeting times on the next run instead of never.
+   *
+   * The key mirrors the table's uniqueness constraint
+   * (conference_id, day_number, slot_number, suite_id), so an existing slot is
+   * left exactly as it is — including any assignment already made against it.
+   */
+  const slotKey = (r: { day_number: number; slot_number: number; suite_id: string | null }) =>
+    `${r.day_number}|${r.slot_number}|${r.suite_id ?? ""}`;
+  const haveSlotKeys = new Set((existingSlots ?? []).map(slotKey));
 
   const startBase = "1970-01-01T00:00:00.000Z";
   const slotRows: Database["public"]["Tables"]["meeting_slots"]["Insert"][] = [];
@@ -196,14 +210,31 @@ async function ensureMeetingScaffolding(
     }
   }
 
-  const { data: insertedSlots, error: insertSlotsError } = await adminClient
-    .from("meeting_slots")
-    .insert(slotRows)
-    .select("*")
-    .order("day_number", { ascending: true })
-    .order("slot_number", { ascending: true });
+  const newSlotRows = slotRows.filter(
+    (r) =>
+      !haveSlotKeys.has(
+        slotKey({
+          day_number: r.day_number,
+          slot_number: r.slot_number,
+          suite_id: r.suite_id ?? null,
+        })
+      )
+  );
 
-  if (insertSlotsError) throw new Error(insertSlotsError.message);
+  let insertedSlots: MeetingSlotRow[] = [];
+  if (newSlotRows.length > 0) {
+    const { data, error: insertSlotsError } = await adminClient
+      .from("meeting_slots")
+      .insert(newSlotRows)
+      .select("*");
+
+    if (insertSlotsError) throw new Error(insertSlotsError.message);
+    insertedSlots = data ?? [];
+  }
+
+  const meetingSlots = [...(existingSlots ?? []), ...insertedSlots].sort(
+    (a, b) => a.day_number - b.day_number || a.slot_number - b.slot_number
+  );
 
   const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
     adminClient,
@@ -213,7 +244,10 @@ async function ensureMeetingScaffolding(
 
   return {
     suitesCount: suites.length,
-    meetingSlots: insertedSlots ?? [],
+    // The WHOLE grid, not just what this run added — the solver schedules
+    // against every slot, and returning only the new ones would quietly plan
+    // around an empty room.
+    meetingSlots,
     suites,
     suiteOrgAssignmentsBySuiteId,
   };
@@ -232,7 +266,7 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     adminClient
       .from("conference_registrations")
       .select(
-        "id, organization_id, user_id, category_responsibilities, buying_timeline, top_priorities, meeting_intent, purchasing_authority, top_5_preferences, blackout_list"
+        "id, organization_id, user_id, category_responsibilities, buying_timeline, top_priorities, meeting_intent, purchasing_authority, top_5_preferences"
       )
       .eq("conference_id", conferenceId)
       .in("status", ["submitted", "confirmed"])
@@ -254,6 +288,16 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     throw new Error(`Failed to load exhibitor candidates: ${exhibitorsResult.error.message}`);
   }
 
+  // Refusals are standing org-to-org facts, loaded from org_meeting_refusals —
+  // NOT from the per-registration blackout_list they used to live in. That
+  // column was scoped to one registration for one conference, so a refusal
+  // expired every year unless someone retyped it. See lib/org/meeting-refusals.ts.
+  const refusalOrgIds = [
+    ...(delegatesResult.data ?? []).map((row) => row.organization_id),
+    ...(exhibitorsResult.data ?? []).map((row) => row.organization_id),
+  ].filter((id): id is string => Boolean(id));
+  const blackoutByOrg = await loadBlackoutListsByOrg(refusalOrgIds);
+
   const delegates: DelegateProfile[] = (delegatesResult.data ?? []).map((row) => ({
     registrationId: row.id,
     organizationId: row.organization_id,
@@ -264,7 +308,7 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     meetingIntent: normalizeStringArray(row.meeting_intent),
     purchasingAuthority: row.purchasing_authority,
     top5Preferences: normalizeStringArray(row.top_5_preferences),
-    blackoutList: normalizeStringArray(row.blackout_list),
+    blackoutList: blackoutByOrg.get(row.organization_id) ?? [],
   }));
 
   const exhibitors: ExhibitorProfile[] = (exhibitorsResult.data ?? []).map((row) => ({
@@ -276,6 +320,7 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     buyingCyclesTargeted: normalizeStringArray(row.buying_cycles_targeted),
     meetingOutcomeIntent: normalizeStringArray(row.meeting_outcome_intent),
     salesReadiness: normalizeSalesReadiness(row.sales_readiness),
+    blackoutList: blackoutByOrg.get(row.organization_id) ?? [],
   }));
 
   if (delegates.length === 0 || exhibitors.length === 0) {

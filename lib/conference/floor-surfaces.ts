@@ -30,6 +30,8 @@
  * public map mid-purchase.
  */
 
+import { CONTAINMENT_ROLE } from "./inclusion";
+
 /** One surface: one background image, one coordinate space. */
 export type FloorPlanSurface = {
   /** `floorplan` entity id, or LEGACY_SURFACE_ID for the synthesised one. */
@@ -158,7 +160,7 @@ export function resolvePlacementsWithInheritance(
     resolved.set(entityId, { surfaceId, viaEntityId: entityId, direct: true });
   }
 
-  const contains = refs.filter((r) => r.role === "includes");
+  const contains = refs.filter((r) => r.role === CONTAINMENT_ROLE);
   // Iterate to a fixed point so a chain (surface → booth → suite → sub-thing)
   // resolves fully. Bounded by depth, so a cycle stops instead of hanging.
   for (let pass = 0; pass < contains.length + 1; pass++) {

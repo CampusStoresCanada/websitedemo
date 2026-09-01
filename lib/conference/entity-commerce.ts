@@ -1,5 +1,6 @@
 import type { BuildEntity, ConferenceOffer, NonMemberDayPass } from "../actions/conference-entities";
 import { effectiveIncludes, effectiveRefs } from "./entity-graph";
+import { ACCESS_ROLES } from "./inclusion";
 
 /**
  * Pure sell/fulfill logic for the v3 catalog — what a purchase grants, and what
@@ -70,7 +71,7 @@ export function resolveAccess(heldIds: Iterable<string>, byId: Map<string, Build
     const entity = byId.get(id);
     if (!entity) continue;
     for (const r of effectiveRefs(entity, byId)) {
-      if ((r.role === "includes" || r.role === "involved_in") && !access.has(r.toEntityId)) {
+      if ((ACCESS_ROLES as readonly string[]).includes(r.role) && !access.has(r.toEntityId)) {
         access.add(r.toEntityId);
         queue.push(r.toEntityId);
       }

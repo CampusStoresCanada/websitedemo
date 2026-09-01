@@ -3,6 +3,17 @@ import { describe, expect, it } from "vitest";
 import { resolveMeetingGeometryFromEntities } from "../meeting-geometry";
 
 describe("resolveMeetingGeometryFromEntities", () => {
+  it("ignores a stale organization_id left in the attributes bag", () => {
+    // The old copies are still sitting on 13 suites. They must not win over,
+    // or stand in for, the derived holder — otherwise retiring them silently
+    // resurrects the drift this change removed.
+    const geo = resolveMeetingGeometryFromEntities(
+      [],
+      [{ suiteNumber: 7, organizationId: null, attributes: { organization_id: "org-stale" } }]
+    );
+    expect(geo.suiteOrgAssignmentsBySuiteNumber).toEqual({});
+  });
+
   it("derives a day's meeting count from its cadence window", () => {
     const geo = resolveMeetingGeometryFromEntities(
       [
@@ -71,12 +82,22 @@ describe("resolveMeetingGeometryFromEntities", () => {
     ]);
   });
 
-  it("maps a suite's pinned org by suite number", () => {
+  it("maps a suite's holder by suite number, from the resolved value", () => {
+    /**
+     * This used to read `attributes.organization_id` — a hand-kept copy of who
+     * bought the containing booth. It had already fallen one behind (booth 202,
+     * Ookami Promo), so the scheduler could never seat anyone in that suite.
+     *
+     * The holder is now derived from the sale plus booth --includes--> suite and
+     * passed in. Checked before removing the old read: all 13 typed values
+     * agreed with the sale, and the derivation additionally finds the missing
+     * one — a strict superset, nothing lost.
+     */
     const geo = resolveMeetingGeometryFromEntities(
       [],
       [
-        { attributes: { suite_number: 1, organization_id: "org-a" } },
-        { attributes: { suite_number: 2 } },
+        { suiteNumber: 1, organizationId: "org-a", attributes: {} },
+        { suiteNumber: 2, organizationId: null, attributes: {} },
       ]
     );
     expect(geo.suiteOrgAssignmentsBySuiteNumber).toEqual({ "1": "org-a" });

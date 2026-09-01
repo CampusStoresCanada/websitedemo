@@ -171,7 +171,14 @@ export interface MeetingDayEntityInput {
 }
 
 export interface MeetingSuiteEntityInput {
-  /** The suite entity's attributes (suite_number, organization_id). */
+  /**
+   * Resolved by the loader from the entity name and the containment graph.
+   * Optional so pure callers and tests can pass attributes alone.
+   */
+  suiteNumber?: number;
+  /** Derived from who bought the containing booth — never a stored copy. */
+  organizationId?: string | null;
+  /** The suite entity's attributes (suite_number kept for an explicit override). */
   attributes: Record<string, unknown>;
 }
 
@@ -268,12 +275,22 @@ export function resolveMeetingGeometryFromEntities(
     })
     .filter(Boolean) as MeetingDayGeometry[];
 
+  /**
+   * Suite number and holder are RESOLVED BY THE CALLER now (see
+   * meeting-geometry-loader). This used to re-derive both from the attributes
+   * bag: the number via `index + 1` when `suite_number` was absent — true for 18
+   * of 31 — and the holder from a hand-typed `organization_id`. Two derivations
+   * of the same two facts, and this was the copy that stayed wrong after the
+   * loader was fixed.
+   *
+   * The fallbacks stay only for a caller that passes neither, and are the same
+   * last-resort as the loader's rather than a second opinion.
+   */
   const suiteOrgAssignmentsBySuiteNumber: Record<string, string> = {};
   suites.forEach((s, index) => {
-    const rawNumber = s.attributes.suite_number;
-    const suiteNumber = normalizePositiveInt(rawNumber, index + 1);
-    const org =
-      typeof s.attributes.organization_id === "string" ? s.attributes.organization_id.trim() : "";
+    const suiteNumber =
+      s.suiteNumber ?? normalizePositiveInt(s.attributes.suite_number, index + 1);
+    const org = s.organizationId?.trim() ?? "";
     if (org) suiteOrgAssignmentsBySuiteNumber[String(suiteNumber)] = org;
   });
 
