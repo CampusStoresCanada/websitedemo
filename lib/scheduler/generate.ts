@@ -4,7 +4,7 @@ import {
   validateScheduleConstraints,
 } from "./constraints";
 import { isBlackedOut } from "./blackout";
-import { breakTie, deterministicOrder } from "./tiebreak";
+import { breakTie } from "./tiebreak";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -22,8 +22,6 @@ interface GenerateInput {
   matchScores: MatchScoreRecord[];
   policy: SchedulingPolicy;
   suitePinnedExhibitorBySuiteId?: Record<string, string>;
-  /** Suites that belong to a booth holder — never handed to another exhibitor. */
-  reservedSuiteIds?: ReadonlySet<string>;
   seed: number;
 }
 
@@ -31,8 +29,7 @@ function selectActiveExhibitorsBySuite(
   exhibitors: ExhibitorProfile[],
   suiteIds: string[],
   seed: number,
-  suitePinnedExhibitorBySuiteId?: Record<string, string>,
-  reservedSuiteIds?: ReadonlySet<string>
+  suitePinnedExhibitorBySuiteId?: Record<string, string>
 ): { bySuiteId: Map<string, ExhibitorProfile>; suitelessExhibitors: string[] } {
   const orderedSuites = [...suiteIds].sort((a, b) => a.localeCompare(b));
   const exhibitorById = new Map(exhibitors.map((row) => [row.registrationId, row] as const));
@@ -65,9 +62,11 @@ function selectActiveExhibitorsBySuite(
    * 107. That is inventory given away by a solver, which is not a decision a
    * solver gets to make.
    *
-   * An exhibitor with no suite now gets no suite. If CSC wants to lend one out,
-   * that is a deliberate manual assignment (`is_manual`), visible and
-   * attributable — not a silent side effect of the seed.
+   * An exhibitor with no suite now gets no suite. Meetings are a suite benefit:
+   * a booth that includes no suite gets none, by design, and the CALLER filters
+   * those out before they reach here so they are not reported as a fault. If
+   * CSC wants to lend a room out, that is a deliberate manual assignment
+   * (`is_manual`), visible and attributable — not a side effect of the seed.
    */
   const suitelessExhibitors = exhibitors
     .filter((item) => !pinnedRegistrationIds.has(item.registrationId))
@@ -112,8 +111,7 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     input.exhibitors,
     suiteIds,
     input.seed,
-    input.suitePinnedExhibitorBySuiteId,
-    input.reservedSuiteIds
+    input.suitePinnedExhibitorBySuiteId
   );
   const scoreByKey = scoreMap(input.matchScores);
   const delegateById = new Map(
@@ -243,13 +241,24 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
    * not include them, and whether a booth without a suite should get meetings
    * at all is a business decision, not the solver's.
    */
+  /**
+   * Reaching here means an exhibitor who DOES hold a suite still got no room —
+   * the caller has already excluded booths that include no suite, because for
+   * those, no meetings is the product rather than a fault.
+   *
+   * The realistic cause is staffing: each suite pins a DIFFERENT exhibitor
+   * registration, so an org running two suites with one named person can only
+   * fill one. That is worth saying — they paid for a room that will sit empty —
+   * but it is not infeasible, and it is fixed by naming someone, not by code.
+   */
   if (suitelessExhibitors.length > 0) {
     diagnostics.violations.push({
       code: "EXHIBITOR_WITHOUT_SUITE",
       severity: "soft",
       message:
-        `${suitelessExhibitors.length} exhibitor(s) hold no suite, so they have no room to meet in and are not scheduled. ` +
-        `A suite comes from a booth that includes one; assign a suite manually if CSC intends to lend them one.`,
+        `${suitelessExhibitors.length} exhibitor(s) hold a suite but were not placed in one — ` +
+        `usually an org with more suites than named staff, since each suite needs its own person. ` +
+        `Name someone to the seat, or the room sits empty.`,
       details: { exhibitorRegistrationIds: suitelessExhibitors },
     });
     if (diagnostics.status === "completed") diagnostics.status = "completed_with_warnings";

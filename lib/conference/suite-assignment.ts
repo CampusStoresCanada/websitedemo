@@ -38,19 +38,10 @@ export function buildSuiteOrgAssignmentsBySuiteId(
 }
 
 /**
- * Suites that belong to somebody — the ones the free-fill pass must not touch.
+ * `reservedSuiteIds` is GONE — subsumed by the stronger rule.
  *
- * A suite is the meeting use of a booth its holder bought. If the holder has no
- * spare exhibitor registration to staff it, it stays EMPTY. It is never offered
- * to another exhibitor, which the deterministic fill would otherwise do: a
- * competitor sitting in your booth is worse than an unused room.
+ * It kept held suites out of the free-fill pool. With free-fill deleted a suite
+ * is only ever reached through a pin, and pins come only from holders, so
+ * nothing can take a room it does not hold. A guard that can never fire reads
+ * like protection and is really just something else to keep in step.
  */
-export function reservedSuiteIds(
-  suiteOrgAssignmentsBySuiteId: Record<string, string>
-): Set<string> {
-  return new Set(
-    Object.entries(suiteOrgAssignmentsBySuiteId)
-      .filter(([, orgId]) => Boolean(orgId))
-      .map(([suiteId]) => suiteId)
-  );
-}

@@ -8,7 +8,7 @@ import { logAuditEventSafe } from "@/lib/ops/audit";
 import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
-import { buildSuiteOrgAssignmentsBySuiteId, reservedSuiteIds } from "@/lib/conference/suite-assignment";
+import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
 import type {
   DelegateProfile,
@@ -378,7 +378,40 @@ export async function createSchedulerDraftRun(
       usedPinnedExhibitorRegistrationIds.add(chosen.registrationId);
     }
 
-    const matchScores = computeAllMatchScores(candidates.delegates, candidates.exhibitors);
+    /**
+     * MEETINGS ARE A SUITE BENEFIT. An exhibitor whose booth includes no suite
+     * is not a scheduling candidate at all — the ED's rule, 2026-09-01:
+     * "$4000 booths shouldn't get meetings at all, that isn't a part of
+     * included."
+     *
+     * So they are filtered out here rather than left in and reported as
+     * unscheduled. Leaving them in made every run permanently "below exhibitor
+     * target" and flagged a $4,000 booth as a problem to fix, when getting no
+     * meetings is precisely what that booth costs less for.
+     */
+    const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
+    const schedulableExhibitors = candidates.exhibitors.filter((e) =>
+      orgIdsHoldingSuites.has(e.organizationId)
+    );
+    const exhibitorsWithoutSuiteEntitlement =
+      candidates.exhibitors.length - schedulableExhibitors.length;
+
+    /**
+     * No exhibitor holds a suite → there is nothing to schedule, and saying
+     * "completed" would be a green run that did nothing. Fail with the reason,
+     * because the two causes need opposite fixes: nobody named to the seat of a
+     * suite-holding booth (name someone), versus every exhibitor being on a
+     * booth that includes no suite (they were never getting meetings).
+     */
+    if (schedulableExhibitors.length === 0) {
+      throw new Error(
+        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor(s) are named to seats, ` +
+          `but none is on a booth that includes a suite, so there is no room for a meeting to happen in. ` +
+          `Meetings come with a suite; a booth without one does not get them.`
+      );
+    }
+
+    const matchScores = computeAllMatchScores(candidates.delegates, schedulableExhibitors);
 
     const persistedScoreInput = matchScores.map((score) => ({
       conference_id: conferenceId,
@@ -410,7 +443,7 @@ export async function createSchedulerDraftRun(
 
     const generateResult = generateSchedule({
       delegates: candidates.delegates,
-      exhibitors: candidates.exhibitors,
+      exhibitors: schedulableExhibitors,
       meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
         id: slot.id,
         dayNumber: slot.day_number,
@@ -427,8 +460,6 @@ export async function createSchedulerDraftRun(
         feasibilityRelaxation: schedulingPolicy.feasibility_relaxation,
       },
       suitePinnedExhibitorBySuiteId,
-      // Booth holders' rooms stay theirs even when unstaffed. See generate.ts.
-      reservedSuiteIds: reservedSuiteIds(scaffolding.suiteOrgAssignmentsBySuiteId),
       seed: runSeed,
     });
 
@@ -504,9 +535,18 @@ export async function createSchedulerDraftRun(
         status: "completed",
         completed_at: new Date().toISOString(),
         total_delegates: candidates.delegates.length,
-        total_exhibitors: candidates.exhibitors.length,
+        // The exhibitors that could actually be scheduled — a booth with no
+        // suite is not one, so counting it here would overstate the roster.
+        total_exhibitors: schedulableExhibitors.length,
         total_meetings_created: schedulesInput.length,
         constraint_violations: generateResult.diagnostics as unknown as Json,
+        // Recorded, not warned about: a booth with no suite gets no meetings by
+        // design. Kept visible so "why is my exhibitor count lower than my
+        // exhibitor list" has an answer that is not a bug hunt.
+        metadata: {
+          ...(runRow.metadata as Record<string, unknown> | null),
+          exhibitors_without_suite_entitlement: exhibitorsWithoutSuiteEntitlement,
+        } as unknown as Json,
       })
       .eq("id", runRow.id)
       .select("*")
