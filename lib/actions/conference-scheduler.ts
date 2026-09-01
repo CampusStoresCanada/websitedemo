@@ -10,6 +10,9 @@ import { generateSchedule } from "@/lib/scheduler/generate";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { loadMeetingMatchScores } from "@/lib/conference/meeting-match-scores";
+import { optimizeSchedule } from "@/lib/scheduler/optimize";
+import { isBlackedOut } from "@/lib/scheduler/blackout";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -462,6 +465,69 @@ export async function createSchedulerDraftRun(
       suitePinnedExhibitorBySuiteId,
       seed: runSeed,
     });
+
+    /**
+     * The greedy is the SEED, not the answer. It fills slots in order and stops,
+     * which delivers pairings but leaves room-time on the floor — measured on a
+     * 14-exhibitor run: 122 of a possible 130 pairings, occupying 11.2% of
+     * suite-slots. Local search then maximizes the stated objective
+     * (Σ matchTotal × timeOccupancy) by splitting packed meetings into more
+     * occupied slots and filling dead ones.
+     *
+     * ⛔ Legality is a filter on moves, never a term. The search cannot pair a
+     * refused org, double-book a person, or seat an exhibitor in a room they do
+     * not hold — those are not worse moves, they are not moves.
+     */
+    const matchScoreLookup = await loadMeetingMatchScores(
+      candidates.delegates.map((d) => d.organizationId)
+    );
+
+    const delegateSeatFacts = new Map(
+      candidates.delegates.map((d) => [
+        d.registrationId,
+        { orgId: d.organizationId, contactId: null as string | null },
+      ])
+    );
+    const exhibitorSeatFacts = new Map<string, { orgId: string; suiteId: string }>();
+    for (const [suiteId, exhibitorSeatId] of Object.entries(suitePinnedExhibitorBySuiteId)) {
+      const exhibitor = schedulableExhibitors.find((e) => e.registrationId === exhibitorSeatId);
+      if (exhibitor) exhibitorSeatFacts.set(exhibitorSeatId, { orgId: exhibitor.organizationId, suiteId });
+    }
+
+    const blackoutByExhibitorSeat = new Map(
+      schedulableExhibitors.map((e) => [e.registrationId, e])
+    );
+    const delegateById = new Map(candidates.delegates.map((d) => [d.registrationId, d]));
+
+    const optimized = optimizeSchedule(generateResult.assignments, {
+      meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
+        id: slot.id,
+        dayNumber: slot.day_number,
+        slotNumber: slot.slot_number,
+        suiteId: slot.suite_id,
+      })),
+      policy: {
+        meetingGroupMin: schedulingPolicy.meeting_group_min,
+        meetingGroupMax: schedulingPolicy.meeting_group_max,
+      },
+      exhibitorSeats: exhibitorSeatFacts,
+      delegateSeats: delegateSeatFacts,
+      mayMeet: (delegateSeatId: string, exhibitorSeatId: string) => {
+        const delegate = delegateById.get(delegateSeatId);
+        const exhibitor = blackoutByExhibitorSeat.get(exhibitorSeatId);
+        if (!delegate || !exhibitor) return false;
+        return !isBlackedOut(delegate, exhibitor);
+      },
+      objective: {
+        delegateSeats: delegateSeatFacts,
+        exhibitorSeats: exhibitorSeatFacts,
+        orgTotalFor: matchScoreLookup.orgTotalFor,
+        personTotalFor: matchScoreLookup.personTotalFor,
+      },
+      seed: runSeed,
+    });
+
+    generateResult.assignments = optimized.assignments;
 
     // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
     // → infeasible: discard assignments, nothing usable.
