@@ -1,6 +1,8 @@
 import type { DelegateProfile, ExhibitorProfile } from "@/lib/scheduler/types";
 import { loadSeatHoldings, type SeatHolding } from "./seats";
 import { offerRequiresOwnershipOfEntityIds } from "./ownership-gate";
+import { resolveAccess } from "./entity-commerce";
+import { sessionMatchesMeetingWindow } from "./meeting-geometry";
 import { loadBlackoutListsByOrg } from "@/lib/org/meeting-refusals";
 
 /**
@@ -15,6 +17,8 @@ import { loadBlackoutListsByOrg } from "@/lib/org/meeting-refusals";
 export type MeetingCandidates = {
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
+  /** Named seats on neither side — reported, never swept onto one of them. */
+  notMatchable: string[];
   /** Every named registration seat, by seat id — for name/org/auth lookups. */
   seatById: Map<string, SeatHolding>;
   /** Registration types that require owning a booth, i.e. the exhibiting side. */
@@ -111,6 +115,34 @@ export async function loadMeetingCandidates(
 
   const delegates: DelegateProfile[] = [];
   const exhibitors: ExhibitorProfile[] = [];
+  /** Named seats whose type is in no meeting at all — CSC staff, a $4,000 booth. */
+  const notMatchable: string[] = [];
+
+  /**
+   * The curated meeting blocks: sessions whose times ARE the day's meeting
+   * windows — the same windows the slots are generated from.
+   */
+  const meetingBlockIds = new Set(
+    [...entitiesById.values()]
+      .filter((e) => {
+        if (e.kind !== "session") return false;
+        const whenRef = e.refs.find((r) => r.role === "when");
+        const day = whenRef ? entitiesById.get(whenRef.toEntityId) : null;
+        return day ? sessionMatchesMeetingWindow(e.attributes, day.attributes) : false;
+      })
+      .map((e) => e.id)
+  );
+
+  // Memoised: many seats share one registration type, and the walk is the graph.
+  const meetingParticipationByTypeId = new Map<string, boolean>();
+  const participatesInMeetings = (entityId: string): boolean => {
+    const cached = meetingParticipationByTypeId.get(entityId);
+    if (cached !== undefined) return cached;
+    const reachable = resolveAccess([entityId], entitiesById);
+    const participates = [...meetingBlockIds].some((id) => reachable.has(id));
+    meetingParticipationByTypeId.set(entityId, participates);
+    return participates;
+  };
 
   for (const seat of seats) {
     const userId = seat.holderUserId ?? "";
@@ -120,6 +152,40 @@ export async function loadMeetingCandidates(
       buyingCycle: [],
     };
     const blackoutList = blackoutByOrg.get(seat.organizationId) ?? [];
+
+    /**
+     * IS THIS PERSON IN MEETINGS? The graph already says so — ask it.
+     *
+     * `resolveAccess` walks `includes` AND `involved_in`, and the catalogue
+     * records meeting participation on the second of those:
+     *
+     *   Board Registration            --involved_in--> Meeting Block 1..5
+     *   Full Conference Registration  --involved_in--> Meeting Block 1..5
+     *   Tuesday Day Pass              --involved_in--> Meeting Block 1..5
+     *   Connected Exhibitor Staff Reg --involved_in--> Meeting Block 1..5
+     *
+     * ⛔ I twice reached for something else — first "not an exhibitor means a
+     * delegate", then `organizations.type` — and both were inventions. The first
+     * scheduled three Campus Stores Canada staff, the association that RUNS the
+     * conference, into supplier meetings as buyers. Staff Registration is
+     * involved_in nothing, so the graph had already excluded them. So had it
+     * excluded the $4,000 Exhibitor Staff Registration, while including the
+     * Connected tier — the ED's "$4000 booths shouldn't get meetings" was
+     * declared data before it was ever a rule in code.
+     *
+     * ⚠️ Reaching the meeting DAY is not enough, and that is the trap that got
+     * me on the first attempt: Tuesday also holds "Get Organized" (09:15–09:30)
+     * and "Move-in - Tuesday", both of which a Staff Registration reaches. It is
+     * the meeting WINDOWS that separate a curated meeting from something that
+     * merely happens that day — see sessionMatchesMeetingWindow.
+     *
+     * WHICH SIDE they sit on is the separate, already-solved question:
+     * ownership-gate's "does this type require owning a booth".
+     */
+    if (!participatesInMeetings(seat.entityId)) {
+      notMatchable.push(seat.seatId);
+      continue;
+    }
 
     if (exhibitingTypeIds.has(seat.entityId)) {
       exhibitors.push({
@@ -163,6 +229,7 @@ export async function loadMeetingCandidates(
   return {
     delegates,
     exhibitors,
+    notMatchable,
     seatById: new Map(seats.map((seat) => [seat.seatId, seat] as const)),
     exhibitingTypeIds,
   };

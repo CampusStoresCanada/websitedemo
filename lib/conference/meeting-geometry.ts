@@ -220,6 +220,44 @@ function parseMeetingWindows(
   return windows;
 }
 
+/**
+ * Is this session one of the day's CURATED MEETING BLOCKS — the rows the
+ * scheduler's slots correspond to?
+ *
+ * A meeting block is a session on a meeting day whose start and end are one of
+ * that day's `meeting_windows`. Same source the slot generation iterates, so the
+ * program row and the slots it produces cannot disagree.
+ *
+ * ⚠️ "On the meeting day" is NOT sufficient, which is the trap that caught me:
+ * `summarizeAccess().meetingDay` is non-null for anything reachable on Tuesday,
+ * and Tuesday also holds "Get Organized" (09:15–09:30) and "Move-in - Tuesday"
+ * (09:00–17:30). A CSC Staff Registration reaches Get Organized, so testing the
+ * DAY put the association that runs the conference into supplier meetings as
+ * buyers. The windows are what separate a curated meeting from a thing that
+ * merely happens that day.
+ *
+ * ⛔ Not name matching. "Meeting Block 1" is a label; two UI components hardcode
+ * the five UUIDs and neither is a definition.
+ */
+export function sessionMatchesMeetingWindow(
+  sessionAttributes: Record<string, unknown>,
+  dayAttributes: Record<string, unknown>
+): boolean {
+  if (!isMeetingDayAttributes(dayAttributes)) return false;
+
+  // Same defaults resolveMeetingGeometryFromEntities uses for a day.
+  const slotDurationMinutes = normalizePositiveInt(dayAttributes.slot_duration_minutes, 15);
+  const bufferMinutes = normalizeNonNegativeInt(dayAttributes.meeting_buffer_minutes, 0);
+  const windows = parseMeetingWindows(dayAttributes.meeting_windows, slotDurationMinutes, bufferMinutes);
+  if (!windows) return false;
+
+  const startTime = normalizeTimeValue(sessionAttributes.start_time, "");
+  const endTime = normalizeTimeValue(sessionAttributes.end_time, "");
+  if (!startTime || !endTime) return false;
+
+  return windows.some((w) => w.startTime === startTime && w.endTime === endTime);
+}
+
 export function resolveMeetingGeometryFromEntities(
   days: MeetingDayEntityInput[],
   suites: MeetingSuiteEntityInput[]
