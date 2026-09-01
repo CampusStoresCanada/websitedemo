@@ -15,6 +15,9 @@ export interface ExhibitorProfile {
   registrationId: string;
   organizationId: string;
   userId: string;
+  /** Organization ids this exhibitor will not meet. A partner can fire a
+   *  customer — blackout is symmetrical. See lib/scheduler/blackout.ts. */
+  blackoutList: string[];
   primaryCategory: string | null;
   secondaryCategories: string[];
   buyingCyclesTargeted: string[];

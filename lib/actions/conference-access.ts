@@ -51,7 +51,20 @@ type Result<T> = { success: true; data: T } | { success: false; error: string };
  * passes, so entitlement and obligation now come from ONE traversal at ONE
  * depth rather than two functions disagreeing about how far to look.
  */
-async function loadV3HeldGrantTypes(db: AdminDb, personId: string, conferenceId: string): Promise<GrantType[]> {
+/**
+ * What this person holds, from their seats.
+ *
+ * Returns the grant types (what we may ASK them) and the registration entity
+ * (what we BUILD them — their badge's layout variant). Both come from the same
+ * seat read, because they are the same fact asked twice: a seat is the whole
+ * story of someone attending. Nothing here consults `person_kind`, which is a
+ * sediment column written by eight disagreeing code paths.
+ */
+async function loadV3Held(
+  db: AdminDb,
+  personId: string,
+  conferenceId: string
+): Promise<{ grantTypes: GrantType[]; registrationEntityId: string | null; registrationName: string | null }> {
   const [{ data: seats }, { data: entityRows }, { data: refRows }] = await Promise.all([
     db
       .from("entity_balance_seats")
@@ -66,11 +79,14 @@ async function loadV3HeldGrantTypes(db: AdminDb, personId: string, conferenceId:
   ]);
 
   const heldIds = [...new Set((seats ?? []).map((s) => s.entity_id).filter((id): id is string => !!id))];
-  if (heldIds.length === 0) return [];
+  if (heldIds.length === 0) {
+    return { grantTypes: [], registrationEntityId: null, registrationName: null };
+  }
 
   const byId = new Map(
     buildEntityGraph(entityRows ?? [], refRows ?? []).map((e) => [e.id, e])
   );
+  const registration = heldIds.map((id) => byId.get(id)).find((e) => e?.kind === "registration") ?? null;
 
   // Held things AND everything reachable from them. The seat itself counts —
   // a directly bought Meet & Greet ticket is an `event` in its own right, not
@@ -80,7 +96,11 @@ async function loadV3HeldGrantTypes(db: AdminDb, personId: string, conferenceId:
     const kind = byId.get(id)?.kind;
     if (kind) kinds.add(kind);
   }
-  return grantTypesForKinds(kinds);
+  return {
+    grantTypes: grantTypesForKinds(kinds),
+    registrationEntityId: registration?.id ?? null,
+    registrationName: registration?.name ?? null,
+  };
 }
 
 /**
@@ -170,7 +190,7 @@ export async function resolvePersonObligations(
     return { success: false, error: "Not authorized to view this person's readiness." };
   }
 
-  const grantTypes = await loadV3HeldGrantTypes(db, personId, conferenceId);
+  const { grantTypes } = await loadV3Held(db, personId, conferenceId);
   const fields = person as unknown as PersonObligationFields;
   return { success: true, data: computePersonObligations(grantTypes, fields) };
 }
@@ -238,7 +258,7 @@ export async function loadContactConferenceObligations(
   if (!person) return { success: true, data: null };
 
   const row = person as unknown as { id: string; conference_id: string };
-  const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
+  const { grantTypes } = await loadV3Held(db, row.id, row.conference_id);
   const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
   if (status.obligations.length === 0) return { success: true, data: null };
 
@@ -312,7 +332,9 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     displayName: string | null;
     roleTitle: string | null;
     organizationName: string | null;
-    role: "delegate" | "exhibitor";
+    /** The registration type held — the badge's layout variant key. */
+    variantKey: string | null;
+    variantName: string | null;
     template: unknown | null;
   };
 } | null>> {
@@ -325,7 +347,7 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   ];
   const { data: person, error } = await db
     .from("conference_people")
-    .select(`id, conference_id, contact_id, person_kind, ${columns.join(", ")}`)
+    .select(`id, conference_id, contact_id, ${columns.join(", ")}`)
     .eq("user_id", auth.ctx.userId)
     .neq("assignment_status", "canceled")
     .order("updated_at", { ascending: false })
@@ -334,9 +356,12 @@ export async function loadMyConferenceObligations(): Promise<Result<{
   if (error) return { success: false, error: error.message };
   if (!person) return { success: true, data: null };
 
-  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null; person_kind: string | null };
-  const personKind = row.person_kind;
-  const grantTypes = await loadV3HeldGrantTypes(db, row.id, row.conference_id);
+  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null };
+  const { grantTypes, registrationEntityId, registrationName } = await loadV3Held(
+    db,
+    row.id,
+    row.conference_id
+  );
   const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
 
   const values: Record<string, string | null> = {};
@@ -384,9 +409,11 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     displayName: (values.display_name as string | null) ?? contactRow?.name ?? null,
     roleTitle: contactRow?.role_title ?? null,
     organizationName: org?.name ?? null,
-    role: (personKind === "exhibitor" ? "exhibitor" : "delegate") as
-      | "delegate"
-      | "exhibitor",
+    // The layout key is the registration type they hold. This used to collapse
+    // `person_kind` into one of two roles, which meant the member's preview and
+    // the print run could resolve different layouts for the same badge.
+    variantKey: registrationEntityId,
+    variantName: registrationName,
     template: (templateRow.data?.field_mapping as unknown) ?? null,
   };
 

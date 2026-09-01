@@ -2,6 +2,12 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
+import {
+  readMatchEdges,
+  confidenceBucket,
+  categoryEvidence,
+  hasCertificationMatch,
+} from "@/lib/match/read";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 const SUB_TO_PARENT = new Map<string, string>();
@@ -101,6 +107,111 @@ export async function getMemberSupplierData(
   if (!hasAssignments) {
     return { success: true, data: { matches: [], topMatches: [], totalMatches: 0, hasAssignments: false } };
   }
+
+  // ── 3b. The engine, if it has an answer ──────────────────────────────────
+  //
+  // This function and getPartnerMarketData were the same algorithm written twice
+  // in opposite directions — parse categories, score parent/sub overlap 1/1.5/2/3,
+  // bucket, sort, slice. Both now read one engine, and the duplicate below
+  // survives only as the fallback.
+  //
+  // ⚠️ Null means the engine is UNAVAILABLE (migration unapplied, no promoted
+  // run, last night's job failed) — never "no matches". An empty array is a real
+  // answer and is returned as one. Rendering an empty panel because a batch job
+  // died is worse than quietly doing the old thing.
+  const edges = await readMatchEdges({
+    subjectOrgId: orgId,
+    direction: "member_to_partner",
+    limit: 50,
+  });
+
+  if (edges) {
+    if (edges.length === 0) {
+      return { success: true, data: { matches: [], topMatches: [], totalMatches: 0, hasAssignments: true } };
+    }
+
+    const orgIds = edges.map((e) => e.candidateOrgId);
+
+    // Narrow row shapes rather than `any`: these are the only columns read, and
+    // naming them means a schema change surfaces here instead of at render.
+    type PartnerRow = {
+      id: string;
+      name: string;
+      slug: string;
+      province: string | null;
+      catalogue_url: string | null;
+    };
+    type ContactRow = {
+      name: string | null;
+      role_title: string | null;
+      work_email: string | null;
+      email: string | null;
+      organization_id: string;
+    };
+
+    const [partnerResult, contactResult] = await Promise.all([
+      db
+        .from("organizations")
+        .select("id, name, slug, province, catalogue_url")
+        .in("id", orgIds),
+      db
+        .from("contacts")
+        .select("name, role_title, work_email, email, organization_id")
+        .in("organization_id", orgIds)
+        .not("hidden", "eq", true)
+        .is("archived_at", null),
+    ]);
+
+    const orgById = new Map<string, PartnerRow>(
+      ((partnerResult.data ?? []) as unknown as PartnerRow[]).map((o) => [o.id, o])
+    );
+    const contactByOrg = new Map<string, ContactRow>();
+    for (const c of (contactResult.data ?? []) as unknown as ContactRow[]) {
+      if (!contactByOrg.has(c.organization_id)) contactByOrg.set(c.organization_id, c);
+    }
+
+    const engineMatches: SupplierMatch[] = edges
+      // An org archived since last night's run must not surface, even though the
+      // run legitimately included it.
+      .filter((e) => orgById.has(e.candidateOrgId))
+      .map((edge) => {
+        const org = orgById.get(edge.candidateOrgId)!;
+        const contact = contactByOrg.get(edge.candidateOrgId);
+        const { category, subcategories } = categoryEvidence(edge.reasons);
+        return {
+          orgId: edge.candidateOrgId,
+          orgName: org.name,
+          orgSlug: org.slug,
+          province: org.province ?? null,
+          matchingCategory: category,
+          matchingSubcategories: subcategories,
+          confidence: confidenceBucket(edge.total),
+          primaryContact: contact
+            ? {
+                name: contact.name ?? null,
+                roleTitle: contact.role_title ?? null,
+                email: contact.work_email || contact.email || null,
+              }
+            : null,
+          catalogueUrl: org.catalogue_url ?? null,
+          hasCertMatch: hasCertificationMatch(edge),
+        };
+      });
+
+    return {
+      success: true,
+      data: {
+        matches: engineMatches,
+        topMatches: engineMatches.slice(0, 10),
+        totalMatches: engineMatches.length,
+        hasAssignments: true,
+      },
+    };
+  }
+
+  // ── Fallback: the original inline scorer ─────────────────────────────────
+  // Kept deliberately. It runs whenever the engine has nothing, so a failed
+  // nightly job degrades to yesterday's behaviour rather than to an empty panel.
 
   // 4. Get org's preferred certifications for bonus scoring
   const preferredCerts: string[] = Array.isArray(pi?.preferred_certifications)

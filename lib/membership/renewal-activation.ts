@@ -13,6 +13,10 @@ import { stripe } from "@/lib/stripe/client";
 // cover — no new mock needed).
 import { recordRenewalEvent } from "../renewal/events";
 import { getRenewalConfig } from "../policy/engine";
+// Same reasoning as the two above: `mirror` is not mocked in any suite, so
+// it must resolve for real. Its own dependencies use the "@/" alias and so
+// pick up the existing mocks.
+import { mirrorFieldsToMembership } from "./mirror";
 
 /**
  * The membership/partnership fiscal year boundary (e.g. "09-01") is an
@@ -223,6 +227,18 @@ export async function activateMembershipRenewal(
   if (updateError) {
     return { success: false, error: updateError.message };
   }
+
+  // Phase 4: keep `memberships.expires_at` in step with the authoritative
+  // organizations write above. Best-effort and non-blocking by contract —
+  // this must never fail the activation, since the org column is what every
+  // live consumer reads today (the renewal cron's gate included). Placed
+  // after the update rather than beside it so a mirror failure can't strand
+  // a paid org without its new expiry.
+  await mirrorFieldsToMembership(
+    params.organizationId,
+    { expires_at: params.newExpiresAt },
+    { source: "activateMembershipRenewal" }
+  );
 
   if (org.membership_status === "grace" || org.membership_status === "locked" || org.membership_status === "approved") {
     // "approved" here is a first-time activation, not a renewal — an org

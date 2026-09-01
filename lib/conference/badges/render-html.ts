@@ -4,11 +4,10 @@ import {
   type BadgeLogoBindingKey,
   type BadgePersonRecord,
   type BadgeShapeLayer,
-  type BadgeRole,
   type BadgeSlotText,
   type BadgeTemplateConfigV1,
   type BadgeTextBindingKey,
-  personRoleFromKind,
+  resolveBadgeVariant,
 } from "@/lib/conference/badges/template";
 import {
   compactWhitespace,
@@ -20,7 +19,12 @@ import {
 
 type RenderBadgeOptions = {
   template: BadgeTemplateConfigV1;
-  role: BadgeRole;
+  /**
+   * The registration type this badge is for — a `conference_entities.id`.
+   * Optional: without it the badge falls back to the legacy role layout, which
+   * is what every template did before layouts could vary by type.
+   */
+  variantKey?: string | null;
   person: BadgePersonRecord;
   side: "front" | "back";
 };
@@ -329,11 +333,15 @@ function renderCropMarks(params: { pageWidthIn: number; pageHeightIn: number; bl
 }
 
 export function renderBadgeHtml(options: RenderBadgeOptions): string {
-  const { template, person, role, side } = options;
-  const roleLayout = template.roleLayouts?.[role] ?? null;
-  const front = roleLayout?.front ?? template.front;
-  const back = roleLayout?.back ?? template.back;
-  const roleTheme = template.roles[role];
+  const { template, person, side } = options;
+  // One resolution point for "what does this person's badge look like" — see
+  // resolveBadgeVariant. Registration type wins, legacy role is the fallback.
+  const {
+    front,
+    back,
+    theme: roleTheme,
+    resolvedKey,
+  } = resolveBadgeVariant(template, { variantKey: options.variantKey });
   const { firstName, lastName } = splitDisplayName(person);
   const orgName = compactWhitespace(person.organizationName || "");
   const orgSplit = splitOrganizationSmart(orgName.toUpperCase());
@@ -508,7 +516,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
       )
       .join("");
     return `
-<article class="badge role-${role}">
+<article class="badge variant-${resolvedKey}">
   ${cropMarksHtml}
   <div class="badge-canvas">
     ${finalBackgroundUrl ? `<img class="badge-bg" src="${escapeHtml(finalBackgroundUrl)}" alt="" />` : ""}
@@ -675,7 +683,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     .join("");
 
   return `
-<article class="badge role-${role}">
+<article class="badge variant-${resolvedKey}">
   ${cropMarksHtml}
   <div class="badge-canvas">
     ${finalBackgroundUrl ? `<img class="badge-bg" src="${escapeHtml(finalBackgroundUrl)}" alt="" />` : ""}
@@ -691,17 +699,18 @@ export function renderJobDocumentHtml(params: {
   includeBack: boolean;
 }): string {
   const pages = params.people.flatMap((person) => {
-    const role = personRoleFromKind(person.personKind);
+    // The badge's layout is its registration type. No role, no person kind.
+    const variantKey = person.variantKey;
     const front = renderBadgeHtml({
       template: params.template,
-      role,
+      variantKey,
       person,
       side: "front",
     });
     if (!params.includeBack) return [front];
     const back = renderBadgeHtml({
       template: params.template,
-      role,
+      variantKey,
       person,
       side: "back",
     });

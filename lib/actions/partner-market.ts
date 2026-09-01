@@ -6,6 +6,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { sendCircleNotification } from "@/lib/circle/notifications";
 import { sendEmail } from "@/lib/email/send";
+import { readMatchEdges, confidenceBucket, categoryEvidence } from "@/lib/match/read";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 
@@ -98,6 +99,150 @@ export async function getPartnerMarketData(
   }
 
   const db = createAdminClient();
+
+  // ── The engine, if it has an answer ──────────────────────────────────────
+  //
+  // This and getMemberSupplierData were the same algorithm written twice in
+  // opposite directions. Both now read one engine; the code below survives only
+  // as the fallback for when the engine has nothing.
+  //
+  // ⚠️ Null means UNAVAILABLE (migration unapplied, no promoted run, last
+  // night's job failed) — never "no matches". An empty array is a real answer.
+  const edges = await readMatchEdges({
+    subjectOrgId: partnerOrgId,
+    direction: "partner_to_member",
+    limit: 50,
+  });
+
+  if (edges) {
+    // ⚠️ Counted separately, not derived from the edges. The panel renders this
+    // as "N member stores haven't set up their procurement data yet", which is a
+    // statement about members who told us nothing — not about members who failed
+    // to match this partner. Inferring it from a shortfall in edges would turn a
+    // true sentence into a false one.
+    const { count: withoutProcurement } = await db
+      .from("organizations")
+      .select("id", { count: "exact", head: true })
+      .eq("type", "Member")
+      .eq("membership_status", "active")
+      .eq("is_test", false)
+      .is("archived_at", null)
+      .not("procurement_info", "cs", '{"category_buyers":[]}');
+
+    if (edges.length === 0) {
+      return {
+        success: true,
+        data: { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: withoutProcurement ?? 0 },
+      };
+    }
+
+    type MemberRow = {
+      id: string;
+      name: string;
+      slug: string;
+      province: string | null;
+      email: string | null;
+      procurement_info: Record<string, unknown> | null;
+    };
+    type ContactRow = {
+      id: string;
+      name: string | null;
+      role_title: string | null;
+      work_email: string | null;
+      email: string | null;
+      organization_id: string;
+    };
+
+    const memberIds = edges.map((e) => e.candidateOrgId);
+    const [memberResult, contactResult] = await Promise.all([
+      db
+        .from("organizations")
+        .select("id, name, slug, province, email, procurement_info")
+        .in("id", memberIds),
+      db
+        .from("contacts")
+        .select("id, name, role_title, work_email, email, organization_id")
+        .in("organization_id", memberIds)
+        .not("hidden", "eq", true)
+        .is("archived_at", null),
+    ]);
+
+    const memberById = new Map<string, MemberRow>(
+      ((memberResult.data ?? []) as unknown as MemberRow[]).map((m) => [m.id, m])
+    );
+    const contactById = new Map<string, ContactRow>();
+    const contactsByOrg = new Map<string, ContactRow[]>();
+    for (const c of (contactResult.data ?? []) as unknown as ContactRow[]) {
+      contactById.set(c.id, c);
+      const list = contactsByOrg.get(c.organization_id) ?? [];
+      list.push(c);
+      contactsByOrg.set(c.organization_id, list);
+    }
+
+    const toContact = (c: ContactRow): MarketContact => ({
+      id: c.id,
+      name: c.name ?? null,
+      roleTitle: c.role_title ?? null,
+      email: c.work_email || c.email || null,
+    });
+
+    const engineMatches: MarketMatch[] = edges
+      // A member archived since last night's run must not surface, even though
+      // the run legitimately included it.
+      .filter((e) => memberById.has(e.candidateOrgId))
+      .map((edge) => {
+        const member = memberById.get(edge.candidateOrgId)!;
+        const { category, subcategories } = categoryEvidence(edge.reasons);
+
+        // The buyer who owns that category at that store, from their own
+        // category_buyers mapping — the one piece the edge cannot carry,
+        // because it is a person and edges are org-grained by design.
+        const buyers = Array.isArray(member.procurement_info?.category_buyers)
+          ? (member.procurement_info!.category_buyers as { category?: string; contact_ids?: string[] }[])
+          : [];
+        const entry = buyers.find((b) => b.category === category);
+        let buyer: MarketContact | null = null;
+        for (const id of entry?.contact_ids ?? []) {
+          const c = contactById.get(id);
+          if (c) {
+            buyer = toContact(c);
+            break;
+          }
+        }
+
+        const orgContacts = contactsByOrg.get(edge.candidateOrgId) ?? [];
+        return {
+          orgId: edge.candidateOrgId,
+          orgName: member.name,
+          orgSlug: member.slug,
+          province: member.province ?? null,
+          matchingCategory: category,
+          matchingSubcategories: subcategories,
+          confidence: confidenceBucket(edge.total),
+          // ⚠️ Scale changed from the old 0–3 to the engine's 0–100. Safe: no
+          // component renders this field — it is ordering only, and the rows
+          // already arrive ordered.
+          score: edge.total,
+          buyer,
+          primaryContact: orgContacts[0] ? toContact(orgContacts[0]) : null,
+          publicEmail: member.email ?? null,
+        };
+      });
+
+    return {
+      success: true,
+      data: {
+        matches: engineMatches,
+        topMatches: engineMatches.slice(0, 10),
+        totalMatches: engineMatches.length,
+        withoutProcurementCount: withoutProcurement ?? 0,
+      },
+    };
+  }
+
+  // ── Fallback: the original inline scorer ─────────────────────────────────
+  // Kept deliberately, so a failed nightly job degrades to yesterday's behaviour
+  // rather than to an empty panel.
 
   // Fetch all active member orgs
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

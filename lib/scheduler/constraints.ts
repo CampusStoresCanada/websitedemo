@@ -1,3 +1,4 @@
+import { isBlackedOut } from "./blackout";
 import type {
   ConstraintViolation,
   DelegateProfile,
@@ -23,6 +24,12 @@ function pct(value: number, total: number): number {
 
 export function validateScheduleConstraints(input: ConstraintInput): SchedulerDiagnosticReport {
   const delegateById = new Map(input.delegates.map((delegate) => [delegate.registrationId, delegate]));
+  const exhibitorPartyByRegistration = new Map(
+    input.exhibitors.map((exhibitor) => [
+      exhibitor.registrationId,
+      { organizationId: exhibitor.organizationId, blackoutList: exhibitor.blackoutList },
+    ])
+  );
   const delegateMeetingCount = new Map<string, number>();
   const exhibitorMeetingCount = new Map<string, number>();
   const delegateSeenOrg = new Map<string, Set<string>>();
@@ -60,7 +67,11 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
       delegateMeetingCount.set(delegateId, (delegateMeetingCount.get(delegateId) ?? 0) + 1);
       coveredDelegateOrgs.add(delegate.organizationId);
 
-      if (delegate.blackoutList.includes(assignment.exhibitorOrganizationId)) {
+      // Two-way: either side declaring the other is a violation.
+      const exhibitorParty = exhibitorPartyByRegistration.get(
+        assignment.exhibitorRegistrationId
+      ) ?? { organizationId: assignment.exhibitorOrganizationId, blackoutList: [] };
+      if (isBlackedOut(delegate, exhibitorParty)) {
         violations.push({
           code: "BLACKOUT",
           severity: "hard",
@@ -69,6 +80,9 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
             delegateRegistrationId: delegateId,
             exhibitorOrganizationId: assignment.exhibitorOrganizationId,
             meetingSlotId: assignment.meetingSlotId,
+            declaredBy: delegate.blackoutList.includes(assignment.exhibitorOrganizationId)
+              ? "delegate"
+              : "exhibitor",
           },
         });
       }

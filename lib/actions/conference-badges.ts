@@ -3,9 +3,10 @@
 import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { resolveBadgeRun } from "@/lib/conference/badges/run";
 import {
   normalizeBadgeTemplateConfig,
-  type BadgeRole,
+  resolveBadgeVariant,
   type BadgeTextBindingKey,
   type BadgeFrontConfig,
 } from "@/lib/conference/badges/template";
@@ -66,18 +67,12 @@ type BadgePreflightIssue = {
   code:
     | "MISSING_CANONICAL_PERSON"
     | "MISSING_TEMPLATE"
+    | "ROSTER_LOAD_FAILED"
     | "TEXT_OVERFLOW";
   message: string;
   personId?: string;
 };
 
-function splitDisplayName(value: string): { firstName: string; lastName: string } {
-  const display = compactWhitespace(value);
-  if (!display) return { firstName: "", lastName: "" };
-  const parts = display.split(/\s+/);
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
-  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
-}
 
 function splitOrganizationSmart(orgName: string): { line1: string; line2: string } {
   const words = compactWhitespace(orgName).split(" ").filter(Boolean);
@@ -149,9 +144,6 @@ function bindingValue(params: {
   }
 }
 
-function roleForPersonKind(kind: string): BadgeRole {
-  return compactWhitespace(kind).toLowerCase() === "exhibitor" ? "exhibitor" : "delegate";
-}
 
 function personLabel(firstName: string, lastName: string, displayName: string, personId: string): string {
   const full = compactWhitespace(`${firstName} ${lastName}`);
@@ -168,29 +160,47 @@ async function runBadgePreflight(params: {
   const db = createAdminClient();
   const issues: BadgePreflightIssue[] = [];
 
-  const peopleQuery = db
-    .from("conference_people")
-    .select(
-      "id, canonical_person_id, person_kind, display_name, first_name, last_name, role_title, delegate_title, organization_name, badge_org_name, organization_id, badge_organization_id, city, province"
-    )
-    .eq("conference_id", params.conferenceId)
-    .neq("assignment_status", "canceled");
-  const peopleScoped =
-    params.personId && params.personId.trim().length > 0
-      ? await peopleQuery.eq("id", params.personId).limit(1)
-      : await peopleQuery;
-  const peopleRows = (peopleScoped.data as Array<Record<string, unknown>> | null) ?? [];
-  for (const row of peopleRows) {
-    const personId = typeof row.id === "string" ? row.id : undefined;
-    const canonicalPersonId =
-      typeof row.canonical_person_id === "string" && row.canonical_person_id.length > 0
-        ? row.canonical_person_id
-        : null;
-    if (!canonicalPersonId) {
+  // Every column named here must exist on conference_people. This select
+  // carried eight that the v3 cutover removed — first_name, last_name,
+  // delegate_title, organization_name, badge_org_name, badge_organization_id,
+  // city, province — and Postgres rejects the whole statement on the first of
+  // them. Because the result was read as `.data ?? []` with no error check,
+  // that hard failure surfaced as "0 people, 0 issues, preflight passed" on
+  // every run. Name and title resolve from `contacts`, org/city/province from
+  // `organizations`; the fallback chain below already preferred both sources.
+  // The roster is resolved in ONE place — lib/conference/badges/roster.ts. This
+  // function used to rebuild it inline: its own people query, its own contacts
+  // and organizations lookups, and its own `person_kind` → role mapping. That
+  // made four independent answers to "what kind of badge is this" across the
+  // print pipeline, and preflight was checking a different one than the PDF
+  // rendered.
+  let run: Awaited<ReturnType<typeof resolveBadgeRun>>;
+  try {
+    run = await resolveBadgeRun(params.conferenceId);
+  } catch (error) {
+    return [
+      {
+        code: "ROSTER_LOAD_FAILED",
+        message: error instanceof Error ? error.message : "Could not load the conference roster.",
+      },
+    ];
+  }
+  // Walk the run forwards: each type, then the seats somebody is named to. An
+  // unnamed seat has no text to overflow and no identity to be missing, so it
+  // is simply not a badge to check.
+  const entries = run.types.flatMap((type) =>
+    type.seats
+      .filter((seat) => seat.person)
+      .filter((seat) => !params.personId?.trim() || seat.person!.personId === params.personId)
+      .map((seat) => ({ type, person: seat.person! }))
+  );
+
+  for (const { person } of entries) {
+    if (!person.hasIdentityLink) {
       issues.push({
         code: "MISSING_CANONICAL_PERSON",
         message: "Conference person is missing canonical person linkage.",
-        personId,
+        personId: person.personId,
       });
     }
   }
@@ -229,105 +239,15 @@ async function runBadgePreflight(params: {
   // Resilient mode: overlay assets are optional. Renderer already handles null overlays.
   const template = normalizeBadgeTemplateConfig(configResult.data.field_mapping ?? null);
 
-  const canonicalIds = Array.from(
-    new Set(
-      peopleRows
-        .map((row) => (typeof row.canonical_person_id === "string" ? row.canonical_person_id : null))
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-  const orgIds = Array.from(
-    new Set(
-      peopleRows
-        .map((row) =>
-          typeof row.organization_id === "string"
-            ? row.organization_id
-            : typeof row.badge_organization_id === "string"
-              ? row.badge_organization_id
-              : null
-        )
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-
-  const canonicalById = new Map<string, { first_name: string | null; last_name: string | null; title: string | null }>();
-  if (canonicalIds.length > 0) {
-    const { data: canonicalRows } = await db
-      .from("contacts")
-      .select("id, first_name, last_name, title:role_title")
-      .in("id", canonicalIds);
-    for (const row of (canonicalRows as Array<Record<string, unknown>> | null) ?? []) {
-      if (typeof row.id !== "string") continue;
-      canonicalById.set(row.id, {
-        first_name: typeof row.first_name === "string" ? row.first_name : null,
-        last_name: typeof row.last_name === "string" ? row.last_name : null,
-        title: typeof row.title === "string" ? row.title : null,
-      });
-    }
-  }
-
-  const orgById = new Map<string, { name: string | null; city: string | null; province: string | null }>();
-  if (orgIds.length > 0) {
-    const { data: orgRows } = await db
-      .from("organizations")
-      .select("id, name, city, province")
-      .in("id", orgIds);
-    for (const row of (orgRows as Array<Record<string, unknown>> | null) ?? []) {
-      if (typeof row.id !== "string") continue;
-      orgById.set(row.id, {
-        name: typeof row.name === "string" ? row.name : null,
-        city: typeof row.city === "string" ? row.city : null,
-        province: typeof row.province === "string" ? row.province : null,
-      });
-    }
-  }
-
-  for (const row of peopleRows) {
-    const personId = typeof row.id === "string" ? row.id : null;
-    if (!personId) continue;
-    const role = roleForPersonKind(typeof row.person_kind === "string" ? row.person_kind : "");
-    const roleLayout = template.roleLayouts?.[role] ?? null;
-    const front: BadgeFrontConfig = roleLayout?.front ?? template.front;
-    const canonical =
-      typeof row.canonical_person_id === "string"
-        ? canonicalById.get(row.canonical_person_id) ?? null
-        : null;
-    const organizationId =
-      typeof row.organization_id === "string"
-        ? row.organization_id
-        : typeof row.badge_organization_id === "string"
-          ? row.badge_organization_id
-          : null;
-    const org = organizationId ? orgById.get(organizationId) ?? null : null;
-    const displayName = compactWhitespace(
-      typeof row.display_name === "string" ? row.display_name : ""
-    );
-    const rowFirst = compactWhitespace(typeof row.first_name === "string" ? row.first_name : "");
-    const rowLast = compactWhitespace(typeof row.last_name === "string" ? row.last_name : "");
-    const fallbackSplit = splitDisplayName(displayName);
-    const firstName = compactWhitespace(
-      canonical?.first_name || rowFirst || fallbackSplit.firstName
-    );
-    const lastName = compactWhitespace(
-      canonical?.last_name || rowLast || fallbackSplit.lastName
-    );
-    const roleTitle = compactWhitespace(
-      canonical?.title ||
-        (typeof row.role_title === "string" ? row.role_title : "") ||
-        (typeof row.delegate_title === "string" ? row.delegate_title : "")
-    );
-    const organizationName = compactWhitespace(
-      (typeof row.organization_name === "string" ? row.organization_name : "") ||
-        (typeof row.badge_org_name === "string" ? row.badge_org_name : "") ||
-        org?.name ||
-        ""
-    );
-    const city = compactWhitespace(
-      (typeof row.city === "string" ? row.city : "") || org?.city || ""
-    );
-    const province = compactWhitespace(
-      (typeof row.province === "string" ? row.province : "") || org?.province || ""
-    );
+  for (const entry of entries) {
+    const personId = entry.person.personId;
+    // The layout IS the registration type being iterated. Nothing is derived.
+    const { front } = resolveBadgeVariant(template, { variantKey: entry.type.entityId });
+    const { displayName, firstName, lastName, roleTitle } = entry.person;
+    const seat = entry.type.seats.find((s) => s.person?.personId === personId);
+    const organizationName = seat?.organizationName ?? "";
+    const city = seat?.organizationCity ?? "";
+    const province = seat?.organizationProvince ?? "";
     const orgSplit = splitOrganizationSmart(organizationName.toUpperCase());
     const computedFirst = front.firstName.allCaps ? firstName.toUpperCase() : firstName;
     const computedLast = front.lastName.allCaps ? lastName.toUpperCase() : lastName;

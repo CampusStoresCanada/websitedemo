@@ -211,6 +211,7 @@ function toExhibitorProfile(
     organizationId: row.organization_id,
     userId: row.user_id,
     primaryCategory: row.primary_category,
+    blackoutList: normalizeStringArray(row.blackout_list),
     secondaryCategories: normalizeStringArray(row.secondary_categories),
     buyingCyclesTargeted: normalizeStringArray(row.buying_cycles_targeted),
     meetingOutcomeIntent: normalizeStringArray(row.meeting_outcome_intent),

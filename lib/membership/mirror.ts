@@ -16,16 +16,26 @@ import { getProgramsConfig } from "@/lib/policy/engine";
  *
  * Direction of authority, as of Stage 3: membership *lifecycle status* is
  * owned by `memberships` and mirrored outward into `organizations` by
- * transition_membership_state(). These three fields go the other way —
- * they are still written to `organizations` first by the paths below, and
- * mirrored inward here. So this remains an additive, best-effort mirror:
- * it must never fail or block the authoritative `organizations` write that
+ * transition_membership_state(). These fields go the other way — they are
+ * still written to `organizations` first by the paths below, and mirrored
+ * inward here. So this remains an additive, best-effort mirror: it must
+ * never fail or block the authoritative `organizations` write that
  * precedes it, and every error is logged and swallowed rather than thrown.
+ *
+ * `expires_at` was added 2026-08-31. It was in the Stage 0 backfill but had
+ * no continuous writer afterwards — `transition_membership_state`'s source
+ * contains no reference to it, and `activateMembershipRenewal` (the only
+ * writer of `organizations.membership_expires_at`) never mirrored. So the
+ * column was write-once and drifted on every renewal payment: 7 rows by
+ * 2026-08-18, hand-backfilled, then 16 again by 2026-08-31. Mirroring it
+ * here is what stops that recurring.
  */
 export interface MembershipMirrorFields {
   fte?: number | null;
   is_cancoll_member?: boolean;
   cancoll_tier?: string | null;
+  /** ISO date (YYYY-MM-DD) — mirrors organizations.membership_expires_at. */
+  expires_at?: string | null;
 }
 
 export async function mirrorFieldsToMembership(

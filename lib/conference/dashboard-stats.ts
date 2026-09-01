@@ -48,7 +48,12 @@ const STAT_LABELS: Record<ConferenceStatKey, string> = {
 const COLLECTED_ORDER_STATUSES = ["paid", "partially_refunded"];
 
 /** A registration only counts once the delegate has committed to attending. */
-const COUNTED_REGISTRATION_STATUSES = new Set(["submitted", "confirmed"]);
+// v2 counted a registration once it reached submitted/confirmed. v3 has no
+// registration row to have a status: a person exists on the conference the
+// moment a seat is allocated to them, and "canceled" is the only state that
+// un-counts them. Everything else — assigned, pending_user_activation,
+// reassigned, unassigned — is a real, countable participant.
+const UNCOUNTED_ASSIGNMENT_STATUSES = new Set(["canceled"]);
 
 /**
  * Dues sold inside a conference checkout are membership revenue, not
@@ -139,8 +144,8 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
       .not("paid_at", "is", null),
 
     db
-      .from("conference_registrations")
-      .select("organization_id, registration_type, status, created_at")
+      .from("conference_people")
+      .select("organization_id, person_kind, assignment_status, created_at")
       .eq("conference_id", conferenceId),
   ]);
 
@@ -276,10 +281,10 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
   // Nothing else in this file or the widget needs to change.
 
   for (const registration of registrations) {
-    if (!COUNTED_REGISTRATION_STATUSES.has(registration.status)) continue;
+    if (UNCOUNTED_ASSIGNMENT_STATUSES.has(registration.assignment_status)) continue;
     const day = dayOf(registration.created_at);
     activityDays.push(day);
-    if (registration.registration_type === "delegate") addTo(delegatesByDay, day, 1);
+    if (registration.person_kind === "delegate") addTo(delegatesByDay, day, 1);
     noteOrg(registration.organization_id, day);
   }
 

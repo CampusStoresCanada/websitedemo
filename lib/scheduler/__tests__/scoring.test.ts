@@ -19,6 +19,7 @@ const exhibitor: ExhibitorProfile = {
   registrationId: "e1",
   organizationId: "org-e1",
   userId: "u-e1",
+  blackoutList: [],
   primaryCategory: "snacks",
   secondaryCategories: ["snacks", "coffee"],
   buyingCyclesTargeted: ["holiday"],

@@ -10,7 +10,7 @@ import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
 import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
-import { buildSuiteOrgAssignmentsBySuiteId, findDuplicateSuiteOrgAssignment } from "@/lib/conference/suite-assignment";
+import { buildSuiteOrgAssignmentsBySuiteId, reservedSuiteIds } from "@/lib/conference/suite-assignment";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -72,25 +72,21 @@ function formatTimeFromDate(date: Date): string {
 }
 
 /**
- * Suite→org assignment is just a plain entity attribute with no built-in
- * limit, so this is the one place that actually enforces "one org, one
- * suite" before a schedule can be generated — see suite-assignment.ts for
- * why that limit matters.
+ * Suite→org is DERIVED now (see lib/conference/inclusion.ts): the sale is
+ * recorded on the booth, and the booth includes the suite.
+ *
+ * This used to throw DUPLICATE_SUITE_ASSIGNMENT when an org held two suites,
+ * and told the admin to "unassign the extra suite in Build" — i.e. to clear the
+ * hand-typed copy that no longer exists. Both halves are gone: holding two
+ * suites is legal (it buys throughput, not time — see suite-assignment.ts), and
+ * the limit that matters (no delegate meets the same org twice) is a hard
+ * constraint inside the solver, where meetings are actually made.
  */
 async function buildSuiteOrgAssignments(
-  adminClient: ReturnType<typeof createAdminClient>,
+  _adminClient: ReturnType<typeof createAdminClient>,
   suites: Array<{ id: string; suite_number: number }>,
   suiteOrgAssignmentsBySuiteNumber: Record<string, string>
 ): Promise<Record<string, string>> {
-  const duplicate = findDuplicateSuiteOrgAssignment(suites, suiteOrgAssignmentsBySuiteNumber);
-  if (duplicate) {
-    const { data: org } = await adminClient.from("organizations").select("name").eq("id", duplicate.orgId).maybeSingle();
-    throw new Error(
-      `DUPLICATE_SUITE_ASSIGNMENT: ${org?.name ?? duplicate.orgId} is assigned to suites #${duplicate.suiteNumbers.join(", #")}. ` +
-        "An organization can only be pinned to one suite's meeting schedule, regardless of how many booths it purchased — " +
-        "unassign the extra suite(s) in Build before running the scheduler."
-    );
-  }
   return buildSuiteOrgAssignmentsBySuiteId(suites, suiteOrgAssignmentsBySuiteNumber);
 }
 
@@ -489,6 +485,8 @@ export async function createSchedulerDraftRun(
         feasibilityRelaxation: schedulingPolicy.feasibility_relaxation,
       },
       suitePinnedExhibitorBySuiteId,
+      // Booth holders' rooms stay theirs even when unstaffed. See generate.ts.
+      reservedSuiteIds: reservedSuiteIds(scaffolding.suiteOrgAssignmentsBySuiteId),
       seed: runSeed,
     });
 

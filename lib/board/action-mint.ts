@@ -428,3 +428,202 @@ export function rewriteMentions(html: string, directory: DirectoryEntry[]): stri
 
   return output;
 }
+
+// ─────────────────────────────────────────────────────────────────────────
+// Recap tags — READ AND REMOVE (see docs/BOARD_RECAP_POST_MINT.md)
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * `DECIDED:` / `OUTSTANDING:` / `NEXT MEETING:` lines are addressed to the
+ * machine, not to the board. Unlike `ACTION:` lines — which are durable, stay
+ * in the minutes forever, and are re-read on demand by the mint screen — these
+ * are CONSUMED: parsed once on save, moved onto the recap draft, and removed
+ * from the stored minutes.
+ *
+ * That makes this the only parser in this file that has to EDIT the minutes
+ * rather than flatten them, and it is why the removal below is deliberately
+ * conservative. A missed tag leaves a visible line in the minutes that a human
+ * can delete. An over-eager removal deletes the board's record of a meeting.
+ * When those two are the choices, always miss.
+ */
+
+export type RecapKind = "decided" | "outstanding" | "next_meeting";
+
+export interface RecapLine {
+  kind: RecapKind;
+  /** The line with its tag removed. HTML-stripped, mentions already canonical. */
+  text: string;
+  /** The whole line as written, tag included — traceability on the draft. */
+  raw: string;
+}
+
+export interface RecapParse {
+  lines: RecapLine[];
+  /** The minutes with every consumed tag element removed. */
+  strippedHtml: string;
+  /** What was removed, verbatim. The only surviving copy — store it. */
+  removedHtml: string;
+}
+
+/**
+ * `NEXT MEETING` is tested first: it is the only two-word tag, and testing a
+ * one-word tag first would never mis-fire but leaves the ordering looking
+ * accidental. Whitespace inside the tag is tolerated because `&nbsp;` between
+ * the words survives entity decoding as a plain space.
+ */
+const RECAP_PATTERNS: [RecapKind, RegExp][] = [
+  ["next_meeting", /^NEXT\s+MEETING\s*:\s*/i],
+  ["decided", /^DECIDED\s*:\s*/i],
+  ["outstanding", /^OUTSTANDING\s*:\s*/i],
+];
+
+function matchRecapTag(flatText: string): { kind: RecapKind; body: string } | null {
+  const trimmed = flatText.trim();
+  for (const [kind, pattern] of RECAP_PATTERNS) {
+    if (pattern.test(trimmed)) return { kind, body: trimmed.replace(pattern, "").trim() };
+  }
+  return null;
+}
+
+/** Block elements a tag line is plausibly wrapped in by the editor. */
+const BLOCK_TAGS = ["li", "p", "h1", "h2", "h3", "h4", "h5", "h6", "div"];
+
+interface BlockMatch {
+  start: number;
+  end: number;
+  html: string;
+  inner: string;
+}
+
+/**
+ * Every block element whose own text begins with a recap tag.
+ *
+ * Deliberately NOT "find the first tag and truncate to the end of the
+ * document" — that assumes the block is always last and always contiguous, and
+ * a stray footer or an interleaved tag would silently take real minutes with
+ * it. An element containing no tag is never touched.
+ */
+function findRecapBlocks(html: string): BlockMatch[] {
+  const found: BlockMatch[] = [];
+
+  for (const tag of BLOCK_TAGS) {
+    const re = new RegExp(`<${tag}\\b[^>]*>([\\s\\S]*?)</${tag}>`, "gi");
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(html)) !== null) {
+      const inner = m[1];
+      // Non-greedy matching cannot pair nested same-name tags, so a <div>
+      // wrapping other blocks is skipped and its inner blocks are matched
+      // instead. Without this a nested <div> would match up to the WRONG
+      // closing tag and removal would leave stray markup behind.
+      if (tag === "div" && /<(?:div|p|li|h[1-6])\b/i.test(inner)) continue;
+      if (!matchRecapTag(stripMinutesHtml(inner))) continue;
+      found.push({ start: m.index, end: m.index + m[0].length, html: m[0], inner });
+    }
+  }
+
+  // Innermost wins — a <li> inside a matched <div> should be the thing removed.
+  const innermost = found.filter(
+    (a) =>
+      !found.some(
+        (b) => b !== a && b.start >= a.start && b.end <= a.end && b.end - b.start < a.end - a.start
+      )
+  );
+
+  innermost.sort((a, b) => a.start - b.start);
+
+  // Any remaining overlap would corrupt the splice below.
+  const disjoint: BlockMatch[] = [];
+  for (const m of innermost) {
+    if (disjoint.length && m.start < disjoint[disjoint.length - 1].end) continue;
+    disjoint.push(m);
+  }
+  return disjoint;
+}
+
+/**
+ * Removing every `<li>` of a list leaves `<ul></ul>`, which renders as a stray
+ * gap. An empty list is never intentional, so it is safe to drop.
+ *
+ * Empty `<p>` is deliberately NOT cleaned up: blank paragraphs are real
+ * spacing in the minutes, and we never create one (whole elements are removed,
+ * not their contents).
+ */
+function dropEmptyLists(html: string): string {
+  const blank = "(?:\\s|&nbsp;|<br\\s*/?>)*";
+  let out = html;
+  for (let i = 0; i < 3; i++) {
+    const next = out.replace(new RegExp(`<(ul|ol)\\b[^>]*>${blank}</\\1>`, "gi"), "");
+    if (next === out) break;
+    out = next;
+  }
+  return out;
+}
+
+/** Minutes pasted as plain text, with no block markup around the tag lines. */
+function parsePlainTextRecap(source: string): RecapParse {
+  const kept: string[] = [];
+  const removed: string[] = [];
+  const lines: RecapLine[] = [];
+
+  for (const line of source.split(/\r?\n/)) {
+    const flat = stripMinutesHtml(line);
+    const tag = matchRecapTag(flat);
+    if (tag) {
+      lines.push({ kind: tag.kind, text: tag.body, raw: flat.trim() });
+      removed.push(line);
+    } else {
+      kept.push(line);
+    }
+  }
+
+  if (!lines.length) return { lines: [], strippedHtml: source, removedHtml: "" };
+
+  return {
+    lines,
+    strippedHtml: kept.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd(),
+    removedHtml: removed.join("\n"),
+  };
+}
+
+/**
+ * Pull the recap tags out of the minutes and hand back the minutes without
+ * them.
+ *
+ * Returns the source untouched when there is nothing to consume, so a caller
+ * can treat "no tags" as "change nothing" without a special case.
+ */
+export function parseRecapLines(minutesHtml: string): RecapParse {
+  const source = minutesHtml ?? "";
+  if (!source.trim()) return { lines: [], strippedHtml: source, removedHtml: "" };
+
+  const blocks = findRecapBlocks(source);
+  if (!blocks.length) return parsePlainTextRecap(source);
+
+  const lines: RecapLine[] = [];
+  for (const block of blocks) {
+    const flat = stripMinutesHtml(block.inner);
+    const tag = matchRecapTag(flat);
+    if (tag) lines.push({ kind: tag.kind, text: tag.body, raw: flat.trim() });
+  }
+
+  // Splice from the end so earlier offsets stay valid.
+  let stripped = source;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    stripped = stripped.slice(0, blocks[i].start) + stripped.slice(blocks[i].end);
+  }
+
+  return {
+    lines,
+    strippedHtml: dropEmptyLists(stripped),
+    removedHtml: blocks.map((b) => b.html).join(""),
+  };
+}
+
+/** Group parsed lines by kind, preserving document order within each. */
+export function groupRecapLines(lines: RecapLine[]): Record<RecapKind, RecapLine[]> {
+  return {
+    decided: lines.filter((l) => l.kind === "decided"),
+    outstanding: lines.filter((l) => l.kind === "outstanding"),
+    next_meeting: lines.filter((l) => l.kind === "next_meeting"),
+  };
+}

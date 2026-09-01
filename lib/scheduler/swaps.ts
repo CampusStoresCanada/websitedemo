@@ -1,3 +1,4 @@
+import { isBlackedOut } from "./blackout";
 import type { ScoreBreakdown, SwapAlternative, SwapCountMode } from "./types";
 
 interface CapCountRow {
@@ -56,15 +57,20 @@ export function buildWhyLowerReasons(
   return whyLower;
 }
 
+/**
+ * @deprecated Prefer `isBlackedOut` from ./blackout directly. Kept as a thin
+ * adapter so the swap call site and its tests keep their positional shape —
+ * the rule itself now lives in exactly one place.
+ */
 export function isTwoWayBlackout(
   delegateOrgId: string,
   delegateBlackoutList: string[],
   exhibitorOrgId: string,
   exhibitorBlackoutList: string[]
 ): boolean {
-  return (
-    delegateBlackoutList.includes(exhibitorOrgId) ||
-    exhibitorBlackoutList.includes(delegateOrgId)
+  return isBlackedOut(
+    { organizationId: delegateOrgId, blackoutList: delegateBlackoutList },
+    { organizationId: exhibitorOrgId, blackoutList: exhibitorBlackoutList }
   );
 }
 

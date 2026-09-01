@@ -3,6 +3,7 @@ import {
   exhibitorOrganizationByRegistration,
   validateScheduleConstraints,
 } from "./constraints";
+import { isBlackedOut } from "./blackout";
 import { breakTie, deterministicOrder } from "./tiebreak";
 import type {
   DelegateProfile,
@@ -21,6 +22,8 @@ interface GenerateInput {
   matchScores: MatchScoreRecord[];
   policy: SchedulingPolicy;
   suitePinnedExhibitorBySuiteId?: Record<string, string>;
+  /** Suites that belong to a booth holder — never handed to another exhibitor. */
+  reservedSuiteIds?: ReadonlySet<string>;
   seed: number;
 }
 
@@ -28,7 +31,8 @@ function selectActiveExhibitorsBySuite(
   exhibitors: ExhibitorProfile[],
   suiteIds: string[],
   seed: number,
-  suitePinnedExhibitorBySuiteId?: Record<string, string>
+  suitePinnedExhibitorBySuiteId?: Record<string, string>,
+  reservedSuiteIds?: ReadonlySet<string>
 ): Map<string, ExhibitorProfile> {
   const orderedSuites = [...suiteIds].sort((a, b) => a.localeCompare(b));
   const exhibitorById = new Map(exhibitors.map((row) => [row.registrationId, row] as const));
@@ -52,6 +56,16 @@ function selectActiveExhibitorsBySuite(
   let exhibitorIndex = 0;
   for (const suiteId of orderedSuites) {
     if (map.has(suiteId)) continue;
+    /**
+     * ⛔ A suite that belongs to somebody is never free-filled.
+     *
+     * It reaches here only when its holder had no spare exhibitor registration
+     * to staff it — an org running two suites with one person, or a booth holder
+     * with nobody registered. Without this the deterministic fill below would
+     * hand that room to the next exhibitor in line, i.e. seat a competitor in a
+     * booth someone else paid for. An empty room is the correct outcome.
+     */
+    if (reservedSuiteIds?.has(suiteId)) continue;
     if (exhibitorIndex >= orderedExhibitors.length) break;
     map.set(suiteId, orderedExhibitors[exhibitorIndex]);
     exhibitorIndex += 1;
@@ -95,9 +109,13 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     input.exhibitors,
     suiteIds,
     input.seed,
-    input.suitePinnedExhibitorBySuiteId
+    input.suitePinnedExhibitorBySuiteId,
+    input.reservedSuiteIds
   );
   const scoreByKey = scoreMap(input.matchScores);
+  const delegateById = new Map(
+    input.delegates.map((delegate) => [delegate.registrationId, delegate])
+  );
   const exhibitorOrgByRegistration = exhibitorOrganizationByRegistration(input.exhibitors);
 
   const delegateTargetMeetings = Math.ceil(suiteIds.length * input.policy.delegateCoveragePct);
@@ -123,8 +141,14 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     for (const delegateId of orderedDelegates) {
       if (selected.length >= input.policy.meetingGroupMax) break;
 
+      // Blackout is checked against the parties themselves, never against the
+      // score record. A score may rank a pairing; it may not authorise one.
+      // See lib/scheduler/blackout.ts.
+      const delegate = delegateById.get(delegateId);
+      if (!delegate || isBlackedOut(delegate, exhibitor)) continue;
+
       const score = scoreByKey.get(buildScoreKey(delegateId, exhibitor.registrationId));
-      if (!score || score.isBlackout || !Number.isFinite(score.totalScore)) continue;
+      if (!score || !Number.isFinite(score.totalScore)) continue;
 
       const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();
       if (seen.has(exhibitor.organizationId)) continue;
