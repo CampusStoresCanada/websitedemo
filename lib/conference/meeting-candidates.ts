@@ -2,7 +2,7 @@ import type { DelegateProfile, ExhibitorProfile } from "@/lib/scheduler/types";
 import { loadSeatHoldings, type SeatHolding } from "./seats";
 import { offerRequiresOwnershipOfEntityIds } from "./ownership-gate";
 import { resolveAccess } from "./entity-commerce";
-import { sessionMatchesMeetingWindow } from "./meeting-geometry";
+import { grantTypesForKinds } from "./entity-obligations";
 import { loadBlackoutListsByOrg } from "@/lib/org/meeting-refusals";
 
 /**
@@ -119,27 +119,37 @@ export async function loadMeetingCandidates(
   const notMatchable: string[] = [];
 
   /**
-   * The curated meeting blocks: sessions whose times ARE the day's meeting
-   * windows — the same windows the slots are generated from.
+   * Is this registration in the curated meetings? `meeting_access` says so.
+   *
+   * `ENTITY_KIND_TO_GRANT_TYPES` already declares `meeting: ["meeting_access"]`
+   * — the grant vocabulary built for badges and data obligations — and
+   * `grantTypesForKinds` is its reader, already used by person-agenda.ts. So the
+   * question is simply: does the access graph reach an entity of kind `meeting`.
+   *
+   * ⛔ I got here the long way, and every wrong turn was an invention:
+   *   1. "not an exhibitor means a delegate" — put three CSC staff, the
+   *      association that RUNS the conference, into supplier meetings as buyers
+   *   2. `organizations.type === "Member"` — a hardcode of a CSC-CONFIGURED
+   *      value (MembershipProgramDef maps org type to permission level)
+   *   3. `summarizeAccess().meetingDay` — true for anything on the meeting DAY,
+   *      and Tuesday also holds "Get Organized"; let all three straight back in
+   *   4. matching a session's start/end against the day's meeting windows — a
+   *      parser trick whose only purpose was to work around the Meeting Blocks
+   *      being stored as kind `session`, when the catalogue has had a `meeting`
+   *      kind all along: "A scheduled meeting slot — buyer/seller, board,
+   *      committee."
+   *
+   * The miskinded data was the bug. Those four were me routing around it
+   * instead of reading what had already been built.
    */
-  const meetingBlockIds = new Set(
-    [...entitiesById.values()]
-      .filter((e) => {
-        if (e.kind !== "session") return false;
-        const whenRef = e.refs.find((r) => r.role === "when");
-        const day = whenRef ? entitiesById.get(whenRef.toEntityId) : null;
-        return day ? sessionMatchesMeetingWindow(e.attributes, day.attributes) : false;
-      })
-      .map((e) => e.id)
-  );
-
-  // Memoised: many seats share one registration type, and the walk is the graph.
   const meetingParticipationByTypeId = new Map<string, boolean>();
   const participatesInMeetings = (entityId: string): boolean => {
     const cached = meetingParticipationByTypeId.get(entityId);
     if (cached !== undefined) return cached;
-    const reachable = resolveAccess([entityId], entitiesById);
-    const participates = [...meetingBlockIds].some((id) => reachable.has(id));
+    const reachableKinds = [...resolveAccess([entityId], entitiesById)]
+      .map((id) => entitiesById.get(id)?.kind)
+      .filter((kind): kind is string => Boolean(kind));
+    const participates = grantTypesForKinds(reachableKinds).includes("meeting_access");
     meetingParticipationByTypeId.set(entityId, participates);
     return participates;
   };
@@ -172,12 +182,6 @@ export async function loadMeetingCandidates(
      * excluded the $4,000 Exhibitor Staff Registration, while including the
      * Connected tier — the ED's "$4000 booths shouldn't get meetings" was
      * declared data before it was ever a rule in code.
-     *
-     * ⚠️ Reaching the meeting DAY is not enough, and that is the trap that got
-     * me on the first attempt: Tuesday also holds "Get Organized" (09:15–09:30)
-     * and "Move-in - Tuesday", both of which a Staff Registration reaches. It is
-     * the meeting WINDOWS that separate a curated meeting from something that
-     * merely happens that day — see sessionMatchesMeetingWindow.
      *
      * WHICH SIDE they sit on is the separate, already-solved question:
      * ownership-gate's "does this type require owning a booth".
