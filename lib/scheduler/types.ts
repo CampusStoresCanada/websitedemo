@@ -36,8 +36,8 @@ export interface ScoreBreakdown {
 }
 
 export interface MatchScoreRecord {
-  delegateRegistrationId: string;
-  exhibitorRegistrationId: string;
+  delegateSeatId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string;
   totalScore: number;
   breakdown: ScoreBreakdown;
@@ -64,9 +64,9 @@ export interface MeetingSlotInput {
 
 export interface ScheduleAssignment {
   meetingSlotId: string;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string;
-  delegateRegistrationIds: string[];
+  delegateSeatIds: string[];
   matchScoreKeys: string[];
 }
 
@@ -127,7 +127,7 @@ export type SwapCountMode = "requested" | "committed";
 
 export interface SwapAlternative {
   scheduleId: string;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string;
   score: number;
   scoreDeltaFromOriginal: number;
@@ -140,9 +140,9 @@ export interface SwapRequestSummary {
   id: string;
   conferenceId: string;
   schedulerRunId: string;
-  delegateRegistrationId: string;
+  delegateSeatId: string;
   dropScheduleId: string;
-  replacementExhibitorId: string | null;
+  replacementExhibitorSeatId: string | null;
   replacementScheduleId: string | null;
   status:
     | "requested"

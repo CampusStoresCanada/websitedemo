@@ -39,8 +39,8 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
 
   for (const assignment of input.assignments) {
     if (
-      assignment.delegateRegistrationIds.length < input.policy.meetingGroupMin ||
-      assignment.delegateRegistrationIds.length > input.policy.meetingGroupMax
+      assignment.delegateSeatIds.length < input.policy.meetingGroupMin ||
+      assignment.delegateSeatIds.length > input.policy.meetingGroupMax
     ) {
       violations.push({
         code: "GROUP_BOUNDS",
@@ -48,7 +48,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
         message: "Meeting group size is outside policy bounds",
         details: {
           meetingSlotId: assignment.meetingSlotId,
-          size: assignment.delegateRegistrationIds.length,
+          size: assignment.delegateSeatIds.length,
           min: input.policy.meetingGroupMin,
           max: input.policy.meetingGroupMax,
         },
@@ -56,11 +56,11 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
     }
 
     exhibitorMeetingCount.set(
-      assignment.exhibitorRegistrationId,
-      (exhibitorMeetingCount.get(assignment.exhibitorRegistrationId) ?? 0) + 1
+      assignment.exhibitorSeatId,
+      (exhibitorMeetingCount.get(assignment.exhibitorSeatId) ?? 0) + 1
     );
 
-    for (const delegateId of assignment.delegateRegistrationIds) {
+    for (const delegateId of assignment.delegateSeatIds) {
       const delegate = delegateById.get(delegateId);
       if (!delegate) continue;
 
@@ -69,7 +69,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
 
       // Two-way: either side declaring the other is a violation.
       const exhibitorParty = exhibitorPartyByRegistration.get(
-        assignment.exhibitorRegistrationId
+        assignment.exhibitorSeatId
       ) ?? { organizationId: assignment.exhibitorOrganizationId, blackoutList: [] };
       if (isBlackedOut(delegate, exhibitorParty)) {
         violations.push({
@@ -77,7 +77,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
           severity: "hard",
           message: "Blackout violation detected",
           details: {
-            delegateRegistrationId: delegateId,
+            delegateSeatId: delegateId,
             exhibitorOrganizationId: assignment.exhibitorOrganizationId,
             meetingSlotId: assignment.meetingSlotId,
             declaredBy: delegate.blackoutList.includes(assignment.exhibitorOrganizationId)
@@ -94,7 +94,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
           severity: "hard",
           message: "Delegate was assigned duplicate exhibitor organization",
           details: {
-            delegateRegistrationId: delegateId,
+            delegateSeatId: delegateId,
             exhibitorOrganizationId: assignment.exhibitorOrganizationId,
           },
         });
@@ -117,7 +117,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
       message: "One or more delegates are below target meetings",
       details: {
         target: input.delegateTargetMeetings,
-        delegateRegistrationIds: delegatesBelowTarget,
+        delegateSeatIds: delegatesBelowTarget,
       },
     });
   }
@@ -136,7 +136,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
       message: "One or more exhibitors are below target meetings",
       details: {
         target: input.exhibitorTargetMeetings,
-        exhibitorRegistrationIds: exhibitorsBelowTarget,
+        exhibitorSeatIds: exhibitorsBelowTarget,
       },
     });
   }
@@ -187,12 +187,12 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
   };
 }
 
-export function buildScoreKey(delegateRegistrationId: string, exhibitorRegistrationId: string): string {
-  return `${delegateRegistrationId}:${exhibitorRegistrationId}`;
+export function buildScoreKey(delegateSeatId: string, exhibitorSeatId: string): string {
+  return `${delegateSeatId}:${exhibitorSeatId}`;
 }
 
-export function isScoreKeyForExhibitor(scoreKey: string, exhibitorRegistrationId: string): boolean {
-  return scoreKey.endsWith(`:${exhibitorRegistrationId}`);
+export function isScoreKeyForExhibitor(scoreKey: string, exhibitorSeatId: string): boolean {
+  return scoreKey.endsWith(`:${exhibitorSeatId}`);
 }
 
 export function exhibitorOrganizationByRegistration(

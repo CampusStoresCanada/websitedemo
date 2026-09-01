@@ -43,7 +43,7 @@ function assignmentLabel(assignment: ScheduleOpsAssignment | undefined): string 
 
 function assignmentSignature(assignment: ScheduleOpsAssignment | undefined): string {
   if (!assignment) return "";
-  return `${assignment.exhibitorRegistrationId}|${[...assignment.delegateRegistrationIds]
+  return `${assignment.exhibitorSeatId}|${[...assignment.delegateSeatIds]
     .sort()
     .join(",")}`;
 }

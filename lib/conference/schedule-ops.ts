@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadSeatHoldings } from "./seats";
 import type { Json } from "@/lib/database.types";
 
 export type ScheduleOpsRun = {
@@ -36,9 +37,9 @@ export type ScheduleOpsAssignment = {
   suiteId: string;
   dayNumber: number;
   slotNumber: number;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationName: string;
-  delegateRegistrationIds: string[];
+  delegateSeatIds: string[];
   delegateNames: string[];
   status: string;
   isManual: boolean;
@@ -90,18 +91,10 @@ type ScheduleRow = {
   id: string;
   scheduler_run_id: string;
   meeting_slot_id: string;
-  exhibitor_registration_id: string;
-  delegate_registration_ids: string[] | null;
+  exhibitor_seat_id: string;
+  delegate_seat_ids: string[] | null;
   status: string;
   is_manual: boolean | null;
-};
-
-type RegistrationRow = {
-  id: string;
-  registration_type: string;
-  delegate_name: string | null;
-  legal_name: string | null;
-  organization_id: string | null;
 };
 
 type OrganizationRow = {
@@ -109,13 +102,6 @@ type OrganizationRow = {
   name: string;
 };
 
-function displayNameFromRegistration(row: RegistrationRow): string {
-  return (
-    row.delegate_name?.trim() ||
-    row.legal_name?.trim() ||
-    row.id
-  );
-}
 
 export async function loadScheduleOpsSummary(
   conferenceId: string,
@@ -178,7 +164,7 @@ export async function loadScheduleOpsSummary(
     const { data: schedulesData } = await adminClient
       .from("schedules")
       .select(
-        "id, scheduler_run_id, meeting_slot_id, exhibitor_registration_id, delegate_registration_ids, status, is_manual"
+        "id, scheduler_run_id, meeting_slot_id, exhibitor_seat_id, delegate_seat_ids, status, is_manual"
       )
       .eq("conference_id", conferenceId)
       .in("scheduler_run_id", runIdsToLoad)
@@ -186,33 +172,26 @@ export async function loadScheduleOpsSummary(
     schedules = (schedulesData ?? []) as ScheduleRow[];
   }
 
-  const exhibitorRegistrationIds = Array.from(
-    new Set(schedules.map((row) => row.exhibitor_registration_id).filter(Boolean))
-  );
-  const delegateRegistrationIds = Array.from(
-    new Set(
-      schedules.flatMap((row) => row.delegate_registration_ids ?? []).filter(Boolean)
-    )
-  );
-  const registrationIds = Array.from(
-    new Set([...exhibitorRegistrationIds, ...delegateRegistrationIds])
+  const exhibitorSeatIds = Array.from(
+    new Set(schedules.map((row) => row.exhibitor_seat_id).filter(Boolean))
   );
 
-  let registrations: RegistrationRow[] = [];
-  if (registrationIds.length > 0) {
-    const { data: registrationsData } = await adminClient
-      .from("conference_registrations")
-      .select("id, registration_type, delegate_name, legal_name, organization_id")
-      .in("id", registrationIds);
-    registrations = (registrationsData ?? []) as RegistrationRow[];
-  }
-  const registrationById = new Map(registrations.map((row) => [row.id, row] as const));
+  /**
+   * Seats, not registrations. These ids ARE seat ids now, and the seat carries
+   * its holder's name and the type it is for — so the name-and-org join that
+   * used to hit conference_registrations (0 rows, no writer) is one call to the
+   * canonical reader.
+   */
+  const { seats } = await loadSeatHoldings(adminClient, {
+    conferenceId,
+    entityKinds: ["registration"],
+  });
+  const seatById = new Map(seats.map((seat) => [seat.seatId, seat] as const));
 
   const exhibitorOrgIds = Array.from(
     new Set(
-      registrations
-        .filter((row) => row.registration_type === "exhibitor")
-        .map((row) => row.organization_id)
+      exhibitorSeatIds
+        .map((id) => seatById.get(id)?.organizationId)
         .filter((value): value is string => Boolean(value))
     )
   );
@@ -232,16 +211,15 @@ export async function loadScheduleOpsSummary(
   const mapAssignment = (row: ScheduleRow): ScheduleOpsAssignment | null => {
     const slot = slotById.get(row.meeting_slot_id);
     if (!slot) return null;
-    const exhibitorReg = registrationById.get(row.exhibitor_registration_id);
+    const exhibitorSeat = seatById.get(row.exhibitor_seat_id);
     const exhibitorOrgName =
-      (exhibitorReg?.organization_id
-        ? organizationById.get(exhibitorReg.organization_id)?.name
+      (exhibitorSeat?.organizationId
+        ? organizationById.get(exhibitorSeat.organizationId)?.name
         : null) ?? "Unknown exhibitor";
-    const delegateIds = row.delegate_registration_ids ?? [];
-    const delegateNames = delegateIds.map((id) => {
-      const reg = registrationById.get(id);
-      return reg ? displayNameFromRegistration(reg) : id;
-    });
+    const delegateIds = row.delegate_seat_ids ?? [];
+    const delegateNames = delegateIds.map(
+      (id) => seatById.get(id)?.holderName?.trim() || id
+    );
 
     return {
       id: row.id,
@@ -250,9 +228,9 @@ export async function loadScheduleOpsSummary(
       suiteId: slot.suite_id,
       dayNumber: slot.day_number,
       slotNumber: slot.slot_number,
-      exhibitorRegistrationId: row.exhibitor_registration_id,
+      exhibitorSeatId: row.exhibitor_seat_id,
       exhibitorOrganizationName: exhibitorOrgName,
-      delegateRegistrationIds: delegateIds,
+      delegateSeatIds: delegateIds,
       delegateNames,
       status: row.status,
       isManual: row.is_manual === true,

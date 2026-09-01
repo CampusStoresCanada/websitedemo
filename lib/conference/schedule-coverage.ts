@@ -46,8 +46,8 @@ export function computeCoverage(
   const totalCells = slots.length;
   const filledCells = slots.filter((s) => filledSlotIds.has(s.id)).length;
 
-  const scheduledExhibitorIds = new Set(assignments.map((a) => a.exhibitorRegistrationId));
-  const scheduledDelegateIds = new Set(assignments.flatMap((a) => a.delegateRegistrationIds));
+  const scheduledExhibitorIds = new Set(assignments.map((a) => a.exhibitorSeatId));
+  const scheduledDelegateIds = new Set(assignments.flatMap((a) => a.delegateSeatIds));
 
   const suiteMap = new Map<string, { filled: number; total: number }>();
   for (const slot of slots) {
@@ -63,7 +63,7 @@ export function computeCoverage(
     emptyCells: totalCells - filledCells,
     fillPct: totalCells > 0 ? Math.round((filledCells / totalCells) * 100) : 0,
     totalMeetings: assignments.length,
-    exhibitorOnlyMeetings: assignments.filter((a) => a.delegateRegistrationIds.length === 0).length,
+    exhibitorOnlyMeetings: assignments.filter((a) => a.delegateSeatIds.length === 0).length,
     unscheduledExhibitors: exhibitors.filter((e) => !scheduledExhibitorIds.has(e.registrationId)),
     unscheduledDelegates: delegates.filter((d) => !scheduledDelegateIds.has(d.registrationId)),
     suiteUtil: [...suiteMap.entries()].map(([suiteId, v]) => ({ suiteId, ...v })),

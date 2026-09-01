@@ -120,8 +120,8 @@ export function computeAllMatchScores(
     for (const exhibitor of exhibitors) {
       const result = computeMatchScore(delegate, exhibitor);
       scores.push({
-        delegateRegistrationId: delegate.registrationId,
-        exhibitorRegistrationId: exhibitor.registrationId,
+        delegateSeatId: delegate.registrationId,
+        exhibitorSeatId: exhibitor.registrationId,
         exhibitorOrganizationId: exhibitor.organizationId,
         totalScore: result.totalScore,
         breakdown: result.breakdown,

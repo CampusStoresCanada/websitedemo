@@ -1,7 +1,8 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
-import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
+import { loadSeatHoldings } from "@/lib/conference/seats";
+import { offerRequiresOwnershipOfEntityIds } from "@/lib/conference/ownership-gate";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
 import {
   getConferenceScheduleTimeline,
@@ -128,7 +129,7 @@ export async function loadPersonAgenda(
   const db = createAdminClient();
   const { data: person } = await db
     .from("conference_people")
-    .select("id, display_name, user_id, organization_id, registration_id, person_kind, contact_id")
+    .select("id, display_name, user_id, organization_id, person_kind, contact_id")
     .eq("id", personId)
     .eq("conference_id", conferenceId)
     .maybeSingle();
@@ -145,31 +146,46 @@ export async function loadPersonAgenda(
     return { success: false, error: "Not authorized to view this agenda." };
   }
 
-  const [{ data: seats }, { data: entityRows }, { data: refRows }] = await Promise.all([
-    db
-      .from("entity_balance_seats")
-      .select("entity_id")
-      .eq("conference_id", conferenceId)
-      .eq("holder_person_id", personId),
-    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
-    db
-      .from("conference_entity_refs")
-      .select("from_entity_id, to_entity_id, role, quantity")
-      .eq("conference_id", conferenceId),
-  ]);
+  /**
+   * One call, not three. This used to query entity_balance_seats,
+   * conference_entities and conference_entity_refs by hand and rebuild the graph
+   * — the twentieth such copy, which is the thing lib/conference/seats.ts exists
+   * to stop. It was on the eslint gate's grandfathered list; migrating it here
+   * means that exemption comes off.
+   */
+  const { seats, entitiesById: byId } = await loadSeatHoldings(db, {
+    conferenceId,
+    holderPersonId: personId,
+  });
 
-  const heldIds = new Set(
-    (seats ?? []).map((s) => s.entity_id).filter((id): id is string => !!id)
-  );
-  const byId = new Map(buildEntityGraph(entityRows ?? [], refRows ?? []).map((e) => [e.id, e]));
+  const heldIds = new Set(seats.map((s) => s.entityId));
   const entitled = resolveAccess(heldIds, byId);
 
-  // An exhibitor's meetings hang off their exhibitor registration; a delegate's
-  // off theirs. Getting this backwards shows someone an empty Meeting Block.
-  const meetingRole = person.person_kind === "exhibitor" ? "exhibitor" : "delegate";
+  /**
+   * Her meetings hang off the SEAT she is named to, not off a registration row.
+   *
+   * `conference_people.registration_id` used to carry this. It pointed at
+   * conference_registrations — 0 rows, no writer, the v2 person-monolith — so it
+   * was null for every person and the meeting query it fed could only ever
+   * return nothing.
+   *
+   * Which side of the table she sits on is a property of the TYPE she holds, not
+   * a label on her: an exhibiting registration is one that
+   * `requires_ownership_of` a booth. That is the same structural test the badge
+   * pipeline uses, and it survives a conference inventing a third kind of
+   * attendee — which `person_kind` (eight writers, all disagreeing) does not.
+   */
+  const meetingSeat = seats.find((s) => s.entityKind === "registration") ?? null;
+  const meetingSeatEntity = meetingSeat ? byId.get(meetingSeat.entityId) : null;
+  const isExhibitingSeat = meetingSeatEntity
+    ? offerRequiresOwnershipOfEntityIds(meetingSeatEntity.refs).some(
+        (id) => byId.get(id)?.kind === "booth"
+      )
+    : false;
+  const meetingRole = isExhibitingSeat ? "exhibitor" : "delegate";
   const timeline = await getConferenceScheduleTimeline(conferenceId, {
-    viewerRole: meetingRole === "exhibitor" ? "exhibitor" : "delegate",
-    viewerRegistrationId: person.registration_id,
+    viewerRole: meetingRole,
+    viewerSeatId: meetingSeat?.seatId ?? null,
     viewerMeetingRole: meetingRole,
   });
 

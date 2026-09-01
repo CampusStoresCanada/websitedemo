@@ -1,6 +1,7 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadSeatHoldings } from "./seats";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { deriveAgenda } from "@/lib/conference/agenda";
 
@@ -15,10 +16,10 @@ export interface ConferenceMeetingAssignment {
   scheduleId: string;
   schedulerRunId: string;
   meetingSlotId: string;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string | null;
   exhibitorName: string;
-  delegateRegistrationIds: string[];
+  delegateSeatIds: string[];
   dayNumber: number;
   slotNumber: number;
   suiteId: string;
@@ -78,7 +79,7 @@ export interface ConferenceScheduleTimeline {
 export interface ConferenceAttendeeMeetingRow {
   scheduleId: string;
   meetingSlotId: string;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string;
   exhibitorName: string;
   dayNumber: number;
@@ -129,7 +130,7 @@ export async function getConferenceScheduleTimeline(
   conferenceId: string,
   options: {
     viewerRole: ConferenceScheduleViewerRole;
-    viewerRegistrationId?: string | null;
+    viewerSeatId?: string | null;
     viewerMeetingRole?: "delegate" | "exhibitor";
   }
 ): Promise<ConferenceScheduleTimeline> {
@@ -224,19 +225,19 @@ export async function getConferenceScheduleTimeline(
     let scheduleQuery = ac
       .from("schedules")
       .select(
-        "id, scheduler_run_id, meeting_slot_id, exhibitor_registration_id, delegate_registration_ids, status"
+        "id, scheduler_run_id, meeting_slot_id, exhibitor_seat_id, delegate_seat_ids, status"
       )
       .eq("conference_id", conferenceId)
       .eq("scheduler_run_id", activeRun.id)
       .neq("status", "canceled");
 
-    if (options.viewerRole !== "admin" && options.viewerRegistrationId) {
+    if (options.viewerRole !== "admin" && options.viewerSeatId) {
       if (viewerMeetingRole === "delegate") {
-        scheduleQuery = scheduleQuery.contains("delegate_registration_ids", [options.viewerRegistrationId]);
+        scheduleQuery = scheduleQuery.contains("delegate_seat_ids", [options.viewerSeatId]);
       } else {
-        scheduleQuery = scheduleQuery.eq("exhibitor_registration_id", options.viewerRegistrationId);
+        scheduleQuery = scheduleQuery.eq("exhibitor_seat_id", options.viewerSeatId);
       }
-    } else if (options.viewerRole !== "admin" && !options.viewerRegistrationId) {
+    } else if (options.viewerRole !== "admin" && !options.viewerSeatId) {
       scheduleQuery = scheduleQuery.limit(0);
     }
 
@@ -244,7 +245,7 @@ export async function getConferenceScheduleTimeline(
     const rows = scheduleRows ?? [];
     const meetingSlotIds = [...new Set(rows.map((row) => row.meeting_slot_id).filter(Boolean))];
     const exhibitorRegIds = [
-      ...new Set(rows.map((row) => row.exhibitor_registration_id).filter(Boolean)),
+      ...new Set(rows.map((row) => row.exhibitor_seat_id).filter(Boolean)),
     ];
 
     const [{ data: meetingSlots }, { data: exhibitorRegs }] = (await Promise.all([
@@ -254,11 +255,18 @@ export async function getConferenceScheduleTimeline(
             .select("id, day_number, slot_number, start_time, end_time, suite_id")
             .in("id", meetingSlotIds)
         : Promise.resolve({ data: [] }),
+      /**
+       * Seat → org. The seat is the fact; conference_registrations has no
+       * writer. Through loadSeatHoldings rather than a direct read — a direct
+       * one is what the eslint gate exists to stop, and writing one here while
+       * porting AWAY from a duplicated store would be the same mistake twice.
+       */
       exhibitorRegIds.length > 0
-        ? ac
-            .from("conference_registrations")
-            .select("id, organization_id")
-            .in("id", exhibitorRegIds)
+        ? loadSeatHoldings(ac, { conferenceId }).then(({ seats }) => ({
+            data: seats
+              .filter((seat) => exhibitorRegIds.includes(seat.seatId))
+              .map((seat) => ({ id: seat.seatId, organization_id: seat.organizationId })),
+          }))
         : Promise.resolve({ data: [] }),
     ])) as [{ data: any[] | null }, { data: any[] | null }];
 
@@ -283,7 +291,7 @@ export async function getConferenceScheduleTimeline(
 
     for (const row of rows) {
       const slot = slotById.get(row.meeting_slot_id);
-      const exhibitorReg = exhibitorByRegId.get(row.exhibitor_registration_id);
+      const exhibitorReg = exhibitorByRegId.get(row.exhibitor_seat_id);
       if (!slot || !exhibitorReg) continue;
 
       const exhibitorOrg = exhibitorReg.organization_id
@@ -308,11 +316,11 @@ export async function getConferenceScheduleTimeline(
         scheduleId: row.id,
         schedulerRunId: row.scheduler_run_id,
         meetingSlotId: row.meeting_slot_id,
-        exhibitorRegistrationId: row.exhibitor_registration_id,
+        exhibitorSeatId: row.exhibitor_seat_id,
         exhibitorOrganizationId: exhibitorReg.organization_id ?? null,
         exhibitorName: exhibitorOrg?.name ?? "Unknown exhibitor",
-        delegateRegistrationIds: Array.isArray(row.delegate_registration_ids)
-          ? row.delegate_registration_ids
+        delegateSeatIds: Array.isArray(row.delegate_seat_ids)
+          ? row.delegate_seat_ids
           : [],
         dayNumber: Number(slot.day_number ?? 0),
         slotNumber: Number(slot.slot_number ?? 0),
@@ -374,7 +382,7 @@ export function buildAttendeeMeetingRows(
     .map((assignment) => ({
       scheduleId: assignment.scheduleId,
       meetingSlotId: assignment.meetingSlotId,
-      exhibitorRegistrationId: assignment.exhibitorRegistrationId,
+      exhibitorSeatId: assignment.exhibitorSeatId,
       exhibitorOrganizationId: assignment.exhibitorOrganizationId ?? "",
       exhibitorName: assignment.exhibitorName,
       dayNumber: assignment.dayNumber,

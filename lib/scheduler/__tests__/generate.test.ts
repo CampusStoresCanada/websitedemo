@@ -138,7 +138,7 @@ describe("generateSchedule", () => {
     });
 
     const d2Assignments = result.assignments.filter((assignment) =>
-      assignment.delegateRegistrationIds.includes("d2")
+      assignment.delegateSeatIds.includes("d2")
     );
     const hasBlackout = d2Assignments.some((assignment) => assignment.exhibitorOrganizationId === "org-e1");
     expect(hasBlackout).toBe(false);

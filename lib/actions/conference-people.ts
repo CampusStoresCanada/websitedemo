@@ -33,7 +33,6 @@ type ConferencePersonRow = {
   organization_id: string;
   user_id: string | null;
   canonical_person_id: string | null;
-  registration_id: string | null;
   conference_staff_id: string | null;
   source_type: "registration" | "staff" | "manual";
   source_id: string;
@@ -217,7 +216,6 @@ export async function syncConferencePeopleIndex(
         organization_id: row.organization_id as string,
         user_id: userId,
         canonical_person_id: canonicalPersonId,
-        registration_id: row.id as string,
         conference_staff_id: null,
         source_type: "registration",
         source_id: row.id as string,
@@ -237,7 +235,6 @@ export async function syncConferencePeopleIndex(
         assignment_cutoff_at:
           (row.assignment_cutoff_at as string | null) ?? null,
         schedule_scope: scheduleScope,
-        schedule_registration_id: row.id as string,
         travel_mode: (row.travel_mode as string | null) ?? null,
         road_origin_address: (row.road_origin_address as string | null) ?? null,
         arrival_flight_details:
@@ -298,7 +295,6 @@ export async function syncConferencePeopleIndex(
         organization_id: staff.organization_id,
         user_id: userId,
         canonical_person_id: canonicalPersonId,
-        registration_id: staff.registration_id ?? null,
         conference_staff_id: staff.id,
         source_type: "staff",
         source_id: staff.id,
@@ -469,7 +465,6 @@ const OPS_EDITABLE_FIELDS = new Set([
   "reassigned_from_user_id",
   "assignment_cutoff_at",
   "schedule_scope",
-  "schedule_registration_id",
   "schedule_run_id",
   "hotel_name",
   "hotel_confirmation_code",
@@ -557,7 +552,7 @@ export async function applyCanonicalConferencePersonIdentityEdit(
   const { data: person, error: personError } = await db
     .from("conference_people")
     .select(
-      "id, conference_id, organization_id, user_id, canonical_person_id, registration_id, display_name, contact_email, role_title"
+      "id, conference_id, organization_id, user_id, canonical_person_id, display_name, contact_email, role_title"
     )
     .eq("id", personId)
     .maybeSingle();
@@ -644,19 +639,15 @@ export async function applyCanonicalConferencePersonIdentityEdit(
     }
   }
 
-  if (person.registration_id) {
-    const registrationPatch: Record<string, unknown> = { updated_at: nowIso };
-    if (nextDisplayName) {
-      registrationPatch.delegate_name = nextDisplayName;
-      registrationPatch.legal_name = nextDisplayName;
-    }
-    if (nextContactEmail) registrationPatch.delegate_email = nextContactEmail;
-    if (nextRoleTitle !== null) registrationPatch.delegate_title = nextRoleTitle;
-    await db
-      .from("conference_registrations")
-      .update(registrationPatch)
-      .eq("id", person.registration_id);
-  }
+  /**
+   * The write-back into conference_registrations (delegate_name, legal_name,
+   * delegate_email, delegate_title) is GONE with the column that reached it.
+   *
+   * It was mirroring identity into the v2 person-monolith — a table with 0 rows
+   * and no writer. `contacts` is the canonical identity store; conference_people
+   * carries the per-conference projection. Mirroring into a third place was the
+   * habit that made every one of these questions have three answers.
+   */
 
   const projectionPatch: Record<string, unknown> = { updated_at: nowIso };
   if (nextDisplayName) projectionPatch.display_name = nextDisplayName;

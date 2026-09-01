@@ -3,14 +3,13 @@
 import { requireAdmin, requireConferenceOpsAccess, requireSuperAdmin } from "@/lib/auth/guards";
 import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { loadBlackoutListsByOrg } from "@/lib/org/meeting-refusals";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
-import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId, reservedSuiteIds } from "@/lib/conference/suite-assignment";
+import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -249,79 +248,22 @@ async function ensureMeetingScaffolding(
   };
 }
 
+/**
+ * Candidate loading lives in lib/conference/meeting-candidates.ts so the swaps
+ * path builds its profiles from the same code. Only the scheduler's own
+ * precondition — you cannot solve with one side of the table empty — stays here.
+ */
 async function loadEligibleCandidates(conferenceId: string): Promise<{
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
 }> {
   const adminClient = createAdminClient();
-
-  // Schedulable candidates are the conference's submitted/confirmed registrations
-  // of the relevant type. (The old paid-product eligibility gate was retired with
-  // the v3 cutover — see docs/CONFERENCE_V2_BLUEPRINT.md.)
-  const [delegatesResult, exhibitorsResult] = await Promise.all([
-    adminClient
-      .from("conference_registrations")
-      .select(
-        "id, organization_id, user_id, category_responsibilities, buying_timeline, top_priorities, meeting_intent, purchasing_authority, top_5_preferences"
-      )
-      .eq("conference_id", conferenceId)
-      .in("status", ["submitted", "confirmed"])
-      .in("registration_type", ["delegate", "observer"]),
-    adminClient
-      .from("conference_registrations")
-      .select(
-        "id, organization_id, user_id, primary_category, secondary_categories, buying_cycles_targeted, meeting_outcome_intent, sales_readiness"
-      )
-      .eq("conference_id", conferenceId)
-      .in("status", ["submitted", "confirmed"])
-      .eq("registration_type", "exhibitor"),
-  ]);
-
-  if (delegatesResult.error) {
-    throw new Error(`Failed to load delegate candidates: ${delegatesResult.error.message}`);
-  }
-  if (exhibitorsResult.error) {
-    throw new Error(`Failed to load exhibitor candidates: ${exhibitorsResult.error.message}`);
-  }
-
-  // Refusals are standing org-to-org facts, loaded from org_meeting_refusals —
-  // NOT from the per-registration blackout_list they used to live in. That
-  // column was scoped to one registration for one conference, so a refusal
-  // expired every year unless someone retyped it. See lib/org/meeting-refusals.ts.
-  const refusalOrgIds = [
-    ...(delegatesResult.data ?? []).map((row) => row.organization_id),
-    ...(exhibitorsResult.data ?? []).map((row) => row.organization_id),
-  ].filter((id): id is string => Boolean(id));
-  const blackoutByOrg = await loadBlackoutListsByOrg(refusalOrgIds);
-
-  const delegates: DelegateProfile[] = (delegatesResult.data ?? []).map((row) => ({
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    categoryResponsibilities: normalizeStringArray(row.category_responsibilities),
-    buyingTimeline: normalizeStringArray(row.buying_timeline),
-    topPriorities: normalizeStringArray(row.top_priorities),
-    meetingIntent: normalizeStringArray(row.meeting_intent),
-    purchasingAuthority: row.purchasing_authority,
-    top5Preferences: normalizeStringArray(row.top_5_preferences),
-    blackoutList: blackoutByOrg.get(row.organization_id) ?? [],
-  }));
-
-  const exhibitors: ExhibitorProfile[] = (exhibitorsResult.data ?? []).map((row) => ({
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    primaryCategory: row.primary_category,
-    secondaryCategories: normalizeStringArray(row.secondary_categories),
-    buyingCyclesTargeted: normalizeStringArray(row.buying_cycles_targeted),
-    meetingOutcomeIntent: normalizeStringArray(row.meeting_outcome_intent),
-    salesReadiness: normalizeSalesReadiness(row.sales_readiness),
-    blackoutList: blackoutByOrg.get(row.organization_id) ?? [],
-  }));
+  const { delegates, exhibitors, seatById } = await loadMeetingCandidates(adminClient, conferenceId);
 
   if (delegates.length === 0 || exhibitors.length === 0) {
     throw new Error(
-      "INSUFFICIENT_ACTIVE_REGISTRATIONS: paid order metadata did not resolve to active delegate/exhibitor registrations."
+      `INSUFFICIENT_NAMED_SEATS: the scheduler needs at least one delegate and one exhibitor named to a registration seat. ` +
+        `Found ${delegates.length} delegate(s) and ${exhibitors.length} exhibitor(s) across ${seatById.size} named registration seat(s).`
     );
   }
 
@@ -441,8 +383,8 @@ export async function createSchedulerDraftRun(
     const persistedScoreInput = matchScores.map((score) => ({
       conference_id: conferenceId,
       scheduler_run_id: runRow.id,
-      delegate_registration_id: score.delegateRegistrationId,
-      exhibitor_registration_id: score.exhibitorRegistrationId,
+      delegate_seat_id: score.delegateSeatId,
+      exhibitor_seat_id: score.exhibitorSeatId,
       total_score: Number.isFinite(score.totalScore) ? score.totalScore : -999999,
       score_breakdown: score.breakdown as unknown as Json,
       match_reasons: score.reasons,
@@ -457,13 +399,13 @@ export async function createSchedulerDraftRun(
     const { data: persistedScores, error: persistedScoresError } = await adminClient
       .from("match_scores")
       .insert(persistedScoreInput)
-      .select("id, delegate_registration_id, exhibitor_registration_id");
+      .select("id, delegate_seat_id, exhibitor_seat_id");
 
     if (persistedScoresError) throw new Error(persistedScoresError.message);
 
     const scoreIdByKey = new Map<string, string>();
     for (const row of persistedScores ?? []) {
-      scoreIdByKey.set(`${row.delegate_registration_id}:${row.exhibitor_registration_id}`, row.id);
+      scoreIdByKey.set(`${row.delegate_seat_id}:${row.exhibitor_seat_id}`, row.id);
     }
 
     const generateResult = generateSchedule({
@@ -539,8 +481,8 @@ export async function createSchedulerDraftRun(
         conference_id: conferenceId,
         scheduler_run_id: runRow.id,
         meeting_slot_id: assignment.meetingSlotId,
-        exhibitor_registration_id: assignment.exhibitorRegistrationId,
-        delegate_registration_ids: assignment.delegateRegistrationIds,
+        exhibitor_seat_id: assignment.exhibitorSeatId,
+        delegate_seat_ids: assignment.delegateSeatIds,
         match_score_ids: assignment.matchScoreKeys
           .map((key) => scoreIdByKey.get(key))
           .filter((id): id is string => Boolean(id)),

@@ -75,22 +75,22 @@ function selectActiveExhibitorsBySuite(
 
 function scoreMap(matchScores: MatchScoreRecord[]): Map<string, MatchScoreRecord> {
   return new Map(
-    matchScores.map((score) => [buildScoreKey(score.delegateRegistrationId, score.exhibitorRegistrationId), score])
+    matchScores.map((score) => [buildScoreKey(score.delegateSeatId, score.exhibitorSeatId), score])
   );
 }
 
 function delegateCandidateOrder(params: {
   delegateIds: string[];
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   scoreByKey: Map<string, MatchScoreRecord>;
   seed: number;
 }): string[] {
   return [...params.delegateIds].sort((left, right) => {
     const leftScore =
-      params.scoreByKey.get(buildScoreKey(left, params.exhibitorRegistrationId))?.totalScore ??
+      params.scoreByKey.get(buildScoreKey(left, params.exhibitorSeatId))?.totalScore ??
       Number.NEGATIVE_INFINITY;
     const rightScore =
-      params.scoreByKey.get(buildScoreKey(right, params.exhibitorRegistrationId))?.totalScore ??
+      params.scoreByKey.get(buildScoreKey(right, params.exhibitorSeatId))?.totalScore ??
       Number.NEGATIVE_INFINITY;
 
     if (leftScore !== rightScore) return rightScore - leftScore;
@@ -132,7 +132,7 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
 
     const orderedDelegates = delegateCandidateOrder({
       delegateIds: input.delegates.map((delegate) => delegate.registrationId),
-      exhibitorRegistrationId: exhibitor.registrationId,
+      exhibitorSeatId: exhibitor.registrationId,
       scoreByKey,
       seed: input.seed,
     });
@@ -172,9 +172,9 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
 
     assignments.push({
       meetingSlotId: slot.id,
-      exhibitorRegistrationId: exhibitor.registrationId,
+      exhibitorSeatId: exhibitor.registrationId,
       exhibitorOrganizationId: exhibitor.organizationId,
-      delegateRegistrationIds: selected,
+      delegateSeatIds: selected,
       matchScoreKeys: selected.map((delegateId) =>
         buildScoreKey(delegateId, exhibitor.registrationId)
       ),
@@ -188,23 +188,23 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
 
   for (const delegateId of delegatesBelowTarget) {
     const candidates = assignments
-      .filter((assignment) => assignment.delegateRegistrationIds.length < input.policy.meetingGroupMax)
+      .filter((assignment) => assignment.delegateSeatIds.length < input.policy.meetingGroupMax)
       .filter((assignment) => {
         const exhibitorOrgId =
-          exhibitorOrgByRegistration.get(assignment.exhibitorRegistrationId) ??
+          exhibitorOrgByRegistration.get(assignment.exhibitorSeatId) ??
           assignment.exhibitorOrganizationId;
         const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();
         if (seen.has(exhibitorOrgId)) return false;
 
-        const score = scoreByKey.get(buildScoreKey(delegateId, assignment.exhibitorRegistrationId));
+        const score = scoreByKey.get(buildScoreKey(delegateId, assignment.exhibitorSeatId));
         return Boolean(score && !score.isBlackout && Number.isFinite(score.totalScore));
       })
       .sort((left, right) => {
         const leftScore =
-          scoreByKey.get(buildScoreKey(delegateId, left.exhibitorRegistrationId))?.totalScore ??
+          scoreByKey.get(buildScoreKey(delegateId, left.exhibitorSeatId))?.totalScore ??
           Number.NEGATIVE_INFINITY;
         const rightScore =
-          scoreByKey.get(buildScoreKey(delegateId, right.exhibitorRegistrationId))?.totalScore ??
+          scoreByKey.get(buildScoreKey(delegateId, right.exhibitorSeatId))?.totalScore ??
           Number.NEGATIVE_INFINITY;
         if (leftScore !== rightScore) return rightScore - leftScore;
         return breakTie(input.seed, left.meetingSlotId, right.meetingSlotId);
@@ -213,8 +213,8 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
     for (const assignment of candidates) {
       if ((delegateMeetingCount.get(delegateId) ?? 0) >= delegateTargetMeetings) break;
 
-      assignment.delegateRegistrationIds.push(delegateId);
-      assignment.matchScoreKeys.push(buildScoreKey(delegateId, assignment.exhibitorRegistrationId));
+      assignment.delegateSeatIds.push(delegateId);
+      assignment.matchScoreKeys.push(buildScoreKey(delegateId, assignment.exhibitorSeatId));
 
       delegateMeetingCount.set(delegateId, (delegateMeetingCount.get(delegateId) ?? 0) + 1);
       const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();

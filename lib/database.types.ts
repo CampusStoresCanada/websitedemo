@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -1604,56 +1604,6 @@ export type Database = {
           },
         ]
       }
-      board_minutes_drafts: {
-        Row: {
-          batch_id: string | null
-          completed_at: string | null
-          consumed_at: string | null
-          created_at: string
-          data_json: Json | null
-          error: string | null
-          id: string
-          meeting_id: string
-          requested_by: string | null
-          requested_by_email: string | null
-          status: string
-        }
-        Insert: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Update: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id?: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
-            columns: ["meeting_id"]
-            isOneToOne: true
-            referencedRelation: "board_meetings"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       board_meetings: {
         Row: {
           agenda_html: string | null
@@ -1722,6 +1672,63 @@ export type Database = {
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_minutes_drafts: {
+        Row: {
+          batch_id: string | null
+          completed_at: string | null
+          consumed_at: string | null
+          created_at: string
+          data_json: Json | null
+          error: string | null
+          id: string
+          meeting_id: string
+          requested_by: string | null
+          requested_by_email: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Update: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id?: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_minutes_drafts_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -3000,12 +3007,15 @@ export type Database = {
       conference_checklist_tasks: {
         Row: {
           active: boolean
+          ask_from: string | null
           audience: string
           check_entity_id: string | null
           check_type: string
           checklist_id: string
           created_at: string
+          deadline_at: string | null
           description: string
+          hardens_because: string | null
           id: string
           name: string
           sort_order: number
@@ -3013,12 +3023,15 @@ export type Database = {
         }
         Insert: {
           active?: boolean
+          ask_from?: string | null
           audience?: string
           check_entity_id?: string | null
           check_type: string
           checklist_id: string
           created_at?: string
+          deadline_at?: string | null
           description: string
+          hardens_because?: string | null
           id?: string
           name: string
           sort_order?: number
@@ -3026,12 +3039,15 @@ export type Database = {
         }
         Update: {
           active?: boolean
+          ask_from?: string | null
           audience?: string
           check_entity_id?: string | null
           check_type?: string
           checklist_id?: string
           created_at?: string
+          deadline_at?: string | null
           description?: string
+          hardens_because?: string | null
           id?: string
           name?: string
           sort_order?: number
@@ -3344,11 +3360,13 @@ export type Database = {
       }
       conference_instances: {
         Row: {
+          badge_preprint_at: string | null
           board_decision_at: string | null
           booth_sales_general_open_at: string | null
           booth_sales_sponsor_open_at: string | null
           bursary_goal_cents: number | null
           cart_reservation_minutes: number
+          catering_cutoff: string | null
           created_at: string
           created_by: string | null
           documents: Json
@@ -3381,11 +3399,13 @@ export type Database = {
           year: number
         }
         Insert: {
+          badge_preprint_at?: string | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
+          catering_cutoff?: string | null
           created_at?: string
           created_by?: string | null
           documents?: Json
@@ -3418,11 +3438,13 @@ export type Database = {
           year: number
         }
         Update: {
+          badge_preprint_at?: string | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
           bursary_goal_cents?: number | null
           cart_reservation_minutes?: number
+          catering_cutoff?: string | null
           created_at?: string
           created_by?: string | null
           documents?: Json
@@ -3712,12 +3734,10 @@ export type Database = {
           person_kind: string
           preferred_departure_airport: string | null
           reassigned_from_user_id: string | null
-          registration_id: string | null
           registration_tier: string | null
           retention_sensitive_fields: string[]
           road_origin_address: string | null
           role_title: string | null
-          schedule_registration_id: string | null
           schedule_run_id: string | null
           schedule_scope: string
           seat_index: number | null
@@ -3765,12 +3785,10 @@ export type Database = {
           person_kind: string
           preferred_departure_airport?: string | null
           reassigned_from_user_id?: string | null
-          registration_id?: string | null
           registration_tier?: string | null
           retention_sensitive_fields?: string[]
           road_origin_address?: string | null
           role_title?: string | null
-          schedule_registration_id?: string | null
           schedule_run_id?: string | null
           schedule_scope?: string
           seat_index?: number | null
@@ -3818,12 +3836,10 @@ export type Database = {
           person_kind?: string
           preferred_departure_airport?: string | null
           reassigned_from_user_id?: string | null
-          registration_id?: string | null
           registration_tier?: string | null
           retention_sensitive_fields?: string[]
           road_origin_address?: string | null
           role_title?: string | null
-          schedule_registration_id?: string | null
           schedule_run_id?: string | null
           schedule_scope?: string
           seat_index?: number | null
@@ -3905,20 +3921,6 @@ export type Database = {
             columns: ["reassigned_from_user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_people_registration_id_fkey"
-            columns: ["registration_id"]
-            isOneToOne: false
-            referencedRelation: "conference_registrations"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "conference_people_schedule_registration_id_fkey"
-            columns: ["schedule_registration_id"]
-            isOneToOne: false
-            referencedRelation: "conference_registrations"
             referencedColumns: ["id"]
           },
           {
@@ -6242,6 +6244,13 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
+            foreignKeyName: "ghost_announcements_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: false
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "ghost_announcements_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
@@ -6748,12 +6757,146 @@ export type Database = {
           },
         ]
       }
+      match_edges: {
+        Row: {
+          breakdown: Json
+          candidate_org_id: string
+          confidence: number
+          created_at: string
+          direction: string
+          id: string
+          rank: number
+          reasons: Json
+          reasons_withheld: Json
+          run_id: string
+          score: number
+          subject_org_id: string
+          total: number
+        }
+        Insert: {
+          breakdown: Json
+          candidate_org_id: string
+          confidence: number
+          created_at?: string
+          direction: string
+          id?: string
+          rank: number
+          reasons: Json
+          reasons_withheld?: Json
+          run_id: string
+          score: number
+          subject_org_id: string
+          total: number
+        }
+        Update: {
+          breakdown?: Json
+          candidate_org_id?: string
+          confidence?: number
+          created_at?: string
+          direction?: string
+          id?: string
+          rank?: number
+          reasons?: Json
+          reasons_withheld?: Json
+          run_id?: string
+          score?: number
+          subject_org_id?: string
+          total?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_edges_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "match_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_org_id_fkey"
+            columns: ["subject_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_org_id_fkey"
+            columns: ["subject_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      match_runs: {
+        Row: {
+          completed_at: string | null
+          counts: Json | null
+          embedding_model: string | null
+          id: string
+          notes: string | null
+          promoted_at: string | null
+          promoted_by: string | null
+          resolver_version: string | null
+          started_at: string
+          status: string
+          weights: Json
+        }
+        Insert: {
+          completed_at?: string | null
+          counts?: Json | null
+          embedding_model?: string | null
+          id?: string
+          notes?: string | null
+          promoted_at?: string | null
+          promoted_by?: string | null
+          resolver_version?: string | null
+          started_at?: string
+          status?: string
+          weights: Json
+        }
+        Update: {
+          completed_at?: string | null
+          counts?: Json | null
+          embedding_model?: string | null
+          id?: string
+          notes?: string | null
+          promoted_at?: string | null
+          promoted_by?: string | null
+          resolver_version?: string | null
+          started_at?: string
+          status?: string
+          weights?: Json
+        }
+        Relationships: [
+          {
+            foreignKeyName: "match_runs_promoted_by_fkey"
+            columns: ["promoted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_scores: {
         Row: {
           conference_id: string
           created_at: string
-          delegate_registration_id: string
-          exhibitor_registration_id: string
+          delegate_seat_id: string
+          exhibitor_seat_id: string
           id: string
           is_blackout: boolean
           is_top_5: boolean
@@ -6765,8 +6908,8 @@ export type Database = {
         Insert: {
           conference_id: string
           created_at?: string
-          delegate_registration_id: string
-          exhibitor_registration_id: string
+          delegate_seat_id: string
+          exhibitor_seat_id: string
           id?: string
           is_blackout?: boolean
           is_top_5?: boolean
@@ -6778,8 +6921,8 @@ export type Database = {
         Update: {
           conference_id?: string
           created_at?: string
-          delegate_registration_id?: string
-          exhibitor_registration_id?: string
+          delegate_seat_id?: string
+          exhibitor_seat_id?: string
           id?: string
           is_blackout?: boolean
           is_top_5?: boolean
@@ -6797,17 +6940,17 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "match_scores_delegate_registration_id_fkey"
-            columns: ["delegate_registration_id"]
+            foreignKeyName: "match_scores_delegate_seat_id_fkey"
+            columns: ["delegate_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "match_scores_exhibitor_registration_id_fkey"
-            columns: ["exhibitor_registration_id"]
+            foreignKeyName: "match_scores_exhibitor_seat_id_fkey"
+            columns: ["exhibitor_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -7997,6 +8140,133 @@ export type Database = {
             columns: ["resolved_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      org_meeting_refusals: {
+        Row: {
+          created_at: string
+          declared_by_contact_id: string | null
+          declaring_org_id: string
+          first_declared_at: string
+          id: string
+          reaffirmed_at: string | null
+          reason: string | null
+          refused_org_id: string
+          retired_at: string | null
+          retired_by_contact_id: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          declared_by_contact_id?: string | null
+          declaring_org_id: string
+          first_declared_at?: string
+          id?: string
+          reaffirmed_at?: string | null
+          reason?: string | null
+          refused_org_id: string
+          retired_at?: string | null
+          retired_by_contact_id?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          declared_by_contact_id?: string | null
+          declaring_org_id?: string
+          first_declared_at?: string
+          id?: string
+          reaffirmed_at?: string | null
+          reason?: string | null
+          refused_org_id?: string
+          retired_at?: string | null
+          retired_by_contact_id?: string | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "org_meeting_refusals_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_org_id_fkey"
+            columns: ["declaring_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_org_id_fkey"
+            columns: ["declaring_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_refused_org_id_fkey"
+            columns: ["refused_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_refused_org_id_fkey"
+            columns: ["refused_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_retired_by_contact_id_fkey"
+            columns: ["retired_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_retired_by_contact_id_fkey"
+            columns: ["retired_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_retired_by_contact_id_fkey"
+            columns: ["retired_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_retired_by_contact_id_fkey"
+            columns: ["retired_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
         ]
@@ -9709,6 +9979,123 @@ export type Database = {
           },
         ]
       }
+      renewal_assignments: {
+        Row: {
+          assigned_at: string
+          assigned_by: string | null
+          assigned_to: string | null
+          id: string
+          organization_id: string
+          renewal_year: number
+          updated_at: string
+        }
+        Insert: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_to?: string | null
+          id?: string
+          organization_id: string
+          renewal_year: number
+          updated_at?: string
+        }
+        Update: {
+          assigned_at?: string
+          assigned_by?: string | null
+          assigned_to?: string | null
+          id?: string
+          organization_id?: string
+          renewal_year?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_assignments_assigned_by_fkey"
+            columns: ["assigned_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_assigned_to_fkey"
+            columns: ["assigned_to"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_assignments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      renewal_contact_log: {
+        Row: {
+          channel: string
+          contacted_at: string
+          contacted_by: string | null
+          created_at: string
+          id: string
+          note: string | null
+          organization_id: string
+          outcome: string
+          renewal_year: number
+        }
+        Insert: {
+          channel: string
+          contacted_at?: string
+          contacted_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id: string
+          outcome: string
+          renewal_year: number
+        }
+        Update: {
+          channel?: string
+          contacted_at?: string
+          contacted_by?: string | null
+          created_at?: string
+          id?: string
+          note?: string | null
+          organization_id?: string
+          outcome?: string
+          renewal_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_contact_log_contacted_by_fkey"
+            columns: ["contacted_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_contact_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_contact_log_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       renewal_events: {
         Row: {
           created_at: string
@@ -9799,6 +10186,61 @@ export type Database = {
           status?: string
         }
         Relationships: []
+      }
+      renewal_snapshots: {
+        Row: {
+          approved_at: string | null
+          approved_by: string | null
+          data_json: Json
+          id: string
+          meeting_id: string
+          pulled_at: string
+          pulled_by: string | null
+          renewal_year: number
+        }
+        Insert: {
+          approved_at?: string | null
+          approved_by?: string | null
+          data_json: Json
+          id?: string
+          meeting_id: string
+          pulled_at?: string
+          pulled_by?: string | null
+          renewal_year: number
+        }
+        Update: {
+          approved_at?: string | null
+          approved_by?: string | null
+          data_json?: Json
+          id?: string
+          meeting_id?: string
+          pulled_at?: string
+          pulled_by?: string | null
+          renewal_year?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "renewal_snapshots_approved_by_fkey"
+            columns: ["approved_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_snapshots_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "renewal_snapshots_pulled_by_fkey"
+            columns: ["pulled_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       retention_jobs: {
         Row: {
@@ -10044,8 +10486,8 @@ export type Database = {
         Row: {
           conference_id: string
           created_at: string
-          delegate_registration_ids: string[]
-          exhibitor_registration_id: string
+          delegate_seat_ids: string[]
+          exhibitor_seat_id: string
           id: string
           is_manual: boolean
           match_score_ids: string[] | null
@@ -10056,8 +10498,8 @@ export type Database = {
         Insert: {
           conference_id: string
           created_at?: string
-          delegate_registration_ids: string[]
-          exhibitor_registration_id: string
+          delegate_seat_ids: string[]
+          exhibitor_seat_id: string
           id?: string
           is_manual?: boolean
           match_score_ids?: string[] | null
@@ -10068,8 +10510,8 @@ export type Database = {
         Update: {
           conference_id?: string
           created_at?: string
-          delegate_registration_ids?: string[]
-          exhibitor_registration_id?: string
+          delegate_seat_ids?: string[]
+          exhibitor_seat_id?: string
           id?: string
           is_manual?: boolean
           match_score_ids?: string[] | null
@@ -10086,10 +10528,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "schedules_exhibitor_registration_id_fkey"
-            columns: ["exhibitor_registration_id"]
+            foreignKeyName: "schedules_exhibitor_seat_id_fkey"
+            columns: ["exhibitor_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -10296,6 +10738,234 @@ export type Database = {
           },
           {
             foreignKeyName: "shipments_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signal_affinity_rollup: {
+        Row: {
+          actor_count: number
+          computed_at: string
+          event_count: number
+          last_seen_at: string | null
+          object_org_id: string
+          organization_id: string
+          polarity: string
+          stance: string
+          weight: number
+        }
+        Insert: {
+          actor_count?: number
+          computed_at?: string
+          event_count: number
+          last_seen_at?: string | null
+          object_org_id: string
+          organization_id: string
+          polarity?: string
+          stance?: string
+          weight: number
+        }
+        Update: {
+          actor_count?: number
+          computed_at?: string
+          event_count?: number
+          last_seen_at?: string | null
+          object_org_id?: string
+          organization_id?: string
+          polarity?: string
+          stance?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_affinity_rollup_object_org_id_fkey"
+            columns: ["object_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_object_org_id_fkey"
+            columns: ["object_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signal_inbox: {
+        Row: {
+          actor_contact_id: string | null
+          actor_org_id: string | null
+          claimed_at: string | null
+          claimed_by: string | null
+          dedupe_key: string | null
+          id: string
+          kind: string
+          payload: Json
+          received_at: string
+        }
+        Insert: {
+          actor_contact_id?: string | null
+          actor_org_id?: string | null
+          claimed_at?: string | null
+          claimed_by?: string | null
+          dedupe_key?: string | null
+          id?: string
+          kind: string
+          payload: Json
+          received_at?: string
+        }
+        Update: {
+          actor_contact_id?: string | null
+          actor_org_id?: string | null
+          claimed_at?: string | null
+          claimed_by?: string | null
+          dedupe_key?: string | null
+          id?: string
+          kind?: string
+          payload?: Json
+          received_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_inbox_actor_contact_id_fkey"
+            columns: ["actor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_inbox_actor_contact_id_fkey"
+            columns: ["actor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_inbox_actor_contact_id_fkey"
+            columns: ["actor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_inbox_actor_contact_id_fkey"
+            columns: ["actor_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_inbox_actor_org_id_fkey"
+            columns: ["actor_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_inbox_actor_org_id_fkey"
+            columns: ["actor_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      signal_inbox_drains: {
+        Row: {
+          claimed_by: string
+          drained_at: string
+          id: string
+          newest_row_at: string | null
+          oldest_row_at: string | null
+          row_count: number
+        }
+        Insert: {
+          claimed_by: string
+          drained_at?: string
+          id?: string
+          newest_row_at?: string | null
+          oldest_row_at?: string | null
+          row_count: number
+        }
+        Update: {
+          claimed_by?: string
+          drained_at?: string
+          id?: string
+          newest_row_at?: string | null
+          oldest_row_at?: string | null
+          row_count?: number
+        }
+        Relationships: []
+      }
+      signal_term_rollup: {
+        Row: {
+          actor_count: number
+          computed_at: string
+          event_count: number
+          first_seen_at: string | null
+          last_seen_at: string | null
+          organization_id: string
+          polarity: string
+          stance: string
+          term: string
+          term_source: string
+          weight: number
+        }
+        Insert: {
+          actor_count?: number
+          computed_at?: string
+          event_count: number
+          first_seen_at?: string | null
+          last_seen_at?: string | null
+          organization_id: string
+          polarity?: string
+          stance?: string
+          term: string
+          term_source: string
+          weight: number
+        }
+        Update: {
+          actor_count?: number
+          computed_at?: string
+          event_count?: number
+          first_seen_at?: string | null
+          last_seen_at?: string | null
+          organization_id?: string
+          polarity?: string
+          stance?: string
+          term?: string
+          term_source?: string
+          weight?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "signal_term_rollup_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_term_rollup_organization_id_fkey"
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
@@ -10989,7 +11659,7 @@ export type Database = {
           created_at: string
           decided_at: string | null
           decided_by: string | null
-          delegate_registration_id: string
+          delegate_seat_id: string
           id: string
           reason: string | null
           requested_by: string
@@ -11002,7 +11672,7 @@ export type Database = {
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
-          delegate_registration_id: string
+          delegate_seat_id: string
           id?: string
           reason?: string | null
           requested_by: string
@@ -11015,7 +11685,7 @@ export type Database = {
           created_at?: string
           decided_at?: string | null
           decided_by?: string | null
-          delegate_registration_id?: string
+          delegate_seat_id?: string
           id?: string
           reason?: string | null
           requested_by?: string
@@ -11038,10 +11708,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "swap_cap_increase_requests_delegate_registration_id_fkey"
-            columns: ["delegate_registration_id"]
+            foreignKeyName: "swap_cap_increase_requests_delegate_seat_id_fkey"
+            columns: ["delegate_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -11061,11 +11731,11 @@ export type Database = {
           conference_id: string
           constraint_check_result: Json | null
           created_at: string
-          delegate_registration_id: string
+          delegate_seat_id: string
           drop_schedule_id: string
           id: string
           reason: string | null
-          replacement_exhibitor_id: string | null
+          replacement_exhibitor_seat_id: string | null
           replacement_schedule_id: string | null
           resolved_at: string | null
           scheduler_run_id: string
@@ -11079,11 +11749,11 @@ export type Database = {
           conference_id: string
           constraint_check_result?: Json | null
           created_at?: string
-          delegate_registration_id: string
+          delegate_seat_id: string
           drop_schedule_id: string
           id?: string
           reason?: string | null
-          replacement_exhibitor_id?: string | null
+          replacement_exhibitor_seat_id?: string | null
           replacement_schedule_id?: string | null
           resolved_at?: string | null
           scheduler_run_id: string
@@ -11097,11 +11767,11 @@ export type Database = {
           conference_id?: string
           constraint_check_result?: Json | null
           created_at?: string
-          delegate_registration_id?: string
+          delegate_seat_id?: string
           drop_schedule_id?: string
           id?: string
           reason?: string | null
-          replacement_exhibitor_id?: string | null
+          replacement_exhibitor_seat_id?: string | null
           replacement_schedule_id?: string | null
           resolved_at?: string | null
           scheduler_run_id?: string
@@ -11124,10 +11794,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "swap_requests_delegate_registration_id_fkey"
-            columns: ["delegate_registration_id"]
+            foreignKeyName: "swap_requests_delegate_seat_id_fkey"
+            columns: ["delegate_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -11138,10 +11808,10 @@ export type Database = {
             referencedColumns: ["id"]
           },
           {
-            foreignKeyName: "swap_requests_replacement_exhibitor_id_fkey"
-            columns: ["replacement_exhibitor_id"]
+            foreignKeyName: "swap_requests_replacement_exhibitor_seat_id_fkey"
+            columns: ["replacement_exhibitor_seat_id"]
             isOneToOne: false
-            referencedRelation: "conference_registrations"
+            referencedRelation: "entity_balance_seats"
             referencedColumns: ["id"]
           },
           {
@@ -12343,11 +13013,11 @@ export type Database = {
           conference_id: string
           constraint_check_result: Json | null
           created_at: string
-          delegate_registration_id: string
+          delegate_seat_id: string
           drop_schedule_id: string
           id: string
           reason: string | null
-          replacement_exhibitor_id: string | null
+          replacement_exhibitor_seat_id: string | null
           replacement_schedule_id: string | null
           resolved_at: string | null
           scheduler_run_id: string

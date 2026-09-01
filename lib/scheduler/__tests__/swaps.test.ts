@@ -48,7 +48,7 @@ describe("scheduler swaps helpers", () => {
     const ranked = rankSwapAlternatives([
       {
         scheduleId: "b",
-        exhibitorRegistrationId: "e2",
+        exhibitorSeatId: "e2",
         exhibitorOrganizationId: "org2",
         score: 80,
         scoreDeltaFromOriginal: -5,
@@ -66,7 +66,7 @@ describe("scheduler swaps helpers", () => {
       },
       {
         scheduleId: "a",
-        exhibitorRegistrationId: "e1",
+        exhibitorSeatId: "e1",
         exhibitorOrganizationId: "org1",
         score: 80,
         scoreDeltaFromOriginal: -5,
@@ -84,7 +84,7 @@ describe("scheduler swaps helpers", () => {
       },
       {
         scheduleId: "c",
-        exhibitorRegistrationId: "e3",
+        exhibitorSeatId: "e3",
         exhibitorOrganizationId: "org3",
         score: 88,
         scoreDeltaFromOriginal: -2,
