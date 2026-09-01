@@ -162,6 +162,7 @@ describe("generateSchedule honours blackouts in both directions", () => {
 describe("validateScheduleConstraints reports both directions", () => {
   it("flags an exhibitor-declared blackout and names who declared it", () => {
     const report = validateScheduleConstraints({
+      meetingSlots: slots,
       assignments: [
         {
           meetingSlotId: "s1",

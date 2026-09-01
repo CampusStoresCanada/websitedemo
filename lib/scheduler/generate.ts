@@ -125,11 +125,89 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
   const delegateMeetingCount = new Map<string, number>();
   const delegateSeenExhibitorOrg = new Map<string, Set<string>>();
 
+  /**
+   * ⛔ A person cannot be in two rooms at once.
+   *
+   * Slots in different suites SHARE (dayNumber, slotNumber) — slot 1 is 09:30 in
+   * every suite. Nothing tracked that, so with one exhibitor the schedule looked
+   * perfect and with two, every single delegate was booked into both suites at
+   * 09:30. The blackout / no-repeat-org / target checks all passed: none of them
+   * is about time.
+   */
+  const slotKeyOf = (slot: MeetingSlotInput) => `${slot.dayNumber}:${slot.slotNumber}`;
+  const delegateBusyAt = new Map<string, Set<string>>();
+  const slotById = new Map(input.meetingSlots.map((slot) => [slot.id, slot] as const));
+
   const assignments: ScheduleAssignment[] = [];
+
+  /**
+   * SPREAD A LIGHTLY-BOOKED EXHIBITOR ACROSS THE DAY.
+   *
+   * The loop walks slots in order and fills greedily, so an exhibitor with only
+   * enough demand for three meetings got slots 1, 2, 3 — three back-to-back
+   * meetings at 09:30 and then an empty room until 17:15. Correct, and a bad
+   * day for everyone in it.
+   *
+   * How many meetings a suite can actually hold is knowable before assigning:
+   * every delegate may meet an org once (DUPLICATE_EXHIBITOR_ORG), so it is
+   * ceil(eligible delegates / group max), capped by the slots the suite has.
+   * Take that many slots evenly spaced across the day instead of the first N.
+   *
+   * ⚠️ A CEILING, not a quota — the loop still skips a slot it cannot fill, so
+   * spreading never invents meetings. It only changes WHICH slots are offered.
+   */
+  const slotsBySuite = new Map<string, MeetingSlotInput[]>();
+  for (const slot of orderedSlots) {
+    const list = slotsBySuite.get(slot.suiteId) ?? [];
+    list.push(slot);
+    slotsBySuite.set(slot.suiteId, list);
+  }
+
+  /**
+   * ⚠️ STAGGER the spread per suite, or spreading makes coverage worse.
+   *
+   * Offering every suite the same evenly-spaced slots (1, 8, 16) puts all the
+   * lightly-booked exhibitors head-to-head at the same three times, and the
+   * delegates they both want can only be in one room. Measured: Merangue lost a
+   * meeting that way — two delegates never met them because both were sitting
+   * with Crestar at 15:00.
+   *
+   * A phase offset per suite means concurrent exhibitors are offered different
+   * times, so the same delegate can see both across the day.
+   */
+  const offeredSlotIds = new Set<string>();
+  const suiteOrder = [...slotsBySuite.keys()].sort((a, b) => a.localeCompare(b));
+  for (const [suiteId, suiteSlots] of slotsBySuite) {
+    const exhibitor = suiteToExhibitor.get(suiteId);
+    if (!exhibitor) continue;
+
+    const eligible = input.delegates.filter(
+      (delegate) => !isBlackedOut(delegate, exhibitor)
+    ).length;
+    const wanted = Math.min(
+      suiteSlots.length,
+      Math.ceil(eligible / Math.max(1, input.policy.meetingGroupMax))
+    );
+    if (wanted >= suiteSlots.length) {
+      for (const slot of suiteSlots) offeredSlotIds.add(slot.id);
+      continue;
+    }
+    // Evenly spaced, then phase-shifted by this suite's position so concurrent
+    // suites are offered different times rather than the same ones.
+    const step = suiteSlots.length / wanted;
+    const phase = suiteOrder.length > 1
+      ? (suiteOrder.indexOf(suiteId) / suiteOrder.length) * step
+      : 0;
+    for (let i = 0; i < wanted; i += 1) {
+      const index = Math.min(suiteSlots.length - 1, Math.floor(i * step + phase));
+      offeredSlotIds.add(suiteSlots[index].id);
+    }
+  }
 
   for (const slot of orderedSlots) {
     const exhibitor = suiteToExhibitor.get(slot.suiteId);
     if (!exhibitor) continue;
+    if (!offeredSlotIds.has(slot.id)) continue;
 
     const orderedDelegates = delegateCandidateOrder({
       delegateIds: input.delegates.map((delegate) => delegate.registrationId),
@@ -157,6 +235,9 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
       const meetings = delegateMeetingCount.get(delegateId) ?? 0;
       if (meetings >= delegateTargetMeetings) continue;
 
+      // Already in another suite at this time.
+      if (delegateBusyAt.get(delegateId)?.has(slotKeyOf(slot))) continue;
+
       selected.push(delegateId);
     }
 
@@ -169,6 +250,9 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
       const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();
       seen.add(exhibitor.organizationId);
       delegateSeenExhibitorOrg.set(delegateId, seen);
+      const busy = delegateBusyAt.get(delegateId) ?? new Set<string>();
+      busy.add(slotKeyOf(slot));
+      delegateBusyAt.set(delegateId, busy);
     }
 
     assignments.push({
@@ -197,6 +281,11 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
         const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();
         if (seen.has(exhibitorOrgId)) return false;
 
+        // The repair pass adds a person to an EXISTING group, so it has to
+        // respect the clock exactly like the main loop does.
+        const slot = slotById.get(assignment.meetingSlotId);
+        if (slot && delegateBusyAt.get(delegateId)?.has(slotKeyOf(slot))) return false;
+
         const score = scoreByKey.get(buildScoreKey(delegateId, assignment.exhibitorSeatId));
         return Boolean(score && !score.isBlackout && Number.isFinite(score.totalScore));
       })
@@ -221,11 +310,18 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
       const seen = delegateSeenExhibitorOrg.get(delegateId) ?? new Set<string>();
       seen.add(assignment.exhibitorOrganizationId);
       delegateSeenExhibitorOrg.set(delegateId, seen);
+      const repairSlot = slotById.get(assignment.meetingSlotId);
+      if (repairSlot) {
+        const busy = delegateBusyAt.get(delegateId) ?? new Set<string>();
+        busy.add(slotKeyOf(repairSlot));
+        delegateBusyAt.set(delegateId, busy);
+      }
     }
   }
 
   const diagnostics = validateScheduleConstraints({
     assignments,
+    meetingSlots: input.meetingSlots,
     delegates: input.delegates,
     exhibitors: input.exhibitors,
     delegateTargetMeetings,

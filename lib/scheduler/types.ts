@@ -80,6 +80,7 @@ export interface ConstraintViolation {
     | "ORG_COVERAGE"
     | "BLACKOUT"
     | "DUPLICATE_EXHIBITOR_ORG"
+    | "DELEGATE_DOUBLE_BOOKED"
     | "EXHIBITOR_WITHOUT_SUITE"
     | "POLICY_RELAXATION_DISABLED";
   severity: ConstraintSeverity;

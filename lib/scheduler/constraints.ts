@@ -1,5 +1,6 @@
 import { isBlackedOut } from "./blackout";
 import type {
+  MeetingSlotInput,
   ConstraintViolation,
   DelegateProfile,
   ExhibitorProfile,
@@ -10,6 +11,8 @@ import type {
 
 interface ConstraintInput {
   assignments: ScheduleAssignment[];
+  /** Needed to tell concurrent slots apart — slot N is the same time in every suite. */
+  meetingSlots: MeetingSlotInput[];
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
   delegateTargetMeetings: number;
@@ -23,6 +26,42 @@ function pct(value: number, total: number): number {
 }
 
 export function validateScheduleConstraints(input: ConstraintInput): SchedulerDiagnosticReport {
+  /**
+   * ⛔ HARD: nobody is in two rooms at once.
+   *
+   * Checked here as well as avoided in the generator, because the generator is
+   * not the only writer — the repair pass, swaps and manual assignment all edit
+   * assignments, and a schedule that puts a person in two suites at 09:30 is not
+   * a soft preference to weigh, it is impossible. It went unnoticed until a
+   * second exhibitor was named, at which point EVERY delegate was double-booked.
+   */
+  const slotTimeById = new Map(
+    input.meetingSlots.map((slot) => [slot.id, `${slot.dayNumber}:${slot.slotNumber}`] as const)
+  );
+  const delegateSlotTimes = new Map<string, Set<string>>();
+  const doubleBooked: Array<{ delegateId: string; when: string }> = [];
+  for (const assignment of input.assignments) {
+    const when = slotTimeById.get(assignment.meetingSlotId);
+    if (!when) continue;
+    for (const delegateId of assignment.delegateSeatIds) {
+      const seen = delegateSlotTimes.get(delegateId) ?? new Set<string>();
+      if (seen.has(when)) {
+        doubleBooked.push({ delegateId, when });
+      }
+      seen.add(when);
+      delegateSlotTimes.set(delegateId, seen);
+    }
+  }
+  const doubleBookingViolations: ConstraintViolation[] = doubleBooked.map(({ delegateId, when }) => {
+    const [dayNumber, slotNumber] = when.split(":");
+    return {
+      code: "DELEGATE_DOUBLE_BOOKED" as const,
+      severity: "hard" as const,
+      message: "A delegate is booked into two suites at the same time",
+      details: { delegateSeatId: delegateId, dayNumber: Number(dayNumber), slotNumber: Number(slotNumber) },
+    };
+  });
+
   const delegateById = new Map(input.delegates.map((delegate) => [delegate.registrationId, delegate]));
   const exhibitorPartyByRegistration = new Map(
     input.exhibitors.map((exhibitor) => [
@@ -35,7 +74,7 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
   const delegateSeenOrg = new Map<string, Set<string>>();
   const coveredDelegateOrgs = new Set<string>();
 
-  const violations: ConstraintViolation[] = [];
+  const violations: ConstraintViolation[] = [...doubleBookingViolations];
 
   for (const assignment of input.assignments) {
     if (
