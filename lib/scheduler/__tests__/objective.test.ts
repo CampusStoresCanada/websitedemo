@@ -10,11 +10,20 @@ const SLOTS: MeetingSlotInput[] = [
 ];
 
 const EXHIBITORS = new Map([["ex-1", { orgId: "partner-1", suiteId: "suite-a" }]]);
-const DELEGATE_ORGS = new Map([
-  ["d1", "member-1"],
-  ["d2", "member-2"],
-  ["d3", "member-3"],
-  ["d4", "member-4"],
+/** Four delegates, each from a DIFFERENT member store. */
+const DELEGATE_SEATS = new Map([
+  ["d1", { orgId: "member-1", contactId: null }],
+  ["d2", { orgId: "member-2", contactId: null }],
+  ["d3", { orgId: "member-3", contactId: null }],
+  ["d4", { orgId: "member-4", contactId: null }],
+]);
+
+/** Four delegates, ALL from the same store — the double-count case. */
+const ONE_STORE_SEATS = new Map([
+  ["d1", { orgId: "member-1", contactId: null }],
+  ["d2", { orgId: "member-1", contactId: null }],
+  ["d3", { orgId: "member-1", contactId: null }],
+  ["d4", { orgId: "member-1", contactId: null }],
 ]);
 
 /** Every member scores the same, so only structure moves the number. */
@@ -34,9 +43,9 @@ function value(assignments: ScheduleAssignment[]): number {
   return scoreSchedule({
     assignments,
     meetingSlots: SLOTS,
-    orgByDelegateSeatId: DELEGATE_ORGS,
+    delegateSeats: DELEGATE_SEATS,
     exhibitorSeats: EXHIBITORS,
-    totalFor: FLAT,
+    orgTotalFor: FLAT,
   }).value;
 }
 
@@ -65,9 +74,9 @@ describe("scoreSchedule — occupancy is TIME, not headcount", () => {
     const twos = scoreSchedule({
       assignments: [meeting("s1", ["d1", "d2"]), meeting("s2", ["d3", "d4"])],
       meetingSlots: SLOTS,
-      orgByDelegateSeatId: DELEGATE_ORGS,
+      delegateSeats: DELEGATE_SEATS,
       exhibitorSeats: EXHIBITORS,
-      totalFor: FLAT,
+      orgTotalFor: FLAT,
     });
     expect(twos.byExhibitor[0].occupancy).toBeCloseTo(0.5, 5);
     expect(twos.byExhibitor[0].slotsUsed).toBe(2);
@@ -77,9 +86,9 @@ describe("scoreSchedule — occupancy is TIME, not headcount", () => {
     const empty = scoreSchedule({
       assignments: [],
       meetingSlots: SLOTS,
-      orgByDelegateSeatId: DELEGATE_ORGS,
+      delegateSeats: DELEGATE_SEATS,
       exhibitorSeats: EXHIBITORS,
-      totalFor: FLAT,
+      orgTotalFor: FLAT,
     });
     expect(empty.value).toBe(0);
     expect(empty.overallOccupancy).toBe(0);
@@ -92,13 +101,74 @@ describe("scoreSchedule — occupancy is TIME, not headcount", () => {
     const unscored = scoreSchedule({
       assignments: [meeting("s1", ["d1", "d2"])],
       meetingSlots: SLOTS,
-      orgByDelegateSeatId: DELEGATE_ORGS,
+      delegateSeats: DELEGATE_SEATS,
       exhibitorSeats: EXHIBITORS,
-      totalFor: () => 0,
+      orgTotalFor: () => 0,
     });
     expect(unscored.value).toBe(0);
     // ...but the room was still occupied, which the report still says.
     expect(unscored.byExhibitor[0].occupancy).toBeCloseTo(0.25, 5);
+  });
+
+  it("⛔ counts an org edge ONCE PER ORG in the room, not once per body", () => {
+    /**
+     * The bug the match-scoring session found on review. Summing a blended
+     * per-delegate score counted one store's org edge once per person, so four
+     * people from the highest-scoring store were free score at no occupancy cost
+     * — the optimizer's best move became packing one store into every meeting,
+     * inverting the small-group result this objective exists to produce.
+     *
+     * An org edge is a claim about an ORG PAIR. Four bodies from one store are
+     * still one org in the room.
+     */
+    const fourFromOneStore = scoreSchedule({
+      assignments: [meeting("s1", ["d1", "d2", "d3", "d4"])],
+      meetingSlots: SLOTS,
+      delegateSeats: ONE_STORE_SEATS,
+      exhibitorSeats: EXHIBITORS,
+      orgTotalFor: FLAT,
+    });
+    const oneFromThatStore = scoreSchedule({
+      assignments: [meeting("s1", ["d1"])],
+      meetingSlots: SLOTS,
+      delegateSeats: ONE_STORE_SEATS,
+      exhibitorSeats: EXHIBITORS,
+      orgTotalFor: FLAT,
+    });
+    expect(fourFromOneStore.value).toBe(oneFromThatStore.value);
+
+    // ...whereas four DIFFERENT stores in the room really is four org facts.
+    const fourStores = scoreSchedule({
+      assignments: [meeting("s1", ["d1", "d2", "d3", "d4"])],
+      meetingSlots: SLOTS,
+      delegateSeats: DELEGATE_SEATS,
+      exhibitorSeats: EXHIBITORS,
+      orgTotalFor: FLAT,
+    });
+    expect(fourStores.value).toBeCloseTo(4 * oneFromThatStore.value, 5);
+  });
+
+  it("adds a person edge on top of the org prior, and 0 when absent", () => {
+    /**
+     * ⚠️ A missing ORG edge means computed-and-scored-zero (the top-50 cap never
+     * bound on the promoted run). A missing PERSON edge means never computed at
+     * that grain — unknown. So person absence adds nothing rather than asserting
+     * no affinity, which is why these are two terms and not a fallback chain.
+     */
+    const withContacts = new Map([
+      ["d1", { orgId: "member-1", contactId: "contact-1" }],
+      ["d2", { orgId: "member-1", contactId: null }],
+    ]);
+    const result = scoreSchedule({
+      assignments: [meeting("s1", ["d1", "d2"])],
+      meetingSlots: SLOTS,
+      delegateSeats: withContacts,
+      exhibitorSeats: EXHIBITORS,
+      orgTotalFor: FLAT,
+      personTotalFor: (contactId) => (contactId === "contact-1" ? 7 : 0),
+    });
+    // one org in the room (10) + one person edge (7), NOT 2 x 10 + 7
+    expect(result.byExhibitor[0].matchTotal).toBe(17);
   });
 
   it("reports occupancy across the whole floor, not just one suite", () => {
@@ -109,9 +179,9 @@ describe("scoreSchedule — occupancy is TIME, not headcount", () => {
     const result = scoreSchedule({
       assignments: [meeting("s1", ["d1"])],
       meetingSlots: twoSuites,
-      orgByDelegateSeatId: DELEGATE_ORGS,
+      delegateSeats: DELEGATE_SEATS,
       exhibitorSeats: EXHIBITORS,
-      totalFor: FLAT,
+      orgTotalFor: FLAT,
     });
     expect(result.overallOccupancy).toBeCloseTo(1 / 5, 5);
   });

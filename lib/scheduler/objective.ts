@@ -32,22 +32,72 @@ import type { MeetingSlotInput, ScheduleAssignment } from "./types";
  * never be the reason two orgs meet, and never the reason they don't. Wanting an
  * exclusion flag in here is the direction Steve explicitly ruled out.
  *
- * The score itself comes from `match_edges` on the promoted run (`total` =
- * matchTotal = fit discounted by coverage), looked up per (member org, partner
- * org). A missing edge is 0, not unknown — the engine drops genuine zeros.
+ * ⛔ EACH FACT IS COUNTED AT THE GRAIN IT WAS ASSERTED AT.
+ *
+ *   meetingScore(m, e) = Σ over DISTINCT member orgs in m:  orgEdge(org, e)
+ *                      + Σ over delegates in m:             personEdge(person, e) ?? 0
+ *
+ * The first version summed one blended score per delegate, which counted the org
+ * edge once per body. Four people from one store contributed that store's org
+ * fact four times — and because occupancy is time, adding the fourth body cost
+ * nothing. The optimizer's best move became packing four people from the
+ * highest-scoring store into every meeting: free score, no occupancy penalty,
+ * and it inverts the small-group result it is supposed to produce. Caught by the
+ * match-scoring session on review.
+ *
+ * So an org edge — a claim about an ORG PAIR — is counted once per org in the
+ * room. A person edge is additive per person on top of it. The org prior is
+ * never discarded, just never multiplied by headcount.
+ *
+ * ⚠️ THE SCORE IS A STEP FUNCTION, SO TIES WILL DOMINATE. Measured on the
+ * promoted run, member_to_partner: 989 edges, only 36 DISTINCT VALUES, and 387
+ * of them (39%) are the identical 41.80. Range 1.22–58.00.
+ *
+ * A search that ranks on this alone becomes arbitrary between runs on ~40% of
+ * pairs, which reads as instability to anyone diffing two runs of the same
+ * input. Any ordering built on the objective needs a deterministic secondary key
+ * — `breakTie(seed, …)` in ./tiebreak.ts, which the greedy already uses.
+ *
+ * ⛔ Maximize `total`, never `score`. `score` is raw fit that ignores how much we
+ * know: there are edges at score=100 with confidence=0.03 — one axis agreeing
+ * loudly and nothing else known about the pair. `total` is fit already
+ * discounted by coverage, and lands those at 41.80 rather than 100.
+ *
+ * ⚠️ Scales are not comparable across directions (partner_to_partner medians
+ * more than double member_to_partner). Never sum or threshold across them. This
+ * consumes member_to_partner only.
+ *
+ * ⚠️ "MISSING = 0" IS TRUE OF ORG EDGES AND NOT OF PERSON EDGES. On the promoted
+ * run every pair was computed and every nonzero one stored (the top-50 cap never
+ * bound), so a missing org edge means computed-and-scored-zero. A missing PERSON
+ * edge means never computed at person grain — unknown, not zero. Same word,
+ * different fact. Person absence therefore ADDS NOTHING rather than asserting
+ * no-affinity, which is why these are two terms and not a fallback chain.
  */
 
-/** (member org, partner org) → matchTotal. See lib/conference/meeting-match-scores.ts. */
-export type PairScoreLookup = (memberOrgId: string, partnerOrgId: string) => number;
+/** (member org, partner org) → matchTotal. Missing = 0, and that is exact. */
+export type OrgScoreLookup = (memberOrgId: string, partnerOrgId: string) => number;
+
+/**
+ * (member contact, partner org) → person-grain refinement, 0 when not computed.
+ *
+ * Deliberately buyer↔COMPANY, not buyer↔rep: CSC does not staff a partner's
+ * suite, so which rep works the booth is not ours to optimize over.
+ */
+export type PersonScoreLookup = (memberContactId: string, partnerOrgId: string) => number;
+
+export type DelegateSeatFacts = { orgId: string; contactId: string | null };
 
 export type ObjectiveInput = {
   assignments: ScheduleAssignment[];
   meetingSlots: MeetingSlotInput[];
-  /** Delegate seat → the member org they attend for. */
-  orgByDelegateSeatId: ReadonlyMap<string, string>;
+  /** Delegate seat → the member org they attend for, and who they are. */
+  delegateSeats: ReadonlyMap<string, DelegateSeatFacts>;
   /** Exhibitor seat → their partner org and the suite they sit in. */
   exhibitorSeats: ReadonlyMap<string, { orgId: string; suiteId: string }>;
-  totalFor: PairScoreLookup;
+  orgTotalFor: OrgScoreLookup;
+  /** Omit while person edges do not exist; it contributes 0. */
+  personTotalFor?: PersonScoreLookup;
 };
 
 export type ExhibitorTerm = {
@@ -65,8 +115,9 @@ export function exhibitorTerm(params: {
   exhibitorOrgId: string;
   assignments: ScheduleAssignment[];
   slotsAvailable: number;
-  orgByDelegateSeatId: ReadonlyMap<string, string>;
-  totalFor: PairScoreLookup;
+  delegateSeats: ReadonlyMap<string, DelegateSeatFacts>;
+  orgTotalFor: OrgScoreLookup;
+  personTotalFor?: PersonScoreLookup;
 }): ExhibitorTerm {
   const mine = params.assignments.filter(
     (a) => a.exhibitorSeatId === params.exhibitorSeatId
@@ -74,10 +125,19 @@ export function exhibitorTerm(params: {
 
   let matchTotal = 0;
   for (const assignment of mine) {
+    const orgsInTheRoom = new Set<string>();
     for (const delegateSeatId of assignment.delegateSeatIds) {
-      const memberOrgId = params.orgByDelegateSeatId.get(delegateSeatId);
-      if (!memberOrgId) continue;
-      matchTotal += params.totalFor(memberOrgId, params.exhibitorOrgId);
+      const seat = params.delegateSeats.get(delegateSeatId);
+      if (!seat) continue;
+      orgsInTheRoom.add(seat.orgId);
+      // Person grain: additive, and absent means "not computed", so it adds 0.
+      if (params.personTotalFor && seat.contactId) {
+        matchTotal += params.personTotalFor(seat.contactId, params.exhibitorOrgId);
+      }
+    }
+    // Org grain: once per ORG in the room, never once per body.
+    for (const memberOrgId of orgsInTheRoom) {
+      matchTotal += params.orgTotalFor(memberOrgId, params.exhibitorOrgId);
     }
   }
 
@@ -119,8 +179,9 @@ export function scoreSchedule(input: ObjectiveInput): ObjectiveResult {
         exhibitorOrgId: seat.orgId,
         assignments: input.assignments,
         slotsAvailable: slotCountBySuite.get(seat.suiteId) ?? 0,
-        orgByDelegateSeatId: input.orgByDelegateSeatId,
-        totalFor: input.totalFor,
+        delegateSeats: input.delegateSeats,
+        orgTotalFor: input.orgTotalFor,
+        personTotalFor: input.personTotalFor,
       })
     );
   }

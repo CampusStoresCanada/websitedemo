@@ -22,17 +22,35 @@ import { readMatchEdges } from "@/lib/match/read";
  */
 
 export type MeetingMatchScores = {
-  /** Member org → partner org → total. 0 when the engine had no edge. */
-  totalFor: (memberOrgId: string, partnerOrgId: string) => number;
+  /**
+   * Member ORG → partner org. Missing = 0, and that is EXACT: on the promoted
+   * run every pair was computed and every nonzero one stored (the top-50 cap
+   * never bound), so absence means computed-and-scored-zero.
+   */
+  orgTotalFor: (memberOrgId: string, partnerOrgId: string) => number;
+  /**
+   * Member CONTACT → partner org, additive on top of the org prior.
+   *
+   * ⚠️ Missing here means NEVER COMPUTED AT PERSON GRAIN — unknown, not zero.
+   * That is why it is a separate additive term and not a fallback: person
+   * absence must add nothing, never assert no-affinity.
+   *
+   * Buyer↔COMPANY by design, not buyer↔rep. CSC does not staff a partner's
+   * suite, so which rep works the booth is not ours to optimize over.
+   */
+  personTotalFor: (memberContactId: string, partnerOrgId: string) => number;
   /** Whether a promoted run existed at all — null engine vs a genuinely empty one. */
   available: boolean;
   edgeCount: number;
+  personEdgeCount: number;
 };
 
 const EMPTY: MeetingMatchScores = {
-  totalFor: () => 0,
+  orgTotalFor: () => 0,
+  personTotalFor: () => 0,
   available: false,
   edgeCount: 0,
+  personEdgeCount: 0,
 };
 
 /**
@@ -45,7 +63,9 @@ const EMPTY: MeetingMatchScores = {
  * today, which is exactly when it is cheapest to get this wrong).
  */
 export async function loadMeetingMatchScores(
-  memberOrgIds: readonly string[]
+  memberOrgIds: readonly string[],
+  /** Delegates as (contact, their org) — readMatchEdges keys person reads by both. */
+  memberContacts: ReadonlyArray<{ contactId: string; orgId: string }> = []
 ): Promise<MeetingMatchScores> {
   const uniqueMembers = [...new Set(memberOrgIds.filter(Boolean))];
   if (uniqueMembers.length === 0) return EMPTY;
@@ -69,9 +89,45 @@ export async function loadMeetingMatchScores(
     }
   }
 
+  /**
+   * Person edges, read at person grain.
+   *
+   * There are none today — subject_contact_id is null on every row — so these
+   * reads return empty and the term contributes 0. That is deliberate: the day
+   * the engine starts emitting them this sharpens on its own, with nobody
+   * remembering to come back here. A hardcoded zero would not.
+   *
+   * ⚠️ NOT a fallback for a missing org edge. Missing here means never computed
+   * at this grain; missing at org grain means computed and scored zero. Two
+   * different facts, so two additive terms.
+   */
+  const byPerson = new Map<string, number>();
+  let personEdgeCount = 0;
+  const seenContacts = new Set<string>();
+
+  for (const contact of memberContacts) {
+    if (!contact.contactId || !contact.orgId) continue;
+    if (seenContacts.has(contact.contactId)) continue;
+    seenContacts.add(contact.contactId);
+
+    const edges = await readMatchEdges({
+      subjectOrgId: contact.orgId,
+      subjectContactId: contact.contactId,
+      direction: "member_to_partner",
+    });
+    if (edges === null) continue;
+    for (const edge of edges) {
+      byPerson.set(`${contact.contactId}|${edge.candidateOrgId}`, edge.total);
+      personEdgeCount += 1;
+    }
+  }
+
   return {
-    totalFor: (memberOrgId, partnerOrgId) => byPair.get(`${memberOrgId}|${partnerOrgId}`) ?? 0,
+    orgTotalFor: (memberOrgId, partnerOrgId) => byPair.get(`${memberOrgId}|${partnerOrgId}`) ?? 0,
+    personTotalFor: (memberContactId, partnerOrgId) =>
+      byPerson.get(`${memberContactId}|${partnerOrgId}`) ?? 0,
     available: sawARun,
     edgeCount,
+    personEdgeCount,
   };
 }
