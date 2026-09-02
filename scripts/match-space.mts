@@ -557,13 +557,34 @@ if (WRITE) {
   }).select("id").single();
   if (error) { console.error("run insert failed:", error.message); process.exit(1); }
 
+  // ⛔ `rank` is 1-based WITHIN each subject, ordered by raw similarity.
+  //
+  // An earlier version wrote 0 for every row. `readMatchEdges` orders by this
+  // column, so every consumer was silently handed edges in whatever order the
+  // database returned them — a ranked list that was not ranked, with nothing to
+  // indicate it.
+  //
+  // ⚠️ Ordered by SIMILARITY, not by `total`. `total` is a percentile across ALL
+  // pairs in the run, so one member's whole shortlist sits in the 98th–100th and
+  // is nearly flat: the top ten of a real member span 1.3 points out of 100.
+  // Similarity keeps its spread and is the only honest within-subject ordering.
+  const bySubjectRank = new Map<string, number>();
+  const ranked = [...rows].sort((a, b) => b.sim - a.sim);
+  const rankOf = new Map<string, number>();
+  for (const r of ranked) {
+    const next = (bySubjectRank.get(r.subject) ?? 0) + 1;
+    bySubjectRank.set(r.subject, next);
+    rankOf.set(`${r.subject}\u001f${r.candidate}`, next);
+  }
+
   const edges = rows.map((r) => ({
     run_id: run!.id, direction: "member_to_partner",
     subject_org_id: r.subject.startsWith("org:") ? r.subject.slice(4) : contactOrg.get(r.subject.slice(7)),
     subject_contact_id: r.subject.startsWith("person:") ? r.subject.slice(7) : null,
     candidate_org_id: r.candidate.slice(4),
     total: Number(r.score.toFixed(2)), score: Number(r.score.toFixed(2)),
-    confidence: Number(r.conf.toFixed(4)), rank: 0,
+    confidence: Number(r.conf.toFixed(4)),
+    rank: rankOf.get(`${r.subject}\u001f${r.candidate}`) ?? 0,
     breakdown: { similarity: Number(r.sim.toFixed(6)) }, reasons: [],
   }));
   for (let i = 0; i < edges.length; i += 500) {

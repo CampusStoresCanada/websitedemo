@@ -126,3 +126,69 @@ export function applyBoosts(
     })
     .sort((a, b) => b.promoted - a.promoted);
 }
+
+/**
+ * Give promoted candidates a bounded number of slots, without reordering the rest.
+ *
+ * ⛔ Use this, not `applyBoosts`, for anything that promotes on a list. A
+ * multiplier cannot work here and the numbers are unambiguous: within one
+ * member's shortlist the top ten scores span **1.3 points out of 100**, because
+ * `total` is a percentile across every pair in the run and a member's whole
+ * shortlist sits in the 98th–100th. Measured against a real member:
+ *
+ *     x1.02  →  5 of the top 8 replaced by new partners
+ *     x1.05  →  7 of the top 8
+ *     x1.25  →  7 of the top 8
+ *
+ * Even a 2% thumb is a bulldozer. There is no multiplier small enough to be a
+ * nudge and large enough to do anything, so the mechanism itself is wrong.
+ *
+ * Reserving slots is bounded and predictable instead: at most `slots` positions
+ * change, the rest of the list keeps its fit order, and a reader can be told
+ * exactly which entries were placed rather than earned.
+ */
+export function promoteIntoSlots<T>(
+  items: readonly T[],
+  isPromoted: (item: T) => boolean,
+  options: { slots?: number; within?: number } = {}
+): { item: T; promoted: boolean }[] {
+  const slots = options.slots ?? 1;
+  const within = options.within ?? 10;
+  if (slots <= 0 || items.length === 0) {
+    return items.map((item) => ({ item, promoted: false }));
+  }
+
+  const head = items.slice(0, within);
+  const tail = items.slice(within);
+  const already = head.filter(isPromoted).length;
+  const shortBy = Math.min(slots - already, tail.filter(isPromoted).length);
+
+  // ⚠️ Already enough of them near the top: change NOTHING. A promotion that
+  // fires when the candidate would have ranked there anyway is a thumb pressing
+  // on its own side of the scale, and it makes the boost impossible to evaluate.
+  if (shortBy <= 0) {
+    return items.map((item) => ({ item, promoted: false }));
+  }
+
+  // The best promoted candidates from below the fold, in their existing order —
+  // never a random pick, so the same input always produces the same list.
+  const lifted = tail.filter(isPromoted).slice(0, shortBy);
+  const liftedSet = new Set(lifted);
+
+  // ⛔ Make room by pushing the weakest un-promoted entries DOWN, never by
+  // dropping them. An earlier version deleted them: a member asking for ten
+  // suggestions silently got eight, and the two best things we had to say were
+  // the ones thrown away. Promotion reorders a list; it must never shorten it.
+  const displaced = new Set(
+    head.filter((i) => !isPromoted(i)).slice(-shortBy)
+  );
+
+  return [
+    ...head.filter((i) => !displaced.has(i)).map((item) => ({ item, promoted: false })),
+    ...lifted.map((item) => ({ item, promoted: true })),
+    // Displaced entries outrank everything still below the fold, so they sit at
+    // the top of the tail rather than at the bottom of the list.
+    ...[...displaced].map((item) => ({ item, promoted: false })),
+    ...tail.filter((i) => !liftedSet.has(i)).map((item) => ({ item, promoted: false })),
+  ];
+}

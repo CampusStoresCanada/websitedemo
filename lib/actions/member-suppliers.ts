@@ -8,6 +8,8 @@ import {
   categoryEvidence,
   hasCertificationMatch,
 } from "@/lib/match/read";
+import { reasonsVisibleTo, promoteIntoSlots } from "@/lib/match/edge-view";
+import { getSpotlightMap } from "@/lib/membership/new-partner-spotlight";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 const SUB_TO_PARENT = new Map<string, string>();
@@ -46,6 +48,15 @@ export interface SupplierMatch {
   primaryContact: SupplierContact | null;
   catalogueUrl: string | null;
   hasCertMatch: boolean;
+  /**
+   * Why this rose above its fit, if it did.
+   *
+   * ⛔ The boost is NEVER folded into `confidence`. A 90-day spotlight is a
+   * decision CSC made, not evidence the partner suits this member — surfacing it
+   * as a visible label is what keeps "ranked because they match" answerable from
+   * "ranked because we promoted them". Empty for everyone not being promoted.
+   */
+  promotedFor: string[];
 }
 
 export interface SupplierData {
@@ -170,14 +181,42 @@ export async function getMemberSupplierData(
       if (!contactByOrg.has(c.organization_id)) contactByOrg.set(c.organization_id, c);
     }
 
-    const engineMatches: SupplierMatch[] = edges
+    // ⛔ Promotion sits ON TOP of the ranking, not inside the score.
+    //
+    // New partners get early visibility because CSC decided they should, and that
+    // is not a claim about fit. `applyBoosts` returns both numbers so this surface
+    // can order by the promoted one and still name the reason — "Merangue, New
+    // Partner" — rather than silently reordering and leaving nobody able to ask
+    // whether the engine is any good.
+    //
+    // ⚠️ The spotlight is read here, per request, NEVER baked into the nightly
+    // run: a run is a snapshot, so day 89 and day 91 would otherwise store
+    // different scores for two orgs whose fit never changed.
+    // ⛔ SLOTS, not a multiplier. Measured on a real member's list, the top ten
+    // fit scores span 1.3 points out of 100 — `total` is a percentile across
+    // every pair in the run, so one member's shortlist all sits in the 98th–100th.
+    // A 1.02x thumb replaced 5 of the top 8 with new partners; 1.25x replaced 7.
+    // There is no multiplier small enough to be a nudge, so the mechanism is
+    // wrong rather than the number.
+    //
+    // Two reserved slots in the top ten is bounded and legible instead: at most
+    // two positions move, everyone displaced moves DOWN rather than out, and the
+    // label says which entries were placed rather than earned.
+    const spotlight = await getSpotlightMap();
+    const engineMatches: SupplierMatch[] = promoteIntoSlots(
       // An org archived since last night's run must not surface, even though the
       // run legitimately included it.
-      .filter((e) => orgById.has(e.candidateOrgId))
-      .map((edge) => {
+      edges.filter((e) => orgById.has(e.candidateOrgId)),
+      (e) => spotlight.has(e.candidateOrgId),
+      { slots: 2, within: 10 }
+    )
+      .map(({ item: edge, promoted }) => {
         const org = orgById.get(edge.candidateOrgId)!;
         const contact = contactByOrg.get(edge.candidateOrgId);
-        const { category, subcategories } = categoryEvidence(edge.reasons);
+        // The reader is this member, looking at their own supplier list. The
+        // engine stores every reason with its provenance and takes no view on
+        // audiences; deciding one is this surface's job.
+        const { category, subcategories } = categoryEvidence(reasonsVisibleTo(edge.reasons, orgId));
         return {
           orgId: edge.candidateOrgId,
           orgName: org.name,
@@ -194,6 +233,7 @@ export async function getMemberSupplierData(
               }
             : null,
           catalogueUrl: org.catalogue_url ?? null,
+          promotedFor: promoted ? ["New Partner"] : [],
           hasCertMatch: hasCertificationMatch(edge),
         };
       });
@@ -269,7 +309,34 @@ export async function getMemberSupplierData(
     }
   }
 
+  // ⚠️ The fallback must promote the same partners as the engine path, and in the
+  // same order. A member seeing "New Partner" on one page load and not the next —
+  // because a batch job failed and the surface silently fell back — reads as the
+  // site being broken rather than as a degraded path.
+  //
+  // ⛔ Same rule as the engine path: the multiplier moves the ORDER, never the
+  // stored score. `conf()` below still reads the untouched `score`, so a promoted
+  // partner is not also reported as a better fit than it is.
+  // ⚠️ The same mechanism and the same order as the engine path. A member seeing
+  // "New Partner" on one page load and not the next — because a batch job failed
+  // and the surface silently fell back — reads as the site being broken rather
+  // than as a degraded path.
+  const fallbackSpotlight = await getSpotlightMap();
   scored.sort((a, b) => b.score - a.score);
+
+  const arranged = promoteIntoSlots(
+    scored,
+    (r) => fallbackSpotlight.has(r.partner.id as string),
+    { slots: 2, within: 10 }
+  );
+  const promotedIds = new Set(
+    arranged.filter((r) => r.promoted).map((r) => r.item.partner.id as string)
+  );
+  // ⛔ Take the ARRANGED order, not just the labels. Labelling without
+  // reordering would put a "New Partner" badge on a row that never moved, which
+  // says we promoted something we did not.
+  scored.length = 0;
+  scored.push(...arranged.map((r) => r.item));
 
   // 7. Fetch primary contacts for matched partner orgs
   const matchedOrgIds = scored.map(s => s.partner.id as string);
@@ -301,6 +368,7 @@ export async function getMemberSupplierData(
       orgName: partner.name as string,
       orgSlug: partner.slug as string,
       province: (partner.province as string | null) ?? null,
+      promotedFor: promotedIds.has(partner.id as string) ? ["New Partner"] : [],
       matchingCategory: matchCat,
       matchingSubcategories: matchSubs,
       confidence: conf(score),
