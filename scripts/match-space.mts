@@ -17,7 +17,8 @@ import { normalize } from "@/lib/signals/embedding";
 import { redactContactDetails, countRedactions, isExcludedSpace } from "@/lib/signals/redact";
 import { postBodyText } from "@/lib/signals/circle-backfill";
 import {
-  poolSignals, nearest, placementConfidence, calibrate, removeCommonDirection, rarityWeight,
+  poolSignals, nearest, placementConfidence, calibrate, rarityWeight,
+  bestMatchingAct, removeCommonDirection,
   type SignalVector, type Placed,
 } from "@/lib/match/space";
 
@@ -454,11 +455,25 @@ if (missing.length > 0) {
 const vectors: number[][] = docs.map((d) => cache.vectors[textKey(d.text)]);
 
 // ── place ────────────────────────────────────────────────────────────────────
+//
+// ⛔ Centre the ACTS, not the pooled positions. Projection is linear, so pooling
+// centred acts lands in the same place as centring the pooled result — but doing
+// it here leaves individual acts in the SAME space as the positions, which is
+// what makes a best-act score comparable to a pooled one. Uncentred, every act
+// in this corpus scores ~0.6 against every partner, because it is all
+// campus-store text.
+const centredVectors = vectors; // ⚠️ see below — act-level centring was tested and reverted
+
 const byOwner = new Map<string, SignalVector[]>();
+const actsOf = new Map<string, { vector: number[]; text: string }[]>();
 docs.forEach((d, i) => {
   const list = byOwner.get(d.owner) ?? [];
-  list.push({ vector: vectors[i], verb: d.verb, occurredAt: d.at, weight: d.weight });
+  list.push({ vector: centredVectors[i], verb: d.verb, occurredAt: d.at, weight: d.weight });
   byOwner.set(d.owner, list);
+  // Kept alongside so the winning act can be quoted back as the REASON.
+  const acts = actsOf.get(d.owner) ?? [];
+  acts.push({ vector: centredVectors[i], text: d.text });
+  actsOf.set(d.owner, acts);
 });
 
 const placed = new Map<string, Placed>();
@@ -505,6 +520,12 @@ for (const [org, sigs] of peopleByOrg) {
 }
 console.log(`member orgs placed from their people: ${orgsFromPeople}`);
 
+// ⛔ Centre POSITIONS, not acts. Tested both against the one externally
+// validated pair we have — Waterloo → RAINS, where Steve knew of a real
+// relationship nobody had stated. Centring at act level demoted it from rank 1
+// to rank 11 and every Waterloo person with it. The common direction computed
+// over 8,887 individual acts is a different axis from the one over ~350 pooled
+// positions, and removing it takes the consistency signal with it.
 const centred = removeCommonDirection([...placed.values()]);
 
 const memberPeople: Placed[] = [], partnerOrgs: Placed[] = [], memberOrgs: Placed[] = [];
@@ -522,15 +543,30 @@ for (const p of centred) {
 console.log(`placed: ${memberPeople.length} member people · ${memberOrgs.length} member orgs · ${partnerOrgs.length} partner orgs`);
 
 // ── read off who is near whom ────────────────────────────────────────────────
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
 const label = (id: string) =>
   id.startsWith("org:") ? (orgName.get(id.slice(4)) ?? id)
   : `${contactName.get(id.slice(7)) ?? "?"} (${orgName.get(contactOrg.get(id.slice(7)) ?? "") ?? "?"})`;
 
-const rows: { subject: string; candidate: string; sim: number; score: number; conf: number }[] = [];
+const rows: {
+  subject: string; candidate: string; sim: number; score: number; conf: number;
+  bestSim: number | null; bestText: string | null;
+}[] = [];
 for (const subj of [...memberPeople, ...memberOrgs]) {
+  const acts = actsOf.get(subj.id) ?? [];
   for (const n of nearest(subj, partnerOrgs, { k: 25 })) {
-    rows.push({ subject: subj.id, candidate: n.id, sim: n.similarity, score: 0,
-                conf: placementConfidence(subj) });
+    const candidate = partnerOrgs.find((p) => p.id === n.id)!;
+    // ⛔ The single strongest thing they said about this candidate — the number
+    // AND the sentence. Waterloo's pooled position reaches 0.27 against RAINS
+    // while Ana's post about Roots reaches 0.6: the evidence was always there,
+    // pooling just diluted it with staplers and chocolates.
+    const best = bestMatchingAct(acts.map((a) => a.vector), candidate.vector);
+    rows.push({
+      subject: subj.id, candidate: n.id, sim: n.similarity, score: 0,
+      conf: placementConfidence(subj),
+      bestSim: best?.similarity ?? null,
+      bestText: best ? acts[best.index].text.slice(0, 300) : null,
+    });
   }
 }
 // Scale to this run's own spread rather than a band fitted to a previous one.
@@ -552,6 +588,14 @@ console.log(`distinct scores (2dp): ${new Set(rows.map((r) => r.score.toFixed(2)
 // ⚠️ The cost is real and worth stating: her signal is split across three
 // vectors, so she is placed three times from a third of her evidence each. That
 // is a data question for a human, not something a matcher may quietly fix.
+const withBest = rows.filter((r) => r.bestSim !== null);
+if (withBest.length) {
+  const lift = withBest.filter((r) => (r.bestSim ?? 0) > r.sim).length;
+  console.log(`\nbest-act beats the pooled position on ${lift} of ${withBest.length} pairs ` +
+    `(median pooled ${median(withBest.map((r) => r.sim)).toFixed(3)}, ` +
+    `median best-act ${median(withBest.map((r) => r.bestSim!)).toFixed(3)})`);
+}
+
 console.log(`\ntop person → partner pairings:`);
 const shown = new Set<string>();
 for (const r of [...rows].filter((x) => x.subject.startsWith("person:")).sort((a, b) => b.sim - a.sim)) {
@@ -620,7 +664,16 @@ if (WRITE) {
     total: Number(r.score.toFixed(2)), score: Number(r.score.toFixed(2)),
     confidence: Number(r.conf.toFixed(4)),
     rank: rankOf.get(`${r.subject}\u001f${r.candidate}`) ?? 0,
-    breakdown: { similarity: Number(r.sim.toFixed(6)) }, reasons: [],
+    breakdown: {
+      similarity: Number(r.sim.toFixed(6)),
+      bestActSimilarity: r.bestSim === null ? null : Number(r.bestSim.toFixed(6)),
+    },
+    // ⛔ The reason is the ACT, quoted. "Waterloo → RAINS" is a number;
+    // "because Ana said their Roots sales fell 25%" is something a human can use.
+    reasons: r.bestText
+      ? [{ kind: "observed", axis: "semantic", text: r.bestText, evidence: [],
+           supports: true, sourceOrgId: null, sourceVisibility: "unset" }]
+      : [],
   }));
   for (let i = 0; i < edges.length; i += 500) {
     const { error: e } = await db.from("match_edges").insert(edges.slice(i, i + 500));

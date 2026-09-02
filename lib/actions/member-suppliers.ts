@@ -130,11 +130,35 @@ export async function getMemberSupplierData(
   // run, last night's job failed) — never "no matches". An empty array is a real
   // answer and is returned as one. Rendering an empty panel because a batch job
   // died is worse than quietly doing the old thing.
-  const edges = await readMatchEdges({
-    subjectOrgId: orgId,
-    direction: "member_to_partner",
-    limit: 50,
-  });
+  // ⛔ A PERSON logs in and looks at orgs — an org never logs in.
+  //
+  // Eight people at Waterloo get eight different lists, and they track what each
+  // one actually does: the apparel specialist gets RAINS, Dynasty and Barbarian
+  // Bruzer; the campus tech manager gets Resero, Bookware and PrismRBS; the
+  // course materials manager gets VitalSource and Login Canada. Serving the ORG
+  // row shows all eight the same page and throws that away — which is the same
+  // failure as the old engine telling 45 stores about Merangue.
+  //
+  // ⚠️ Falls back to the org row, never to nothing. Someone who has never posted
+  // has no position of their own, and their store's is the best available
+  // answer — see "a store is its people" in scripts/match-space.mts.
+  const personalEdges = contactId
+    ? await readMatchEdges({
+        subjectOrgId: orgId,
+        direction: "member_to_partner",
+        subjectContactId: contactId,
+        limit: 50,
+      })
+    : null;
+
+  const edges =
+    personalEdges && personalEdges.length > 0
+      ? personalEdges
+      : await readMatchEdges({
+          subjectOrgId: orgId,
+          direction: "member_to_partner",
+          limit: 50,
+        });
 
   if (edges) {
     if (edges.length === 0) {

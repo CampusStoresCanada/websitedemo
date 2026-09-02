@@ -194,6 +194,74 @@ export function rarityWeight(sharedBy: number, population: number): number {
   return Math.log1p(1 / share) / Math.log1p(population);
 }
 
+/**
+ * The single act that best matches a target, not the average of all of them.
+ *
+ * ── Why an average is not enough ────────────────────────────────────────────
+ *
+ * A person's pooled position is a fair summary and a poor witness. Waterloo's
+ * buyers post about Roots, Hollister and trendy hoodies — and about staplers,
+ * and chocolates, and tote bags. Averaged, that centre sits somewhere between
+ * apparel and office supplies and is a strong statement about neither.
+ *
+ * Measured on the real pair: Waterloo's individual acts reach **0.6** against
+ * RAINS, while the pooled position reaches **0.27**. The evidence was there all
+ * along; pooling diluted it with staplers.
+ *
+ * So the two answer different questions and both are worth having:
+ *   pooled    where does this person sit overall
+ *   best act  is there a specific thing they said that matches THIS candidate
+ *
+ * ⛔ The act is also the REASON. "Waterloo → RAINS" is a number; "because Ana
+ * said their Roots sales fell 25% and they are still with them" is something a
+ * human can act on. Returning the index means the sentence survives the scoring.
+ *
+ * ⚠️ Vectors must be centred the same way as everything else, or this measures
+ * genericness: uncentred, every act in this corpus scores ~0.6 against every
+ * partner because it is all campus-store text.
+ */
+export function bestMatchingAct(
+  acts: readonly (readonly number[])[],
+  target: readonly number[]
+): { index: number; similarity: number } | null {
+  if (acts.length === 0 || target.length === 0) return null;
+  let index = -1;
+  let best = -Infinity;
+  for (let i = 0; i < acts.length; i++) {
+    if (acts[i].length !== target.length) continue;
+    const sim = dot(acts[i], target);
+    if (sim > best) { best = sim; index = i; }
+  }
+  return index < 0 ? null : { index, similarity: best };
+}
+
+/**
+ * Project the shared direction out of raw act vectors.
+ *
+ * The same operation as `removeCommonDirection`, applied one level down. Doing
+ * it here rather than after pooling means acts and positions live in the SAME
+ * centred space, so a best-act similarity and a pooled similarity are directly
+ * comparable — and pooling centred acts gives the same position as centring the
+ * pooled result, because projection is linear.
+ */
+export function centreVectors(vectors: readonly (readonly number[])[]): number[][] {
+  if (vectors.length < 3) return vectors.map((v) => [...v]);
+  const dims = vectors[0].length;
+  const mean = new Array<number>(dims).fill(0);
+  for (const v of vectors) {
+    if (v.length !== dims) continue;
+    for (let i = 0; i < dims; i++) mean[i] += v[i];
+  }
+  const axis = normalize(mean);
+  return vectors.map((v) => {
+    if (v.length !== dims) return [...v];
+    const along = dot(v, axis);
+    const rest = v.map((x, i) => x - along * axis[i]);
+    const norm = Math.sqrt(rest.reduce((s, x) => s + x * x, 0));
+    return norm < 1e-9 ? [...v] : normalize(rest);
+  });
+}
+
 export interface Placed {
   id: string;
   vector: number[];
