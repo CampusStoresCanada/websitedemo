@@ -1,5 +1,7 @@
 import { redirect } from "next/navigation";
 import BenchmarkingSurveyForm from "@/components/benchmarking/BenchmarkingSurveyForm";
+import SurveyIntro from "@/components/benchmarking/SurveyIntro";
+import { formatDeadline } from "@/lib/benchmarking/deadline";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
@@ -12,7 +14,11 @@ export const metadata = {
   description: "Complete your annual benchmarking survey.",
 };
 
-export default async function BenchmarkingSurveyPage() {
+export default async function BenchmarkingSurveyPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ start?: string }>;
+}) {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
     redirect("/login");
@@ -218,6 +224,46 @@ export default async function BenchmarkingSurveyPage() {
 
   // 8. Get the field config for this survey (or DEFAULT if null)
   const fieldConfig = getFieldConfig(activeSurvey);
+
+  // 9. The opening page, shown until the store has made its disclosure choice.
+  //
+  // Gated on disclosure_level_set_at rather than on whether any answer exists,
+  // because the question this page asks is the consent one — a store that has
+  // typed figures but never decided how they may be used has not been asked
+  // properly. `?start=1` lets someone who wants the form immediately past it,
+  // and the intro stays reachable from the form afterwards, because the choice
+  // must remain changeable for the whole cycle.
+  const params = await searchParams;
+  const hasChosen = Boolean(
+    (currentRow as { disclosure_level_set_at?: string | null }).disclosure_level_set_at,
+  );
+  const skipIntro = params?.start === "1";
+
+  if (!hasChosen && !skipIntro) {
+    const { data: chairRow } = await db
+      .from("site_content")
+      .select("title, body")
+      .eq("section", "benchmarking_intro_chair")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    return (
+      <SurveyIntro
+        fiscalYear={activeSurvey.fiscal_year}
+        organizationName={organization.name}
+        fieldConfig={fieldConfig}
+        benchmarkingId={currentRow!.id}
+        disclosureLevel={
+          (currentRow as { disclosure_level?: string }).disclosure_level === "aggregate_only"
+            ? "aggregate_only"
+            : "full"
+        }
+        closesOn={formatDeadline(activeSurvey.closes_at)}
+        chairNote={chairRow ?? null}
+        onBeginHref="/benchmarking/survey?start=1"
+      />
+    );
+  }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
