@@ -6,6 +6,7 @@ import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import ConferenceChecklistSection from "@/components/org/ConferenceChecklistSection";
+import MeetingPreferencesSection from "@/components/org/MeetingPreferencesSection";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import type {
   PendingTransferInfo,
@@ -566,6 +567,10 @@ export default async function OrgProfilePage({ params }: PageProps) {
         slug={slug}
         conferenceId={currentConferenceId}
       />
+      <MeetingPreferencesSection
+        orgId={organization.id}
+        conferenceId={currentConferenceId}
+      />
       </>
     );
   }
@@ -604,6 +609,10 @@ export default async function OrgProfilePage({ params }: PageProps) {
     <ConferenceChecklistSection
       orgId={organization.id}
       slug={slug}
+      conferenceId={currentConferenceId}
+    />
+    <MeetingPreferencesSection
+      orgId={organization.id}
       conferenceId={currentConferenceId}
     />
     </>
