@@ -14,6 +14,7 @@ import { createClient } from "@supabase/supabase-js";
 import { getCircleClient } from "@/lib/circle/client";
 import { normalize } from "@/lib/signals/embedding";
 import { redactContactDetails, countRedactions, isExcludedSpace } from "@/lib/signals/redact";
+import { postBodyText } from "@/lib/signals/circle-backfill";
 import {
   poolSignals, nearest, placementConfidence, calibrate, removeCommonDirection, rarityWeight,
   type SignalVector, type Placed,
@@ -35,7 +36,7 @@ const db = createClient(
 // One "document" is one act with its own date. Declared text is undated on
 // purpose: this site never timestamps a form, and treating undated as ancient
 // would decay every member's own description to nothing.
-interface Doc { owner: string; text: string; verb: "posted" | "preferred" | "commented" | "rsvped"; at: Date | null; weight?: number }
+interface Doc { owner: string; text: string; verb: "posted" | "preferred" | "commented" | "rsvped" | "opened" | "clicked"; at: Date | null; weight?: number }
 
 const docs: Doc[] = [];
 // ⛔ Redaction happens HERE, at the single door into the corpus. Doing it at
@@ -84,7 +85,7 @@ for (const o of orgs ?? []) {
 // applied and the table looks empty. Pull and filter in memory instead.
 const { data: allContacts, error: contactErr } = await db
   .from("contacts")
-  .select("id,name,role_title,organization_id,profile_id")
+  .select("id,name,role_title,organization_id,profile_id,email")
   .limit(5000);
 if (contactErr) { console.error("contacts:", contactErr.message); process.exit(1); }
 const contacts = (allContacts ?? []).filter((c) => orgType.has(c.organization_id as string));
@@ -283,6 +284,93 @@ for (const [eid, went] of eventReach) {
   }
 }
 console.log(`invited-and-did-not-go: ${skipped} weak negative signals`);
+
+// ── Email engagement ─────────────────────────────────────────────────────────
+//
+// ⚠️ The AUTHOR is CSC and the ACT is the member's. We exclude the association's
+// own voice everywhere else, and this is not a contradiction: nobody is claiming
+// the newsletter says what a member buys. What a member OPENED, and what they
+// clicked through from, is theirs — the email's subject is simply the topic they
+// engaged with. Steve: "we don't know why you opened an email 8 times, but it is
+// probably an indication of something."
+//
+// ⛔ Historical sends carry nothing. Engagement tracking was blind until the
+// Resend endpoint was enabled on 2026-09-02, so ~580 earlier deliveries have no
+// opens and never will. Absence before that date is a broken pipe, not disinterest.
+// ⛔ Resolve by the address the mail was SENT TO, not by login.
+//
+// `message_recipients.user_id` is NULL on every engaged delivery — a campaign is
+// addressed to an email, and the login link is not populated on that path. This
+// is not "email as an identity key": we are not inferring who someone is, we are
+// reading back the address a message was delivered to.
+//
+// ⚠️ It is still ambiguous where an inbox is shared, and shared inboxes are known
+// to exist here. An address matching several contact rows is REPORTED AND
+// DROPPED rather than attributed to a guess — one open is one human, and we do
+// not know which. ⛔ Never merge the rows to make the ambiguity go away.
+const { data: deliveries } = await db
+  .from("message_deliveries")
+  .select("opened_at, open_count, first_clicked_at, click_count, " +
+          "message_recipients!inner(contact_email), " +
+          "message_campaigns!inner(name, subject_override, body_override, " +
+          "message_templates(subject, body_html))");
+
+// email → the contact rows holding it. Length > 1 means we cannot say who acted.
+const byEmail = new Map<string, string[]>();
+for (const c of contacts) {
+  const addr = (c as { email?: string | null }).email?.trim().toLowerCase();
+  if (addr) byEmail.set(addr, [...(byEmail.get(addr) ?? []), c.id as string]);
+}
+
+let engaged = 0, opens = 0, clicks = 0, sharedInbox = 0;
+const campaignReach = new Map<string, Set<string>>();
+type Engagement = { cid: string; text: string; at: Date | null; verb: "opened" | "clicked"; count: number; key: string };
+const engagements: Engagement[] = [];
+
+for (const d of (deliveries ?? []) as unknown as Record<string, any>[]) {
+  const openedAt = d.opened_at as string | null;
+  const clickedAt = d.first_clicked_at as string | null;
+  if (!openedAt && !clickedAt) continue;
+
+  const addr = (d.message_recipients?.contact_email as string | null)?.trim().toLowerCase();
+  const cids = addr ? byEmail.get(addr) : undefined;
+  if (!cids?.length) continue;
+  if (cids.length > 1) { sharedInbox++; continue; }
+
+  const c = d.message_campaigns ?? {};
+  const t = c.message_templates ?? {};
+  const text = [c.subject_override || t.subject, c.name, postBodyText(c.body_override || t.body_html || "")]
+    .filter(Boolean).join(". ");
+  if (text.length <= 25) continue;
+
+  const key = String(c.name ?? "");
+  for (const cid of cids) {
+    if (!contactOrg.has(cid)) continue;
+    const set = campaignReach.get(key) ?? new Set<string>();
+    set.add(cid);
+    campaignReach.set(key, set);
+
+    // ⛔ A click is a different act from an open, not a bigger one — they went
+    // somewhere. Both are recorded; the verb profiles decide their weight and
+    // half-life, which is not a judgement made here.
+    if (openedAt) engagements.push({ cid, text, at: new Date(openedAt), verb: "opened", count: Number(d.open_count ?? 1), key });
+    if (clickedAt) engagements.push({ cid, text, at: new Date(clickedAt), verb: "clicked", count: Number(d.click_count ?? 1), key });
+  }
+}
+
+// ⛔ Second pass — a campaign's rarity is unknown until every delivery is
+// counted. A newsletter the whole association opened separates nobody.
+const mailAudience = new Set(engagements.map((e) => e.cid)).size;
+for (const e of engagements) {
+  // Repeat opens are repeat ACTS. Capped, because the twentieth open of the same
+  // mail is a mail client refetching images, not twenty decisions.
+  const repeat = 1 + Math.min(Math.max(e.count, 1) - 1, 4) * 0.25;
+  add(`person:${e.cid}`, e.text, e.verb, e.at, repeat * rarityWeight(campaignReach.get(e.key)!.size, mailAudience));
+  engaged++;
+  if (e.verb === "opened") opens++; else clicks++;
+}
+console.log(`email engagement: ${engaged} acts (${opens} opens, ${clicks} clicks) across ${campaignReach.size} campaigns` +
+  (sharedInbox ? ` · ${sharedInbox} dropped: shared inbox, cannot say who acted` : ""));
 
 console.log(`events ${eventText.size}, with text ${[...eventText.values()].filter((e) => e.text.length > 25).length}`);
 console.log(`rsvps ${rsvps}, attached ${rsvpAttached} · registrations ${regs}, attached ${regAttached}`);
