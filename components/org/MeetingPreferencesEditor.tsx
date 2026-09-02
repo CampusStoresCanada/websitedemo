@@ -2,6 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { saveTopChoices, type PresentOrg } from "@/lib/actions/conference-meeting-preferences";
+import OrgChoiceList from "@/components/org/OrgChoiceList";
 
 /**
  * Pick your top five. That is the whole activity.
@@ -74,43 +75,13 @@ export default function MeetingPreferencesEditor({
         {error ? <span className="text-red-700">{error}</span> : null}
       </div>
 
-      <ul className="divide-y divide-gray-200 rounded-md border border-gray-200">
-        {candidates.map((org) => {
-          const isChosen = chosen.includes(org.id);
-          return (
-            <li key={org.id} className="flex items-center justify-between gap-4 px-3 py-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-gray-900">{org.name}</p>
-                <p className="text-xs text-gray-500">
-                  {org.type}
-                  {org.takesMeetings ? null : (
-                    <>
-                      {org.type ? " · " : null}
-                      <span className="text-amber-700">on the floor only this year</span>
-                    </>
-                  )}
-                </p>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => toggle(org.id)}
-                aria-pressed={isChosen}
-                // Disabled only when the list is full AND this one is not in it,
-                // so the button that would free a slot is always available.
-                disabled={isPending || (atLimit && !isChosen)}
-                className={`shrink-0 rounded-md px-2.5 py-1 text-xs font-medium disabled:opacity-40 ${
-                  isChosen
-                    ? "bg-[#163D6D] text-white"
-                    : "border border-gray-300 bg-white text-gray-700 hover:bg-gray-50"
-                }`}
-              >
-                {isChosen ? "Chosen" : "Add"}
-              </button>
-            </li>
-          );
-        })}
-      </ul>
+      <OrgChoiceList
+        orgs={candidates}
+        selectedIds={chosen}
+        onToggle={toggle}
+        disabled={isPending}
+        limit={limit}
+      />
     </div>
   );
 }

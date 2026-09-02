@@ -63,7 +63,9 @@ async function contactIdFor(orgId: string): Promise<string | null> {
 export type PresentOrg = {
   id: string;
   name: string;
-  type: string | null;
+  /** Links to the profile so "who is that?" is one click and a back button. */
+  slug: string | null;
+  logoUrl: string | null;
   /**
    * Whether this org has a suite, i.e. can actually hold scheduled meetings.
    *
@@ -136,7 +138,7 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
 
   const { data: orgs } = await db
     .from("organizations")
-    .select("id, name, type, is_test")
+    .select("id, name, slug, logo_url, is_test")
     .in("id", orgIds)
     .is("archived_at", null);
 
@@ -147,7 +149,8 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
     .map((o) => ({
       id: o.id as string,
       name: (o.name as string) ?? "",
-      type: (o.type as string | null) ?? null,
+      slug: (o.slug as string | null) ?? null,
+      logoUrl: (o.logo_url as string | null) ?? null,
       takesMeetings: orgsWithSuites.has(o.id as string),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));

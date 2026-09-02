@@ -1,5 +1,6 @@
 import { getMeetingPreferences } from "@/lib/actions/conference-meeting-preferences";
 import MeetingPreferencesEditor from "@/components/org/MeetingPreferencesEditor";
+import MeetingBlackoutEditor from "@/components/org/MeetingBlackoutEditor";
 
 /**
  * Where an organisation says who it wants to meet, and who it does not.
@@ -30,33 +31,52 @@ export default async function MeetingPreferencesSection({
   // does not get this section, the same way they do not get the roster controls.
   if (!result.success || !result.data) return null;
 
-  const { present, topChoiceOrgIds, limit } = result.data;
+  const { present, topChoiceOrgIds, refusedOrgIds, limit } = result.data;
 
   // Nobody to choose from means this org is not really at the conference yet.
   const others = present.filter((org) => org.id !== orgId);
   if (others.length === 0) return null;
 
   return (
-    <section
-      id="meeting_preferences"
-      className="max-w-6xl mx-auto px-4 pb-10 space-y-4 scroll-mt-20"
-    >
-      <div>
-        <h2 className="text-xl font-semibold text-gray-900">Who you want to meet</h2>
-        <p className="mt-1 text-sm text-gray-600">
-          Pick up to {limit} of the organizations coming to the conference. We use this to
-          build the meeting schedule and try to fit them in — it isn&apos;t a guarantee, and
-          you may be matched with others besides.
-        </p>
-      </div>
+    <>
+      <section
+        id="meeting_preferences"
+        className="max-w-6xl mx-auto px-4 pb-10 space-y-4 scroll-mt-20"
+      >
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Who you want to meet</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Pick up to {limit}. If we can make the meeting happen, we will.
+          </p>
+        </div>
 
-      <MeetingPreferencesEditor
-        conferenceId={conferenceId}
-        orgId={orgId}
-        candidates={others}
-        initialTopChoiceOrgIds={topChoiceOrgIds}
-        limit={limit}
-      />
-    </section>
+        <MeetingPreferencesEditor
+          conferenceId={conferenceId}
+          orgId={orgId}
+          candidates={others}
+          initialTopChoiceOrgIds={topChoiceOrgIds}
+          limit={limit}
+        />
+      </section>
+
+      <section
+        id="meeting_blackout"
+        className="max-w-6xl mx-auto px-4 pb-10 space-y-4 scroll-mt-20"
+      >
+        <div>
+          <h2 className="text-xl font-semibold text-gray-900">Who you would not meet</h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Tick anyone you would rather not sit down with. We won&apos;t schedule you
+            together.
+          </p>
+        </div>
+
+        <MeetingBlackoutEditor
+          orgId={orgId}
+          candidates={others}
+          initialRefusedOrgIds={refusedOrgIds}
+        />
+      </section>
+    </>
   );
 }
