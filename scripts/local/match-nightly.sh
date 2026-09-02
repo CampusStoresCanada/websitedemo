@@ -23,6 +23,12 @@ PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
 LOG_DIR="$HOME/Library/Logs/csc-match"
 LOG="$LOG_DIR/match-nightly.log"
 
+# The model the stored vectors were built with, and its width. ⛔ Changing either
+# means every existing vector is incomparable — re-embed the corpus deliberately
+# rather than letting a run quietly mix two spaces.
+MODEL="nomic-embed-text"
+EXPECTED_DIMS=768
+
 # ── install / uninstall ──────────────────────────────────────────────────────
 if [[ "${1:-}" == "--install" ]]; then
   mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
@@ -113,6 +119,42 @@ if ! curl -sf --max-time 5 "${OLLAMA_URL:-http://localhost:11434}/api/tags" >/de
     echo "ollama would not start — leaving the run for a human"; exit 1
   fi
 fi
+
+# ⛔ A running server is NOT a usable model. `ollama serve` is "Excel is open" —
+# the model is named per request, and if `nomic-embed-text` is not downloaded on
+# this machine every embed call fails with a model-not-found that looks nothing
+# like the actual problem. An OS reinstall, a cleared disk or a pruned model
+# store all produce a perfectly healthy server with nothing in it.
+if ! curl -sf --max-time 10 "${OLLAMA_URL:-http://localhost:11434}/api/tags" | grep -q "$MODEL"; then
+  echo "$MODEL not present — pulling it (first run may take a few minutes)"
+  if ! ollama pull "$MODEL"; then
+    echo "could not pull $MODEL — leaving the run for a human"; exit 1
+  fi
+fi
+
+# ⚠️ Prove it can actually embed before spending minutes gathering a corpus. A
+# model can be listed and still fail to load — wrong architecture after an
+# upgrade, a truncated download. One request costs nothing and turns a confusing
+# late failure into an obvious early one.
+DIMS="$(curl -sf --max-time 60 "${OLLAMA_URL:-http://localhost:11434}/api/embed" \
+  -H 'Content-Type: application/json' \
+  -d "{\"model\":\"$MODEL\",\"input\":\"probe\"}" \
+  | python3 -c 'import sys,json; print(len(json.load(sys.stdin)["embeddings"][0]))' 2>/dev/null)"
+
+if [[ -z "$DIMS" ]]; then
+  echo "$MODEL is present but would not embed — leaving the run for a human"; exit 1
+fi
+
+# ⛔ Dimensions must match what the stored vectors were built with. Two models
+# are silently incomparable: cosine between them is noise that still returns a
+# plausible number. `poolSignals` drops mismatched widths rather than mixing
+# them, so the failure would be a quietly emptier run, not an error.
+if [[ "$DIMS" != "$EXPECTED_DIMS" ]]; then
+  echo "$MODEL returned ${DIMS} dimensions, expected ${EXPECTED_DIMS} — the model changed under us."
+  echo "Refusing to run: vectors from a different model cannot be compared with the ones already stored."
+  exit 1
+fi
+echo "$MODEL ready (${DIMS} dimensions)"
 
 # Refresh the community first: comments are incremental and cheap (a handful of
 # requests once the cache is warm), and a stale corpus is a silently worse run.
