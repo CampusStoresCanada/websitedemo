@@ -107,6 +107,7 @@ const NAV_SECTIONS = [
     items: [
       { href: "/admin/board/meetings",   title: "Board Meetings",   description: "Meeting records and synced documents from OneDrive." },
       { href: "/admin/board/financials", title: "Board Financials", description: "QuickBooks P&L and Balance Sheet snapshots for directors." },
+      { href: "/admin/elections",        title: "Board Elections",  description: "Open a cycle, review nominations, and monitor the ballot." },
     ],
   },
   {

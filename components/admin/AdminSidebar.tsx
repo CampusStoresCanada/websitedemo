@@ -46,6 +46,7 @@ const NAV_GROUPS: NavGroup[] = [
     items: [
       { href: "/admin/board/meetings", label: "Meetings", matchPrefix: "/admin/board/meetings" },
       { href: "/admin/board/financials", label: "Financials", matchPrefix: "/admin/board/financials" },
+      { href: "/admin/elections", label: "Elections", matchPrefix: "/admin/elections" },
     ],
   },
   {
