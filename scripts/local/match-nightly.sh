@@ -1,0 +1,134 @@
+#!/bin/bash
+#
+# The nightly match run, on the Mac Studio.
+#
+# ⛔ This cannot live on Vercel. The engine embeds against a local model on this
+# machine, which nothing in the datacentre can reach. So the compute is here and
+# the WATCHING is there: `evaluateMatchRunStale` in lib/ops/alerts.ts notices when
+# this machine has not reported in and asks a human to run it again.
+#
+# ⚠️ "Overnight in a datacentre isn't overnight on a work computer." This machine
+# reboots for updates, sleeps, and gets shut. A missed night is normal. The job is
+# built to be safely re-runnable at any hour rather than to be reliable at 3am.
+#
+# Install:   ./scripts/local/match-nightly.sh --install
+# Run now:   ./scripts/local/match-nightly.sh
+# Uninstall: ./scripts/local/match-nightly.sh --uninstall
+
+set -uo pipefail
+
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+LABEL="ca.campusstores.match-nightly"
+PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
+LOG_DIR="$HOME/Library/Logs/csc-match"
+LOG="$LOG_DIR/match-nightly.log"
+
+# ── install / uninstall ──────────────────────────────────────────────────────
+if [[ "${1:-}" == "--install" ]]; then
+  mkdir -p "$HOME/Library/LaunchAgents" "$LOG_DIR"
+  cat > "$PLIST" <<PLIST_EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key><string>${LABEL}</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/bin/bash</string>
+    <string>${REPO}/scripts/local/match-nightly.sh</string>
+  </array>
+  <!-- 03:15 local. Late enough that the machine is idle, early enough that a
+       failure is visible before anyone needs the numbers. -->
+  <key>StartCalendarInterval</key>
+  <dict><key>Hour</key><integer>3</integer><key>Minute</key><integer>15</integer></dict>
+  <!-- ⚠️ The whole point: if the Mac was asleep or off at 03:15, run at the next
+       opportunity instead of silently skipping the night. -->
+  <key>RunAtLoad</key><false/>
+  <key>StandardOutPath</key><string>${LOG}</string>
+  <key>StandardErrorPath</key><string>${LOG}</string>
+</dict>
+</plist>
+PLIST_EOF
+  launchctl unload "$PLIST" 2>/dev/null
+  launchctl load "$PLIST" && echo "installed ${LABEL} — runs 03:15 daily, logs to ${LOG}"
+  exit $?
+fi
+
+if [[ "${1:-}" == "--uninstall" ]]; then
+  launchctl unload "$PLIST" 2>/dev/null
+  rm -f "$PLIST" && echo "removed ${LABEL}"
+  exit 0
+fi
+
+# ── the run ──────────────────────────────────────────────────────────────────
+mkdir -p "$LOG_DIR"
+cd "$REPO" || exit 1
+echo "── $(date '+%Y-%m-%d %H:%M:%S') ────────────────────────────────────────"
+
+# ⛔ Pull named variables ONE AT A TIME. Do not source this file, and do not
+# source a grep of it either: .env.local holds a multi-line value (a private
+# key), so the first line of it matches `KEY=` and opens a quote that never
+# closes — which kills the whole sourced block and leaves EVERY variable unset.
+# The first version of this script did exactly that and failed with
+# "supabaseUrl is required", which reads like a code fault rather than an
+# env-parsing one.
+if [[ ! -f .env.local ]]; then
+  echo "no .env.local — cannot reach Supabase"; exit 1
+fi
+
+read_env() {
+  local line
+  line="$(grep -m1 "^$1=" .env.local || true)"
+  [[ -z "$line" ]] && return 1
+  line="${line#*=}"
+  line="${line%\"}"; line="${line#\"}"      # strip surrounding double quotes
+  line="${line%\'}"; line="${line#\'}"      # or single
+  printf '%s' "$line"
+}
+
+for var in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY CIRCLE_API_KEY \
+           CIRCLE_COMMUNITY_ID CIRCLE_GHOST_KEY OLLAMA_URL; do
+  value="$(read_env "$var")" && export "$var=$value"
+done
+
+# ⚠️ Fail here, loudly, rather than three minutes into an embedding run with a
+# stack trace that blames the database client.
+for required in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
+  if [[ -z "${!required:-}" ]]; then
+    echo "$required missing from .env.local — cannot run"; exit 1
+  fi
+done
+
+# ⚠️ Start ollama if it is not already serving. After a reboot nothing has
+# launched it, and the run would otherwise fail on every request with a
+# connection refused that reads like a code fault.
+if ! curl -sf --max-time 5 "${OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null; then
+  echo "ollama not responding — starting it"
+  nohup ollama serve >/dev/null 2>&1 &
+  for _ in $(seq 1 30); do
+    curl -sf --max-time 2 "${OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null && break
+    sleep 1
+  done
+  if ! curl -sf --max-time 5 "${OLLAMA_URL:-http://localhost:11434}/api/tags" >/dev/null; then
+    echo "ollama would not start — leaving the run for a human"; exit 1
+  fi
+fi
+
+# Refresh the community first: comments are incremental and cheap (a handful of
+# requests once the cache is warm), and a stale corpus is a silently worse run.
+npx tsx scripts/circle-comments.mts || echo "comment refresh failed — continuing on the cached corpus"
+
+# ⛔ --write records the run; it NEVER promotes. What the site serves stays a
+# human decision.
+npx tsx scripts/match-space.mts --write
+STATUS=$?
+
+# Keep the log readable: the last ~2000 lines is several weeks of runs.
+if [[ -f "$LOG" ]]; then
+  tail -n 2000 "$LOG" > "${LOG}.tmp" && mv "${LOG}.tmp" "$LOG"
+fi
+
+if [[ $STATUS -ne 0 ]]; then
+  echo "run FAILED (exit $STATUS) — the unfinished row is what the Vercel watchdog will see"
+fi
+exit $STATUS

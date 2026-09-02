@@ -501,9 +501,26 @@ const split = [...dupPeople.values()].filter((n) => n > 1).length;
 if (split) console.log(`\n⚠️  ${split} people hold more than one contact row — their signal is split across them`);
 
 if (WRITE) {
+  // ⛔ Claim the run BEFORE doing the work, not after.
+  //
+  // Writing only on success means a crash leaves no row at all — and "the Mac
+  // started and died" then looks exactly like "the Mac never woke up". Those
+  // have different fixes, so the watchdog on Vercel has to be able to tell them
+  // apart. A row with no `completed_at` is the evidence that something tried.
   const { data: run, error } = await db.from("match_runs").insert({
-    started_at: NOW.toISOString(), completed_at: new Date().toISOString(),
-    status: "complete", embedding_model: MODEL, resolver_version: "space-v1",
+    started_at: NOW.toISOString(), completed_at: null,
+    status: "running", embedding_model: MODEL, resolver_version: "space-v1",
+    // ⛔ `weights` is NOT NULL, and this engine HAS no per-axis weights — that
+    // is the whole point of it. Rather than write `{}` and let a reader assume
+    // the weights were lost, record what the run actually did: the shape of the
+    // computation, so a future run can be compared against this one.
+    weights: {
+      engine: "embedding-space",
+      model: MODEL,
+      centred: true,
+      calibration: "per-run percentile",
+      note: "no named axes and no typed weights — see lib/match/space.ts",
+    },
     counts: { docs: docs.length, placed: placed.size, pairs: rows.length },
     notes: "embedding space — unpromoted",
   }).select("id").single();
@@ -522,6 +539,14 @@ if (WRITE) {
     const { error: e } = await db.from("match_edges").insert(edges.slice(i, i + 500));
     if (e) { console.error("edge insert failed:", e.message); process.exit(1); }
   }
+  // Only now is the run a fact. ⛔ Still `complete`, never `promoted` — what the
+  // site serves is a human's decision, not a side effect of the job finishing.
+  const { error: doneErr } = await db
+    .from("match_runs")
+    .update({ status: "complete", completed_at: new Date().toISOString() })
+    .eq("id", run!.id);
+  if (doneErr) { console.error("run completion failed:", doneErr.message); process.exit(1); }
+
   console.log(`\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, NOT promoted`);
 }
 

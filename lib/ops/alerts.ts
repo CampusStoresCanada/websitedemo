@@ -64,6 +64,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "board_vote_not_closed",
   "board_roster_size_mismatch",
   "benchmarking_no_committee_lead",
+  "match_run_stale",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = [
   "job_consecutive_failures:",
@@ -287,19 +288,24 @@ async function evaluateRenewalUnsubscribedUnpaid(): Promise<CandidateAlert | nul
   const db = createAdminClient();
 
   // A hard bounce and an unsubscribe are NOT the same signal and must not be
-  // counted together. Of the 51 rows in this table, 42 are bounces backfilled
-  // from Resend history — dead addresses, where the member has told us nothing
-  // and may not even know they owe. Only the self-serve and admin-recorded rows
-  // are somebody actually saying something. Lumping them flagged ten
-  // organizations as "signalling" when four were.
+  // counted together. Most rows in this table are dead addresses — the member
+  // has told us nothing and may not even know they owe. Only the self-serve
+  // and admin-recorded rows are somebody actually saying something. Lumping
+  // them flagged ten organizations as "signalling" when four were.
+  //
+  // This used to filter on `reason NOT LIKE 'backfill%'`, which was only ever
+  // right for the one 2026-08-22 import. Once the Resend webhook resumed
+  // writing bounces (`resend webhook: hard bounce …`) that prefix stopped
+  // matching and every new dead address would have been counted as a member
+  // signalling intent. `kind` states the distinction directly, so new rows
+  // classify themselves.
   const { data: suppressed } = await db
     .from("comms_suppressions")
-    .select("email, reason")
-    .eq("category", "all");
+    .select("email")
+    .eq("category", "all")
+    .neq("kind", "bounce");
   const suppressedEmails = new Set(
-    (suppressed ?? [])
-      .filter((r) => !((r.reason as string) ?? "").startsWith("backfill"))
-      .map((r) => (r.email as string).trim().toLowerCase()),
+    (suppressed ?? []).map((r) => (r.email as string).trim().toLowerCase()),
   );
   if (suppressedEmails.size === 0) return null;
 
@@ -1675,6 +1681,75 @@ async function evaluateOverExposedRelations(): Promise<CandidateAlert[]> {
   return alerts;
 }
 
+/**
+ * Did the Mac Studio phone home?
+ *
+ * ⛔ The match engine does NOT run here. It embeds against a local model on a
+ * machine on someone's desk, which Vercel cannot reach, cannot start and cannot
+ * retry. The only thing this side can do is notice an absence and ask a human.
+ *
+ * ⚠️ "Overnight in a datacentre isn't overnight on a work computer." A desk
+ * machine reboots for updates, sleeps, gets shut for a flight. A missing run is
+ * the NORMAL case, not an incident — so this is a nudge, not a page, and it is
+ * deliberately quiet at weekends when nobody is going to act on it anyway.
+ *
+ * ⚠️ A FAILED run and NO run are different problems: one machine tried and
+ * broke, the other never woke up. They get different messages, because the fix
+ * is different.
+ */
+async function evaluateMatchRunStale(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db as any)
+    .from("match_runs")
+    .select("id, started_at, completed_at, status, notes")
+    .order("started_at", { ascending: false })
+    .limit(1);
+  if (error) return null;
+
+  const latest = (data ?? [])[0] as
+    | { id: string; started_at: string; completed_at: string | null; status: string; notes: string | null }
+    | undefined;
+
+  const now = new Date();
+  // Saturday and Sunday: say nothing. Nobody is going to walk over to the Mac,
+  // and an alert that cries wolf every weekend is one people learn to ignore.
+  const day = now.getUTCDay();
+  if (day === 0 || day === 6) return null;
+
+  if (!latest) {
+    return {
+      ruleKey: "match_run_stale",
+      severity: "warning",
+      message: "No match run has ever been recorded. The local job on the Mac Studio has never reported in.",
+      details: { lastRunAt: null, reason: "never_run" },
+    };
+  }
+
+  const ageHours = hoursBetween(latest.started_at, now.toISOString());
+  // Two nights. One missed night is a laptop lid; two is something to look at.
+  if (ageHours < 48) return null;
+
+  const failed = latest.status === "failed" || !latest.completed_at;
+  return {
+    ruleKey: "match_run_stale",
+    severity: "warning",
+    message: failed
+      ? `The last match run (${latest.started_at.slice(0, 10)}) did not finish — the Mac Studio started and stopped. ` +
+        `Worth running it again by hand and watching the output.`
+      : `No match run in ${Math.floor(ageHours / 24)} days. The Mac Studio has not reported in — ` +
+        `did you want to run it again and upload?`,
+    details: {
+      lastRunAt: latest.started_at,
+      lastRunStatus: latest.status,
+      finished: Boolean(latest.completed_at),
+      ageHours: Math.round(ageHours),
+      // ⚠️ Read live: an ops_alert message is frozen at creation and goes stale.
+      howToFix: "./scripts/local/match-nightly.sh — on the Mac Studio",
+    },
+  };
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -1700,6 +1775,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBoardVoteLapsed(),
     evaluateBoardVoteNotClosed(),
     evaluateBoardRosterSize(),
+    evaluateMatchRunStale(),
   ]);
 
   // Flattened separately: every other check yields at most one candidate, but
