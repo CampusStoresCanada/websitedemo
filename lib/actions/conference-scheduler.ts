@@ -259,9 +259,13 @@ async function ensureMeetingScaffolding(
 async function loadEligibleCandidates(conferenceId: string): Promise<{
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
+  contactBySeatId: Map<string, string>;
 }> {
   const adminClient = createAdminClient();
-  const { delegates, exhibitors, seatById } = await loadMeetingCandidates(adminClient, conferenceId);
+  const { delegates, exhibitors, seatById, contactBySeatId } = await loadMeetingCandidates(
+    adminClient,
+    conferenceId
+  );
 
   if (delegates.length === 0 || exhibitors.length === 0) {
     throw new Error(
@@ -270,7 +274,7 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     );
   }
 
-  return { delegates, exhibitors };
+  return { delegates, exhibitors, contactBySeatId };
 }
 
 export async function createSchedulerDraftRun(
@@ -478,14 +482,35 @@ export async function createSchedulerDraftRun(
      * refused org, double-book a person, or seat an exhibitor in a room they do
      * not hold — those are not worse moves, they are not moves.
      */
+    /**
+     * ⚠️ Contacts come from loadSeatHoldings via loadMeetingCandidates — NOT
+     * re-derived here. `contact_id` is FK-enforced and `canonical_person_id` is
+     * not, and getting that precedence wrong already cost the badge pipeline a
+     * real person's identity. One resolution, in the gated reader.
+     *
+     * I previously hardcoded `contactId: null` here, which meant the person term
+     * could never fire even once person rows exist — a seam I had described as
+     * live and which was dead end to end.
+     */
+    const memberContacts = candidates.delegates
+      .map((d) => ({
+        contactId: candidates.contactBySeatId.get(d.registrationId) ?? "",
+        orgId: d.organizationId,
+      }))
+      .filter((c) => c.contactId);
+
     const matchScoreLookup = await loadMeetingMatchScores(
-      candidates.delegates.map((d) => d.organizationId)
+      candidates.delegates.map((d) => d.organizationId),
+      memberContacts
     );
 
     const delegateSeatFacts = new Map(
       candidates.delegates.map((d) => [
         d.registrationId,
-        { orgId: d.organizationId, contactId: null as string | null },
+        {
+          orgId: d.organizationId,
+          contactId: candidates.contactBySeatId.get(d.registrationId) ?? null,
+        },
       ])
     );
     const exhibitorSeatFacts = new Map<string, { orgId: string; suiteId: string }>();

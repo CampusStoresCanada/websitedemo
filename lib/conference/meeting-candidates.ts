@@ -19,6 +19,8 @@ export type MeetingCandidates = {
   exhibitors: ExhibitorProfile[];
   /** Named seats on neither side — reported, never swept onto one of them. */
   notMatchable: string[];
+  /** Seat → holder's `contacts` id, for person-grain match reads. */
+  contactBySeatId: Map<string, string>;
   /** Every named registration seat, by seat id — for name/org/auth lookups. */
   seatById: Map<string, SeatHolding>;
   /** Registration types that require owning a booth, i.e. the exhibiting side. */
@@ -234,6 +236,16 @@ export async function loadMeetingCandidates(
     delegates,
     exhibitors,
     notMatchable,
+    /**
+     * Seat → the holder's contacts id, for the person-grain match lookup.
+     * Resolved by loadSeatHoldings (contact_id first — canonical_person_id has
+     * no FK), so the scheduler never re-derives it.
+     */
+    contactBySeatId: new Map(
+      seats
+        .filter((seat) => seat.holderContactId)
+        .map((seat) => [seat.seatId, seat.holderContactId as string] as const)
+    ),
     seatById: new Map(seats.map((seat) => [seat.seatId, seat] as const)),
     exhibitingTypeIds,
   };

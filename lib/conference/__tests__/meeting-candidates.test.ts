@@ -13,6 +13,8 @@ function seat(partial: Partial<SeatHolding> & { seatId: string }): SeatHolding {
     holderPersonId: null,
     holderName: null,
     holderUserId: null,
+    holderContactId: null,
+    seatedAt: null,
     ...partial,
   };
 }

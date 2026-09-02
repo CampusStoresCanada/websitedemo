@@ -19,7 +19,7 @@ import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /** The column list every seat read selects — kept beside the row type, as ENTITY_SELECT is. */
 export const SEAT_SELECT =
-  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id";
+  "id, conference_id, organization_id, entity_id, seat_index, holder_person_id, created_at";
 
 export type SeatHolding = {
   seatId: string;
@@ -42,6 +42,25 @@ export type SeatHolding = {
    */
   holderName: string | null;
   holderUserId: string | null;
+  /**
+   * The holder's `contacts` id — the join key the match engine reads
+   * (`match_edges.subject_contact_id`).
+   *
+   * ⛔ `contact_id` FIRST, then `canonical_person_id`. Both columns on
+   * conference_people point at `contacts`, but only `contact_id` has a foreign
+   * key; `canonical_person_id` has none, and on CSC 2027 one row already points
+   * at a contact that does not exist. The badge pipeline found that the hard
+   * way — reading the unenforced column resolved no identity for a real person
+   * and silently fell back to splitting their display name.
+   *
+   * Widened in here rather than resolved a third time: badges/run.ts and
+   * person-agenda.ts each already do this join, and a scheduler doing its own
+   * would be the third copy of a rule that is only correct one way.
+   */
+  holderContactId: string | null;
+  /** When the seat was allocated — the nearest thing to a registration date,
+   *  and a sort key some organisers want their print file stacked by. */
+  seatedAt: string | null;
 };
 
 export type SeatQuery = {
@@ -134,6 +153,8 @@ export async function loadSeatHoldings(
       holderPersonId: typeof row.holder_person_id === "string" ? row.holder_person_id : null,
       holderName: null,
       holderUserId: null,
+      holderContactId: null,
+      seatedAt: typeof row.created_at === "string" ? row.created_at : null,
     });
   }
   if (orphaned.length > 0) {
@@ -151,7 +172,7 @@ export async function loadSeatHoldings(
   if (holderIds.length > 0) {
     const peopleRes = await db
       .from("conference_people")
-      .select("id, display_name, user_id")
+      .select("id, display_name, user_id, contact_id, canonical_person_id")
       .in("id", holderIds);
     if (peopleRes.error) {
       throw new Error(`Could not load seat holders: ${peopleRes.error.message}`);
@@ -162,6 +183,11 @@ export async function loadSeatHoldings(
         {
           name: typeof r.display_name === "string" ? r.display_name : null,
           userId: typeof r.user_id === "string" ? r.user_id : null,
+          // FK-enforced column first — see holderContactId.
+          contactId:
+            (typeof r.contact_id === "string" && r.contact_id) ||
+            (typeof r.canonical_person_id === "string" && r.canonical_person_id) ||
+            null,
         },
       ])
     );
@@ -171,6 +197,7 @@ export async function loadSeatHoldings(
       if (!person) continue;
       seat.holderName = person.name;
       seat.holderUserId = person.userId;
+      seat.holderContactId = person.contactId;
     }
   }
 
