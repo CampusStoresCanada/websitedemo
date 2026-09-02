@@ -332,3 +332,99 @@ export async function setRefusal(params: {
   if (error) return { success: false, error: error.message };
   return { success: true };
 }
+
+
+/**
+ * A DELEGATE'S OWN LIST — no org-admin rights required.
+ *
+ * ⛔ The grain follows the event, not a permission. A trade show has people who
+ * attend and companies that exhibit: a delegate picks for themselves because
+ * three buyers from one store want three different sets of meetings, while an
+ * exhibitor's suite meets whoever walks in, so the company has one list.
+ *
+ * So the check here is "are you this person" — you hold a named seat at this
+ * conference — rather than "do you speak for this company". An attendee who is
+ * not an admin still gets to say who they want to meet, which was the whole
+ * point: if I am going to the conference, I should be given the choices.
+ */
+async function callerAsDelegate(conferenceId: string): Promise<
+  { ok: true; personId: string; contactId: string | null; orgId: string } | { ok: false; error: string }
+> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { ok: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data } = await db
+    .from("conference_people")
+    .select("id, organization_id, contact_id, canonical_person_id")
+    .eq("conference_id", conferenceId)
+    .eq("user_id", auth.ctx.userId)
+    .neq("assignment_status", "canceled")
+    .maybeSingle();
+
+  if (!data) return { ok: false, error: "You are not registered for this conference." };
+  return {
+    ok: true,
+    personId: data.id as string,
+    // contact_id first — canonical_person_id has no FK. Same precedence as
+    // loadSeatHoldings and the badge pipeline.
+    contactId:
+      ((data.contact_id as string | null) || (data.canonical_person_id as string | null)) ?? null,
+    orgId: data.organization_id as string,
+  };
+}
+
+export async function getMyTopChoices(
+  conferenceId: string
+): Promise<ActionResult<{ chosenOrgIds: string[]; present: PresentOrg[]; limit: number }>> {
+  const me = await callerAsDelegate(conferenceId);
+  if (!me.ok) return { success: false, error: me.error };
+  if (!me.contactId) {
+    return { success: false, error: "We could not match you to a contact record." };
+  }
+
+  const [choices, present] = await Promise.all([
+    loadTopChoices(conferenceId),
+    listOrgsPresent(conferenceId, me.orgId),
+  ]);
+
+  return {
+    success: true,
+    data: {
+      chosenOrgIds: indexTopChoices(choices)
+        .chosenByContact(me.contactId)
+        .map((c) => c.chosenOrgId),
+      present,
+      limit: TOP_CHOICE_LIMIT,
+    },
+  };
+}
+
+export async function saveMyTopChoices(
+  conferenceId: string,
+  chosenOrgIds: string[]
+): Promise<ActionResult> {
+  const me = await callerAsDelegate(conferenceId);
+  if (!me.ok) return { success: false, error: me.error };
+  if (!me.contactId) {
+    return { success: false, error: "We could not match you to a contact record." };
+  }
+
+  try {
+    await replaceTopChoices({
+      conferenceId,
+      declaringOrgId: me.orgId,
+      // ⛔ The subject is ME. Clearing is scoped to this contact, so saving my
+      // five can never erase a colleague's.
+      declaringContactId: me.contactId,
+      declaredByContactId: me.contactId,
+      chosenOrgIds,
+    });
+    return { success: true };
+  } catch (cause) {
+    return {
+      success: false,
+      error: cause instanceof Error ? cause.message : "Could not save your choices.",
+    };
+  }
+}

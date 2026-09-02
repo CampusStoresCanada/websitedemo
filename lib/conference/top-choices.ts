@@ -13,6 +13,17 @@ import { createAdminClient } from "@/lib/supabase/admin";
  * else and may not manage it — and a member who was promised a meeting and did
  * not get one is a worse outcome than one who was never promised.
  *
+ * ⛔ TWO GRAINS, because a trade show has two kinds of attendee. A DELEGATE
+ * attends as a person and picks their own five — three buyers from one store
+ * legitimately want three different sets of meetings. An EXHIBITOR attends as a
+ * company; the suite meets whoever walks in, so the org has one list.
+ *
+ * `declaringContactId` null means the org is the subject, set means a person is
+ * — the same convention `match_edges.subject_contact_id` uses, so the engine
+ * reads it without translation. This is not a special case bolted on; it is the
+ * delegate/exhibitor structure of the event, which is already derived elsewhere
+ * from whether a registration `requires_ownership_of` a booth.
+ *
  * ⛔ It is also NOT the opposite of a refusal, even though they look symmetrical.
  * A refusal is a standing relationship fact reaffirmed annually; a top choice is
  * scoped to one conference because you pick from who is actually present. They
@@ -29,6 +40,8 @@ export const TOP_CHOICE_LIMIT = 5;
 
 export type TopChoice = {
   declaringOrgId: string;
+  /** Whose list this is. Null = the org's own (exhibitor side). */
+  declaringContactId: string | null;
   chosenOrgId: string;
   /** 1..TOP_CHOICE_LIMIT when they ordered them; null when it is just a set. */
   rank: number | null;
@@ -37,6 +50,7 @@ export type TopChoice = {
 
 type ChoiceRow = {
   declaring_org_id: string;
+  declaring_contact_id: string | null;
   chosen_org_id: string;
   rank: number | null;
   declared_by_contact_id: string | null;
@@ -53,7 +67,7 @@ type ChoiceDb = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     select: (columns: string) => any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    upsert: (values: unknown, options?: unknown) => any;
+    insert: (values: unknown) => any;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     delete: () => any;
   };
@@ -64,7 +78,7 @@ export async function loadTopChoices(conferenceId: string): Promise<TopChoice[]>
   const db = createAdminClient() as unknown as ChoiceDb;
   const { data, error } = await db
     .from("conference_top_choices")
-    .select("declaring_org_id, chosen_org_id, rank, declared_by_contact_id")
+    .select("declaring_org_id, declaring_contact_id, chosen_org_id, rank, declared_by_contact_id")
     .eq("conference_id", conferenceId);
 
   // Never swallow this. An unreadable preference list is not an empty one, and
@@ -73,6 +87,7 @@ export async function loadTopChoices(conferenceId: string): Promise<TopChoice[]>
 
   return ((data ?? []) as ChoiceRow[]).map((row) => ({
     declaringOrgId: row.declaring_org_id,
+    declaringContactId: row.declaring_contact_id,
     chosenOrgId: row.chosen_org_id,
     rank: row.rank,
     declaredByContactId: row.declared_by_contact_id,
@@ -89,20 +104,35 @@ export type TopChoiceLookup = {
   mutual: (orgA: string, orgB: string) => boolean;
   /** The rank one org gave another, when they ordered their picks. */
   rankOf: (declaringOrgId: string, chosenOrgId: string) => number | null;
-  /** Everything one org chose, for rendering their own list back to them. */
+  /** An ORG's own list — exhibitor side, declaringContactId null. */
   chosenBy: (declaringOrgId: string) => TopChoice[];
+  /** One PERSON's list — delegate side. */
+  chosenByContact: (declaringContactId: string) => TopChoice[];
 };
 
 export function indexTopChoices(choices: readonly TopChoice[]): TopChoiceLookup {
   const byPair = new Map<string, TopChoice>();
   const byDeclaring = new Map<string, TopChoice[]>();
+  const byContact = new Map<string, TopChoice[]>();
 
   for (const choice of choices) {
-    byPair.set(`${choice.declaringOrgId}|${choice.chosenOrgId}`, choice);
-    const list = byDeclaring.get(choice.declaringOrgId) ?? [];
-    list.push(choice);
-    byDeclaring.set(choice.declaringOrgId, list);
+    if (choice.declaringContactId) {
+      const list = byContact.get(choice.declaringContactId) ?? [];
+      list.push(choice);
+      byContact.set(choice.declaringContactId, list);
+    } else {
+      byPair.set(`${choice.declaringOrgId}|${choice.chosenOrgId}`, choice);
+      const list = byDeclaring.get(choice.declaringOrgId) ?? [];
+      list.push(choice);
+      byDeclaring.set(choice.declaringOrgId, list);
+    }
+    // An org "chose" a vendor if it did, or if any of its people did — which is
+    // what a scheduler weighing org-level interest should see.
+    const anyKey = `${choice.declaringOrgId}|${choice.chosenOrgId}`;
+    if (!byPair.has(anyKey)) byPair.set(anyKey, choice);
   }
+
+  const rank = (choice: TopChoice) => choice.rank ?? TOP_CHOICE_LIMIT + 1;
 
   const chose = (declaringOrgId: string, chosenOrgId: string) =>
     byPair.has(`${declaringOrgId}|${chosenOrgId}`);
@@ -113,9 +143,9 @@ export function indexTopChoices(choices: readonly TopChoice[]): TopChoiceLookup 
     rankOf: (declaringOrgId, chosenOrgId) =>
       byPair.get(`${declaringOrgId}|${chosenOrgId}`)?.rank ?? null,
     chosenBy: (declaringOrgId) =>
-      [...(byDeclaring.get(declaringOrgId) ?? [])].sort(
-        (left, right) => (left.rank ?? TOP_CHOICE_LIMIT + 1) - (right.rank ?? TOP_CHOICE_LIMIT + 1)
-      ),
+      [...(byDeclaring.get(declaringOrgId) ?? [])].sort((l, r) => rank(l) - rank(r)),
+    chosenByContact: (declaringContactId) =>
+      [...(byContact.get(declaringContactId) ?? [])].sort((l, r) => rank(l) - rank(r)),
   };
 }
 
@@ -133,6 +163,8 @@ export function indexTopChoices(choices: readonly TopChoice[]): TopChoiceLookup 
 export async function replaceTopChoices(params: {
   conferenceId: string;
   declaringOrgId: string;
+  /** Set for a delegate's own list; null when the org itself is choosing. */
+  declaringContactId?: string | null;
   declaredByContactId: string | null;
   /** Chosen orgs in preference order; rank comes from position. */
   chosenOrgIds: readonly string[];
@@ -150,25 +182,40 @@ export async function replaceTopChoices(params: {
 
   const db = createAdminClient() as unknown as ChoiceDb;
 
-  const { error: deleteError } = await db
+  // Clear only THIS subject's rows — a delegate saving their five must not
+  // erase a colleague's, and neither may touch the org-level list.
+  let clear = db
     .from("conference_top_choices")
     .delete()
     .eq("conference_id", params.conferenceId)
     .eq("declaring_org_id", params.declaringOrgId);
+  clear = params.declaringContactId
+    ? clear.eq("declaring_contact_id", params.declaringContactId)
+    : clear.is("declaring_contact_id", null);
+  const { error: deleteError } = await clear;
   if (deleteError) throw new Error(`Could not clear top choices: ${deleteError.message}`);
 
   if (unique.length === 0) return;
 
-  const { error: insertError } = await db.from("conference_top_choices").upsert(
+  /**
+   * ⛔ INSERT, not upsert. The subject's rows were just deleted above, so there
+   * is nothing to conflict with — and ON CONFLICT could not work here anyway:
+   * both unique indexes are PARTIAL (one for org-level rows, one for
+   * person-level), and Postgres will not match a partial index from a bare
+   * column list. It fails at runtime with "no unique or exclusion constraint
+   * matching the ON CONFLICT specification", which is exactly what a delegate
+   * saving their first list hit.
+   */
+  const { error: insertError } = await db.from("conference_top_choices").insert(
     unique.map((chosenOrgId, index) => ({
       conference_id: params.conferenceId,
       declaring_org_id: params.declaringOrgId,
+      declaring_contact_id: params.declaringContactId ?? null,
       chosen_org_id: chosenOrgId,
       declared_by_contact_id: params.declaredByContactId,
       rank: index + 1,
       updated_at: new Date().toISOString(),
-    })),
-    { onConflict: "conference_id,declaring_org_id,chosen_org_id" }
+    }))
   );
   if (insertError) throw new Error(`Could not save top choices: ${insertError.message}`);
 }

@@ -2,7 +2,17 @@ import { describe, expect, it } from "vitest";
 import { indexTopChoices, TOP_CHOICE_LIMIT, type TopChoice } from "../top-choices";
 
 function choice(declaringOrgId: string, chosenOrgId: string, rank: number | null = null): TopChoice {
-  return { declaringOrgId, chosenOrgId, rank, declaredByContactId: null };
+  return { declaringOrgId, declaringContactId: null, chosenOrgId, rank, declaredByContactId: null };
+}
+
+/** A delegate's own list — declaringContactId set. */
+function personChoice(
+  declaringOrgId: string,
+  declaringContactId: string,
+  chosenOrgId: string,
+  rank: number | null = null
+): TopChoice {
+  return { declaringOrgId, declaringContactId, chosenOrgId, rank, declaredByContactId: null };
 }
 
 describe("indexTopChoices", () => {
@@ -55,6 +65,30 @@ describe("indexTopChoices", () => {
 
   it("returns an empty list for an org that chose nobody", () => {
     expect(indexTopChoices([]).chosenBy("store")).toEqual([]);
+  });
+
+  it("keeps two colleagues' lists apart", () => {
+    /**
+     * The delegate side. Three buyers from one store legitimately want three
+     * different sets of meetings — the apparel buyer and the course-materials
+     * buyer are not choosing on behalf of each other, and one saving their five
+     * must never appear in the other's list.
+     */
+    const lookup = indexTopChoices([
+      personChoice("store", "shawn", "vendor-a", 1),
+      personChoice("store", "anish", "vendor-b", 1),
+    ]);
+    expect(lookup.chosenByContact("shawn").map((c) => c.chosenOrgId)).toEqual(["vendor-a"]);
+    expect(lookup.chosenByContact("anish").map((c) => c.chosenOrgId)).toEqual(["vendor-b"]);
+    // Neither is the ORG's own list, which nobody at the store has made.
+    expect(lookup.chosenBy("store")).toEqual([]);
+  });
+
+  it("counts a person's pick as their org having chosen, for org-level weighing", () => {
+    // A vendor asking "did that store want us?" should see yes when one of its
+    // buyers said so, even though the store itself never made a list.
+    const lookup = indexTopChoices([personChoice("store", "shawn", "vendor-a")]);
+    expect(lookup.chose("store", "vendor-a")).toBe(true);
   });
 
   it("holds the limit at five", () => {
