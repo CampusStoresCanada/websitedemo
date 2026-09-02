@@ -20,6 +20,13 @@ import { saveTopChoices, setRefusal, type PresentOrg } from "@/lib/actions/confe
  * ⛔ An org may not both choose and refuse the same organization — picking one
  * clears the other rather than storing a contradiction for the engine to
  * resolve. It cannot resolve it; only the human can.
+ *
+ * ⚠️ THE COPY IS SHORT ON PURPOSE. The preamble above the list already says we
+ * will try to make the meeting happen if we can. A paragraph underneath
+ * explaining that an org without a meeting room cannot be given a meeting is
+ * restating the same caveat in more words — Steve: "I can't make the meeting
+ * happen with an org that doesn't have a meeting. So, you know, life goes on."
+ * The "on the floor only this year" label carries it. Do not re-add the essay.
  */
 export default function MeetingPreferencesEditor({
   conferenceId,
@@ -173,17 +180,10 @@ export default function MeetingPreferencesEditor({
       </ul>
 
       <p className="text-xs text-gray-500">
-        Some exhibitors don&apos;t have a meeting room this year — you&apos;ll see &ldquo;on
-        the floor only&rdquo; next to them. Pick them anyway if they&apos;re who you want to
-        see: we can&apos;t book you a meeting, but knowing there was demand is the most
-        useful thing you can tell us, and we pass it on to them.
+        &ldquo;Rather not&rdquo; weighs heavily against a pairing when we build the
+        schedule, and stays in place for future conferences until you change it.
       </p>
 
-      <p className="text-xs text-gray-500">
-        &ldquo;Rather not&rdquo; is weighted heavily against when we build the schedule. We
-        will do everything we can to avoid it, though we can&apos;t promise it will never
-        happen. It stays in place for future conferences until you change it.
-      </p>
     </div>
   );
 }
