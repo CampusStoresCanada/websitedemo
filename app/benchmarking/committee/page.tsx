@@ -1,4 +1,7 @@
 import { redirect } from "next/navigation";
+import IntroNoteEditor from "@/components/benchmarking/committee/IntroNoteEditor";
+import { getIntroNote } from "@/lib/actions/benchmarking-intro-note";
+import { formatOpening } from "@/lib/benchmarking/deadline";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { WORKSTREAMS } from "@/lib/benchmarking/committee-workstreams";
@@ -104,7 +107,20 @@ export default async function CommitteePage() {
     .select("id", { count: "exact", head: true })
     .eq("committee_status", "pending")) as { count: number | null };
 
+  // The committee's own words on the survey's opening page. Fetched here so the
+  // editor is part of the console the lead already uses, rather than a place
+  // they have to be told about.
+  const introNote = await getIntroNote();
+
   return (
+    <>
+      <div className="mx-auto max-w-5xl px-4 pt-8">
+        <IntroNoteEditor
+          initialTitle={introNote?.title ?? ""}
+          initialBody={introNote?.body ?? ""}
+          surveyOpensOn={formatOpening(survey?.opens_at)}
+        />
+      </div>
     <CommitteeConsole
       isLead={isLead}
       isAdmin={admin}
@@ -126,5 +142,6 @@ export default async function CommitteePage() {
         recipientsEscalated,
       }}
     />
+    </>
   );
 }
