@@ -8,6 +8,8 @@ import { getConferenceDashboardStats } from "@/lib/conference/dashboard-stats";
 import { getBoardChecklist } from "@/lib/board/checklist";
 import { getElectionsWidgetData } from "@/lib/elections/dashboard-widget";
 import { getDashboardWidgetLayout, widgetSpan } from "@/lib/admin/dashboard-widgets";
+import { visibleNavGroups } from "@/lib/admin/nav";
+import { getCurrentRenewalSeason } from "@/lib/renewal/season";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
@@ -87,66 +89,20 @@ function SectionHeading({ children }: { children: React.ReactNode }) {
 
 // ─── Nav section data (bottom sitemap) ──────────────────────────────
 
-const NAV_SECTIONS = [
-  {
-    heading: "Conference",
-    items: [
-      { href: "/admin/conference",  title: "Conferences",        description: "Manage conference instances, registrations, scheduling, and commerce." },
-    ],
-  },
-  {
-    heading: "Membership",
-    items: [
-      { href: "/admin/membership",  title: "Members & Partners", description: "Organization directory, billing, renewals, and benchmarking." },
-      { href: "/admin/applications",title: "Applications",       description: "Review pending membership and partner applications." },
-      { href: "/admin/people",      title: "People",             description: "User accounts, contacts, and organizational roles." },
-    ],
-  },
-  {
-    heading: "Board",
-    items: [
-      { href: "/admin/board/meetings",   title: "Board Meetings",   description: "Meeting records and synced documents from OneDrive." },
-      { href: "/admin/board/financials", title: "Board Financials", description: "QuickBooks P&L and Balance Sheet snapshots for directors." },
-      { href: "/admin/elections",        title: "Board Elections",  description: "Open a cycle, review nominations, and monitor the ballot." },
-    ],
-  },
-  {
-    heading: "Sponsorships",
-    items: [
-      { href: "/admin/sponsorships",title: "Sponsorships",       description: "Manage sponsorship tiers, agreements, and placements." },
-    ],
-  },
-  {
-    heading: "Communications",
-    items: [
-      { href: "/admin/comms",       title: "Campaigns & Templates", description: "Manage email campaigns, templates, and delivery analytics." },
-      { href: "/admin/events",      title: "Events",             description: "Create, review, and manage non-conference events." },
-      { href: "/admin/contact",     title: "Contact Inquiries",  description: "Inbound contact form submissions, including IDN requests." },
-    ],
-  },
-  {
-    heading: "System",
-    items: [
-      { href: "/admin/ops",         title: "Ops Health",         description: "Monitor job status, alerts, webhooks, and integration sync." },
-      { href: "/admin/calendar",    title: "Operational Calendar", description: "Unified timeline of conference, renewal, comms, and system milestones." },
-    ],
-  },
-  {
-    heading: "Configuration",
-    items: [
-      { href: "/admin/policy",      title: "Policy Settings",    description: "Review and publish policy changes for billing, scheduling, and retention." },
-      { href: "/admin/circle",      title: "Circle Integration", description: "SSO cutover controls, member mapping, and sync status." },
-      { href: "/admin/content",     title: "Site Content",       description: "Manage board/staff listings and public website content." },
-      { href: "/admin/pages",       title: "Pages & Permissions",description: "Review route ownership, visibility, and permission requirements." },
-    ],
-  },
-];
 
 // ─── Page ────────────────────────────────────────────────────────────
 
 export default async function AdminConsolePage() {
   const auth = await requireAdmin();
   const isSA = auth.ok && isSuperAdmin(auth.ctx.globalRole);
+
+  // The All Sections grid is the sidebar's map rendered wide, so it resolves
+  // visibility exactly the same way — same role gate, same season gate. Kept
+  // as two hand-written lists, the two disagreed: the grid was showing the
+  // super-admin-only Configuration section to every admin.
+  const navGroups = visibleNavGroups(auth.ok ? auth.ctx.globalRole : "admin", {
+    renewalSeason: (await getCurrentRenewalSeason(new Date())) !== null,
+  });
 
   const db = createAdminClient();
   const today = new Date().toISOString().slice(0, 10);
@@ -777,7 +733,7 @@ export default async function AdminConsolePage() {
       <div className="border-t border-gray-100 pt-6">
         <SectionHeading>All Sections</SectionHeading>
         <div className="space-y-6">
-          {NAV_SECTIONS.map((section) => (
+          {navGroups.map((section) => (
             <div key={section.heading}>
               <p className="mb-2 text-xs font-medium text-gray-400">{section.heading}</p>
               <div className="grid gap-2 sm:grid-cols-2">
@@ -787,7 +743,7 @@ export default async function AdminConsolePage() {
                     href={link.href}
                     className="rounded-xl border border-gray-200 bg-white p-4 hover:border-gray-300 transition-colors"
                   >
-                    <h3 className="text-sm font-semibold text-gray-900">{link.title}</h3>
+                    <h3 className="text-sm font-semibold text-gray-900">{link.title ?? link.label}</h3>
                     <p className="mt-1 text-xs text-gray-500">{link.description}</p>
                   </Link>
                 ))}
