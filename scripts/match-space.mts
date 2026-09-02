@@ -10,6 +10,7 @@
  * changes what a member sees.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { getCircleClient } from "@/lib/circle/client";
 import { normalize } from "@/lib/signals/embedding";
@@ -392,35 +393,65 @@ async function embed(texts: string[]): Promise<number[][]> {
   return (await res.json()).embeddings as number[][];
 }
 
-let vectors: number[][];
+// ── Vectors, cached by CONTENT ───────────────────────────────────────────────
+//
+// ⛔ The cache is keyed on a hash of each text, never on the corpus's shape. An
+// earlier version keyed the whole file on `docs.length`: add one comment and
+// delete another, the count matches, and EVERY vector is silently reused against
+// the wrong document. A reorder did the same. Nothing errors — the run just
+// quietly describes a world that never existed.
+//
+// Content addressing also makes this genuinely incremental, which is the point:
+// only text nobody has embedded before ever reaches the model, however much else
+// moved around it.
+type VectorCache = { model: string; vectors: Record<string, number[]> };
+
+const textKey = (text: string) => createHash("sha1").update(text).digest("hex");
+
+let cache: VectorCache = { model: MODEL, vectors: {} };
 if (!REEMBED && existsSync(VEC_CACHE)) {
-  const cached = JSON.parse(readFileSync(VEC_CACHE, "utf8")) as { n: number; vectors: number[][] };
-  if (cached.n === docs.length) { vectors = cached.vectors; console.log(`${vectors.length} vectors from cache`); }
-  else { vectors = []; }
-} else vectors = [];
-
-if (vectors.length !== docs.length) {
-  // ⛔ Embed each distinct TEXT once. One event's description is attached to
-  // every person who attended it and every person who did not, so the corpus
-  // holds tens of thousands of documents over a few dozen unique strings.
-  // Embedding per-document would spend hours re-deriving the same vector.
-  const uniqueTexts: string[] = [];
-  const indexOfText = new Map<string, number>();
-  for (const d of docs) {
-    if (!indexOfText.has(d.text)) { indexOfText.set(d.text, uniqueTexts.length); uniqueTexts.push(d.text); }
+  try {
+    const loaded = JSON.parse(readFileSync(VEC_CACHE, "utf8")) as Partial<VectorCache>;
+    // ⚠️ A cache built by a different model is not a cache, it is a trap:
+    // its vectors are incomparable with anything this run produces.
+    if (loaded.model === MODEL && loaded.vectors) cache = loaded as VectorCache;
+    else console.log("cache was built by a different model — re-embedding");
+  } catch {
+    console.log("cache unreadable — re-embedding");
   }
-  console.log(`embedding ${uniqueTexts.length} distinct texts for ${docs.length} documents`);
+}
 
-  const unique: number[][] = [];
-  for (let i = 0; i < uniqueTexts.length; i += 32) {
-    unique.push(...(await embed(uniqueTexts.slice(i, i + 32))).map(normalize));
-    process.stdout.write(`\r  embedded ${unique.length}/${uniqueTexts.length}`);
+// ⛔ Embed each distinct TEXT once. One event's description attaches to everyone
+// who attended it and everyone who did not, so the corpus holds tens of
+// thousands of documents over a few thousand unique strings.
+const distinct = new Map<string, string>(); // key → text
+for (const d of docs) distinct.set(textKey(d.text), d.text);
+
+const missing = [...distinct.entries()].filter(([key]) => !cache.vectors[key]);
+console.log(
+  `${distinct.size} distinct texts for ${docs.length} documents · ` +
+  `${distinct.size - missing.length} cached, ${missing.length} to embed`
+);
+
+if (missing.length > 0) {
+  for (let i = 0; i < missing.length; i += 32) {
+    const batch = missing.slice(i, i + 32);
+    const fresh = (await embed(batch.map(([, text]) => text))).map(normalize);
+    batch.forEach(([key], j) => { cache.vectors[key] = fresh[j]; });
+    process.stdout.write(`\r  embedded ${Math.min(i + 32, missing.length)}/${missing.length}`);
   }
   console.log();
-  vectors = docs.map((d) => unique[indexOfText.get(d.text)!]);
+
+  // ⚠️ Prune anything the corpus no longer contains, or the cache grows without
+  // bound as posts are edited and old wordings linger forever.
+  const live = new Set(distinct.keys());
+  for (const key of Object.keys(cache.vectors)) if (!live.has(key)) delete cache.vectors[key];
+
   mkdirSync(".cache", { recursive: true });
-  writeFileSync(VEC_CACHE, JSON.stringify({ n: docs.length, vectors }));
+  writeFileSync(VEC_CACHE, JSON.stringify(cache));
 }
+
+const vectors: number[][] = docs.map((d) => cache.vectors[textKey(d.text)]);
 
 // ── place ────────────────────────────────────────────────────────────────────
 const byOwner = new Map<string, SignalVector[]>();
