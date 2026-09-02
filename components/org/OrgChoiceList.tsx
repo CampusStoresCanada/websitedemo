@@ -95,10 +95,12 @@ export default function OrgChoiceList({
                 ) : (
                   <span className="font-medium">{org.name}</span>
                 )}
-                <span className="text-gray-500">
-                  {" — "}
-                  {org.takesMeetings ? "Connected Exhibitor" : "No meetings"}
-                </span>
+                {org.showsMeetingCapability ? (
+                  <span className="text-gray-500">
+                    {" — "}
+                    {org.takesMeetings ? "Connected Exhibitor" : "No meetings"}
+                  </span>
+                ) : null}
               </span>
             </label>
           </li>

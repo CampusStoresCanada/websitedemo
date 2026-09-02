@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useEffect, useRef, useState } from "react";
 import { saveTopChoices, type PresentOrg } from "@/lib/actions/conference-meeting-preferences";
 import OrgChoiceList from "@/components/org/OrgChoiceList";
 
@@ -37,30 +37,62 @@ export default function MeetingPreferencesEditor({
 }) {
   const [chosen, setChosen] = useState<string[]>(initialTopChoiceOrgIds);
   const [error, setError] = useState<string | null>(null);
-  const [saved, setSaved] = useState(false);
-  const [isPending, startTransition] = useTransition();
+  const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   const atLimit = chosen.length >= limit;
 
-  function toggle(targetOrgId: string) {
-    const next = chosen.includes(targetOrgId)
-      ? chosen.filter((id) => id !== targetOrgId)
-      : [...chosen, targetOrgId];
-    if (next.length > limit) return;
+  /**
+   * ⛔ THE SAVE BELONGS TO THE CLICK, NEVER TO A STATE WATCHER.
+   *
+   * This was briefly a useEffect on `chosen` guarded by a firstRender ref. React
+   * invokes effects TWICE in development, so the second invocation ran with the
+   * initial value and wrote it — and because a save replaces the whole list,
+   * merely opening the page with an empty list DELETED whatever was stored. I
+   * destroyed a real saved choice that way while testing.
+   *
+   * Debounced from the handler instead: local state moves instantly, boxes are
+   * never disabled, and rapid ticking collapses into one write. Mounting does
+   * nothing at all.
+   */
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pending = useRef<string[] | null>(null);
 
-    const previous = chosen;
-    setChosen(next);
-    setError(null);
-    setSaved(false);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
 
-    startTransition(async () => {
-      const result = await saveTopChoices(conferenceId, orgId, next);
+  function queueSave(next: string[]) {
+    pending.current = next;
+    setStatus("saving");
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(async () => {
+      const attempt = pending.current;
+      if (!attempt) return;
+      const result = await saveTopChoices(conferenceId, orgId, attempt);
+      // A later tick has already superseded this write.
+      if (pending.current !== attempt) return;
       if (!result.success) {
-        setChosen(previous);
         setError(result.error);
+        setStatus("idle");
         return;
       }
-      setSaved(true);
+      setError(null);
+      setStatus("saved");
+    }, 500);
+  }
+
+  function toggle(targetOrgId: string) {
+    setChosen((current) => {
+      let next: string[];
+      if (current.includes(targetOrgId)) {
+        next = current.filter((id) => id !== targetOrgId);
+      } else if (current.length >= limit) {
+        return current;
+      } else {
+        next = [...current, targetOrgId];
+      }
+      queueSave(next);
+      return next;
     });
   }
 
@@ -70,8 +102,8 @@ export default function MeetingPreferencesEditor({
         <span className="font-medium text-gray-700">
           {chosen.length} of {limit} chosen
         </span>
-        {isPending ? <span className="text-gray-500">Saving…</span> : null}
-        {saved && !isPending ? <span className="text-green-700">Saved</span> : null}
+        {status === "saving" ? <span className="text-gray-500">Saving…</span> : null}
+        {status === "saved" ? <span className="text-green-700">Saved</span> : null}
         {error ? <span className="text-red-700">{error}</span> : null}
       </div>
 
@@ -79,7 +111,6 @@ export default function MeetingPreferencesEditor({
         orgs={candidates}
         selectedIds={chosen}
         onToggle={toggle}
-        disabled={isPending}
         limit={limit}
       />
     </div>

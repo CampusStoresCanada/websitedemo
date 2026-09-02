@@ -70,11 +70,16 @@ export default function MeetingBlackoutEditor({
         {error ? <span className="text-red-700">{error}</span> : null}
       </div>
 
+      {/*
+        ⛔ Never disabled while saving. Disabling on each write dropped ticks in
+        the other list at normal clicking speed — found by clicking it. Each
+        refusal is its own row keyed to one org, so overlapping writes touch
+        different rows and cannot race.
+      */}
       <OrgChoiceList
         orgs={candidates}
         selectedIds={refused}
         onToggle={toggle}
-        disabled={isPending}
         accentClassName="accent-red-700"
       />
 

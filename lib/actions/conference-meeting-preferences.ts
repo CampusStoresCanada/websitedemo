@@ -78,6 +78,8 @@ export type PresentOrg = {
    * throw away the demand signal that justifies the upgrade.
    */
   takesMeetings: boolean;
+  /** Whether the row should say anything about meeting capability at all. */
+  showsMeetingCapability: boolean;
 };
 
 /**
@@ -90,8 +92,31 @@ export type PresentOrg = {
  * Seat holders come through loadSeatHoldings (the gated reader); booth holders
  * come from entity_balances, which is where a booth purchase is recorded.
  */
-export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[]> {
+export async function listOrgsPresent(
+  conferenceId: string,
+  /**
+   * ⛔ Whose list this is. Meetings are buyer↔seller, so a store picks VENDORS
+   * and a vendor picks STORES — never its own side.
+   *
+   * Caught by clicking it: a partner was being shown other partners and, worse,
+   * member colleges labelled "No meetings", which is meaningless. A store does
+   * not need a suite to attend a meeting; it sits in the vendor's.
+   */
+  viewerOrgId: string
+): Promise<PresentOrg[]> {
   const db = createAdminClient();
+
+  const { data: viewer } = await db
+    .from("organizations")
+    .select("type")
+    .eq("id", viewerOrgId)
+    .maybeSingle();
+  const viewerType = (viewer?.type as string | null) ?? null;
+  // Whoever is not us. Anything that is neither Member nor Vendor Partner (CSC
+  // staff) gets no list rather than a guess.
+  const wantedType =
+    viewerType === "Member" ? "Vendor Partner" : viewerType === "Vendor Partner" ? "Member" : null;
+  if (!wantedType) return [];
 
   const { seats } = await loadSeatHoldings(db, { conferenceId });
   const { data: balances } = await db
@@ -140,6 +165,7 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
     .from("organizations")
     .select("id, name, slug, logo_url, is_test")
     .in("id", orgIds)
+    .eq("type", wantedType)
     .is("archived_at", null);
 
   return ((orgs ?? []) as Array<Record<string, unknown>>)
@@ -151,7 +177,13 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
       name: (o.name as string) ?? "",
       slug: (o.slug as string | null) ?? null,
       logoUrl: (o.logo_url as string | null) ?? null,
-      takesMeetings: orgsWithSuites.has(o.id as string),
+      /**
+       * Only meaningful for vendors — they are the ones who need a suite. A
+       * store attends in the vendor's room, so the label is suppressed when a
+       * vendor is looking at stores.
+       */
+      takesMeetings: wantedType === "Member" ? true : orgsWithSuites.has(o.id as string),
+      showsMeetingCapability: wantedType === "Vendor Partner",
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
@@ -172,7 +204,7 @@ export async function getMeetingPreferences(
 
   const [choices, present] = await Promise.all([
     loadTopChoices(conferenceId),
-    listOrgsPresent(conferenceId),
+    listOrgsPresent(conferenceId, orgId),
   ]);
 
   const db = createAdminClient() as unknown as {
