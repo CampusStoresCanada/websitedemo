@@ -470,6 +470,41 @@ for (const [owner, sigs] of byOwner) {
 // ⚠️ Centre over the WHOLE population before comparing anything. Uncentred, one
 // partner sat closest to the average of everything and took the #1 slot for 65
 // of 240 people — the space was reporting genericness as fit.
+// ⛔ A STORE IS ITS PEOPLE.
+//
+// Only 4 of 79 member orgs ever wrote a description, so placing orgs from their
+// own text placed almost none of them — while 280 of their PEOPLE placed fine,
+// because people write posts even when their store never filled in a form. The
+// site reads org-level rows, so the engine was person-rich and unusable.
+//
+// A store's position is therefore pooled from the acts of everyone who works
+// there, and only falls back to its own description when nobody there has said
+// anything. That is also the truer statement: what a store buys is what its
+// buyers do, not what somebody once typed into a profile field.
+//
+// ⚠️ Pooled BEFORE centring, so the store sits in the same space as everyone
+// else. Pooling centred vectors would average away the very direction that
+// centring exists to expose.
+const peopleByOrg = new Map<string, SignalVector[]>();
+for (const [owner, sigs] of byOwner) {
+  if (!owner.startsWith("person:")) continue;
+  const org = contactOrg.get(owner.slice(7));
+  if (!org || orgType.get(org) !== "Member") continue;
+  peopleByOrg.set(org, [...(peopleByOrg.get(org) ?? []), ...sigs]);
+}
+
+let orgsFromPeople = 0;
+for (const [org, sigs] of peopleByOrg) {
+  const pooled = poolSignals(sigs, { now: NOW });
+  if (!pooled) continue;
+  const key = `org:${org}`;
+  // Their own description wins if they wrote one — it is a deliberate statement
+  // about themselves, and this is only standing in for its absence.
+  if (!placed.has(key)) orgsFromPeople++;
+  if (!placed.has(key)) placed.set(key, { id: key, ...pooled });
+}
+console.log(`member orgs placed from their people: ${orgsFromPeople}`);
+
 const centred = removeCommonDirection([...placed.values()]);
 
 const memberPeople: Placed[] = [], partnerOrgs: Placed[] = [], memberOrgs: Placed[] = [];
