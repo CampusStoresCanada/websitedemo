@@ -1,0 +1,415 @@
+<title>Circle Cluster Bench</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+<style id="css">
+*, *::before, *::after { box-sizing: border-box; }
+:root {
+  --ground: #F7F8FA; --panel: #FFFFFF; --sunk: #EDF1F5;
+  --ink: #16202B; --muted: #5C6B7A; --faint: #8797A6;
+  --line: #DDE3EA; --line-strong: #C3CED9;
+  --accent: #0E7C86; --accent-ink: #FFFFFF; --accent-wash: #E2F1F2;
+  --agree: #2F7D4F; --wrong: #B4432B; --silent: #8A6A1F;
+  --agree-wash: #E6F1EA; --wrong-wash: #F8E7E2; --silent-wash: #F6EFDD;
+  --shadow: 0 1px 2px rgba(22,32,43,.06), 0 6px 20px -12px rgba(22,32,43,.18);
+  --sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --serif: "Source Serif 4", Georgia, "Times New Roman", serif;
+  --mono: "IBM Plex Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #10151A; --panel: #171E26; --sunk: #1E2731;
+    --ink: #E6EDF3; --muted: #93A2B1; --faint: #6E7E8D;
+    --line: #26313D; --line-strong: #35434F;
+    --accent: #35B4BE; --accent-ink: #08272A; --accent-wash: #173236;
+    --agree: #63BC87; --wrong: #E08469; --silent: #C7A254;
+    --agree-wash: #172C1F; --wrong-wash: #33201A; --silent-wash: #2C2517;
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px -12px rgba(0,0,0,.7);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #10151A; --panel: #171E26; --sunk: #1E2731;
+  --ink: #E6EDF3; --muted: #93A2B1; --faint: #6E7E8D;
+  --line: #26313D; --line-strong: #35434F;
+  --accent: #35B4BE; --accent-ink: #08272A; --accent-wash: #173236;
+  --agree: #63BC87; --wrong: #E08469; --silent: #C7A254;
+  --agree-wash: #172C1F; --wrong-wash: #33201A; --silent-wash: #2C2517;
+  --shadow: 0 1px 2px rgba(0,0,0,.4), 0 6px 20px -12px rgba(0,0,0,.7);
+}
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0; background: var(--ground); color: var(--ink);
+  font-family: var(--sans); font-size: 15px; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, p, ul, ol, figure { margin: 0; }
+button, input, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 3px; }
+
+/* ── shell ───────────────────────────────────────────────────────────── */
+.wrap { max-width: 1180px; margin: 0 auto; padding: 0 24px 96px; }
+
+.topbar {
+  position: sticky; top: 0; z-index: 20; background: var(--ground);
+  border-bottom: 1px solid var(--line); margin-bottom: 28px;
+}
+.topbar-inner {
+  max-width: 1180px; margin: 0 auto; padding: 14px 24px;
+  display: flex; align-items: center; gap: 20px; flex-wrap: wrap;
+}
+.brand { display: flex; align-items: baseline; gap: 10px; margin-right: auto; }
+.brand strong { font-size: 15px; font-weight: 600; letter-spacing: -.01em; }
+.brand span { font-family: var(--mono); font-size: 11.5px; color: var(--faint); }
+
+.tally { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.meter { width: 128px; height: 5px; background: var(--sunk); border-radius: 3px; overflow: hidden; }
+.meter i { display: block; height: 100%; background: var(--accent); width: 0; transition: width .3s ease; }
+
+.save {
+  border: 1px solid var(--accent); background: var(--accent); color: var(--accent-ink);
+  padding: 7px 15px; border-radius: 6px; font-weight: 600; font-size: 13.5px; cursor: pointer;
+}
+.save:disabled { opacity: .4; cursor: default; }
+.save.ghost { background: transparent; color: var(--accent); }
+.savenote { font-family: var(--mono); font-size: 11.5px; color: var(--muted); }
+.savenote.bad { color: var(--wrong); }
+
+/* ── masthead ────────────────────────────────────────────────────────── */
+.mast { padding: 34px 0 26px; border-bottom: 1px solid var(--line); margin-bottom: 30px; }
+.mast h1 {
+  font-size: clamp(28px, 3.6vw, 40px); font-weight: 600; letter-spacing: -.025em;
+  text-wrap: balance; max-width: 22ch; line-height: 1.12;
+}
+.mast p { margin-top: 14px; max-width: 66ch; color: var(--muted); font-size: 15.5px; }
+.mast p + p { margin-top: 9px; }
+.stats { display: flex; flex-wrap: wrap; gap: 0; margin-top: 24px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; background: var(--panel); }
+.stat { padding: 12px 18px; flex: 1 1 auto; min-width: 128px; border-right: 1px solid var(--line); }
+.stat:last-child { border-right: 0; }
+.stat b { display: block; font-family: var(--mono); font-size: 19px; font-weight: 500; font-variant-numeric: tabular-nums; }
+.stat span { display: block; font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--faint); margin-top: 3px; }
+
+/* ── layout ──────────────────────────────────────────────────────────── */
+.bench { display: grid; grid-template-columns: 116px minmax(0, 1fr); gap: 30px; align-items: start; }
+
+.rail { position: sticky; top: 78px; display: flex; flex-direction: column; gap: 5px; }
+.rail-hd { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: 3px; }
+.chip {
+  display: grid; grid-template-columns: 22px 1fr; align-items: center; gap: 7px;
+  border: 0; background: transparent; padding: 3px 5px; border-radius: 5px;
+  cursor: pointer; text-align: left; width: 100%;
+}
+.chip:hover { background: var(--sunk); }
+.chip em { font-family: var(--mono); font-size: 11px; font-style: normal; color: var(--faint); font-variant-numeric: tabular-nums; }
+.chip i { display: block; height: 7px; border-radius: 2px; background: var(--line-strong); }
+.chip[data-done="1"] i { background: var(--accent); }
+@media (max-width: 860px) { .bench { grid-template-columns: 1fr; } .rail { display: none; } }
+
+/* ── card ────────────────────────────────────────────────────────────── */
+.stack { display: flex; flex-direction: column; gap: 22px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; box-shadow: var(--shadow); scroll-margin-top: 82px; overflow: hidden; }
+.card[data-done="1"] { border-color: var(--accent); }
+
+.card-hd { display: flex; align-items: baseline; gap: 14px; flex-wrap: wrap; padding: 16px 20px 13px; border-bottom: 1px solid var(--line); }
+.card-n { font-family: var(--mono); font-size: 12px; color: var(--accent); font-weight: 600; }
+.card-size { font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
+.card-meta { font-family: var(--mono); font-size: 11.5px; color: var(--faint); font-variant-numeric: tabular-nums; margin-left: auto; display: flex; gap: 14px; }
+
+/* the machine's claim — deliberately quiet, mono, small */
+.claim { padding: 11px 20px; background: var(--sunk); border-bottom: 1px solid var(--line); display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.claim-lb { font-size: 10.5px; text-transform: uppercase; letter-spacing: .08em; color: var(--faint); white-space: nowrap; }
+.claim-v { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.claim-v b { font-weight: 500; color: var(--ink); }
+.claim.none .claim-v { color: var(--silent); font-style: italic; }
+
+/* the community's voice — serif, roomy */
+.docs { padding: 4px 20px 10px; display: flex; flex-direction: column; }
+.thread { padding: 13px 0; border-bottom: 1px solid var(--line); }
+.thread:last-child { border-bottom: 0; }
+.thread-t { font-family: var(--serif); font-size: 16.5px; font-weight: 600; line-height: 1.35; max-width: 70ch; }
+.thread-b { font-family: var(--serif); font-size: 14.5px; line-height: 1.5; color: var(--muted); margin-top: 3px; max-width: 74ch; }
+.snip { font-family: var(--serif); font-size: 14px; line-height: 1.5; color: var(--muted); max-width: 72ch;
+  margin-top: 6px; padding-left: 12px; border-left: 2px solid var(--line-strong); }
+.thread-m { font-family: var(--mono); font-size: 10.5px; color: var(--faint); margin-top: 7px; letter-spacing: .02em; }
+.splitbox { display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); cursor: pointer; }
+.splitbox input { width: 15px; height: 15px; accent-color: var(--accent); cursor: pointer; }
+
+.spaces { padding: 0 20px 14px; font-family: var(--mono); font-size: 11px; color: var(--faint); }
+
+/* ── verdict controls ────────────────────────────────────────────────── */
+.judge { padding: 14px 20px 17px; border-top: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; gap: 11px; }
+.judge-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.namefield { flex: 1 1 300px; min-width: 220px; }
+.namefield input, .notefield textarea {
+  width: 100%; background: var(--ground); border: 1px solid var(--line-strong);
+  border-radius: 6px; padding: 8px 11px; font-size: 14.5px;
+}
+.notefield textarea { resize: vertical; min-height: 44px; font-size: 14px; }
+.namefield input::placeholder, .notefield textarea::placeholder { color: var(--faint); }
+
+.seg { display: flex; gap: 6px; flex-wrap: wrap; }
+.seg button {
+  border: 1px solid var(--line-strong); background: var(--ground); border-radius: 6px;
+  padding: 7px 12px; font-size: 12.5px; font-weight: 500; cursor: pointer; color: var(--muted);
+  display: inline-flex; align-items: center; gap: 7px;
+}
+.seg button::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: currentColor; opacity: .5; }
+.seg button:hover { border-color: var(--faint); }
+.seg button[aria-pressed="true"] { font-weight: 600; }
+.seg button[aria-pressed="true"]::before { opacity: 1; }
+.seg button[data-v="agree"][aria-pressed="true"] { color: var(--agree); border-color: var(--agree); background: var(--agree-wash); }
+.seg button[data-v="wrong"][aria-pressed="true"] { color: var(--wrong); border-color: var(--wrong); background: var(--wrong-wash); }
+.seg button[data-v="silent"][aria-pressed="true"] { color: var(--silent); border-color: var(--silent); background: var(--silent-wash); }
+
+.export { margin-top: 30px; background: var(--panel); border: 1px solid var(--accent); border-radius: 10px; padding: 16px 18px; }
+.export-hd { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+.export-hd strong { font-size: 14px; }
+.export-hd span { font-size: 12.5px; color: var(--muted); }
+.export textarea { width: 100%; background: var(--ground); color: var(--ink); border: 1px solid var(--line-strong); border-radius: 6px; padding: 10px 12px; font-family: var(--mono); font-size: 12px; line-height: 1.5; resize: vertical; }
+.foot { margin-top: 42px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 13.5px; max-width: 70ch; }
+.foot code { font-family: var(--mono); font-size: 12.5px; background: var(--sunk); padding: 1px 5px; border-radius: 3px; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<script id="state" type="application/json">__CLUSTER_DATA__</script>
+
+<div id="root"></div>
+
+<script id="app">
+(function () {
+  var S = JSON.parse(document.getElementById("state").textContent);
+  S.labels = S.labels || {};
+  var CL = S.clusters, L = S.labels;
+  var dirty = false, ns;
+  var LSKEY = "csc.cluster.labels.v1";
+
+  // Whatever this browser holds wins over what was published: it is the newer
+  // work. Every accessor is guarded — a private window, blocked site data or a
+  // thumbnail pass all throw here, and none of them should cost a blank page.
+  try {
+    var held = JSON.parse(localStorage.getItem(LSKEY) || "null");
+    if (held) { for (var k in held) if (held[k]) L[k] = held[k]; }
+  } catch (e) { /* no stored labels; the embedded ones stand */ }
+  var PERSISTS = (function () {
+    try { localStorage.setItem(LSKEY + ".probe", "1"); localStorage.removeItem(LSKEY + ".probe"); return true; }
+    catch (e) { return false; }
+  })();
+  function stash() { if (!PERSISTS) return; try { localStorage.setItem(LSKEY, JSON.stringify(L)); } catch (e) {} }
+  function footNote() {
+    return PERSISTS
+      ? "Labels are kept in this browser as you type, so they survive closing the tab."
+      : "\u26a0 This view cannot store anything locally \u2014 labels live only until you close the tab, so export before you go.";
+  }
+
+  function esc(s) {
+    return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+  function get(n) { return L[n] || (L[n] = { name: "", verdict: "", note: "", split: false }); }
+  function done(n) { var l = L[n]; return !!(l && l.name && l.name.trim()); }
+  function tally() { return CL.filter(function (c) { return done(c.n); }).length; }
+
+  var VERDICTS = [
+    ["agree",  "Rules had it"],
+    ["wrong",  "Rules were wrong"],
+    ["silent", "Rules said nothing"]
+  ];
+
+  function shell() {
+    return '' +
+    '<div class="topbar"><div class="topbar-inner">' +
+      '<div class="brand"><strong>Circle Cluster Bench</strong>' +
+      '<span>' + S.docs + ' conversations &middot; ' + CL.length + ' clusters &middot; nomic-embed-text</span></div>' +
+      '<div class="tally"><span id="tallytext"></span>' +
+      '<div class="meter"><i id="meterbar"></i></div></div>' +
+      '<span class="savenote" id="savenote"></span>' +
+      '<button class="save ghost" id="exportbtn">Export JSON</button>' +
+      '<button class="save" id="savebtn">Save labels</button>' +
+    '</div></div>' +
+    '<div class="wrap">' +
+      '<div class="mast">' +
+        '<h1>What is this community actually talking about?</h1>' +
+        '<p>Every conversation in Circle — a question and the answers it drew — grouped by meaning. ' +
+        'No keyword list, no taxonomy, nobody’s hand on the scale. Each card below is one group the ' +
+        'machine found. Above the conversations is what the existing keyword rules claim the group is ' +
+        'about. Where those two disagree, the rules are what break.</p>' +
+        '<p>Name each group in whatever words fit, and say whether the rules got there. Everyone who ' +
+        'joined a conversation carries its topic, so a name here reaches every person in it. Nothing ' +
+        'feeds a recommendation until you say so.</p>' +
+        '<div class="stats">' +
+          '<div class="stat"><b>' + S.docs + '</b><span>conversations</span></div>' +
+          '<div class="stat"><b>' + S.comments + '</b><span>replies inside them</span></div>' +
+          '<div class="stat"><b>19%</b><span>keyword rules see</span></div>' +
+          '<div class="stat"><b>' + CL.length + '</b><span>groups found</span></div>' +
+        '</div>' +
+      '</div>' +
+      '<div class="bench"><div class="rail" id="rail"></div><div class="stack" id="stack"></div></div>' +
+      '<div class="export" id="exportpanel" hidden><div class="export-hd">' +
+        '<strong>Your labels</strong><span>Copy this and hand it back — it rebuilds the vocabulary.</span></div>' +
+        '<textarea id="exportbox" readonly rows="12" spellcheck="false"></textarea></div>' +
+      '<div class="foot">' + footNote() + ' <b>Export JSON</b> hands them back for rebuilding the vocabulary. Groups marked ' +
+      '<i>Rules were wrong</i> or <i>Rules said nothing</i> are the evidence for retiring the ' +
+      '<code>60-term</code> vocabulary; the names you give become the vocabulary that replaces it.</div>' +
+    '</div>';
+  }
+
+  function railHTML() {
+    return '<div class="rail-hd">Groups</div>' + CL.map(function (c) {
+      var w = Math.max(14, Math.round(c.size / CL[0].size * 100));
+      return '<button class="chip" data-go="' + c.n + '" data-done="' + (done(c.n) ? 1 : 0) + '" ' +
+        'title="' + esc(c.size + ' documents') + '"><em>' + String(c.n).padStart(2, "0") + '</em>' +
+        '<i style="width:' + w + '%"></i></button>';
+    }).join("");
+  }
+
+  function cardHTML(c) {
+    var l = get(c.n);
+    var claim = c.rules.length
+      ? '<span class="claim-v">' + c.rules.map(function (r) {
+          return '<b>' + esc(r.term) + '</b> ' + r.pct + '%';
+        }).join(" &middot; ") + '</span>'
+      : '<span class="claim-v">no term matched a single document here</span>';
+
+    var docs = c.reps.map(function (t) {
+      var snips = (t.snippets || []).map(function (x) {
+        return '<div class="snip">' + esc(x) + '\u2026</div>';
+      }).join("");
+      return '<div class="thread">' +
+        '<div class="thread-t">' + esc(t.title) + '</div>' +
+        (t.body ? '<div class="thread-b">' + esc(t.body) + '\u2026</div>' : '') + snips +
+        '<div class="thread-m">' + t.replies + (t.replies === 1 ? ' reply' : ' replies') + '</div>' +
+      '</div>';
+    }).join("");
+
+    var seg = VERDICTS.map(function (v) {
+      return '<button data-v="' + v[0] + '" data-n="' + c.n + '" aria-pressed="' +
+        (l.verdict === v[0] ? "true" : "false") + '">' + v[1] + '</button>';
+    }).join("");
+
+    return '<section class="card" id="c' + c.n + '" data-done="' + (done(c.n) ? 1 : 0) + '">' +
+      '<div class="card-hd"><span class="card-n">' + String(c.n).padStart(2, "0") + '</span>' +
+      '<span class="card-size">' + c.size + (c.size === 1 ? ' conversation' : ' conversations') + '</span>' +
+      '<span class="card-meta"><span>' + c.replies + ' replies</span><span>' + c.people + '+ people</span>' +
+      '<span>cohesion ' + c.cohesion + '</span></span></div>' +
+      '<div class="claim' + (c.rules.length ? '' : ' none') + '">' +
+      '<span class="claim-lb">Keyword rules say</span>' + claim + '</div>' +
+      '<div class="docs">' + docs + '</div>' +
+      (c.spaces.length ? '<div class="spaces">mostly in: ' + c.spaces.map(function (s) {
+        return esc(s.name) + " (" + s.n + ")"; }).join(" &middot; ") + '</div>' : '') +
+      '<div class="judge">' +
+        '<div class="judge-row"><div class="namefield">' +
+        '<input type="text" data-name="' + c.n + '" value="' + esc(l.name) + '" ' +
+        'placeholder="What is this group about?" aria-label="Name for group ' + c.n + '"></div>' +
+        '<div class="seg">' + seg + '</div></div>' +
+        '<label class="splitbox"><input type="checkbox" data-split="' + c.n + '"' +
+        (l.split ? ' checked' : '') + '> This pile is more than one topic</label>' +
+        '<div class="notefield"><textarea data-note="' + c.n + '" rows="1" ' +
+        'placeholder="Anything worth remembering — a category we’re missing, a partner to ask" ' +
+        'aria-label="Notes for group ' + c.n + '">' + esc(l.note) + '</textarea></div>' +
+      '</div></section>';
+  }
+
+  function paintTally() {
+    var t = tally();
+    document.getElementById("tallytext").textContent = t + " of " + CL.length + " named";
+    document.getElementById("meterbar").style.width = (t / CL.length * 100) + "%";
+    var b = document.getElementById("savebtn");
+    b.disabled = !dirty;
+    b.textContent = dirty ? "Save labels" : "Saved";
+    b.className = dirty ? "save" : "save ghost";
+  }
+  function markDone(n) {
+    var d = done(n) ? "1" : "0";
+    var card = document.getElementById("c" + n); if (card) card.dataset.done = d;
+    var chip = document.querySelector('.chip[data-go="' + n + '"]'); if (chip) chip.dataset.done = d;
+  }
+  function touch(n) { dirty = true; stash(); markDone(n); paintTally(); }
+
+  function render() {
+    document.getElementById("root").innerHTML = shell();
+    document.getElementById("rail").innerHTML = railHTML();
+    document.getElementById("stack").innerHTML = CL.map(cardHTML).join("");
+    paintTally();
+  }
+
+  document.addEventListener("input", function (e) {
+    var t = e.target;
+    if (t.dataset && t.dataset.split != null) { get(+t.dataset.split).split = t.checked; dirty = true; stash(); paintTally(); }
+    else if (t.dataset && t.dataset.name != null) { get(+t.dataset.name).name = t.value; touch(+t.dataset.name); }
+    else if (t.dataset && t.dataset.note != null) { get(+t.dataset.note).note = t.value; dirty = true; stash(); paintTally(); }
+  });
+
+  document.addEventListener("click", function (e) {
+    var b = e.target.closest ? e.target.closest("button") : null;
+    if (!b) return;
+    if (b.dataset.go) {
+      var el = document.getElementById("c" + b.dataset.go);
+      if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (b.dataset.v) {
+      var n = +b.dataset.n, l = get(n);
+      l.verdict = l.verdict === b.dataset.v ? "" : b.dataset.v;
+      b.parentNode.querySelectorAll("button").forEach(function (x) {
+        x.setAttribute("aria-pressed", x.dataset.v === l.verdict ? "true" : "false");
+      });
+      touch(n);
+      return;
+    }
+    if (b.id === "savebtn") { save(); return; }
+    if (b.id === "exportbtn") {
+      var panel = document.getElementById("exportpanel");
+      var box = document.getElementById("exportbox");
+      box.value = JSON.stringify({ labelledAt: new Date().toISOString(), labels: L }, null, 2);
+      panel.hidden = false;
+      box.focus(); box.select();
+      try { navigator.clipboard.writeText(box.value).then(function () { note("Copied to clipboard."); }, function () {}); } catch (e) {}
+      panel.scrollIntoView({ behavior: "smooth", block: "center" });
+    }
+  });
+
+  function document_source() {
+    var css = document.getElementById("css").outerHTML;
+    var app = document.getElementById("app").textContent;
+    var json = JSON.stringify(S).replace(/</g, "\\u003c");
+    return "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n" +
+      "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n" +
+      "<title>Circle Cluster Bench</title>\n" +
+      "<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">\n" +
+      "<link rel=\"preconnect\" href=\"https://fonts.gstatic.com\" crossorigin>\n" +
+      "<link rel=\"stylesheet\" href=\"https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap\">\n" +
+      css + "\n</head>\n<body>\n" +
+      "<script id=\"state\" type=\"application/json\">" + json + "<\/script>\n" +
+      "<div id=\"root\"><\/div>\n" +
+      "<script id=\"app\">" + app + "<\/script>\n</body>\n</html>";
+  }
+
+  function note(msg, bad) {
+    var el = document.getElementById("savenote");
+    el.textContent = msg; el.className = "savenote" + (bad ? " bad" : "");
+    clearTimeout(ns); if (!bad) ns = setTimeout(function () { el.textContent = ""; }, 4000);
+  }
+
+  function save() {
+    if (!dirty) return;
+    var btn = document.getElementById("savebtn");
+    btn.disabled = true; btn.textContent = "Saving…";
+    Promise.resolve(window.claude && window.claude.use ? window.claude.use("artifact") : null)
+      .then(function (a) {
+        if (!a) { note(PERSISTS ? "Kept in this browser \u2014 export to hand back." : "Nowhere to save here \u2014 use Export JSON.", !PERSISTS); dirty = !PERSISTS; paintTally(); return; }
+        return a.publish(document_source()).then(function () { dirty = false; note("Saved."); paintTally(); });
+      })
+      .catch(function (err) {
+        var c = err && err.code;
+        if (c === "conflict") { note("Someone saved first — reloading to their version."); return; }
+        if (c === "not_writer" || c === "not_granted" || c === "not_declared" || c === "capability_disabled") {
+          note("Kept in this browser. Use Export JSON to hand them back.");
+        } else if (c === "rate_limited") { note("Saving too often — wait a moment, then save again.", true); }
+        else if (c === "too_large") { note("Too large to save.", true); }
+        else { note("Save failed — try once more.", true); }
+        dirty = true; paintTally();
+      });
+  }
+
+  render();
+})();
+</script>
