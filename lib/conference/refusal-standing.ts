@@ -103,9 +103,16 @@ export function holdsThisCycle(row: RefusalRow, window: CycleWindow): boolean {
  * Returns pairs rather than a predicate so the exclusion is a visible, countable
  * step in a pipeline instead of a condition buried in a comparator.
  *
- * ⚠️ One-directional by design. A refuses B does not mean B refuses A, and
- * consumers that want the pairing gone in both directions must say so — a
- * scheduler should, a directory listing probably should not.
+ * ⚠️ One-directional by design — this is the PRIMITIVE, not the policy. A refuses
+ * B does not mean B refuses A, and callers mirror if their surface needs it.
+ *
+ * ⛔ Do not read this and conclude refusals are one-way. The grains differ:
+ * an ORG refusal is symmetrical (either side may fire the other; the pair is
+ * blacked out both ways), while a PERSON refusal binds that one seat — their
+ * colleague may still want the meeting, their employer has refused nothing and
+ * the vendor has refused nobody. `loadBlackoutListsByOrg` mirrors, and
+ * `loadBlackoutListsByContact` does not. Use those, not this, unless you are
+ * building the policy layer yourself.
  */
 export function enforcedPairs(rows: readonly RefusalRow[], window: CycleWindow): OrgPair[] {
   return rows
