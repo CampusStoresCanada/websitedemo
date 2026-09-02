@@ -105,32 +105,43 @@ describe("scheduler swaps helpers", () => {
     expect(ranked.map((item) => item.scheduleId)).toEqual(["c", "a", "b"]);
   });
 
-  it("builds why-lower text from score component deltas", () => {
+  it("builds why-lower text from the engine's axes", () => {
     const why = buildWhyLowerReasons(
-      {
-        category_overlap: 30,
-        buying_timeline_match: 20,
-        priority_alignment: 18,
-        top_5_preference: 15,
-        meeting_intent_match: 10,
-        purchasing_authority: 5,
-        blackout_penalty: 0,
-      },
-      {
-        category_overlap: 20,
-        buying_timeline_match: 20,
-        priority_alignment: 11,
-        top_5_preference: 0,
-        meeting_intent_match: 10,
-        purchasing_authority: 3,
-        blackout_penalty: 0,
-      }
+      { category: 0.9, province: 0.5, certification: 0.4, timing: 0.2 },
+      { category: 0.6, province: 0.5, certification: 0.1, timing: 0.2 }
     );
 
-    expect(why).toContain("category overlap is lower (20 vs 30)");
-    expect(why).toContain("priority alignment is lower (11 vs 18)");
-    expect(why).toContain("top 5 preference is lower (0 vs 15)");
-    expect(why).toContain("purchasing authority fit is lower (3 vs 5)");
+    expect(why).toContain("category overlap is lower (0.6 vs 0.9)");
+    expect(why).toContain("certification fit is lower (0.1 vs 0.4)");
+    // Equal axes say nothing.
+    expect(why.join(" ")).not.toContain("province");
+    expect(why.join(" ")).not.toContain("timing");
+  });
+
+  it("⛔ says nothing about an axis that was never observed", () => {
+    /**
+     * null means the axis had NOTHING TO SAY about that pair; 0 means it looked
+     * and found no fit. The old code read `Number(value ?? 0)`, so an unobserved
+     * axis was reported as "province fit is lower (0 vs 0.4)" — a judgement
+     * nobody made, shown to a member deciding whether to give up a meeting.
+     */
+    const why = buildWhyLowerReasons(
+      { category: 0.9, province: 0.4 },
+      { category: 0.9, province: null }
+    );
+    expect(why).toEqual([]);
+
+    // ...and the same in the other direction.
+    expect(
+      buildWhyLowerReasons({ province: null }, { province: 0.1 })
+    ).toEqual([]);
+  });
+
+  it("falls back to the raw axis name for an axis it has no label for", () => {
+    // The engine's axes will change as signals light up; an unknown key must
+    // still produce a sentence rather than disappearing.
+    const why = buildWhyLowerReasons({ some_new_axis: 0.8 }, { some_new_axis: 0.2 });
+    expect(why).toEqual(["some_new_axis is lower (0.2 vs 0.8)"]);
   });
 
   it("flags conflicts for delegate and linked registrations in same slot", () => {

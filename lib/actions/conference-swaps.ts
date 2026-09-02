@@ -8,7 +8,6 @@ import {
 import type { Database, Json } from "@/lib/database.types";
 import { getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { computeMatchScore } from "@/lib/scheduler/scoring";
 import {
   buildWhyLowerReasons,
   countConsumedSwaps,
@@ -25,6 +24,7 @@ import type {
 } from "@/lib/scheduler/types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadMeetingCandidates, siblingSeatIds } from "@/lib/conference/meeting-candidates";
+import { loadMeetingMatchScores } from "@/lib/conference/meeting-match-scores";
 import { loadSeatHoldings } from "@/lib/conference/seats";
 
 type SwapRequestRow = Database["public"]["Tables"]["swap_requests"]["Row"];
@@ -229,6 +229,10 @@ export async function requestSwap(
    * run either.
    */
   const candidates = await loadMeetingCandidates(adminClient, conferenceId);
+  // Same promoted run the scheduler ranked on — see toSolverRecords.
+  const promotedScores = await loadMeetingMatchScores(
+    candidates.delegates.map((d) => d.organizationId)
+  );
   const delegateSeat = candidates.seatById.get(delegateSeatId) ?? null;
   const delegateReg = delegateSeat
     ? {
@@ -429,15 +433,34 @@ export async function requestSwap(
       const persistedBreakdown =
         persistedScore && extractBreakdown(persistedScore.score_breakdown);
 
+      /**
+       * ⛔ NO v2 FALLBACK. This used to fall back to computeMatchScore when a
+       * run had not persisted a row, which meant an alternative could be ranked
+       * by a different scorer than the meeting it was replacing — the swap would
+       * look worse or better for reasons that had nothing to do with the match.
+       * Both now come from the promoted run; an absent row is a real 0.
+       */
       const computedScore =
         persistedScore && persistedBreakdown
           ? {
               totalScore: Number(persistedScore.total_score),
               breakdown: persistedBreakdown,
               reasons: persistedScore.match_reasons ?? [],
-              isBlackout: persistedScore.is_blackout,
+              isBlackout: false,
             }
-          : computeMatchScore(delegateProfile, exhibitorReg);
+          : {
+              totalScore:
+                promotedScores.orgTotalFor(delegateReg.organization_id, exhibitorReg.organizationId),
+              breakdown: promotedScores.breakdownFor(
+                delegateReg.organization_id,
+                exhibitorReg.organizationId
+              ),
+              reasons: promotedScores.reasonsFor(
+                delegateReg.organization_id,
+                exhibitorReg.organizationId
+              ),
+              isBlackout: false,
+            };
 
       if (
         !Number.isFinite(computedScore.totalScore) ||

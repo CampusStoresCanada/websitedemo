@@ -5,12 +5,11 @@ import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
-import { loadMeetingMatchScores } from "@/lib/conference/meeting-match-scores";
+import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { optimizeSchedule } from "@/lib/scheduler/optimize";
 import { isBlackedOut } from "@/lib/scheduler/blackout";
 import type {
@@ -396,6 +395,17 @@ export async function createSchedulerDraftRun(
      * target" and flagged a $4,000 booth as a problem to fix, when getting no
      * meetings is precisely what that booth costs less for.
      */
+    const memberContacts = candidates.delegates
+      .map((d) => ({
+        contactId: candidates.contactBySeatId.get(d.registrationId) ?? "",
+        orgId: d.organizationId,
+      }))
+      .filter((c) => c.contactId);
+    const matchScoreLookup = await loadMeetingMatchScores(
+      candidates.delegates.map((d) => d.organizationId),
+      memberContacts
+    );
+
     const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
     const schedulableExhibitors = candidates.exhibitors.filter((e) =>
       orgIdsHoldingSuites.has(e.organizationId)
@@ -418,7 +428,20 @@ export async function createSchedulerDraftRun(
       );
     }
 
-    const matchScores = computeAllMatchScores(candidates.delegates, schedulableExhibitors);
+    /**
+     * ⛔ ONE SCORE SOURCE. This was computeAllMatchScores — the v2 scorer, whose
+     * five of six inputs lost their home when the meeting system came off
+     * conference_registrations, leaving it effectively two axes. The greedy
+     * ranked on that while the local search ranked on match_edges and swaps
+     * ranked on persisted v2 rows: three notions of a good pairing in one
+     * pipeline, none agreeing. All three now read the promoted run.
+     */
+    const matchScores = toSolverRecords({
+      delegates: candidates.delegates,
+      exhibitors: schedulableExhibitors,
+      contactBySeatId: candidates.contactBySeatId,
+      scores: matchScoreLookup,
+    });
 
     const persistedScoreInput = matchScores.map((score) => ({
       conference_id: conferenceId,
@@ -482,28 +505,6 @@ export async function createSchedulerDraftRun(
      * refused org, double-book a person, or seat an exhibitor in a room they do
      * not hold — those are not worse moves, they are not moves.
      */
-    /**
-     * ⚠️ Contacts come from loadSeatHoldings via loadMeetingCandidates — NOT
-     * re-derived here. `contact_id` is FK-enforced and `canonical_person_id` is
-     * not, and getting that precedence wrong already cost the badge pipeline a
-     * real person's identity. One resolution, in the gated reader.
-     *
-     * I previously hardcoded `contactId: null` here, which meant the person term
-     * could never fire even once person rows exist — a seam I had described as
-     * live and which was dead end to end.
-     */
-    const memberContacts = candidates.delegates
-      .map((d) => ({
-        contactId: candidates.contactBySeatId.get(d.registrationId) ?? "",
-        orgId: d.organizationId,
-      }))
-      .filter((c) => c.contactId);
-
-    const matchScoreLookup = await loadMeetingMatchScores(
-      candidates.delegates.map((d) => d.organizationId),
-      memberContacts
-    );
-
     const delegateSeatFacts = new Map(
       candidates.delegates.map((d) => [
         d.registrationId,

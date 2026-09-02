@@ -94,12 +94,12 @@ export function computeMatchScore(
   }
 
   const totalScore =
-    breakdown.category_overlap +
-    breakdown.buying_timeline_match +
-    breakdown.priority_alignment +
-    breakdown.top_5_preference +
-    breakdown.meeting_intent_match +
-    breakdown.purchasing_authority;
+    (breakdown.category_overlap ?? 0) +
+    (breakdown.buying_timeline_match ?? 0) +
+    (breakdown.priority_alignment ?? 0) +
+    (breakdown.top_5_preference ?? 0) +
+    (breakdown.meeting_intent_match ?? 0) +
+    (breakdown.purchasing_authority ?? 0);
 
   return {
     totalScore,

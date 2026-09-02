@@ -25,15 +25,23 @@ export interface ExhibitorProfile {
   salesReadiness: Record<string, unknown> | null;
 }
 
-export interface ScoreBreakdown {
-  category_overlap: number;
-  buying_timeline_match: number;
-  priority_alignment: number;
-  top_5_preference: number;
-  meeting_intent_match: number;
-  purchasing_authority: number;
-  blackout_penalty: number;
-}
+/**
+ * Per-axis match values, straight from the engine's `match_edges.breakdown`.
+ *
+ * ⛔ null ≠ 0. null means the axis had NOTHING TO SAY about this pair; 0 means
+ * it looked and found no fit. Collapsing null to 0 punishes a pair for what we
+ * do not know, which is the bug the confidence mechanism exists to avoid.
+ *
+ * Open-keyed on purpose. It was seven fixed v2 axis names
+ * (category_overlap, buying_timeline_match, priority_alignment,
+ * top_5_preference, meeting_intent_match, purchasing_authority,
+ * blackout_penalty) — five of which read columns that no longer have a home.
+ * The engine's axes are category, certification, province, timing,
+ * requirements, services, cohort, semantic and behavioural, and they will
+ * change again as signals light up. A consumer reads keys it recognises and
+ * passes the rest through.
+ */
+export type ScoreBreakdown = Record<string, number | null>;
 
 export interface MatchScoreRecord {
   delegateSeatId: string;

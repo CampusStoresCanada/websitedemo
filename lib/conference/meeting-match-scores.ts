@@ -1,4 +1,5 @@
 import { readMatchEdges } from "@/lib/match/read";
+import type { MatchScoreRecord } from "@/lib/scheduler/types";
 
 /**
  * The conference solver's view of match quality: (member org, partner org) → total.
@@ -39,15 +40,30 @@ export type MeetingMatchScores = {
    * suite, so which rep works the booth is not ours to optimize over.
    */
   personTotalFor: (memberContactId: string, partnerOrgId: string) => number;
+  /**
+   * The engine's per-axis values for a store pair, for explanation only.
+   * ⛔ null in here means the axis never had anything to say — never collapse it
+   * to 0, or a UI will report a judgement nobody made.
+   */
+  breakdownFor: (memberOrgId: string, partnerOrgId: string) => Record<string, number | null>;
+  /** The engine's own reason sentences for a store pair. */
+  reasonsFor: (memberOrgId: string, partnerOrgId: string) => string[];
+  /** Position within this subject's candidates; large when there is no edge. */
+  rankFor: (memberOrgId: string, partnerOrgId: string) => number;
   /** Whether a promoted run existed at all — null engine vs a genuinely empty one. */
   available: boolean;
   edgeCount: number;
   personEdgeCount: number;
 };
 
+const NO_RANK = Number.MAX_SAFE_INTEGER;
+
 const EMPTY: MeetingMatchScores = {
   orgTotalFor: () => 0,
   personTotalFor: () => 0,
+  breakdownFor: () => ({}),
+  reasonsFor: () => [],
+  rankFor: () => NO_RANK,
   available: false,
   edgeCount: 0,
   personEdgeCount: 0,
@@ -71,6 +87,10 @@ export async function loadMeetingMatchScores(
   if (uniqueMembers.length === 0) return EMPTY;
 
   const byPair = new Map<string, number>();
+  const detailByPair = new Map<
+    string,
+    { breakdown: Record<string, number | null>; reasons: string[]; rank: number }
+  >();
   let sawARun = false;
   let edgeCount = 0;
 
@@ -84,7 +104,13 @@ export async function loadMeetingMatchScores(
     if (edges === null) continue;
     sawARun = true;
     for (const edge of edges) {
-      byPair.set(`${memberOrgId}|${edge.candidateOrgId}`, edge.total);
+      const key = `${memberOrgId}|${edge.candidateOrgId}`;
+      byPair.set(key, edge.total);
+      detailByPair.set(key, {
+        breakdown: edge.breakdown,
+        reasons: edge.reasons.map((r) => r.text),
+        rank: edge.rank,
+      });
       edgeCount += 1;
     }
   }
@@ -124,10 +150,70 @@ export async function loadMeetingMatchScores(
 
   return {
     orgTotalFor: (memberOrgId, partnerOrgId) => byPair.get(`${memberOrgId}|${partnerOrgId}`) ?? 0,
+    breakdownFor: (memberOrgId, partnerOrgId) =>
+      detailByPair.get(`${memberOrgId}|${partnerOrgId}`)?.breakdown ?? {},
+    reasonsFor: (memberOrgId, partnerOrgId) =>
+      detailByPair.get(`${memberOrgId}|${partnerOrgId}`)?.reasons ?? [],
+    rankFor: (memberOrgId, partnerOrgId) =>
+      detailByPair.get(`${memberOrgId}|${partnerOrgId}`)?.rank ?? NO_RANK,
     personTotalFor: (memberContactId, partnerOrgId) =>
       byPerson.get(`${memberContactId}|${partnerOrgId}`) ?? 0,
     available: sawARun,
     edgeCount,
     personEdgeCount,
   };
+}
+
+
+/**
+ * ONE SCORE SOURCE for the whole meeting pipeline.
+ *
+ * The greedy seed, the local search and the swap alternatives were each ranking
+ * on a different notion of a good match: the greedy on the v2
+ * `computeAllMatchScores`, the search on `match_edges`, and swaps on persisted
+ * v2 rows. A meeting could be created by one idea of a good pairing, improved by
+ * a second and swapped by a third, none of which agreed. This is the single
+ * source they all read.
+ *
+ * PAIR score = orgTotal(delegate's store, vendor) + personTotal(delegate, vendor).
+ *
+ * ⚠️ That is the value ONE DELEGATE brings, and it is deliberately not the
+ * meeting total. The objective de-duplicates the org term across a room (an org
+ * edge is a claim about an org pair, counted once however many of their people
+ * are present); ranking a single delegate has no room to de-duplicate against.
+ * Two colleagues from one store rank equally on org grounds, which is correct —
+ * they are equally good on what we know about their employer.
+ *
+ * ⛔ `isBlackout` is always false. Legality is decided from
+ * `org_meeting_refusals` before any score is consulted, the engine has no
+ * blocklist input, and generate.ts ignores this field by design. It survives
+ * only because the record shape is shared.
+ */
+export function toSolverRecords(params: {
+  delegates: ReadonlyArray<{ registrationId: string; organizationId: string }>;
+  exhibitors: ReadonlyArray<{ registrationId: string; organizationId: string }>;
+  contactBySeatId: ReadonlyMap<string, string>;
+  scores: MeetingMatchScores;
+}): MatchScoreRecord[] {
+  const records: MatchScoreRecord[] = [];
+  for (const delegate of params.delegates) {
+    const contactId = params.contactBySeatId.get(delegate.registrationId);
+    for (const exhibitor of params.exhibitors) {
+      const org = params.scores.orgTotalFor(delegate.organizationId, exhibitor.organizationId);
+      const person = contactId
+        ? params.scores.personTotalFor(contactId, exhibitor.organizationId)
+        : 0;
+      records.push({
+        delegateSeatId: delegate.registrationId,
+        exhibitorSeatId: exhibitor.registrationId,
+        exhibitorOrganizationId: exhibitor.organizationId,
+        totalScore: org + person,
+        breakdown: params.scores.breakdownFor(delegate.organizationId, exhibitor.organizationId),
+        reasons: params.scores.reasonsFor(delegate.organizationId, exhibitor.organizationId),
+        isBlackout: false,
+        isTop5: params.scores.rankFor(delegate.organizationId, exhibitor.organizationId) <= 5,
+      });
+    }
+  }
+  return records;
 }
