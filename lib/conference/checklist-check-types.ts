@@ -13,6 +13,7 @@ export const CHECK_TYPES = [
   "directory_profile_complete",
   "self_reported",
   "directory_profile_enriched",
+  "top_choices_declared",
 ] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
 

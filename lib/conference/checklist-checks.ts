@@ -149,6 +149,37 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
    *
    * Cancelled and expired orders are not debts, so they never block.
    */
+  /**
+   * Have they told us who they most want to meet?
+   *
+   * Detectable rather than self_reported — we can see whether a row exists, so
+   * asking someone to tick "yes I did that" would be asking them to confirm
+   * something we already know, and lets a task read complete when it is not.
+   *
+   * ⚠️ ANY choice counts, not five. The ask is "tell us who you want to meet";
+   * someone with two people they care about has answered it. Requiring the full
+   * five would push people to pad the list with orgs they do not care about,
+   * which is worse than a short honest list — the padding is indistinguishable
+   * from real interest once it reaches the scheduler.
+   */
+  async top_choices_declared({ db, organizationId, conferenceId }) {
+    // The generated types do not know this table yet and another session holds
+    // uncommitted changes in lib/database.types.ts, so regenerating would be a
+    // merge decision rather than a type fix. Narrow shim, same as
+    // lib/conference/top-choices.ts — delete both at the next coordinated regen.
+    const anyDb = db as unknown as {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      from: (table: string) => any;
+    };
+    const { data } = await anyDb
+      .from("conference_top_choices")
+      .select("id")
+      .eq("conference_id", conferenceId)
+      .eq("declaring_org_id", organizationId)
+      .limit(1);
+    return Boolean(data && data.length > 0);
+  },
+
   async payment_complete({ db, organizationId, conferenceId }) {
     const { data } = await db
       .from("conference_orders")

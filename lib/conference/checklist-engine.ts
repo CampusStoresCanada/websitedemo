@@ -42,6 +42,11 @@ function getTaskCta(
       };
     case "travel_info_submitted":
       return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
+    case "top_choices_declared":
+      return {
+        label: "Choose who you want to meet",
+        url: `${appUrl}/org/${ctx.orgSlug}#meeting_preferences`,
+      };
     case "payment_complete":
       return {
         label: "See what's owed",

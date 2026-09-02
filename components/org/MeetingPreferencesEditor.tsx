@@ -125,7 +125,15 @@ export default function MeetingPreferencesEditor({
             <li key={org.id} className="flex items-center justify-between gap-4 px-3 py-2">
               <div className="min-w-0">
                 <p className="truncate text-sm font-medium text-gray-900">{org.name}</p>
-                {org.type ? <p className="text-xs text-gray-500">{org.type}</p> : null}
+                <p className="text-xs text-gray-500">
+                  {org.type}
+                  {org.takesMeetings ? null : (
+                    <>
+                      {org.type ? " · " : null}
+                      <span className="text-amber-700">on the floor only this year</span>
+                    </>
+                  )}
+                </p>
               </div>
 
               <div className="flex shrink-0 items-center gap-2">
@@ -163,6 +171,13 @@ export default function MeetingPreferencesEditor({
           );
         })}
       </ul>
+
+      <p className="text-xs text-gray-500">
+        Some exhibitors don&apos;t have a meeting room this year — you&apos;ll see &ldquo;on
+        the floor only&rdquo; next to them. Pick them anyway if they&apos;re who you want to
+        see: we can&apos;t book you a meeting, but knowing there was demand is the most
+        useful thing you can tell us, and we pass it on to them.
+      </p>
 
       <p className="text-xs text-gray-500">
         &ldquo;Rather not&rdquo; is weighted heavily against when we build the schedule. We

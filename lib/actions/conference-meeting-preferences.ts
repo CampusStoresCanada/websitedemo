@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { loadSeatHoldings } from "@/lib/conference/seats";
+import { CONTAINMENT_ROLE } from "@/lib/conference/inclusion";
 import {
   loadTopChoices,
   replaceTopChoices,
@@ -59,7 +60,23 @@ async function contactIdFor(orgId: string): Promise<string | null> {
   return (data?.id as string | undefined) ?? null;
 }
 
-export type PresentOrg = { id: string; name: string; type: string | null };
+export type PresentOrg = {
+  id: string;
+  name: string;
+  type: string | null;
+  /**
+   * Whether this org has a suite, i.e. can actually hold scheduled meetings.
+   *
+   * ⛔ SHOWN, NEVER ENFORCED. Only the higher-tier booths include a suite, so
+   * picking a standard exhibitor cannot produce a meeting this year — but the
+   * pick is still recorded, because it is one of the most useful things we can
+   * learn. The ED: a standard exhibitor finding that 47 people would rather
+   * have had twelve minutes with them than catch them on a booked-solid floor
+   * is genuinely useful, to us and to them. Filtering those picks out would
+   * throw away the demand signal that justifies the upgrade.
+   */
+  takesMeetings: boolean;
+};
 
 /**
  * Who is actually going to be there, which is the list you pick five from.
@@ -77,7 +94,7 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
   const { seats } = await loadSeatHoldings(db, { conferenceId });
   const { data: balances } = await db
     .from("entity_balances")
-    .select("organization_id")
+    .select("organization_id, entity_id")
     .eq("conference_id", conferenceId);
 
   const orgIds = [
@@ -88,6 +105,34 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
   ].filter((id): id is string => Boolean(id));
 
   if (orgIds.length === 0) return [];
+
+  /**
+   * Who can hold meetings = who holds a booth that `includes` a suite. Derived
+   * from the graph rather than from a price or a product name, the same way the
+   * scheduler derives it (see lib/conference/inclusion.ts).
+   */
+  const { data: suiteRefs } = await db
+    .from("conference_entity_refs")
+    .select("from_entity_id, to_entity_id, role")
+    .eq("conference_id", conferenceId)
+    .eq("role", CONTAINMENT_ROLE);
+  const { data: suiteEntities } = await db
+    .from("conference_entities")
+    .select("id")
+    .eq("conference_id", conferenceId)
+    .eq("kind", "suite");
+
+  const suiteIds = new Set((suiteEntities ?? []).map((e) => e.id as string));
+  const boothsWithSuites = new Set(
+    (suiteRefs ?? [])
+      .filter((r) => suiteIds.has(r.to_entity_id as string))
+      .map((r) => r.from_entity_id as string)
+  );
+  const orgsWithSuites = new Set(
+    (balances ?? [])
+      .filter((b) => boothsWithSuites.has(b.entity_id as string))
+      .map((b) => b.organization_id as string)
+  );
 
   const { data: orgs } = await db
     .from("organizations")
@@ -103,6 +148,7 @@ export async function listOrgsPresent(conferenceId: string): Promise<PresentOrg[
       id: o.id as string,
       name: (o.name as string) ?? "",
       type: (o.type as string | null) ?? null,
+      takesMeetings: orgsWithSuites.has(o.id as string),
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

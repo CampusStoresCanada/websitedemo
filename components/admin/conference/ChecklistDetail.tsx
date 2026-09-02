@@ -50,6 +50,7 @@ const CHECK_TYPE_LABELS: Record<CheckType, string> = {
   directory_profile_complete: "Directory listing ready (logo, description, categories, contacts)",
   directory_profile_enriched: "Directory listing enriched (featured product, catalogue)",
   self_reported: "Self-reported — the org ticks it off (Stronco, Encore, anything off-site)",
+  top_choices_declared: "Top choices declared (who they most want to meet)",
 };
 
 // `self_reported` binds check_entity_id to the TASK's own id rather than a
