@@ -30,7 +30,7 @@ export default async function MeetingPreferencesSection({
   // does not get this section, the same way they do not get the roster controls.
   if (!result.success || !result.data) return null;
 
-  const { present, topChoiceOrgIds, refusedOrgIds, limit } = result.data;
+  const { present, topChoiceOrgIds, limit } = result.data;
 
   // Nobody to choose from means this org is not really at the conference yet.
   const others = present.filter((org) => org.id !== orgId);
@@ -55,7 +55,6 @@ export default async function MeetingPreferencesSection({
         orgId={orgId}
         candidates={others}
         initialTopChoiceOrgIds={topChoiceOrgIds}
-        initialRefusedOrgIds={refusedOrgIds}
         limit={limit}
       />
     </section>
