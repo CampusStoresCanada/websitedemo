@@ -75,11 +75,23 @@ describe("what we promise to deliver", () => {
     expect(DELIVERABLES.filter((d) => d.built).length).toBeGreaterThan(0);
   });
 
-  it("does not claim year-over-year for this cycle", () => {
-    // First year collected through this system. Movement needs two.
+  it("DOES promise year-over-year this cycle, because FY2025 is on file", () => {
+    // I originally marked this 2027, conflating "first year collected through
+    // this system" with "first year we have data for". All 39 FY2025 rows carry
+    // revenue, COGS, net profit, HR expense and online sales, so every metric in
+    // YOY_METRICS has a 2025 baseline and movement lands with the 2026 results.
     const yoy = DELIVERABLES.find((d) => /year-over-year/i.test(d.title))!;
-    expect(yoy.built).toBe(false);
-    expect(yoy.when).toBe("2027");
+    expect(yoy.built).toBe(true);
+    expect(yoy.when).not.toBe("2027");
+  });
+
+  it("still holds inventory metrics back to 2027, for a real reason", () => {
+    // Different constraint entirely: GMROI and turns average TWO year-end
+    // inventory figures, and fye_inventory_value is null for all 39 FY2025
+    // rows — the question was not asked. First pair is 2026 and 2027.
+    const inv = DELIVERABLES.find((d) => /GMROI/i.test(d.title))!;
+    expect(inv.built).toBe(false);
+    expect(inv.when).toBe("2027");
   });
 
   it("keeps the PDF package honestly flagged as not yet built", () => {

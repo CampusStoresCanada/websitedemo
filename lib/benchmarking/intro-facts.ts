@@ -139,9 +139,23 @@ export const DELIVERABLES: Deliverable[] = [
   {
     title: "Year-over-year movement",
     body:
-      "How each of your figures has moved since last year, once two comparable " +
-      "years exist. This is the first year collected through this system, so the " +
-      "first movement appears in the 2027 cycle.",
+      "How each of your figures has moved since last year — revenue, gross and net " +
+      "margin, staffing share, online share, and sales per student and per square " +
+      "foot. FY2025 is on file for all 39 stores that took part, so this arrives " +
+      "with this year's results rather than waiting for a third year.",
+    when: "With the results release",
+    built: true,
+  },
+  {
+    // Separated from the movement above because it is a genuinely different
+    // constraint: GMROI and turns need an AVERAGE of two year-end inventory
+    // figures, and fye_inventory_value is empty for all 39 FY2025 rows — it was
+    // not asked. So the first pair of year-ends is 2026 and 2027.
+    title: "Inventory performance — GMROI and stock turns",
+    body:
+      "Margin return and turns against average inventory at cost. These need two " +
+      "consecutive year-end inventory figures to average, and FY2025 did not ask " +
+      "for one, so the first pair is this year and next.",
     when: "2027",
     built: false,
   },
