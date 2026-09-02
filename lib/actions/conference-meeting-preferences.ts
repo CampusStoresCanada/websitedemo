@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { loadSeatHoldings } from "@/lib/conference/seats";
 import { CONTAINMENT_ROLE } from "@/lib/conference/inclusion";
+import { getProgramsConfig } from "@/lib/policy/engine";
 import {
   loadTopChoices,
   replaceTopChoices,
@@ -106,17 +107,37 @@ export async function listOrgsPresent(
 ): Promise<PresentOrg[]> {
   const db = createAdminClient();
 
-  const { data: viewer } = await db
-    .from("organizations")
-    .select("type")
-    .eq("id", viewerOrgId)
-    .maybeSingle();
-  const viewerType = (viewer?.type as string | null) ?? null;
-  // Whoever is not us. Anything that is neither Member nor Vendor Partner (CSC
-  // staff) gets no list rather than a guess.
-  const wantedType =
-    viewerType === "Member" ? "Vendor Partner" : viewerType === "Vendor Partner" ? "Member" : null;
-  if (!wantedType) return [];
+  const [{ data: viewer }, programs] = await Promise.all([
+    db.from("organizations").select("type").eq("id", viewerOrgId).maybeSingle(),
+    getProgramsConfig(),
+  ]);
+
+  /**
+   * ⛔ WHICH SIDE SOMEONE IS ON IS CONFIGURED, NOT HARDCODED.
+   *
+   * `MembershipProgramDef` maps a literal `organizations.type` value to a
+   * permission level, and CSC edits those programs — so `type === "Member"` in
+   * source is a guess that survives only until somebody renames a program or
+   * adds a second one on the same side. I wrote that literal here after being
+   * corrected on exactly it earlier the same day.
+   *
+   * Reading the programs also handles the case a hardcode cannot: two org types
+   * that both resolve to `member`.
+   */
+  const levelOf = (orgType: string | null | undefined) =>
+    programs.find((program) => program.orgTypeValue === orgType)?.permissionLevel ?? null;
+
+  const viewerLevel = levelOf(viewer?.type as string | null);
+  // Meetings are buyer↔seller, so the list is always the OTHER side. Anyone on
+  // neither side (CSC staff) gets no list rather than a guess.
+  const wantedLevel =
+    viewerLevel === "member" ? "partner" : viewerLevel === "partner" ? "member" : null;
+  if (!wantedLevel) return [];
+
+  const wantedTypes = programs
+    .filter((program) => program.permissionLevel === wantedLevel)
+    .map((program) => program.orgTypeValue);
+  if (wantedTypes.length === 0) return [];
 
   const { seats } = await loadSeatHoldings(db, { conferenceId });
   const { data: balances } = await db
@@ -165,7 +186,7 @@ export async function listOrgsPresent(
     .from("organizations")
     .select("id, name, slug, logo_url, is_test")
     .in("id", orgIds)
-    .eq("type", wantedType)
+    .in("type", wantedTypes)
     .is("archived_at", null);
 
   return ((orgs ?? []) as Array<Record<string, unknown>>)
@@ -182,8 +203,13 @@ export async function listOrgsPresent(
        * store attends in the vendor's room, so the label is suppressed when a
        * vendor is looking at stores.
        */
-      takesMeetings: wantedType === "Member" ? true : orgsWithSuites.has(o.id as string),
-      showsMeetingCapability: wantedType === "Vendor Partner",
+      /**
+       * Only the supply side needs a room of its own — a store attends in the
+       * vendor's suite — so capability is a fact about partners and is neither
+       * shown nor computed when a vendor is looking at stores.
+       */
+      takesMeetings: wantedLevel === "partner" ? orgsWithSuites.has(o.id as string) : true,
+      showsMeetingCapability: wantedLevel === "partner",
     }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }
