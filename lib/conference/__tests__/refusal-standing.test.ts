@@ -1,115 +1,92 @@
 import { describe, it, expect } from "vitest";
 import {
-  refusalStanding,
+  holdsThisCycle,
   enforcedPairs,
-  thawPrompts,
+  awaitingAnswer,
   type RefusalRow,
-  type RefusalPolicy,
 } from "../refusal-standing";
 
-const NOW = new Date("2026-09-02T12:00:00Z");
-const POLICY: RefusalPolicy = { lapseAfterDays: 1095, promptAfterDays: 365 };
+/** This year's ask went out ahead of the conference. */
+const ASKED = new Date("2026-08-01T00:00:00Z");
 
-const daysAgo = (n: number) => new Date(NOW.getTime() - n * 86_400_000).toISOString();
+const at = (iso: string) => new Date(iso).toISOString();
 
 const row = (over: Partial<RefusalRow> = {}): RefusalRow => ({
   declaring_org_id: "member",
   refused_org_id: "vendor",
-  declared_by_contact_id: "karin",
-  first_declared_at: daysAgo(30),
+  first_declared_at: at("2026-08-15T00:00:00Z"),
   ...over,
 });
 
-describe("refusalStanding", () => {
-  it("enforces a fresh refusal", () => {
-    const s = refusalStanding(row(), NOW, POLICY);
-    expect(s.enforced).toBe(true);
-    expect(s.dueForThaw).toBe(false);
+describe("holdsThisCycle", () => {
+  it("holds when they answered this year's ask", () => {
+    expect(holdsThisCycle(row(), ASKED)).toBe(true);
   });
 
-  it("lets an old one lapse without anyone clearing it", () => {
-    // ⛔ Persists-until-cleared is a trap: clearing old blackouts is nobody's
-    // job, so it becomes permanent in practice.
-    const s = refusalStanding(row({ first_declared_at: daysAgo(1200) }), NOW, POLICY);
-    expect(s.enforced).toBe(false);
+  it("holds when an old blackout was re-affirmed this year", () => {
+    expect(
+      holdsThisCycle(
+        row({ first_declared_at: at("2023-01-01"), reaffirmed_at: at("2026-08-20") }),
+        ASKED
+      )
+    ).toBe(true);
   });
 
-  it("resets the clock when it is re-affirmed", () => {
-    // Saying it still stands IS the signal that it still stands.
-    const s = refusalStanding(
-      row({ first_declared_at: daysAgo(1200), reaffirmed_at: daysAgo(10) }),
-      NOW,
-      POLICY
-    );
-    expect(s.enforced).toBe(true);
-    expect(s.dueForThaw).toBe(false);
-    expect(Math.round(s.ageDays)).toBe(10);
+  it("⛔ does NOT hold when last year's blackout was never renewed", () => {
+    // This is the point, not an oversight. Not mentioning it again is how a
+    // relationship recovers, and it is the only way most of them ever will —
+    // nobody writes in to announce a grudge is over.
+    expect(holdsThisCycle(row({ first_declared_at: at("2025-08-15") }), ASKED)).toBe(false);
   });
 
-  it("stops enforcing once a human retires it, however recent", () => {
-    const s = refusalStanding(row({ retired_at: daysAgo(1) }), NOW, POLICY);
-    expect(s.enforced).toBe(false);
-    expect(s.retired).toBe(true);
+  it("does not hold once withdrawn, however recently stated", () => {
+    expect(holdsThisCycle(row({ retired_at: at("2026-08-20") }), ASKED)).toBe(false);
   });
 
-  it("flags one that is still in force but old enough to ask about", () => {
-    const s = refusalStanding(row({ first_declared_at: daysAgo(400) }), NOW, POLICY);
-    expect(s.enforced).toBe(true);
-    expect(s.dueForThaw).toBe(true);
-  });
-
-  it("never asks about a refusal that has already lapsed", () => {
-    // Nothing to discuss — it stopped mattering on its own.
-    const s = refusalStanding(row({ first_declared_at: daysAgo(2000) }), NOW, POLICY);
-    expect(s.dueForThaw).toBe(false);
-  });
-
-  it("treats a future timestamp as now rather than granting extra life", () => {
-    const s = refusalStanding(row({ first_declared_at: daysAgo(-50) }), NOW, POLICY);
-    expect(s.ageDays).toBe(0);
-    expect(s.enforced).toBe(true);
+  it("counts an answer given exactly at the ask", () => {
+    expect(holdsThisCycle(row({ first_declared_at: ASKED.toISOString() }), ASKED)).toBe(true);
   });
 });
 
 describe("enforcedPairs", () => {
-  it("returns only what must still be removed before scoring", () => {
+  it("returns only what must be removed before scoring", () => {
     const rows = [
+      row({ refused_org_id: "renewed", first_declared_at: at("2020-01-01"), reaffirmed_at: at("2026-08-10") }),
       row({ refused_org_id: "fresh" }),
-      row({ refused_org_id: "lapsed", first_declared_at: daysAgo(1200) }),
-      row({ refused_org_id: "retired", retired_at: daysAgo(5) }),
-      row({ refused_org_id: "renewed", first_declared_at: daysAgo(1200), reaffirmed_at: daysAgo(2) }),
+      row({ refused_org_id: "stale", first_declared_at: at("2025-08-15") }),
+      row({ refused_org_id: "withdrawn", retired_at: at("2026-08-20") }),
     ];
-    expect(enforcedPairs(rows, NOW, POLICY).map((p) => p.refusedOrgId)).toEqual([
-      "fresh",
-      "renewed",
-    ]);
+    expect(enforcedPairs(rows, ASKED).map((p) => p.refusedOrgId)).toEqual(["renewed", "fresh"]);
+  });
+
+  it("is one-directional — A refusing B is not B refusing A", () => {
+    const pairs = enforcedPairs([row({ declaring_org_id: "a", refused_org_id: "b" })], ASKED);
+    expect(pairs).toEqual([{ declaringOrgId: "a", refusedOrgId: "b" }]);
   });
 });
 
-describe("thawPrompts", () => {
-  const rows = [
-    row({ refused_org_id: "ancient", first_declared_at: daysAgo(900) }),
-    row({ refused_org_id: "old", first_declared_at: daysAgo(400) }),
-    row({ refused_org_id: "recent" }),
-    row({ refused_org_id: "lapsed", first_declared_at: daysAgo(2000) }),
-  ];
-
-  it("raises the oldest still-standing refusals first", () => {
-    expect(thawPrompts(rows, NOW, POLICY).map((p) => p.refusedOrgId)).toEqual([
-      "ancient",
-      "old",
-    ]);
+describe("awaitingAnswer", () => {
+  it("lists orgs with an old blackout that have not replied", () => {
+    // Distinguishes "said no blackouts" from "has not replied yet", which the
+    // filter alone cannot show.
+    const rows = [
+      row({ declaring_org_id: "quiet", first_declared_at: at("2025-08-15") }),
+      row({ declaring_org_id: "answered", first_declared_at: at("2026-08-15") }),
+    ];
+    expect(awaitingAnswer(rows, ASKED)).toEqual(["quiet"]);
   });
 
-  it("addresses the party who DECLARED it, never the refused one", () => {
-    // ⛔ Approaching the refused org tells them they were refused — the refusal
-    // leaking through outreach instead of through the score.
-    const [first] = thawPrompts(rows, NOW, POLICY);
-    expect(first.declaringOrgId).toBe("member");
-    expect(first.declaredByContactId).toBe("karin");
+  it("does not chase an org that answered about any of its blackouts", () => {
+    // One answer covers the question; it was "any blackouts?", not per-pair.
+    const rows = [
+      row({ declaring_org_id: "org", refused_org_id: "old", first_declared_at: at("2025-01-01") }),
+      row({ declaring_org_id: "org", refused_org_id: "new", first_declared_at: at("2026-08-15") }),
+    ];
+    expect(awaitingAnswer(rows, ASKED)).toEqual([]);
   });
 
-  it("says nothing when everything is fresh or already lapsed", () => {
-    expect(thawPrompts([rows[2], rows[3]], NOW, POLICY)).toEqual([]);
+  it("does not chase an org that withdrew rather than went quiet", () => {
+    const rows = [row({ declaring_org_id: "org", first_declared_at: at("2025-01-01"), retired_at: at("2025-06-01") })];
+    expect(awaitingAnswer(rows, ASKED)).toEqual([]);
   });
 });
