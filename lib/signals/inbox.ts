@@ -25,6 +25,7 @@ import "server-only";
 import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerAuthState } from "@/lib/auth/server";
+import { isKnownVerb } from "./ingest";
 import type { SignalSource, SignalVerb, SignalObjectType } from "./types";
 
 /**
@@ -123,6 +124,20 @@ export async function recordAct(act: ObservedAct): Promise<EnqueueResult> {
   try {
     if (!KNOWN_SOURCES.has(act.source)) {
       return { status: "rejected", reason: `unknown source "${act.source}"` };
+    }
+
+    // ⛔ The VERB is checked at runtime too, and the source check above was not
+    // enough on its own. The TypeScript union guards nothing at this boundary: a
+    // producer reaching here through a cast, from JavaScript, or with a typo
+    // writes a verb nobody defined and the row lands looking perfectly real. It
+    // then fails much later in `VERB_PROFILES[verb]` during scoring, a long way
+    // from the code that caused it — or, if a future reader guards that lookup,
+    // the act silently weighs nothing while the producer appears to work.
+    //
+    // Rejecting here is the whole point of a single door: a bad row never
+    // becomes durable, and the producer is told immediately.
+    if (!isKnownVerb(act.verb)) {
+      return { status: "rejected", reason: `unknown verb "${act.verb}"` };
     }
 
     // ── Attribution. Server session only, and OPTIONAL. ────────────────────

@@ -43,6 +43,35 @@ import { VERB_PROFILES } from "./decay";
 import type { SignalEvent, SignalVerb } from "./types";
 
 /** The four verbs that are deliberate statements of preference. */
+/**
+ * Every verb the spine accepts, as a RUNTIME value.
+ *
+ * ⛔ The TypeScript union is not a guard at the boundary. A producer reaching
+ * `recordAct` through a cast, from JavaScript, or with a typo'd string writes a
+ * verb nobody defined and nothing complains — the row lands, looks real, and
+ * blows up much later in `VERB_PROFILES[verb]` at scoring time, a long way from
+ * the code that caused it. Worse if a future reader guards that lookup: the act
+ * then silently weighs nothing and the producer appears to be working.
+ *
+ * ⚠️ Keep in step with `SignalVerb`. `assertNeverMissed` below fails to compile
+ * if a verb is added to the union and not to this list.
+ */
+export const ALL_VERBS: readonly SignalVerb[] = [
+  "refused", "preferred", "selected", "rejected",
+  "searched", "filtered", "viewed", "clicked", "posted",
+  "commented", "joined", "rsvped", "attended", "opened", "scanned",
+] as const;
+
+/** Compile-time proof that ALL_VERBS covers the union. Never called. */
+function assertNeverMissed(verb: SignalVerb): (typeof ALL_VERBS)[number] {
+  return verb;
+}
+void assertNeverMissed;
+
+export function isKnownVerb(verb: string): verb is SignalVerb {
+  return (ALL_VERBS as readonly string[]).includes(verb);
+}
+
 export const EXPLICIT_VERBS: readonly SignalVerb[] = [
   "refused",
   "preferred",

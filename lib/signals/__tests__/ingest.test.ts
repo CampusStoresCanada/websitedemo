@@ -152,3 +152,26 @@ describe("requireValidSignalEvent", () => {
     ).toThrow(/needs its own verb[\s\S]*reading absence as a statement/);
   });
 });
+
+describe("ALL_VERBS", () => {
+  it("covers every verb the union declares", async () => {
+    const { ALL_VERBS, isKnownVerb } = await import("../ingest");
+    // ⛔ A verb added to SignalVerb and not to ALL_VERBS would pass tsc at the
+    // producer and be rejected at runtime — the worst of both.
+    for (const v of ALL_VERBS) expect(isKnownVerb(v)).toBe(true);
+    expect(ALL_VERBS.length).toBe(15);
+  });
+
+  it("rejects a typo rather than letting it become a durable row", async () => {
+    const { isKnownVerb } = await import("../ingest");
+    expect(isKnownVerb("scannned")).toBe(false);
+    expect(isKnownVerb("SCANNED")).toBe(false);
+    expect(isKnownVerb("")).toBe(false);
+  });
+
+  it("keeps the explicit verbs a strict subset", async () => {
+    const { ALL_VERBS, EXPLICIT_VERBS } = await import("../ingest");
+    for (const v of EXPLICIT_VERBS) expect(ALL_VERBS).toContain(v);
+    expect(EXPLICIT_VERBS.length).toBeLessThan(ALL_VERBS.length);
+  });
+});
