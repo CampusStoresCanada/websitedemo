@@ -5,6 +5,7 @@
 import { CIRCLE_ADMIN_API_BASE, CIRCLE_V1_API_BASE, getCircleConfig } from "./config";
 import { CircleApiError } from "./types";
 import type {
+  CircleComment,
   CircleMember,
   CircleMemberInput,
   CirclePost,
@@ -555,6 +556,37 @@ export class CircleAdminClient {
       { body: payload as unknown as Record<string, unknown> }
     );
     return { id: result.comment?.id ?? result.id ?? 0 };
+  }
+
+  /**
+   * Comments on a post.
+   *
+   * ⚠️ The client could CREATE comments and never read them, so the whole
+   * thread structure was invisible to anything downstream. In "Ask the Partners"
+   * a member asks and partners answer — the question is a demand signal and each
+   * reply is a supply signal from whoever wrote it. That pairing is the most
+   * directly useful thing in the community and it was being thrown away.
+   */
+  async listComments(
+    postId: number,
+    options?: { per_page?: number; page?: number }
+  ): Promise<CircleComment[]> {
+    const params = {
+      post_id: postId,
+      per_page: options?.per_page ?? 100,
+      page: options?.page ?? 1,
+    };
+    try {
+      const result = await this.request<{ records?: CircleComment[] } | CircleComment[]>(
+        "GET",
+        "/comments",
+        { params }
+      );
+      return Array.isArray(result) ? result : (result.records ?? []);
+    } catch {
+      // A post with comments disabled 404s rather than returning empty.
+      return [];
+    }
   }
 
   // ---- Event attendees ----------------------------------------------------
