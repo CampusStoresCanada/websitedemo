@@ -1,7 +1,35 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import type { PartnerAsk, PartnerCandidate, CircleState } from "@/lib/comms/partner-asks";
+import type { PartnerAsk, CircleState } from "@/lib/comms/partner-asks";
+
+/**
+ * One row as this screen needs it.
+ *
+ * ⚠️ Deliberately NOT `PartnerCandidate`. That type belongs to the retired word
+ * matcher, which still exists only as the baseline in the A/B harness, and
+ * sharing a row shape with it is how the two engines would quietly become
+ * interchangeable again.
+ *
+ * ⛔ Carries `rank`, never a similarity. Raw cosine here is 0.33–0.41 across the
+ * whole list — printing it invites an operator to read a 0.35 as "35% sure",
+ * which it is not. Position is the only part of the number that means anything
+ * to a human, so position is the only part shown.
+ */
+export interface AskPanelCandidate {
+  contactId: string | null;
+  orgId: string;
+  name: string;
+  email: string;
+  orgName: string;
+  circleState: CircleState;
+  rank: number;
+  reasons: string[];
+  /** Null means they have never spoken in Circle — the reason they are here. */
+  lastSpokeAt: string | null;
+  /** We picked this person from the org; the engine ranked the company. */
+  viaOrgContact: boolean;
+}
 
 const STATE_STYLE: Record<CircleState, { label: string; cls: string; hint: string }> = {
   active: {
@@ -24,10 +52,16 @@ const STATE_STYLE: Record<CircleState, { label: string; cls: string; hint: strin
 export default function PartnerAskPanel({
   ask,
   candidates,
+  scored,
+  filtered,
   action,
 }: {
   ask: PartnerAsk;
-  candidates: PartnerCandidate[];
+  candidates: AskPanelCandidate[];
+  /** False = the nightly run has not reached this ask. Not the same as empty. */
+  scored: boolean;
+  /** Ranked, but hidden by the audience filter (already active, or a member). */
+  filtered: number;
   action: (formData: FormData) => void;
 }) {
   const [picked, setPicked] = useState<Set<string>>(new Set());
@@ -77,7 +111,12 @@ export default function PartnerAskPanel({
       <div className="rounded-lg border border-gray-200 bg-white">
         <div className="flex flex-wrap items-center justify-between gap-2 border-b border-gray-200 px-5 py-3">
           <h3 className="font-medium text-gray-900">
-            {candidates.length} matching partner{candidates.length === 1 ? "" : "s"}
+            {candidates.length} partner{candidates.length === 1 ? "" : "s"} worth emailing
+            {filtered > 0 && (
+              <span className="ml-2 font-normal text-xs text-gray-500">
+                {filtered} more ranked, hidden — already active in Circle, or not a partner
+              </span>
+            )}
           </h3>
           <div className="flex gap-2 text-xs">
             {(["active", "invited", "absent"] as CircleState[]).map((s) => (
@@ -89,8 +128,27 @@ export default function PartnerAskPanel({
         </div>
 
         {candidates.length === 0 ? (
+          // ⚠️ Two different facts, two different sentences. Collapsing them into
+          // one "no matches" is what makes an operator wait for a list that is
+          // never coming, or build a manual one the engine could have filled.
           <p className="px-5 py-8 text-center text-sm text-gray-500">
-            No partner categories matched this question. It may need a manual list.
+            {!scored ? (
+              <>
+                <strong className="text-gray-700">Not scored yet.</strong> Questions are
+                ranked overnight, so one posted today is ready tomorrow morning.
+              </>
+            ) : filtered > 0 ? (
+              <>
+                <strong className="text-gray-700">Everyone who fits is already here.</strong>{" "}
+                All {filtered} ranked partners are active in Circle — they will see this
+                question without an email.
+              </>
+            ) : (
+              <>
+                <strong className="text-gray-700">Nobody ranked for this one.</strong> It may
+                need a manual list.
+              </>
+            )}
           </p>
         ) : (
           <ul className="divide-y divide-gray-100">
@@ -112,9 +170,24 @@ export default function PartnerAskPanel({
                       <span className={`rounded px-1.5 py-0.5 text-xs ${st.cls}`} title={st.hint}>
                         {st.label}
                       </span>
-                      <span className="ml-auto text-xs text-gray-400">score {c.score}</span>
+                      {c.viaOrgContact && (
+                        <span
+                          className="rounded bg-blue-50 px-1.5 py-0.5 text-xs text-blue-700"
+                          title="The engine matched this company, not this person. We picked their listed contact — check they are the right one to ask."
+                        >
+                          org contact
+                        </span>
+                      )}
+                      <span className="ml-auto text-xs text-gray-400">#{c.rank}</span>
                     </div>
-                    <div className="mt-0.5 truncate text-xs text-gray-500">{c.email}</div>
+                    <div className="mt-0.5 truncate text-xs text-gray-500">
+                      {c.email}
+                      <span className="ml-2 text-gray-400">
+                        {c.lastSpokeAt
+                          ? `last spoke ${new Date(c.lastSpokeAt).toLocaleDateString()}`
+                          : "never spoken in Circle"}
+                      </span>
+                    </div>
                     <div className="mt-1 text-xs text-gray-400">{c.reasons.join(" · ")}</div>
                   </label>
                 </li>
@@ -134,6 +207,31 @@ export default function PartnerAskPanel({
         <input type="hidden" name="asker_org" value={ask.askerOrg ?? ""} />
         {pickedCandidates.map((c) => (
           <input key={c.email} type="hidden" name="recipient" value={`${c.email}|${c.name}`} />
+        ))}
+        {/*
+          Who the operator actually picked, by id, so the choice can be recorded
+          against what the engine suggested. Carried separately from `recipient`
+          because that one is an email/name pair the campaign needs, and ids are
+          what the feedback loop needs — squeezing both through one field is how
+          the log would start disagreeing with the send.
+
+          ⛔ Sent at the grain the ENGINE used, which is why `viaOrgContact` blanks
+          the contact id. For an org-grain recommendation the stored row has no
+          contact, and writing back the person WE attached at read time would miss
+          it — logging a candidate the engine ranked #6 as `recommended: false`,
+          the marker reserved for one a human added that we never surfaced. That
+          would not be a lost row; it would be a fabricated miss, in the one table
+          used to judge whether the engine works, biasing it against itself. The
+          person emailed is not lost — the campaign holds them.
+          See [[feedback_downstream_of_our_own_decision]].
+        */}
+        {pickedCandidates.map((c) => (
+          <input
+            key={`pick-${c.email}`}
+            type="hidden"
+            name="pick"
+            value={`${c.orgId}|${c.viaOrgContact ? "" : (c.contactId ?? "")}`}
+          />
         ))}
 
         <p className="text-sm text-gray-700">
