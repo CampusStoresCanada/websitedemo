@@ -123,6 +123,7 @@ const KNOWN_SOURCES = new Set<string>(["website", "circle", "email", "conference
 export async function recordAct(act: ObservedAct): Promise<EnqueueResult> {
   try {
     if (!KNOWN_SOURCES.has(act.source)) {
+      console.warn(`[signal-inbox] REJECTED unknown source "${act.source}" — signal dropped.`);
       return { status: "rejected", reason: `unknown source "${act.source}"` };
     }
 
@@ -137,6 +138,20 @@ export async function recordAct(act: ObservedAct): Promise<EnqueueResult> {
     // Rejecting here is the whole point of a single door: a bad row never
     // becomes durable, and the producer is told immediately.
     if (!isKnownVerb(act.verb)) {
+      // ⚠️ LOUD, because the caller cannot hear this. Every producer treats
+      // recordAct as fire-and-forget and `void`s the result — correctly, since a
+      // dropped signal must never break the page a human was actually using. So
+      // a rejection is invisible from the producer's side: their emission simply
+      // stops existing, and the first sign is an empty table months later.
+      //
+      // The badge-scan session raised exactly this after the verb check landed:
+      // the guard protects the data and hides the mistake. Rejecting silently is
+      // worse than not checking, so the check has to announce itself somewhere a
+      // human looks.
+      console.warn(
+        `[signal-inbox] REJECTED unknown verb "${act.verb}" from source "${act.source}" — ` +
+        `the producer is emitting a verb that is not in ALL_VERBS and its signal is being dropped.`
+      );
       return { status: "rejected", reason: `unknown verb "${act.verb}"` };
     }
 
