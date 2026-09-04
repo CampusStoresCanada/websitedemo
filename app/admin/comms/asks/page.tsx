@@ -6,10 +6,12 @@ import { listPartnerAsks } from "@/lib/comms/partner-asks";
 import { getCircleClient } from "@/lib/circle/client";
 import {
   askCandidates,
+  loadJudgements,
   recordAskSelection,
+  recordJudgement,
   resolveActingContact,
 } from "@/lib/comms/ask-candidates";
-import type { AskPanelCandidate } from "@/components/comms/PartnerAskPanel";
+import type { AskPanelCandidate, Verdict } from "@/components/comms/PartnerAskPanel";
 import { getServerAuthState } from "@/lib/auth/server";
 import { createCampaign } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
@@ -67,6 +69,19 @@ export default async function PartnerAsksPage({
     }
   }
 
+  /**
+   * Verdicts already recorded for the partners on this list.
+   *
+   * ⛔ Loaded for the SEND list, not for the candidates we filtered out. The
+   * silent partners ARE the product — the carrot exists to pull them into the
+   * community — so whether the engine picked the right ones is the question worth
+   * a human's attention. Rating people who are already active would teach us
+   * about the ranking in the abstract while the actual decision went unmeasured.
+   */
+  const judgements = ranking.candidates.length && selected
+    ? await loadJudgements(String(selected.id))
+    : new Map<string, { verdict: Verdict; judgedAt: string }>();
+
   const candidates: AskPanelCandidate[] = ranking.candidates
     // No email, no send. The engine ranks people it has writing for, which is
     // not the same set as people we can reach.
@@ -85,7 +100,39 @@ export default async function PartnerAsksPage({
       reasons: c.reason ? [c.reason] : [],
       lastSpokeAt: c.lastSpokeAt,
       viaOrgContact: c.viaOrgContact,
+      // ⚠️ Keyed exactly as `candidateKey` builds it. Getting this wrong shows
+      // every row unrated and quietly invites a second verdict on rows that
+      // already have one.
+      verdict: judgements.get(`${c.orgId}::${c.contactId ?? ""}`)?.verdict ?? null,
     }));
+
+  /**
+   * Record one verdict on a ranking.
+   *
+   * ⛔ Returns a plain result rather than throwing or redirecting. This runs from
+   * a button inside the page, not a form submit — a throw would surface as an
+   * unhandled action error over a screen the operator is mid-way through, for the
+   * sake of a rating nobody asked them to give.
+   */
+  async function judgeCandidate(
+    orgId: string,
+    contactId: string | null,
+    rank: number,
+    verdict: Verdict
+  ): Promise<{ ok: boolean }> {
+    "use server";
+    if (!askParam) return { ok: false };
+    try {
+      const { profile } = await getServerAuthState();
+      const judgedBy = await resolveActingContact(profile?.id ?? null);
+      return await recordJudgement({
+        askRef: askParam, orgId, contactId, rank, verdict, judgedBy,
+      });
+    } catch (err) {
+      console.warn("[asks] judgement failed:", err instanceof Error ? err.message : err);
+      return { ok: false };
+    }
+  }
 
   /**
    * Prepares a send — deliberately does NOT dispatch. It creates the campaign
@@ -256,6 +303,7 @@ export default async function PartnerAsksPage({
                 scored={ranking.scored}
                 filtered={ranking.filtered}
                 action={prepareSend}
+                onJudge={judgeCandidate}
               />
             )}
           </section>

@@ -228,10 +228,13 @@ export async function askCandidates(
   }
 
   if (!data || data.length === 0) {
-    // ⛔ No rows does NOT mean the engine has not looked. Three of eight open asks
+    // ⛔ No rows does NOT mean the engine has not looked. Three of nine open asks
     // score to zero candidates — the run considered them and nobody matched. Ask
     // the run what it looked at rather than inferring it from the wreckage.
-    return { scored: await runConsidered(db, askRef), candidates: [], filtered: 0 };
+    return {
+      scored: await runConsidered(db, askRef),
+      candidates: [], filtered: 0,
+    };
   }
 
   type Row = {
@@ -250,13 +253,14 @@ export async function askCandidates(
     // answer this" to somebody who already did is the one unambiguous mistake.
     .filter((r) => !r.answered_this_ask);
 
-  const wanted = rows.filter((r) => {
+  const inAudience = (r: Row) => {
     if (audience === "everyone") return true;
     // Silence is the qualifier: never spoken at all.
     const silent = r.candidate_last_spoke_at === null;
     if (audience === "silent") return silent;
     return silent && r.organizations.type === "Vendor Partner";
-  });
+  };
+  const wanted = rows.filter(inAudience);
 
   const top = wanted.slice(0, limit);
 
@@ -265,10 +269,13 @@ export async function askCandidates(
   // the engine look like it found nothing.
   const orgContacts = await attachOrgContacts(
     db,
-    top.map((r) => ({ orgId: r.candidate_org_id, contactId: r.candidate_contact_id }))
+    top.map((r) => ({
+      orgId: r.candidate_org_id,
+      contactId: r.candidate_contact_id,
+    }))
   );
 
-  const candidates = top.map((r) => {
+  const shape = (r: Row) => {
     const viaOrg = !r.candidate_contact_id;
     const fallback = viaOrg ? orgContacts.get(r.candidate_org_id) : undefined;
     return {
@@ -285,12 +292,17 @@ export async function askCandidates(
       answeredThisAsk: r.answered_this_ask,
       viaOrgContact: viaOrg,
     };
-  });
+  };
+  const candidates = top.map(shape);
 
   // Counted against everything the engine ranked, not against `wanted`, so the
   // screen can say how much the audience filter is hiding rather than implying
   // the engine only found this many.
-  return { scored: true, candidates, filtered: rows.length - candidates.length };
+  return {
+    scored: true,
+    candidates,
+    filtered: rows.length - candidates.length,
+  };
 }
 
 /**
@@ -468,4 +480,99 @@ export async function recordAskSelection(params: {
   }
 
   return { recorded, corrections: added.length };
+}
+
+// ── Human verdicts on the engine's rankings ────────────────────────────────
+
+export type Verdict = "good" | "bad" | "unsure";
+
+export interface Judgement {
+  verdict: Verdict;
+  judgedAt: string;
+}
+
+/**
+ * The latest verdict per candidate for one ask, keyed by `candidateKey`.
+ *
+ * ⚠️ Latest, not only. The table is append-only — a changed mind is a new row —
+ * so a screen shows the most recent while the history stays intact. How often a
+ * verdict flips, and after how long, is worth more than the current value alone.
+ */
+export async function loadJudgements(askRef: string): Promise<Map<string, Judgement>> {
+  const db = createAdminClient();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (db as any)
+    .from("ask_judgements")
+    .select("candidate_org_id, candidate_contact_id, verdict, judged_at")
+    .eq("ask_ref", askRef)
+    .order("judged_at", { ascending: false });
+
+  const out = new Map<string, Judgement>();
+  if (error) {
+    // ⚠️ Never throw — a screen that cannot show past verdicts is still usable
+    // for making new ones. Silence here would look like "nothing judged yet".
+    console.warn(`[ask-candidates] judgement read failed for ${askRef}: ${error.message}`);
+    return out;
+  }
+  type R = {
+    candidate_org_id: string; candidate_contact_id: string | null;
+    verdict: Verdict; judged_at: string;
+  };
+  // Newest first, so the first row seen for a candidate is the current verdict.
+  for (const r of ((data ?? []) as R[])) {
+    const k = candidateKey(r.candidate_org_id, r.candidate_contact_id);
+    if (!out.has(k)) out.set(k, { verdict: r.verdict, judgedAt: r.judged_at });
+  }
+  return out;
+}
+
+/**
+ * Record one human verdict.
+ *
+ * ⛔ INSERT, always. Never an upsert on (ask, candidate): that would overwrite
+ * the previous verdict and destroy the only record of a human changing their
+ * mind. Append-only is the point, not an implementation detail.
+ *
+ * ⛔ Captures `run_id` and `rank_at_judgement` at write time. A verdict is about
+ * what the engine said THAT night at THAT position — without them, tonight's
+ * re-rank would silently reattribute an old judgement to a new opinion, and the
+ * evaluation would credit the engine for a call it never made. Provenance at
+ * write time, never derived. See [[feedback_downstream_of_our_own_decision]].
+ */
+export async function recordJudgement(params: {
+  askRef: string;
+  orgId: string;
+  contactId: string | null;
+  rank: number | null;
+  verdict: Verdict;
+  judgedBy: string | null;
+}): Promise<{ ok: boolean }> {
+  const db = createAdminClient();
+
+  // The run whose ranking is on screen right now.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: run } = await (db as any)
+    .from("match_runs")
+    .select("id")
+    .eq("status", "complete")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (db as any).from("ask_judgements").insert({
+    ask_ref: params.askRef,
+    candidate_org_id: params.orgId,
+    candidate_contact_id: params.contactId,
+    run_id: run?.id ?? null,
+    rank_at_judgement: params.rank,
+    verdict: params.verdict,
+    judged_by: params.judgedBy,
+  });
+
+  if (error) {
+    console.warn(`[ask-candidates] judgement write failed for ${params.askRef}: ${error.message}`);
+    return { ok: false };
+  }
+  return { ok: true };
 }

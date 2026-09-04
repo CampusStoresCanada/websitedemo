@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, useTransition } from "react";
 import type { PartnerAsk, CircleState } from "@/lib/comms/partner-asks";
 
 /**
@@ -29,7 +29,31 @@ export interface AskPanelCandidate {
   lastSpokeAt: string | null;
   /** We picked this person from the org; the engine ranked the company. */
   viaOrgContact: boolean;
+  /** A verdict already recorded for this suggestion, if any. */
+  verdict: Verdict | null;
 }
+
+export type Verdict = "good" | "bad" | "unsure";
+
+/**
+ * ⛔ Rating is NOT the checkbox, and the two must stay separate acts.
+ *
+ * Ticking someone means "email them"; a rating means "the engine was right about
+ * them". They come apart constantly — an operator sends to a mediocre match to
+ * fill out a thin list, or skips a perfect one because they wrote to them last
+ * week. Reading selection as approval would quietly label both of those wrong,
+ * in the one table we use to decide whether the engine works.
+ */
+const VERDICTS: { value: Verdict; label: string; on: string; hint: string }[] = [
+  { value: "good", label: "Good", on: "bg-green-600 text-white border-green-600",
+    hint: "This partner could genuinely answer this question." },
+  { value: "bad", label: "Wrong", on: "bg-red-600 text-white border-red-600",
+    hint: "The engine misread the question, or misread this partner." },
+  // ⚠️ Offered deliberately. Without it a hesitant human picks a confident
+  // answer, and the evaluation treats a shrug as certainty.
+  { value: "unsure", label: "?", on: "bg-gray-600 text-white border-gray-600",
+    hint: "Genuine uncertainty — recorded, and counted neither way." },
+];
 
 const STATE_STYLE: Record<CircleState, { label: string; cls: string; hint: string }> = {
   active: {
@@ -55,9 +79,14 @@ export default function PartnerAskPanel({
   scored,
   filtered,
   action,
+  onJudge,
 }: {
   ask: PartnerAsk;
   candidates: AskPanelCandidate[];
+  /** Records a verdict on one suggestion. Never sends anything. */
+  onJudge: (
+    orgId: string, contactId: string | null, rank: number, verdict: Verdict
+  ) => Promise<{ ok: boolean }>;
   /** False = the nightly run has not reached this ask. Not the same as empty. */
   scored: boolean;
   /** Ranked, but hidden by the audience filter (already active, or a member). */
@@ -78,6 +107,25 @@ export default function PartnerAskPanel({
       next.has(email) ? next.delete(email) : next.add(email);
       return next;
     });
+
+  const [verdicts, setVerdicts] = useState<Record<string, Verdict>>({});
+  const [judgeFailed, setJudgeFailed] = useState<Record<string, true>>({});
+  const [, startJudging] = useTransition();
+
+  const judge = (c: AskPanelCandidate, verdict: Verdict) => {
+    setVerdicts((p) => ({ ...p, [c.email]: verdict }));
+    setJudgeFailed((p) => { const n = { ...p }; delete n[c.email]; return n; });
+    startJudging(async () => {
+      const res = await onJudge(c.orgId, c.contactId, c.rank, verdict);
+      // ⚠️ Roll back a verdict that did not land. A button left coloured shows a
+      // rating that exists nowhere, and the evaluation would be missing exactly
+      // the rows a human believes they recorded.
+      if (!res.ok) {
+        setVerdicts((p) => { const n = { ...p }; delete n[c.email]; return n; });
+        setJudgeFailed((p) => ({ ...p, [c.email]: true }));
+      }
+    });
+  };
 
   const pickedCandidates = candidates.filter((c) => picked.has(c.email));
   const pickedAbsent = pickedCandidates.filter((c) => c.circleState === "absent").length;
@@ -190,6 +238,34 @@ export default function PartnerAskPanel({
                     </div>
                     <div className="mt-1 text-xs text-gray-400">{c.reasons.join(" · ")}</div>
                   </label>
+                  {/*
+                    Outside the <label>, so rating never toggles the checkbox —
+                    a stray click that silently adds a recipient is the one
+                    mistake this screen must not make.
+                  */}
+                  <div className="mt-1 flex shrink-0 items-center gap-1">
+                    {VERDICTS.map((v) => {
+                      const current = verdicts[c.email] ?? c.verdict;
+                      return (
+                        <button
+                          key={v.value}
+                          type="button"
+                          title={v.hint}
+                          onClick={() => judge(c, v.value)}
+                          className={`rounded border px-1.5 py-0.5 text-xs transition ${
+                            current === v.value
+                              ? v.on
+                              : "border-gray-300 text-gray-500 hover:border-gray-400"
+                          }`}
+                        >
+                          {v.label}
+                        </button>
+                      );
+                    })}
+                    {judgeFailed[c.email] && (
+                      <span className="text-xs text-red-600">not saved</span>
+                    )}
+                  </div>
                 </li>
               );
             })}
