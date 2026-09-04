@@ -707,7 +707,36 @@ if (WRITE && existsSync(".cache/circle-corpus.json")) {
     if (!vector) continue;
 
     const placedAsk: Placed = { id: `ask:${ask.postId}`, vector, contributing: 1, mass: 1 };
-    for (const n of nearest(placedAsk, answerers, { k: 12 })) {
+
+    /**
+     * ⛔ Rank the two pools SEPARATELY, then merge.
+     *
+     * One shared top-12 looks fair and is not. 79 member stores post constantly
+     * and have years of text to match on; a silent partner has a description and
+     * nothing else, which is exactly why they are the ones worth emailing. So
+     * members took most slots — ten of twelve on four of six asks, and TWELVE of
+     * twelve on the Kodak question, leaving the tool whose entire purpose is
+     * enticing quiet partners with nobody at all to offer.
+     *
+     * That is not the engine judging partners a poor fit. It is a scoring
+     * population competing for a fixed number of seats, where one side writes far
+     * more than the other. Guaranteeing depth in each pool measures them against
+     * their own kind and leaves the merged order honest.
+     *
+     * ⚠️ Both pools are still real answerers — a store that already solved this
+     * sourcing problem is a good person to ask. This widens the list; it does not
+     * privilege partners within it.
+     */
+    const perPool = [
+      ...nearest(placedAsk, partnerOrgs, { k: 12 }),
+      ...nearest(placedAsk, memberPeople, { k: 12 }),
+    ];
+    // Merged into one honest ordering: rank stays a global statement about this
+    // ask, so a partner at #14 is genuinely the fourteenth-best answer and the
+    // screen is not quietly re-numbering a filtered list to look better.
+    const ranked = perPool.sort((a, b) => b.similarity - a.similarity || a.id.localeCompare(b.id));
+
+    ranked.forEach((n, i) => {
       const isPerson = n.id.startsWith("person:");
       const contactId = isPerson ? n.id.slice(7) : null;
       const orgId = isPerson ? contactOrg.get(n.id.slice(7))! : n.id.slice(4);
@@ -717,13 +746,13 @@ if (WRITE && existsSync(".cache/circle-corpus.json")) {
         ask_ref: String(ask.postId), run_id: null,
         candidate_org_id: orgId, candidate_contact_id: contactId,
         recommended: true,
-        rank: askRows.filter((r) => r.ask_ref === String(ask.postId)).length + 1,
+        rank: i + 1,
         similarity: Number(n.similarity.toFixed(6)),
         reason: best ? acts[best.index].text.slice(0, 300) : null,
         candidate_last_spoke_at: contactId ? (lastSpoke.get(contactId)?.toISOString() ?? null) : null,
         answered_this_ask: contactId ? answeredAsk.has(`${ask.postId}\u001f${contactId}`) : false,
       });
-    }
+    });
   }
   // ⛔ Which asks were LOOKED AT, recorded as a fact of this run.
   //
@@ -863,6 +892,71 @@ if (WRITE) {
       .eq("recommended", true);
     if (staleErr) console.error("stale retraction failed:", staleErr.message);
     else if (count) console.log(`retracted ${count} stale recommendation(s)`);
+  }
+
+  /**
+   * ⛔ Prune old EDGES. The job that creates the bulk is the job that clears it.
+   *
+   * Each run writes ~8,700 edges and nothing removed them, so the table reached
+   * 101 MB across 18 runs while the cron was broken. Now that it fires nightly
+   * that is ~3.2M rows and 2+ GB a year, nearly all of it belonging to runs
+   * nobody will ever read again.
+   *
+   * ⛔ `promoted` is untouchable — `lib/match/read.ts` selects `status = 'promoted'`
+   * and that run IS what the site serves. Deleting its edges would empty every
+   * match surface on the site while every dashboard still said the run was fine.
+   *
+   * ⚠️ Only edges are dropped, never `match_runs` rows. The run record is a few
+   * hundred bytes and it is what `evaluateMatchRunStale` reads to know this
+   * machine is still reporting in — pruning history would blind the alarm meant
+   * to notice this job dying.
+   */
+  const KEEP_COMPLETE = 3;   // last few nights, so runs stay comparable
+  const KEEP_SUPERSEDED = 1; // the immediate rollback target
+
+  const { data: runsByStatus } = await db
+    .from("match_runs")
+    .select("id, status, started_at")
+    .in("status", ["complete", "superseded"])
+    .order("started_at", { ascending: false });
+
+  const keep = new Set<string>([run!.id]);
+  let nComplete = 0, nSuperseded = 0;
+  for (const r of (runsByStatus ?? []) as { id: string; status: string }[]) {
+    if (r.status === "complete" && nComplete < KEEP_COMPLETE) { keep.add(r.id); nComplete++; }
+    if (r.status === "superseded" && nSuperseded < KEEP_SUPERSEDED) { keep.add(r.id); nSuperseded++; }
+  }
+  const prunable = ((runsByStatus ?? []) as { id: string }[])
+    .map((r) => r.id)
+    .filter((id) => !keep.has(id));
+
+  /**
+   * ⚠️ ONE RUN PER STATEMENT. Deleting twelve runs' edges in a single `.in()`
+   * was ~98,000 rows and died on `canceling statement due to statement timeout`
+   * — which the job reported and then carried on, so the table would have kept
+   * growing while the log claimed a prune step existed.
+   *
+   * A per-night cap keeps the job's own runtime bounded no matter how large the
+   * backlog is; it drains over a few nights instead of one long delete. What is
+   * left is logged, because a cap nobody can see reads as "fully cleaned".
+   */
+  const MAX_RUNS_PRUNED = 5;
+  if (prunable.length > 0) {
+    let pruned = 0, done = 0;
+    for (const id of prunable.slice(0, MAX_RUNS_PRUNED)) {
+      const { error: pruneErr, count } = await db
+        .from("match_edges")
+        .delete({ count: "exact" })
+        .eq("run_id", id);
+      // Keep going: one slow run must not block the rest of the backlog.
+      if (pruneErr) { console.error(`edge prune failed for ${id.slice(0, 8)}:`, pruneErr.message); continue; }
+      pruned += count ?? 0; done++;
+    }
+    const left = prunable.length - done;
+    console.log(
+      `pruned ${pruned} edges from ${done} old run(s)` +
+        (left > 0 ? ` — ${left} still to prune, next run picks them up` : "")
+    );
   }
 
   console.log(`\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, NOT promoted`);
