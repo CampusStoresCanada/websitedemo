@@ -31,7 +31,12 @@ export type ScanDevice = "mobile" | "desktop" | "unknown";
  * distinguishable from someone following a shared link — which is the whole
  * question when judging whether the paper earned its place.
  */
-export type ScanSource = "print" | "link";
+/**
+ * Where the scan came from. `badge` is an exhibitor's badge front, which
+ * carries the same public code as the book — distinguishing it keeps "did the
+ * printed directory earn its place" separate from show-floor scanning.
+ */
+export type ScanSource = "print" | "link" | "badge";
 
 const BOT_PATTERN =
   /bot|crawler|spider|crawling|slackbot|discordbot|whatsapp|telegram|preview|facebookexternalhit|embedly|curl|wget|python-requests|headless|lighthouse|pingdom|uptime/i;
