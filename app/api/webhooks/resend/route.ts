@@ -198,9 +198,13 @@ export async function POST(request: NextRequest) {
   // recipient doesn't want commercial email from us at all — both warrant a
   // global suppression, not a per-category one. Soft/undetermined bounces
   // are transient and can resolve on their own, so they're logged on the
-  // delivery above but don't suppress. Recipients of transactional email
-  // are unaffected either way, since transactional sends bypass suppression
-  // checks entirely (see executeCampaignSend).
+  // delivery above but don't suppress.
+  //
+  // The two are recorded with different `kind`s because they now behave
+  // differently. A complaint is a preference and transactional mail still
+  // goes. A hard bounce is a dead mailbox and blocks EVERY send, transactional
+  // included — enforced centrally in lib/email/send.ts, so it covers the
+  // election/benchmarking/renewal paths that never touch the campaign system.
   const isHardBounce = type === "email.bounced" && data.bounce?.type === "Permanent";
   const isComplaint = type === "email.complained";
   if (isHardBounce || isComplaint) {
@@ -209,7 +213,12 @@ export async function POST(request: NextRequest) {
       const reason = isComplaint
         ? "resend webhook: spam complaint"
         : `resend webhook: hard bounce${data.bounce?.subType ? ` (${data.bounce.subType})` : ""}`;
-      const { error: suppressErr } = await unsubscribeEmail(recipientEmail, GLOBAL_SUPPRESSION_CATEGORY, reason);
+      const { error: suppressErr } = await unsubscribeEmail(
+        recipientEmail,
+        GLOBAL_SUPPRESSION_CATEGORY,
+        reason,
+        isComplaint ? "complaint" : "bounce"
+      );
       if (suppressErr) {
         console.error("[webhooks/resend] auto-suppression failed:", suppressErr);
       }
