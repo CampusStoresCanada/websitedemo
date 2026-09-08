@@ -9,6 +9,8 @@ import { generateSchedule } from "@/lib/scheduler/generate";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { lateAdd } from "@/lib/scheduler/late-add";
+import { validateScheduleConstraints } from "@/lib/scheduler/constraints";
 import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { optimizeSchedule } from "@/lib/scheduler/optimize";
 import { bestOfRestarts } from "@/lib/scheduler/search";
@@ -279,7 +281,23 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
 
 export async function createSchedulerDraftRun(
   conferenceId: string,
-  seed?: number
+  seed?: number,
+  /**
+   * ⛔ SAME BUILDER, DIFFERENT SCOPE. Steve: "it is literally trying to find the
+   * best in the outstanding holes." Passing `extendRunId` does not start a
+   * second scheduler — it runs this one seeded from that run's schedule instead
+   * of from the greedy, with only the additive moves enabled.
+   *
+   * That is the whole difference between before and after the freeze. Before,
+   * every slot is negotiable and the search may rearrange anything. After, the
+   * existing schedule is a given and the only question is what fits in the gaps
+   * around it.
+   *
+   * ⚠️ Restarts are deliberately NOT used in this mode. A restart reseeds the
+   * greedy and builds a fresh schedule, which is exactly the thing a late add
+   * must never do — it would discard the frozen schedule and move everybody.
+   */
+  options?: { extendRunId?: string }
 ): Promise<SchedulerActionSuccess<SchedulerRunSummary> | SchedulerActionFailure> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -612,25 +630,141 @@ export async function createSchedulerDraftRun(
      * winner exactly — a schedule nobody can regenerate is one nobody can
      * explain to a member who asks why they got these five meetings.
      */
-    const search = bestOfRestarts({
-      baseSeed: runSeed,
-      restarts: SCHEDULER_RESTARTS,
-      attempt: (seed) => {
-        const draw = generateSchedule({ ...generateInput, seed });
-        const improved = optimizeSchedule(draw.assignments, {
-          ...optimizeContext,
-          seed,
-        });
-        return {
-          value: improved.after.value,
-          result: { draw, improved },
-        };
-      },
-    });
+    const extendRunId = options?.extendRunId;
+    /**
+     * Set by whichever scope ran. A late add has NO restart spread — it draws
+     * once from the frozen schedule — and rescue is disabled, so both are
+     * reported as absent rather than as zeroes that look like a flat search.
+     */
+    let restartSpread: {
+      restarts: number; best: number; worst: number; median: number;
+      distinctValues: number; winningSeed: number;
+    } | null = null;
+    let rescueMoves = 0;
+    /** The objective of the schedule actually saved, whichever scope produced it. */
+    let objectiveAfter: { satisfiedPreferences: number; preferenceShare: number } | null = null;
+    let lateAddSummary: SchedulerRunSummary["lateAdd"] | undefined;
+    /** Pre-existing meetings keep the score ids the frozen run recorded. */
+    const preservedScoreIds = new Map<string, string[]>();
 
-    const optimized = search.best.result.improved;
-    generateResult.assignments = optimized.assignments;
-    generateResult.diagnostics = search.best.result.draw.diagnostics;
+    if (extendRunId) {
+      /**
+       * LATE ADD — extend a frozen schedule rather than build one.
+       *
+       * The seed is the promoted run's own assignments, so everything already
+       * sent out is a fixed starting point. lateAdd() then applies only the
+       * additive moves and VERIFIES that nobody lost a meeting, throwing if
+       * they did.
+       */
+      const { data: frozenRows, error: frozenError } = await adminClient
+        .from("schedules")
+        .select("meeting_slot_id, exhibitor_seat_id, delegate_seat_ids, match_score_ids")
+        .eq("scheduler_run_id", extendRunId)
+        .eq("status", "scheduled");
+
+      if (frozenError) throw new Error(frozenError.message);
+      if (!frozenRows || frozenRows.length === 0) {
+        throw new Error(
+          `cannot extend run ${extendRunId}: it has no scheduled meetings. ` +
+            "A late add needs a frozen schedule to add to."
+        );
+      }
+
+      const exhibitorOrgBySeat = new Map(
+        [...optimizeContext.exhibitorSeats.entries()].map(([id, e]) => [id, e.orgId])
+      );
+
+      const frozenAssignments = frozenRows.map((row) => {
+        const key = `${row.meeting_slot_id}::${row.exhibitor_seat_id}`;
+        preservedScoreIds.set(key, (row.match_score_ids as string[] | null) ?? []);
+        return {
+          meetingSlotId: row.meeting_slot_id as string,
+          exhibitorSeatId: row.exhibitor_seat_id as string,
+          exhibitorOrganizationId:
+            exhibitorOrgBySeat.get(row.exhibitor_seat_id as string) ?? "",
+          delegateSeatIds: (row.delegate_seat_ids as string[] | null) ?? [],
+          matchScoreKeys: [] as string[],
+        };
+      });
+
+      const result = lateAdd(frozenAssignments, { ...optimizeContext, seed: runSeed });
+
+      generateResult.assignments = result.assignments;
+      /**
+       * ⚠️ Recomputed against what is actually being SAVED. The full path below
+       * still reports the greedy draw's diagnostics, which describes a schedule
+       * that was never persisted — the same bug already fixed in run-search.ts.
+       * Not fixing it here in the same change, but a late add must not inherit
+       * it: its whole purpose is to report truthfully who ended up with what.
+       */
+      generateResult.diagnostics = validateScheduleConstraints({
+        meetingSlots: generateInput.meetingSlots,
+        assignments: result.assignments,
+        delegates: generateInput.delegates,
+        exhibitors: generateInput.exhibitors,
+        delegateTargetMeetings: generateResult.diagnostics.delegateTargetMeetings,
+        exhibitorTargetMeetings: Math.max(
+          1,
+          Math.floor(
+            generateInput.meetingSlots.length / Math.max(1, generateInput.exhibitors.length)
+          )
+        ),
+        policy: generateInput.policy,
+      });
+
+      objectiveAfter = {
+        satisfiedPreferences: result.objective.after.satisfiedPreferences,
+        preferenceShare: result.objective.after.preferenceShare,
+      };
+      lateAddSummary = {
+        newlySeated: result.newlySeated,
+        alsoGained: result.alsoGained,
+        stillWithoutMeetings: result.stillWithoutMeetings,
+        addedMeetings: result.added.length,
+      };
+    } else {
+      /**
+       * DRAW MANY SCHEDULES, KEEP THE BEST — the outer loop, not one fill.
+       *
+       * Each restart reseeds the greedy ordering, the tiebreaks and the fill
+       * order, then scores the finished schedule on the one objective. Restart
+       * seeds are derived from `runSeed`, so the same run reproduces the same
+       * winner exactly — a schedule nobody can regenerate is one nobody can
+       * explain to a member who asks why they got these five meetings.
+       */
+      const search = bestOfRestarts({
+        baseSeed: runSeed,
+        restarts: SCHEDULER_RESTARTS,
+        attempt: (seed) => {
+          const draw = generateSchedule({ ...generateInput, seed });
+          const improved = optimizeSchedule(draw.assignments, {
+            ...optimizeContext,
+            seed,
+          });
+          return {
+            value: improved.after.value,
+            result: { draw, improved },
+          };
+        },
+      });
+
+      const optimized = search.best.result.improved;
+      generateResult.assignments = optimized.assignments;
+      generateResult.diagnostics = search.best.result.draw.diagnostics;
+      restartSpread = {
+        restarts: search.spread.restarts,
+        best: search.spread.best,
+        worst: search.spread.worst,
+        median: search.spread.median,
+        distinctValues: search.spread.distinctValues,
+        winningSeed: search.best.seed,
+      };
+      rescueMoves = optimized.movesApplied.rescue;
+      objectiveAfter = {
+        satisfiedPreferences: optimized.after.satisfiedPreferences,
+        preferenceShare: optimized.after.preferenceShare,
+      };
+    }
 
     // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
     // → infeasible: discard assignments, nothing usable.
@@ -683,9 +817,18 @@ export async function createSchedulerDraftRun(
         meeting_slot_id: assignment.meetingSlotId,
         exhibitor_seat_id: assignment.exhibitorSeatId,
         delegate_seat_ids: assignment.delegateSeatIds,
-        match_score_ids: assignment.matchScoreKeys
-          .map((key) => scoreIdByKey.get(key))
-          .filter((id): id is string => Boolean(id)),
+        /**
+         * ⚠️ A meeting carried over from the frozen run keeps the score ids that
+         * run recorded. Its matchScoreKeys are empty by construction — they are
+         * not stored on `schedules` and cannot be reconstructed — so mapping
+         * them would silently blank the provenance of every pre-existing
+         * meeting the moment a late add ran.
+         */
+        match_score_ids:
+          preservedScoreIds.get(`${assignment.meetingSlotId}::${assignment.exhibitorSeatId}`) ??
+          assignment.matchScoreKeys
+            .map((key) => scoreIdByKey.get(key))
+            .filter((id): id is string => Boolean(id)),
         status: "scheduled",
       }));
 
@@ -728,16 +871,18 @@ export async function createSchedulerDraftRun(
            * nothing and either the space is flat or the seed is not reaching
            * the decisions it should. A finding, not a success.
            */
-          restart_spread: {
-            restarts: search.spread.restarts,
-            best: search.spread.best,
-            worst: search.spread.worst,
-            median: search.spread.median,
-            distinct_values: search.spread.distinctValues,
-            winning_seed: search.best.seed,
-          },
+          restart_spread: restartSpread
+            ? {
+                restarts: restartSpread.restarts,
+                best: restartSpread.best,
+                worst: restartSpread.worst,
+                median: restartSpread.median,
+                distinct_values: restartSpread.distinctValues,
+                winning_seed: restartSpread.winningSeed,
+              }
+            : null,
           /** Non-zero means the best schedule left someone with nothing. */
-          rescue_moves: optimized.movesApplied.rescue,
+          rescue_moves: rescueMoves,
           score_distribution: {
             edges: scoreDistribution.count,
             distinct_values: scoreDistribution.distinct,
@@ -746,8 +891,8 @@ export async function createSchedulerDraftRun(
             degenerate: scoreDistribution.degenerate,
           },
           preference_weight: scoreDistribution.weight,
-          satisfied_preferences: optimized.after.satisfiedPreferences,
-          preference_share: optimized.after.preferenceShare,
+          satisfied_preferences: objectiveAfter?.satisfiedPreferences ?? null,
+          preference_share: objectiveAfter?.preferenceShare ?? null,
         } as unknown as Json,
       })
       .eq("id", runRow.id)
@@ -770,12 +915,23 @@ export async function createSchedulerDraftRun(
         runSeed,
         status: completedRun.status,
         totalMeetingsCreated: schedulesInput.length,
+        // A late add is auditable as one: which run it extended, and who it
+        // obliges somebody to write to.
+        extendedRunId: extendRunId ?? null,
+        lateAdd: lateAddSummary ?? null,
       },
     });
 
     return {
       success: true,
-      data: mapRunSummary(completedRun),
+      /**
+       * ⛔ `lateAdd` rides on the summary because the caller cannot get it any
+       * other way — it is derived by comparing before and after, and both are
+       * gone once this returns. `alsoGained` in particular is an obligation:
+       * those people hold a schedule that is now wrong and need
+       * `conference_schedule_ready` re-sent.
+       */
+      data: { ...mapRunSummary(completedRun), lateAdd: lateAddSummary },
     };
   } catch (error) {
     await adminClient

@@ -1,4 +1,4 @@
-import { optimizeSchedule, type OptimizeContext } from "./optimize";
+import { optimizeSchedule, type OptimizeContext, type OptimizeResult } from "./optimize";
 import type { ScheduleAssignment } from "./types";
 
 /**
@@ -42,6 +42,8 @@ import type { ScheduleAssignment } from "./types";
 export type LateAddResult = {
   /** The frozen schedule plus whatever new meetings FILL could add. */
   assignments: ScheduleAssignment[];
+  /** Objective before and after, so a persisted run reports its real score. */
+  objective: { before: OptimizeResult["before"]; after: OptimizeResult["after"] };
   /** Only the meetings that did not exist before. */
   added: ScheduleAssignment[];
   /** Delegate seats that had NO meetings before and now hold at least one. */
@@ -56,10 +58,10 @@ export type LateAddResult = {
    * their day gains a meeting it did not have on 18 January.
    *
    * Nobody is moved and nothing is taken away, so it is far milder than a
-   * reshuffle. But it is still a change to a document somebody is holding, and
-   * whoever runs a late add owes these people a note. A non-empty list is the
-   * signal that a phone call is owed — if it is long, prefer waiting for the
-   * next arrival over seating this one.
+   * reshuffle. But it is still a change to a document somebody is holding, so
+   * these people need their schedule RE-SENT — the `conference_schedule_ready`
+   * template exists for exactly that. Not a phone call: a re-send. A long list
+   * is the signal to wait for the next arrival rather than seat this one.
    */
   alsoGained: string[];
   /**
@@ -69,7 +71,7 @@ export type LateAddResult = {
    * only use spare room; once every slot an exhibitor holds is occupied there
    * is no legal additive move left. Reporting this honestly is the point —
    * somebody arriving three days before the show may genuinely have nowhere to
-   * sit, and that is a phone call, not a bug.
+   * sit. That is a conversation with them, not a defect to fix here.
    */
   stillWithoutMeetings: string[];
 };
@@ -115,6 +117,7 @@ export function lateAdd(
 
   return {
     assignments: result.assignments,
+    objective: { before: result.before, after: result.after },
     added,
     newlySeated: newlySeated.sort(),
     alsoGained: alsoGained.sort(),
