@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.17"
+    PostgrestVersion: "14.5"
   }
   public: {
     Tables: {
@@ -211,6 +211,255 @@ export type Database = {
           value?: string
         }
         Relationships: []
+      }
+      ask_judgements: {
+        Row: {
+          ask_ref: string
+          candidate_contact_id: string | null
+          candidate_org_id: string
+          created_at: string
+          id: string
+          judged_at: string
+          judged_by: string | null
+          rank_at_judgement: number | null
+          run_id: string | null
+          verdict: string
+        }
+        Insert: {
+          ask_ref: string
+          candidate_contact_id?: string | null
+          candidate_org_id: string
+          created_at?: string
+          id?: string
+          judged_at?: string
+          judged_by?: string | null
+          rank_at_judgement?: number | null
+          run_id?: string | null
+          verdict: string
+        }
+        Update: {
+          ask_ref?: string
+          candidate_contact_id?: string | null
+          candidate_org_id?: string
+          created_at?: string
+          id?: string
+          judged_at?: string
+          judged_by?: string | null
+          rank_at_judgement?: number | null
+          run_id?: string | null
+          verdict?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ask_judgements_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_judged_by_fkey"
+            columns: ["judged_by"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_judged_by_fkey"
+            columns: ["judged_by"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_judged_by_fkey"
+            columns: ["judged_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_judged_by_fkey"
+            columns: ["judged_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_judgements_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "match_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      ask_recommendations: {
+        Row: {
+          answered_this_ask: boolean
+          ask_ref: string
+          candidate_contact_id: string | null
+          candidate_last_spoke_at: string | null
+          candidate_org_id: string
+          created_at: string
+          id: string
+          rank: number | null
+          reason: string | null
+          recommended: boolean
+          replied_at: string | null
+          run_id: string | null
+          selected_at: string | null
+          selected_by: string | null
+          similarity: number | null
+        }
+        Insert: {
+          answered_this_ask?: boolean
+          ask_ref: string
+          candidate_contact_id?: string | null
+          candidate_last_spoke_at?: string | null
+          candidate_org_id: string
+          created_at?: string
+          id?: string
+          rank?: number | null
+          reason?: string | null
+          recommended: boolean
+          replied_at?: string | null
+          run_id?: string | null
+          selected_at?: string | null
+          selected_by?: string | null
+          similarity?: number | null
+        }
+        Update: {
+          answered_this_ask?: boolean
+          ask_ref?: string
+          candidate_contact_id?: string | null
+          candidate_last_spoke_at?: string | null
+          candidate_org_id?: string
+          created_at?: string
+          id?: string
+          rank?: number | null
+          reason?: string | null
+          recommended?: boolean
+          replied_at?: string | null
+          run_id?: string | null
+          selected_at?: string | null
+          selected_by?: string | null
+          similarity?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "ask_recommendations_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_candidate_org_id_fkey"
+            columns: ["candidate_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "match_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_selected_by_fkey"
+            columns: ["selected_by"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_selected_by_fkey"
+            columns: ["selected_by"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_selected_by_fkey"
+            columns: ["selected_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "ask_recommendations_selected_by_fkey"
+            columns: ["selected_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+        ]
       }
       audit_log: {
         Row: {
@@ -1604,56 +1853,6 @@ export type Database = {
           },
         ]
       }
-      board_minutes_drafts: {
-        Row: {
-          batch_id: string | null
-          completed_at: string | null
-          consumed_at: string | null
-          created_at: string
-          data_json: Json | null
-          error: string | null
-          id: string
-          meeting_id: string
-          requested_by: string | null
-          requested_by_email: string | null
-          status: string
-        }
-        Insert: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Update: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id?: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
-            columns: ["meeting_id"]
-            isOneToOne: true
-            referencedRelation: "board_meetings"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       board_meetings: {
         Row: {
           agenda_html: string | null
@@ -1722,6 +1921,63 @@ export type Database = {
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      board_minutes_drafts: {
+        Row: {
+          batch_id: string | null
+          completed_at: string | null
+          consumed_at: string | null
+          created_at: string
+          data_json: Json | null
+          error: string | null
+          id: string
+          meeting_id: string
+          requested_by: string | null
+          requested_by_email: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Update: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id?: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "board_minutes_drafts_requested_by_fkey"
+            columns: ["requested_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
@@ -2508,6 +2764,7 @@ export type Database = {
           created_at: string
           email: string
           id: string
+          kind: string
           reason: string | null
         }
         Insert: {
@@ -2515,6 +2772,7 @@ export type Database = {
           created_at?: string
           email: string
           id?: string
+          kind?: string
           reason?: string | null
         }
         Update: {
@@ -2522,6 +2780,7 @@ export type Database = {
           created_at?: string
           email?: string
           id?: string
+          kind?: string
           reason?: string | null
         }
         Relationships: []
@@ -2640,6 +2899,126 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_badge_scans: {
+        Row: {
+          badge_token_id: string | null
+          conference_id: string
+          encounter: string
+          id: string
+          outcome: string | null
+          scanned_at: string
+          scanned_person_id: string
+          scanner_contact_id: string | null
+          scanner_organization_id: string | null
+          scanner_user_id: string
+          scheduler_run_id: string | null
+        }
+        Insert: {
+          badge_token_id?: string | null
+          conference_id: string
+          encounter: string
+          id?: string
+          outcome?: string | null
+          scanned_at?: string
+          scanned_person_id: string
+          scanner_contact_id?: string | null
+          scanner_organization_id?: string | null
+          scanner_user_id: string
+          scheduler_run_id?: string | null
+        }
+        Update: {
+          badge_token_id?: string | null
+          conference_id?: string
+          encounter?: string
+          id?: string
+          outcome?: string | null
+          scanned_at?: string
+          scanned_person_id?: string
+          scanner_contact_id?: string | null
+          scanner_organization_id?: string | null
+          scanner_user_id?: string
+          scheduler_run_id?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_badge_scans_badge_token_id_fkey"
+            columns: ["badge_token_id"]
+            isOneToOne: false
+            referencedRelation: "conference_badge_tokens"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanned_person_id_fkey"
+            columns: ["scanned_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_contact_id_fkey"
+            columns: ["scanner_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_contact_id_fkey"
+            columns: ["scanner_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_contact_id_fkey"
+            columns: ["scanner_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_contact_id_fkey"
+            columns: ["scanner_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_organization_id_fkey"
+            columns: ["scanner_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_organization_id_fkey"
+            columns: ["scanner_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scanner_user_id_fkey"
+            columns: ["scanner_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_badge_scans_scheduler_run_id_fkey"
+            columns: ["scheduler_run_id"]
+            isOneToOne: false
+            referencedRelation: "scheduler_runs"
             referencedColumns: ["id"]
           },
         ]
@@ -2855,7 +3234,9 @@ export type Database = {
           conference_id: string
           created_at: string
           device_id: string | null
+          entity_id: string | null
           id: string
+          is_test: boolean
           person_id: string | null
           result_state: string
           scan_token_id: string | null
@@ -2867,7 +3248,9 @@ export type Database = {
           conference_id: string
           created_at?: string
           device_id?: string | null
+          entity_id?: string | null
           id?: string
+          is_test?: boolean
           person_id?: string | null
           result_state: string
           scan_token_id?: string | null
@@ -2879,7 +3262,9 @@ export type Database = {
           conference_id?: string
           created_at?: string
           device_id?: string | null
+          entity_id?: string | null
           id?: string
+          is_test?: boolean
           person_id?: string | null
           result_state?: string
           scan_token_id?: string | null
@@ -2897,6 +3282,13 @@ export type Database = {
             columns: ["conference_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_check_in_events_entity_id_fkey"
+            columns: ["entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
             referencedColumns: ["id"]
           },
           {
@@ -3354,6 +3746,7 @@ export type Database = {
       conference_instances: {
         Row: {
           badge_preprint_at: string | null
+          badge_scan_rules: Json | null
           board_decision_at: string | null
           booth_sales_general_open_at: string | null
           booth_sales_sponsor_open_at: string | null
@@ -3393,6 +3786,7 @@ export type Database = {
         }
         Insert: {
           badge_preprint_at?: string | null
+          badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
@@ -3432,6 +3826,7 @@ export type Database = {
         }
         Update: {
           badge_preprint_at?: string | null
+          badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
           booth_sales_sponsor_open_at?: string | null
@@ -3482,6 +3877,85 @@ export type Database = {
             columns: ["duplicated_from_id"]
             isOneToOne: false
             referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_lead_disclosures: {
+        Row: {
+          conference_id: string
+          decided_at: string | null
+          decided_by: string | null
+          id: string
+          member_person_id: string
+          requested_at: string
+          scan_id: string
+          status: string
+          vendor_organization_id: string
+        }
+        Insert: {
+          conference_id: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          member_person_id: string
+          requested_at?: string
+          scan_id: string
+          status?: string
+          vendor_organization_id: string
+        }
+        Update: {
+          conference_id?: string
+          decided_at?: string | null
+          decided_by?: string | null
+          id?: string
+          member_person_id?: string
+          requested_at?: string
+          scan_id?: string
+          status?: string
+          vendor_organization_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_lead_disclosures_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_lead_disclosures_decided_by_fkey"
+            columns: ["decided_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_lead_disclosures_member_person_id_fkey"
+            columns: ["member_person_id"]
+            isOneToOne: false
+            referencedRelation: "conference_people"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_lead_disclosures_scan_id_fkey"
+            columns: ["scan_id"]
+            isOneToOne: true
+            referencedRelation: "conference_badge_scans"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_lead_disclosures_vendor_organization_id_fkey"
+            columns: ["vendor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_lead_disclosures_vendor_organization_id_fkey"
+            columns: ["vendor_organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -3705,6 +4179,7 @@ export type Database = {
           badge_printed_at: string | null
           badge_reprint_count: number
           canonical_person_id: string | null
+          check_in_is_test: boolean
           check_in_source: string | null
           checked_in_at: string | null
           conference_id: string
@@ -3756,6 +4231,7 @@ export type Database = {
           badge_printed_at?: string | null
           badge_reprint_count?: number
           canonical_person_id?: string | null
+          check_in_is_test?: boolean
           check_in_source?: string | null
           checked_in_at?: string | null
           conference_id: string
@@ -3807,6 +4283,7 @@ export type Database = {
           badge_printed_at?: string | null
           badge_reprint_count?: number
           canonical_person_id?: string | null
+          check_in_is_test?: boolean
           check_in_source?: string | null
           checked_in_at?: string | null
           conference_id?: string
@@ -4529,6 +5006,137 @@ export type Database = {
             columns: ["task_id"]
             isOneToOne: false
             referencedRelation: "conference_checklist_tasks"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_top_choices: {
+        Row: {
+          chosen_from: string | null
+          chosen_org_id: string
+          conference_id: string
+          created_at: string
+          declared_by_contact_id: string | null
+          declaring_contact_id: string | null
+          declaring_org_id: string
+          id: string
+          picked_order: number | null
+          updated_at: string
+        }
+        Insert: {
+          chosen_from?: string | null
+          chosen_org_id: string
+          conference_id: string
+          created_at?: string
+          declared_by_contact_id?: string | null
+          declaring_contact_id?: string | null
+          declaring_org_id: string
+          id?: string
+          picked_order?: number | null
+          updated_at?: string
+        }
+        Update: {
+          chosen_from?: string | null
+          chosen_org_id?: string
+          conference_id?: string
+          created_at?: string
+          declared_by_contact_id?: string | null
+          declaring_contact_id?: string | null
+          declaring_org_id?: string
+          id?: string
+          picked_order?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_top_choices_chosen_org_id_fkey"
+            columns: ["chosen_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_chosen_org_id_fkey"
+            columns: ["chosen_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declared_by_contact_id_fkey"
+            columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_org_id_fkey"
+            columns: ["declaring_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_top_choices_declaring_org_id_fkey"
+            columns: ["declaring_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
             referencedColumns: ["id"]
           },
         ]
@@ -6750,9 +7358,119 @@ export type Database = {
           },
         ]
       }
+      market_ratings: {
+        Row: {
+          axis: string
+          created_at: string
+          id: string
+          member_org_id: string
+          partner_org_id: string
+          rank_at_rating: number | null
+          rated_as: string | null
+          rated_at: string
+          rated_by: string | null
+          rated_by_profile: string | null
+          run_id: string | null
+          value: string
+        }
+        Insert: {
+          axis: string
+          created_at?: string
+          id?: string
+          member_org_id: string
+          partner_org_id: string
+          rank_at_rating?: number | null
+          rated_as?: string | null
+          rated_at?: string
+          rated_by?: string | null
+          rated_by_profile?: string | null
+          run_id?: string | null
+          value: string
+        }
+        Update: {
+          axis?: string
+          created_at?: string
+          id?: string
+          member_org_id?: string
+          partner_org_id?: string
+          rank_at_rating?: number | null
+          rated_as?: string | null
+          rated_at?: string
+          rated_by?: string | null
+          rated_by_profile?: string | null
+          run_id?: string | null
+          value?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "market_ratings_member_org_id_fkey"
+            columns: ["member_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_member_org_id_fkey"
+            columns: ["member_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_partner_org_id_fkey"
+            columns: ["partner_org_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_partner_org_id_fkey"
+            columns: ["partner_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_rated_by_fkey"
+            columns: ["rated_by"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_rated_by_fkey"
+            columns: ["rated_by"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_rated_by_fkey"
+            columns: ["rated_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_rated_by_fkey"
+            columns: ["rated_by"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "market_ratings_run_id_fkey"
+            columns: ["run_id"]
+            isOneToOne: false
+            referencedRelation: "match_runs"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       match_edges: {
         Row: {
           breakdown: Json
+          candidate_contact_id: string | null
           candidate_org_id: string
           confidence: number
           created_at: string
@@ -6763,11 +7481,13 @@ export type Database = {
           reasons_withheld: Json
           run_id: string
           score: number
+          subject_contact_id: string | null
           subject_org_id: string
           total: number
         }
         Insert: {
           breakdown: Json
+          candidate_contact_id?: string | null
           candidate_org_id: string
           confidence: number
           created_at?: string
@@ -6778,11 +7498,13 @@ export type Database = {
           reasons_withheld?: Json
           run_id: string
           score: number
+          subject_contact_id?: string | null
           subject_org_id: string
           total: number
         }
         Update: {
           breakdown?: Json
+          candidate_contact_id?: string | null
           candidate_org_id?: string
           confidence?: number
           created_at?: string
@@ -6793,10 +7515,39 @@ export type Database = {
           reasons_withheld?: Json
           run_id?: string
           score?: number
+          subject_contact_id?: string | null
           subject_org_id?: string
           total?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "match_edges_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_candidate_contact_id_fkey"
+            columns: ["candidate_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "match_edges_candidate_org_id_fkey"
             columns: ["candidate_org_id"]
@@ -6816,6 +7567,34 @@ export type Database = {
             columns: ["run_id"]
             isOneToOne: false
             referencedRelation: "match_runs"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_contact_id_fkey"
+            columns: ["subject_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_contact_id_fkey"
+            columns: ["subject_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_contact_id_fkey"
+            columns: ["subject_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "match_edges_subject_contact_id_fkey"
+            columns: ["subject_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
           {
@@ -8141,6 +8920,7 @@ export type Database = {
         Row: {
           created_at: string
           declared_by_contact_id: string | null
+          declaring_contact_id: string | null
           declaring_org_id: string
           first_declared_at: string
           id: string
@@ -8154,6 +8934,7 @@ export type Database = {
         Insert: {
           created_at?: string
           declared_by_contact_id?: string | null
+          declaring_contact_id?: string | null
           declaring_org_id: string
           first_declared_at?: string
           id?: string
@@ -8167,6 +8948,7 @@ export type Database = {
         Update: {
           created_at?: string
           declared_by_contact_id?: string | null
+          declaring_contact_id?: string | null
           declaring_org_id?: string
           first_declared_at?: string
           id?: string
@@ -8202,6 +8984,34 @@ export type Database = {
           {
             foreignKeyName: "org_meeting_refusals_declared_by_contact_id_fkey"
             columns: ["declared_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "org_meeting_refusals_declaring_contact_id_fkey"
+            columns: ["declaring_contact_id"]
             isOneToOne: false
             referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
@@ -10742,6 +11552,7 @@ export type Database = {
         Row: {
           actor_count: number
           computed_at: string
+          contact_id: string | null
           event_count: number
           last_seen_at: string | null
           object_org_id: string
@@ -10753,6 +11564,7 @@ export type Database = {
         Insert: {
           actor_count?: number
           computed_at?: string
+          contact_id?: string | null
           event_count: number
           last_seen_at?: string | null
           object_org_id: string
@@ -10764,6 +11576,7 @@ export type Database = {
         Update: {
           actor_count?: number
           computed_at?: string
+          contact_id?: string | null
           event_count?: number
           last_seen_at?: string | null
           object_org_id?: string
@@ -10773,6 +11586,34 @@ export type Database = {
           weight?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "signal_affinity_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_affinity_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "signal_affinity_rollup_object_org_id_fkey"
             columns: ["object_org_id"]
@@ -10913,6 +11754,7 @@ export type Database = {
         Row: {
           actor_count: number
           computed_at: string
+          contact_id: string | null
           event_count: number
           first_seen_at: string | null
           last_seen_at: string | null
@@ -10926,6 +11768,7 @@ export type Database = {
         Insert: {
           actor_count?: number
           computed_at?: string
+          contact_id?: string | null
           event_count: number
           first_seen_at?: string | null
           last_seen_at?: string | null
@@ -10939,6 +11782,7 @@ export type Database = {
         Update: {
           actor_count?: number
           computed_at?: string
+          contact_id?: string | null
           event_count?: number
           first_seen_at?: string | null
           last_seen_at?: string | null
@@ -10950,6 +11794,34 @@ export type Database = {
           weight?: number
         }
         Relationships: [
+          {
+            foreignKeyName: "signal_term_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_term_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_term_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "signal_term_rollup_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
           {
             foreignKeyName: "signal_term_rollup_organization_id_fkey"
             columns: ["organization_id"]
@@ -13557,12 +14429,12 @@ export type Tables<
   DefaultSchemaTableNameOrOptions extends
     | keyof (DefaultSchema["Tables"] & DefaultSchema["Views"])
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof (DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"] &
         DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Views"])
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13586,11 +14458,11 @@ export type TablesInsert<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13611,11 +14483,11 @@ export type TablesUpdate<
   DefaultSchemaTableNameOrOptions extends
     | keyof DefaultSchema["Tables"]
     | { schema: keyof DatabaseWithoutInternals },
-  TableName extends DefaultSchemaTableNameOrOptions extends {
+  TableName extends (DefaultSchemaTableNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaTableNameOrOptions["schema"]]["Tables"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaTableNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13636,11 +14508,11 @@ export type Enums<
   DefaultSchemaEnumNameOrOptions extends
     | keyof DefaultSchema["Enums"]
     | { schema: keyof DatabaseWithoutInternals },
-  EnumName extends DefaultSchemaEnumNameOrOptions extends {
+  EnumName extends (DefaultSchemaEnumNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[DefaultSchemaEnumNameOrOptions["schema"]]["Enums"]
-    : never = never,
+    : never) = never,
 > = DefaultSchemaEnumNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
@@ -13653,11 +14525,11 @@ export type CompositeTypes<
   PublicCompositeTypeNameOrOptions extends
     | keyof DefaultSchema["CompositeTypes"]
     | { schema: keyof DatabaseWithoutInternals },
-  CompositeTypeName extends PublicCompositeTypeNameOrOptions extends {
+  CompositeTypeName extends (PublicCompositeTypeNameOrOptions extends {
     schema: keyof DatabaseWithoutInternals
   }
     ? keyof DatabaseWithoutInternals[PublicCompositeTypeNameOrOptions["schema"]]["CompositeTypes"]
-    : never = never,
+    : never) = never,
 > = PublicCompositeTypeNameOrOptions extends {
   schema: keyof DatabaseWithoutInternals
 }
