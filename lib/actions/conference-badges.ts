@@ -2,6 +2,7 @@
 
 import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { ReprintPlan } from "@/lib/conference/badges/reprint-plan";
 import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
@@ -851,6 +852,8 @@ export async function requestBadgeReprint(params: {
   reason: string;
   note?: string | null;
   transportMethod: "pdf" | "printer_bridge";
+  /** What the label should carry, recorded even when nothing can print it yet. */
+  plan?: ReprintPlan;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -917,6 +920,12 @@ export async function requestBadgeReprint(params: {
       metadata: {
         qr_payload: token.data.qrPayload,
         token_id: token.data.tokenId,
+        // ⛔ Snapshot, like every other job metadata field. What the desk had in
+        // hand is a fact about the moment, not something to re-derive later —
+        // the blanks for a company run out as they are used, so asking the same
+        // question next week gives a different answer about a card that has
+        // already been printed and handed over.
+        ...(params.plan ? { reprint_plan: params.plan } : {}),
       },
       started_at: nowIso,
       updated_at: nowIso,

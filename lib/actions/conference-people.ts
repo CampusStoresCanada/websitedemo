@@ -26,6 +26,7 @@ import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
+import { planReprint, type BadgeStock } from "@/lib/conference/badges/reprint-plan";
 
 type ConferencePersonRow = {
   id: string;
@@ -1030,7 +1031,9 @@ export async function markConferencePersonCheckedInManual(
 export async function reprintConferenceBadge(
   personId: string,
   reason: BadgeReprintReason,
-  note?: string | null
+  note?: string | null,
+  /** What the operator is holding. Omitted means they did not say. */
+  stockInHand?: BadgeStock
 ): Promise<{
   success: boolean;
   error?: string;
@@ -1055,12 +1058,28 @@ export async function reprintConferenceBadge(
     return { success: false, error: "Conference person not found." };
   }
 
+  // ⛔ Transport stays "pdf" even when the plan says ql_label, and that is
+  // deliberate until the bridge exists.
+  //
+  // `sent_to_printer` has no consumer — no endpoint, no worker, no driver. A job
+  // routed there stops dead and only moves when somebody changes the status by
+  // hand in an admin dropdown. Routing reprints to it because the PLAN says so
+  // would give the desk a button that queues work nothing prints, and the
+  // operator would find out with a queue behind them.
+  //
+  // The plan is still computed and recorded, so the job carries what the label
+  // should say the moment there is something to print it.
+  const plan = planReprint({
+    stock: stockInHand ?? "none",
+    personIsSeated: true, // a reprint is for somebody already seated; walk-ups take the assignment path
+  });
   const reprintJob = await requestBadgeReprint({
     conferenceId: person.conference_id,
     personId,
     reason,
     note: note ?? null,
     transportMethod: "pdf",
+    plan,
   });
   if (!reprintJob.success || !reprintJob.data) {
     return { success: false, error: reprintJob.error ?? "Failed to queue badge reprint." };
