@@ -3,7 +3,8 @@
 import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { resolveBadgeRun } from "@/lib/conference/badges/run";
+import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
+import { normalizeArrangement, type BadgeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgeTemplateConfig,
   resolveBadgeVariant,
@@ -28,6 +29,8 @@ export type DelegateBatchOrderMode = "delegate_first_name" | "delegate_last_name
 export type ExhibitorBatchOrderMode = "exhibitor_room_number" | "exhibitor_org_name";
 
 export type BadgeSetupSessionState = {
+  /** How the print file is stacked — see lib/conference/badges/arrangement.ts. */
+  arrangement?: BadgeArrangement;
   startFrom?: "blank" | "current";
   canvasPreset?: "oversized" | "trimmed";
   delegateOverlay?: string;
@@ -67,6 +70,8 @@ type BadgePreflightIssue = {
   code:
     | "MISSING_CANONICAL_PERSON"
     | "MISSING_TEMPLATE"
+    | "MULTIPLE_REGISTRATION_TYPES"
+    | "MISSING_NAME"
     | "ROSTER_LOAD_FAILED"
     | "TEXT_OVERFLOW";
   message: string;
@@ -156,6 +161,8 @@ async function runBadgePreflight(params: {
   conferenceId: string;
   personId?: string | null;
   templateVersion?: number | null;
+  /** Whether this run will also print a card for each unnamed seat. */
+  includeBlanks?: boolean;
 }): Promise<BadgePreflightIssue[]> {
   const db = createAdminClient();
   const issues: BadgePreflightIssue[] = [];
@@ -185,9 +192,13 @@ async function runBadgePreflight(params: {
       },
     ];
   }
-  // Walk the run forwards: each type, then the seats somebody is named to. An
-  // unnamed seat has no text to overflow and no identity to be missing, so it
-  // is simply not a badge to check.
+  // Walk the run forwards: each type, then the seats somebody is named to.
+  //
+  // ⚠️ This used to say an unnamed seat "is simply not a badge to check". That
+  // stopped being true when blanks became printable: a blank has no name and no
+  // identity, but it still carries the ORGANISATION's name across the front, and
+  // 152 of them can go in one file. The org half is checked separately below,
+  // and only when the run is actually printing them.
   const entries = run.types.flatMap((type) =>
     type.seats
       .filter((seat) => seat.person)
@@ -195,7 +206,27 @@ async function runBadgePreflight(params: {
       .map((seat) => ({ type, person: seat.person! }))
   );
 
+  // One person, one face. Holding seats on two registration types is not
+  // something to resolve by tie-break — a human picks which badge they get.
+  for (const clash of run.peopleInMultipleTypes) {
+    issues.push({
+      code: "MULTIPLE_REGISTRATION_TYPES",
+      message: `${clash.displayName} holds seats on more than one registration type (${clash.typeNames.join(", ")}) — decide which badge they get before printing.`,
+      personId: clash.personId,
+    });
+  }
+
   for (const { person } of entries) {
+    // An empty name used to pass preflight and print the literal word ATTENDEE
+    // (see splitDisplayName in render-html). That placeholder is gone, so an
+    // unnamed badge now prints blank — which is worse, and worth blocking.
+    if (!person.firstName && !person.lastName && !person.displayName) {
+      issues.push({
+        code: "MISSING_NAME",
+        message: "This person has no name on their conference record or their linked contact — their badge would print blank.",
+        personId: person.personId,
+      });
+    }
     if (!person.hasIdentityLink) {
       issues.push({
         code: "MISSING_CANONICAL_PERSON",
@@ -332,6 +363,59 @@ async function runBadgePreflight(params: {
         personId,
         message: `${personLabel(firstName, lastName, displayName, personId)}: ${check.field} does not fully fit its text box.`,
       });
+    }
+  }
+
+  // Blanks, when the run is printing them.
+  //
+  // Only the organisation lines: a blank has no name and no title by design, so
+  // the person checks above have nothing to look at. ⛔ Deduped by (type,
+  // organisation) — one company with forty unnamed seats is ONE thing to fix,
+  // and forty identical warnings would bury the run's real issues.
+  if (params.includeBlanks) {
+    const seen = new Set<string>();
+    for (const { type, seat } of unnamedSeats(run)) {
+      const key = `${type.entityId}:${seat.organizationName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const { front } = resolveBadgeVariant(template, { variantKey: type.entityId });
+      const orgSplit = splitOrganizationSmart(seat.organizationName.toUpperCase());
+      const person = {
+        displayName: "",
+        firstName: "",
+        lastName: "",
+        roleTitle: "",
+        organizationName: seat.organizationName,
+        city: seat.organizationCity,
+        province: seat.organizationProvince,
+      };
+      const computed = {
+        orgLine1: orgSplit.line1,
+        orgLine2: orgSplit.line2,
+        firstName: "",
+        lastName: "",
+        roleTitle: "",
+      };
+      for (const [field, slot] of [
+        ["organizationLine1", front.organizationLine1],
+        ["organizationLine2", front.organizationLine2],
+      ] as const) {
+        const value = bindingValue({
+          binding: front.bindings[field],
+          person,
+          computed,
+        });
+        if (!value.trim()) continue;
+        const layout = fitTextLayout(value, slot, template.canvas.dpi, {
+          maxLines: slot.maxLines ?? 1,
+          lineHeightEm: slot.lineHeight ?? 1.12,
+        });
+        if (!layout.overflowed) continue;
+        issues.push({
+          code: "TEXT_OVERFLOW",
+          message: `Blank ${type.name} badge for ${seat.organizationName}: ${field} does not fully fit its text box.`,
+        });
+      }
     }
   }
 
@@ -538,10 +622,14 @@ async function insertBadgeEvent(params: {
 export async function createPreprintedBadgeJob(params: {
   conferenceId: string;
   templateVersion: number | null;
-  delegateOrderMode?: DelegateBatchOrderMode;
-  delegateOrderDirection?: "asc" | "desc";
-  exhibitorOrderMode?: ExhibitorBatchOrderMode;
-  exhibitorOrderDirection?: "asc" | "desc";
+  /**
+   * Also print a card for every seat nobody has been named to.
+   *
+   * Off unless asked for. An operator generating a package expects the badges
+   * they have names for; silently doubling a 15-badge file to 166 because the
+   * roster is incomplete is not a decision to make on their behalf.
+   */
+  includeBlanks?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -552,13 +640,18 @@ export async function createPreprintedBadgeJob(params: {
 
   const db = createAdminClient();
   const nowIso = new Date().toISOString();
-  const delegateOrderMode = params.delegateOrderMode ?? "delegate_last_name";
-  const exhibitorOrderMode = params.exhibitorOrderMode ?? "exhibitor_org_name";
-  const delegateOrderDirection = params.delegateOrderDirection ?? "asc";
-  const exhibitorOrderDirection = params.exhibitorOrderDirection ?? "asc";
+  // How the print file is stacked, from the conference's saved arrangement.
+  // Falls back to one section per registration type when nobody has set one.
+  const arrangementRun = await resolveBadgeRun(params.conferenceId);
+  const arrangement = normalizeArrangement(
+    (await getBadgeSetupSession(params.conferenceId)).data?.state?.arrangement ?? null,
+    arrangementRun.types.map((t) => ({ entityId: t.entityId, name: t.name }))
+  );
+
   const preflightIssues = await runBadgePreflight({
     conferenceId: params.conferenceId,
     templateVersion: params.templateVersion,
+    includeBlanks: params.includeBlanks === true,
   });
   const blockingIssues = preflightIssues.filter(
     (issue) => issue.code !== "TEXT_OVERFLOW"
@@ -591,16 +684,14 @@ export async function createPreprintedBadgeJob(params: {
       template_version: params.templateVersion,
       initiated_by: auth.ctx.userId,
       metadata: {
-        ordering: {
-          delegate: {
-            mode: delegateOrderMode,
-            direction: delegateOrderDirection,
-          },
-          exhibitor: {
-            mode: exhibitorOrderMode,
-            direction: exhibitorOrderDirection,
-          },
-        },
+        // The arrangement is SNAPSHOT onto the job, the same way template_version
+        // is. Re-rendering an old job must reproduce the file that was printed,
+        // not whatever the operator has since changed the arrangement to.
+        arrangement,
+        // Same reasoning, and it matters more here: the unnamed seats a blank
+        // stack is built from shrink every time somebody is named, so a job
+        // regenerated next week would otherwise come back a different length.
+        includeBlanks: params.includeBlanks === true,
       },
       started_at: nowIso,
       updated_at: nowIso,
@@ -665,11 +756,15 @@ export async function createPreprintedBadgeJob(params: {
       conferenceId: params.conferenceId,
       pipelineType: "preprinted",
       status: "pdf_generated",
-      delegateOrderMode,
-      delegateOrderDirection,
-      exhibitorOrderMode,
-      exhibitorOrderDirection,
       templateVersion: params.templateVersion,
+      // The audit record says how the file was stacked, in the arrangement's
+      // own terms — not the retired delegate/exhibitor sort modes.
+      sections: arrangement.sections.map((section) => ({
+        label: section.label,
+        types: section.entityIds.length,
+        sortBy: section.sortBy,
+        direction: section.direction,
+      })),
     },
   });
 

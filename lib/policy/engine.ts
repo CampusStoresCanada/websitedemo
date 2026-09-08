@@ -383,6 +383,17 @@ export function resolveConferenceTier(
   const program = programs.find((p) => p.orgTypeValue === orgType)
   if (program) return program.conferenceTier
   if (orgType === 'Non-Member') return 'non_member'
+  // ⛔ Staff are their OWN tier, not a member and not the public.
+  //
+  // Not in programs.definitions: a MembershipProgramDef carries permissionLevel,
+  // orgAdminElevates, invoiceType and a billing block, so a Staff entry would
+  // hand CSC's own staff a permission level and an invoice type as a side
+  // effect of naming them. They are not billed and not a membership program.
+  //
+  // ⚠️ Having their own tier must NOT reduce what they can do — see
+  // effectiveBuyerTiers in entity-pricing: staff satisfy member-targeted
+  // offers, because they function as members inside this organisation.
+  if (orgType === 'Staff') return 'staff'
   return 'public'
 }
 

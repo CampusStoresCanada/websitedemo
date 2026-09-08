@@ -1,5 +1,5 @@
 import { renderBadgeHtml } from "@/lib/conference/badges/render-html";
-import type { BadgeTemplateConfigV1, BadgeRole } from "@/lib/conference/badges/template";
+import type { BadgeTemplateConfigV1 } from "@/lib/conference/badges/template";
 
 /**
  * What their badge will actually say — rendered by the badge system itself.
@@ -22,11 +22,12 @@ import type { BadgeTemplateConfigV1, BadgeRole } from "@/lib/conference/badges/t
  */
 export default function BadgePreview({
   template,
-  role,
+  variantKey,
   person,
 }: {
   template: BadgeTemplateConfigV1 | null;
-  role: BadgeRole;
+  /** The registration type this badge is for — its layout variant key. */
+  variantKey: string | null;
   person: {
     displayName: string | null;
     roleTitle: string | null;
@@ -56,7 +57,7 @@ export default function BadgePreview({
   // same function the print pipeline uses — not a second interpretation of it.
   const html = renderBadgeHtml({
     template,
-    role,
+    variantKey,
     side: "front",
     person: {
       displayName: person.displayName ?? "",

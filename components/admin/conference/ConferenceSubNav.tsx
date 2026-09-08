@@ -87,14 +87,28 @@ export default function ConferenceSubNav({
             {year} &middot; Edition {editionCode}
           </p>
         </div>
-        <Link
-          href={`${basePath}/check-in`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="rounded-md border border-accent bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover shrink-0"
-        >
-          Check-in Desk ↗
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link
+            href={`${basePath}/check-in`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-accent bg-accent px-3 py-1.5 text-xs font-medium text-white hover:bg-accent-hover"
+          >
+            Check-in Desk ↗
+          </Link>
+          {/* A rehearsal has to be reachable without knowing a URL, and it has
+              to be visibly a different thing from the live desk — hence its own
+              button rather than a toggle inside the desk that somebody could
+              flip without meaning to. */}
+          <Link
+            href={`${basePath}/check-in?test=1`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="rounded-md border border-amber-400 bg-amber-50 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100"
+          >
+            Rehearse ↗
+          </Link>
+        </div>
       </div>
 
       {/* Overview / launch checklist — the home */}

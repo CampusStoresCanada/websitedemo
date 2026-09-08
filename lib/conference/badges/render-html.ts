@@ -1,4 +1,6 @@
+import type { AccessSummary } from "@/lib/conference/entity-commerce";
 import {
+  type BadgeBackBlock,
   type BadgeFreeTextLayer,
   type BadgeImageLayer,
   type BadgeLogoBindingKey,
@@ -27,6 +29,10 @@ type RenderBadgeOptions = {
   variantKey?: string | null;
   person: BadgePersonRecord;
   side: "front" | "back";
+  /** Conference-level, derived in resolveBadgeRun from the `venue` entities. */
+  venueAddress?: string | null;
+  /** Read from the designated contact's profile at print time, never baked in. */
+  onsiteContact?: { name: string; phone: string } | null;
 };
 
 function escapeHtml(input: string): string {
@@ -63,9 +69,15 @@ function mapboxStaticBackground(
   const requestWidth = Math.max(320, Math.round(widthPx * scale));
   const requestHeight = Math.max(320, Math.round(heightPx * scale));
 
+  // Mapbox burns its own credit line into the returned raster, bottom-right. On a
+  // screen that is fine; on a 3.25x5.25in badge it lands INSIDE the trim area and
+  // prints on the finished card. Suppressing it is supported by the Static Images
+  // API, but Mapbox's terms only permit that when the attribution appears
+  // elsewhere in the product -- so whoever turns this off owes an attribution
+  // somewhere the attendee can see it (badge back, or the printed programme).
   return `https://api.mapbox.com/styles/v1/${stylePath}/static/${lng},${lat},${zoom},0/${requestWidth}x${requestHeight}?access_token=${encodeURIComponent(
     token
-  )}`;
+  )}&attribution=false&logo=false`;
 }
 
 function generatedFallbackBackground(tintHex: string): string {
@@ -97,7 +109,13 @@ function splitDisplayName(person: BadgePersonRecord): {
     };
   }
   const display = person.displayName?.trim() || "";
-  if (!display) return { firstName: "ATTENDEE", lastName: "" };
+  // ⛔ Was `firstName: "ATTENDEE"`. Preflight (which splits the same name via
+  // run.ts) returned "" and reported the badge clean, while this printed the
+  // literal word ATTENDEE onto it — preflight validating a different answer
+  // than the renderer produced, which is the whole bug class this pipeline was
+  // supposed to have stopped having. An empty name is a preflight problem, not
+  // something to paper over at render time.
+  if (!display) return { firstName: "", lastName: "" };
   const parts = display.split(/\s+/);
   if (parts.length === 1) return { firstName: parts[0], lastName: "" };
   // Treat last token as surname and keep all remaining tokens in the first-name block
@@ -282,6 +300,200 @@ function renderImageLayer(params: {
   return `<img class="image-layer" src="${escapeHtml(image.src)}" alt="" style="left:${left}px;top:${top}px;width:${width}px;height:${height}px;opacity:${opacity};transform:rotate(${rotation}deg);transform-origin:top left;object-fit:${objectFit};" />`;
 }
 
+
+/** "09:00" / "09:00:00" -> "9:00 AM". Anything else passes through unchanged. */
+function formatClock(value: string | null): string {
+  if (!value) return "";
+  const match = /^(\d{1,2}):(\d{2})/.exec(value.trim());
+  if (!match) return value.trim();
+  const hour = Number(match[1]);
+  if (!Number.isFinite(hour)) return value.trim();
+  const suffix = hour < 12 ? "AM" : "PM";
+  const hour12 = hour % 12 === 0 ? 12 : hour % 12;
+  return `${hour12}:${match[2]} ${suffix}`;
+}
+
+/** What the badge admits its holder to, as display lines. Derived, never authored. */
+function accessLines(access: AccessSummary | null): string[] {
+  if (!access) return [];
+  const lines: string[] = [];
+  if (access.days.length) lines.push(access.days.join(" · "));
+  if (access.mealsIncluded) lines.push("All meals included");
+  if (access.meetingDay) lines.push(`Curated meetings — ${access.meetingDay}`);
+  if (access.tradeShowDays.length) {
+    lines.push(`Trade show — ${access.tradeShowDays.map((d) => d.name).join(", ")}`);
+  }
+  // Deliberately NOT listing access.events by name: the agenda block below
+  // prints every one of them with its day and time. Naming them twice cost five
+  // lines on a full delegate badge and pushed the schedule into the QR.
+  if (access.events.length) {
+    lines.push(
+      access.events.length === 1
+        ? "1 evening event — see schedule"
+        : `${access.events.length} evening events — see schedule`
+    );
+  }
+  return lines;
+}
+
+type BackRow = { html: string; text: string };
+
+/** The derived rows of one block, plus its heading. No layout decisions here. */
+function backBlockRows(params: {
+  block: BadgeBackBlock;
+  person: BadgePersonRecord;
+  venueAddress: string | null;
+  onsiteContact: { name: string; phone: string } | null;
+}): { heading: string | null; rows: BackRow[] } {
+  const { block, person, venueAddress, onsiteContact } = params;
+  const rows: BackRow[] = [];
+  const plain = (text: string, cls = "bb-row") =>
+    rows.push({ html: `<div class="${cls}">${escapeHtml(text)}</div>`, text });
+
+  if (block.source === "access_summary") {
+    for (const line of accessLines(person.access)) plain(line);
+  } else if (block.source === "agenda") {
+    let currentDay = "";
+    for (const item of person.agenda) {
+      if (item.dayName && item.dayName !== currentDay) {
+        currentDay = item.dayName;
+        plain(currentDay, "bb-day");
+      }
+      const time = formatClock(item.startTime);
+      const room = item.venueName
+        ? `<span class="bb-room">${escapeHtml(item.venueName)}</span>`
+        : "";
+      rows.push({
+        html: `<div class="bb-item"><span class="bb-time">${escapeHtml(
+          time
+        )}</span><span class="bb-name">${escapeHtml(item.name)}${room}</span></div>`,
+        // The time sits in a fixed column; name and room share what is left.
+        text: `${item.name} ${item.venueName ?? ""}`,
+      });
+    }
+  } else if (block.source === "qr_caption") {
+    // ⛔ The caption is ABOUT the code, so no code means no caption. A blank
+    // badge has no token and prints no QR; leaving this in pointed the holder
+    // at empty space and told them it identified them, which is the opposite of
+    // what a blank says. Keyed on the payload rather than the image so it also
+    // covers a badge whose QR failed to generate.
+    if (person.qrPayload) {
+      plain(
+        block.text?.trim() ||
+          "This code identifies your badge for check-in and scanning on site."
+      );
+    }
+  } else if (block.source === "venue") {
+    if (venueAddress) plain(venueAddress);
+    if (onsiteContact) {
+      plain(
+        onsiteContact.name
+          ? `On site: ${onsiteContact.name} · ${onsiteContact.phone}`
+          : `On site: ${onsiteContact.phone}`
+      );
+    }
+    if (block.text?.trim()) plain(block.text.trim());
+  }
+
+  return { heading: block.heading, rows };
+}
+
+function familyCssFor(family: BadgeBackBlock["family"]): string {
+  return family === "primary"
+    ? "var(--font-primary)"
+    : family === "slab"
+      ? "var(--font-slab)"
+      : "var(--font-secondary)";
+}
+
+/**
+ * Every back block, laid out.
+ *
+ * Flow blocks share one column so a type with a long agenda pushes down instead
+ * of colliding with whatever sits below it. The column has a line budget; rows
+ * beyond it are TRUNCATED AND COUNTED, never silently cut, because a badge
+ * missing half an agenda looks exactly like one that never had it.
+ *
+ * Wrapped lines are ESTIMATED from character count — the generator cannot
+ * measure text — so the budget is deliberately conservative.
+ */
+function renderBackBlocks(params: {
+  blocks: BadgeBackBlock[];
+  person: BadgePersonRecord;
+  venueAddress: string | null;
+  onsiteContact: { name: string; phone: string } | null;
+  dpi: number;
+  scaleX: number;
+  scaleY: number;
+}): string {
+  const { blocks, person, venueAddress, onsiteContact, dpi, scaleX, scaleY } = params;
+  const flow = blocks.filter((b) => b.flow);
+  const pinned = blocks.filter((b) => !b.flow);
+  const out: string[] = [];
+
+  const renderOne = (block: BadgeBackBlock, rows: BackRow[], heading: string | null) => {
+    const sizePx = designPxFromPt(block.sizePt, dpi) * scaleX;
+    const head = heading ? `<div class="bb-head">${escapeHtml(heading)}</div>` : "";
+    return `<div class="bb-group" style="font-family:${familyCssFor(
+      block.family
+    )};font-size:${sizePx}px;">${head}${rows.map((r) => r.html).join("")}</div>`;
+  };
+
+  if (flow.length > 0) {
+    const anchor = flow[0];
+    const budget = anchor.maxLines && anchor.maxLines > 0 ? anchor.maxLines : Infinity;
+    // Rough advance width for the block's face; only used to predict wrapping.
+    const charsPerLine = Math.max(
+      12,
+      Math.floor(anchor.width / (designPxFromPt(anchor.sizePt, dpi) * 0.5))
+    );
+    let used = 0;
+    let dropped = 0;
+    const groups: string[] = [];
+
+    for (const block of flow) {
+      const { heading, rows } = backBlockRows({ block, person, venueAddress, onsiteContact });
+      if (rows.length === 0) continue;
+      const kept: BackRow[] = [];
+      if (heading) used += 1;
+      for (const row of rows) {
+        const lines = Math.max(1, Math.ceil(row.text.length / charsPerLine));
+        if (used + lines > budget) {
+          dropped += 1;
+          continue;
+        }
+        used += lines;
+        kept.push(row);
+      }
+      if (kept.length > 0 || heading) groups.push(renderOne(block, kept, heading));
+    }
+    if (dropped > 0) {
+      groups.push(
+        `<div class="bb-more">+ ${dropped} more — see the full programme</div>`
+      );
+    }
+    out.push(
+      `<div class="back-block" style="left:${anchor.x * scaleX}px;top:${
+        anchor.y * scaleY
+      }px;width:${anchor.width * scaleX}px;font-size:${
+        designPxFromPt(anchor.sizePt, dpi) * scaleX
+      }px;">${groups.join("")}</div>`
+    );
+  }
+
+  for (const block of pinned) {
+    const { heading, rows } = backBlockRows({ block, person, venueAddress, onsiteContact });
+    if (rows.length === 0) continue;
+    out.push(
+      `<div class="back-block" style="left:${block.x * scaleX}px;top:${
+        block.y * scaleY
+      }px;width:${block.width * scaleX}px;">${renderOne(block, rows, heading)}</div>`
+    );
+  }
+
+  return out.join("");
+}
+
 function renderFreeTextLayer(params: {
   textLayer: BadgeFreeTextLayer;
   dpi: number;
@@ -441,7 +653,15 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     template.canvas.dpi,
     { maxLines: front.organizationLine2.maxLines ?? 1 }
   );
-  const firstLayout = fitTextLayout(bindingValues.firstName || "ATTENDEE", front.firstName, template.canvas.dpi, {
+  // ⛔ Was `|| "ATTENDEE"`, the SAME bug the note on splitDisplayName above says
+  // was killed — it had simply moved one function over. fitTextLayout does not
+  // just measure, it returns the lines that print (see `lines: firstLayout.lines`
+  // below), so a badge with no first name printed the literal word ATTENDEE
+  // across its name block. It survived because every real badge has a name and
+  // preflight blocks the ones that do not; blanks, which have no name BY
+  // DESIGN, printed 152 cards reading ATTENDEE. A space, matching lastName:
+  // fit against something non-empty, print nothing.
+  const firstLayout = fitTextLayout(bindingValues.firstName || " ", front.firstName, template.canvas.dpi, {
     maxLines: 1,
     lineHeightEm: 1.0,
   });
@@ -460,9 +680,22 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
   if (lastLayout.overflowed) overflowFields.push("lastName");
   if (titleLayout.overflowed) overflowFields.push("title");
 
-  const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(
-    person.qrPayload
-  )}`;
+  // Generated locally in document.ts and inlined. The old path fetched every
+  // badge's code from api.qrserver.com, which handed a third party an
+  // identifier for every attendee and made printing depend on their uptime.
+  //
+  // ⛔ Empty payload → NO QR, and in particular no fetch. A blank badge has no
+  // person and therefore no token, and both branches below would otherwise
+  // misfire on it: the fallback would ask a third party to encode the empty
+  // string, printing a scannable code that resolves to nothing. A card with no
+  // code on it reads as "not issued yet", which is what a blank is.
+  const qrUrl =
+    person.qrImageDataUri ??
+    (person.qrPayload
+      ? `https://api.qrserver.com/v1/create-qr-code/?size=512x512&data=${encodeURIComponent(
+          person.qrPayload
+        )}`
+      : null);
 
   const frontMapBg = mapboxStaticBackground(
     process.env.NEXT_PUBLIC_MAPBOX_TOKEN,
@@ -524,7 +757,17 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     ${renderedBackShapes}
     ${renderedBackImages}
     ${renderedBackText}
-    <img class="qr" src="${qrUrl}" alt="Badge QR code" style="left:${back.qr.x * scaleX}px;top:${back.qr.y * scaleY}px;width:${back.qr.size * scaleX}px;height:${back.qr.size * scaleY}px;" />
+    ${qrUrl ? `<img class="qr" src="${qrUrl}" alt="Badge QR code" style="left:${back.qr.x * scaleX}px;top:${back.qr.y * scaleY}px;width:${back.qr.size * scaleX}px;height:${back.qr.size * scaleY}px;" />` : ""}
+    ${renderBackBlocks({
+      blocks: back.blocks ?? [],
+      person,
+      venueAddress: options.venueAddress ?? null,
+      onsiteContact: options.onsiteContact ?? null,
+      dpi: template.canvas.dpi,
+      scaleX,
+      scaleY,
+    })}
+    ${frontMapBg ? `<div class="map-credit">© Mapbox © OpenStreetMap</div>` : ""}
   </div>
 </article>`;
   }
@@ -537,11 +780,22 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     }`
   );
 
+  // ⛔ The FRONT QR is the ORGANISATION's public listing code, not the person's
+  // badge token. The two codes are deliberately different and deliberately on
+  // different faces: the front faces outward and can be scanned in passing, so
+  // it may only reach a public page built from opted-in listing data. The
+  // person's token lives on the back, where showing it is a deliberate act.
+  // Nothing renders when the org has no public code — a floating QR over the
+  // map with no plate behind it is worse than no QR.
   frontLayerHtml.set(
     "front_qr",
-    `<img class="qr" src="${qrUrl}" alt="Badge QR code" style="left:${(front.qr.x + frontOffsetX) * scaleX}px;top:${
-      (front.qr.y + frontOffsetY) * scaleY
-    }px;width:${front.qr.size * scaleX}px;height:${front.qr.size * scaleY}px;" />`
+    person.orgQrImageDataUri
+      ? `<img class="qr" src="${person.orgQrImageDataUri}" alt="${escapeHtml(
+          person.organizationName ?? "Exhibitor"
+        )} directory listing" style="left:${(front.qr.x + frontOffsetX) * scaleX}px;top:${
+          (front.qr.y + frontOffsetY) * scaleY
+        }px;width:${front.qr.size * scaleX}px;height:${front.qr.size * scaleY}px;" />`
+      : ""
   );
 
   frontLayerHtml.set(
@@ -697,6 +951,8 @@ export function renderJobDocumentHtml(params: {
   template: BadgeTemplateConfigV1;
   people: BadgePersonRecord[];
   includeBack: boolean;
+  venueAddress?: string | null;
+  onsiteContact?: { name: string; phone: string } | null;
 }): string {
   const pages = params.people.flatMap((person) => {
     // The badge's layout is its registration type. No role, no person kind.
@@ -706,6 +962,8 @@ export function renderJobDocumentHtml(params: {
       variantKey,
       person,
       side: "front",
+      venueAddress: params.venueAddress ?? null,
+      onsiteContact: params.onsiteContact ?? null,
     });
     if (!params.includeBack) return [front];
     const back = renderBadgeHtml({
@@ -713,6 +971,8 @@ export function renderJobDocumentHtml(params: {
       variantKey,
       person,
       side: "back",
+      venueAddress: params.venueAddress ?? null,
+      onsiteContact: params.onsiteContact ?? null,
     });
     return [front, back];
   });
@@ -729,6 +989,16 @@ export function renderJobDocumentHtml(params: {
     <title>${escapeHtml(params.title)}</title>
     <style>
       @page { size: ${pageWidthIn}in ${pageHeightIn}in; margin: 0; }
+      /* ⛔ Chrome DROPS background colours and images when printing unless this
+         is set. Everything that makes a badge a badge is a background here: the
+         map photo, the tint layer, the overlay artwork, and the crop marks
+         (which are background-coloured divs). Without it the PDF comes out as
+         text on white with no trim guides — and nothing in the HTML preview
+         hints at it, because on screen they all render fine. */
+      *, *::before, *::after {
+        -webkit-print-color-adjust: exact;
+        print-color-adjust: exact;
+      }
       html, body { margin: 0; padding: 0; background: #f5f5f5; }
       body {
         --font-primary: ${params.template.fonts.primary};
@@ -770,6 +1040,53 @@ export function renderJobDocumentHtml(params: {
         height: 100%;
         object-fit: cover;
       }
+      /* The static map request suppresses Mapbox's burnt-in credit, which used to
+         print inside the trim on the front. Mapbox's terms allow that only if the
+         attribution appears elsewhere in the product -- this is that elsewhere. */
+      .back-block {
+        position: absolute;
+        color: #14161a;
+        line-height: 1.25;
+      }
+      /* Flow groups stack; the gap is what keeps a long access summary from
+         touching the schedule heading below it. */
+      .bb-group + .bb-group { margin-top: 1.1em; }
+      .bb-head {
+        font-weight: 700;
+        letter-spacing: 0.09em;
+        text-transform: uppercase;
+        font-size: 0.86em;
+        margin-bottom: 0.5em;
+      }
+      .bb-day {
+        font-weight: 700;
+        margin-top: 0.55em;
+      }
+      .bb-item {
+        display: flex;
+        gap: 0.5em;
+      }
+      .bb-time {
+        flex: 0 0 auto;
+        width: 5.8em;
+        text-align: right;
+        font-variant-numeric: tabular-nums;
+      }
+      .bb-name { flex: 1 1 auto; }
+      .bb-room { opacity: 0.62; }
+      .bb-room::before { content: " · "; }
+      .bb-more { font-style: italic; opacity: 0.75; margin-top: 0.3em; }
+      .map-credit {
+        position: absolute;
+        left: 0.125in;
+        right: 0.125in;
+        bottom: 0.3in;
+        text-align: center;
+        font-family: Arial, Helvetica, sans-serif;
+        font-size: 4pt;
+        line-height: 1.3;
+        color: #8a8a8a;
+      }
       .map-tint {
         position: absolute;
         inset: 0;
@@ -807,8 +1124,11 @@ export function renderJobDocumentHtml(params: {
       }
       @media print {
         body { background: #fff; }
-        .sheet { padding: 0; gap: 0; }
-        .badge { box-shadow: none; }
+        .sheet { padding: 0; gap: 0; display: block; }
+        /* One badge per sheet — flex centring is a screen affordance and leaves
+           the page origin somewhere Chrome has to guess at. */
+        .badge { box-shadow: none; margin: 0; break-after: page; }
+        .badge:last-child { break-after: auto; }
       }
     </style>
   </head>

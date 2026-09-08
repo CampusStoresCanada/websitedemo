@@ -19,6 +19,7 @@ export async function POST(
     qr_token?: string;
     scan_timestamp?: string;
     device_id?: string;
+    test_mode?: boolean;
   };
 
   try {
@@ -26,6 +27,7 @@ export async function POST(
       qr_token?: string;
       scan_timestamp?: string;
       device_id?: string;
+      test_mode?: boolean;
     };
   } catch {
     return NextResponse.json(
@@ -46,6 +48,10 @@ export async function POST(
     qrToken: payload.qr_token,
     scanTimestamp: payload.scan_timestamp ?? null,
     deviceId: payload.device_id ?? null,
+    // ⛔ Only ever true because the caller said so. There is no server-side or
+    // per-conference test flag to leave switched on by accident: a rehearsal is
+    // something you are doing right now, in this tab.
+    testMode: payload.test_mode === true,
   });
 
   if (!result.success) {

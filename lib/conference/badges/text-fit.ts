@@ -149,7 +149,18 @@ export function fitTextLayout(
     fallbackPt: slot.defaultPt,
   });
 
-  const sizeFloor = Math.min(slot.minPt, ABSOLUTE_MIN_FIT_PT);
+  // ⛔ Math.MAX. This was `Math.min(slot.minPt, ABSOLUTE_MIN_FIT_PT)`, which —
+  // since the absolute backstop is 1pt — resolved to 1pt for every slot and
+  // made EVERY declared minimum in every template dead code. The shrink loop
+  // ran all the way down rather than stopping and reporting, so text that
+  // could not fit was silently rendered too small to read and `overflowed`
+  // stayed false, which is the flag preflight raises TEXT_OVERFLOW from. The
+  // result: the badge passed preflight clean and printed a 4.5pt organisation
+  // name against a declared 9pt minimum.
+  //
+  // The backstop keeps its job — it guards a template that sets minPt to 0 or
+  // omits it — but it is a floor under the minimum, not a replacement for it.
+  const sizeFloor = Math.max(slot.minPt, ABSOLUTE_MIN_FIT_PT);
   for (let size = slot.defaultPt; size >= sizeFloor; size -= 0.25) {
     const roundedSize = Number(size.toFixed(2));
     const lineHeightPx = designPxFromPt(size, dpi) * lineHeightEm;

@@ -50,8 +50,22 @@ describe("resolveConferenceTier — reproduces the old 4-way orgTypeToTier exact
     expect(resolveConferenceTier(undefined, CSC_PROGRAMS)).toBe("public");
   });
 
-  it('any other unrecognized type (e.g. "Staff", "Supplier") → "public"', () => {
-    expect(resolveConferenceTier("Staff", CSC_PROGRAMS)).toBe("public");
+  /**
+   * ⛔ CHANGED 2026-09-08. This used to assert Staff → "public", grouped with
+   * Supplier as "unrecognized". Staff is now a named tier: CSC's own staff are
+   * not the public, and modelling them as such is what left them being asked to
+   * accept a Member Code of Conduct and to renew a membership CSC holds with
+   * itself.
+   *
+   * ⚠️ Supplier deliberately still falls through. Nobody has decided what a
+   * Supplier org is at a conference, and inventing an answer here would repeat
+   * the mistake being corrected.
+   */
+  it('"Staff" → "staff", its own tier', () => {
+    expect(resolveConferenceTier("Staff", CSC_PROGRAMS)).toBe("staff");
+  });
+
+  it('any other unrecognized type (e.g. "Supplier") → "public"', () => {
     expect(resolveConferenceTier("Supplier", CSC_PROGRAMS)).toBe("public");
   });
 });

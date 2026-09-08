@@ -22,10 +22,10 @@ import {
   type BadgeReprintReason,
 } from "@/lib/actions/conference-badges";
 import { ensureKnownPerson, ensurePersonForUser } from "@/lib/identity/lifecycle";
-import { getMyConferenceLegalGate, getPersonAssigneeLegalGate } from "@/lib/actions/conference-legal";
+import { getMyConferenceLegalGate } from "@/lib/actions/conference-legal";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { createHash } from "node:crypto";
+import { findBadgeTokenRow } from "@/lib/conference/badges/tokens";
 
 type ConferencePersonRow = {
   id: string;
@@ -969,7 +969,8 @@ export async function setConferencePersonCanonicalLink(params: {
 }
 
 export async function markConferencePersonCheckedInManual(
-  personId: string
+  personId: string,
+  options?: { testMode?: boolean }
 ): Promise<{ success: boolean; error?: string; data?: { checkedInAt: string } }> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -991,6 +992,7 @@ export async function markConferencePersonCheckedInManual(
       .update({
         checked_in_at: checkedInAt,
         check_in_source: "manual",
+        check_in_is_test: options?.testMode === true,
         updated_at: new Date().toISOString(),
       })
       .eq("id", personId);
@@ -1006,6 +1008,7 @@ export async function markConferencePersonCheckedInManual(
     scan_token_id: null,
     device_id: null,
     result_state: person.checked_in_at ? "already_checked_in" : "valid",
+    is_test: options?.testMode === true,
   });
 
   await logAuditEventSafe({
@@ -1288,11 +1291,118 @@ export type CheckInScanResultState =
   | "not_found"
   | "legal_not_accepted";
 
+/**
+ * How much of a rehearsal is still sitting in the real numbers.
+ *
+ * ⛔ The desk shows this whether or not it is in test mode. A writing test mode
+ * has exactly one failure that matters — somebody rehearses, closes the tab, and
+ * the fake check-ins are still there on the morning of day one, inflating the
+ * count nobody thinks to question. A flag that only the test-mode UI can see
+ * would be that failure with extra steps. This is queried from the rows
+ * themselves, so any session, on any machine, at any later date, can find them.
+ */
+export async function countTestCheckIns(
+  conferenceId: string
+): Promise<{ success: boolean; error?: string; data?: { people: number; events: number } }> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const [people, events] = await Promise.all([
+    db
+      .from("conference_people")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId)
+      .eq("check_in_is_test", true),
+    db
+      .from("conference_check_in_events")
+      .select("id", { count: "exact", head: true })
+      .eq("conference_id", conferenceId)
+      .eq("is_test", true),
+  ]);
+  if (people.error || events.error) {
+    return {
+      success: false,
+      error: people.error?.message ?? events.error?.message ?? "Could not count test check-ins.",
+    };
+  }
+  return { success: true, data: { people: people.count ?? 0, events: events.count ?? 0 } };
+}
+
+/**
+ * Undo a rehearsal.
+ *
+ * ⛔ Scoped by the FLAG, never by time or by operator. "Everything checked in
+ * today" would take real check-ins with it the moment a rehearsal happens on a
+ * conference morning, which is exactly when a desk gets rehearsed.
+ *
+ * Clears the check-in from the person and deletes the rehearsal's scan events.
+ * The audit rows written at the time are left alone: they record that somebody
+ * ran a test, which remains true, and rewriting history to hide a rehearsal is
+ * the opposite of what an audit trail is for.
+ */
+export async function resetTestCheckIns(
+  conferenceId: string
+): Promise<{ success: boolean; error?: string; data?: { peopleCleared: number; eventsDeleted: number } }> {
+  const auth = await requireConferenceOpsAccess();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const before = await countTestCheckIns(conferenceId);
+  if (!before.success || !before.data) {
+    return { success: false, error: before.error ?? "Could not count test check-ins." };
+  }
+
+  const { error: peopleError } = await db
+    .from("conference_people")
+    .update({
+      checked_in_at: null,
+      check_in_source: null,
+      check_in_is_test: false,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("conference_id", conferenceId)
+    .eq("check_in_is_test", true);
+  if (peopleError) return { success: false, error: peopleError.message };
+
+  const { error: eventsError } = await db
+    .from("conference_check_in_events")
+    .delete()
+    .eq("conference_id", conferenceId)
+    .eq("is_test", true);
+  if (eventsError) return { success: false, error: eventsError.message };
+
+  await logAuditEventSafe({
+    action: "conference_check_in_test_reset",
+    entityType: "conference_instances",
+    entityId: conferenceId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      peopleCleared: before.data.people,
+      eventsDeleted: before.data.events,
+    },
+  });
+
+  return {
+    success: true,
+    data: { peopleCleared: before.data.people, eventsDeleted: before.data.events },
+  };
+}
+
 export async function scanConferenceCheckInToken(params: {
   conferenceId: string;
   qrToken: string;
   scanTimestamp?: string | null;
   deviceId?: string | null;
+  /**
+   * A desk rehearsal. The scan runs for real — same token resolution, same
+   * gates, same writes — and every row it creates is flagged so it can be found
+   * and undone later. ⛔ NOT a dry run: the point is to exercise the true path,
+   * which means the cleanup has to live in the data rather than in whoever
+   * remembers they were testing.
+   */
+  testMode?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -1313,6 +1423,7 @@ export async function scanConferenceCheckInToken(params: {
     : new Date().toISOString();
   const db = createAdminClient();
 
+  const isTest = params.testMode === true;
   const insertEvent = async (
     state: CheckInScanResultState,
     personId: string | null,
@@ -1323,10 +1434,14 @@ export async function scanConferenceCheckInToken(params: {
       person_id: personId,
       checked_in_at: scannedAt,
       checked_in_by: auth.ctx.userId,
+      // ⛔ Still "qr". `is_test` is a separate axis: a rehearsal scan is still a
+      // scan, and folding the two together would lose how the person was
+      // checked in for every row in a test run.
       check_in_source: "qr",
       scan_token_id: scanTokenId,
       device_id: deviceId,
       result_state: state,
+      is_test: isTest,
     });
   };
 
@@ -1338,17 +1453,10 @@ export async function scanConferenceCheckInToken(params: {
     };
   }
 
-  const tokenHash = createHash("sha256").update(token).digest("hex");
-  const { data: tokenRow, error: tokenError } = await db
-    .from("conference_badge_tokens")
-    .select("id, person_id, revoked_at")
-    .eq("conference_id", conferenceId)
-    .eq("token_hash", tokenHash)
-    .maybeSingle();
-
-  if (tokenError) {
-    return { success: false, error: `Failed to resolve scan token: ${tokenError.message}` };
-  }
+  // One reader for conference_badge_tokens — see findBadgeTokenRow. The desk and
+  // the /scan route hashed the same token separately before this, which is how
+  // two answers to "is this badge valid" get to drift apart.
+  const tokenRow = await findBadgeTokenRow(db, { token, conferenceId });
 
   let resolvedTokenRow = tokenRow;
   if (!resolvedTokenRow) {
@@ -1395,7 +1503,7 @@ export async function scanConferenceCheckInToken(params: {
     const ensuredTokenId = (ensuredTokenRows[0] as { token_id: string }).token_id;
     const { data: tokenById, error: tokenByIdError } = await db
       .from("conference_badge_tokens")
-      .select("id, person_id, revoked_at")
+      .select("id, person_id, conference_id, revoked_at")
       .eq("id", ensuredTokenId)
       .maybeSingle();
     if (tokenByIdError || !tokenById) {
@@ -1405,6 +1513,14 @@ export async function scanConferenceCheckInToken(params: {
       };
     }
     resolvedTokenRow = tokenById;
+  }
+
+  if (!resolvedTokenRow) {
+    await insertEvent("invalid_token", null, null);
+    return {
+      success: true,
+      data: { state: "invalid_token", personId: null, checkedInAt: null },
+    };
   }
 
   if (resolvedTokenRow.revoked_at) {
@@ -1446,21 +1562,22 @@ export async function scanConferenceCheckInToken(params: {
     };
   }
 
-  // Gate: the attendee must have accepted their personal (assignee) documents
-  // before they can be checked in. Best-effort — a gate error never blocks
-  // check-in, but an explicit "not accepted" result does.
-  try {
-    const gate = await getPersonAssigneeLegalGate(conferenceId, personRow.id);
-    if (gate.success && gate.data && !gate.data.allAccepted) {
-      await insertEvent("legal_not_accepted", personRow.id, resolvedTokenRow.id);
-      return {
-        success: true,
-        data: { state: "legal_not_accepted", personId: personRow.id, checkedInAt: null },
-      };
-    }
-  } catch {
-    // ignore — don't let a gate failure block the desk
-  }
+  // ⛔ NO DOCUMENT GATE HERE, deliberately.
+  //
+  // Checking in is an ADMINISTRATIVE act — handing a person the badge that is
+  // already theirs — not a grant of access to anything. Refusing it because a
+  // waiver is unsigned turns the busiest queue of the conference into a
+  // paperwork desk, and punishes the attendee for a gap they cannot close while
+  // standing there.
+  //
+  // The documents are enforced where they actually mean something, and were
+  // already enforced there before this gate existed: registration
+  // (conference-registration), buying a day pass (DayPassOfferCard), and the
+  // welcome/acceptance surface the conference hub pushes people to. This was a
+  // fifth copy of that rule in the one place it did not belong.
+  //
+  // ⚠️ Historical `legal_not_accepted` rows remain in conference_check_in_events
+  // and the desk still renders their copy. Nothing produces new ones.
 
   const checkedInAt = new Date().toISOString();
   const { error: updateError } = await db
@@ -1468,6 +1585,7 @@ export async function scanConferenceCheckInToken(params: {
     .update({
       checked_in_at: checkedInAt,
       check_in_source: "badge_pickup",
+      check_in_is_test: isTest,
       updated_at: checkedInAt,
     })
     .eq("id", personRow.id);
@@ -1488,6 +1606,7 @@ export async function scanConferenceCheckInToken(params: {
       resultState: "valid",
       checkedInAt,
       deviceId,
+      isTest,
     },
   });
 

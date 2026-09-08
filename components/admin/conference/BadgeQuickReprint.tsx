@@ -7,7 +7,7 @@ type PersonOption = {
   displayName: string | null;
   contactEmail: string | null;
   roleTitle: string | null;
-  personKind: string;
+  registrationType: string;
 };
 
 interface BadgeQuickReprintProps {
@@ -46,7 +46,7 @@ export default function BadgeQuickReprint({
       .filter((person) => {
         const display = (person.displayName ?? "").toLowerCase();
         const email = (person.contactEmail ?? "").toLowerCase();
-        const kind = (person.personKind ?? "").toLowerCase();
+        const kind = (person.registrationType ?? "").toLowerCase();
         return display.includes(q) || email.includes(q) || kind.includes(q);
       })
       .slice(0, 50);
@@ -155,7 +155,7 @@ export default function BadgeQuickReprint({
                       {person.displayName ?? person.contactEmail ?? person.id}
                     </div>
                     <div className="text-xs text-gray-500">
-                      {person.contactEmail ?? "No email"} • {person.personKind}
+                      {person.contactEmail ?? "No email"} • {person.registrationType}
                     </div>
                   </button>
                 </li>
