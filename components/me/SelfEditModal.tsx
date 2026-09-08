@@ -48,7 +48,8 @@ type ConferenceObligations = {
     displayName: string | null;
     roleTitle: string | null;
     organizationName: string | null;
-    role: "delegate" | "exhibitor";
+    variantKey: string | null;
+    variantName: string | null;
     template: unknown | null;
   };
 };
@@ -599,7 +600,7 @@ function SelfEditModalInner({
                             template={
                               conferenceObligations.badge.template as never
                             }
-                            role={conferenceObligations.badge.role}
+                            variantKey={conferenceObligations.badge.variantKey}
                             person={conferenceObligations.badge}
                           />
                         </div>
