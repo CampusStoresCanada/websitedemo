@@ -363,20 +363,7 @@ async function deriveAssigneeContext(
     // again — with no literal anywhere to grep for. That is the policy engine's
     // design rather than something this call introduced, but it is the kind of
     // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
-    // had before the vendor-partner fix — that bug was partners being swept into
-    // the member audience, and correcting it must not move anybody else.
-    //
-    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
-    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
-    // "member" here silently defeats it — CSC's own officers would be asked to
-    // accept a Member Code of Conduct again, with nothing failing loudly.
-    //
-    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
-    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site.
-    const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
+    audienceSourceRoles = [resolveConferenceTier(org?.type, await getProgramsConfig())];
   }
   return { isAssignee: true, audienceSourceRoles };
 }
@@ -724,20 +711,7 @@ export async function getPersonAssigneeLegalGate(
     // again — with no literal anywhere to grep for. That is the policy engine's
     // design rather than something this call introduced, but it is the kind of
     // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
-    // had before the vendor-partner fix — that bug was partners being swept into
-    // the member audience, and correcting it must not move anybody else.
-    //
-    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
-    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
-    // "member" here silently defeats it — CSC's own officers would be asked to
-    // accept a Member Code of Conduct again, with nothing failing loudly.
-    //
-    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
-    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site.
-    const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
+    audienceSourceRoles = [resolveConferenceTier(org?.type, await getProgramsConfig())];
   }
   const { data: seats } = await db
     .from("entity_balance_seats")
