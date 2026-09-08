@@ -69,13 +69,25 @@ export type OptimizeContext = {
    * have been moved for somebody else's convenience, after being told it was
    * final.
    *
-   * So a late add runs FILL alone, which is the only structurally additive
-   * move here:
+   * A late add runs the two additive moves only:
    *
    *   split   moves an exhibitor's own delegates between their own slots  DISTURBS
    *   swap    trades two delegates between two meetings                   DISTURBS
    *   rescue  BUMPS a seated delegate to cover someone at zero            DISTURBS
+   *   join    adds one delegate to an under-full existing meeting         additive
    *   fill    puts a new meeting in an empty slot, displacing nobody      additive
+   *
+   * ⛔ JOIN DEFAULTS OFF, unlike the other four. It is not part of the
+   * pre-freeze search: the patience default and every measured convergence
+   * number come from a search without it, and switching a move on by default
+   * would invalidate all of them. Turn it on deliberately, as lateAdd does.
+   *
+   * ⛔ JOIN IS THE ONE STEVE ASKED FOR, and it is better than FILL for a lone
+   * arrival. Group minimum is 2, so FILL cannot seat one person — it must
+   * invent a second, dragging in somebody already registered who then has a
+   * meeting they were not told about. JOIN instead makes a two into a three:
+   * same slot, same exhibitor, same people, plus one. Steve: "they still don't
+   * meet solo. They become a three or wait for another solo add."
    *
    * ⚠️ `rescue` is the one that looks safe and is not. It exists to stop
    * anybody leaving with zero meetings, which is the rule Steve was clearest
@@ -85,9 +97,9 @@ export type OptimizeContext = {
    *
    * ⚠️ FILL-only cannot guarantee a latecomer gets meetings. It seats them
    * where there is spare room and reports honestly when there is none — see
-   * lateAddFill(). A latecomer with no seats is a conversation, not a bug.
+   * lateAdd(). A latecomer with no seats is a conversation, not a bug.
    */
-  moves?: { split?: boolean; fill?: boolean; swap?: boolean; rescue?: boolean };
+  moves?: { split?: boolean; fill?: boolean; swap?: boolean; rescue?: boolean; join?: boolean };
 };
 
 export type OptimizeResult = {
@@ -99,7 +111,7 @@ export type OptimizeResult = {
    * count means the objective's best schedule left somebody with no meetings at
    * all and we took score back off the table to fix it.
    */
-  movesApplied: { split: number; fill: number; swap: number; rescue: number };
+  movesApplied: { split: number; fill: number; swap: number; rescue: number; join: number };
   passes: number;
 };
 
@@ -231,6 +243,36 @@ export function optimizeSchedule(
     fill: context.moves?.fill ?? true,
     swap: context.moves?.swap ?? true,
     rescue: context.moves?.rescue ?? true,
+    // OFF unless asked for — see the note on `moves`.
+    join: context.moves?.join ?? false,
+  };
+
+  /**
+   * What seating this delegate with this exhibitor is worth, for RANKING only.
+   *
+   * Hoisted out of FILL so JOIN ranks candidates the same way. The accept-check
+   * is still the real objective in both places — this decides who is CONSIDERED,
+   * which is what a slice or a first-match makes final. Deliberately not a second
+   * scorer: the org term is counted per delegate here, where the true objective
+   * counts it once per org in the room.
+   */
+  const pairValue = (delegateSeatId: string, exhibitorOrgId: string): number => {
+    const seat = context.delegateSeats.get(delegateSeatId);
+    if (!seat) return 0;
+    const obj = context.objective;
+    const weight = obj.preferenceWeight ?? DEFAULT_PREFERENCE_WEIGHT;
+    let value = obj.orgTotalFor(seat.orgId, exhibitorOrgId);
+    if (obj.personTotalFor && seat.contactId) {
+      value += obj.personTotalFor(seat.contactId, exhibitorOrgId);
+    }
+    // Both directions: an exhibitor asking for this store counts as much as the
+    // store asking for them. Mutual therefore sorts above one-way.
+    if (obj.orgPreferredFor?.(seat.orgId, exhibitorOrgId)) value += weight;
+    if (obj.orgPreferredFor?.(exhibitorOrgId, seat.orgId)) value += weight;
+    if (seat.contactId && obj.personPreferredFor?.(seat.contactId, exhibitorOrgId)) {
+      value += weight;
+    }
+    return value;
   };
 
   const slotsBySuite = new Map<string, Slot[]>();
@@ -250,7 +292,7 @@ export function optimizeSchedule(
   let current = cloneAssignments(seedAssignments);
   let currentValue = before.value;
 
-  const movesApplied = { split: 0, fill: 0, swap: 0, rescue: 0 };
+  const movesApplied = { split: 0, fill: 0, swap: 0, rescue: 0, join: 0 };
   /**
    * ⛔ A BACKSTOP, NOT A BUDGET — and it was 12, which made it the operative rule.
    *
@@ -277,6 +319,79 @@ export function optimizeSchedule(
 
   for (; passes < maxPasses; passes += 1) {
     let improvedThisPass = false;
+
+    // ── JOIN ─────────────────────────────────────────────────────────────────
+    /**
+     * Make a two into a three. Same slot, same exhibitor, same people, plus one.
+     *
+     * ⛔ The only move that seats somebody while changing nothing anyone has
+     * already been told. FILL is additive about MEETINGS but not about PEOPLE:
+     * a new meeting needs meetingGroupMin bodies, so seating one latecomer
+     * forces a second delegate into a meeting they were never promised. JOIN
+     * has no such floor — an existing meeting already satisfies the minimum, so
+     * one person can be added alone.
+     *
+     * Runs before SPLIT and FILL so joining an existing room is preferred over
+     * inventing one. Off by default; see `moves`.
+     */
+    const joinTargets = !allow.join
+      ? []
+      : current
+          .map((assignment, index) => ({ assignment, index }))
+          .filter(
+            ({ assignment }) =>
+              assignment.delegateSeatIds.length < context.policy.meetingGroupMax
+          )
+          .sort((left, right) =>
+            breakTie(
+              context.seed,
+              `${left.assignment.meetingSlotId}:${left.assignment.exhibitorSeatId}`,
+              `${right.assignment.meetingSlotId}:${right.assignment.exhibitorSeatId}`
+            )
+          );
+
+    for (const { assignment, index } of joinTargets) {
+      const slot = slotById.get(assignment.meetingSlotId);
+      if (!slot) continue;
+      const { busyAt, metOrgs } = indexSchedule(current, slotById);
+      const seated = new Set(assignment.delegateSeatIds);
+
+      const eligible = [...context.delegateSeats.keys()]
+        .filter((delegateSeatId) => {
+          if (seated.has(delegateSeatId)) return false;
+          if (!context.mayMeet(delegateSeatId, assignment.exhibitorSeatId)) return false;
+          if (metOrgs.get(delegateSeatId)?.has(assignment.exhibitorOrganizationId)) return false;
+          if (busyAt.get(delegateSeatId)?.has(timeKey(slot))) return false;
+          return true;
+        })
+        // Same lexicographic rule as FILL: nobody leaves with zero while there
+        // is room, then value, then the seed.
+        .sort(
+          (left, right) =>
+            Number((metOrgs.get(right)?.size ?? 0) === 0) -
+              Number((metOrgs.get(left)?.size ?? 0) === 0) ||
+            pairValue(right, assignment.exhibitorOrganizationId) -
+              pairValue(left, assignment.exhibitorOrganizationId) ||
+            breakTie(context.seed, left, right)
+        );
+
+      const candidate = eligible[0];
+      if (!candidate) continue;
+
+      const next = cloneAssignments(current);
+      next[index].delegateSeatIds.push(candidate);
+
+      const nextValue = measure(next).value;
+      if (nextValue > currentValue) {
+        current = next;
+        currentValue = nextValue;
+        movesApplied.join += 1;
+        improvedThisPass = true;
+        break;
+      }
+    }
+
+    if (improvedThisPass) continue;
 
     // ── SPLIT ────────────────────────────────────────────────────────────────
     // The money move. Same pairings, more occupied slots: a group of four in one
@@ -384,24 +499,8 @@ export function optimizeSchedule(
        * deliberately not a second scorer. `breakTie` stays as the tiebreaker,
        * because the score is coarse and ties are common.
        */
-      const fillValue = (delegateSeatId: string): number => {
-        const seat = context.delegateSeats.get(delegateSeatId);
-        if (!seat) return 0;
-        const obj = context.objective;
-        const weight = obj.preferenceWeight ?? DEFAULT_PREFERENCE_WEIGHT;
-        let value = obj.orgTotalFor(seat.orgId, exhibitor.orgId);
-        if (obj.personTotalFor && seat.contactId) {
-          value += obj.personTotalFor(seat.contactId, exhibitor.orgId);
-        }
-        // Both directions: an exhibitor asking for this store counts as much as
-        // the store asking for them. Mutual therefore sorts above one-way.
-        if (obj.orgPreferredFor?.(seat.orgId, exhibitor.orgId)) value += weight;
-        if (obj.orgPreferredFor?.(exhibitor.orgId, seat.orgId)) value += weight;
-        if (seat.contactId && obj.personPreferredFor?.(seat.contactId, exhibitor.orgId)) {
-          value += weight;
-        }
-        return value;
-      };
+      const fillValue = (delegateSeatId: string): number =>
+        pairValue(delegateSeatId, exhibitor.orgId);
 
       /**
        * ⛔ NOBODY LEAVES WITH ZERO WHILE A SEAT IS FREE.

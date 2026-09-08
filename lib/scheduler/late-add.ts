@@ -11,15 +11,32 @@ import type { ScheduleAssignment } from "./types";
  * told it was final. So this is deliberately NOT "optimize again with one more
  * person in the pool".
  *
- * It runs FILL alone: a new meeting in an empty suite-slot, displacing nobody.
- * split, swap and rescue all rearrange people who are already placed.
+ * It runs the two additive moves, JOIN first:
  *
- * ⚠️ IT VERIFIES RATHER THAN TRUSTS. FILL is additive by construction today,
- * but "by construction" is a property of code that changes. If any pre-existing
- * meeting differs afterwards — a delegate added, removed, or the whole meeting
- * gone — this THROWS instead of returning a schedule that quietly moved
- * somebody. A late add that silently reshuffles the show is far worse than one
- * that fails loudly in January with three weeks to sort it out.
+ *   join  adds one person to an under-full existing meeting — a two becomes a
+ *         three. Same slot, same exhibitor, same people, plus one.
+ *   fill  opens a new meeting in an empty suite-slot when two or more people
+ *         need seating together.
+ *
+ * split, swap and rescue all rearrange people who are already placed, so all
+ * three are off.
+ *
+ * ⛔ JOIN FIRST IS THE WHOLE DESIGN, per Steve: "they still don't meet solo.
+ * They become a three or wait for another solo add." A lone arrival cannot be
+ * seated by FILL — group minimum is 2, so FILL would have to drag in a second
+ * delegate who was never promised that meeting. JOIN has no such floor, because
+ * the meeting it joins already satisfies the minimum. So one latecomer joins an
+ * existing room; two latecomers can open a new one together; one latecomer with
+ * no under-full room waits for the next one rather than costing anyone else a
+ * change. Their schedule is not shipped the moment they register, which is what
+ * makes waiting a real option.
+ *
+ * ⚠️ IT VERIFIES RATHER THAN TRUSTS. Both moves are additive by construction
+ * today, but "by construction" is a property of code that changes. If anybody
+ * is dropped from a meeting they already had, or a meeting disappears, this
+ * THROWS rather than returning a schedule that quietly moved somebody. A late
+ * add that silently reshuffles the show is far worse than one that fails loudly
+ * in January with three weeks to sort it out.
  */
 
 export type LateAddResult = {
@@ -32,17 +49,17 @@ export type LateAddResult = {
   /**
    * Delegates who already had meetings and picked up another.
    *
-   * ⛔ READ THIS BEFORE SENDING ANYTHING OUT. "Displaces nobody" is not the same
-   * as "changes nobody's day". Group minimum is 2, so a lone latecomer cannot be
-   * seated by themselves — FILL has to pair them with someone else who is free
-   * at that minute and has not met that exhibitor. That someone is usually an
-   * existing delegate, whose printed schedule then gains a meeting it did not
-   * have when it was sent on 18 January.
+   * ⚠️ USUALLY EMPTY, and it should stay that way. JOIN runs first and adds the
+   * latecomer to an existing room, which gives nobody else anything. This list
+   * fills only when FILL had to open a NEW meeting, because a new meeting needs
+   * meetingGroupMin bodies — so somebody already registered gets pulled in and
+   * their day gains a meeting it did not have on 18 January.
    *
-   * Nobody is moved and nothing is taken away, so this is far milder than a
-   * reshuffle — but it is still a change to a document somebody is holding, and
-   * whoever runs a late add owes these people a note. The list exists so that
-   * obligation is visible instead of buried in a diff.
+   * Nobody is moved and nothing is taken away, so it is far milder than a
+   * reshuffle. But it is still a change to a document somebody is holding, and
+   * whoever runs a late add owes these people a note. A non-empty list is the
+   * signal that a phone call is owed — if it is long, prefer waiting for the
+   * next arrival over seating this one.
    */
   alsoGained: string[];
   /**
@@ -60,13 +77,13 @@ export type LateAddResult = {
 /** (slot, exhibitor) identifies a meeting; its delegates are its content. */
 const meetingKey = (a: ScheduleAssignment) => `${a.meetingSlotId}::${a.exhibitorSeatId}`;
 
-export function lateAddFill(
+export function lateAdd(
   frozen: ScheduleAssignment[],
   context: OptimizeContext
 ): LateAddResult {
   const result = optimizeSchedule(frozen, {
     ...context,
-    moves: { fill: true, split: false, swap: false, rescue: false },
+    moves: { join: true, fill: true, split: false, swap: false, rescue: false },
   });
 
   assertFrozenSurvived(frozen, result.assignments);
@@ -106,9 +123,17 @@ export function lateAddFill(
 }
 
 /**
- * Every meeting that existed before must exist after, with exactly the same
- * people in it. Throws with the specific meeting rather than a generic failure,
- * because whoever reads this in January needs to know which room moved.
+ * Every meeting that existed before must still exist, and everyone who was in it
+ * must still be in it. Gaining a delegate is allowed — that is JOIN, and it is
+ * the point. LOSING one is not, and neither is a meeting vanishing.
+ *
+ * ⛔ THE INVARIANT IS "NOBODY LOSES ANYTHING", NOT "NOTHING CHANGED". Those are
+ * different, and the weaker-sounding one is the one that matches the promise:
+ * a delegate told on 18 January that they meet Boxercraft at 9:30 still meets
+ * Boxercraft at 9:30. Somebody else joining that room does not break that.
+ *
+ * Throws naming the specific meeting, because whoever reads this in January
+ * needs to know which room moved rather than that some room did.
  */
 function assertFrozenSurvived(
   frozen: ScheduleAssignment[],
@@ -122,12 +147,12 @@ function assertFrozenSurvived(
     if (!now) {
       throw new Error(`late-add removed a frozen meeting: ${key}`);
     }
-    const wasThere = [...original.delegateSeatIds].sort();
-    const isThere = [...now.delegateSeatIds].sort();
-    if (wasThere.join(",") !== isThere.join(",")) {
+    const stillSeated = new Set(now.delegateSeatIds);
+    const dropped = original.delegateSeatIds.filter((d) => !stillSeated.has(d));
+    if (dropped.length > 0) {
       throw new Error(
-        `late-add changed who is in a frozen meeting: ${key} — ` +
-          `was [${wasThere.join(", ")}], now [${isThere.join(", ")}]`
+        `late-add removed somebody from a frozen meeting: ${key} — ` +
+          `lost [${dropped.join(", ")}]`
       );
     }
   }

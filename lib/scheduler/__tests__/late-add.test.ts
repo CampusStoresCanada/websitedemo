@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { lateAddFill } from "../late-add";
+import { lateAdd } from "../late-add";
 import { optimizeSchedule } from "../optimize";
 import type { MeetingSlotInput, ScheduleAssignment } from "../types";
 
@@ -60,7 +60,7 @@ describe("late add after the freeze", () => {
     const seats = delegates(["d1", "d2", "d3", "d4", "late-1", "late-2"]);
     const before = snapshot(crammed);
 
-    const out = lateAddFill(crammed, context(seats));
+    const out = lateAdd(crammed, context(seats));
 
     // Every original meeting survives with the same people in it.
     for (const original of before) {
@@ -80,13 +80,13 @@ describe("late add after the freeze", () => {
     expect(movedSomebody).toBe(true);
 
     // The late add, given the identical input, does not.
-    const late = lateAddFill(crammed, context(seats));
+    const late = lateAdd(crammed, context(seats));
     expect(snapshot(late.assignments)).toContain(snapshot(crammed)[0]);
   });
 
   it("seats latecomers in spare room and names who else gained a meeting", () => {
     const seats = delegates(["d1", "d2", "d3", "d4", "late-1", "late-2"]);
-    const out = lateAddFill(crammed, context(seats));
+    const out = lateAdd(crammed, context(seats));
 
     // Two latecomers can fill an empty slot together — group minimum is 2.
     expect(out.newlySeated).toEqual(["late-1", "late-2"]);
@@ -95,51 +95,60 @@ describe("late add after the freeze", () => {
     expect(out.stillWithoutMeetings).toEqual([]);
   });
 
-  it("reports honestly when there is no room rather than forcing a seat", () => {
-    // One slot, already used by the only exhibitor: no empty slot exists.
+  it("reports honestly when there is genuinely no room", () => {
+    // One slot, and the meeting in it is already at meetingGroupMax. JOIN has
+    // nothing under-full to join and FILL has no empty slot to open.
     const oneSlot = [SLOTS[0]];
-    const seats = delegates(["d1", "d2", "late-1", "late-2"]);
+    const seats = delegates(["d1", "d2", "d3", "d4", "late-1"]);
+
+    const out = lateAdd(crammed, context(seats, { meetingSlots: oneSlot }));
+
+    expect(out.added).toEqual([]);
+    expect(out.newlySeated).toEqual([]);
+    expect(out.stillWithoutMeetings).toEqual(["late-1"]);
+    // And critically: the existing meeting is untouched.
+    expect(snapshot(out.assignments)).toEqual(snapshot(crammed));
+  });
+
+  it("seats a LONE latecomer by joining a room, costing nobody anything", () => {
+    // The case Steve described: "they become a three". d1 and d2 already meet
+    // partner-1 at s1. late-1 arrives alone — too few for a new meeting, but an
+    // existing room has space.
+    const seats = delegates(["d1", "d2", "late-1"]);
     const frozen: ScheduleAssignment[] = [
       { ...crammed[0], delegateSeatIds: ["d1", "d2"] },
     ];
 
-    const out = lateAddFill(frozen, context(seats, { meetingSlots: oneSlot }));
+    const out = lateAdd(frozen, context(seats));
 
+    expect(out.newlySeated).toEqual(["late-1"]);
+    // ⛔ THE POINT: nobody else gained a meeting. JOIN put late-1 into a room
+    // that already existed, so no schedule but late-1's changed at all.
+    expect(out.alsoGained).toEqual([]);
     expect(out.added).toEqual([]);
-    expect(out.newlySeated).toEqual([]);
-    expect(out.stillWithoutMeetings).toEqual(["late-1", "late-2"]);
-    // And critically: the existing meeting is untouched.
-    expect(snapshot(out.assignments)).toEqual(snapshot(frozen));
+    // d1 and d2 still meet partner-1 at s1 — they simply have company.
+    expect(snapshot(out.assignments)).toEqual(["s1|ex-1|d1,d2,late-1"]);
   });
 
-  it("names the already-seated delegate whose printed day gains a meeting", () => {
-    // Two suites. d1 already meets partner-1 at s1 and that is frozen. A
-    // latecomer arrives; the only legal companion for partner-2's empty room is
-    // d1, who has not met partner-2. Nobody is moved — but d1's schedule, sent
-    // on 18 January, now has a meeting on it that it did not have.
+  it("names everyone whose day gains a meeting when FILL has to open a room", () => {
+    // JOIN cannot help here — partner-1's only meeting is at max — so a lone
+    // latecomer can only be seated by opening partner-2's room, and a new
+    // meeting needs a minimum of two. FILL therefore recruits people who were
+    // never promised that meeting, and every one of them is reported.
     const bSlots: MeetingSlotInput[] = Array.from({ length: 3 }, (_, i) => ({
       id: `b${i + 1}`,
       dayNumber: 1,
       slotNumber: i + 4,
       suiteId: "suite-b",
     }));
-    const seats = delegates(["d1", "late-1"]);
+    const seats = delegates(["d1", "d2", "d3", "d4", "late-1"]);
     const twoExhibitors = new Map([
       ["ex-1", { orgId: "partner-1", suiteId: "suite-a" }],
       ["ex-2", { orgId: "partner-2", suiteId: "suite-b" }],
     ]);
-    const frozen: ScheduleAssignment[] = [
-      {
-        meetingSlotId: "s1",
-        exhibitorSeatId: "ex-1",
-        exhibitorOrganizationId: "partner-1",
-        delegateSeatIds: ["d1"],
-        matchScoreKeys: [],
-      },
-    ];
 
-    const out = lateAddFill(
-      frozen,
+    const out = lateAdd(
+      crammed,
       context(seats, {
         meetingSlots: [...SLOTS, ...bSlots],
         exhibitorSeats: twoExhibitors,
@@ -148,20 +157,25 @@ describe("late add after the freeze", () => {
     );
 
     expect(out.newlySeated).toEqual(["late-1"]);
-    // ⛔ The assertion that matters: d1 is reported, so whoever runs the late
-    // add knows to tell them. Silence here would be the bug.
-    expect(out.alsoGained).toEqual(["d1"]);
-    // d1's ORIGINAL meeting is still intact — gaining one is not moving one.
-    expect(snapshot(out.assignments)).toContain("s1|ex-1|d1");
+    // ⛔ The assertion that matters: seating ONE person cost several others a
+    // change to their printed day, and the caller is told exactly who. Silence
+    // here would be the bug — this is the list that owes a phone call.
+    expect(out.alsoGained.length).toBeGreaterThan(0);
+    // Nothing was taken from them: the original meeting is intact.
+    expect(snapshot(out.assignments)).toContain(snapshot(crammed)[0]);
   });
 
-  it("a lone latecomer cannot be seated alone — group minimum is 2", () => {
+  it("waits rather than inventing a meeting of one", () => {
     const seats = delegates(["d1", "d2", "d3", "d4", "late-1"]);
-    const out = lateAddFill(crammed, context(seats));
+    const out = lateAdd(crammed, context(seats));
 
-    // Everyone else has already met partner-1, so there is no legal companion
-    // and no legal meeting. This is a real limitation, not a defect: the
-    // answer is a phone call, not a group of one.
+    // Both additive moves are exhausted, for different reasons: JOIN finds no
+    // under-full room (the only meeting is at max), and FILL finds no legal
+    // companion (everyone else has already met partner-1, and a new meeting
+    // needs two). Steve: "they still don't meet solo. They become a three or
+    // wait for another solo add." This is the waiting case, and waiting is a
+    // correct outcome rather than a failure — their schedule is not shipped the
+    // moment they register.
     expect(out.newlySeated).toEqual([]);
     expect(out.stillWithoutMeetings).toEqual(["late-1"]);
   });
