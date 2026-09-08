@@ -59,6 +59,35 @@ export type OptimizeContext = {
    * one draw; raising restarts widens the sample. They are different levers.
    */
   maxSwapTrials?: number;
+  /**
+   * Which moves may run. Defaults to all four — this exists for ONE caller.
+   *
+   * ⛔ THE SCHEDULE FREEZES 18 JANUARY AND THE CONFERENCE IS 2 FEBRUARY. After
+   * the freeze people have been told where to be, and a late registrant must
+   * not cost anyone else a change. Re-running the full search would produce a
+   * better schedule and a worse outcome: every delegate whose day moved would
+   * have been moved for somebody else's convenience, after being told it was
+   * final.
+   *
+   * So a late add runs FILL alone, which is the only structurally additive
+   * move here:
+   *
+   *   split   moves an exhibitor's own delegates between their own slots  DISTURBS
+   *   swap    trades two delegates between two meetings                   DISTURBS
+   *   rescue  BUMPS a seated delegate to cover someone at zero            DISTURBS
+   *   fill    puts a new meeting in an empty slot, displacing nobody      additive
+   *
+   * ⚠️ `rescue` is the one that looks safe and is not. It exists to stop
+   * anybody leaving with zero meetings, which is the rule Steve was clearest
+   * about — but it achieves it by removing a seated delegate from a meeting
+   * they have already been told about. Before the freeze that is the right
+   * trade; after it, it breaks the promise for the person bumped.
+   *
+   * ⚠️ FILL-only cannot guarantee a latecomer gets meetings. It seats them
+   * where there is spare room and reports honestly when there is none — see
+   * lateAddFill(). A latecomer with no seats is a conversation, not a bug.
+   */
+  moves?: { split?: boolean; fill?: boolean; swap?: boolean; rescue?: boolean };
 };
 
 export type OptimizeResult = {
@@ -195,6 +224,15 @@ export function optimizeSchedule(
 ): OptimizeResult {
   const slotById = new Map(context.meetingSlots.map((s) => [s.id, s] as const));
 
+  // Every move on unless a caller says otherwise, so the pre-freeze search is
+  // untouched by the existence of late-add mode.
+  const allow = {
+    split: context.moves?.split ?? true,
+    fill: context.moves?.fill ?? true,
+    swap: context.moves?.swap ?? true,
+    rescue: context.moves?.rescue ?? true,
+  };
+
   const slotsBySuite = new Map<string, Slot[]>();
   for (const slot of context.meetingSlots) {
     const list = slotsBySuite.get(slot.suiteId) ?? [];
@@ -246,7 +284,9 @@ export function optimizeSchedule(
     // exhibitor while matchTotal is unchanged. This is the mechanism behind
     // "delegate time is the binding constraint" — it converts spare seats into
     // room-time rather than spending delegate-slots on redundant company.
-    const splitCandidates = [...current]
+    // Disabled wholesale in late-add mode: SPLIT moves an exhibitor's own
+    // delegates between their own slots, which changes a day already sent out.
+    const splitCandidates = !allow.split ? [] : [...current]
       .map((assignment, index) => ({ assignment, index }))
       .filter(({ assignment }) => assignment.delegateSeatIds.length >= context.policy.meetingGroupMin * 2)
       .sort((left, right) =>
@@ -305,7 +345,7 @@ export function optimizeSchedule(
     // ── FILL ─────────────────────────────────────────────────────────────────
     // Use a dead slot at all: an exhibitor sitting idle, and delegates who have
     // not met that org and are free at that minute.
-    const exhibitorOrder = [...context.exhibitorSeats.entries()].sort(([left], [right]) =>
+    const exhibitorOrder = !allow.fill ? [] : [...context.exhibitorSeats.entries()].sort(([left], [right]) =>
       breakTie(context.seed, left, right)
     );
 
@@ -453,7 +493,9 @@ export function optimizeSchedule(
         breakTie(context.seed, left.assignment.meetingSlotId, right.assignment.meetingSlotId)
       );
 
-    const maxSwapTrials = context.maxSwapTrials ?? 4000;
+    // Zero trials is how SWAP is switched off — the loops are already bounded
+    // by it, so no separate branch can drift out of step with them.
+    const maxSwapTrials = allow.swap ? (context.maxSwapTrials ?? 4000) : 0;
     let trials = 0;
     let swapped = false;
 
@@ -598,7 +640,10 @@ export function optimizeSchedule(
     }
   };
 
-  rescueUncovered();
+  // ⛔ Skipped in late-add mode: rescue reaches zero-meeting delegates by
+  // BUMPING a seated one, and after the freeze that breaks the promise made
+  // to whoever gets bumped.
+  if (allow.rescue) rescueUncovered();
 
   return {
     assignments: current,
