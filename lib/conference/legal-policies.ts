@@ -42,8 +42,35 @@ export type Registrant = {
   role?: "buyer" | "assignee";
 };
 
+/**
+ * ⛔ Tiers that are never asked to accept anything.
+ *
+ * CSC's own staff are agents and officers of the organisation running the
+ * conference. They are not a counterparty to its terms — an officer does not
+ * sign an agreement with their own organisation, does not accept a *Member*
+ * Code of Conduct, and cannot renew a membership CSC holds with itself.
+ *
+ * ⚠️ This is an EXCEPTION, not a reduction. Staff still function as members
+ * everywhere else (see effectiveBuyerTiers); what changes is that they are
+ * treated as already agreed and already in compliance, rather than being
+ * chased for signatures they were never a party to.
+ *
+ * ⛔ It has to live HERE, above the appliesToAll check, because that flag is
+ * what actually reaches them: Terms & Conditions and Privacy & Recording
+ * Release both carry `applies_to_all: true`, so no audience or registration
+ * change can exempt anybody from them. Targeting is not enough — only an
+ * explicit exception is.
+ */
+const EXEMPT_TIERS = new Set(["staff"]);
+
+/** Is this registrant exempt from the conference's legal gate entirely? */
+export function isLegallyExempt(who: Registrant): boolean {
+  return who.audienceSourceRoles.some((role) => EXEMPT_TIERS.has(role));
+}
+
 /** Does this registrant have to accept this policy? */
 export function isPolicyRequired(policy: PolicyTargeting, who: Registrant): boolean {
+  if (isLegallyExempt(who)) return false;
   // Role gate: when resolving for a specific acceptance moment, the policy must
   // be accepted by that role (or by both). Unset accept_by applies to either.
   if (who.role && policy.acceptBy && policy.acceptBy !== "both" && policy.acceptBy !== who.role) {

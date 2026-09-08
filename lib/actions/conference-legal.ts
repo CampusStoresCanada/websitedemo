@@ -363,18 +363,20 @@ async function deriveAssigneeContext(
     // again — with no literal anywhere to grep for. That is the policy engine's
     // design rather than something this call introduced, but it is the kind of
     // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` diverges. Everything else keeps the tier it had before
-    // this fix — the bug was that vendor partners were silently swept into the
-    // member audience, and that is the ONLY thing being corrected. Sending
-    // Non-Member or Staff somewhere new would be a second, unasked-for change
-    // riding along inside a bug fix.
+    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
+    // had before the vendor-partner fix — that bug was partners being swept into
+    // the member audience, and correcting it must not move anybody else.
     //
-    // ⚠️ And it must not be done by teaching resolveConferenceTier new answers:
-    // that function also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site, leave the resolver
-    // as the single shared mapping.
+    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
+    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
+    // "member" here silently defeats it — CSC's own officers would be asked to
+    // accept a Member Code of Conduct again, with nothing failing loudly.
+    //
+    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
+    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
+    // change there moves PRICING. Narrow at the call site.
     const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" ? "partner" : "member"];
+    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
   }
   return { isAssignee: true, audienceSourceRoles };
 }
@@ -722,18 +724,20 @@ export async function getPersonAssigneeLegalGate(
     // again — with no literal anywhere to grep for. That is the policy engine's
     // design rather than something this call introduced, but it is the kind of
     // thing that is only ever found by the person it hurts.
-    // ⛔ Only `partner` diverges. Everything else keeps the tier it had before
-    // this fix — the bug was that vendor partners were silently swept into the
-    // member audience, and that is the ONLY thing being corrected. Sending
-    // Non-Member or Staff somewhere new would be a second, unasked-for change
-    // riding along inside a bug fix.
+    // ⛔ Only `partner` and `staff` diverge. Everything else keeps the tier it
+    // had before the vendor-partner fix — that bug was partners being swept into
+    // the member audience, and correcting it must not move anybody else.
     //
-    // ⚠️ And it must not be done by teaching resolveConferenceTier new answers:
-    // that function also feeds loadBuyerTier in conference-commerce, so a tier
-    // change there moves PRICING. Narrow at the call site, leave the resolver
-    // as the single shared mapping.
+    // ⚠️ `staff` MUST pass through unchanged. The exemption in legal-policies is
+    // keyed on "staff" appearing in audienceSourceRoles, so collapsing it to
+    // "member" here silently defeats it — CSC's own officers would be asked to
+    // accept a Member Code of Conduct again, with nothing failing loudly.
+    //
+    // ⚠️ And none of this may be done by teaching resolveConferenceTier new
+    // answers: it also feeds loadBuyerTier in conference-commerce, so a tier
+    // change there moves PRICING. Narrow at the call site.
     const tier = resolveConferenceTier(org?.type, await getProgramsConfig());
-    audienceSourceRoles = [tier === "partner" ? "partner" : "member"];
+    audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
   }
   const { data: seats } = await db
     .from("entity_balance_seats")

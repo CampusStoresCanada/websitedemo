@@ -15,6 +15,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 import {
+  isLegallyExempt,
   requiredPolicyEntityIds,
   type PolicyTargeting,
   type Registrant,
@@ -115,6 +116,11 @@ export async function computeMissingLegal(
   // at them; without one, fall back to every active doc.
   let requiredTypes = [...latestByType.entries()];
   if (registrant) {
+    // ⛔ Exempt tiers short-circuit the whole walk, not just the targeting.
+    // A policy with `applies_to_all` and a legal version with no policy entity
+    // ("unmanaged → fail safe") both bypass targeting entirely, so filtering
+    // per-policy would still have chased staff for two documents.
+    if (isLegallyExempt(registrant)) return { allAccepted: true, missing: [] };
     const policies = await loadPolicyTargeting(db, conferenceId);
     const requiredPolicies = requiredPolicyEntityIds(policies, registrant);
     requiredTypes = requiredTypes.filter(([, versionId]) => {
@@ -170,8 +176,12 @@ export async function computeOrgLegalCompleteness(
   // ⛔ Only `partner` diverges — see conference-legal.ts. resolveConferenceTier
   // also feeds pricing via loadBuyerTier, so it stays the shared mapping and the
   // narrowing happens here.
+  // ⚠️ `staff` passes through, same as conference-legal.ts. This file AUTO-MERGED
+  // cleanly into a version that collapsed staff to "member" two lines above the
+  // isLegallyExempt call that looks for "staff" — no conflict marker, type-checked
+  // fine, and the exemption could never have fired.
   const tier = resolveConferenceTier(org?.type, programs);
-  const audienceSourceRoles = [tier === "partner" ? "partner" : "member"];
+  const audienceSourceRoles = [tier === "partner" || tier === "staff" ? tier : "member"];
 
   for (const person of people) {
     if (!person.user_id) return false; // no account yet — can't have accepted anything
