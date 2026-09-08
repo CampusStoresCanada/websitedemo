@@ -17,6 +17,13 @@
 
 set -uo pipefail
 
+# ⛔ launchd hands a job an EMPTY PATH — not your shell's. Every interactive test
+# passes and the 3am run dies with "npx: command not found" (exit 127), which is
+# indistinguishable at a glance from the Full Disk Access failure (126) that
+# preceded it. Homebrew on Apple Silicon lives in /opt/homebrew/bin; Intel and
+# nvm installs are listed too so this does not silently depend on one machine.
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.nvm/versions/node/current/bin:/usr/bin:/bin:/usr/sbin:/sbin:${PATH:-}"
+
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 LABEL="ca.campusstores.match-nightly"
 PLIST="$HOME/Library/LaunchAgents/${LABEL}.plist"
@@ -105,6 +112,21 @@ for required in NEXT_PUBLIC_SUPABASE_URL SUPABASE_SERVICE_ROLE_KEY; do
   fi
 done
 
+# ⛔ Check the tools BEFORE doing any work. Without this the run gets as far as
+# starting ollama, embedding a dimension probe and reporting "ready", then dies on
+# the first npx — so the log's last cheerful line is a success message and the
+# failure reads like a late, mysterious crash rather than a missing binary.
+MISSING=""
+for tool in node npx curl ollama; do
+  command -v "$tool" >/dev/null 2>&1 || MISSING="$MISSING $tool"
+done
+if [[ -n "$MISSING" ]]; then
+  echo "missing from PATH:$MISSING"
+  echo "PATH was: $PATH"
+  echo "nothing run — fix the PATH above rather than the caller"
+  exit 1
+fi
+
 # ⚠️ Start ollama if it is not already serving. After a reboot nothing has
 # launched it, and the run would otherwise fail on every request with a
 # connection refused that reads like a code fault.
@@ -158,6 +180,13 @@ echo "$MODEL ready (${DIMS} dimensions)"
 
 # Refresh the community first: comments are incremental and cheap (a handful of
 # requests once the cache is warm), and a stale corpus is a silently worse run.
+# ⛔ Refresh the POSTS corpus first. Without this the run scores whatever asks
+# existed the day the cache was last built by hand — the cache sat two days stale
+# while comments refreshed nightly, so the newest question was never looked at and
+# the screen said "not scored yet" about it forever. A tool for fresh questions
+# that cannot see fresh questions is worse than no tool.
+npx tsx scripts/circle-embed.mts --fetch-only || echo "corpus refresh failed — continuing on the cached corpus"
+
 npx tsx scripts/circle-comments.mts || echo "comment refresh failed — continuing on the cached corpus"
 
 # ⛔ --write records the run; it NEVER promotes. What the site serves stays a

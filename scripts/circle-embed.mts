@@ -29,6 +29,10 @@ const { resolveDocument } = await import("../lib/signals/resolve");
 
 const args = process.argv.slice(2);
 const FETCH = args.includes("--fetch");
+// Refresh the corpus and stop. The clustering below is a labelling aid for a
+// human at a screen; the nightly only needs the cache rewritten, and running
+// kmeans over 8,900 documents to throw the answer away is pure waste.
+const FETCH_ONLY = args.includes("--fetch-only");
 const kIdx = args.indexOf("--clusters");
 const K = kIdx >= 0 ? Number(args[kIdx + 1]) : 20;
 
@@ -58,7 +62,7 @@ async function embed(texts: string[]): Promise<number[][]> {
 
 let docs: Doc[] = [];
 
-if (FETCH || !existsSync(CACHE)) {
+if (FETCH || FETCH_ONLY || !existsSync(CACHE)) {
   const circle = getCircleClient();
   if (!circle) {
     console.error("No Circle client — CIRCLE_API_KEY not set.");
@@ -130,6 +134,7 @@ if (FETCH || !existsSync(CACHE)) {
   mkdirSync(dirname(CACHE), { recursive: true });
   writeFileSync(CACHE, JSON.stringify(docs));
   console.log(`cached → ${CACHE}\n`);
+  if (FETCH_ONLY) process.exit(0);
 } else {
   docs = JSON.parse(readFileSync(CACHE, "utf8")) as Doc[];
   console.log(`${docs.length} documents from cache\n`);

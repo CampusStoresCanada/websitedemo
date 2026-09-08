@@ -548,14 +548,58 @@ const label = (id: string) =>
   id.startsWith("org:") ? (orgName.get(id.slice(4)) ?? id)
   : `${contactName.get(id.slice(7)) ?? "?"} (${orgName.get(contactOrg.get(id.slice(7)) ?? "") ?? "?"})`;
 
-const rows: {
+type Row = {
   subject: string; candidate: string; sim: number; score: number; conf: number;
   bestSim: number | null; bestText: string | null;
-}[] = [];
-for (const subj of [...memberPeople, ...memberOrgs]) {
+  direction: "member_to_partner" | "partner_to_member";
+  /**
+   * ⛔ How well the CANDIDATE is placed, not just the subject.
+   *
+   * The edge carried only the subject's confidence, so for partner_to_member
+   * every row shared one number and nothing said how much we actually know about
+   * the store being recommended. New Brunswick Community College — no
+   * description, no categories, ONE act to its name — ranked #1 for thirteen of
+   * eighty partners, and no consumer could tell it apart from Calgary with 254.
+   *
+   * ⚠️ A vector built from almost nothing lands near the middle of the space, and
+   * the middle is close to everything. That is the hub effect, and it looks
+   * exactly like a strong match until you ask what it was built from. This is the
+   * same failure as the old scorer's score=100/confidence=0.03, reproduced.
+   */
+  candConf: number;
+  /** Similarity after shrinking toward the typical pair by candidate confidence. */
+  simAdj: number;
+};
+
+/**
+ * ⛔ BOTH DIRECTIONS, ranked separately — never one transposed into the other.
+ *
+ * Cosine is symmetric, so it is tempting to compute member→partner once and read
+ * it backwards. The similarity survives that; the RANKING does not. A member's
+ * 25 nearest partners is a different set from a partner's 50 nearest members, and
+ * `rank` is per subject. Transposing would hand a partner a list ordered by how
+ * much each member matters to OTHER partners.
+ *
+ * ⚠️ The partner page (`Your Market`) reads `partner_to_member` and nothing else.
+ * Until now the engine wrote only `member_to_partner`, so promoting one of its
+ * runs would have emptied that page for every partner — silently, because the
+ * reader treats an empty result as a real answer rather than falling back.
+ *
+ * Candidates there are member ORGS, not people: the panel renders a store and
+ * resolves its buyer from `category_buyers` separately. Member orgs are pooled
+ * from their people's acts, so a store places even when it never wrote anything.
+ */
+const rows: Row[] = [];
+const addRows = (
+  subjects: Placed[],
+  candidates: Placed[],
+  k: number,
+  direction: Row["direction"]
+) => {
+for (const subj of subjects) {
   const acts = actsOf.get(subj.id) ?? [];
-  for (const n of nearest(subj, partnerOrgs, { k: 25 })) {
-    const candidate = partnerOrgs.find((p) => p.id === n.id)!;
+  for (const n of nearest(subj, candidates, { k })) {
+    const candidate = candidates.find((p) => p.id === n.id)!;
     // ⛔ The single strongest thing they said about this candidate — the number
     // AND the sentence. Waterloo's pooled position reaches 0.27 against RAINS
     // while Ana's post about Roots reaches 0.6: the evidence was always there,
@@ -564,14 +608,69 @@ for (const subj of [...memberPeople, ...memberOrgs]) {
     rows.push({
       subject: subj.id, candidate: n.id, sim: n.similarity, score: 0,
       conf: placementConfidence(subj),
+      candConf: placementConfidence(candidate),
+      simAdj: 0, // filled once the run's typical similarity is known
+
       bestSim: best?.similarity ?? null,
       bestText: best ? acts[best.index].text.slice(0, 300) : null,
+      direction,
     });
   }
 }
-// Scale to this run's own spread rather than a band fitted to a previous one.
-const scale = calibrate(rows.map((r) => r.sim));
-for (const r of rows) r.score = scale(r.sim);
+};
+
+addRows([...memberPeople, ...memberOrgs], partnerOrgs, 25, "member_to_partner");
+// 50 to match what the partner panel renders, so its list is never truncated by
+// the engine rather than by the surface that knows how many it wants.
+addRows(partnerOrgs, memberOrgs, 50, "partner_to_member");
+
+/**
+ * ⛔ SHRINK toward the middle by how much evidence the candidate's position rests
+ * on — do not multiply by it.
+ *
+ * A vector built from almost nothing lands near the centre of the space, and the
+ * centre is close to everything. That is the hub effect, and it is not a modest
+ * bias: eight member orgs placed from under 0.2 confidence took 31 of 80 top
+ * slots, while forty-five well-placed orgs took 34. Per edge, a barely-placed
+ * store was five times likelier to rank #1. New Brunswick Community College —
+ * one act, no description, no categories — was top for thirteen partners.
+ *
+ * ⚠️ Multiplying by confidence would be the obvious fix and the wrong one. It
+ * makes "we know nothing about them" mean "they are a bad match", pushing sparse
+ * orgs to the BOTTOM. That is a different error, not a correction: a store we
+ * have no data on is not a poor prospect, it is an unremarkable one. Shrinkage
+ * says exactly that — with little evidence, regress toward what a typical pair
+ * looks like rather than trusting an estimate built on one sentence.
+ *
+ *     adjusted = conf * observed + (1 - conf) * typical
+ *
+ * At conf 0.11 a store lands essentially at the median whatever its raw cosine;
+ * at conf 0.97 it is left alone. ⛔ The candidate's confidence, not the
+ * subject's: the subject's applies equally to all of its edges and so cannot
+ * change the order of its own list, which is what a surface renders.
+ *
+ * ⚠️ Per direction. member→partner and partner→member have different similarity
+ * distributions, so one shared "typical" would drag one direction toward the
+ * other's centre.
+ */
+const typicalByDirection = new Map<Row["direction"], number>();
+for (const d of ["member_to_partner", "partner_to_member"] as Row["direction"][]) {
+  typicalByDirection.set(d, median(rows.filter((r) => r.direction === d).map((r) => r.sim)));
+}
+for (const r of rows) {
+  const typical = typicalByDirection.get(r.direction) ?? 0;
+  r.simAdj = r.candConf * r.sim + (1 - r.candConf) * typical;
+}
+
+/**
+ * ⚠️ ONE scale across both directions, not one per direction.
+ *
+ * Calibrating separately would make 80 mean "top fifth of member→partner" in one
+ * row and "top fifth of partner→member" in the next, so no consumer could compare
+ * two edges or apply a single threshold. One run, one meaning.
+ */
+const scale = calibrate(rows.map((r) => r.simAdj));
+for (const r of rows) r.score = scale(r.simAdj);
 
 const sims = rows.map((r) => r.sim).sort((a, b) => a - b);
 const q = (p: number) => sims[Math.floor(sims.length * p)] ?? 0;
@@ -610,6 +709,165 @@ for (const p of memberPeople) dupPeople.set(label(p.id), (dupPeople.get(label(p.
 const split = [...dupPeople.values()].filter((n) => n > 1).length;
 if (split) console.log(`\n⚠️  ${split} people hold more than one contact row — their signal is split across them`);
 
+// ── Open questions → who could answer them ───────────────────────────────────
+//
+// The one surface where the whole loop closes on live data: the engine shows a
+// list, an admin picks a subset, some of those reply. shown ⊇ chosen ⊇ replied,
+// and each narrowing is a labelled fact.
+//
+// ⛔ THE WHOLE COMMUNITY, not just partners. Half the answers in "Ask the
+// Partners" come from MEMBERS — Sandy Nemeth and Shannon Blackadder answering
+// sourcing questions because they are the people who actually know. Steve:
+// "there are experts on both sides of the transaction." Ranking only vendors
+// throws away half the expertise in the room.
+//
+// ⚠️ Computed here, nightly, because the site cannot reach this model. An ask
+// posted today is scored tonight and the tool has it tomorrow — which is the
+// right trade for a surface used a handful of times a year, and it keeps member
+// conversation on this machine rather than at an embedding vendor.
+const ASK_SPACE = "Ask the Partners";
+let asksConsidered: string[] = [];
+const askRows: {
+  ask_ref: string; run_id: string | null; candidate_org_id: string;
+  candidate_contact_id: string | null; recommended: boolean;
+  rank: number; similarity: number; reason: string | null;
+  candidate_last_spoke_at: string | null; answered_this_ask: boolean;
+}[] = [];
+
+// ⛔ THE TOOL IS AN ACTIVATION ENGINE, NOT A Q&A MATCHER.
+//
+// Steve: "I'm taking people who aren't answering questions in Circle and forcing
+// the email into their inbox telling them to go answer it. If they never sign in
+// they never get the notification, if they never get the notification they never
+// get curious about what we're doing as a group. I'm using that space as a
+// carrot — here's the sale, go get it."
+//
+// So the question is two-fold: WHO IS BEST ABLE TO ANSWER THIS, WHO IS NOT
+// ALREADY ANSWERING IN CIRCLE. An already-active candidate is a wasted send —
+// they would have seen the ask anyway. Ranking on relevance alone put a member
+// who posts constantly at rank 1, which is the clearest possible failure.
+//
+// 70 of 80 partner orgs have NEVER posted or commented. That silence is the
+// product, not a data gap.
+//
+// ⚠️ Recorded as FACTS — when they last spoke, whether they already answered
+// this one — never as a score adjustment. Dormancy is a filter and relevance is
+// the rank, the same split as blackouts and the spotlight. Baking silence into
+// the similarity would make "they are quiet" indistinguishable from "they are a
+// good fit", and the surface could never explain which it was reacting to.
+const lastSpoke = new Map<string, Date>();
+const noteVoice = (who: string | null | undefined, at: string | null | undefined) => {
+  if (!who) return;
+  const cid = byDisplay.get(who) ?? [...contactName.entries()].find(([, n]) => n === who)?.[0];
+  if (!cid) return;
+  const when = at ? new Date(at) : null;
+  if (!when || Number.isNaN(when.getTime())) return;
+  const prev = lastSpoke.get(cid);
+  if (!prev || when > prev) lastSpoke.set(cid, when);
+};
+
+if (WRITE && existsSync(".cache/circle-corpus.json")) {
+  const corpus = JSON.parse(readFileSync(".cache/circle-corpus.json", "utf8")) as {
+    kind: string; text: string; postId?: string | number | null; space?: string | null;
+  }[];
+  const asks = corpus.filter((d) => d.kind === "post" && d.space === ASK_SPACE && d.postId);
+
+  // Everyone who could answer: partner orgs AND member people. An org answers
+  // through a person, so member candidates are person-grain — "ask Sandy", not
+  // "ask the University of Manitoba".
+  const answerers: Placed[] = [...partnerOrgs, ...memberPeople];
+
+  // Who has spoken, and when — from the same corpora the space is built from.
+  for (const d of corpus) {
+    if (d.kind === "post") noteVoice((d as { author?: string | null }).author, (d as { at?: string | null }).at);
+  }
+  if (existsSync(".cache/circle-comments.json")) {
+    for (const c of JSON.parse(readFileSync(".cache/circle-comments.json", "utf8")) as
+         { userName?: string | null; createdAt?: string | null; postId?: number | string | null }[]) {
+      noteVoice(c.userName, c.createdAt);
+    }
+  }
+
+  // Who already replied to each ask — emailing them "go answer this" is noise.
+  const answeredAsk = new Set<string>();
+  if (existsSync(".cache/circle-comments.json")) {
+    for (const c of JSON.parse(readFileSync(".cache/circle-comments.json", "utf8")) as
+         { userName?: string | null; postId?: number | string | null }[]) {
+      const cid = c.userName ? [...contactName.entries()].find(([, n]) => n === c.userName)?.[0] : null;
+      if (cid && c.postId) answeredAsk.add(`${c.postId}\u001f${cid}`);
+    }
+  }
+
+  for (const ask of asks) {
+    const key = textKey(redactContactDetails(ask.text.replace(/\s+/g, " ").trim()).slice(0, 4000));
+    const vector = cache.vectors[key];
+    // An ask too short to have been embedded has no position and gets no list —
+    // better than a list built from nothing.
+    if (!vector) continue;
+
+    const placedAsk: Placed = { id: `ask:${ask.postId}`, vector, contributing: 1, mass: 1 };
+
+    /**
+     * ⛔ Rank the two pools SEPARATELY, then merge.
+     *
+     * One shared top-12 looks fair and is not. 79 member stores post constantly
+     * and have years of text to match on; a silent partner has a description and
+     * nothing else, which is exactly why they are the ones worth emailing. So
+     * members took most slots — ten of twelve on four of six asks, and TWELVE of
+     * twelve on the Kodak question, leaving the tool whose entire purpose is
+     * enticing quiet partners with nobody at all to offer.
+     *
+     * That is not the engine judging partners a poor fit. It is a scoring
+     * population competing for a fixed number of seats, where one side writes far
+     * more than the other. Guaranteeing depth in each pool measures them against
+     * their own kind and leaves the merged order honest.
+     *
+     * ⚠️ Both pools are still real answerers — a store that already solved this
+     * sourcing problem is a good person to ask. This widens the list; it does not
+     * privilege partners within it.
+     */
+    const perPool = [
+      ...nearest(placedAsk, partnerOrgs, { k: 12 }),
+      ...nearest(placedAsk, memberPeople, { k: 12 }),
+    ];
+    // Merged into one honest ordering: rank stays a global statement about this
+    // ask, so a partner at #14 is genuinely the fourteenth-best answer and the
+    // screen is not quietly re-numbering a filtered list to look better.
+    const ranked = perPool.sort((a, b) => b.similarity - a.similarity || a.id.localeCompare(b.id));
+
+    ranked.forEach((n, i) => {
+      const isPerson = n.id.startsWith("person:");
+      const contactId = isPerson ? n.id.slice(7) : null;
+      const orgId = isPerson ? contactOrg.get(n.id.slice(7))! : n.id.slice(4);
+      const acts = actsOf.get(n.id) ?? [];
+      const best = bestMatchingAct(acts.map((a) => a.vector), vector);
+      askRows.push({
+        ask_ref: String(ask.postId), run_id: null,
+        candidate_org_id: orgId, candidate_contact_id: contactId,
+        recommended: true,
+        rank: i + 1,
+        similarity: Number(n.similarity.toFixed(6)),
+        reason: best ? acts[best.index].text.slice(0, 300) : null,
+        candidate_last_spoke_at: contactId ? (lastSpoke.get(contactId)?.toISOString() ?? null) : null,
+        answered_this_ask: contactId ? answeredAsk.has(`${ask.postId}\u001f${contactId}`) : false,
+      });
+    });
+  }
+  // ⛔ Which asks were LOOKED AT, recorded as a fact of this run.
+  //
+  // Three of eight asks score to zero candidates. Without this list, a reader
+  // cannot tell "the run has not reached this ask" from "the run considered it
+  // and nobody matched" — both are simply an absence of rows — and the screen
+  // then tells an operator to wait overnight for a list that already exists and
+  // is empty. Derived at read time it would be a guess about what a job did;
+  // written here it is the job's own account.
+  asksConsidered = asks.map((a) => String(a.postId));
+  console.log(
+    `asks scored: ${asks.length}, with candidates: ` +
+      `${new Set(askRows.map((r) => r.ask_ref)).size}, rows: ${askRows.length}`
+  );
+}
+
 if (WRITE) {
   // ⛔ Claim the run BEFORE doing the work, not after.
   //
@@ -631,7 +889,12 @@ if (WRITE) {
       calibration: "per-run percentile",
       note: "no named axes and no typed weights — see lib/match/space.ts",
     },
-    counts: { docs: docs.length, placed: placed.size, pairs: rows.length },
+    counts: {
+      docs: docs.length, placed: placed.size, pairs: rows.length,
+      // Read by lib/comms/ask-candidates.ts to answer "have we looked at this
+      // ask?" independently of whether it produced anybody.
+      asksConsidered,
+    },
     notes: "embedding space — unpromoted",
   }).select("id").single();
   if (error) { console.error("run insert failed:", error.message); process.exit(1); }
@@ -647,26 +910,46 @@ if (WRITE) {
   // pairs in the run, so one member's whole shortlist sits in the 98th–100th and
   // is nearly flat: the top ten of a real member span 1.3 points out of 100.
   // Similarity keeps its spread and is the only honest within-subject ordering.
+  // ⚠️ Rank per (DIRECTION, subject). A partner org is a subject in one direction
+  // and a candidate in the other; counting its ranks in one sequence would number
+  // a partner's member list starting from wherever its member→partner rows left
+  // off, and every list would silently begin at the wrong number.
   const bySubjectRank = new Map<string, number>();
-  const ranked = [...rows].sort((a, b) => b.sim - a.sim);
+  // ⛔ Rank on the ADJUSTED similarity, or the shrinkage changes the score while
+  // leaving the order untouched — a discount nobody can see and nothing acts on.
+  const ranked = [...rows].sort((a, b) => b.simAdj - a.simAdj);
   const rankOf = new Map<string, number>();
+  const rankKey = (r: Row) => `${r.direction}\u001f${r.subject}`;
   for (const r of ranked) {
-    const next = (bySubjectRank.get(r.subject) ?? 0) + 1;
-    bySubjectRank.set(r.subject, next);
-    rankOf.set(`${r.subject}\u001f${r.candidate}`, next);
+    const next = (bySubjectRank.get(rankKey(r)) ?? 0) + 1;
+    bySubjectRank.set(rankKey(r), next);
+    rankOf.set(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`, next);
   }
 
   const edges = rows.map((r) => ({
-    run_id: run!.id, direction: "member_to_partner",
+    run_id: run!.id, direction: r.direction,
     subject_org_id: r.subject.startsWith("org:") ? r.subject.slice(4) : contactOrg.get(r.subject.slice(7)),
     subject_contact_id: r.subject.startsWith("person:") ? r.subject.slice(7) : null,
-    candidate_org_id: r.candidate.slice(4),
+    // ⚠️ Candidates are org-grain in both directions today, but slice by prefix
+    // rather than assuming: a person-grain candidate would otherwise write the
+    // first 4 characters of a contact id into an org column and fail the FK.
+    candidate_org_id: r.candidate.startsWith("org:")
+      ? r.candidate.slice(4)
+      : contactOrg.get(r.candidate.slice(7)),
+    candidate_contact_id: r.candidate.startsWith("person:") ? r.candidate.slice(7) : null,
     total: Number(r.score.toFixed(2)), score: Number(r.score.toFixed(2)),
     confidence: Number(r.conf.toFixed(4)),
-    rank: rankOf.get(`${r.subject}\u001f${r.candidate}`) ?? 0,
+    rank: rankOf.get(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`) ?? 0,
     breakdown: {
+      // Raw cosine, kept alongside the adjusted value so the discount is visible
+      // rather than baked in silently.
       similarity: Number(r.sim.toFixed(6)),
+      adjustedSimilarity: Number(r.simAdj.toFixed(6)),
       bestActSimilarity: r.bestSim === null ? null : Number(r.bestSim.toFixed(6)),
+      // ⚠️ Both sides' placement confidence, so a reader can discount a match to
+      // an org we barely know instead of taking its rank at face value.
+      subjectConfidence: Number(r.conf.toFixed(4)),
+      candidateConfidence: Number(r.candConf.toFixed(4)),
     },
     // ⛔ The reason is the ACT, quoted. "Waterloo → RAINS" is a number;
     // "because Ana said their Roots sales fell 25%" is something a human can use.
@@ -686,6 +969,114 @@ if (WRITE) {
     .update({ status: "complete", completed_at: new Date().toISOString() })
     .eq("id", run!.id);
   if (doneErr) { console.error("run completion failed:", doneErr.message); process.exit(1); }
+
+  if (askRows.length > 0) {
+    // ⛔ Upsert on (ask, candidate) so a re-run refreshes the suggestion without
+    // stacking duplicates — and without touching selected_at, which belongs to
+    // whatever a human already decided.
+    const { error: askErr } = await db
+      .from("ask_recommendations")
+      .upsert(
+        askRows.map((r) => ({ ...r, run_id: run!.id })),
+        { onConflict: "ask_ref,candidate_org_id,candidate_contact_id", ignoreDuplicates: false }
+      );
+    if (askErr) console.error("ask recommendations failed:", askErr.message);
+    else console.log(`ask recommendations: ${askRows.length} rows`);
+  }
+
+  /**
+   * ⛔ Retract what this run no longer stands behind.
+   *
+   * The upsert refreshes rows it writes and is blind to rows it does not. A
+   * candidate that drops out of an ask's top set keeps its row, still flagged
+   * `recommended` with a stale rank — NorQuest College sat at rank 12 for the
+   * notebooks ask two runs after the engine stopped ranking it, colliding with
+   * the live rank 12. Left alone the table accretes phantom recommendations that
+   * a surface will happily show as current, and the evaluation data then counts
+   * a pick of a suggestion no engine ever made.
+   *
+   * ⚠️ Only rows this job owns. `selected_at is null` spares anything a human has
+   * already acted on, and `recommended = true` spares their corrections — those
+   * are the record of a decision, not a suggestion to withdraw. Scoped to the
+   * asks actually considered, so an ask this run never looked at keeps whatever
+   * an earlier run said about it.
+   */
+  if (asksConsidered.length > 0) {
+    const { error: staleErr, count } = await db
+      .from("ask_recommendations")
+      .delete({ count: "exact" })
+      .in("ask_ref", asksConsidered)
+      .neq("run_id", run!.id)
+      .is("selected_at", null)
+      .eq("recommended", true);
+    if (staleErr) console.error("stale retraction failed:", staleErr.message);
+    else if (count) console.log(`retracted ${count} stale recommendation(s)`);
+  }
+
+  /**
+   * ⛔ Prune old EDGES. The job that creates the bulk is the job that clears it.
+   *
+   * Each run writes ~8,700 edges and nothing removed them, so the table reached
+   * 101 MB across 18 runs while the cron was broken. Now that it fires nightly
+   * that is ~3.2M rows and 2+ GB a year, nearly all of it belonging to runs
+   * nobody will ever read again.
+   *
+   * ⛔ `promoted` is untouchable — `lib/match/read.ts` selects `status = 'promoted'`
+   * and that run IS what the site serves. Deleting its edges would empty every
+   * match surface on the site while every dashboard still said the run was fine.
+   *
+   * ⚠️ Only edges are dropped, never `match_runs` rows. The run record is a few
+   * hundred bytes and it is what `evaluateMatchRunStale` reads to know this
+   * machine is still reporting in — pruning history would blind the alarm meant
+   * to notice this job dying.
+   */
+  const KEEP_COMPLETE = 3;   // last few nights, so runs stay comparable
+  const KEEP_SUPERSEDED = 1; // the immediate rollback target
+
+  const { data: runsByStatus } = await db
+    .from("match_runs")
+    .select("id, status, started_at")
+    .in("status", ["complete", "superseded"])
+    .order("started_at", { ascending: false });
+
+  const keep = new Set<string>([run!.id]);
+  let nComplete = 0, nSuperseded = 0;
+  for (const r of (runsByStatus ?? []) as { id: string; status: string }[]) {
+    if (r.status === "complete" && nComplete < KEEP_COMPLETE) { keep.add(r.id); nComplete++; }
+    if (r.status === "superseded" && nSuperseded < KEEP_SUPERSEDED) { keep.add(r.id); nSuperseded++; }
+  }
+  const prunable = ((runsByStatus ?? []) as { id: string }[])
+    .map((r) => r.id)
+    .filter((id) => !keep.has(id));
+
+  /**
+   * ⚠️ ONE RUN PER STATEMENT. Deleting twelve runs' edges in a single `.in()`
+   * was ~98,000 rows and died on `canceling statement due to statement timeout`
+   * — which the job reported and then carried on, so the table would have kept
+   * growing while the log claimed a prune step existed.
+   *
+   * A per-night cap keeps the job's own runtime bounded no matter how large the
+   * backlog is; it drains over a few nights instead of one long delete. What is
+   * left is logged, because a cap nobody can see reads as "fully cleaned".
+   */
+  const MAX_RUNS_PRUNED = 5;
+  if (prunable.length > 0) {
+    let pruned = 0, done = 0;
+    for (const id of prunable.slice(0, MAX_RUNS_PRUNED)) {
+      const { error: pruneErr, count } = await db
+        .from("match_edges")
+        .delete({ count: "exact" })
+        .eq("run_id", id);
+      // Keep going: one slow run must not block the rest of the backlog.
+      if (pruneErr) { console.error(`edge prune failed for ${id.slice(0, 8)}:`, pruneErr.message); continue; }
+      pruned += count ?? 0; done++;
+    }
+    const left = prunable.length - done;
+    console.log(
+      `pruned ${pruned} edges from ${done} old run(s)` +
+        (left > 0 ? ` — ${left} still to prune, next run picks them up` : "")
+    );
+  }
 
   console.log(`\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, NOT promoted`);
 }
