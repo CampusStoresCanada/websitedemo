@@ -10,6 +10,7 @@ import {
   useRef,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/auth/with-timeout";
 import { derivePermissionState } from "@/lib/auth/permissions";
 import type { User } from "@supabase/supabase-js";
 import type {
@@ -140,22 +141,6 @@ const STANDARD_IDLE_WARNING_MS = 5 * 60 * 1000;
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-function withTimeout<T>(
-  promise: Promise<T>,
-  ms: number,
-  label: string,
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`${label} timed out after ${ms}ms`)),
-        ms,
-      ),
-    ),
-  ]);
 }
 
 function describeError(err: unknown): Record<string, unknown> {
@@ -390,9 +375,16 @@ export function AuthProvider({
   }, []);
 
   const fetchUserData = useCallback(
-    async (userId: string) => {
+    /**
+     * ⚠️ `signal` is optional so the non-deadline caller (`refreshPermissions`)
+     * keeps working unchanged, but every query below honours it when given —
+     * otherwise a cancelled attempt would still hold four requests open.
+     */
+    async (userId: string, signal?: AbortSignal) => {
       const [profileResult, orgsResult, grantsResult] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", userId).single(),
+        supabase.from("profiles").select("*").eq("id", userId)
+          .abortSignal(signal as AbortSignal)
+          .single(),
         supabase
           .from("user_organizations")
           .select(
@@ -407,9 +399,11 @@ export function AuthProvider({
           `,
           )
           .eq("user_id", userId)
-          .eq("status", "active"),
+          .eq("status", "active")
+          .abortSignal(signal as AbortSignal),
         // Capabilities follow the roles this person currently holds.
-        supabase.rpc("current_capabilities", { p_subject: userId }),
+        supabase.rpc("current_capabilities", { p_subject: userId })
+          .abortSignal(signal as AbortSignal),
       ]);
 
       if (profileResult.error || orgsResult.error) {
@@ -475,13 +469,17 @@ export function AuthProvider({
           )
           .map((uo) => uo.organization_id);
 
-        if (memberOrgIds.length > 0) {
+        // ⛔ Do not START a fourth request for an attempt already abandoned. This
+        // one runs sequentially, after the three above, so without this guard a
+        // timed-out attempt opens a brand-new connection on its way out.
+        if (memberOrgIds.length > 0 && !signal?.aborted) {
           const { data: benchmarkingData, error: benchmarkingError } =
             await supabase
               .from("benchmarking")
               .select("organization_id")
               .in("organization_id", memberOrgIds)
-              .limit(1);
+              .limit(1)
+              .abortSignal(signal as AbortSignal);
 
           if (benchmarkingError) {
             console.warn(
@@ -621,7 +619,7 @@ export function AuthProvider({
       for (let attempt = 1; attempt <= MAX_PERMISSION_RETRIES; attempt++) {
         try {
           await withTimeout(
-            fetchUserData(session.user.id),
+            (signal) => fetchUserData(session.user.id, signal),
             AUTH_FETCH_TIMEOUT_MS,
             "fetchUserData",
           );
@@ -690,7 +688,10 @@ export function AuthProvider({
         data: { user: fallbackUser },
         error: fallbackUserError,
       } = await withTimeout(
-        supabase.auth.getUser(),
+        // ⚠️ supabase-js auth methods accept no abort signal, so this one still
+        // only races. Called once on a recovery path rather than retried three
+        // times, so it cannot pile up the way fetchUserData did.
+        () => supabase.auth.getUser(),
         AUTH_FETCH_TIMEOUT_MS,
         "getUser",
       );
@@ -732,7 +733,8 @@ export function AuthProvider({
             data: { session },
             error,
           } = await withTimeout(
-            supabase.auth.getSession(),
+            // Same caveat as getUser: races only, and runs once at bootstrap.
+            () => supabase.auth.getSession(),
             AUTH_BOOTSTRAP_TIMEOUT_MS,
             "getSession",
           );

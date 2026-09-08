@@ -49,6 +49,7 @@ import type { RFPWithContext } from "@/lib/types/rfp";
 import PartnerRFPFeed from "@/components/rfps/PartnerRFPFeed";
 import type { MarketData } from "@/lib/actions/partner-market";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
+import type { RatingRow } from "@/lib/match/rating-standing";
 
 // ── Category grouping ─────────────────────────────────────────────────────────
 // primary_category is a flat comma-separated string of parent categories and
@@ -107,6 +108,9 @@ interface PartnerProfileProps {
   canEditLinks: boolean;
   partnerRFPs?: RFPWithContext[];
   partnerMarket?: MarketData | null;
+  /** ⛔ Org admins only — rating is an admin act, reading the market is not. */
+  canRateMarket?: boolean;
+  marketRatings?: RatingRow[];
   canNudge?: boolean;
   nudgeAvailableAt?: string | null;
   conferenceAttendance: Array<{
@@ -233,6 +237,8 @@ export default function PartnerProfile({
   canEditLinks,
   partnerRFPs = [],
   partnerMarket = null,
+  canRateMarket = false,
+  marketRatings = [],
   canNudge = false,
   nudgeAvailableAt = null,
   renewalWindowOpen = false,
@@ -1639,6 +1645,9 @@ export default function PartnerProfile({
           market={partnerMarket}
           canNudge={canNudge}
           nudgeAvailableAt={nudgeAvailableAt}
+          canRate={canRateMarket}
+          ratings={marketRatings}
+          partnerOrgId={organization.id}
         />
       )}
 

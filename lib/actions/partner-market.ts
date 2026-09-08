@@ -2,11 +2,14 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { sendCircleNotification } from "@/lib/circle/notifications";
 import { sendEmail } from "@/lib/email/send";
-import { readMatchEdges, confidenceBucket, categoryEvidence } from "@/lib/match/read";
+import { readMatchEdges, confidenceBucket, categoryEvidence, getPromotedRunId } from "@/lib/match/read";
+import { reasonsVisibleTo } from "@/lib/match/edge-view";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 
@@ -66,6 +69,14 @@ export interface MarketContact {
 
 export interface MarketMatch {
   orgId: string;
+  /**
+   * Position in the ranking the reader is looking at.
+   *
+   * ⚠️ Carried so a rating can record WHAT the engine said, not merely that a
+   * human disagreed with it. Without the rank, tonight's re-rank reattributes an
+   * old verdict to a new opinion.
+   */
+  rank: number;
   orgName: string;
   orgSlug: string;
   province: string | null;
@@ -79,6 +90,8 @@ export interface MarketMatch {
 }
 
 export interface MarketData {
+  /** The run these matches came from — provenance for any verdict recorded against them. */
+  runId: string | null;
   matches: MarketMatch[];       // all matches, sorted by score desc
   topMatches: MarketMatch[];    // top 10
   totalMatches: number;
@@ -87,15 +100,56 @@ export interface MarketData {
 
 // ── Main query ────────────────────────────────────────────────────────────────
 
+/**
+ * ⛔ AUTHORIZE HERE, not only in the page.
+ *
+ * This module is `"use server"`, so every export is a callable endpoint and this
+ * one takes an org id as an argument. The org page checked the viewer before
+ * calling it; nothing made an attacker go through the page. Any authenticated
+ * user could ask for any partner's market and receive their ranked prospect list
+ * with buyer names and addresses — a partner-tier perk, handed out for free.
+ *
+ * ⚠️ It gets worse the moment ratings exist. "Currently doing business together"
+ * turns this same endpoint into a competitor's customer-list lookup: a vendor
+ * could enumerate who a rival sells to. So the check lands before that feature,
+ * not alongside it.
+ *
+ * ⛔ Scoped to the ORG, deliberately — `activeOrgIds`, not `orgAdminOrgIds`.
+ * Anyone at the partner with active access may READ their market; only an org
+ * admin may rate it. Two different levels, and collapsing them here would
+ * quietly take the panel away from every non-admin who uses it today.
+ */
 export async function getPartnerMarketData(
   partnerOrgId: string,
   partnerCategoryString: string | null
 ): Promise<{ success: boolean; data?: MarketData; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: "Not signed in" };
+
+  // ⚠️ The page also withholds this while the org's own access has lapsed — a
+  // partner-tier perk, not a permanent entitlement. Enforced here too, or the
+  // endpoint would keep serving it to an org the page has already cut off.
+  let accessActive = isGlobalAdmin(auth.ctx.globalRole);
+  if (!accessActive && auth.ctx.activeOrgIds.includes(partnerOrgId)) {
+    const db0 = createAdminClient();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: orgRow } = await (db0 as any)
+      .from("organizations").select("membership_status").eq("id", partnerOrgId).maybeSingle();
+    accessActive = isOrgAccessActive(
+      (orgRow?.membership_status as OrgMembershipStatus | null) ?? null
+    );
+  }
+  if (!accessActive) {
+    // ⚠️ Same shape as "not found": a refusal that names the org would confirm it
+    // exists and has a market worth hiding.
+    return { success: false, error: "Not available" };
+  }
+
   const { parents: partnerParents, subcategories: partnerSubs } =
     parseCategories(partnerCategoryString);
 
   if (partnerParents.length === 0 && partnerSubs.length === 0) {
-    return { success: true, data: { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 } };
+    return { success: true, data: { runId: null, matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 } };
   }
 
   const db = createAdminClient();
@@ -132,7 +186,7 @@ export async function getPartnerMarketData(
     if (edges.length === 0) {
       return {
         success: true,
-        data: { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: withoutProcurement ?? 0 },
+        data: { runId: null, matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: withoutProcurement ?? 0 },
       };
     }
 
@@ -192,7 +246,9 @@ export async function getPartnerMarketData(
       .filter((e) => memberById.has(e.candidateOrgId))
       .map((edge) => {
         const member = memberById.get(edge.candidateOrgId)!;
-        const { category, subcategories } = categoryEvidence(edge.reasons);
+        // The reader is this partner, so a member's hidden sections stay hidden
+        // here — a decision this surface makes, not one the engine made for it.
+        const { category, subcategories } = categoryEvidence(reasonsVisibleTo(edge.reasons, partnerOrgId));
 
         // The buyer who owns that category at that store, from their own
         // category_buyers mapping — the one piece the edge cannot carry,
@@ -212,6 +268,7 @@ export async function getPartnerMarketData(
 
         const orgContacts = contactsByOrg.get(edge.candidateOrgId) ?? [];
         return {
+          rank: edge.rank,
           orgId: edge.candidateOrgId,
           orgName: member.name,
           orgSlug: member.slug,
@@ -232,6 +289,7 @@ export async function getPartnerMarketData(
     return {
       success: true,
       data: {
+        runId: await getPromotedRunId(),
         matches: engineMatches,
         topMatches: engineMatches.slice(0, 10),
         totalMatches: engineMatches.length,
@@ -349,9 +407,13 @@ export async function getPartnerMarketData(
     return "low";
   }
 
-  const matches: MarketMatch[] = rawMatches.map(({ org, score, category, memberSubs }) => {
+  const matches: MarketMatch[] = rawMatches.map(({ org, score, category, memberSubs }, i) => {
     const buyerIds = orgBuyerMap.get(org.id) ?? [];
     const orgContacts = contactsByOrg.get(org.id) ?? [];
+    // ⚠️ Position in the fallback's own ordering. `runId` stays null below: these
+    // came from no run, and a verdict recorded against them must not later look
+    // like a judgement on the engine.
+    const fallbackRank = i + 1;
 
     // Find best buyer: prefer one with a matching subcategory
     let buyer: MarketContact | null = null;
@@ -367,6 +429,7 @@ export async function getPartnerMarketData(
     const matchingSubcategories = partnerSubs.filter(s => memberSubs.includes(s));
 
     return {
+      rank: fallbackRank,
       orgId: org.id,
       orgName: org.name as string,
       orgSlug: org.slug as string,
@@ -384,6 +447,7 @@ export async function getPartnerMarketData(
   return {
     success: true,
     data: {
+      runId: null,
       matches,
       topMatches: matches.slice(0, 10),
       totalMatches: matches.length,
@@ -402,6 +466,12 @@ export async function checkNudgeCooldown(): Promise<{
   lastSentAt?: string;
   availableAt?: string;
 }> {
+  // ⚠️ Reads a GLOBAL cooldown log, so it leaks little — but it is an export of a
+  // "use server" module and had no check at all. Closing it alongside its sibling
+  // rather than leaving one door open in a file whose others are now locked.
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { canSend: false };
+
   const db = createAdminClient();
   const cutoff = new Date(Date.now() - NUDGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
