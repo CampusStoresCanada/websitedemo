@@ -176,6 +176,14 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
       .select("id")
       .eq("conference_id", conferenceId)
       .eq("declaring_org_id", organizationId)
+      /**
+       * ⛔ ORG-GRAIN ROWS ONLY. Without this a delegate picking their own five
+       * ticked off their COMPANY'S task — while the org page, which reads
+       * `chosenBy(orgId)`, still showed an empty list. The check and the surface
+       * disagreed, and the direction of the error was the expensive one: the
+       * exhibitor stops being asked for the list the scheduler actually needs.
+       */
+      .is("declaring_contact_id", null)
       .limit(1);
     return Boolean(data && data.length > 0);
   },
@@ -264,6 +272,78 @@ export const CHECKS: Record<CheckType, (args: CheckArgs) => Promise<boolean>> = 
   },
 };
 
+
+/**
+ * Checks that can be answered ABOUT ONE PERSON rather than about a company.
+ *
+ * ⛔ Deliberately a separate, sparse registry — not a widened CheckArgs. Most
+ * checks have no person-grain meaning at all: payment, agreements and the
+ * directory listing are answered by a company, and inventing a per-person
+ * version would report a delegate incomplete for something they cannot do.
+ * A check appears here only when the underlying capture is genuinely keyed to
+ * the person. A task whose type is absent falls back to `self_reported` — the
+ * tick — which is what every person task did before this existed.
+ *
+ * ⛔ EACH ONE IS WRITTEN ONCE, IN BULK. Two surfaces ask this question: an
+ * attendee's own agenda ("have I done it?") and the admin roll-up ("how many
+ * haven't?"). A per-person implementation plus a separate counting query is two
+ * implementations of one rule, and checklist-status.ts already carries a header
+ * warning that its copy of the state rules must never drift from the loader's.
+ * So the bulk answer is the only answer, and the single-person check is a `has`
+ * against it — they cannot disagree.
+ */
+export const PERSON_CHECKS_BULK: Partial<
+  Record<CheckType, (args: { db: AdminClient; conferenceId: string }) => Promise<Set<string>>>
+> = {
+  /**
+   * Which contacts have told us who they want to meet.
+   *
+   * ⛔ Keyed on `declaring_contact_id`, never on their org. Three buyers from
+   * one store want three different sets of meetings, so a colleague answering
+   * must not tick this off for everyone — which is exactly what reusing the
+   * org-grain check would have done.
+   *
+   * ⚠️ ANY choice counts, not five — same rule as the org version. Requiring
+   * the full five pushes people to pad the list, and padding is
+   * indistinguishable from real interest by the time it reaches the scheduler.
+   */
+  async top_choices_declared({ db, conferenceId }) {
+    // Same narrow shim as the org version above — the generated types do not
+    // know this table yet. Delete both at the next coordinated regen.
+    const anyDb = db as unknown as {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      from: (table: string) => any;
+    };
+    const { data } = await anyDb
+      .from("conference_top_choices")
+      .select("declaring_contact_id")
+      .eq("conference_id", conferenceId)
+      .not("declaring_contact_id", "is", null);
+    return new Set(
+      ((data ?? []) as Array<{ declaring_contact_id: string | null }>)
+        .map((r) => r.declaring_contact_id)
+        .filter((id): id is string => Boolean(id))
+    );
+  },
+};
+
+/**
+ * Run a person-grain check, or return null when this task has none.
+ *
+ * Null rather than false: "no person-grain check exists" and "this person has
+ * not done it" are different answers, and collapsing them would mark every
+ * company task incomplete on every attendee's own list.
+ */
+export async function evaluatePersonChecklistTaskCheck(
+  db: AdminClient,
+  checkType: CheckType,
+  conferenceId: string,
+  contactId: string
+): Promise<boolean | null> {
+  const check = PERSON_CHECKS_BULK[checkType];
+  if (!check) return null;
+  return (await check({ db, conferenceId })).has(contactId);
+}
 
 export async function evaluateChecklistTaskCheck(
   db: AdminClient,

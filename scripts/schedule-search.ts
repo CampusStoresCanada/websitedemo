@@ -1,0 +1,286 @@
+/**
+ * RUN THE SCHEDULER ON THIS MACHINE, as hard as you like.
+ *
+ *   npx tsx --env-file=.env.local scripts/schedule-search.ts <conferenceId> [options]
+ *
+ *     --until-cold          draw until it stops improving (DEFAULT)
+ *     --patience N          consecutive non-improving draws before stopping (default 50)
+ *     --no-ils              disable iterated local search (reproduces old runs)
+ *     --pref-pct N          how far up the score range a stated pick is worth (default 0.90)
+ *     --max-ms N            wall-clock backstop
+ *     --max-draws N         draw-count backstop
+ *     --restarts N          fixed count instead of convergence
+ *     --swap-trials N       how far each draw explores (default 40000)
+ *     --persist             write the winner as a DRAFT run
+ *
+ * The January 18 freeze wants convergence, not a count: "let it cool until it
+ * stops coming up with better solves." A fixed N either stops mid-climb or
+ * burns hours after the plateau, and which one you get depends on the data.
+ *
+ * ⛔ Why this exists: drawing many schedules and keeping the best is CPU-bound
+ * arithmetic, and the admin button runs it inside an HTTP request. That caps the
+ * search at whatever a request timeout tolerates, which is the wrong ceiling for
+ * the one lever that most improves the result. Steve: "there is an M1 Max
+ * sitting here waiting to crush numbers instead of just relying on someone
+ * else's celeron in the cloud."
+ *
+ * ⛔ It calls `runSchedulerSearch`, the SAME function the server action calls.
+ * A local script that rebuilt the assembly would be a second scheduler, and a
+ * local run that disagreed with the button would be worse than no local run.
+ *
+ * Defaults to a DRY RUN: it prints what it found and writes nothing. `--persist`
+ * is required to create the draft run, and it never activates one — publishing a
+ * schedule stays a human act behind the admin UI.
+ */
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
+import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
+import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
+import { runSchedulerSearch } from "@/lib/scheduler/run-search";
+import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
+import type { MeetingSlotInput } from "@/lib/scheduler/types";
+
+function arg(name: string): string | null {
+  const hit = process.argv.find((a) => a.startsWith(`--${name}=`));
+  if (hit) return hit.split("=")[1];
+  const idx = process.argv.indexOf(`--${name}`);
+  return idx >= 0 ? (process.argv[idx + 1] ?? null) : null;
+}
+
+async function main() {
+  const conferenceId = process.argv[2];
+  if (!conferenceId || conferenceId.startsWith("--")) {
+    console.error(
+      "usage: schedule-search.ts <conferenceId> [--patience N] [--swap-trials N] " +
+        "[--pref-pct N] [--no-ils] [--restarts N] [--persist]"
+    );
+    process.exit(1);
+  }
+  const fixedRestarts = arg("restarts");
+  const persist = process.argv.includes("--persist");
+  // Convergence is the default; a fixed count is the opt-out.
+  const untilCold = fixedRestarts === null
+    ? {
+        patience: Number(arg("patience") ?? 50),
+        maxDraws: arg("max-draws") ? Number(arg("max-draws")) : undefined,
+        maxMs: arg("max-ms") ? Number(arg("max-ms")) : undefined,
+      }
+    : undefined;
+  const restarts = Number(fixedRestarts ?? 1);
+
+  const db = createAdminClient();
+  const t0 = Date.now();
+
+  const [candidates, geometry, policy] = await Promise.all([
+    loadMeetingCandidates(db, conferenceId),
+    loadConferenceMeetingGeometry(conferenceId),
+    getSchedulingConfig(),
+  ]);
+
+  const { data: suiteRows } = await db
+    .from("conference_suites")
+    .select("id, suite_number")
+    .eq("conference_id", conferenceId)
+    .order("suite_number", { ascending: true });
+  const suites = (suiteRows ?? []).map((r) => ({
+    id: r.id as string,
+    suite_number: r.suite_number as number,
+  }));
+
+  const { data: slotRows } = await db
+    .from("meeting_slots")
+    .select("id, day_number, slot_number, suite_id")
+    .eq("conference_id", conferenceId);
+  const meetingSlots: MeetingSlotInput[] = (slotRows ?? []).map((s) => ({
+    id: s.id as string,
+    dayNumber: s.day_number as number,
+    slotNumber: s.slot_number as number,
+    suiteId: s.suite_id as string,
+  }));
+
+  const suiteOrgBySuiteId = buildSuiteOrgAssignmentsBySuiteId(
+    suites,
+    geometry.suiteOrgAssignmentsBySuiteNumber
+  );
+
+  // Only exhibitors whose org actually holds a suite can be scheduled — a booth
+  // without a room does not get meetings.
+  const orgsHoldingSuites = new Set(Object.values(suiteOrgBySuiteId));
+  const exhibitors = candidates.exhibitors.filter((e: (typeof candidates.exhibitors)[number]) => orgsHoldingSuites.has(e.organizationId));
+
+  const suitePinnedExhibitorBySuiteId: Record<string, string> = {};
+  const used = new Set<string>();
+  for (const suite of suites) {
+    const orgId = suiteOrgBySuiteId[suite.id];
+    if (!orgId) continue;
+    const pick = exhibitors.find(
+      (e: (typeof exhibitors)[number]) => e.organizationId === orgId && !used.has(e.registrationId)
+    );
+    if (!pick) continue;
+    suitePinnedExhibitorBySuiteId[suite.id] = pick.registrationId;
+    used.add(pick.registrationId);
+  }
+
+  const memberContacts = candidates.delegates
+    .map((d: (typeof candidates.delegates)[number]) => ({
+      orgId: d.organizationId,
+      contactId: candidates.contactBySeatId.get(d.registrationId) ?? "",
+    }))
+    .filter((c: { orgId: string; contactId: string }) => c.contactId);
+  const scores = await loadMeetingMatchScores(
+    candidates.delegates.map((d: (typeof candidates.delegates)[number]) => d.organizationId),
+    memberContacts
+  );
+
+  const delegateSeats = new Map(
+    candidates.delegates.map((d: (typeof candidates.delegates)[number]) => [
+      d.registrationId,
+      { orgId: d.organizationId, contactId: candidates.contactBySeatId.get(d.registrationId) ?? null },
+    ])
+  );
+  const exhibitorSeats = new Map<string, { orgId: string; suiteId: string }>();
+  for (const [suiteId, seatId] of Object.entries(suitePinnedExhibitorBySuiteId)) {
+    const e = exhibitors.find((x: (typeof exhibitors)[number]) => x.registrationId === seatId);
+    if (e) exhibitorSeats.set(seatId, { orgId: e.organizationId, suiteId });
+  }
+
+  const loadedMs = Date.now() - t0;
+  console.log(
+    `loaded in ${loadedMs}ms — ${candidates.delegates.length} delegates, ` +
+      `${exhibitors.length} schedulable exhibitors, ${suites.length} suites, ${meetingSlots.length} slots`
+  );
+  if (exhibitors.length === 0 || candidates.delegates.length === 0) {
+    console.error("nothing to schedule — name some seats first");
+    process.exit(2);
+  }
+
+  const t1 = Date.now();
+  const outcome = runSchedulerSearch({
+    delegates: candidates.delegates,
+    exhibitors,
+    meetingSlots,
+    matchScores: toSolverRecords({
+      delegates: candidates.delegates,
+      exhibitors,
+      contactBySeatId: candidates.contactBySeatId,
+      scores,
+    }),
+    policy: {
+      delegateCoveragePct: policy.delegate_coverage_pct,
+      meetingGroupMin: policy.meeting_group_min,
+      meetingGroupMax: policy.meeting_group_max,
+      orgCoveragePct: policy.org_coverage_pct,
+      tiebreakMode: policy.tiebreak_mode,
+      feasibilityRelaxation: policy.feasibility_relaxation,
+    },
+    suitePinnedExhibitorBySuiteId,
+    delegateSeats,
+    exhibitorSeats,
+    orgTotalFor: scores.orgTotalFor,
+    personTotalFor: scores.personTotalFor,
+    orgPreferredFor: candidates.topChoices.orgPicked,
+    personPreferredFor: candidates.topChoices.personPicked,
+    orgTotals: scores.orgTotals,
+    seed: Number(arg("seed") ?? 1),
+    restarts,
+    untilCold,
+    onImprovement: ({ draw, value, elapsedMs }) =>
+      console.log(`  draw ${draw}: new best ${value.toFixed(0)} (${(elapsedMs / 1000).toFixed(1)}s)`),
+    /**
+     * ⚠️ DEEP BY DEFAULT (40,000), unlike the library's 4,000. Every measured
+     * convergence run used this depth; the shallower library default exists so
+     * the admin button still returns something in seconds. A CLI run is not
+     * competing with a request timeout, and depth is where the quality is.
+     */
+    maxSwapTrials: Number(arg("swap-trials") ?? 40000),
+    // ⛔ Reproduces a pre-2026-09-08 run. ILS is +14% and four times faster.
+    ils: process.argv.includes("--no-ils") ? false : undefined,
+    preferencePercentile: arg("pref-pct") ? Number(arg("pref-pct")) : undefined,
+  });
+  const searchMs = Date.now() - t1;
+
+  console.log(
+    JSON.stringify(
+      {
+        mode: untilCold ? "until-cold" : "fixed",
+        draws: outcome.draws ?? restarts,
+        stoppedBecause: outcome.stoppedBecause,
+        lastImprovementAt: outcome.lastImprovementAt,
+        searchMs,
+        winningSeed: outcome.winningSeed,
+        objective: +outcome.objectiveValue.toFixed(1),
+        spread: outcome.spread,
+        meetings: outcome.assignments.length,
+        pairings: outcome.assignments.reduce((n, a) => n + a.delegateSeatIds.length, 0),
+        satisfiedPreferences: outcome.satisfiedPreferences,
+        mutualPreferences: outcome.mutualPreferences,
+        preferenceShare: +outcome.preferenceShare.toFixed(3),
+        preferenceWeight: +outcome.preferenceWeight.toFixed(2),
+        rescueMoves: outcome.rescueMoves,
+        scoreDistribution: outcome.scoreDistribution,
+        status: outcome.diagnostics.status,
+      },
+      null,
+      1
+    )
+  );
+
+  if (!persist) {
+    console.log("\ndry run — nothing written. pass --persist to create a draft run.");
+    return;
+  }
+
+  const activePolicySet = await getActivePolicySet();
+  if (!activePolicySet) throw new Error("no active policy set — cannot record a reproducible run");
+
+  const { data: run, error } = await db
+    .from("scheduler_runs")
+    .insert({
+      conference_id: conferenceId,
+      // Same policy set the run was scored against, so a persisted local run is
+      // reproducible against the rules that produced it.
+      policy_set_id: activePolicySet.id,
+      run_seed: outcome.winningSeed,
+      run_mode: "draft",
+      status: "completed",
+      total_delegates: candidates.delegates.length,
+      total_exhibitors: exhibitors.length,
+      total_meetings_created: outcome.assignments.length,
+      metadata: {
+        source: "local_cli",
+        restart_spread: outcome.spread,
+        preference_weight: outcome.preferenceWeight,
+        satisfied_preferences: outcome.satisfiedPreferences,
+        mutual_preferences: outcome.mutualPreferences,
+        preference_share: outcome.preferenceShare,
+        rescue_moves: outcome.rescueMoves,
+        score_distribution: outcome.scoreDistribution,
+      },
+    })
+    .select("id")
+    .single();
+  if (error || !run) throw new Error(error?.message ?? "could not create run");
+
+  const rows = outcome.assignments.map((a) => ({
+    conference_id: conferenceId,
+    scheduler_run_id: run.id,
+    meeting_slot_id: a.meetingSlotId,
+    exhibitor_seat_id: a.exhibitorSeatId,
+    delegate_seat_ids: a.delegateSeatIds,
+    status: "scheduled",
+  }));
+  for (let i = 0; i < rows.length; i += 500) {
+    const { error: insertError } = await db.from("schedules").insert(rows.slice(i, i + 500));
+    if (insertError) throw new Error(insertError.message);
+  }
+
+  // ⛔ DRAFT ONLY. Nothing here promotes a run — publishing a schedule to the
+  // people in it stays a deliberate human act in the admin UI.
+  console.log(`\npersisted draft run ${run.id} with ${rows.length} meetings (NOT activated)`);
+}
+
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

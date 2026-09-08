@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAllMatchScores } from "../scoring";
+import { fixtureMatchScores } from "./score-fixtures";
 import { generateSchedule } from "../generate";
 import type {
   DelegateProfile,
@@ -98,7 +98,7 @@ describe("generateSchedule", () => {
   it("is deterministic for same seed and same inputs", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
     const slots = fixtureSlots();
 
     const first = generateSchedule({
@@ -126,7 +126,7 @@ describe("generateSchedule", () => {
   it("never places blacked out pairs", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
 
     const result = generateSchedule({
       delegates,
@@ -158,7 +158,7 @@ describe("generateSchedule", () => {
       delegates,
       exhibitors,
       meetingSlots: [{ id: "s1", dayNumber: 1, slotNumber: 1, suiteId: "suite-nobody-holds" }],
-      matchScores: computeAllMatchScores(delegates, exhibitors),
+      matchScores: fixtureMatchScores(delegates, exhibitors),
       policy,
       // Nobody is pinned: nobody holds this suite.
       suitePinnedExhibitorBySuiteId: {},
@@ -174,7 +174,7 @@ describe("generateSchedule", () => {
   it("reports soft warnings when targets are not fully met", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
 
     // Only 1 slot + 1 suite → most delegates/exhibitors won't meet targets.
     // These are soft violations → completed_with_warnings (not infeasible).

@@ -51,6 +51,8 @@ export type MeetingMatchScores = {
   /** Position within this subject's candidates; large when there is no edge. */
   rankFor: (memberOrgId: string, partnerOrgId: string) => number;
   /** Whether a promoted run existed at all — null engine vs a genuinely empty one. */
+  /** Every org-grain total on this run — the distribution, not one pair. */
+  orgTotals: number[];
   available: boolean;
   edgeCount: number;
   personEdgeCount: number;
@@ -64,6 +66,9 @@ const EMPTY: MeetingMatchScores = {
   breakdownFor: () => ({}),
   reasonsFor: () => [],
   rankFor: () => NO_RANK,
+  // No run, no distribution — so no calibrated weight either. Picks contribute
+  // nothing rather than a number nobody chose.
+  orgTotals: [],
   available: false,
   edgeCount: 0,
   personEdgeCount: 0,
@@ -161,6 +166,16 @@ export async function loadMeetingMatchScores(
     available: sawARun,
     edgeCount,
     personEdgeCount,
+    /**
+     * Every org-grain total on this run, for callers that need the SHAPE of the
+     * distribution rather than one pair's value.
+     *
+     * ⛔ Exists because a constant in score units is a trap: `total` is becoming
+     * a per-run percentile, so any threshold or weight fitted to one night's
+     * numbers silently re-scales on the next. Anything tuned against scores must
+     * be computed from the run it is scheduling — see preferenceWeightFromTotals.
+     */
+    orgTotals: [...byPair.values()],
   };
 }
 

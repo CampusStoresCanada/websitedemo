@@ -143,11 +143,49 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
     }
   }
 
-  const delegatesBelowTarget = input.delegates
-    .filter(
-      (delegate) => (delegateMeetingCount.get(delegate.registrationId) ?? 0) < input.delegateTargetMeetings
-    )
-    .map((delegate) => delegate.registrationId);
+  /**
+   * ⛔ MEASURE AGAINST WHAT WAS ACHIEVABLE FOR THIS PERSON, not a flat target.
+   *
+   * Steve: "if we have someone blacklist all the partners and then come to the
+   * conference... what are they doing?" Exactly the right question, and the flat
+   * version could not answer it. Someone who refuses every exhibitor gets zero
+   * meetings BY THEIR OWN CHOICE, and appeared in this list identical to a
+   * delegate the solver simply never picked up. One is not a failure at all; the
+   * other is the failure this check exists to catch. A metric that cannot tell
+   * them apart reports the wrong number in both directions — and it drags the
+   * headline down with people we did nothing wrong by.
+   *
+   * So a delegate's ceiling is the number of exhibitor ORGS they may actually
+   * meet — distinct orgs (they meet each at most once, see DUPLICATE_EXHIBITOR_ORG)
+   * minus anyone blacked out in either direction — capped by the target.
+   */
+  const exhibitorOrgs = [...new Set(input.exhibitors.map((e) => e.organizationId))];
+  const reachableOrgCount = (delegate: (typeof input.delegates)[number]): number =>
+    exhibitorOrgs.filter((orgId) => {
+      const exhibitor = input.exhibitors.find((e) => e.organizationId === orgId);
+      if (!exhibitor) return false;
+      return !isBlackedOut(
+        { organizationId: delegate.organizationId, blackoutList: delegate.blackoutList },
+        { organizationId: orgId, blackoutList: exhibitor.blackoutList }
+      );
+    }).length;
+
+  const delegatesBelowTarget: string[] = [];
+  /** Zero meetings because they refused everyone — their call, not our miss. */
+  const delegatesSelfExcluded: string[] = [];
+
+  for (const delegate of input.delegates) {
+    const achieved = delegateMeetingCount.get(delegate.registrationId) ?? 0;
+    const reachable = reachableOrgCount(delegate);
+    if (reachable === 0) {
+      delegatesSelfExcluded.push(delegate.registrationId);
+      continue;
+    }
+    // Never demand more than this person could possibly have had.
+    if (achieved < Math.min(input.delegateTargetMeetings, reachable)) {
+      delegatesBelowTarget.push(delegate.registrationId);
+    }
+  }
 
   if (delegatesBelowTarget.length > 0) {
     violations.push({
@@ -158,6 +196,21 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
         target: input.delegateTargetMeetings,
         delegateSeatIds: delegatesBelowTarget,
       },
+    });
+  }
+
+  /**
+   * Reported, never a violation. Someone attending while meeting nobody is not a
+   * scheduling defect — but it IS worth a human knowing, because it says
+   * something about why they come (sessions, peers, the AGM) that no other
+   * signal says.
+   */
+  if (delegatesSelfExcluded.length > 0) {
+    violations.push({
+      code: "DELEGATE_SELF_EXCLUDED",
+      severity: "info",
+      message: "Delegates attending with no meetable exhibitors, by their own refusals",
+      details: { delegateSeatIds: delegatesSelfExcluded },
     });
   }
 
@@ -180,10 +233,62 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
     });
   }
 
+  /**
+   * PER-PERSON COVERAGE — did anyone fly here and meet nobody?
+   *
+   * ⛔ ORG COVERAGE CANNOT ANSWER THIS AND NEVER COULD. It asks what share of
+   * member ORGS got at least one meeting, so a store sending four buyers is
+   * "covered" when one of them meets somebody and the other three meet nobody.
+   * The people who lose out are invisible at exactly the grain they are people.
+   *
+   * ⛔ AND IT IS NOT A PERCENTAGE. Every other coverage number here has a
+   * tolerance, and a tolerance is right for "how full is the day". It is wrong
+   * here: 97% coverage means 3% of the room flew to Toronto, sat through the
+   * meeting block, and met no one. There is no share of that which is fine, so
+   * the gate is any-at-all rather than a threshold somebody can tune down to
+   * make a run look green.
+   *
+   * ⛔ Self-excluded delegates are OUT OF THE DENOMINATOR, not counted as
+   * failures — they refused everyone, which is their call. Including them would
+   * make the number unfixable by us and therefore ignorable.
+   */
+  const reachableDelegates = input.delegates.filter((d) => reachableOrgCount(d) > 0);
+  const delegatesWithNoMeetings = reachableDelegates
+    .filter((d) => (delegateMeetingCount.get(d.registrationId) ?? 0) === 0)
+    .map((d) => d.registrationId);
+  const personCoverage = pct(
+    reachableDelegates.length - delegatesWithNoMeetings.length,
+    reachableDelegates.length
+  );
+
+  if (delegatesWithNoMeetings.length > 0) {
+    violations.push({
+      code: "PERSON_COVERAGE",
+      severity: "soft",
+      message: "One or more delegates have no meetings at all",
+      details: {
+        delegateSeatIds: delegatesWithNoMeetings,
+        achievedPct: personCoverage,
+        /** Named so a reader does not confuse this with ORG_COVERAGE passing. */
+        note: "These delegates could have met someone and were scheduled with nobody.",
+      },
+    });
+  }
+
   const uniqueDelegateOrgs = new Set(input.delegates.map((delegate) => delegate.organizationId));
   const coverage = pct(coveredDelegateOrgs.size, uniqueDelegateOrgs.size);
 
-  if (coverage < input.policy.orgCoveragePct) {
+  /**
+   * ⛔ UNIT MISMATCH — `pct()` returns 0..100, the policy is stored 0..1.
+   *
+   * This read `coverage < input.policy.orgCoveragePct`, i.e. `50 < 0.7`, which
+   * is false for every coverage above zero. ORG_COVERAGE therefore fired ONLY
+   * when not a single delegate org was scheduled, and passed silently in every
+   * case it was written to catch. The exact mirror of DELEGATE_TARGET, which
+   * demanded 24 of a possible 23 and so fired always: one gate stuck green, one
+   * stuck red, neither carrying information. Both found the same afternoon.
+   */
+  if (coverage < input.policy.orgCoveragePct * 100) {
     violations.push({
       code: "ORG_COVERAGE",
       severity: "soft",
@@ -219,6 +324,8 @@ export function validateScheduleConstraints(input: ConstraintInput): SchedulerDi
     status,
     violations,
     delegateTargetMeetings: input.delegateTargetMeetings,
+    /** Share of delegates who could meet someone and did. See PERSON_COVERAGE. */
+    personCoveragePctAchieved: personCoverage,
     totalAssignments: input.assignments.length,
     delegatesBelowTarget,
     exhibitorsBelowTarget,

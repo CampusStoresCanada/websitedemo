@@ -50,11 +50,25 @@ describe("isFieldFilled", () => {
     expect(isFieldFilled("categories", { ...blank, primary_category: "Caps & Gowns" })).toBe(true);
   });
 
-  it("does not count legacy off-taxonomy values as categories", () => {
-    // Real live values predating this taxonomy — they need a human to re-map,
-    // and must not read as "this partner picked a category".
+  it("does not count UNMAPPABLE legacy values as categories", () => {
+    /**
+     * Real live values predating this taxonomy. These two resist mapping —
+     * "General Merchandise" spans most of the taxonomy and "Other" says nothing
+     * — so they need a human, and must not read as "this partner picked a
+     * category".
+     *
+     * ⚠️ "Operations & Support" was the second case here and is now ALIASED to
+     * "Store Operations". Renames belong in ALIASES; guesses about what a
+     * company sells do not.
+     */
     expect(isFieldFilled("categories", { ...blank, primary_category: "General Merchandise" })).toBe(false);
-    expect(isFieldFilled("categories", { ...blank, primary_category: "Operations & Support" })).toBe(false);
+    expect(isFieldFilled("categories", { ...blank, primary_category: "Other" })).toBe(false);
+  });
+
+  it("counts a RENAMED legacy value, because the alias resolves it", () => {
+    // The whole point of the aliases: five partners went from appearing in no
+    // category index at all to being listed where a reader would look.
+    expect(isFieldFilled("categories", { ...blank, primary_category: "Operations & Support" })).toBe(true);
   });
 
   it("accepts either a catalogue URL or non-empty partner_links", () => {

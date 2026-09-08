@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { indexTopChoices, TOP_CHOICE_LIMIT, type TopChoice } from "../top-choices";
 
-function choice(declaringOrgId: string, chosenOrgId: string, rank: number | null = null): TopChoice {
-  return { declaringOrgId, declaringContactId: null, chosenOrgId, rank, declaredByContactId: null };
+function choice(declaringOrgId: string, chosenOrgId: string, pickedOrder: number | null = null): TopChoice {
+  return { declaringOrgId, declaringContactId: null, chosenOrgId, pickedOrder, declaredByContactId: null, chosenFrom: "browse" };
 }
 
 /** A delegate's own list — declaringContactId set. */
@@ -10,9 +10,9 @@ function personChoice(
   declaringOrgId: string,
   declaringContactId: string,
   chosenOrgId: string,
-  rank: number | null = null
+  pickedOrder: number | null = null
 ): TopChoice {
-  return { declaringOrgId, declaringContactId, chosenOrgId, rank, declaredByContactId: null };
+  return { declaringOrgId, declaringContactId, chosenOrgId, pickedOrder, declaredByContactId: null, chosenFrom: "browse" };
 }
 
 describe("indexTopChoices", () => {
@@ -34,23 +34,21 @@ describe("indexTopChoices", () => {
     expect(lookup.mutual("vendor", "store")).toBe(true);
   });
 
-  it("keeps rank per direction — they need not agree", () => {
-    // A store's first pick may rank that store third on the vendor's own list.
-    const lookup = indexTopChoices([choice("store", "vendor", 1), choice("vendor", "store", 3)]);
-    expect(lookup.rankOf("store", "vendor")).toBe(1);
-    expect(lookup.rankOf("vendor", "store")).toBe(3);
-  });
-
-  it("returns null rank for an unranked choice, and for one never made", () => {
-    // Unranked is a real state: being in the five is the signal, ordering is a
-    // bonus. Both read as null, and a caller must not treat null as "last".
-    const lookup = indexTopChoices([choice("store", "vendor")]);
-    expect(lookup.rankOf("store", "vendor")).toBeNull();
-    expect(lookup.rankOf("store", "someone-else")).toBeNull();
+  it("exposes no way to ask how much they wanted one", () => {
+    /**
+     * ⛔ `rankOf` is gone on purpose. It returned tick order — which box was
+     * clicked first on an alphabetical list — dressed up as a preference
+     * ordering. Steve's spec is "choose in no order your top five Orgs to
+     * meet", so the only fact is membership, and an API that implies otherwise
+     * is a trap for whoever writes a query in eight months.
+     */
+    const lookup = indexTopChoices([choice("store", "vendor", 1)]);
+    expect("rankOf" in lookup).toBe(false);
+    expect(lookup.chose("store", "vendor")).toBe(true);
     expect(lookup.chose("store", "someone-else")).toBe(false);
   });
 
-  it("lists an org's own picks in rank order, unranked last", () => {
+  it("lists an org's own picks in a stable order, unordered ones last", () => {
     const lookup = indexTopChoices([
       choice("store", "third", 3),
       choice("store", "unranked"),

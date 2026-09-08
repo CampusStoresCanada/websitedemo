@@ -17,15 +17,14 @@ export default function AgendaView({
   agenda: PersonAgenda;
   mapHref: string;
 }) {
-  if (agenda.items.length === 0) {
-    return (
-      <p className="text-sm text-gray-600">
-        Nothing on your agenda yet. It fills in as your registration and any extras
-        are assigned to you.
-      </p>
-    );
-  }
-
+  /**
+   * ⛔ NO EARLY RETURN ON AN EMPTY SCHEDULE. This used to bail here, which threw
+   * away the "Before you go" block with it — so a registered attendee whose
+   * schedule had not been built yet was shown nothing they owed. At the point we
+   * are asking for meeting preferences that is EVERY attendee, because the
+   * schedule is built from the answers. The empty note now sits where the days
+   * would be, below the deadlines, instead of replacing the whole view.
+   */
   const conflicted = new Set(agenda.conflicts.flatMap((c) => [c.a, c.b]));
   // One "today" for the whole render, so two rows cannot disagree about it.
   const todayISO = new Date().toISOString().slice(0, 10);
@@ -67,6 +66,21 @@ export default function AgendaView({
                 ) : (
                   <span className="text-gray-500"> — needed {d.waitingOn}</span>
                 )}
+                {/*
+                  A `go` item carries its OWN way in, because it is not answered
+                  by the editor at the bottom of this block — it is answered by
+                  using a control further down the page, and we can see whether
+                  they did. Funnelling it into "Answer these" would send someone
+                  to a modal that has no such control.
+                */}
+                {d.how === "go" && d.href && (
+                  <Link
+                    href={d.href}
+                    className="ml-2 font-medium text-[#163D6D] hover:underline"
+                  >
+                    {d.ctaLabel ?? "Open"} &rarr;
+                  </Link>
+                )}
               </li>
             ))}
           </ul>
@@ -74,12 +88,21 @@ export default function AgendaView({
               check-ins are ticked, but both are answered in the same place —
               a person should not have to learn which of their own details
               lives behind which control. */}
-          <a
-            href="#edit-conference"
-            className="mt-3 inline-block rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
-          >
-            {agenda.deadlines.length === 1 ? "Answer it" : "Answer these"}
-          </a>
+          {/*
+            Only shown when something here is actually answered in the editor.
+            A block holding one `go` item would otherwise offer "Answer it"
+            pointing at a modal that cannot answer it.
+          */}
+          {agenda.deadlines.some((d) => d.how !== "go") && (
+            <a
+              href="#edit-conference"
+              className="mt-3 inline-block rounded-md bg-[#163D6D] px-3 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
+            >
+              {agenda.deadlines.filter((d) => d.how !== "go").length === 1
+                ? "Answer it"
+                : "Answer these"}
+            </a>
+          )}
         </div>
       )}
       {agenda.conflicts.length > 0 && (
@@ -91,6 +114,13 @@ export default function AgendaView({
             ? "Two things overlap on your agenda."
             : `${agenda.conflicts.length} pairs of things overlap on your agenda.`}{" "}
           They&rsquo;re marked below — you may well be doing both.
+        </p>
+      )}
+
+      {agenda.items.length === 0 && (
+        <p className="text-sm text-gray-600">
+          Nothing on your agenda yet. It fills in as your registration and any extras
+          are assigned to you.
         </p>
       )}
 

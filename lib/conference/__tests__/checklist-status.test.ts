@@ -8,6 +8,7 @@ const HOTEL = {
   sort_order: 1,
   deadline: "2027-01-08",
   checklistName: "Your Conference",
+  checkType: "self_reported",
 };
 const DIETARY = {
   id: "t-diet",
@@ -16,6 +17,7 @@ const DIETARY = {
   sort_order: 2,
   deadline: null,
   checklistName: "Your Conference",
+  checkType: "self_reported",
 };
 
 const person = (id: string, org = "Acme", fields: Record<string, unknown> = {}) => ({
@@ -26,6 +28,48 @@ const person = (id: string, org = "Acme", fields: Record<string, unknown> = {}) 
 });
 
 describe("summarizePersonTasks", () => {
+  it("counts a person-grain check as done, without a tick", () => {
+    /**
+     * The top-5 ask. We can SEE whether someone picked, so they are never asked
+     * to confirm it — and this count must match what they see on their own
+     * page, which is why the rule lives in one bulk check both sides read.
+     */
+    const [task] = summarizePersonTasks(
+      [HOTEL],
+      [person("a")],
+      [],
+      new Set([`${HOTEL.id}:a`])
+    );
+    expect(task.done).toBe(1);
+    expect(task.derived).toBe(1);
+    expect(task.outstanding).toEqual([]);
+  });
+
+  it("leaves a person the check does not cover outstanding", () => {
+    const [task] = summarizePersonTasks(
+      [HOTEL],
+      [person("a"), person("b")],
+      [],
+      new Set([`${HOTEL.id}:a`])
+    );
+    expect(task.done).toBe(1);
+    expect(task.pending).toBe(1);
+    expect(task.outstanding.map((p) => p.personId)).toEqual(["b"]);
+  });
+
+  it("lets a detected check win over a stale acknowledgement", () => {
+    // Someone ticked "not applicable" and then went and did it. What we can see
+    // beats what they said, the same way a captured hotel code does.
+    const [task] = summarizePersonTasks(
+      [HOTEL],
+      [person("a")],
+      [{ task_id: HOTEL.id, person_id: "a", state: "not_applicable" }],
+      new Set([`${HOTEL.id}:a`])
+    );
+    expect(task.done).toBe(1);
+    expect(task.notApplicable).toBe(0);
+  });
+
   it("counts a confirmation code we already hold as done without anyone ticking", () => {
     const [task] = summarizePersonTasks(
       [HOTEL],
@@ -125,10 +169,10 @@ describe("summarizePersonTasks", () => {
 
 describe("classifyPersonTasks", () => {
   const personTask = (id: string, name: string, active = true) => ({
-    id, name, description: "", sort_order: 1, active, audience: "person",
+    id, name, description: "", sort_order: 1, active, audience: "person", check_type: "self_reported",
   });
   const orgTask = (id: string, name: string, active = true) => ({
-    id, name, description: "", sort_order: 1, active, audience: "org",
+    id, name, description: "", sort_order: 1, active, audience: "org", check_type: "self_reported",
   });
 
   it("asks about a live task on a live checklist", () => {

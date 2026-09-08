@@ -71,12 +71,19 @@ export type AgendaDeadline = {
    *            the editor.
    *   answer — a question where "doesn't apply" is a complete answer (a hotel
    *            they booked elsewhere). Ticked in place.
+   *   go     — something we can SEE whether they did, done by using a control
+   *            elsewhere on the page (picking their top five). Never a tick: a
+   *            tick can be ticked without doing it, so the task would read
+   *            complete when it is not.
    *
    * The two are stored differently and always were — a column versus an
    * acknowledgement row — but that is a storage fact, not a reason to show a
    * person two separate lists of things they owe before the same conference.
    */
-  how: "field" | "answer";
+  how: "field" | "answer" | "go";
+  /** For `go`: where the control lives, relative to this page, and its label. */
+  href?: string;
+  ctaLabel?: string;
   /** What changes on the date — the reason it matters, not just when. */
   hardensBecause?: string | null;
   /** For answers: the task, and where it currently stands. */
@@ -282,8 +289,16 @@ export async function loadPersonAgenda(
   // family" is a complete answer to it — that difference belongs in the
   // control, not in a second section further down the page.
   const { loadPersonalTasks } = await import("@/lib/conference/checklist-tasks");
+  const { getPersonTaskDestination } = await import("@/lib/conference/checklist-cta");
   for (const task of await loadPersonalTasks(db, conferenceId, personId)) {
     if (task.state !== "pending") continue;
+    /**
+     * A monitored task is answered by USING a control, not by ticking. Point at
+     * the control; the state comes from the check either way, so there is
+     * nothing here for them to confirm.
+     */
+    const destination =
+      task.source === "monitored" ? getPersonTaskDestination(task.checkType as never) : null;
     deadlines.push({
       key: `task:${task.taskId}`,
       label: task.name,
@@ -292,7 +307,9 @@ export async function loadPersonAgenda(
       // the answer and re-reading it in a timezone loses one.
       dueOn: task.deadline ? task.deadline.slice(0, 10) : null,
       waitingOn: "before the conference",
-      how: "answer" as const,
+      how: destination ? ("go" as const) : ("answer" as const),
+      href: destination?.path,
+      ctaLabel: destination?.label,
       taskId: task.taskId,
       state: task.state,
       hardensBecause: task.hardensBecause,

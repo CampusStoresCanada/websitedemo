@@ -11,6 +11,8 @@ import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assign
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
 import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { optimizeSchedule } from "@/lib/scheduler/optimize";
+import { bestOfRestarts } from "@/lib/scheduler/search";
+import { describeTotals } from "@/lib/scheduler/objective";
 import { isBlackedOut } from "@/lib/scheduler/blackout";
 import type {
   DelegateProfile,
@@ -259,12 +261,11 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
   contactBySeatId: Map<string, string>;
+  topChoices: Awaited<ReturnType<typeof loadMeetingCandidates>>["topChoices"];
 }> {
   const adminClient = createAdminClient();
-  const { delegates, exhibitors, seatById, contactBySeatId } = await loadMeetingCandidates(
-    adminClient,
-    conferenceId
-  );
+  const { delegates, exhibitors, seatById, contactBySeatId, topChoices } =
+    await loadMeetingCandidates(adminClient, conferenceId);
 
   if (delegates.length === 0 || exhibitors.length === 0) {
     throw new Error(
@@ -273,7 +274,7 @@ async function loadEligibleCandidates(conferenceId: string): Promise<{
     );
   }
 
-  return { delegates, exhibitors, contactBySeatId };
+  return { delegates, exhibitors, contactBySeatId, topChoices };
 }
 
 export async function createSchedulerDraftRun(
@@ -471,7 +472,23 @@ export async function createSchedulerDraftRun(
       scoreIdByKey.set(`${row.delegate_seat_id}:${row.exhibitor_seat_id}`, row.id);
     }
 
-    const generateResult = generateSchedule({
+    /**
+     * HOW MANY SCHEDULES TO DRAW BEFORE PICKING ONE.
+     *
+     * ⛔ A single greedy-plus-local-search is ONE sample, and its quality
+     * depends on the arbitrary order it started from. Steve: "you can't maximize
+     * on one fill, you generate thousands and pick the best."
+     *
+     * ⚠️ Deliberately modest for a request-scoped run, because this one is
+     * synchronous behind an admin click. The work is pure arithmetic and
+     * embarrassingly parallel — every restart is independent — so the real home
+     * for a large sweep is a machine we control rather than a hosted function
+     * with a request timeout. Raising this is the cheapest quality lever here;
+     * `restart_spread` on the run says whether it is buying anything.
+     */
+    const SCHEDULER_RESTARTS = 24;
+
+    const generateInput = {
       delegates: candidates.delegates,
       exhibitors: schedulableExhibitors,
       meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
@@ -491,7 +508,9 @@ export async function createSchedulerDraftRun(
       },
       suitePinnedExhibitorBySuiteId,
       seed: runSeed,
-    });
+    };
+
+    const generateResult = generateSchedule(generateInput);
 
     /**
      * The greedy is the SEED, not the answer. It fills slots in order and stops,
@@ -525,7 +544,18 @@ export async function createSchedulerDraftRun(
     );
     const delegateById = new Map(candidates.delegates.map((d) => [d.registrationId, d]));
 
-    const optimized = optimizeSchedule(generateResult.assignments, {
+    /**
+     * The shape of this run's scores, computed once and recorded on the run.
+     *
+     * ⛔ `degenerate` is a DIAGNOSTIC, never a correction. If it is true the
+     * weight is 0 and stated picks contribute nothing — which is the right
+     * failure, because a floor there would let picks drive the whole schedule
+     * while the engine underneath said nothing and the result still looked fine.
+     * Fix the engine, never the weight.
+     */
+    const scoreDistribution = describeTotals(matchScoreLookup.orgTotals);
+
+    const optimizeContext = {
       meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
         id: slot.id,
         dayNumber: slot.day_number,
@@ -549,11 +579,58 @@ export async function createSchedulerDraftRun(
         exhibitorSeats: exhibitorSeatFacts,
         orgTotalFor: matchScoreLookup.orgTotalFor,
         personTotalFor: matchScoreLookup.personTotalFor,
+        /**
+         * What people ASKED for, alongside what the engine INFERS — two terms,
+         * never one number. Both come from loadMeetingCandidates already split
+         * by grain, so an org's pick counts once for the store and a delegate's
+         * once for that person. See lib/scheduler/objective.ts for why this is
+         * not folded into match_edges upstream.
+         */
+        orgPreferredFor: candidates.topChoices.orgPicked,
+        personPreferredFor: candidates.topChoices.personPicked,
+        /**
+         * ⛔ COMPUTED FROM THIS RUN'S OWN DISTRIBUTION, never a constant.
+         *
+         * `total` is becoming a per-run percentile, so any weight fitted to one
+         * night's numbers silently re-scales on the next — with no error, which
+         * is how the match session lost 98% of its pairs to a hand-fitted band
+         * after a recalibration. p75 − p50 keeps the meaning fixed instead:
+         * "honouring a stated pick is worth upgrading one pairing from median to
+         * upper quartile", true whatever the scale underneath.
+         */
+        preferenceWeight: scoreDistribution.weight,
       },
       seed: runSeed,
+    };
+
+    /**
+     * DRAW MANY SCHEDULES, KEEP THE BEST — the outer loop, not one fill.
+     *
+     * Each restart reseeds the greedy ordering, the tiebreaks and the fill
+     * order, then scores the finished schedule on the one objective. Restart
+     * seeds are derived from `runSeed`, so the same run reproduces the same
+     * winner exactly — a schedule nobody can regenerate is one nobody can
+     * explain to a member who asks why they got these five meetings.
+     */
+    const search = bestOfRestarts({
+      baseSeed: runSeed,
+      restarts: SCHEDULER_RESTARTS,
+      attempt: (seed) => {
+        const draw = generateSchedule({ ...generateInput, seed });
+        const improved = optimizeSchedule(draw.assignments, {
+          ...optimizeContext,
+          seed,
+        });
+        return {
+          value: improved.after.value,
+          result: { draw, improved },
+        };
+      },
     });
 
+    const optimized = search.best.result.improved;
     generateResult.assignments = optimized.assignments;
+    generateResult.diagnostics = search.best.result.draw.diagnostics;
 
     // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
     // → infeasible: discard assignments, nothing usable.
@@ -638,6 +715,39 @@ export async function createSchedulerDraftRun(
         metadata: {
           ...(runRow.metadata as Record<string, unknown> | null),
           exhibitors_without_suite_entitlement: exhibitorsWithoutSuiteEntitlement,
+          /**
+           * What the scores looked like the night this ran, and what one stated
+           * pick was therefore worth. Recorded because the weight is derived
+           * from the distribution rather than fixed: without this a schedule
+           * from February is unreadable in June, and a degenerate run is
+           * indistinguishable from a run where nobody picked anything.
+           */
+          /**
+           * Did drawing many schedules buy anything? `distinct_values` of 1
+           * means every restart landed identically — the extra compute bought
+           * nothing and either the space is flat or the seed is not reaching
+           * the decisions it should. A finding, not a success.
+           */
+          restart_spread: {
+            restarts: search.spread.restarts,
+            best: search.spread.best,
+            worst: search.spread.worst,
+            median: search.spread.median,
+            distinct_values: search.spread.distinctValues,
+            winning_seed: search.best.seed,
+          },
+          /** Non-zero means the best schedule left someone with nothing. */
+          rescue_moves: optimized.movesApplied.rescue,
+          score_distribution: {
+            edges: scoreDistribution.count,
+            distinct_values: scoreDistribution.distinct,
+            p50: scoreDistribution.p50,
+            p75: scoreDistribution.p75,
+            degenerate: scoreDistribution.degenerate,
+          },
+          preference_weight: scoreDistribution.weight,
+          satisfied_preferences: optimized.after.satisfiedPreferences,
+          preference_share: optimized.after.preferenceShare,
         } as unknown as Json,
       })
       .eq("id", runRow.id)

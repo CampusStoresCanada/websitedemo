@@ -7,7 +7,7 @@ import { getUserBookmarks } from "@/lib/actions/bookmarks";
 import MyPendingChanges from "@/components/me/MyPendingChanges";
 import SelfEditModal, { type OrgEditData } from "@/components/me/SelfEditModal";
 import MyConferenceSection from "@/components/me/MyConferenceSection";
-import MyTopChoicesSection from "@/components/me/MyTopChoicesSection";
+import MyMeetingPreferencesSection from "@/components/me/MyMeetingPreferencesSection";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { getMemberSupplierData, type SupplierData } from "@/lib/actions/member-suppliers";
 import { getPartnerMarketData, checkNudgeCooldown, type MarketData } from "@/lib/actions/partner-market";
@@ -273,7 +273,7 @@ export default async function MyAccountPage() {
       {/* Conference to-dos sit above the stat tiles: they are the only thing on
           this page with a deadline attached. */}
       <MyConferenceSection />
-      <MyTopChoicesSection />
+      <MyMeetingPreferencesSection />
 
       {/* ── Stats row ── */}
       <div className="grid grid-cols-3 gap-4">

@@ -78,7 +78,14 @@ export interface ScheduleAssignment {
   matchScoreKeys: string[];
 }
 
-export type ConstraintSeverity = "hard" | "soft";
+/**
+ * `info` is REPORTED AND NEVER COUNTED. Status derivation reacts to hard
+ * (infeasible) and soft (completed_with_warnings) only, so an info row falls
+ * through to "completed" — which is the point: some things a human should see
+ * are not defects, and putting them in the warning pile teaches people to
+ * ignore the warning pile.
+ */
+export type ConstraintSeverity = "hard" | "soft" | "info";
 
 export interface ConstraintViolation {
   code:
@@ -89,6 +96,8 @@ export interface ConstraintViolation {
     | "BLACKOUT"
     | "DUPLICATE_EXHIBITOR_ORG"
     | "DELEGATE_DOUBLE_BOOKED"
+    | "DELEGATE_SELF_EXCLUDED"
+    | "PERSON_COVERAGE"
     | "EXHIBITOR_WITHOUT_SUITE"
     | "POLICY_RELAXATION_DISABLED";
   severity: ConstraintSeverity;
@@ -106,6 +115,14 @@ export interface SchedulerDiagnosticReport {
   delegatesBelowTarget: string[];
   exhibitorsBelowTarget: string[];
   orgCoveragePctAchieved: number;
+  /**
+   * Share of delegates who COULD meet someone and did — person grain.
+   *
+   * Deliberately separate from orgCoveragePctAchieved, which can read 100%
+   * while individual people got nothing: an org is "covered" as soon as one of
+   * its attendees is scheduled. See PERSON_COVERAGE in constraints.ts.
+   */
+  personCoveragePctAchieved: number;
 }
 
 export interface SchedulerGenerateResult {

@@ -119,7 +119,27 @@ export function generateSchedule(input: GenerateInput): SchedulerGenerateResult 
   );
   const exhibitorOrgByRegistration = exhibitorOrganizationByRegistration(input.exhibitors);
 
-  const delegateTargetMeetings = Math.ceil(suiteIds.length * input.policy.delegateCoveragePct);
+  /**
+   * ⛔ A DELEGATE'S CEILING IS TIMES, NOT SUITES.
+   *
+   * This was `suiteIds.length * pct`, and on CSC 2027 that is
+   * ceil(31 × 0.75) = 24 — while there are only 23 DISTINCT MEETING TIMES
+   * (713 slots ÷ 31 suites), and a person can be in one room at a time. So the
+   * target exceeded the physical maximum by one, for every delegate, on every
+   * run: DELEGATE_TARGET fired on 100% of delegates always, which is the same
+   * as not having the check at all. A permanently-red warning is worse than a
+   * missing one, because people learn to scroll past it.
+   *
+   * Suites and times are different numbers and the formula reached for the
+   * wrong one. Coverage means "what share of the meeting day is this person
+   * actually in a meeting", so the denominator is the day.
+   */
+  const distinctMeetingTimes = new Set(
+    input.meetingSlots.map((slot) => `${slot.dayNumber}:${slot.slotNumber}`)
+  ).size;
+  const delegateTargetMeetings = Math.ceil(
+    distinctMeetingTimes * input.policy.delegateCoveragePct
+  );
   const exhibitorTargetMeetings = Math.max(1, Math.floor(orderedSlots.length / Math.max(1, input.exhibitors.length)));
 
   const delegateMeetingCount = new Map<string, number>();

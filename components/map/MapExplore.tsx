@@ -12,6 +12,7 @@ import type { ExploreLens, ScaleRange, CompoundFilters } from "@/lib/explore/typ
 import { orgMatchesQuery } from "@/lib/explore/org-search";
 import { SCALE_RANGES } from "@/lib/explore/types";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
+import { parseOrgCategories } from "@/lib/publication/categories";
 import { orgSubtitle, hasActiveCompounds } from "@/lib/explore/filters";
 import { CompoundFilterBar } from "@/components/explore/CompoundFilterBar";
 import { OrgDetailPanel } from "@/components/explore/OrgDetailPanel";
@@ -35,23 +36,35 @@ const DirectoryTable = dynamic(
 // ---------------------------------------------------------------------------
 
 // ── Partner category helpers ──────────────────────────────────────────────────
-const PARENT_CATEGORY_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 const SUB_TO_PARENT_MAP = new Map<string, string>();
 for (const [parent, subs] of Object.entries(CATEGORY_SUBCATEGORIES)) {
   for (const sub of subs ?? []) SUB_TO_PARENT_MAP.set(sub, parent);
 }
 
-/** Split a comma-separated primary_category string and identify parent categories */
+/**
+ * Split a stored `primary_category` into parent categories and subcategories.
+ *
+ * ⛔ DELEGATES TO `parseOrgCategories`, the one parser that owns this column —
+ * the print directory, the member directory and the meeting scheduler all read
+ * it through that function.
+ *
+ * This used to test `PARENT_CATEGORY_SET.has(item)` and nothing else, which lost
+ * the two things that matter: a class does NOT imply its department, and the
+ * ALIASES are not applied. A partner who declared only class-level terms
+ * therefore had NO parent category and vanished from every department filter on
+ * the public map. Found by the match-engine session, measured, and not
+ * hypothetical:
+ *
+ *   Ambassador Education Solutions — "Course Materials, Textbooks, …"
+ *   VitalSource                    — "Course Materials, Digital Course Materials"
+ *
+ * Both belong under Books. Both were absent from a Books filter — the two
+ * largest textbook suppliers in the directory, unfindable in the place a member
+ * would look for them.
+ */
 function parsePartnerCategories(raw: string | null): { parents: string[]; subcategories: string[] } {
-  if (!raw) return { parents: [], subcategories: [] };
-  const items = raw.split(",").map((s) => s.trim()).filter(Boolean);
-  const parents: string[] = [];
-  const subcategories: string[] = [];
-  for (const item of items) {
-    if (PARENT_CATEGORY_SET.has(item)) parents.push(item);
-    else subcategories.push(item);
-  }
-  return { parents, subcategories };
+  const parsed = parseOrgCategories(raw);
+  return { parents: parsed.departments, subcategories: parsed.classes };
 }
 
 /** Check if an org's primary_category contains a given parent category */

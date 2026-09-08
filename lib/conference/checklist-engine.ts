@@ -3,6 +3,7 @@ import { resolveAudience } from "@/lib/comms/audience";
 import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
 import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
+import { getTaskCta } from "./checklist-cta";
 import { CHECKS, evaluateChecklistTaskCheck } from "./checklist-checks";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
 
@@ -16,61 +17,6 @@ type AdminClient = ReturnType<typeof createAdminClient>;
  * needed, the underlying capture has to exist first, then a check type gets
  * added here.
  */
-/**
- * The CTA for a task is derived from its check type, never admin-entered —
- * so it can never point at a broken or wrong URL. Real routes confirmed by
- * codebase research; see plan doc for the full route survey.
- */
-function getTaskCta(
-  checkType: CheckType,
-  ctx: { orgSlug: string; conferenceId: string; conferenceYear: number; conferenceEdition: string; organizationId: string }
-): { label: string; url: string } {
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
-  switch (checkType) {
-    case "seat_assigned":
-      // The org page's team roster has had a checkbox per conference entity
-      // all along — that is where seats are assigned. A separate panel on a
-      // separate route was a second way to do the same thing.
-      return {
-        label: "Choose who's going",
-        url: `${appUrl}/org/${ctx.orgSlug}#team`,
-      };
-    case "entity_purchased":
-      return {
-        label: "Browse & purchase",
-        url: `${appUrl}/conference/${ctx.conferenceYear}/${ctx.conferenceEdition}/offers?org=${ctx.organizationId}`,
-      };
-    case "travel_info_submitted":
-      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
-    case "top_choices_declared":
-      return {
-        label: "Choose who you want to meet",
-        url: `${appUrl}/org/${ctx.orgSlug}#meeting_preferences`,
-      };
-    case "payment_complete":
-      return {
-        label: "See what's owed",
-        url: `${appUrl}/org/${ctx.orgSlug}#payment`,
-      };
-    case "legal_document_accepted":
-      // Was "View readiness & travel status" pointing at this same page, which
-      // then had no acceptance on it — a CTA that led nowhere twice over.
-      return {
-        label: "Read and accept",
-        url: `${appUrl}/org/${ctx.orgSlug}#agreements`,
-      };
-    case "directory_profile_complete":
-      // Straight to the org's own page, where every field this checks is edited.
-      return { label: "Update your listing", url: `${appUrl}/org/${ctx.orgSlug}` };
-    case "directory_profile_enriched":
-      return { label: "Add your product details", url: `${appUrl}/org/${ctx.orgSlug}` };
-    case "self_reported":
-      // The tick-off list moved onto the org page with everything else.
-      return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
-
-  }
-}
-
 /**
  * The framing sentence and the consent ask, both per checklist.
  *

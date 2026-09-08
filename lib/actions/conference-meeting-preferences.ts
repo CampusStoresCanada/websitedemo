@@ -237,10 +237,17 @@ export async function getMeetingPreferences(
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     from: (table: string) => { select: (columns: string) => any };
   };
+  /**
+   * ⛔ ORG-GRAIN ROWS ONLY — `declaring_contact_id is null`. The same table now
+   * holds delegates' personal refusals, and without this filter a store admin
+   * would see one buyer's private "rather not" as the company's position and,
+   * worse, be able to untick it.
+   */
   const { data: refusals } = await db
     .from("org_meeting_refusals")
     .select("refused_org_id")
     .eq("declaring_org_id", orgId)
+    .is("declaring_contact_id", null)
     .is("retired_at", null);
 
   return {
@@ -271,6 +278,14 @@ export async function saveTopChoices(
       conferenceId,
       declaringOrgId: orgId,
       declaredByContactId: await contactIdFor(orgId),
+      /**
+       * ⛔ BROWSE, and it must stay honest. Both pickers are one alphabetical
+       * list of everyone present — nothing is ranked, suggested or searched, so
+       * every pick made here is the person's own. The moment a picker starts
+       * from something we ordered, this has to become "suggested" or the match
+       * engine will be learning from its own output without anyone noticing.
+       */
+      chosenFrom: "browse",
       chosenOrgIds,
     });
     return { success: true };
@@ -316,6 +331,9 @@ export async function setRefusal(params: {
       .update({ retired_at: nowIso, retired_by_contact_id: contactId, updated_at: nowIso })
       .eq("declaring_org_id", params.declaringOrgId)
       .eq("refused_org_id", params.refusedOrgId)
+      // ⛔ Never reach a delegate's own row. An org admin withdrawing the
+      // company's refusal must not also withdraw one of their staff's.
+      .is("declaring_contact_id", null)
       .is("retired_at", null);
     if (error) return { success: false, error: error.message };
     return { success: true };
@@ -324,6 +342,9 @@ export async function setRefusal(params: {
   const { error } = await db.from("org_meeting_refusals").insert({
     declaring_org_id: params.declaringOrgId,
     refused_org_id: params.refusedOrgId,
+    // Null = the ORGANIZATION is the subject. Stated rather than defaulted, so
+    // the grain is visible at the write site next to the person version below.
+    declaring_contact_id: null,
     declared_by_contact_id: contactId,
     reason: params.reason ?? null,
     first_declared_at: nowIso,
@@ -374,18 +395,42 @@ async function callerAsDelegate(conferenceId: string): Promise<
   };
 }
 
-export async function getMyTopChoices(
+/**
+ * Both of a delegate's lists in one read, because both render on one page from
+ * the same `present` roster — the same shape `getMeetingPreferences` returns for
+ * an org. Fetching them separately would run `listOrgsPresent` twice per load.
+ */
+export async function getMyMeetingPreferences(
   conferenceId: string
-): Promise<ActionResult<{ chosenOrgIds: string[]; present: PresentOrg[]; limit: number }>> {
+): Promise<
+  ActionResult<{
+    chosenOrgIds: string[];
+    refusedOrgIds: string[];
+    present: PresentOrg[];
+    limit: number;
+  }>
+> {
   const me = await callerAsDelegate(conferenceId);
   if (!me.ok) return { success: false, error: me.error };
   if (!me.contactId) {
     return { success: false, error: "We could not match you to a contact record." };
   }
 
-  const [choices, present] = await Promise.all([
+  const db = createAdminClient() as unknown as {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    from: (table: string) => { select: (columns: string) => any };
+  };
+
+  const [choices, present, refusals] = await Promise.all([
     loadTopChoices(conferenceId),
     listOrgsPresent(conferenceId, me.orgId),
+    // ⛔ Keyed on the CONTACT, not the org — my list, not my employer's and not
+    // my colleague's.
+    db
+      .from("org_meeting_refusals")
+      .select("refused_org_id")
+      .eq("declaring_contact_id", me.contactId)
+      .is("retired_at", null),
   ]);
 
   return {
@@ -394,10 +439,71 @@ export async function getMyTopChoices(
       chosenOrgIds: indexTopChoices(choices)
         .chosenByContact(me.contactId)
         .map((c) => c.chosenOrgId),
+      refusedOrgIds: (
+        (refusals.data ?? []) as Array<{ refused_org_id: string }>
+      ).map((r) => r.refused_org_id),
       present,
       limit: TOP_CHOICE_LIMIT,
     },
   };
+}
+
+/**
+ * A delegate declaring or withdrawing their OWN refusal.
+ *
+ * ⛔ Not org-admin gated, and deliberately not the same row an admin edits.
+ * "I would rather not sit with them" is a personal statement about where this
+ * person is seated: it binds their seat only, does not mirror onto the vendor,
+ * and is invisible to their org's admins — who have no business overruling it
+ * and no way to reach it (`setRefusal` filters to org-grain rows).
+ *
+ * ⛔ Withdrawing RETIRES rather than deletes, same as the org version. A
+ * refusal that was in force is a fact about the past even once it is lifted.
+ */
+export async function setMyRefusal(params: {
+  conferenceId: string;
+  refusedOrgId: string;
+  refused: boolean;
+}): Promise<ActionResult> {
+  const me = await callerAsDelegate(params.conferenceId);
+  if (!me.ok) return { success: false, error: me.error };
+  if (!me.contactId) {
+    return { success: false, error: "We could not match you to a contact record." };
+  }
+  if (params.refusedOrgId === me.orgId) {
+    return { success: false, error: "You cannot refuse your own organization." };
+  }
+
+  const nowIso = new Date().toISOString();
+  const db = createAdminClient() as unknown as {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    from: (table: string) => any;
+  };
+
+  if (!params.refused) {
+    const { error } = await db
+      .from("org_meeting_refusals")
+      .update({ retired_at: nowIso, retired_by_contact_id: me.contactId, updated_at: nowIso })
+      .eq("declaring_contact_id", me.contactId)
+      .eq("refused_org_id", params.refusedOrgId)
+      .is("retired_at", null);
+    if (error) return { success: false, error: error.message };
+    return { success: true };
+  }
+
+  const { error } = await db.from("org_meeting_refusals").insert({
+    // The org still travels with the row: it is where this person sat when they
+    // said it, which is what a later review needs to make sense of it.
+    declaring_org_id: me.orgId,
+    declaring_contact_id: me.contactId,
+    refused_org_id: params.refusedOrgId,
+    declared_by_contact_id: me.contactId,
+    reason: null,
+    first_declared_at: nowIso,
+    reaffirmed_at: nowIso,
+  });
+  if (error) return { success: false, error: error.message };
+  return { success: true };
 }
 
 export async function saveMyTopChoices(
@@ -418,6 +524,8 @@ export async function saveMyTopChoices(
       // five can never erase a colleague's.
       declaringContactId: me.contactId,
       declaredByContactId: me.contactId,
+      // Same alphabetical list as the org picker — nothing here is ranked by us.
+      chosenFrom: "browse",
       chosenOrgIds,
     });
     return { success: true };

@@ -38,22 +38,49 @@ import { createAdminClient } from "@/lib/supabase/admin";
 /** How many an org may express per conference. The "5" in "top 5". */
 export const TOP_CHOICE_LIMIT = 5;
 
+/**
+ * Where a pick came from.
+ *
+ * ⛔ THE RECOMMENDER MUST NOT LEARN FROM ITS OWN SUGGESTIONS. If we suggest a
+ * partner, someone picks it off that list, and the pick then raises that pair's
+ * match score, the engine has confirmed itself — it converges on what it already
+ * believed and the failure is invisible from the inside. A cold pick is
+ * independent evidence and worth everything; a pick off our own list is worth
+ * nothing as affinity.
+ *
+ * The load-bearing split is `suggested` vs the other two. `search` and `browse`
+ * are both cold, kept apart only so a later question about discovery has an
+ * answer.
+ */
+export type TopChoiceSource = "suggested" | "search" | "browse";
+
 export type TopChoice = {
   declaringOrgId: string;
   /** Whose list this is. Null = the org's own (exhibitor side). */
   declaringContactId: string | null;
   chosenOrgId: string;
-  /** 1..TOP_CHOICE_LIMIT when they ordered them; null when it is just a set. */
-  rank: number | null;
+  /**
+   * ⚠️ TICK ORDER, NOT A RANKING. Read the name literally.
+   *
+   * The pickers are checkboxes on one alphabetical list, so a low number
+   * largely means "early in the alphabet". Steve's spec was "choose in no order
+   * your top five Orgs to meet" — unordered is the product. Being IN the five
+   * is the entire signal; this exists so a person sees their own five in a
+   * stable order between page loads, and for nothing else.
+   */
+  pickedOrder: number | null;
   declaredByContactId: string | null;
+  /** Where the pick came from. Null only for pre-provenance rows (none exist). */
+  chosenFrom: TopChoiceSource | null;
 };
 
 type ChoiceRow = {
   declaring_org_id: string;
   declaring_contact_id: string | null;
   chosen_org_id: string;
-  rank: number | null;
+  picked_order: number | null;
   declared_by_contact_id: string | null;
+  chosen_from: string | null;
 };
 
 /**
@@ -78,7 +105,9 @@ export async function loadTopChoices(conferenceId: string): Promise<TopChoice[]>
   const db = createAdminClient() as unknown as ChoiceDb;
   const { data, error } = await db
     .from("conference_top_choices")
-    .select("declaring_org_id, declaring_contact_id, chosen_org_id, rank, declared_by_contact_id")
+    .select(
+      "declaring_org_id, declaring_contact_id, chosen_org_id, picked_order, declared_by_contact_id, chosen_from"
+    )
     .eq("conference_id", conferenceId);
 
   // Never swallow this. An unreadable preference list is not an empty one, and
@@ -89,8 +118,9 @@ export async function loadTopChoices(conferenceId: string): Promise<TopChoice[]>
     declaringOrgId: row.declaring_org_id,
     declaringContactId: row.declaring_contact_id,
     chosenOrgId: row.chosen_org_id,
-    rank: row.rank,
+    pickedOrder: row.picked_order,
     declaredByContactId: row.declared_by_contact_id,
+    chosenFrom: (row.chosen_from as TopChoiceSource | null) ?? null,
   }));
 }
 
@@ -102,8 +132,12 @@ export type TopChoiceLookup = {
    * one-way one, and it is invisible unless both directions live in one table.
    */
   mutual: (orgA: string, orgB: string) => boolean;
-  /** The rank one org gave another, when they ordered their picks. */
-  rankOf: (declaringOrgId: string, chosenOrgId: string) => number | null;
+  /**
+   * ⛔ There is deliberately no `rankOf`. It used to return `rank`, which was
+   * tick order dressed up as preference — the single most misreadable thing in
+   * this module. Callers that want "how much did they want this" have their
+   * answer: they picked it. There is no more information than that.
+   */
   /** An ORG's own list — exhibitor side, declaringContactId null. */
   chosenBy: (declaringOrgId: string) => TopChoice[];
   /** One PERSON's list — delegate side. */
@@ -132,7 +166,8 @@ export function indexTopChoices(choices: readonly TopChoice[]): TopChoiceLookup 
     if (!byPair.has(anyKey)) byPair.set(anyKey, choice);
   }
 
-  const rank = (choice: TopChoice) => choice.rank ?? TOP_CHOICE_LIMIT + 1;
+  // Stable display order only — see TopChoice.pickedOrder.
+  const order = (choice: TopChoice) => choice.pickedOrder ?? TOP_CHOICE_LIMIT + 1;
 
   const chose = (declaringOrgId: string, chosenOrgId: string) =>
     byPair.has(`${declaringOrgId}|${chosenOrgId}`);
@@ -140,12 +175,10 @@ export function indexTopChoices(choices: readonly TopChoice[]): TopChoiceLookup 
   return {
     chose,
     mutual: (orgA, orgB) => chose(orgA, orgB) && chose(orgB, orgA),
-    rankOf: (declaringOrgId, chosenOrgId) =>
-      byPair.get(`${declaringOrgId}|${chosenOrgId}`)?.rank ?? null,
     chosenBy: (declaringOrgId) =>
-      [...(byDeclaring.get(declaringOrgId) ?? [])].sort((l, r) => rank(l) - rank(r)),
+      [...(byDeclaring.get(declaringOrgId) ?? [])].sort((l, r) => order(l) - order(r)),
     chosenByContact: (declaringContactId) =>
-      [...(byContact.get(declaringContactId) ?? [])].sort((l, r) => rank(l) - rank(r)),
+      [...(byContact.get(declaringContactId) ?? [])].sort((l, r) => order(l) - order(r)),
   };
 }
 
@@ -166,8 +199,17 @@ export async function replaceTopChoices(params: {
   /** Set for a delegate's own list; null when the org itself is choosing. */
   declaringContactId?: string | null;
   declaredByContactId: string | null;
-  /** Chosen orgs in preference order; rank comes from position. */
+  /** Chosen orgs in tick order; `picked_order` is derived from position. */
   chosenOrgIds: readonly string[];
+  /**
+   * ⛔ REQUIRED, DELIBERATELY — no default.
+   *
+   * A default would be silently wrong the first time someone builds a picker
+   * that starts from a suggested list, and by then the rows are already
+   * ambiguous and unfixable. Making every caller state it means adding that
+   * surface forces the question at the moment it can still be answered.
+   */
+  chosenFrom: TopChoiceSource;
 }): Promise<void> {
   const unique = [...new Set(params.chosenOrgIds.filter(Boolean))];
 
@@ -213,7 +255,9 @@ export async function replaceTopChoices(params: {
       declaring_contact_id: params.declaringContactId ?? null,
       chosen_org_id: chosenOrgId,
       declared_by_contact_id: params.declaredByContactId,
-      rank: index + 1,
+      chosen_from: params.chosenFrom,
+      // Tick order, for a stable display order. Named for what it is.
+      picked_order: index + 1,
       updated_at: new Date().toISOString(),
     }))
   );

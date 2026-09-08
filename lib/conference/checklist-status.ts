@@ -16,6 +16,8 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { DERIVED_FROM_FIELD, type PersonalTaskState } from "./checklist-tasks";
+import { PERSON_CHECKS_BULK } from "./checklist-checks";
+import type { CheckType } from "./checklist-check-types";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -72,7 +74,7 @@ export interface ChecklistShape {
   deadline_at: string | null;
   tasks: Array<{
     id: string; name: string; description: string;
-    sort_order: number; active: boolean; audience: string;
+    sort_order: number; active: boolean; audience: string; check_type: string;
   }>;
 }
 
@@ -110,6 +112,7 @@ export function classifyPersonTasks(checklists: ChecklistShape[]): {
         sort_order: task.sort_order,
         deadline: checklist.deadline_at,
         checklistName: checklist.name,
+        checkType: task.check_type,
       });
     }
   }
@@ -123,11 +126,25 @@ interface TaskInput {
   sort_order: number;
   deadline: string | null;
   checklistName: string;
+  /** Which check answers it — how a person-grain check is matched to the task. */
+  checkType: string;
 }
+
+/**
+ * `taskId:personId` for every task a person-grain CHECK reports done.
+ *
+ * ⛔ Precomputed by the caller from the one bulk check in checklist-checks.ts —
+ * never counted with a query of its own here. A second counting query is a
+ * second implementation of the rule, and this file's whole premise is that the
+ * admin count can never disagree with what the attendee is looking at.
+ */
+export type DetectedKeys = ReadonlySet<string>;
 
 interface PersonInput extends PersonTaskPerson {
   /** conference_people row, for tasks answered by captured data. */
   fields: Record<string, unknown>;
+  /** Who they are in `contacts`, for person-grain checks. Null when unmatched. */
+  contactId?: string | null;
 }
 
 interface AckInput {
@@ -138,12 +155,14 @@ interface AckInput {
 
 /**
  * Pure roll-up. Mirrors loadPersonalTasks(): a derived field with a non-empty
- * value wins outright, then an explicit acknowledgement, then pending.
+ * value wins outright, then a person-grain check, then an explicit
+ * acknowledgement, then pending. Keep that order — it is the loader's.
  */
 export function summarizePersonTasks(
   tasks: TaskInput[],
   people: PersonInput[],
-  acks: AckInput[]
+  acks: AckInput[],
+  detected: DetectedKeys = new Set()
 ): PersonTaskSummary[] {
   const ackByTaskPerson = new Map<string, string>();
   for (const ack of acks) {
@@ -168,6 +187,16 @@ export function summarizePersonTasks(
       for (const person of people) {
         const derivedValue = derivedField ? person.fields[derivedField] : null;
         if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
+          done++;
+          derived++;
+          continue;
+        }
+        /**
+         * Seen, not ticked. Counts as derived for the same reason a hotel code
+         * does: it came from real captured data, so nobody was asked to confirm
+         * something we can already see.
+         */
+        if (detected.has(`${task.id}:${person.personId}`)) {
           done++;
           derived++;
           continue;
@@ -214,13 +243,13 @@ export async function loadPersonTaskStatus(
   const { data: checklists } = await db
     .from("conference_checklists")
     .select(
-      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience)"
+      "id, name, active, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type)"
     )
     .eq("conference_id", conferenceId);
 
   type TaskRow = {
     id: string; name: string; description: string;
-    sort_order: number; active: boolean; audience: string;
+    sort_order: number; active: boolean; audience: string; check_type: string;
   };
 
   const { tasks, inactive } = classifyPersonTasks(
@@ -244,7 +273,7 @@ export async function loadPersonTaskStatus(
   const { data: peopleRows } = await db
     .from("conference_people")
     .select(
-      `id, display_name, legal_name, contact_email, organization_id, organizations(name)${
+      `id, display_name, legal_name, contact_email, organization_id, contact_id, canonical_person_id, organizations(name)${
         derivedColumns.length ? `, ${derivedColumns.join(", ")}` : ""
       }`
     )
@@ -260,6 +289,10 @@ export async function loadPersonTaskStatus(
       name: r.display_name || r.legal_name || r.contact_email || "Unnamed attendee",
       organizationName: r.organizations?.name ?? "—",
       fields: r,
+      // contact_id first — canonical_person_id has no FK. Same precedence as
+      // loadSeatHoldings, the badge pipeline and loadPersonalTasks.
+      contactId:
+        ((r.contact_id as string | null) || (r.canonical_person_id as string | null)) ?? null,
     };
   });
 
@@ -278,13 +311,36 @@ export async function loadPersonTaskStatus(
     .not("person_id", "is", null)
     .in("task_id", tasks.map((t) => t.id));
 
+  /**
+   * What we can SEE people have done, from the same bulk checks their own page
+   * reads. One query per distinct check type on the board, not one per person.
+   */
+  const detected = new Set<string>();
+  const checkTypesPresent = [...new Set(tasks.map((t) => t.checkType))];
+  await Promise.all(
+    checkTypesPresent.map(async (checkType) => {
+      const check = PERSON_CHECKS_BULK[checkType as CheckType];
+      if (!check) return;
+      const passing = await check({ db, conferenceId });
+      for (const task of tasks) {
+        if (task.checkType !== checkType) continue;
+        for (const person of people) {
+          if (person.contactId && passing.has(person.contactId)) {
+            detected.add(`${task.id}:${person.personId}`);
+          }
+        }
+      }
+    })
+  );
+
   return {
     population: people.length,
     inactiveTasks: inactive,
     tasks: summarizePersonTasks(
       tasks,
       people,
-      (acks ?? []) as unknown as AckInput[]
+      (acks ?? []) as unknown as AckInput[],
+      detected
     ),
   };
 }

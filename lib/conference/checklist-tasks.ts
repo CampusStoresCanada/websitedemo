@@ -19,7 +19,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
-import { evaluateChecklistTaskCheck } from "./checklist-checks";
+import { evaluateChecklistTaskCheck, evaluatePersonChecklistTaskCheck } from "./checklist-checks";
 import type { CheckType } from "./checklist-check-types";
 import { parseServiceDetails, type ServiceDetails } from "./service-details";
 
@@ -172,8 +172,18 @@ export async function loadPersonalTasks(
       .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, deadline_at, ask_from, hardens_because)")
       .eq("conference_id", conferenceId)
       .eq("active", true),
-    db.from("conference_people").select("hotel_confirmation_code").eq("id", personId).maybeSingle(),
+    db
+      .from("conference_people")
+      .select("hotel_confirmation_code, contact_id, canonical_person_id")
+      .eq("id", personId)
+      .maybeSingle(),
   ]);
+
+  // contact_id first — canonical_person_id has no FK. Same precedence as
+  // loadSeatHoldings and the badge pipeline.
+  const contactId =
+    ((person?.contact_id as string | null) || (person?.canonical_person_id as string | null)) ??
+    null;
 
   type TaskRow = { id: string; name: string; description: string; sort_order: number; active: boolean; audience: string; check_type: string; deadline_at: string | null; ask_from: string | null; hardens_because: string | null };
   const rows: { task: TaskRow; deadline: string | null }[] = [];
@@ -202,9 +212,10 @@ export async function loadPersonalTasks(
 
   const personFields = (person ?? {}) as Record<string, unknown>;
 
-  return rows
+  return Promise.all(
+    rows
     .sort(byDeadlineThenOrder)
-    .map(({ task, deadline }): PersonalTask => {
+    .map(async ({ task, deadline }): Promise<PersonalTask> => {
       const derivedField = DERIVED_FROM_FIELD[task.name];
       const derivedValue = derivedField ? personFields[derivedField] : null;
       if (typeof derivedValue === "string" && derivedValue.trim().length > 0) {
@@ -213,6 +224,37 @@ export async function loadPersonalTasks(
                  source: "self_reported", checkType: task.check_type, service: null,
                  hardensBecause: task.hardens_because, askingNow: isAsking(task) };
       }
+
+      /**
+       * DETECTABLE FOR THIS PERSON — answered by looking, not by asking.
+       *
+       * ⛔ Where we can see whether someone did a thing, we must not ask them
+       * to tick that they did it: the tick can be ticked without doing it, so
+       * the task reads complete when it is not, and it asks someone to confirm
+       * something we already know. Every person task was a tick before this,
+       * which is why the check had to come first.
+       *
+       * `monitored`, so the surface renders state and a way in rather than
+       * Done / Doesn't apply buttons.
+       */
+      const detected = contactId
+        ? await evaluatePersonChecklistTaskCheck(
+            db,
+            task.check_type as CheckType,
+            conferenceId,
+            contactId
+          )
+        : null;
+      if (detected !== null) {
+        return {
+          taskId: task.id, name: task.name, description: task.description,
+          state: detected ? "done" : "pending",
+          evidence: null, derived: true, deadline,
+          source: "monitored", checkType: task.check_type, service: null,
+          hardensBecause: task.hardens_because, askingNow: isAsking(task),
+        };
+      }
+
       const ack = ackByTask.get(task.id);
       return {
         taskId: task.id,
@@ -225,7 +267,8 @@ export async function loadPersonalTasks(
         source: "self_reported", checkType: task.check_type, service: null,
         hardensBecause: task.hardens_because, askingNow: isAsking(task),
       };
-    });
+    })
+  );
 }
 
 /**

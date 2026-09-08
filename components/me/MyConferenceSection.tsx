@@ -61,7 +61,14 @@ export default async function MyConferenceSection() {
         )}
       </div>
 
-      {agenda && agenda.items.length > 0 && conference && (
+      {/*
+        ⛔ DEADLINES RENDER EVEN WITH AN EMPTY SCHEDULE. This was gated on
+        `items.length > 0`, which meant a registered attendee whose schedule has
+        not been built yet saw none of what they owe — and since the meeting
+        schedule is built FROM these answers, that is everybody at the point we
+        are asking. The block is "Before you go", not a view of the agenda.
+      */}
+      {agenda && (agenda.items.length > 0 || agenda.deadlines.length > 0) && conference && (
         <AgendaView
           agenda={agenda}
           mapHref={`/conference/${conference.year}/${conference.edition_code}/map`}
