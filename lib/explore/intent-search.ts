@@ -59,7 +59,16 @@ export type SearchSubject = {
  * this is a two-minute edit, which is the point — it should be cheaper to add
  * a synonym than to argue about a matching algorithm.
  */
-const SYNONYMS: Record<string, string[]> = {
+/**
+ * Exported so callers can consult the map DIRECTLY.
+ *
+ * ⚠️ `resolveIntent` short-circuits on its substring match before reaching here,
+ * so a word like "gowns" comes back as a direct hit on "Caps & Gowns" and its
+ * synonym entry is never seen. That is right for a search box and wrong for
+ * anything that needs to distinguish a curated translation from a substring
+ * coincidence — see lib/signals/resolve.ts, which needs exactly that.
+ */
+export const SYNONYMS: Record<string, string[]> = {
   hoodie: ["Apparel", "Activewear"],
   hoodies: ["Apparel", "Activewear"],
   sweatshirt: ["Apparel", "Activewear"],
