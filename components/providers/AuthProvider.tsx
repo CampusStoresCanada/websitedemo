@@ -10,6 +10,7 @@ import {
   useRef,
 } from "react";
 import { createClient } from "@/lib/supabase/client";
+import { withTimeout } from "@/lib/auth/with-timeout";
 import { derivePermissionState } from "@/lib/auth/permissions";
 import { CAPABILITY } from "@/lib/constants/capabilities";
 import type { User } from "@supabase/supabase-js";
@@ -122,14 +123,7 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms)
-    ),
-  ]);
-}
+
 
 function describeError(err: unknown): Record<string, unknown> {
   if (err instanceof Error) {
@@ -348,9 +342,16 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
   }, []);
 
   const fetchUserData = useCallback(
-    async (userId: string) => {
+    /**
+     * ⚠️ `signal` is optional so callers without a deadline keep working, but
+     * every query below honours it — otherwise a cancelled attempt still holds
+     * four requests open while the retry launches four more.
+     */
+    async (userId: string, signal?: AbortSignal) => {
       const [profileResult, orgsResult] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", userId).single(),
+        supabase.from("profiles").select("*").eq("id", userId)
+          .abortSignal(signal as AbortSignal)
+          .single(),
         supabase
           .from("user_organizations")
           .select(
@@ -365,7 +366,8 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
           `
           )
           .eq("user_id", userId)
-          .eq("status", "active"),
+          .eq("status", "active")
+          .abortSignal(signal as AbortSignal),
       ]);
 
       if (profileResult.error || orgsResult.error) {
@@ -419,7 +421,8 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             .from("benchmarking")
             .select("organization_id")
             .in("organization_id", memberOrgIds)
-            .limit(1);
+            .limit(1)
+            .abortSignal(signal as AbortSignal);
 
           if (benchmarkingError) {
             console.warn("[AuthProvider] benchmarking query failed (non-blocking)", {
@@ -451,7 +454,13 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       // Resolved through the capability system rather than a profile flag —
       // SECURITY DEFINER, so the client may ask about itself without needing
       // read access to governance_role_assignments.
-      const { data: capsData } = await supabase.rpc("current_capabilities", { p_subject: userId });
+      // ⛔ Do not START new work for an attempt already abandoned. This and the
+      // benchmarking lookup run SEQUENTIALLY, after the parallel pair, so without
+      // this guard a timed-out attempt opens fresh connections on its way out —
+      // which is what the retry then has to compete with.
+      if (signal?.aborted) throw new Error("aborted");
+      const { data: capsData } = await supabase.rpc("current_capabilities", { p_subject: userId })
+        .abortSignal(signal as AbortSignal);
       const capabilities = Array.isArray(capsData) ? (capsData as string[]) : [];
       const resolvedReviewer = capabilities.includes(CAPABILITY.benchmarkingContentReview);
       setIsBenchmarkingReviewer(resolvedReviewer);
@@ -539,7 +548,7 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
       for (let attempt = 1; attempt <= MAX_PERMISSION_RETRIES; attempt++) {
         try {
           await withTimeout(
-            fetchUserData(session.user.id),
+            (signal) => fetchUserData(session.user.id, signal),
             AUTH_FETCH_TIMEOUT_MS,
             "fetchUserData"
           );
@@ -605,7 +614,10 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
         data: { user: fallbackUser },
         error: fallbackUserError,
       } = await withTimeout(
-        supabase.auth.getUser(),
+        // ⚠️ supabase-js auth methods accept no abort signal, so this one still
+        // only races. It runs once on a recovery path rather than being retried,
+        // so it cannot pile up the way fetchUserData did.
+        () => supabase.auth.getUser(),
         AUTH_FETCH_TIMEOUT_MS,
         "getUser"
       );
@@ -647,7 +659,8 @@ export function AuthProvider({ children, initialAuth = null }: AuthProviderProps
             data: { session },
             error,
           } = await withTimeout(
-            supabase.auth.getSession(),
+            // Same caveat as getUser: races only, and runs once at bootstrap.
+            () => supabase.auth.getSession(),
             AUTH_BOOTSTRAP_TIMEOUT_MS,
             "getSession"
           );
