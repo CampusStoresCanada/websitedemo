@@ -1,3 +1,4 @@
+import { ORG_TYPE } from '@/lib/constants/org-types'
 import { createAdminClient } from "@/lib/supabase/admin";
 import { TTLCache } from "../cache/ttl-cache";
 import type {
@@ -382,7 +383,18 @@ export function resolveConferenceTier(
 ): string {
   const program = programs.find((p) => p.orgTypeValue === orgType)
   if (program) return program.conferenceTier
-  if (orgType === 'Non-Member') return 'non_member'
+  // Org types that are not membership PROGRAMS but still have a conference
+  // tier. A MembershipProgramDef carries invoiceType and billing, so putting
+  // these in programs.definitions would invent a billing program for an org
+  // nobody invoices.
+  if (orgType === ORG_TYPE.nonMember) return 'non_member'
+  // CSC's own staff are internal — they get member-targeted conference
+  // documents, not public ones. Steve, 2026-09-08.
+  if (orgType === ORG_TYPE.staff) return 'member'
+  // ⚠️ Anything unnamed lands on 'public', which is the QUIET wrong answer on a
+  // legal-audience path: it does not error, it just asks somebody to accept the
+  // wrong documents. Add the org type here or to programs.definitions rather
+  // than letting it fall through.
   return 'public'
 }
 

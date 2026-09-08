@@ -1,5 +1,7 @@
 "use server";
 
+import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
+
 import {
   isGlobalAdmin,
   requireAdmin,
@@ -342,7 +344,26 @@ async function deriveAssigneeContext(
       .select("type")
       .eq("id", cp.organization_id)
       .maybeSingle();
-    if (org?.type === "vendor_partner") audienceSourceRoles = ["partner"];
+    // ⛔ Resolve through the CONFIGURED membership programs, never a string
+    // literal. `organizations.type` is capitalised and human-readable
+    // ("Vendor Partner"), so the old `=== "vendor_partner"` matched 0 of 210
+    // rows and every partner was silently evaluated against MEMBER documents.
+    // A comparator would have fixed today's spelling and left the trap armed;
+    // `programs.definitions` owns the org-type → tier mapping, so renaming a
+    // type or adding a third program keeps working without touching this file.
+    //
+    // ⚠️⚠️ THE FALLBACK IS `public`, NOT `member`. resolveConferenceTier returns
+    // 'public' for any org type the programs list does not name. 📏 As of
+    // 2026-09-08 `policy_values` has ZERO `programs.definitions` rows, so
+    // getProgramsConfig() falls through to defaultMembershipPrograms(), which
+    // maps Member → member and Vendor Partner → partner. **The correct answer
+    // here currently depends on that policy being UNSET.** The day somebody
+    // configures it through the admin UI and omits Vendor Partner, this line
+    // silently returns 'public' and partners lose their partner documents
+    // again — with no literal anywhere to grep for. That is the policy engine's
+    // design rather than something this call introduced, but it is the kind of
+    // thing that is only ever found by the person it hurts.
+    audienceSourceRoles = [resolveConferenceTier(org?.type, await getProgramsConfig())];
   }
   return { isAssignee: true, audienceSourceRoles };
 }
@@ -671,7 +692,26 @@ export async function getPersonAssigneeLegalGate(
       .select("type")
       .eq("id", person.organization_id)
       .maybeSingle();
-    if (org?.type === "vendor_partner") audienceSourceRoles = ["partner"];
+    // ⛔ Resolve through the CONFIGURED membership programs, never a string
+    // literal. `organizations.type` is capitalised and human-readable
+    // ("Vendor Partner"), so the old `=== "vendor_partner"` matched 0 of 210
+    // rows and every partner was silently evaluated against MEMBER documents.
+    // A comparator would have fixed today's spelling and left the trap armed;
+    // `programs.definitions` owns the org-type → tier mapping, so renaming a
+    // type or adding a third program keeps working without touching this file.
+    //
+    // ⚠️⚠️ THE FALLBACK IS `public`, NOT `member`. resolveConferenceTier returns
+    // 'public' for any org type the programs list does not name. 📏 As of
+    // 2026-09-08 `policy_values` has ZERO `programs.definitions` rows, so
+    // getProgramsConfig() falls through to defaultMembershipPrograms(), which
+    // maps Member → member and Vendor Partner → partner. **The correct answer
+    // here currently depends on that policy being UNSET.** The day somebody
+    // configures it through the admin UI and omits Vendor Partner, this line
+    // silently returns 'public' and partners lose their partner documents
+    // again — with no literal anywhere to grep for. That is the policy engine's
+    // design rather than something this call introduced, but it is the kind of
+    // thing that is only ever found by the person it hurts.
+    audienceSourceRoles = [resolveConferenceTier(org?.type, await getProgramsConfig())];
   }
   const { data: seats } = await db
     .from("entity_balance_seats")

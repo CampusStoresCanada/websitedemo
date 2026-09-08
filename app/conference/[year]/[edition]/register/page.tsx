@@ -11,6 +11,7 @@ import { getRetentionConsentConfig } from "@/lib/policy/engine";
 import PartnerRegistrationForm from "./PartnerRegistrationForm";
 import DelegateRegistrationForm from "./DelegateRegistrationForm";
 import RegistrationOptionForm from "./RegistrationOptionForm";
+import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
 
 export const metadata = { title: "Conference Registration" };
 
@@ -77,8 +78,21 @@ export default async function RegisterPage({
   const memberships = userOrgs.map((uo: any) =>
     (uo as { organizations: { id: string; name: string; type: string } }).organizations
   );
-  const delegateOrgs = memberships.filter((org) => org.type !== "vendor_partner");
-  const exhibitorOrgsForRole = memberships.filter((org) => org.type === "vendor_partner");
+  // ⛔ `organizations.type` is capitalised and human-readable — "Vendor Partner",
+  // not "vendor_partner". The snake_case comparison that was here matched none
+  // of the 122 partner organisations, so `exhibitorOrgsForRole` was ALWAYS empty
+  // and every vendor partner was routed down the delegate path on a live
+  // registration flow.
+  //
+  // Resolved through the configured membership programs rather than a literal:
+  // `programs.definitions` maps orgTypeValue → conferenceTier, so this keeps
+  // working if a type is renamed or a third program is added. A hand-rolled
+  // comparator would have fixed the spelling and left the trap armed.
+  const programs = await getProgramsConfig();
+  const isPartnerOrg = (org: { type: string }) =>
+    resolveConferenceTier(org.type, programs) === "partner";
+  const delegateOrgs = memberships.filter((org) => !isPartnerOrg(org));
+  const exhibitorOrgsForRole = memberships.filter((org) => isPartnerOrg(org));
   const hasDelegate = delegateOrgs.length > 0;
   const hasExhibitor = exhibitorOrgsForRole.length > 0;
 
