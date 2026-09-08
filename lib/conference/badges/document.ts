@@ -1,3 +1,4 @@
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import {
   DEFAULT_BADGE_TEMPLATE_CONFIG_V1,
   normalizeBadgeTemplateConfig,
@@ -21,6 +22,14 @@ import {
   type BadgeRunType,
 } from "@/lib/conference/badges/run";
 import { arrangeBadges, normalizeArrangement } from "@/lib/conference/badges/arrangement";
+import { loadSeatHoldings } from "@/lib/conference/seats";
+import {
+  computeSpareCounts,
+  exhibitorRegistrationIds,
+  normalizeBadgePrintStock,
+  totalPossibleExhibitorSeats,
+  type BadgePrintStock,
+} from "@/lib/conference/badges/print-stock";
 
 /**
  * Build the printable document for one badge job.
@@ -215,6 +224,28 @@ function resolveCanonicalContactByEmail(
   return contactsByOrgEmail.get(`${org}:${email}`) ?? null;
 }
 
+/**
+ * An organisation's badge logo.
+ *
+ * ⛔ CSC has no `logo_url` and never will, because CSC does not have an
+ * organisation page — the website IS its page. Staff are not a company that
+ * happens to be at the conference; they are the people running it, and this is
+ * the same exception the legal gate already makes for them rather than a new
+ * special case. Without it the Executive Director, the Conference Coordinator
+ * and the Community Manager all print with an empty circle where a logo goes.
+ *
+ * ⚠️ Keyed on the org TYPE, not on a hardcoded organisation id, so a conference
+ * run by a different host resolves its own staff the same way. The path is
+ * site-relative; the renderer absolutises it like any other asset.
+ */
+const SITE_LOGO_URL = "/logos/csc-logo.svg";
+
+function orgLogoUrl(org: Record<string, unknown> | undefined): string | null {
+  const declared = typeof org?.logo_url === "string" && org.logo_url.trim() ? org.logo_url : null;
+  if (declared) return declared;
+  return org?.organization_type === ORG_TYPE.staff ? SITE_LOGO_URL : null;
+}
+
 function toBadgePerson(
   row: Record<string, unknown>,
   qrPayloadByPersonId: Map<string, string>,
@@ -333,16 +364,70 @@ function toBadgePerson(
  * this seat is admitted to what the seat was sold as, and any separately-bought
  * add-on cannot exist yet because there is nobody to have bought it.
  */
+/**
+ * A reprint spare: stock for the desk, belonging to nobody.
+ *
+ * ⛔ No organisation. A seat blank names the company because the company is
+ * known; a spare is written on at the desk for whoever needs it, so printing
+ * somebody's employer on it would be a guess. It maps the conference hotel for
+ * the same reason — there is no home city to show.
+ *
+ * ⚠️ It DOES carry the registration type's schedule, which is why spares are
+ * generated per type rather than as one anonymous pile: a Thursday Day Pass
+ * spare and a Full Conference spare admit different people to different days,
+ * and a desk handing out the wrong one has given somebody the wrong conference.
+ */
+function spareBadgeRecord(params: {
+  type: BadgeRunType;
+  index: number;
+  venue: { latitude: number | null; longitude: number | null };
+}): HydratedBadgePerson {
+  const { type, index, venue } = params;
+  return {
+    id: `spare:${type.entityId}:${index}`,
+    variantKey: type.entityId,
+    variantName: type.name,
+    displayName: null,
+    firstName: null,
+    lastName: null,
+    roleTitle: null,
+    organizationName: null,
+    logoUrl: null,
+    qrPayload: "",
+    qrImageDataUri: null,
+    organizationSlug: null,
+    orgQrImageDataUri: null,
+    latitude: venue.latitude,
+    longitude: venue.longitude,
+    city: null,
+    province: null,
+    organizationType: null,
+    roomNumber: null,
+    access: type.accessSummary,
+    agenda: type.agenda,
+  };
+}
+
 function blankBadgeRecord(params: {
   type: BadgeRunType;
   seat: BadgeRunSeat;
   org: Record<string, unknown> | undefined;
   orgQrByCode: Map<string, string>;
+  venue: { latitude: number | null; longitude: number | null };
 }): HydratedBadgePerson {
-  const { type, seat, org, orgQrByCode } = params;
+  const { type, seat, org, orgQrByCode, venue } = params;
   const slug = typeof org?.slug === "string" && org.slug.trim() ? org.slug.trim() : null;
-  const latitude = typeof org?.latitude === "number" ? org.latitude : null;
-  const longitude = typeof org?.longitude === "number" ? org.longitude : null;
+  // ⛔ TWO KINDS OF BLANK, and they map different places.
+  //
+  // A blank for an outstanding SEAT belongs to a known company — you know who
+  // they are, just not who is coming — so it keeps that company's map, exactly
+  // like a named badge would. A reprint SPARE belongs to nobody: it is stock
+  // held back for the desk, so it maps the conference hotel instead. `venue` is
+  // set only for spares; seat blanks pass nulls and fall through to the org.
+  const latitude =
+    venue.latitude ?? (typeof org?.latitude === "number" ? org.latitude : null);
+  const longitude =
+    venue.longitude ?? (typeof org?.longitude === "number" ? org.longitude : null);
   return {
     id: `blank:${seat.seatId}`,
     variantKey: type.entityId,
@@ -352,7 +437,7 @@ function blankBadgeRecord(params: {
     lastName: null,
     roleTitle: null,
     organizationName: seat.organizationName || null,
-    logoUrl: typeof org?.logo_url === "string" ? org.logo_url : null,
+    logoUrl: orgLogoUrl(org),
     // ⛔ Empty, not a placeholder. `qrPayload` feeds a QR generator; a blank
     // must produce NO code rather than a valid code pointing at nothing.
     qrPayload: "",
@@ -388,7 +473,8 @@ function blankBadgeRecord(params: {
 function blankBadgeStack(
   run: BadgeRun,
   orgById: Map<string, Record<string, unknown>>,
-  orgQrByCode: Map<string, string>
+  orgQrByCode: Map<string, string>,
+  venue: { latitude: number | null; longitude: number | null }
 ): HydratedBadgePerson[] {
   return unnamedSeats(run)
     .slice()
@@ -404,8 +490,34 @@ function blankBadgeStack(
         seat,
         org: orgById.get(seat.organizationId),
         orgQrByCode,
+        venue,
       })
     );
+}
+
+/** Spare counts for one job, from the conference's configured policy. */
+async function spareCountsForJob(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  conferenceId: string,
+  run: BadgeRun,
+  stock: BadgePrintStock
+) {
+  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId });
+  const exhibitorTypes = exhibitorRegistrationIds(entitiesById);
+  const soldExhibitorSeats = seats.filter((seat) => exhibitorTypes.has(seat.entityId)).length;
+  // ⚠️ The member roster is people NAMED to a member seat as the run stands
+  // now — the same "on the day we go to print" number an operator would count.
+  const memberRoster = run.types.reduce(
+    (sum, type) => sum + type.seats.filter((seat) => seat.person).length,
+    0
+  );
+  return computeSpareCounts({
+    stock,
+    possibleExhibitorSeats: totalPossibleExhibitorSeats(entitiesById),
+    soldExhibitorSeats,
+    memberRoster,
+  });
 }
 
 export async function buildBadgeJobDocument(params: {
@@ -822,7 +934,50 @@ export async function buildBadgeJobDocument(params: {
   // appending them here rather than merging them in keeps the named run byte-
   // for-byte identical to a run generated without blanks.
   if (blankSeats.length > 0) {
-    ordered = [...ordered, ...blankBadgeStack(run, orgById, orgQrByCode)];
+    // Seat blanks: the company is known, so they map the company.
+    ordered = [
+      ...ordered,
+      ...blankBadgeStack(run, orgById, orgQrByCode, { latitude: null, longitude: null }),
+    ];
+
+    // Reprint spares, last in the file: unbranded stock for the desk.
+    const stock = normalizeBadgePrintStock(
+      (job.metadata as Record<string, unknown> | null)?.printStock ?? null
+    );
+    if (stock.enabled) {
+      const { data: venueRow } = await db
+        .from("conference_instances")
+        .select("location_latitude, location_longitude")
+        .eq("id", conferenceId)
+        .maybeSingle();
+      const venue = {
+        latitude:
+          typeof venueRow?.location_latitude === "number" ? venueRow.location_latitude : null,
+        longitude:
+          typeof venueRow?.location_longitude === "number" ? venueRow.location_longitude : null,
+      };
+      // ⛔ Split across the types that actually sell seats, because a spare
+      // carries its type's schedule. Proportional to seats sold, so the stack
+      // the desk reaches for most is the one it has most of.
+      const soldByType = run.types
+        .map((type) => ({ type, sold: type.seats.length }))
+        .filter((entry) => entry.sold > 0);
+      const soldTotal = soldByType.reduce((sum, entry) => sum + entry.sold, 0) || 1;
+      const counts = await spareCountsForJob(db, conferenceId, run, stock);
+      let remaining = counts.total;
+      const spares: HydratedBadgePerson[] = [];
+      soldByType.forEach((entry, i) => {
+        const share =
+          i === soldByType.length - 1
+            ? remaining
+            : Math.min(remaining, Math.round((counts.total * entry.sold) / soldTotal));
+        remaining -= share;
+        for (let n = 0; n < share; n += 1) {
+          spares.push(spareBadgeRecord({ type: entry.type, index: n, venue }));
+        }
+      });
+      ordered = [...ordered, ...spares];
+    }
   }
 
   // Read the coordinator's CURRENT number rather than a copy baked into the

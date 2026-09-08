@@ -226,6 +226,22 @@ export async function resolveBadgeRun(conferenceId: string): Promise<BadgeRun> {
   // to the type's agenda printed a pre-conference online Q&A the badge could not
   // possibly be used at. Blanks take the type's agenda by definition — nobody
   // holds the seat — so that disagreement printed on 152 cards.
+  // ⛔ A BADGE PRINTS BLOCKS, NEVER ASSIGNMENTS — and that is what makes it safe
+  // to print in January.
+  //
+  // summarizeAgenda walks the CATALOGUE: days, meals, sessions, events and
+  // meeting BLOCKS. It renders "9:30 Meeting Block 1 · Mississauga Ballroom
+  // A&D", never "9:30 you are meeting Boxercraft". Who somebody meets lives in
+  // `schedules`, is re-runnable, and is deliberately not catalogue data.
+  //
+  // ⚠️ That is load-bearing. A post-freeze late add can give an ALREADY-SEATED
+  // delegate a meeting they did not have — group minimum is 2, so a lone
+  // latecomer has to be paired with somebody free, and the scheduler returns
+  // those people in `alsoGained`. Their blocks were already on their badge, so
+  // the card stays true. The day anything renders per-person meeting
+  // assignments onto a printed artefact, that stops being true and a late add
+  // silently invalidates a card nobody is going to reprint.
+  //
   const onsiteAgendaOptions = {
     onsiteOnly: true,
     onsiteDayPolicy: {

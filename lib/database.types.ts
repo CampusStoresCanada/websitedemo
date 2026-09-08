@@ -3746,6 +3746,7 @@ export type Database = {
       conference_instances: {
         Row: {
           badge_preprint_at: string | null
+          badge_print_stock: Json | null
           badge_scan_rules: Json | null
           board_decision_at: string | null
           booth_sales_general_open_at: string | null
@@ -3786,6 +3787,7 @@ export type Database = {
         }
         Insert: {
           badge_preprint_at?: string | null
+          badge_print_stock?: Json | null
           badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
@@ -3826,6 +3828,7 @@ export type Database = {
         }
         Update: {
           badge_preprint_at?: string | null
+          badge_print_stock?: Json | null
           badge_scan_rules?: Json | null
           board_decision_at?: string | null
           booth_sales_general_open_at?: string | null
