@@ -142,6 +142,25 @@ export interface SchedulerRunSummary {
   totalDelegates: number | null;
   totalExhibitors: number | null;
   totalMeetingsCreated: number | null;
+  /**
+   * Present only on a late-add run — a run that EXTENDED a frozen schedule
+   * instead of rebuilding one.
+   *
+   * ⛔ `alsoGained` is the re-send list, not a curiosity. Those delegates hold a
+   * schedule that is now out of date, and `conference_schedule_ready` exists to
+   * send them the new one. A late add is not finished when the run is promoted;
+   * it is finished when the people whose day changed have been told.
+   */
+  lateAdd?: {
+    /** Had no meetings, now have at least one. */
+    newlySeated: string[];
+    /** Already had meetings and picked up another — re-send their schedule. */
+    alsoGained: string[];
+    /** Still hold nothing: no under-full room and no legal companion. */
+    stillWithoutMeetings: string[];
+    /** Meetings that did not exist in the frozen schedule. */
+    addedMeetings: number;
+  };
 }
 
 export interface SchedulerDependencyError {
