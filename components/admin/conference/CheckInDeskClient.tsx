@@ -27,6 +27,9 @@ type CheckInFacts = {
   days: string[];
   dayDates: string[];
   admittedTo: string[];
+  /** Resolved server-side — see lib/conference/badges/checkin.ts. */
+  reprintMode?: "variable_only" | "full_badge";
+  reprintReason?: string;
 };
 
 type PendingScan = {
@@ -835,6 +838,29 @@ export default function CheckInDeskClient({
                       : ""}
                     . Reprint their badge?
                   </p>
+                  {/* ⛔ WHICH printer, before they pick a reason. A reprint is
+                      two different jobs and the operator has to walk to a
+                      different machine for one of them — saying so after the
+                      job is queued is saying it too late. */}
+                  {card.facts?.reprintMode ? (
+                    <p
+                      className={`mt-1.5 rounded px-1.5 py-1 text-[11px] ${
+                        card.facts.reprintMode === "variable_only"
+                          ? "bg-emerald-500/20 text-emerald-100"
+                          : "bg-amber-500/20 text-amber-100"
+                      }`}
+                    >
+                      <strong>
+                        {card.facts.reprintMode === "variable_only"
+                          ? "Overprint a company blank"
+                          : "Full badge — colour printer"}
+                      </strong>{" "}
+                      {card.facts.reprintReason}
+                      {card.facts.reprintMode === "variable_only"
+                        ? " Check the pile first; print in full if it is empty."
+                        : ""}
+                    </p>
+                  ) : null}
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
                     {REPRINT_REASONS.map(([value, label]) => (
                       <button

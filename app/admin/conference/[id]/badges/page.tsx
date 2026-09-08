@@ -22,7 +22,9 @@ import { resolveBadgeRun, namedSeats, unnamedSeats } from "@/lib/conference/badg
 import { DEFAULT_VARIANT } from "@/lib/conference/badges/template";
 import BadgeArrangementEditor from "@/components/admin/conference/BadgeArrangementEditor";
 import BadgeScanRulesEditor from "@/components/admin/conference/BadgeScanRulesEditor";
+import BadgePrintStockEditor from "@/components/admin/conference/BadgePrintStockEditor";
 import { loadBadgeScanRuleOptions } from "@/lib/actions/badge-scan-rules";
+import { loadBadgePrintStockOptions } from "@/lib/actions/badge-print-stock";
 import {
   normalizeArrangement,
   type BadgeArrangement,
@@ -80,6 +82,7 @@ export default async function ConferenceBadgeOpsPage({
     { data: conference },
     jobsResult,
     scanRulesResult,
+    printStockResult,
     configsResult,
     setupSessionResult,
     peopleResult,
@@ -95,6 +98,9 @@ export default async function ConferenceBadgeOpsPage({
       // Enumerated from live data so an admin assigns what exists rather than
       // typing an organisation type from memory.
       loadBadgeScanRuleOptions(conferenceId),
+      // Percentages shown with the counts they resolve to, from the same
+      // function the printer uses.
+      loadBadgePrintStockOptions(conferenceId),
       listBadgeTemplateConfigs(conferenceId),
       getBadgeSetupSession(conferenceId),
       adminClient
@@ -131,6 +137,7 @@ export default async function ConferenceBadgeOpsPage({
   const peopleRows = peopleResult.data;
 
   const scanRuleOptions = scanRulesResult.ok ? scanRulesResult.data : null;
+  const printStockOptions = printStockResult.ok ? printStockResult.data : null;
 
   const jobs = jobsResult.success ? jobsResult.data ?? [] : [];
   // The most recently created package — shown next to the Generate button so
@@ -1014,6 +1021,24 @@ export default async function ConferenceBadgeOpsPage({
               )}
             </div>
           </div>
+
+          {/* Stock sits with the rules, not with Generate: it is a policy the
+              conference decides once, and the job snapshots it. Putting it on
+              the Generate button would invite changing it per run, which is how
+              two jobs from the same roster come back different lengths. */}
+          {printStockOptions ? (
+            <div className="rounded-lg border border-gray-200 bg-white p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                1b. Blank stock
+              </p>
+              <div className="mt-2">
+                <BadgePrintStockEditor
+                  conferenceId={conferenceId}
+                  options={printStockOptions}
+                />
+              </div>
+            </div>
+          ) : null}
 
           <div className="rounded-lg border border-gray-200 bg-white p-3">
             <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">

@@ -155,3 +155,70 @@ describe("todayVerdict", () => {
     ).toEqual({ admitted: true });
   });
 });
+
+/**
+ * Which reprint job the desk is being asked for.
+ *
+ * ⛔ The desk cannot work this out for itself. It has one scanned person; the
+ * answer depends on whether that person's COMPANY still has an unnamed seat
+ * somewhere in the print run, which is a fact about the whole run.
+ */
+describe("reprint mode on the desk facts", () => {
+  it("overprints a company blank when that company still has an unnamed seat", () => {
+    const facts = checkInFactsFromRun(
+      run({
+        types: [
+          {
+            entityId: "type-a",
+            name: "Full Conference",
+            accessSummary: access(),
+            agenda: [],
+            seats: [
+              seat("s1", "Sundry Goods", { personId: "p1", firstName: "Ada", lastName: "L" }),
+              // Same company, nobody named — so a blank for it went to print.
+              seat("s2", "Sundry Goods", null),
+            ],
+          },
+        ],
+      } as never)
+    );
+    expect(facts.p1.reprintMode).toBe("variable_only");
+  });
+
+  it("prints the whole card when every seat at that company is named", () => {
+    const facts = checkInFactsFromRun(
+      run({
+        types: [
+          {
+            entityId: "type-a",
+            name: "Full Conference",
+            accessSummary: access(),
+            agenda: [],
+            seats: [seat("s1", "Sundry Goods", { personId: "p1", firstName: "Ada", lastName: "L" })],
+          },
+        ],
+      } as never)
+    );
+    expect(facts.p1.reprintMode).toBe("full_badge");
+  });
+
+  it("does not let one company's blank cover another company's person", () => {
+    const facts = checkInFactsFromRun(
+      run({
+        types: [
+          {
+            entityId: "type-a",
+            name: "Full Conference",
+            accessSummary: access(),
+            agenda: [],
+            seats: [
+              seat("s1", "Sundry Goods", { personId: "p1", firstName: "Ada", lastName: "L" }),
+              seat("s2", "Other Co", null),
+            ],
+          },
+        ],
+      } as never)
+    );
+    expect(facts.p1.reprintMode).toBe("full_badge");
+  });
+});

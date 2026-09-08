@@ -21,6 +21,10 @@ import {
   type BadgeRun,
 } from "@/lib/conference/badges/run";
 import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  reprintModeForOrganization,
+  type ReprintMode,
+} from "@/lib/conference/badges/print-stock";
 import type { AccessSummary } from "@/lib/conference/entity-commerce";
 
 export type CheckInFacts = {
@@ -38,6 +42,18 @@ export type CheckInFacts = {
   dayDates: string[];
   /** Short lines for the rest of it — meals, meetings, evening events. */
   admittedTo: string[];
+  /**
+   * What a reprint for this person actually has to produce.
+   *
+   * ⛔ Resolved HERE, not in the desk component. It depends on which companies
+   * still have unnamed seats, which is a fact about the whole print run — the
+   * desk has one scanned person and no way to know it. Handing the component a
+   * computed answer also keeps the print-stock module (and the database work
+   * behind it) out of a client bundle.
+   */
+  reprintMode: ReprintMode;
+  /** Why, in words an operator can act on. */
+  reprintReason: string;
 };
 
 /**
@@ -103,6 +119,17 @@ export function checkInFactsFromRun(
   const entitlementByPerson = new Map(run.entitlements.map((e) => [e.personId, e]));
   const facts: Record<string, CheckInFacts> = {};
 
+  // ⛔ Companies with a seat nobody has been named to. A blank card for each of
+  // these went into the print run carrying that company's name, logo and map —
+  // so a reprint for one of their people only has to add the variable part,
+  // which is a job the on-site thermal printer can do in monochrome.
+  const unnamedSeatOrganizationIds = new Set<string>();
+  for (const type of run.types) {
+    for (const seat of type.seats) {
+      if (!seat.person && seat.organizationId) unnamedSeatOrganizationIds.add(seat.organizationId);
+    }
+  }
+
   for (const type of run.types) {
     for (const seat of type.seats) {
       const person = seat.person;
@@ -125,6 +152,13 @@ export function checkInFactsFromRun(
           .map((name) => dateByDayName.get(name))
           .filter((date): date is string => Boolean(date)),
         admittedTo: deskAccessLines(access),
+        ...(() => {
+          const { mode, reason } = reprintModeForOrganization({
+            organizationId: seat.organizationId || null,
+            unnamedSeatOrganizationIds,
+          });
+          return { reprintMode: mode, reprintReason: reason };
+        })(),
       };
     }
   }
