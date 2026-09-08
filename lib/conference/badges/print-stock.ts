@@ -32,7 +32,9 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { effectiveRefs } from "@/lib/conference/entity-graph";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 import type { BuildEntity } from "@/lib/actions/conference-entities";
+import type { BadgeRun } from "@/lib/conference/badges/run";
 
 export type BadgePrintStock = {
   /** Percentage of the floor's total possible exhibitor staff seats. */
@@ -254,4 +256,49 @@ export function reprintModeForOrganization(params: {
         mode: "full_badge",
         reason: "Every seat at this company is named, so no blank was printed for it.",
       };
+}
+
+
+/**
+ * The three numbers the percentages are applied to, read from live data.
+ *
+ * ⛔ ONE implementation, two callers: the print pipeline sizing a real stack and
+ * the admin screen showing an operator what their percentages come to. A second
+ * copy for the preview would be a screen that confidently displays a number the
+ * printer does not produce — and nobody would find out until the box arrived.
+ */
+export async function loadSpareBasis(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any,
+  conferenceId: string,
+  run: BadgeRun
+): Promise<{
+  possibleExhibitorSeats: number;
+  soldExhibitorSeats: number;
+  memberRoster: number;
+}> {
+  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId });
+  const exhibitorTypes = exhibitorRegistrationIds(entitiesById);
+  return {
+    possibleExhibitorSeats: totalPossibleExhibitorSeats(entitiesById),
+    soldExhibitorSeats: seats.filter((seat) => exhibitorTypes.has(seat.entityId)).length,
+    // ⚠️ People NAMED to a seat as the run stands right now — the same "roster on
+    // the day we go to print" number an operator would count by hand. It grows
+    // every time somebody is named, which is exactly why the floor exists.
+    memberRoster: run.types.reduce(
+      (sum, type) => sum + type.seats.filter((seat) => seat.person).length,
+      0
+    ),
+  };
+}
+
+/** Spare counts for one job, from the conference's configured policy. */
+export async function spareCountsForJob(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
+  db: any,
+  conferenceId: string,
+  run: BadgeRun,
+  stock: BadgePrintStock
+): Promise<SpareCounts> {
+  return computeSpareCounts({ stock, ...(await loadSpareBasis(db, conferenceId, run)) });
 }

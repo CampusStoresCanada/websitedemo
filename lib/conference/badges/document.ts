@@ -22,13 +22,9 @@ import {
   type BadgeRunType,
 } from "@/lib/conference/badges/run";
 import { arrangeBadges, normalizeArrangement } from "@/lib/conference/badges/arrangement";
-import { loadSeatHoldings } from "@/lib/conference/seats";
 import {
-  computeSpareCounts,
-  exhibitorRegistrationIds,
   normalizeBadgePrintStock,
-  totalPossibleExhibitorSeats,
-  type BadgePrintStock,
+  spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
 
 /**
@@ -495,31 +491,6 @@ function blankBadgeStack(
     );
 }
 
-/** Spare counts for one job, from the conference's configured policy. */
-async function spareCountsForJob(
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  db: any,
-  conferenceId: string,
-  run: BadgeRun,
-  stock: BadgePrintStock
-) {
-  const { seats, entitiesById } = await loadSeatHoldings(db, { conferenceId });
-  const exhibitorTypes = exhibitorRegistrationIds(entitiesById);
-  const soldExhibitorSeats = seats.filter((seat) => exhibitorTypes.has(seat.entityId)).length;
-  // ⚠️ The member roster is people NAMED to a member seat as the run stands
-  // now — the same "on the day we go to print" number an operator would count.
-  const memberRoster = run.types.reduce(
-    (sum, type) => sum + type.seats.filter((seat) => seat.person).length,
-    0
-  );
-  return computeSpareCounts({
-    stock,
-    possibleExhibitorSeats: totalPossibleExhibitorSeats(entitiesById),
-    soldExhibitorSeats,
-    memberRoster,
-  });
-}
-
 export async function buildBadgeJobDocument(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
   db: any;
@@ -939,12 +910,21 @@ export async function buildBadgeJobDocument(params: {
       ...ordered,
       ...blankBadgeStack(run, orgById, orgQrByCode, { latitude: null, longitude: null }),
     ];
+  }
 
-    // Reprint spares, last in the file: unbranded stock for the desk.
+  // Reprint spares, last in the file: unbranded stock for the desk.
+  //
+  // ⛔ Gated on the operator asking for blank stock and the conference enabling
+  // spares — NOT on there being unnamed seats. Those are different populations:
+  // a seat blank covers somebody who has not been named yet, a spare covers a
+  // card that gets damaged or a walk-up. Nesting this inside "there are unnamed
+  // seats" meant a conference that got every name in before print day — the
+  // best case — would have arrived with no desk stock at all.
+  {
     const stock = normalizeBadgePrintStock(
       (job.metadata as Record<string, unknown> | null)?.printStock ?? null
     );
-    if (stock.enabled) {
+    if (includeBlanks && stock.enabled) {
       const { data: venueRow } = await db
         .from("conference_instances")
         .select("location_latitude, location_longitude")

@@ -2,6 +2,7 @@
 
 import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
 import { normalizeArrangement, type BadgeArrangement } from "@/lib/conference/badges/arrangement";
@@ -692,6 +693,16 @@ export async function createPreprintedBadgeJob(params: {
         // stack is built from shrink every time somebody is named, so a job
         // regenerated next week would otherwise come back a different length.
         includeBlanks: params.includeBlanks === true,
+        // ⛔ Snapshot, for the same reason as the two above. The spare counts
+        // are a PERCENTAGE of numbers that move — the roster grows as people
+        // are named, and the exhibitor basis follows sales once they overtake
+        // the floor — so a job regenerated a week later would come back a
+        // different length. Freezing the policy on the job means reprinting the
+        // file reproduces the box that was delivered.
+        //
+        // ⚠️ Without this the pipeline read `metadata.printStock` and found
+        // nothing on every job, so spares silently never printed.
+        printStock: await getBadgePrintStock(params.conferenceId),
       },
       started_at: nowIso,
       updated_at: nowIso,
