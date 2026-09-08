@@ -1,0 +1,12 @@
+{
+  // Scripts run under `tsx`, not Next, so they need `server-only` to resolve to
+  // something. See scripts/shims/server-only.ts for why this is a separate file
+  // rather than an entry in tsconfig.json.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "paths": {
+      "@/*": ["./*"],
+      "server-only": ["./scripts/shims/server-only.ts"]
+    }
+  }
+}

@@ -4,7 +4,8 @@
  *   npx tsx --env-file=.env.local scripts/schedule-search.ts <conferenceId> [options]
  *
  *     --until-cold          draw until it stops improving (DEFAULT)
- *     --patience N          consecutive non-improving draws before stopping (default 50)
+ *     --patience N          consecutive non-improving draws before stopping (default 150,
+ *                           measured — see the constant for why it is not 50)
  *     --no-ils              disable iterated local search (reproduces old runs)
  *     --pref-pct N          how far up the score range a stated pick is worth (default 0.90)
  *     --max-ms N            wall-clock backstop
@@ -62,7 +63,38 @@ async function main() {
   // Convergence is the default; a fixed count is the opt-out.
   const untilCold = fixedRestarts === null
     ? {
-        patience: Number(arg("patience") ?? 50),
+        /**
+         * ⛔ 150, MEASURED — not a round number. 50 was a guess and it stops
+         * the search while it is still climbing.
+         *
+         * Convergence run 2026-09-08 at the measured conference (31 suites ×
+         * 23 times = 713 slots, 65 delegates, groups of 2–4, ILS 6, p90):
+         * 885 draws, 144 improvements, converged, 43 min.
+         *
+         *   gaps between improvements: median 2, p90 9, p99 38, MAX 118
+         *
+         * ⚠️ THE 118 IS THE WHOLE POINT. A real improvement arrived after 118
+         * consecutive failures, so any patience under ~120 can stop mid-climb
+         * and call it convergence. What each setting would have produced:
+         *
+         *   patience  25 → stop draw 328, 87,945  (0.38% short, 17 min)
+         *   patience  50 → stop draw 463, 88,083  (0.23% short, 25 min)
+         *   patience  75 → stop draw 617, 88,281  (0.00% short, 34 min)
+         *   patience 150 → ran to 885,    88,282  (converged,    43 min)
+         *
+         * The last real improvement was at draw 735; patience 50 would have
+         * quit at 463, 272 draws early, and nothing in the output would have
+         * said so — a truncated run and a converged one look identical from
+         * the objective alone.
+         *
+         * 18 minutes on a machine that is otherwise idle, once a year, against
+         * a schedule 65 people live with for a day. The trade is not close.
+         *
+         * ⚠️ ONE SEED, SYNTHETIC SCORES — production has no named seats yet.
+         * Re-measure once seats are named; the 118 could be larger on real
+         * data, and this default is a floor rather than a proven ceiling.
+         */
+        patience: Number(arg("patience") ?? 150),
         maxDraws: arg("max-draws") ? Number(arg("max-draws")) : undefined,
         maxMs: arg("max-ms") ? Number(arg("max-ms")) : undefined,
       }
