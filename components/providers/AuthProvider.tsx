@@ -398,10 +398,22 @@ export function AuthProvider({
       // only become promises when awaited.
       const mark = async <T,>(label: string, work: PromiseLike<T>): Promise<T> => {
         const started = performance.now();
+        // ⛔ Mark PENDING synchronously. The first version only wrote on settle,
+        // so a timed-out attempt logged `timings: {}` — true, but unreadable: it
+        // could not tell "never started" from "started and still hanging". -1
+        // means started and not yet back.
+        if (timings) timings[label] = -1;
         try {
           return await work;
         } finally {
-          if (timings) timings[label] = Math.round(performance.now() - started);
+          const ms = Math.round(performance.now() - started);
+          if (timings) timings[label] = ms;
+          // ⚠️ The interesting case settles AFTER the deadline, by which time the
+          // caller has already logged and thrown its object away. Report the real
+          // duration when it finally arrives — that number is the whole question.
+          if (ms > AUTH_FETCH_TIMEOUT_MS) {
+            console.warn(`[AuthProvider] ${label} settled LATE: ${ms}ms`);
+          }
         }
       };
 
