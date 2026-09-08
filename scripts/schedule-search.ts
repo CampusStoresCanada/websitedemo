@@ -12,6 +12,8 @@
  *     --max-draws N         draw-count backstop
  *     --restarts N          fixed count instead of convergence
  *     --swap-trials N       how far each draw explores (default 40000)
+ *     --extend-run ID       LATE ADD: extend that run instead of solving fresh
+ *     --extend-active       LATE ADD: extend this conference's promoted run
  *     --persist             write the winner as a DRAFT run
  *
  * The January 18 freeze wants convergence, not a count: "let it cool until it
@@ -49,12 +51,46 @@ function arg(name: string): string | null {
   return idx >= 0 ? (process.argv[idx + 1] ?? null) : null;
 }
 
+/**
+ * The meetings of a frozen run, in solver shape.
+ *
+ * ⚠️ matchScoreKeys come back EMPTY and that is correct: they are not stored on
+ * `schedules` and cannot be reconstructed. They are only used to attach score
+ * provenance to NEW meetings, and a carried-over meeting keeps the score ids the
+ * original run recorded.
+ */
+async function loadFrozenRun(
+  db: ReturnType<typeof createAdminClient>,
+  runId: string,
+  exhibitorSeats: Map<string, { orgId: string; suiteId: string }>
+) {
+  const { data, error } = await db
+    .from("schedules")
+    .select("meeting_slot_id, exhibitor_seat_id, delegate_seat_ids")
+    .eq("scheduler_run_id", runId)
+    .eq("status", "scheduled");
+  if (error) throw new Error(error.message);
+  if (!data || data.length === 0) {
+    throw new Error(`run ${runId} has no scheduled meetings — nothing to extend`);
+  }
+  return data.map((row) => ({
+    meetingSlotId: row.meeting_slot_id as string,
+    exhibitorSeatId: row.exhibitor_seat_id as string,
+    exhibitorOrganizationId:
+      exhibitorSeats.get(row.exhibitor_seat_id as string)?.orgId ?? "",
+    delegateSeatIds: (row.delegate_seat_ids as string[] | null) ?? [],
+    matchScoreKeys: [] as string[],
+  }));
+}
+
 async function main() {
   const conferenceId = process.argv[2];
   if (!conferenceId || conferenceId.startsWith("--")) {
     console.error(
       "usage: schedule-search.ts <conferenceId> [--patience N] [--swap-trials N] " +
-        "[--pref-pct N] [--no-ils] [--restarts N] [--persist]"
+        "[--pref-pct N] [--no-ils] [--restarts N] [--persist]\n" +
+        "  late add: --extend-active | --extend-run <runId> — extend a frozen " +
+        "schedule instead of solving a new one"
     );
     process.exit(1);
   }
@@ -183,12 +219,64 @@ async function main() {
       `${exhibitors.length} schedulable exhibitors, ${suites.length} suites, ${meetingSlots.length} slots`
   );
   if (exhibitors.length === 0 || candidates.delegates.length === 0) {
-    console.error("nothing to schedule — name some seats first");
+    /**
+     * ⚠️ This fires BEFORE the late-add block, so a late add on a conference
+     * with no candidates reports "name some seats first" rather than anything
+     * about runs. That is the right precondition — a schedule with no exhibitors
+     * cannot be extended either — but the wording would mislead somebody in
+     * January, so say which mode they are in.
+     */
+    const lateAdd =
+      Boolean(arg("extend-run")) || process.argv.includes("--extend-active");
+    console.error(
+      lateAdd
+        ? "nothing to extend — this conference has no schedulable exhibitors or " +
+            "no delegates, so there is no schedule for a late arrival to join"
+        : "nothing to schedule — name some seats first"
+    );
     process.exit(2);
+  }
+
+  /**
+   * LATE ADD — extend a frozen schedule instead of solving a new one.
+   *
+   * ⛔ Runs HERE, on this machine, for the same reason the full solve does:
+   * cloud compute is a no when there is local compute to spare. This is not a
+   * cheaper variant that earns an exception — it is the same engine with the
+   * search turned off.
+   *
+   * The run it extends must already be promoted (or named explicitly), because
+   * a late add is defined against the schedule people were actually sent.
+   */
+  let extendFrom: Awaited<ReturnType<typeof loadFrozenRun>> | undefined;
+  const extendRunArg = arg("extend-run");
+  if (extendRunArg || process.argv.includes("--extend-active")) {
+    let runId = extendRunArg;
+    if (!runId) {
+      const { data: active } = await db
+        .from("scheduler_runs")
+        .select("id")
+        .eq("conference_id", conferenceId)
+        .eq("run_mode", "active")
+        .maybeSingle();
+      if (!active) {
+        console.error(
+          "no promoted run for this conference — a late add extends the schedule " +
+            "people were sent, so there must be one. Solve and promote first."
+        );
+        process.exit(2);
+      }
+      runId = active.id as string;
+    }
+    extendFrom = await loadFrozenRun(db, runId!, exhibitorSeats);
+    console.log(
+      `late add: extending run ${runId} — ${extendFrom.length} existing meetings held fixed`
+    );
   }
 
   const t1 = Date.now();
   const outcome = runSchedulerSearch({
+    extendFrom,
     delegates: candidates.delegates,
     exhibitors,
     meetingSlots,
@@ -257,6 +345,28 @@ async function main() {
       1
     )
   );
+
+  if (outcome.lateAdd) {
+    const { newlySeated, alsoGained, stillWithoutMeetings, addedMeetings } = outcome.lateAdd;
+    console.log("\nlate add:");
+    console.log(`  seated for the first time : ${newlySeated.length}`);
+    console.log(`  new meetings opened       : ${addedMeetings}`);
+    /**
+     * ⛔ Printed as an obligation, not a count. These delegates already had a
+     * schedule and now have one more meeting on it — they need
+     * conference_schedule_ready re-sent. Nothing sends it automatically yet.
+     */
+    console.log(
+      `  ⛔ SCHEDULE NOW STALE      : ${alsoGained.length}` +
+        (alsoGained.length ? ` — re-send to ${alsoGained.join(", ")}` : "")
+    );
+    console.log(
+      `  still with no meetings    : ${stillWithoutMeetings.length}` +
+        (stillWithoutMeetings.length
+          ? ` — no under-full room and no legal companion; they wait for the next arrival`
+          : "")
+    );
+  }
 
   if (!persist) {
     console.log("\ndry run — nothing written. pass --persist to create a draft run.");
