@@ -167,7 +167,11 @@ export async function computeOrgLegalCompleteness(
   // instead of comparing strings, so the mapping stays correct if the org types
   // are ever renamed or a third program is added.
   const programs = await getProgramsConfig();
-  const audienceSourceRoles = [resolveConferenceTier(org?.type, programs)];
+  // ⛔ Only `partner` diverges — see conference-legal.ts. resolveConferenceTier
+  // also feeds pricing via loadBuyerTier, so it stays the shared mapping and the
+  // narrowing happens here.
+  const tier = resolveConferenceTier(org?.type, programs);
+  const audienceSourceRoles = [tier === "partner" ? "partner" : "member"];
 
   for (const person of people) {
     if (!person.user_id) return false; // no account yet — can't have accepted anything

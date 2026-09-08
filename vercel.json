@@ -115,6 +115,14 @@
     {
       "path": "/api/cron/elections-kickoff",
       "schedule": "30 8 * * *"
+    },
+    {
+      "path": "/api/cron/notion-transcript-pages",
+      "schedule": "0 13 * * *"
+    },
+    {
+      "path": "/api/cron/minutes-draft-collect",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

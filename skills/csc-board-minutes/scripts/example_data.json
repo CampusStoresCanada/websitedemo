@@ -1,0 +1,126 @@
+{
+  "meetingTitle": "CSC Board Meeting",
+  "meetingDateLong": "Tuesday, June 23, 2026",
+  "footerDate": "June 23, 2026",
+  "present": [
+    "Shannon Blackadder, Imelda May, Jason Kack, Kevin Liu, Karen Stonehouse, Patricia Linden Teasdale, Sam Willis, Sean Bell",
+    "",
+    "Greg McPherson, Executive Director",
+    "Stephen Thomas – Association Administrator"
+  ],
+  "absent": [
+    "Shawn Davies",
+    "Carolyn Potter – Conference Manager"
+  ],
+  "blocks": [
+    { "type": "sectionHeading", "text": "BUSINESS ITEMS" },
+
+    { "type": "item", "num": "1", "title": "Call to Order" },
+    { "type": "body", "text": "S. Blackadder called the meeting to order on Tuesday, June 23, 2026, at 12:04 p.m. ET." },
+
+    { "type": "item", "num": "2", "title": "Approval of Agenda" },
+    { "type": "body", "text": "The Board reviewed the agenda." },
+    { "type": "motion", "lines": [
+      { "text": "In a motion duly moved and seconded, it was resolved that:", "underline": true },
+      { "text": "The agenda be approved as presented." },
+      { "text": "The Motion was carried." }
+    ]},
+
+    { "type": "item", "num": "3", "title": "Approval of Minutes – May 28, 2026" },
+    { "type": "body", "text": "The Board reviewed the minutes from the May 28, 2026 meeting. No changes were noted." },
+    { "type": "motion", "lines": [
+      { "text": "In a motion duly moved and seconded, it was resolved that:", "underline": true },
+      { "text": "The minutes from the May 28, 2026 Board meeting be approved as presented." },
+      { "text": "The Motion was carried." }
+    ]},
+
+    { "type": "item", "num": "4", "title": "Review of CSC Calendar" },
+    { "type": "body", "text": "The Board reviewed the CSC calendar." },
+    { "type": "bullet", "text": "Exhibitor and sponsorship registration for the 2027 conference is planned to launch soon but remains a work in progress." },
+    { "type": "bullet", "text": "No directors were able to attend the conference held in St. John's last week." },
+    { "type": "bullet", "text": "July's calendar consists solely of the Board meeting; calendar invitations have already been circulated to all directors, with adjustments to follow if scheduling conflicts arise." },
+
+    { "type": "item", "num": "5", "title": "Review of Action Items" },
+    { "type": "body", "text": "Action items from the previous meeting were reviewed. Updates on each item were noted on the worksheet; completed actions were removed from the list." },
+    { "type": "bullet", "text": "Value Proposition Document: postponed to a future meeting." },
+    { "type": "bullet", "text": "PPPC: no update." },
+    { "type": "bullet", "text": "Carleton and Sheridan Outreach: in progress; a meeting with Carleton is scheduled for late July, no date yet set with Sheridan." },
+    { "type": "bullet", "text": "Montreal Market Recruitment: ongoing; the Board discussed the need for translation capacity to pursue larger francophone institutions and agreed a more targeted strategy for smaller institutions may be a better near-term priority." },
+    { "type": "bullet", "text": "Course Material Strategy: flagged as both important and urgent, tied directly to conference planning." },
+    { "type": "bullet", "text": "Banking/Signing Officers: in progress; G. McPherson is reviewing an online banking, expense-reporting, and approvals program called Float and will bring a proposal to the Board; he and S. Blackadder still need to coordinate an in-person visit to the bank." },
+    { "type": "bullet", "text": "Website Prioritization: in progress." },
+    { "type": "bullet", "text": "Recruitment Target for Non-Member Institutions: ongoing, expected to become a priority in the fall." },
+    { "type": "bullet", "text": "Board Self-Evaluation Survey: postponed until conference planning is further along." },
+    { "type": "bullet", "text": "Vendor/Member Value-Add Concepts: relates to today's Ambassador Education Solutions discussion (Item 7)." },
+    { "type": "bullet", "text": "2026–27 Cost Comparison Document: complete." },
+    { "type": "bullet", "text": "Website Advisory Committee: S. Thomas is still seeking volunteers, as Luanne is no longer able to participate." },
+    { "type": "bullet", "text": "CANCOLL Sponsorship Ask: pending finalization of the budget." },
+    { "type": "bullet", "text": "Member Testimonial Videos: not yet started." },
+    { "type": "bullet", "text": "New Member Announcements in Circle: ongoing." },
+    { "type": "bullet", "text": "CRAM Virtual/Regional Format: to be addressed as part of the course material strategy discussion." },
+    { "type": "bullet", "text": "Scholarship Application Ranking Rubric: tied to finalization of venue-related expenses." },
+    { "type": "bullet", "text": "Swag Box Initiative: K. Stonehouse continuing to explore feasibility with McMaster; quantum and weight limits still to be finalized." },
+    { "type": "bullet", "text": "Sponsorship Levels Pricing / Vendor Partnership Benefits: to be discussed under Item 8." },
+    { "type": "bullet", "text": "Membership Renewals Report: will be provided in the fall once renewals launch." },
+    { "type": "bullet", "text": "Course Materials Workshop Financial Projections: incorporated into the 2027 conference budget." },
+    { "type": "bullet", "text": "CEI (Brent Beatty) Follow-Up: discussed under Item 6." },
+    { "type": "bullet", "text": "Vendor Advisory Committee: S. Thomas continuing to establish." },
+    { "type": "body", "text": "The Board also discussed adding a priority indicator (e.g., important/urgent) to the action items tracker to help focus the Board's limited capacity. No formal action was taken, but the Board agreed to keep this in mind going forward." },
+
+    { "type": "sectionHeading", "text": "DISCUSSION ITEMS" },
+
+    { "type": "item", "num": "6", "title": "CEI Conversation" },
+    { "type": "body", "text": "The Board discussed the ongoing situation with CEI (Brent Beatty), who has not paid outstanding membership/vendor partner fees since August 2025 and has been unresponsive to recent communications. After extended discussion, the Board agreed that CEI has been given ample opportunity to respond and that no further outreach is needed at this time." },
+    { "type": "action", "label": "ACTION", "text": "S. Thomas to remove CEI's access to Circle." },
+    { "type": "body", "text": "The Board agreed that when vendor partner registration reopens in August, S. Thomas will send a general invitation, including a value proposition overview, to course-material vendors and publishers who are not current partners (including CEI), inviting them to apply or reapply for partnership for the 2026–27 year." },
+
+    { "type": "item", "num": "7", "title": "Ambassador Education Solutions Partnership/Sponsorship" },
+    { "type": "body", "text": "The Board discussed a potential partnership/sponsorship with Ambassador Education Solutions, including the broader question of what it means for CSC membership when an outside company manages some or all of a member's course materials or store operations, while the store itself remains institutionally owned and operated." },
+    { "type": "body", "text": "Key points raised:" },
+    { "type": "bullet", "text": "Membership eligibility is tied to the store being institutionally owned and operated and staff being employed by the institution, with limited grandfathered exceptions." },
+    { "type": "bullet", "text": "The Board discussed restricting Circle access so that institution-employed staff retain full access (subject to appropriate discretion over what is shared with an outsourced partner), while outsourced-partner staff would have no access to Circle, and the course materials section could be disabled for non-institutional users. G. McPherson confirmed this is feasible." },
+    { "type": "bullet", "text": "The Board discussed concerns about data-sharing with companies that could use member data as leverage with senior institutional leadership, balanced against the recognition that member institutions can share their own data regardless of CSC's policies." },
+    { "type": "bullet", "text": "The Board agreed a member survey on this topic was not the right approach at this stage, given the potential for a mismatch between member sentiment and the Board's broader financial and strategic view." },
+    { "type": "bullet", "text": "The Board noted that Ambassador's outreach (through both S. Bell and S. Thomas) reflects broader industry trends already affecting several member institutions." },
+    { "type": "action", "label": "ACTION", "text": "S. Bell to invite Ambassador Education Solutions to present to the Board (rather than to individual member institutions) and to coordinate a date via a poll." },
+
+    { "type": "item", "num": "8", "title": "2027 Conference Planning" },
+    { "type": "subitem", "num": "8.1", "title": "Venue Floorplan Mock-up" },
+    { "type": "body", "text": "S. Thomas presented a proposed floor plan and booth map. Premium (\"connected\") booths, which include a full day of scheduled vendor meetings, are grouped together (31 booths); standard booths are located in a lower-cost area of the venue with easier loading-dock access. The plan is currently modelled on approximately 60 vendor partner booths. K. Stonehouse presented an alternative model (adjusting connected-booth pricing to $5,800 and increasing standard booths to 36 at $3,700) that would yield approximately 67 booths at similar or greater overall revenue. No final booth count or pricing was adopted; S. Thomas to continue refining the model.", "indent": 1080 },
+    { "type": "subitem", "num": "8.2", "title": "Course Material Day" },
+    { "type": "body", "text": "S. Thomas noted the incremental cost of a course materials day is limited to per-person food and beverage costs (approximately $160/person), as no additional room space is required. The Board discussed whether course material vendors should be integrated into the main floor as standard booths or given a dedicated day/space with scheduled short presentations to publishers and vendors, to make participation more meaningful for that audience. No decision was reached; the format is still to be finalized as part of the broader course material strategy.", "indent": 1080 },
+    { "type": "subitem", "num": "8.3", "title": "Budget Modelling and Pricing" },
+    { "type": "body", "text": "The Board discussed delegate, vendor, and sponsorship pricing for the 2027 conference:", "indent": 1080 },
+    { "type": "bullet", "text": "Delegate registration: the Board discussed a full conference rate of $299 (a $25 reduction from last year) and leaned toward a simplified structure of a full-conference rate plus a single flat daily rate (approximately $199), rather than a fully itemized daily pricing model, to avoid overcomplicating registration. A reduced rate (approximately $100) for a half-day, non-member option on the final day was also discussed as a way to attract nearby institutions and help fill the floor.", "indent": 1440 },
+    { "type": "bullet", "text": "Vendor partner fee: proposed reduction to $500 (from a higher prior amount), reflecting reduced administrative overhead, capped at one booth per company.", "indent": 1440 },
+    { "type": "bullet", "text": "Exhibitor booth pricing: standard booths proposed at $4,500 (consistent with last year's pricing) and premium/connected booths at $6,500, plus a $10,000 sponsorship level (excluding booth). The Board discussed adding a lower-cost sponsorship option and moving away from traditional \"gold/silver/bronze\" tier naming, which has become associated with entrenched historical pricing expectations, while still providing accessible entry points with benefits proportional to sponsorship level.", "indent": 1440 },
+    { "type": "bullet", "text": "The Board agreed pricing needs to be finalized by June 30, 2026, so that registration and website materials can move forward.", "indent": 1440 },
+    { "type": "action", "label": "ACTION", "text": "S. Thomas to begin building out the registration/website structure based on the agreed pricing framework and bring finalized pricing back to the Board for review (via Circle) by June 30, 2026.", "indent": 360 },
+    { "type": "subitem", "num": "8.4", "title": "JCWG Toronto Retail Store Tour Proposal" },
+    { "type": "body", "text": "The Board did not reach this item due to time; it will be carried forward to a future meeting.", "indent": 1080 },
+
+    { "type": "item", "num": "9", "title": "Member & Vendor Satisfaction Survey Results" },
+    { "type": "body", "text": "The Board did not reach this item due to time; it will be carried forward to a future meeting." },
+
+    { "type": "item", "num": "10", "title": "Vendor & Sponsorship Tier Structure" },
+    { "type": "body", "text": "The Board did not reach this item as a standalone discussion due to time, beyond the pricing and tier discussion under Item 8." },
+
+    { "type": "sectionHeading", "text": "OTHER BUSINESS" },
+
+    { "type": "item", "num": "11", "title": "Financial Update" },
+    { "type": "body", "text": "G. McPherson reported that financials to the end of May had been circulated, including approximately $20,000 in expenses related to the Spring Board Meeting in Toronto. The Board remains on track for an estimated $20,000–$22,000 surplus at fiscal year-end. Board members were reminded to submit any outstanding expense reports." },
+
+    { "type": "item", "num": "12", "title": "Other Business" },
+    { "type": "subitem", "num": "12.1", "title": "Course Materials Member Session" },
+    { "type": "body", "text": "I. May proposed postponing the \"Course Materials – Back to Basics\" style member session originally contemplated for this summer, given capacity constraints. The Board agreed to hold the session in August 2026, with I. May, K. Stonehouse, and S. Willis (and potentially S. Bell) completing preparation work in July.", "indent": 1080 },
+
+    { "type": "item", "num": "13", "title": "Next Meeting" },
+    { "type": "body", "text": "The next Board meeting will be held on July 20, 2026." },
+
+    { "type": "item", "num": "14", "title": "Adjournment" },
+    { "type": "action", "label": "MOTION", "text": "Moved by S. Blackadder to adjourn the meeting." },
+    { "type": "body", "text": "Carried." },
+    { "type": "body", "text": "The meeting was adjourned, followed by an in-camera session." },
+    { "type": "body", "text": "The Board did not reach the deferred items on the agenda (Future of Course Materials & AI – Member Programming Series; Website Focus Groups and Launch Timeline)." }
+  ]
+}

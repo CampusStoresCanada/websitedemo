@@ -21,6 +21,7 @@
     "check:elections-e2e": "npx tsx scripts/elections-nomination-e2e.mts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.122.0",
     "@emoji-mart/data": "^1.2.1",
     "@emoji-mart/react": "^1.1.1",
     "@googlemaps/js-api-loader": "^2.0.2",

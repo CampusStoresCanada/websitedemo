@@ -22,6 +22,12 @@ import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
 import MeetingDocumentsPanel from "@/components/admin/board/MeetingDocumentsPanel";
 import LinkEventButton from "@/components/admin/board/LinkEventButton";
 
+// Drafting minutes from a full board transcript is a multi-minute model call,
+// well past Vercel's default function ceiling. Server Actions invoked from this
+// page inherit its maxDuration, so it is set here rather than on the action.
+// If a real transcript still outruns this, the fix is a background job, not a
+// bigger number.
+export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
@@ -74,7 +80,7 @@ export default async function MeetingDetailPage({
     eventSlug = ev?.slug ?? null;
   }
 
-  const [docsRes, actionsRes, prevMeetingRes] = await Promise.all([
+  const [docsRes, actionsRes, prevMeetingRes, draftRes] = await Promise.all([
     db
       .from("board_documents")
       .select("id, title, document_type, mime_type, file_size_bytes, storage_path, created_at, updated_at")
@@ -94,11 +100,17 @@ export default async function MeetingDetailPage({
       .order("meeting_date", { ascending: false })
       .limit(1)
       .maybeSingle(),
+    db
+      .from("board_minutes_drafts")
+      .select("status, error")
+      .eq("meeting_id", id)
+      .maybeSingle(),
   ]);
 
   const docs        = docsRes.data ?? [];
   const actionItems = actionsRes.data ?? [];
   const prevMeeting = prevMeetingRes.data ?? null;
+  const minutesDraft = (draftRes.data as { status: string; error: string | null } | null) ?? null;
 
   // Financial report: frozen to last closed month before the meeting date
   const reportPeriod = getLastFullMonth(meeting.meeting_date);
@@ -191,6 +203,7 @@ export default async function MeetingDetailPage({
           notionUrl={notionUrl}
           isSA={isSA}
           prevMeeting={prevMeeting}
+          minutesDraft={minutesDraft}
         />
       )}
 

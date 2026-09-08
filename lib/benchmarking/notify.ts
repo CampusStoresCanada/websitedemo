@@ -261,7 +261,7 @@ export interface SendPlan {
   surveyId: string;
   fiscalYear: number;
   surveyStatus: string;
-  templateKey: string;
+  templateKey: TemplateKey;
   /** BENCHMARKING_SUPPRESS_EMAIL is set — a "send" would mail nobody. */
   killSwitchOn: boolean;
   willSend: PlannedSend[];
@@ -376,7 +376,7 @@ export async function sendBenchmarkingInvitations(
   const outcomes: NotifyOutcome[] = [];
   for (const line of plan.willSend) {
     const outcome = await send(
-      plan.templateKey as TemplateKey,
+      plan.templateKey,
       line.to,
       line.organizationId,
       line.organizationName,
@@ -420,7 +420,7 @@ export async function sendBenchmarkingReminders(surveyId: string): Promise<SendS
   const outcomes: NotifyOutcome[] = [];
   for (const line of plan.willSend) {
     const outcome = await send(
-      "benchmarking_reminder" as TemplateKey,
+      "benchmarking_reminder",
       line.to,
       line.organizationId,
       line.organizationName,
@@ -462,7 +462,7 @@ export async function sendSubmissionReceipt(
 
   const orgName = r.organizations?.name ?? "your store";
   return send(
-    "benchmarking_submission_received" as TemplateKey,
+    "benchmarking_submission_received",
     recipientEmail(r),
     organizationId,
     orgName,

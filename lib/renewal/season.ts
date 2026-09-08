@@ -11,7 +11,7 @@ export interface RenewalSeason {
   seasonStart: Date;
   /** The shared fiscal-year boundary (renewal.cycle_start_month_day). */
   cycleStart: Date;
-  /** The last day of the grace period — the season is over the day after. */
+  /** The last day of the grace period, inclusive — the season is over the day after. */
   seasonEnd: Date;
 }
 
@@ -22,6 +22,22 @@ function cycleStartForYear(year: number, cycleStartMonthDay: string): Date {
 
 function addUTCDays(date: Date, days: number): Date {
   return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+/**
+ * Midnight UTC on the day `date` falls in.
+ *
+ * The season bounds are whole days at 00:00 UTC, but callers pass a live
+ * `new Date()`. Comparing an instant against them made the two ends behave
+ * differently: any time on `seasonStart` counted (it is already past
+ * midnight), but on `seasonEnd` only the midnight instant itself did — so the
+ * last day of the grace period, Oct 1 under the current config, dropped out of
+ * season the moment the clock ticked past 00:00 UTC. That is the day the
+ * dashboard's renewal widget and the "My renewal calls" nav item matter most.
+ * Normalising to the day makes both bounds inclusive of the whole day.
+ */
+function startOfUTCDay(date: Date): Date {
+  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
 }
 
 /**
@@ -37,6 +53,9 @@ export async function getCurrentRenewalSeason(today: Date): Promise<RenewalSeaso
   const config = await getRenewalConfig();
   const maxReminderDay = config.reminder_days.length > 0 ? Math.max(...config.reminder_days) : 0;
 
+  // Compared as a whole day, not an instant — see startOfUTCDay.
+  const day = startOfUTCDay(today);
+
   // Cycles are annual, so the only candidates that could possibly contain
   // `today` are this UTC year's occurrence, last year's, or next year's
   // (e.g. late December vs. an early-January cycle start).
@@ -48,7 +67,7 @@ export async function getCurrentRenewalSeason(today: Date): Promise<RenewalSeaso
   for (const cycleStart of candidates) {
     const seasonStart = addUTCDays(cycleStart, -(maxReminderDay + 1));
     const seasonEnd = addUTCDays(cycleStart, config.grace_days);
-    if (today.getTime() >= seasonStart.getTime() && today.getTime() <= seasonEnd.getTime()) {
+    if (day.getTime() >= seasonStart.getTime() && day.getTime() <= seasonEnd.getTime()) {
       return {
         renewalYear: cycleStart.getUTCFullYear() + 1,
         seasonStart,

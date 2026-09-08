@@ -58,7 +58,17 @@ export function nextCycleStartOnOrAfter(date: Date, cycleStartMonthDay: string):
   const [month, day] = cycleStartMonthDay.split("-").map(Number);
   const year = date.getUTCFullYear();
   const candidate = new Date(Date.UTC(year, month - 1, day));
-  const result = candidate.getTime() >= date.getTime() ? candidate : new Date(Date.UTC(year + 1, month - 1, day));
+  // Compare DAY to day, not timestamp to midnight. `candidate` is always
+  // 00:00Z, so comparing it against a timestamped `date` meant that on the
+  // cycle-start day itself — any moment after midnight UTC — "on or after"
+  // was false and this rolled a full year forward. That put the anniversary
+  // 364 days out on the one day it was 0 days out, which switched off
+  // isWithinPreRenewalSkipWindow and sold JVCKENWOOD a $600 partnership for
+  // $150 on 2026-09-01. It also meant the day-0 entry in
+  // renewal.reminder_days could never fire.
+  const dateStartOfDay = Date.UTC(year, date.getUTCMonth(), date.getUTCDate());
+  const result =
+    candidate.getTime() >= dateStartOfDay ? candidate : new Date(Date.UTC(year + 1, month - 1, day));
   return result.toISOString().split("T")[0];
 }
 

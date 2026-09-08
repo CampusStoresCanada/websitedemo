@@ -9,6 +9,7 @@ interface Props {
   notionUrl:   string | null;
   isSA:        boolean;
   prevMeeting: { meeting_date: string; minutes_html: string | null } | null;
+  minutesDraft: { status: string; error: string | null } | null;
 }
 
 type Tab = "current" | "past" | "scratchpad";
@@ -19,7 +20,7 @@ const TABS: { key: Tab; label: string }[] = [
   { key: "scratchpad", label: "Scratch Pad" },
 ];
 
-export default function MinutesTabs({ meetingId, minutesHtml, notionUrl, isSA, prevMeeting }: Props) {
+export default function MinutesTabs({ meetingId, minutesHtml, notionUrl, isSA, prevMeeting, minutesDraft }: Props) {
   const [tab, setTab] = useState<Tab>("current");
 
   return (
@@ -46,6 +47,7 @@ export default function MinutesTabs({ meetingId, minutesHtml, notionUrl, isSA, p
         <MeetingDocumentEditor
           meetingId={meetingId}
           docType="minutes"
+          minutesDraft={minutesDraft}
           initialHtml={minutesHtml}
           notionUrl={null}
           isSA={isSA}

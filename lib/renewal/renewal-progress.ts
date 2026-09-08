@@ -2,6 +2,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getPartnershipRateCents } from "@/lib/stripe/billing";
 import { parseUTC } from "@/lib/utils";
 import { getCurrentRenewalSeason } from "./season";
+import { getExpectedAmountsByOrg } from "./expected-amounts";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 
 export type RenewalOrgType = typeof ORG_TYPE.member | typeof ORG_TYPE.vendorPartner;
@@ -88,20 +89,17 @@ async function getTypeProgress(
   // membership_expires_at already covers this renewal year has a matching
   // charge_succeeded event, and vice versa). invoice_generated is used only
   // as a best-effort source for the per-org dues amount, not as the renewal
-  // signal itself.
-  const [chargeEventsRes, invoiceEventsRes] = await Promise.all([
+  // signal itself — and only where no live invoice exists, since a re-issued
+  // invoice leaves that event pointing at the voided row. See
+  // getExpectedAmountsByOrg().
+  const [chargeEventsRes, expectedByOrg] = await Promise.all([
     db
       .from("renewal_events")
       .select("organization_id, created_at")
       .eq("event_type", "charge_succeeded")
       .eq("renewal_year", renewalYear)
       .in("organization_id", orgIds),
-    db
-      .from("renewal_events")
-      .select("organization_id, invoice_id")
-      .eq("event_type", "invoice_generated")
-      .eq("renewal_year", renewalYear)
-      .in("organization_id", orgIds),
+    getExpectedAmountsByOrg(db, orgIds, renewalYear),
   ]);
 
   // Earliest charge_succeeded per org — an org shouldn't have more than one,
@@ -111,20 +109,6 @@ async function getTypeProgress(
     const existing = renewedAtByOrg.get(row.organization_id);
     if (!existing || row.created_at < existing) {
       renewedAtByOrg.set(row.organization_id, row.created_at);
-    }
-  }
-
-  const invoiceIdByOrg = new Map<string, string>();
-  for (const row of invoiceEventsRes.data ?? []) {
-    if (row.invoice_id) invoiceIdByOrg.set(row.organization_id, row.invoice_id);
-  }
-
-  const invoiceIds = Array.from(new Set(invoiceIdByOrg.values()));
-  const amountByInvoiceId = new Map<string, number>();
-  if (invoiceIds.length > 0) {
-    const { data: invoices } = await db.from("invoices").select("id, amount_cents").in("id", invoiceIds);
-    for (const inv of invoices ?? []) {
-      amountByInvoiceId.set(inv.id, inv.amount_cents);
     }
   }
 
@@ -143,8 +127,7 @@ async function getTypeProgress(
   const renewalDays: string[] = [];
 
   for (const orgId of orgIds) {
-    const invoiceId = invoiceIdByOrg.get(orgId);
-    const expectedCents = (invoiceId ? amountByInvoiceId.get(invoiceId) : undefined) ?? partnerFallbackCents;
+    const expectedCents = expectedByOrg.get(orgId) ?? partnerFallbackCents;
     const renewedAt = renewedAtByOrg.get(orgId);
 
     totalExpectedCents += expectedCents;

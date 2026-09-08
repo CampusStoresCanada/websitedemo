@@ -10,7 +10,7 @@ export type Database = {
   // Allows to automatically instantiate createClient with right options
   // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
   __InternalSupabase: {
-    PostgrestVersion: "14.5"
+    PostgrestVersion: "14.17"
   }
   public: {
     Tables: {
@@ -1604,6 +1604,56 @@ export type Database = {
           },
         ]
       }
+      board_minutes_drafts: {
+        Row: {
+          batch_id: string | null
+          completed_at: string | null
+          consumed_at: string | null
+          created_at: string
+          data_json: Json | null
+          error: string | null
+          id: string
+          meeting_id: string
+          requested_by: string | null
+          requested_by_email: string | null
+          status: string
+        }
+        Insert: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Update: {
+          batch_id?: string | null
+          completed_at?: string | null
+          consumed_at?: string | null
+          created_at?: string
+          data_json?: Json | null
+          error?: string | null
+          id?: string
+          meeting_id?: string
+          requested_by?: string | null
+          requested_by_email?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
+            columns: ["meeting_id"]
+            isOneToOne: true
+            referencedRelation: "board_meetings"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       board_meetings: {
         Row: {
           agenda_html: string | null
@@ -1672,63 +1722,6 @@ export type Database = {
             columns: ["event_id"]
             isOneToOne: false
             referencedRelation: "events"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
-      board_minutes_drafts: {
-        Row: {
-          batch_id: string | null
-          completed_at: string | null
-          consumed_at: string | null
-          created_at: string
-          data_json: Json | null
-          error: string | null
-          id: string
-          meeting_id: string
-          requested_by: string | null
-          requested_by_email: string | null
-          status: string
-        }
-        Insert: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Update: {
-          batch_id?: string | null
-          completed_at?: string | null
-          consumed_at?: string | null
-          created_at?: string
-          data_json?: Json | null
-          error?: string | null
-          id?: string
-          meeting_id?: string
-          requested_by?: string | null
-          requested_by_email?: string | null
-          status?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "board_minutes_drafts_meeting_id_fkey"
-            columns: ["meeting_id"]
-            isOneToOne: true
-            referencedRelation: "board_meetings"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "board_minutes_drafts_requested_by_fkey"
-            columns: ["requested_by"]
-            isOneToOne: false
-            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
         ]
