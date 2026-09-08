@@ -64,8 +64,8 @@ export default async function RootLayout({
     : false;
 
   // True for any user who has a qualifying persona (all 4 journeys)
-
-  const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
+  const serverHasOnboarding =
+    serverAuth.user != null && serverAuth.organizations.length > 0;
 
   return (
     <html lang="en">

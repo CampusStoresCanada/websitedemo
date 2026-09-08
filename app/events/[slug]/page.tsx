@@ -12,13 +12,7 @@ import TicketSelector from "@/components/events/TicketSelector";
 import EventDetailBanner from "@/components/events/EventDetailBanner";
 import OrgMemberRegistrationPanel from "@/components/events/OrgMemberRegistrationPanel";
 import BoardMeetingSection from "@/components/events/BoardMeetingSection";
-import { getBoardRenewalReport } from "@/lib/renewal/board-report";
-import { getRenewalSnapshot, getRenewalDelta } from "@/lib/renewal/snapshot";
-import { getAssignableBoardMembers, getAssignmentsByOrg } from "@/lib/renewal/outreach";
-import type { AssignableMember } from "@/lib/renewal/outreach";
-import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
-import type { BoardRenewalReport } from "@/lib/renewal/board-report";
-import { DateTimeRange } from "@/components/ui/LocalDate";
+import LocalDate from "@/components/ui/LocalDate";
 
 export const revalidate = 30;
 
@@ -93,11 +87,6 @@ export default async function EventDetailPage({
   const isPublic    = event.audience_mode === "public";
   const isBoardOnly = event.audience_mode === "board";
   const canViewFull = isPublic || isAuthenticated;
-  // A completed event is readable but closed. Registration actions refuse
-  // anything that is not 'published' (lib/actions/event-registration.ts:53,
-  // :497), so showing the controls here would only offer a button that errors
-  // — or, for cancellation, act on an event that has already happened.
-  const isOpenForRegistration = event.status === "published";
 
   // Board meeting data — admin-only, fetched if this event has a linked board meeting
   const isBoardAdmin = authCtx ? isGlobalAdmin(authCtx.globalRole) : false;
@@ -109,11 +98,6 @@ export default async function EventDetailPage({
     docs:           { id: string; title: string; document_type: string; mime_type: string | null; file_size_bytes: number | null }[];
     profiles:       { id: string; display_name: string | null }[];
     financialReport: ComparativeReport | null;
-    renewalReport:  BoardRenewalReport | null;
-    renewalSnapshot: RenewalSnapshot | null;
-    renewalDelta:   RenewalDelta | null;
-    assignableMembers: AssignableMember[];
-    assignmentsByOrg:  Record<string, string>;
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -131,7 +115,7 @@ export default async function EventDetailPage({
     if (meeting) {
       const reportPeriod = getLastFullMonth(meeting.meeting_date);
 
-      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, renewalReport, renewalSnapshot, assignableMembers, { data: prevMeetingRow }] = await Promise.all([
+      const [{ data: actionItems }, { data: docs }, { data: profiles }, financialReport, { data: prevMeetingRow }] = await Promise.all([
         adminDb
           .from("board_action_items")
           .select("id, title, description, assignees, due_date, status, sort_order, complete_token")
@@ -149,10 +133,6 @@ export default async function EventDetailPage({
           .select("id, display_name")
           .in("global_role", ["admin", "super_admin"]),
         getMeetingFinancialReport(meeting.id),
-        // Null outside the board renewal window — hides the Renewals tab entirely.
-        getBoardRenewalReport(meeting.meeting_date),
-        getRenewalSnapshot(meeting.id),
-        getAssignableBoardMembers(adminDb),
         // Previous meeting (for Past Meeting subtab in Minutes)
         adminDb
           .from("board_meetings")
@@ -172,32 +152,13 @@ export default async function EventDetailPage({
         docs:            docs ?? [],
         profiles:        profiles ?? [],
         financialReport: financialReport ?? null,
-        renewalReport:   renewalReport ?? null,
-        renewalSnapshot: renewalSnapshot ?? null,
-        assignableMembers: assignableMembers ?? [],
-        // Live, never off the snapshot — see getAssignmentsByOrg.
-        assignmentsByOrg: renewalReport
-          ? await getAssignmentsByOrg(adminDb, renewalReport.renewalYear)
-          : {},
-        // Delta is computed against whichever figures are being shown — the
-        // frozen ones if this meeting has a snapshot, otherwise live.
-        renewalDelta:    renewalReport
-          ? await getRenewalDelta({
-              meetingId: meeting.id,
-              meetingDate: meeting.meeting_date,
-              renewalYear: (renewalSnapshot?.report ?? renewalReport).renewalYear,
-              current: renewalSnapshot?.report ?? renewalReport,
-            })
-          : null,
         reportPeriod,
       };
     }
   }
 
   return (
-    // Board meetings carry wide material (comparative financial tables, action-item
-    // grids) that is unreadable in the 4xl content column sized for ordinary events.
-    <div className={`${boardMeetingData ? "max-w-6xl" : "max-w-4xl"} mx-auto px-4 sm:px-6 py-12`}>
+    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-12">
       <div className="mb-6">
         <Link
           href="/events"
@@ -274,6 +235,20 @@ export default async function EventDetailPage({
             </div>
           ) : null}
 
+          {/* Board Meeting Materials — sits in the content column, admin-only */}
+          {boardMeetingData && (
+            <BoardMeetingSection
+              meeting={boardMeetingData.meeting}
+              prevMinutes={boardMeetingData.prevMinutes}
+              actionItems={boardMeetingData.actionItems}
+              docs={boardMeetingData.docs}
+              profiles={boardMeetingData.profiles}
+              currentUserId={authCtx?.userId ?? null}
+              financialReport={boardMeetingData.financialReport}
+              reportPeriod={boardMeetingData.reportPeriod}
+              isSA={isSA}
+            />
+          )}
         </div>
 
         {/* Sidebar */}
@@ -284,7 +259,12 @@ export default async function EventDetailPage({
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-1">
                 Date & Time
               </p>
-              <DateTimeRange start={event.starts_at} end={event.ends_at} />
+              <p className="text-sm text-gray-700 font-medium"><LocalDate iso={event.starts_at} /></p>
+              {event.ends_at && (
+                <p className="text-sm text-gray-500 mt-0.5">
+                  Until <LocalDate iso={event.ends_at} />
+                </p>
+              )}
             </div>
 
             {/* Location — in-person only; virtual events use the Join button */}
@@ -332,14 +312,7 @@ export default async function EventDetailPage({
             )}
 
             {/* Registration CTA */}
-            {!isOpenForRegistration ? (
-              <div className="rounded-lg bg-gray-100 px-4 py-3 text-center">
-                <p className="text-sm font-medium text-gray-600">This event has finished</p>
-                {event.user_registration_status === "registered" && (
-                  <p className="text-xs text-gray-500 mt-0.5">You attended.</p>
-                )}
-              </div>
-            ) : hasTickets && !event.user_registration_status ? (
+            {hasTickets && !event.user_registration_status ? (
               <TicketSelector
                 eventId={event.id}
                 available={tickets!.available}
@@ -355,12 +328,12 @@ export default async function EventDetailPage({
                 isAuthenticated={isAuthenticated}
                 isMembersOnly={!isPublic}
                 isVirtual={event.is_virtual}
-                meetLink={event.virtual_link ?? event.google_meet_link}
+                meetLink={event.virtual_link}
               />
             )}
 
             {/* Org admin: register members from their org */}
-            {isOpenForRegistration && orgAdminOrgId && orgAdminOrgName && (
+            {orgAdminOrgId && orgAdminOrgName && (
               <OrgMemberRegistrationPanel
                 eventId={event.id}
                 orgId={orgAdminOrgId}
@@ -380,28 +353,6 @@ export default async function EventDetailPage({
           </div>
         </div>
       </div>
-
-      {/* Board Meeting Materials — full page width, outside the 2-col grid.
-          Financial tables and action-item grids need the room; admin-only. */}
-      {boardMeetingData && (
-        <BoardMeetingSection
-          meeting={boardMeetingData.meeting}
-          prevMinutes={boardMeetingData.prevMinutes}
-          actionItems={boardMeetingData.actionItems}
-          docs={boardMeetingData.docs}
-          profiles={boardMeetingData.profiles}
-          currentUserId={authCtx?.userId ?? null}
-          financialReport={boardMeetingData.financialReport}
-          renewalReport={boardMeetingData.renewalReport}
-          renewalSnapshot={boardMeetingData.renewalSnapshot}
-          renewalDelta={boardMeetingData.renewalDelta}
-          assignableMembers={boardMeetingData.assignableMembers}
-          assignmentsByOrg={boardMeetingData.assignmentsByOrg}
-          eventSlug={slug}
-          reportPeriod={boardMeetingData.reportPeriod}
-          isSA={isSA}
-        />
-      )}
 
       {/* Who's Coming */}
       {attendeeData && attendeeData.total > 0 && (

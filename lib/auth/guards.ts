@@ -4,7 +4,6 @@ import { unstable_rethrow } from "next/navigation";
 import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { CAPABILITY } from "@/lib/constants/capabilities";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import type { GlobalRole, UserOrganization, UserProfile } from "./types";
 
@@ -16,10 +15,8 @@ export interface AuthContext {
   userEmail: string | null;
   globalRole: GlobalRole;
   isBenchmarkingReviewer: boolean;
-  /** Narrower than isBenchmarkingReviewer: content review only, not QA verify. */
   isBenchmarkingContentReviewer: boolean;
-  /** Every capability held right now. Surfaces that gate on something other
-   *  than the two benchmarking flags read this rather than growing a boolean. */
+  /** Every capability held right now, for checks with no dedicated flag. */
   capabilities: string[];
   orgAdminOrgIds: string[];
   activeOrgIds: string[];
@@ -61,9 +58,7 @@ export type IdentitySnapshot =
       profileError: unknown;
       organizations: UserOrganization[] | null;
       orgsError: unknown;
-      /** Capabilities resolved from governance_role_assignments. Empty rather
-       *  than null on failure — a capability is a grant, so the safe direction
-       *  when we cannot resolve one is "not held". */
+      /** Capabilities held right now via unexpired, unrevoked grants. */
       capabilities: string[];
     };
 
@@ -83,17 +78,22 @@ export const getIdentitySnapshot = cache(
       return { status: "anonymous" };
     }
 
-  let profileResult: { data: UserProfile | null; error: unknown } | null = null;
-  let orgsResult: { data: UserOrganization[] | null; error: unknown } | null = null;
-  let capabilities: string[] = [];
+    let profileResult: { data: UserProfile | null; error: unknown } | null =
+      null;
+    let orgsResult: { data: UserOrganization[] | null; error: unknown } | null =
+      null;
 
-  for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
-    const [profileRes, orgsRes, capsRes] = await Promise.all([
-      client.from("profiles").select("*").eq("id", userId).maybeSingle(),
-      client
-        .from("user_organizations")
-        .select(
-          `
+    let grantsResult: {
+      data: string[] | { capability: string }[] | null;
+    } | null = null;
+
+    for (let attempt = 1; attempt <= AUTHZ_QUERY_RETRIES; attempt += 1) {
+      const [profileRes, orgsRes, grantsRes] = await Promise.all([
+        client.from("profiles").select("*").eq("id", userId).maybeSingle(),
+        client
+          .from("user_organizations")
+          .select(
+            `
           id,
           user_id,
           organization_id,
@@ -101,22 +101,27 @@ export const getIdentitySnapshot = cache(
           status,
           created_at,
           organization:organizations(id, name, type, slug, logo_url, is_cancoll_member, membership_status, memberships(status, program_key))
-        `
-        )
-        .eq("user_id", userId)
-        .eq("status", "active"),
-      // Capabilities come from governance_role_assignments via a SECURITY
-      // DEFINER function, NOT from a flag on profiles. Roles are the single
-      // place authority is recorded, so a capability follows the office and
-      // expires with the term instead of needing to be revoked by hand.
-      client.rpc("current_capabilities", { p_subject: userId }),
-    ]);
+        `,
+          )
+          .eq("user_id", userId)
+          .eq("status", "active"),
+        // Capabilities follow the roles a person currently holds — see
+        // governance_role_capabilities. Rides along on the existing round
+        // trip, so no extra latency.
+        client.rpc("current_capabilities", { p_subject: userId }),
+      ]);
 
-    profileResult = profileRes as unknown as { data: UserProfile | null; error: unknown };
-    orgsResult = orgsRes as unknown as { data: UserOrganization[] | null; error: unknown };
-    // Deliberately not part of the retry condition below: a capability lookup
-    // that fails should degrade to "holds nothing", never block sign-in.
-    capabilities = Array.isArray(capsRes.data) ? (capsRes.data as string[]) : [];
+      profileResult = profileRes as unknown as {
+        data: UserProfile | null;
+        error: unknown;
+      };
+      orgsResult = orgsRes as unknown as {
+        data: UserOrganization[] | null;
+        error: unknown;
+      };
+      grantsResult = grantsRes as unknown as {
+        data: string[] | { capability: string }[] | null;
+      };
 
       if (!profileRes.error && !orgsRes.error) {
         break;
@@ -128,19 +133,28 @@ export const getIdentitySnapshot = cache(
       }
     }
 
-  return {
-    status: "resolved",
-    userId,
-    userEmail,
-    profile: profileResult?.error ? null : (profileResult?.data ?? null),
-    profileError: profileResult?.error ?? null,
-    capabilities,
-    organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
-    orgsError: orgsResult?.error ?? null,
-  };
-});
+    return {
+      status: "resolved",
+      userId,
+      userEmail,
+      profile: profileResult?.error ? null : (profileResult?.data ?? null),
+      profileError: profileResult?.error ?? null,
+      organizations: orgsResult?.error ? null : (orgsResult?.data ?? []),
+      orgsError: orgsResult?.error ?? null,
+      capabilities: Array.from(
+        new Set(
+          (grantsResult?.data ?? []).map((g) =>
+            typeof g === "string" ? g : g.capability,
+          ),
+        ),
+      ),
+    };
+  },
+);
 
-async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | null> {
+async function loadAuthContext(
+  supabase?: AppSupabase,
+): Promise<AuthContext | null> {
   const snapshot = await getIdentitySnapshot();
 
   if (snapshot.status === "anonymous") {
@@ -158,22 +172,14 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
 
   const client = supabase ?? (await createClient());
   const organizations = snapshot.organizations ?? [];
-  const globalRole = (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
-  // Resolved from the benchmarking_reviewer role via governance_role_capabilities
-  // — the same mechanism the Benchmarking Committee and Nominating Committee
-  // already use. There is no is_benchmarking_reviewer column; a previous
-  // version of this line read one that was never created, so this was
-  // permanently false and only global admins could ever review.
-  // Either capability lets you into the reviewer surfaces at all.
-  const isBenchmarkingReviewer =
-    snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview) ||
-    snapshot.capabilities.includes(CAPABILITY.benchmarkingQaVerify);
-  // Content review is the narrower right, and the question-review surfaces ask
-  // it specifically: someone who verifies submitted figures is not thereby
-  // entitled to rewrite the questions. Kept separate rather than folded into
-  // the flag above, because collapsing them would silently widen QA verifiers.
-  const isBenchmarkingContentReviewer = snapshot.capabilities.includes(
-    CAPABILITY.benchmarkingContentReview,
+  const globalRole =
+    (snapshot.profile?.global_role as GlobalRole | null) ?? "user";
+  const capabilities = snapshot.capabilities ?? [];
+  const isBenchmarkingReviewer = capabilities.includes(
+    "benchmarking.qa_verify",
+  );
+  const isBenchmarkingContentReviewer = capabilities.includes(
+    "benchmarking.content_review",
   );
   const activeOrgIds = organizations.map((uo) => uo.organization_id);
   const orgAdminOrgIds = organizations
@@ -187,7 +193,7 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     globalRole,
     isBenchmarkingReviewer,
     isBenchmarkingContentReviewer,
-    capabilities: snapshot.capabilities,
+    capabilities,
     orgAdminOrgIds,
     activeOrgIds,
   };
