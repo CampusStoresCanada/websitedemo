@@ -381,12 +381,35 @@ export function AuthProvider({
      * keeps working unchanged, but every query below honours it when given —
      * otherwise a cancelled attempt would still hold four requests open.
      */
-    async (userId: string, signal?: AbortSignal) => {
+    async (userId: string, signal?: AbortSignal, timings?: Record<string, number>) => {
+      /**
+       * ⚠️ Per-call timing, because "fetchUserData timed out after 2500ms" says
+       * nothing about WHICH of the four calls was slow — and the database is not
+       * the answer: the RPC measures 30ms and the org query 2.7ms with RLS
+       * applied, with Postgres hoisting the auth.uid() checks into InitPlans that
+       * never execute. Something between the browser and that is spending the
+       * budget, and one aggregate number cannot say what.
+       *
+       * Recorded into a caller-owned object rather than returned, so the numbers
+       * survive the timeout that discards this promise — which is exactly the
+       * case worth seeing.
+       */
+      // ⚠️ PromiseLike, not Promise: supabase-js query builders are thenables and
+      // only become promises when awaited.
+      const mark = async <T,>(label: string, work: PromiseLike<T>): Promise<T> => {
+        const started = performance.now();
+        try {
+          return await work;
+        } finally {
+          if (timings) timings[label] = Math.round(performance.now() - started);
+        }
+      };
+
       const [profileResult, orgsResult, grantsResult] = await Promise.all([
-        supabase.from("profiles").select("*").eq("id", userId)
+        mark("profiles", supabase.from("profiles").select("*").eq("id", userId)
           .abortSignal(signal as AbortSignal)
-          .single(),
-        supabase
+          .single()),
+        mark("orgs", supabase
           .from("user_organizations")
           .select(
             `
@@ -401,10 +424,10 @@ export function AuthProvider({
           )
           .eq("user_id", userId)
           .eq("status", "active")
-          .abortSignal(signal as AbortSignal),
+          .abortSignal(signal as AbortSignal)),
         // Capabilities follow the roles this person currently holds.
-        supabase.rpc("current_capabilities", { p_subject: userId })
-          .abortSignal(signal as AbortSignal),
+        mark("capabilities", supabase.rpc("current_capabilities", { p_subject: userId })
+          .abortSignal(signal as AbortSignal)),
       ]);
 
       if (profileResult.error || orgsResult.error) {
@@ -618,9 +641,14 @@ export function AuthProvider({
 
       let fetched = false;
       for (let attempt = 1; attempt <= MAX_PERMISSION_RETRIES; attempt++) {
+        // ⚠️ Owned by the CALLER so it survives the timeout that throws away the
+        // promise. A per-call breakdown of a failed attempt is the only thing
+        // that can say where a 2,500ms budget went, and the aggregate message
+        // cannot.
+        const timings: Record<string, number> = {};
         try {
           await withTimeout(
-            (signal) => fetchUserData(session.user.id, signal),
+            (signal) => fetchUserData(session.user.id, signal, timings),
             AUTH_FETCH_TIMEOUT_MS,
             "fetchUserData",
           );
@@ -641,6 +669,9 @@ export function AuthProvider({
           console.warn("[AuthProvider] fetchUserData attempt failed:", {
             attempt,
             isLastAttempt,
+            // Which call was slow, and whether any finished at all. A call that
+            // never appears here did not settle before the deadline.
+            timings,
             err: errorDetails,
             errorText,
           });
