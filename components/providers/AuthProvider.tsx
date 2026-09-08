@@ -12,7 +12,6 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/auth/with-timeout";
 import { derivePermissionState } from "@/lib/auth/permissions";
-import { CAPABILITY } from "@/lib/constants/capabilities";
 import type { User } from "@supabase/supabase-js";
 import type {
   GlobalRole,
