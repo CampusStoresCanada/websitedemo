@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
-import { requireAuthenticated } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { sendCircleNotification } from "@/lib/circle/notifications";
 import { sendEmail } from "@/lib/email/send";
@@ -86,10 +86,45 @@ export interface MarketData {
 
 // ── Main query ────────────────────────────────────────────────────────────────
 
+/**
+ * ⛔ AUTHORIZE HERE, not only in the page.
+ *
+ * This module is `"use server"`, so every export is a callable endpoint, and this
+ * one takes an org id as an argument. The org page checked the viewer before
+ * calling it — but nothing made a caller go through the page. Any authenticated
+ * user could ask for any partner's market and receive their ranked prospect list
+ * with buyer names and email addresses: a partner-tier perk, handed to anyone
+ * with a login.
+ *
+ * ⛔ Scoped to the ORG — `activeOrgIds`, not `orgAdminOrgIds`. Anyone at the
+ * partner with live access may READ their market; rating it is a separate,
+ * admin-only act. Collapsing the two here would quietly take the panel away from
+ * every non-admin who uses it today.
+ *
+ * ⚠️ DELIBERATELY does NOT also require the org's access to be live, even though
+ * the org page does. That is a policy question, not this exposure: the hole is
+ * that OTHER people could read a partner's market, not that a lapsed partner can
+ * still read their own. Adding it here would silently remove the panel from 6
+ * people at 4 canceled partner orgs — and `app/me/page.tsx` calls this in a loop
+ * that swallows failures with `if (!result.success) continue`, so they would lose
+ * it with no error and no explanation. Bundling a behaviour change into a
+ * security patch is how the security patch gets reverted.
+ */
 export async function getPartnerMarketData(
   partnerOrgId: string,
   partnerCategoryString: string | null
 ): Promise<{ success: boolean; data?: MarketData; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: "Not signed in" };
+
+  const allowed =
+    isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(partnerOrgId);
+  if (!allowed) {
+    // ⚠️ Same shape as "nothing here". A refusal that named the org would confirm
+    // it exists and has a market worth withholding.
+    return { success: false, error: "Not available" };
+  }
+
   const { parents: partnerParents, subcategories: partnerSubs } =
     parseCategories(partnerCategoryString);
 
@@ -257,6 +292,12 @@ export async function checkNudgeCooldown(): Promise<{
   lastSentAt?: string;
   availableAt?: string;
 }> {
+  // ⚠️ Reads a GLOBAL cooldown log so it leaks little, but it is an export of a
+  // "use server" module and had no check at all. Closed alongside its sibling
+  // rather than leaving one door open in a file whose others are now locked.
+  const cooldownAuth = await requireAuthenticated();
+  if (!cooldownAuth.ok) return { canSend: false };
+
   const db = createAdminClient();
   const cutoff = new Date(Date.now() - NUDGE_COOLDOWN_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
