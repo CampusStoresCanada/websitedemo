@@ -26,12 +26,30 @@ export function eligibleTiers(offer: BuildEntity, byId: Map<string, BuildEntity>
   return [...tiers];
 }
 
+/**
+ * Every tier a buyer effectively satisfies.
+ *
+ * ⛔ Staff satisfy `member`. CSC's own staff function as members inside this
+ * organisation, so giving them their own tier must not quietly take capability
+ * away: without this, naming Staff would lock them out of the six member-gated
+ * offers — both $99 socials, all three day passes and Full Conference
+ * Registration — which is a reduction nobody asked for and which fails silently
+ * at the point of purchase.
+ *
+ * The alternative was adding a Staff audience to the `who` of every member
+ * offer. That is six catalogue edits today and one forgotten edit every time
+ * somebody adds a member offer later. This is the rule stated once.
+ */
+export function effectiveBuyerTiers(buyerTier: string): string[] {
+  return buyerTier === "staff" ? ["staff", "member"] : [buyerTier];
+}
+
 /** Can a buyer of the given permission tier purchase this Offer? */
 export function canBuy(offer: BuildEntity, buyerTier: string, byId: Map<string, BuildEntity>): Eligibility {
   if (!offer.isForSale) return { ok: false, reason: "Not for sale." };
   const tiers = eligibleTiers(offer, byId);
   if (tiers.length === 0) return { ok: true }; // open to all
-  if (tiers.includes(buyerTier)) return { ok: true };
+  if (effectiveBuyerTiers(buyerTier).some((tier) => tiers.includes(tier))) return { ok: true };
   return { ok: false, reason: `Only ${tiers.join(", ")} can buy this.` };
 }
 
