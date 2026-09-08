@@ -658,6 +658,17 @@ export function AuthProvider({
         // that can say where a 2,500ms budget went, and the aggregate message
         // cannot.
         const timings: Record<string, number> = {};
+        /**
+         * ⛔ Counted BEFORE, read after. The question the timings alone cannot
+         * answer is whether the three requests were ever DISPATCHED — a call that
+         * never reaches the network is a client-side stall, one that reaches it
+         * and is never handled is a response-handling bug, and they need
+         * different fixes. Resource Timing only records requests the browser
+         * actually issued, so the delta across a failed attempt separates them.
+         */
+        const restBefore = typeof performance !== "undefined"
+          ? performance.getEntriesByType("resource").filter((e) => e.name.includes("/rest/v1/")).length
+          : -1;
         try {
           await withTimeout(
             (signal) => fetchUserData(session.user.id, signal, timings),
@@ -678,9 +689,32 @@ export function AuthProvider({
                 ? err.message
                 : String(err ?? "unknown error");
 
+          const restAfter = typeof performance !== "undefined"
+            ? performance.getEntriesByType("resource").filter((e) => e.name.includes("/rest/v1/")).length
+            : -1;
+          /**
+           * ⚠️ Locks read AT THE FAILURE, not afterwards. supabase-js serialises
+           * token refresh through navigator.locks; a query that needs a token
+           * queues behind whoever holds it. Sampling once the page is idle shows
+           * an empty list and proves nothing — the contention, if any, exists
+           * only while the call is stuck.
+           */
+          let locks = "unread";
+          try {
+            const q = await navigator.locks.query();
+            locks = [
+              ...(q.held ?? []).map((l) => `HELD:${l.name}`),
+              ...(q.pending ?? []).map((l) => `WAIT:${l.name}`),
+            ].join(",") || "none";
+          } catch { /* not supported; leave as unread */ }
+
           console.warn("[AuthProvider] fetchUserData attempt failed:", {
             attempt,
             isLastAttempt,
+            // dispatched > 0 = the requests went out and were never handled.
+            // dispatched === 0 = they never left the client.
+            dispatched: restAfter - restBefore,
+            locks,
             // Which call was slow, and whether any finished at all. A call that
             // never appears here did not settle before the deadline.
             timings,
@@ -732,10 +766,25 @@ export function AuthProvider({
         data: { user: fallbackUser },
         error: fallbackUserError,
       } = await withTimeout(
+        // ⚠️ Timed because this is the suspected culprit: an auth call that hangs
+        // while holding GoTrue's internal lock would block every later query
+        // before it reaches the network, which matches all three observations —
+        // calls start, never dispatch, and the abort does nothing because there
+        // is no in-flight fetch to cancel.
         // ⚠️ supabase-js auth methods accept no abort signal, so this one still
         // only races. Called once on a recovery path rather than retried three
         // times, so it cannot pile up the way fetchUserData did.
-        () => supabase.auth.getUser(),
+        async () => {
+          const t0 = performance.now();
+          try {
+            return await supabase.auth.getUser();
+          } finally {
+            const ms = Math.round(performance.now() - t0);
+            // Only worth a line when it is the problem. A fast getUser is noise;
+            // a slow one is the whole theory.
+            if (ms > 500) console.warn(`[AuthProvider] getUser took ${ms}ms`);
+          }
+        },
         AUTH_FETCH_TIMEOUT_MS,
         "getUser",
       );
