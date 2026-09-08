@@ -48,6 +48,8 @@ export default function ConferenceForm({
   const [endDate, setEndDate] = useState(conference?.end_date ?? "");
   const [registrationOpenAt, setRegistrationOpenAt] = useState(conference?.registration_open_at ?? "");
   const [registrationCloseAt, setRegistrationCloseAt] = useState(conference?.registration_close_at ?? "");
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const [scheduleFreezeAt, setScheduleFreezeAt] = useState((conference as any)?.schedule_freeze_at ?? "");
   const [boothSalesGeneralOpenAt, setBoothSalesGeneralOpenAt] = useState(
     conference?.booth_sales_general_open_at ?? ""
   );
@@ -143,6 +145,7 @@ export default function ConferenceForm({
       end_date: endDate || null,
       registration_open_at: registrationOpenAt || null,
       registration_close_at: registrationCloseAt || null,
+      schedule_freeze_at: scheduleFreezeAt || null,
       booth_sales_general_open_at: boothSalesGeneralOpenAt || null,
     };
 
@@ -271,6 +274,19 @@ export default function ConferenceForm({
           <div>
             <label className="block text-xs text-gray-500 mb-1">Registration Closes</label>
             <input type="datetime-local" value={registrationCloseAt ? utcToLocalInput(registrationCloseAt) : ""} onChange={(e) => setRegistrationCloseAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+          </div>
+          <div>
+            <label className="block text-xs text-gray-500 mb-1">Meeting Schedule Freezes</label>
+            <input type="datetime-local" value={scheduleFreezeAt ? utcToLocalInput(scheduleFreezeAt) : ""} onChange={(e) => setScheduleFreezeAt(e.target.value ? new Date(e.target.value).toISOString() : "")} className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-1 focus:ring-accent" />
+            <p className="mt-1 text-[11px] text-gray-400">
+              When schedules go out and stop being re-solved. After this, a late registrant is added to
+              an existing meeting rather than the whole schedule being rebuilt — rebuilding would move
+              people who have already been told their day. Leave blank if nothing is frozen yet.
+            </p>
+            <p className="mt-1 text-[11px] text-gray-400">
+              Set it BEFORE registration closes, not after: anyone registering between the two dates
+              needs the late-add path.
+            </p>
           </div>
           <div>
             <label className="block text-xs text-gray-500 mb-1">Vendor / Booth Sales Open</label>

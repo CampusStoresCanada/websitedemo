@@ -151,6 +151,10 @@ const CONFERENCE_UPDATE_FIELDS = [
   "end_date",
   "registration_open_at",
   "registration_close_at",
+  // ⚠️ A field absent from this list is dropped SILENTLY — the form saves, the
+  // toast says saved, and the value never lands. Adding an input without adding
+  // it here looks exactly like a working feature.
+  "schedule_freeze_at",
   "on_sale_at",
   "board_decision_at",
   "booth_sales_general_open_at",
