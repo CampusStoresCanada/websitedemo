@@ -548,14 +548,58 @@ const label = (id: string) =>
   id.startsWith("org:") ? (orgName.get(id.slice(4)) ?? id)
   : `${contactName.get(id.slice(7)) ?? "?"} (${orgName.get(contactOrg.get(id.slice(7)) ?? "") ?? "?"})`;
 
-const rows: {
+type Row = {
   subject: string; candidate: string; sim: number; score: number; conf: number;
   bestSim: number | null; bestText: string | null;
-}[] = [];
-for (const subj of [...memberPeople, ...memberOrgs]) {
+  direction: "member_to_partner" | "partner_to_member";
+  /**
+   * ⛔ How well the CANDIDATE is placed, not just the subject.
+   *
+   * The edge carried only the subject's confidence, so for partner_to_member
+   * every row shared one number and nothing said how much we actually know about
+   * the store being recommended. New Brunswick Community College — no
+   * description, no categories, ONE act to its name — ranked #1 for thirteen of
+   * eighty partners, and no consumer could tell it apart from Calgary with 254.
+   *
+   * ⚠️ A vector built from almost nothing lands near the middle of the space, and
+   * the middle is close to everything. That is the hub effect, and it looks
+   * exactly like a strong match until you ask what it was built from. This is the
+   * same failure as the old scorer's score=100/confidence=0.03, reproduced.
+   */
+  candConf: number;
+  /** Similarity after shrinking toward the typical pair by candidate confidence. */
+  simAdj: number;
+};
+
+/**
+ * ⛔ BOTH DIRECTIONS, ranked separately — never one transposed into the other.
+ *
+ * Cosine is symmetric, so it is tempting to compute member→partner once and read
+ * it backwards. The similarity survives that; the RANKING does not. A member's
+ * 25 nearest partners is a different set from a partner's 50 nearest members, and
+ * `rank` is per subject. Transposing would hand a partner a list ordered by how
+ * much each member matters to OTHER partners.
+ *
+ * ⚠️ The partner page (`Your Market`) reads `partner_to_member` and nothing else.
+ * Until now the engine wrote only `member_to_partner`, so promoting one of its
+ * runs would have emptied that page for every partner — silently, because the
+ * reader treats an empty result as a real answer rather than falling back.
+ *
+ * Candidates there are member ORGS, not people: the panel renders a store and
+ * resolves its buyer from `category_buyers` separately. Member orgs are pooled
+ * from their people's acts, so a store places even when it never wrote anything.
+ */
+const rows: Row[] = [];
+const addRows = (
+  subjects: Placed[],
+  candidates: Placed[],
+  k: number,
+  direction: Row["direction"]
+) => {
+for (const subj of subjects) {
   const acts = actsOf.get(subj.id) ?? [];
-  for (const n of nearest(subj, partnerOrgs, { k: 25 })) {
-    const candidate = partnerOrgs.find((p) => p.id === n.id)!;
+  for (const n of nearest(subj, candidates, { k })) {
+    const candidate = candidates.find((p) => p.id === n.id)!;
     // ⛔ The single strongest thing they said about this candidate — the number
     // AND the sentence. Waterloo's pooled position reaches 0.27 against RAINS
     // while Ana's post about Roots reaches 0.6: the evidence was always there,
@@ -564,14 +608,69 @@ for (const subj of [...memberPeople, ...memberOrgs]) {
     rows.push({
       subject: subj.id, candidate: n.id, sim: n.similarity, score: 0,
       conf: placementConfidence(subj),
+      candConf: placementConfidence(candidate),
+      simAdj: 0, // filled once the run's typical similarity is known
+
       bestSim: best?.similarity ?? null,
       bestText: best ? acts[best.index].text.slice(0, 300) : null,
+      direction,
     });
   }
 }
-// Scale to this run's own spread rather than a band fitted to a previous one.
-const scale = calibrate(rows.map((r) => r.sim));
-for (const r of rows) r.score = scale(r.sim);
+};
+
+addRows([...memberPeople, ...memberOrgs], partnerOrgs, 25, "member_to_partner");
+// 50 to match what the partner panel renders, so its list is never truncated by
+// the engine rather than by the surface that knows how many it wants.
+addRows(partnerOrgs, memberOrgs, 50, "partner_to_member");
+
+/**
+ * ⛔ SHRINK toward the middle by how much evidence the candidate's position rests
+ * on — do not multiply by it.
+ *
+ * A vector built from almost nothing lands near the centre of the space, and the
+ * centre is close to everything. That is the hub effect, and it is not a modest
+ * bias: eight member orgs placed from under 0.2 confidence took 31 of 80 top
+ * slots, while forty-five well-placed orgs took 34. Per edge, a barely-placed
+ * store was five times likelier to rank #1. New Brunswick Community College —
+ * one act, no description, no categories — was top for thirteen partners.
+ *
+ * ⚠️ Multiplying by confidence would be the obvious fix and the wrong one. It
+ * makes "we know nothing about them" mean "they are a bad match", pushing sparse
+ * orgs to the BOTTOM. That is a different error, not a correction: a store we
+ * have no data on is not a poor prospect, it is an unremarkable one. Shrinkage
+ * says exactly that — with little evidence, regress toward what a typical pair
+ * looks like rather than trusting an estimate built on one sentence.
+ *
+ *     adjusted = conf * observed + (1 - conf) * typical
+ *
+ * At conf 0.11 a store lands essentially at the median whatever its raw cosine;
+ * at conf 0.97 it is left alone. ⛔ The candidate's confidence, not the
+ * subject's: the subject's applies equally to all of its edges and so cannot
+ * change the order of its own list, which is what a surface renders.
+ *
+ * ⚠️ Per direction. member→partner and partner→member have different similarity
+ * distributions, so one shared "typical" would drag one direction toward the
+ * other's centre.
+ */
+const typicalByDirection = new Map<Row["direction"], number>();
+for (const d of ["member_to_partner", "partner_to_member"] as Row["direction"][]) {
+  typicalByDirection.set(d, median(rows.filter((r) => r.direction === d).map((r) => r.sim)));
+}
+for (const r of rows) {
+  const typical = typicalByDirection.get(r.direction) ?? 0;
+  r.simAdj = r.candConf * r.sim + (1 - r.candConf) * typical;
+}
+
+/**
+ * ⚠️ ONE scale across both directions, not one per direction.
+ *
+ * Calibrating separately would make 80 mean "top fifth of member→partner" in one
+ * row and "top fifth of partner→member" in the next, so no consumer could compare
+ * two edges or apply a single threshold. One run, one meaning.
+ */
+const scale = calibrate(rows.map((r) => r.simAdj));
+for (const r of rows) r.score = scale(r.simAdj);
 
 const sims = rows.map((r) => r.sim).sort((a, b) => a - b);
 const q = (p: number) => sims[Math.floor(sims.length * p)] ?? 0;
@@ -811,26 +910,46 @@ if (WRITE) {
   // pairs in the run, so one member's whole shortlist sits in the 98th–100th and
   // is nearly flat: the top ten of a real member span 1.3 points out of 100.
   // Similarity keeps its spread and is the only honest within-subject ordering.
+  // ⚠️ Rank per (DIRECTION, subject). A partner org is a subject in one direction
+  // and a candidate in the other; counting its ranks in one sequence would number
+  // a partner's member list starting from wherever its member→partner rows left
+  // off, and every list would silently begin at the wrong number.
   const bySubjectRank = new Map<string, number>();
-  const ranked = [...rows].sort((a, b) => b.sim - a.sim);
+  // ⛔ Rank on the ADJUSTED similarity, or the shrinkage changes the score while
+  // leaving the order untouched — a discount nobody can see and nothing acts on.
+  const ranked = [...rows].sort((a, b) => b.simAdj - a.simAdj);
   const rankOf = new Map<string, number>();
+  const rankKey = (r: Row) => `${r.direction}\u001f${r.subject}`;
   for (const r of ranked) {
-    const next = (bySubjectRank.get(r.subject) ?? 0) + 1;
-    bySubjectRank.set(r.subject, next);
-    rankOf.set(`${r.subject}\u001f${r.candidate}`, next);
+    const next = (bySubjectRank.get(rankKey(r)) ?? 0) + 1;
+    bySubjectRank.set(rankKey(r), next);
+    rankOf.set(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`, next);
   }
 
   const edges = rows.map((r) => ({
-    run_id: run!.id, direction: "member_to_partner",
+    run_id: run!.id, direction: r.direction,
     subject_org_id: r.subject.startsWith("org:") ? r.subject.slice(4) : contactOrg.get(r.subject.slice(7)),
     subject_contact_id: r.subject.startsWith("person:") ? r.subject.slice(7) : null,
-    candidate_org_id: r.candidate.slice(4),
+    // ⚠️ Candidates are org-grain in both directions today, but slice by prefix
+    // rather than assuming: a person-grain candidate would otherwise write the
+    // first 4 characters of a contact id into an org column and fail the FK.
+    candidate_org_id: r.candidate.startsWith("org:")
+      ? r.candidate.slice(4)
+      : contactOrg.get(r.candidate.slice(7)),
+    candidate_contact_id: r.candidate.startsWith("person:") ? r.candidate.slice(7) : null,
     total: Number(r.score.toFixed(2)), score: Number(r.score.toFixed(2)),
     confidence: Number(r.conf.toFixed(4)),
-    rank: rankOf.get(`${r.subject}\u001f${r.candidate}`) ?? 0,
+    rank: rankOf.get(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`) ?? 0,
     breakdown: {
+      // Raw cosine, kept alongside the adjusted value so the discount is visible
+      // rather than baked in silently.
       similarity: Number(r.sim.toFixed(6)),
+      adjustedSimilarity: Number(r.simAdj.toFixed(6)),
       bestActSimilarity: r.bestSim === null ? null : Number(r.bestSim.toFixed(6)),
+      // ⚠️ Both sides' placement confidence, so a reader can discount a match to
+      // an org we barely know instead of taking its rank at face value.
+      subjectConfidence: Number(r.conf.toFixed(4)),
+      candidateConfidence: Number(r.candConf.toFixed(4)),
     },
     // ⛔ The reason is the ACT, quoted. "Waterloo → RAINS" is a number;
     // "because Ana said their Roots sales fell 25%" is something a human can use.
