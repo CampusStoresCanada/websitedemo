@@ -53,6 +53,22 @@ export interface CirclePost {
   user: { id: number; name: string; avatar_url: string | null } | null;
 }
 
+/**
+ * A reply on a post. The half of every thread we were not reading.
+ *
+ * `user_id` is the same id space as CirclePost.user_id — the Circle USER id, not
+ * the community member id, so it needs the same hop through the member record
+ * before it can be attributed to a contact.
+ */
+export interface CircleComment {
+  id: number;
+  body: string | { body?: string } | null;
+  post_id: number;
+  user_id: number;
+  created_at: string;
+  parent_comment_id?: number | null;
+}
+
 export interface CircleSpace {
   id: number;
   name: string;
