@@ -67,12 +67,28 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
                 renewed
               </span>
             )}
+            {!entry.renewed && entry.notificationsPausedUntil && (
+              <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
+                reminders paused
+              </span>
+            )}
           </h2>
           <p className="text-xs text-gray-500 mt-0.5">
             {[entry.orgType, entry.province].filter(Boolean).join(" · ")}
             {entry.amountCents > 0 &&
               ` · ${money(entry.amountCents)} ${entry.renewed ? "paid" : "outstanding"}`}
           </p>
+          {/* The row stays on the list — the money is still outstanding and
+              the assignment still stands. But CSC has deliberately stopped
+              emailing this org, and calling them anyway is the same chase
+              through a louder channel. Whoever holds the assignment should
+              see the reason before they dial. */}
+          {!entry.renewed && entry.notificationsPausedUntil && (
+            <p className="text-xs text-amber-700 mt-1">
+              Automated reminders paused until {entry.notificationsPausedUntil}
+              {entry.pauseReason ? ` — ${entry.pauseReason}` : ""}
+            </p>
+          )}
         </div>
         {!entry.renewed && (
           <button

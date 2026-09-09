@@ -7,6 +7,7 @@ import type { MembershipProgramDef } from "@/lib/policy/types";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
+import { RenewalPauseControl, formatPauseDate } from "@/components/admin/RenewalPauseControl";
 
 const INK = "#16345a";
 const RED = "#e72a28";
@@ -177,8 +178,42 @@ function DirectoryRow({
         <div className="font-medium text-[15.5px] leading-tight" style={{ color: INK }}>
           {row.name}
         </div>
-        <OrgAdminLink row={row} onOpenDM={onOpenDM} />
+        <div className="flex items-center gap-2">
+          <OrgAdminLink row={row} onOpenDM={onOpenDM} />
+          {row.renewalPausedUntil && (
+            // Visible on the row itself, not just behind the kebab: an org
+            // that has gone quiet needs to look different from one nobody has
+            // chased yet, or the next person reads the empty contact log as
+            // neglect and starts chasing.
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+              title={row.renewalPauseReason ?? undefined}
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
+              Reminders paused to {formatPauseDate(row.renewalPausedUntil)}
+            </span>
+          )}
+        </div>
       </div>
+
+      {/* Only where a pause could actually suppress something. An org nobody
+          is chasing has nothing to pause, and a button that cannot have an
+          effect is worse than an absent one — an admin presses it and believes
+          they have stopped the mail. A paused org keeps its control even if it
+          falls out of the chase, so the pause stays visible and liftable. */}
+      {row.renewalChaseable || row.renewalPausedUntil ? (
+        <RenewalPauseControl
+          organizationId={row.id}
+          organizationName={row.name}
+          pausedUntil={row.renewalPausedUntil}
+          pauseReason={row.renewalPauseReason}
+        />
+      ) : (
+        <span className="inline-block w-7 h-7 shrink-0" />
+      )}
 
       <Link
         href={`/org/${row.slug}`}

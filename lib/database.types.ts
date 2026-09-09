@@ -8129,6 +8129,10 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
+          renewal_notifications_paused_until: string | null
+          renewal_pause_reason: string | null
+          renewal_pause_set_at: string | null
+          renewal_pause_set_by: string | null
           send_next_email: boolean | null
           show_brand_colors: boolean
           show_contacts: boolean
@@ -8238,6 +8242,10 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
+          renewal_notifications_paused_until?: string | null
+          renewal_pause_reason?: string | null
+          renewal_pause_set_at?: string | null
+          renewal_pause_set_by?: string | null
           send_next_email?: boolean | null
           show_brand_colors?: boolean
           show_contacts?: boolean
@@ -8347,6 +8355,10 @@ export type Database = {
           qbo_invoice_id?: string | null
           qbo_updated_at?: string | null
           quickbooks_customer_id?: string | null
+          renewal_notifications_paused_until?: string | null
+          renewal_pause_reason?: string | null
+          renewal_pause_set_at?: string | null
+          renewal_pause_set_by?: string | null
           send_next_email?: boolean | null
           show_brand_colors?: boolean
           show_contacts?: boolean

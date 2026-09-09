@@ -1,5 +1,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getBillingConfig, getProgramsConfig } from "@/lib/policy/engine";
+import { getCurrentRenewalSeason } from "@/lib/renewal/season";
+import { isInRenewalChase } from "@/lib/renewal/notification-pause";
 import { evaluateBucketPrice } from "@/lib/membership/pricing-core";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 
@@ -36,6 +38,14 @@ export interface RenewalDirectoryRow {
    *  conference_orders id that included a bundled membership_renewal
    *  purchase, for a Stripe receipt link instead of an invoice PDF. */
   receiptOrderId: string | null;
+  /** Inclusive last day renewal notifications are suppressed for this org,
+   *  or null when the chase is running normally. */
+  renewalPausedUntil: string | null;
+  renewalPauseReason: string | null;
+  /** True when renewal mail would actually reach this org inside the life of
+   *  a pause — see isInRenewalChase(). The pause control is hidden otherwise,
+   *  because pausing an org nothing is chasing does nothing. */
+  renewalChaseable: boolean;
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -106,11 +116,11 @@ export interface RenewalDirectory {
 export async function getRenewalDirectory(): Promise<RenewalDirectory> {
   const db = createAdminClient();
 
-  const [{ data: orgs }, billing, programs] = await Promise.all([
+  const [{ data: orgs }, billing, programs, season] = await Promise.all([
     db
       .from("organizations")
       .select(
-        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, memberships(status, fte, program_key)"
+        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, renewal_notifications_paused_until, renewal_pause_reason, memberships(status, fte, program_key)"
       )
       // Filled in once programs resolves — see below. Left broad here since
       // this destructure runs concurrently with getProgramsConfig().
@@ -120,6 +130,9 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       .order("name"),
     getBillingConfig(),
     getProgramsConfig(),
+    // The one existing reader for "are we in a renewal season, and which
+    // cycle is being billed". Not re-derived here — see isInRenewalChase().
+    getCurrentRenewalSeason(new Date()),
   ]);
 
   const programByOrgType = new Map(programs.map((p) => [p.orgTypeValue, p]));
@@ -225,6 +238,12 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       invoiceStatus: invoice?.status ?? null,
       invoicePdfUrl: invoice?.invoice_pdf_url ?? null,
       receiptOrderId: invoice ? null : (receiptOrderByOrg.get(o.id) ?? null),
+      renewalPausedUntil: o.renewal_notifications_paused_until,
+      renewalPauseReason: o.renewal_pause_reason,
+      renewalChaseable: isInRenewalChase(
+        { membershipStatus: o.membership_status, membershipExpiresAt: o.membership_expires_at },
+        season
+      ),
     };
   });
 

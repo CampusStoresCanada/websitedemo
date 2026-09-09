@@ -18,6 +18,14 @@ export interface CallListEntry {
   amountCents: number;
   /** True once a payment lands — the row stays on the list, marked done. */
   renewed: boolean;
+  /** Set when an admin has paused renewal notifications for this org — a
+   *  payment in transit, usually. The row stays on the list, because the
+   *  money is still outstanding and the assignment still stands, but the
+   *  caller should know CSC has deliberately gone quiet before they pick up
+   *  the phone. Suppressing our automated mail and then calling anyway is
+   *  the same nag through a louder channel. */
+  notificationsPausedUntil: string | null;
+  pauseReason: string | null;
   contact: CallListContact | null;
   history: {
     id: string;
@@ -61,7 +69,10 @@ export async function getRenewalCallList(
   if (orgIds.length === 0) return empty;
 
   const [orgsRes, contactsRes, logRes, chargesRes, expectedByOrg] = await Promise.all([
-    db.from("organizations").select("id, name, type, province").in("id", orgIds),
+    db
+      .from("organizations")
+      .select("id, name, type, province, renewal_notifications_paused_until, renewal_pause_reason")
+      .in("id", orgIds),
     // Contact details are working details for the call. Ordering mirrors the
     // board report: the flagged primary first, then whoever has an email.
     db
@@ -127,6 +138,8 @@ export async function getRenewalCallList(
     province: o.province,
     amountCents: expectedByOrg.get(o.id) ?? 0,
     renewed: renewedIds.has(o.id),
+    notificationsPausedUntil: o.renewal_notifications_paused_until,
+    pauseReason: o.renewal_pause_reason,
     contact: contactByOrg.get(o.id) ?? null,
     history: historyByOrg.get(o.id) ?? [],
   }));
