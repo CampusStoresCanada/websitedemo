@@ -91,3 +91,38 @@ describe("which stock to reach for", () => {
     ).toBe("none");
   });
 });
+
+import { fitToStock, DEFAULT_REPRINT_STOCK, REPRINT_STOCKS } from "../reprint-plan";
+
+/**
+ * ⛔ Scale, never crop. Cropping cut "SHAWN" in half on a rendered proof; the
+ * design survives scaling and pays for it in size.
+ */
+describe("fitting the variable layer to the roll", () => {
+  it("declares the stock rather than assuming 62mm somewhere in a renderer", () => {
+    expect(DEFAULT_REPRINT_STOCK.widthMm).toBe(62);
+    expect(DEFAULT_REPRINT_STOCK.platform).toContain("QL-1110");
+    expect(DEFAULT_REPRINT_STOCK.monochrome).toBe(true);
+  });
+
+  it("shrinks a band that is wider than the roll", () => {
+    // The front company-blank band is 850px of an 975px badge at 300dpi.
+    const { scale, stockWidthPx } = fitToStock({ bandWidthPx: 850 });
+    expect(stockWidthPx).toBeCloseTo(732.3, 0);
+    expect(scale).toBeCloseTo(0.861, 2);
+  });
+
+  it("⛔ never scales UP, so a walk-up's name is never bigger than a printed one", () => {
+    expect(fitToStock({ bandWidthPx: 400 }).scale).toBe(1);
+  });
+
+  it("follows the declared stock, so different hardware needs no code change", () => {
+    const wide = { ...REPRINT_STOCKS.brother_ql_dk2113, id: "wide", widthMm: 102 };
+    expect(fitToStock({ bandWidthPx: 850, stock: wide }).scale).toBe(1);
+  });
+
+  it("puts the stock on a label plan and leaves it off a full-badge one", () => {
+    expect(planReprint({ stock: "company_blank", personIsSeated: true }).stockSpec?.widthMm).toBe(62);
+    expect(planReprint({ stock: "none", personIsSeated: true }).stockSpec).toBeNull();
+  });
+});

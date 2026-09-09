@@ -25,6 +25,74 @@
  * is empty: it scans, and it admits them to nothing.
  */
 
+/**
+ * ⛔ The reprint platform's stock is DECLARED, not assumed. The desk prints on
+ * whatever roll is loaded, and that roll's width is the only real constraint on
+ * the label — so it belongs in one named place rather than as 62 typed into a
+ * renderer. A conference that buys a different printer changes this entry and
+ * nothing else.
+ */
+export type ReprintStock = {
+  id: string;
+  /** The machine, in the words on the box. */
+  platform: string;
+  /** The consumable, in the words on the packet. */
+  label: string;
+  widthMm: number;
+  /** Continuous roll — the printer cuts to length, so height is ours to choose. */
+  continuous: boolean;
+  /** Thermal: black only. "White" is whatever the film is, or the badge beneath. */
+  monochrome: boolean;
+};
+
+export const REPRINT_STOCKS: Record<string, ReprintStock> = {
+  brother_ql_dk2113: {
+    id: "brother_ql_dk2113",
+    platform: "Brother QL-1110NWBc",
+    label: "DK-2113 frosted clear continuous",
+    widthMm: 62,
+    continuous: true,
+    monochrome: true,
+  },
+};
+
+export const DEFAULT_REPRINT_STOCK = REPRINT_STOCKS.brother_ql_dk2113;
+
+/**
+ * Fit the badge's variable layer onto the roll.
+ *
+ * ⛔ SCALE, do not CROP. Cropping to 62mm cuts a name in half — verified by
+ * rendering it: "SHAWN" on an 850px band runs off a 732px label. Scaling keeps
+ * the design intact and pays for it in size: narrower margins, a smaller name,
+ * a monochrome logo. That is the right trade because it is paid ONLY by walk-ups.
+ *
+ * ⛔ The alternative — narrowing the badge itself so the label matches 1:1 —
+ * shrinks 886 of 962 first names on every pre-printed badge to accommodate a
+ * handful of desk reprints. Measured, not guessed.
+ *
+ * ⚠️ So a walk-up's badge is legibly not quite a pre-printed one. That is the
+ * price of not telling us you were coming, and it is a feature: it is honest
+ * about which badges were planned for.
+ */
+export function fitToStock(params: {
+  /** Width of the variable layer's bounding box, in badge design px. */
+  bandWidthPx: number;
+  stock?: ReprintStock;
+  dpi?: number;
+}): { stock: ReprintStock; stockWidthPx: number; scale: number } {
+  const stock = params.stock ?? DEFAULT_REPRINT_STOCK;
+  const dpi = params.dpi ?? 300;
+  const stockWidthPx = (stock.widthMm / 25.4) * dpi;
+  return {
+    stock,
+    stockWidthPx,
+    // ⚠️ Never scale UP. A band narrower than the roll prints at its own size
+    // with margin to spare; blowing it up to fill 62mm would make a walk-up's
+    // name LARGER than a pre-printed one, which is backwards.
+    scale: Math.min(1, stockWidthPx / params.bandWidthPx),
+  };
+}
+
 /** Which physical card the operator is holding. */
 export type BadgeStock = "company_blank" | "spare" | "none";
 
@@ -51,6 +119,8 @@ export type ReprintPlan = {
   /** What the QL prints. Empty when this is not a QL job. */
   delta: DeltaField[];
   transport: "ql_label" | "full_badge_pdf";
+  /** The declared stock this label prints on. Null when it is not a label job. */
+  stockSpec: ReprintStock | null;
   /**
    * ⛔ The data half. Non-null means the desk must name this person to a seat
    * before the badge means anything.
@@ -68,6 +138,8 @@ export function planReprint(params: {
    * between printing and printing-plus-writing.
    */
   personIsSeated: boolean;
+  /** Override for a conference on different hardware. */
+  stockSpec?: ReprintStock;
 }): ReprintPlan {
   const { stock, personIsSeated } = params;
 
@@ -76,6 +148,7 @@ export function planReprint(params: {
       stock,
       delta: [],
       transport: "full_badge_pdf",
+      stockSpec: null,
       // ⚠️ Deliberately NOT auto-assigning here. Without a card there is nothing
       // to hand over anyway, so the desk is already stopping to think; inventing
       // a seat at that moment is how somebody ends up holding a badge nobody
@@ -90,6 +163,7 @@ export function planReprint(params: {
     stock,
     delta,
     transport: "ql_label",
+    stockSpec: params.stockSpec ?? DEFAULT_REPRINT_STOCK,
     seatAssignment: personIsSeated
       ? null
       : {
