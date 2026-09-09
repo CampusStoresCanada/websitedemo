@@ -322,10 +322,24 @@ export async function createProgramInvoice(
 /**
  * Finalize and send a draft Stripe invoice.
  * This transitions the local invoice status to 'invoiced'.
+ *
+ * `notify: false` finalizes without asking Stripe to email the invoice. The
+ * invoice is otherwise completely normal — it exists, it is finalized, it
+ * carries its balance, and its PDF and hosted payment URL are captured the
+ * same way — so the member can still be billed, still owes the money, and can
+ * still pay from /org/billing. The only thing that does not happen is Stripe
+ * putting a fresh "here is your invoice" email in their inbox.
+ *
+ * This exists for the renewal notification pause. Stripe is a second sending
+ * channel that our own suppression cannot reach: gating sendTransactional
+ * silences CSC's mail and would have left `stripe.invoices.sendInvoice` below
+ * mailing a paused org anyway, which is the exact outcome the pause is for.
  */
 export async function finalizeAndSendInvoice(
-  invoiceId: string
+  invoiceId: string,
+  options: { notify?: boolean } = {}
 ): Promise<{ success: boolean; error?: string }> {
+  const notify = options.notify ?? true;
   const db = createAdminClient();
 
   const { data: invoice } = await db
@@ -347,7 +361,9 @@ export async function finalizeAndSendInvoice(
   // capture them here rather than fetching live later just to render a
   // download link.
   const finalized = await stripe.invoices.finalizeInvoice(invoice.stripe_invoice_id);
-  await stripe.invoices.sendInvoice(invoice.stripe_invoice_id);
+  if (notify) {
+    await stripe.invoices.sendInvoice(invoice.stripe_invoice_id);
+  }
 
   // Update local status
   await db

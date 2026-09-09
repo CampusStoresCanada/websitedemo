@@ -7,6 +7,7 @@ import type { MembershipProgramDef } from "@/lib/policy/types";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
+import { RenewalPauseControl, formatPauseDate } from "@/components/admin/RenewalPauseControl";
 
 const INK = "#16345a";
 const RED = "#e72a28";
@@ -177,7 +178,25 @@ function DirectoryRow({
         <div className="font-medium text-[15.5px] leading-tight" style={{ color: INK }}>
           {row.name}
         </div>
-        <OrgAdminLink row={row} onOpenDM={onOpenDM} />
+        <div className="flex items-center gap-2">
+          <OrgAdminLink row={row} onOpenDM={onOpenDM} />
+          {row.renewalPausedUntil && (
+            // Visible on the row itself, not just behind the kebab: an org
+            // that has gone quiet needs to look different from one nobody has
+            // chased yet, or the next person reads the empty contact log as
+            // neglect and starts chasing.
+            <span
+              className="inline-flex items-center gap-1 rounded-md bg-amber-50 px-1.5 py-0.5 text-[11px] font-medium text-amber-700"
+              title={row.renewalPauseReason ?? undefined}
+            >
+              <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor">
+                <rect x="6" y="4" width="4" height="16" rx="1" />
+                <rect x="14" y="4" width="4" height="16" rx="1" />
+              </svg>
+              Reminders paused to {formatPauseDate(row.renewalPausedUntil)}
+            </span>
+          )}
+        </div>
       </div>
 
       <Link
@@ -230,18 +249,12 @@ function DirectoryRow({
 
         <InvoiceButton row={row} />
 
-        <button
-          type="button"
-          disabled
-          className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 cursor-not-allowed"
-          aria-label="More actions (coming soon)"
-        >
-          <svg width="15" height="4" viewBox="0 0 16 4" fill="currentColor">
-            <circle cx="1.85" cy="2" r="1.85" />
-            <circle cx="8" cy="2" r="1.85" />
-            <circle cx="14.15" cy="2" r="1.85" />
-          </svg>
-        </button>
+        <RenewalPauseControl
+          organizationId={row.id}
+          organizationName={row.name}
+          pausedUntil={row.renewalPausedUntil}
+          pauseReason={row.renewalPauseReason}
+        />
       </div>
     </div>
   );

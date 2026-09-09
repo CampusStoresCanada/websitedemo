@@ -9,6 +9,8 @@ import {
 } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { sendTransactional } from "@/lib/comms/send";
+import { isRenewalNotificationPaused } from "@/lib/renewal/notification-pause";
+import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import type { Json } from "@/lib/database.types";
@@ -258,7 +260,7 @@ export async function renewalReminderRun(): Promise<JobResult> {
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
-        "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
+        "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id, renewal_notifications_paused_until"
       )
       .in("membership_status", ["active", "reactivated"])
       .is("archived_at", null)
@@ -292,6 +294,12 @@ export async function renewalReminderRun(): Promise<JobResult> {
     // same for every org, so this check happens once, not per org.
     if (daysUntilCycleStart <= maxReminderDay && daysUntilCycleStart >= 0) {
       const worker = async (org: (typeof orgs)[number]) => {
+        // Renewal mail paused for this org by an admin — a payment in transit,
+        // typically. Read once here and applied at each send below; the org is
+        // still invoiced and still owes the money, because a pause is about
+        // the chase and not about the money.
+        const mailPaused = isRenewalNotificationPaused(org, timezone);
+
         // Reminders explicitly switched off for this org's current invoice.
         //
         // `invoices.reminder_suppressed_at` has existed since the Stripe
@@ -369,7 +377,11 @@ export async function renewalReminderRun(): Promise<JobResult> {
               policySetId: activePolicySet.id,
             });
 
-            await finalizeAndSendInvoice(invoice.id);
+            // Finalized either way — the org is billed and owes the money.
+            // `notify` is the pause: Stripe is a sending channel our own
+            // suppression cannot reach, so silencing sendTransactional alone
+            // would still have put an invoice email in a paused org's inbox.
+            await finalizeAndSendInvoice(invoice.id, { notify: !mailPaused });
             invoiceId = invoice.id;
 
             await recordRenewalEvent(db, org.id, renewalYear, "invoice_generated", invoiceId, {
@@ -389,6 +401,13 @@ export async function renewalReminderRun(): Promise<JobResult> {
         // Exact-day informational reminders (30/14/7/0) — unchanged
         // semantics, still one-shot per day since "days_until_expiry" in
         // the email is only meaningful on the day it names.
+        //
+        // A paused org skips the send AND the event record. Recording a
+        // `reminder_sent` event for mail nobody received would put a
+        // falsehood in the renewal log — and the log is what the board
+        // report reads to say who has been contacted.
+        if (mailPaused) return;
+
         for (const reminderDay of reminderDays) {
           if (daysUntilCycleStart !== reminderDay) continue;
 
@@ -507,7 +526,7 @@ export async function renewalChargeRun(): Promise<JobResult> {
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
-        "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id"
+        "id, name, email, type, membership_status, membership_expires_at, stripe_customer_id, renewal_notifications_paused_until"
       )
       .in("membership_status", ["active", "reactivated"])
       .is("archived_at", null)
@@ -638,7 +657,13 @@ export async function renewalChargeRun(): Promise<JobResult> {
               { error: stripeMsg }
             );
 
-            const chargeFailedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+            // The charge_failed EVENT above is recorded either way — the
+            // charge genuinely was attempted and genuinely did fail, and
+            // that is the fact the grace gate downstream runs on. Only the
+            // mail telling the member about it is paused.
+            const chargeFailedRecipients = isRenewalNotificationPaused(org, timezone)
+              ? []
+              : await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of chargeFailedRecipients) {
               await sendTransactional({
                 templateKey: "renewal_charge_failed",
@@ -749,12 +774,13 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
 
   try {
     const graceDays = config.grace_days; // e.g., 30
+    const timezone = config.dispatch_timezone;
 
     // Find all orgs currently in grace
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
-        "id, name, email, membership_status, membership_expires_at, grace_period_started_at"
+        "id, name, email, membership_status, membership_expires_at, grace_period_started_at, renewal_notifications_paused_until"
       )
       .eq("membership_status", "grace")
       .not("grace_period_started_at", "is", null);
@@ -843,17 +869,45 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               grace_days_policy: graceDays,
             });
 
-            const lockedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
-            for (const to of lockedRecipients) {
-              await sendTransactional({
-                templateKey: "membership_locked",
-                to,
-                variables: {
-                  contact_name: org.name,
-                  org_name: org.name,
-                  admin_contact_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/contact`,
+            // The lock itself already happened above — a pause never holds
+            // the countdown. What changes is who finds out.
+            //
+            // Losing access with no email at all is the one genuinely bad
+            // outcome of a pause: the member is silently locked out of a
+            // thing they believe they paid for, and nobody at CSC knows it
+            // landed. So the member's mail stays paused as asked, and the
+            // notice goes to staff instead — a person decides what to say
+            // to an org whose money may well be sitting in a bank queue.
+            //
+            // Keyed per org: two different paused orgs locking in the same
+            // week are two separate things somebody has to act on, and a
+            // shared rule key would collapse them into one.
+            if (isRenewalNotificationPaused(org, timezone)) {
+              await raiseAlertIfNotOpen({
+                ruleKey: `renewal_paused_org_locked:${org.id}`,
+                severity: "warning",
+                message: `${org.name} was locked while renewal notifications were paused — they have lost access and were not emailed about it.`,
+                details: {
+                  organization_id: org.id,
+                  organization_name: org.name,
+                  days_in_grace: Math.floor(daysInGrace),
+                  paused_until: org.renewal_notifications_paused_until,
+                  suppressed_template: "membership_locked",
                 },
               });
+            } else {
+              const lockedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
+              for (const to of lockedRecipients) {
+                await sendTransactional({
+                  templateKey: "membership_locked",
+                  to,
+                  variables: {
+                    contact_name: org.name,
+                    org_name: org.name,
+                    admin_contact_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/contact`,
+                  },
+                });
+              }
             }
 
             succeeded++;
@@ -869,7 +923,22 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
             renewalYear
           );
 
-          if (daysSinceLastReminder === null || daysSinceLastReminder >= 7) {
+          // Paused orgs skip the send AND the grace_reminder event.
+          //
+          // The event is what getLastGraceReminderDaysAgo() reads to space
+          // these a week apart, and what the board renewal report reads to
+          // say who has been contacted. Writing one for mail that never
+          // went out would corrupt both — the report would show an org as
+          // chased when it was deliberately left alone.
+          //
+          // Leaving the event unwritten also gets the resume right: when
+          // the pause lifts, the last real reminder is already more than
+          // seven days old, so the chase picks straight back up on the
+          // next run rather than waiting out another full week.
+          if (
+            !isRenewalNotificationPaused(org, timezone) &&
+            (daysSinceLastReminder === null || daysSinceLastReminder >= 7)
+          ) {
             await recordRenewalEvent(db, org.id, renewalYear, "grace_reminder", undefined, {
               days_in_grace: Math.floor(daysInGrace),
               days_remaining: Math.ceil(graceDays - daysInGrace),

@@ -36,6 +36,10 @@ export interface RenewalDirectoryRow {
    *  conference_orders id that included a bundled membership_renewal
    *  purchase, for a Stripe receipt link instead of an invoice PDF. */
   receiptOrderId: string | null;
+  /** Inclusive last day renewal notifications are suppressed for this org,
+   *  or null when the chase is running normally. */
+  renewalPausedUntil: string | null;
+  renewalPauseReason: string | null;
 }
 
 type AdminClient = ReturnType<typeof createAdminClient>;
@@ -110,7 +114,7 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
     db
       .from("organizations")
       .select(
-        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, memberships(status, fte, program_key)"
+        "id, slug, name, type, logo_url, logo_horizontal_url, membership_status, fte, membership_expires_at, renewal_notifications_paused_until, renewal_pause_reason, memberships(status, fte, program_key)"
       )
       // Filled in once programs resolves — see below. Left broad here since
       // this destructure runs concurrently with getProgramsConfig().
@@ -225,6 +229,8 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       invoiceStatus: invoice?.status ?? null,
       invoicePdfUrl: invoice?.invoice_pdf_url ?? null,
       receiptOrderId: invoice ? null : (receiptOrderByOrg.get(o.id) ?? null),
+      renewalPausedUntil: o.renewal_notifications_paused_until,
+      renewalPauseReason: o.renewal_pause_reason,
     };
   });
 
