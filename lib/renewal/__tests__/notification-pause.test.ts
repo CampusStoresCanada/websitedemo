@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isRenewalNotificationPaused } from "../notification-pause";
+import { isInRenewalChase, isRenewalNotificationPaused } from "../notification-pause";
 
 /**
  * Pins the pause window's day boundaries.
@@ -70,6 +70,66 @@ describe("isRenewalNotificationPaused", () => {
   it("treats an already-elapsed pause as no pause at all", () => {
     expect(
       isRenewalNotificationPaused(paused("2026-08-01"), TZ, new Date("2026-09-09T12:00:00Z"))
+    ).toBe(false);
+  });
+});
+
+/**
+ * Pins which orgs get a pause control.
+ *
+ * The bar: a green run must distinguish "not being chased right now" from
+ * "exempt". Every non-canceled org re-enters the chase when next August's
+ * window opens; the control is hidden today because a pause caps at 120 days
+ * and cannot reach that far, not because those orgs are permanently outside
+ * the renewal cycle. A change that hides grace orgs, or that shows the button
+ * to a paid-up active org while the window is shut, fails here.
+ */
+describe("isInRenewalChase", () => {
+  const shut = { reminderWindowOpen: false, renewalYear: 2028 };
+  const open = { reminderWindowOpen: true, renewalYear: 2028 };
+
+  it("chases an org in grace even when the reminder window is shut", () => {
+    // The live case: weekly grace reminders go out year-round, independent of
+    // the reminder window. U of L today.
+    expect(
+      isInRenewalChase({ membershipStatus: "grace", membershipExpiresAt: "2026-08-31" }, shut)
+    ).toBe(true);
+  });
+
+  it("does not chase a paid-up active org while the window is shut", () => {
+    expect(
+      isInRenewalChase({ membershipStatus: "active", membershipExpiresAt: "2027-08-31" }, shut)
+    ).toBe(false);
+  });
+
+  it("chases that same org once the window opens", () => {
+    // Not exempt — just out of season. The control reappears in August.
+    expect(
+      isInRenewalChase({ membershipStatus: "active", membershipExpiresAt: "2027-08-31" }, open)
+    ).toBe(true);
+  });
+
+  it("does not chase an org already paid through the cycle being billed", () => {
+    expect(
+      isInRenewalChase({ membershipStatus: "active", membershipExpiresAt: "2028-08-31" }, open)
+    ).toBe(false);
+  });
+
+  it("treats a null expiry as an outstanding renewal, not an unknown one", () => {
+    expect(
+      isInRenewalChase({ membershipStatus: "active", membershipExpiresAt: null }, open)
+    ).toBe(true);
+  });
+
+  it("chases reactivated orgs on the same terms as active ones", () => {
+    expect(
+      isInRenewalChase({ membershipStatus: "reactivated", membershipExpiresAt: "2027-08-31" }, open)
+    ).toBe(true);
+  });
+
+  it("does not chase a locked org — the grace job only selects grace", () => {
+    expect(
+      isInRenewalChase({ membershipStatus: "locked", membershipExpiresAt: "2026-08-31" }, open)
     ).toBe(false);
   });
 });

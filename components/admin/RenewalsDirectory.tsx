@@ -199,12 +199,21 @@ function DirectoryRow({
         </div>
       </div>
 
-      <RenewalPauseControl
-        organizationId={row.id}
-        organizationName={row.name}
-        pausedUntil={row.renewalPausedUntil}
-        pauseReason={row.renewalPauseReason}
-      />
+      {/* Only where a pause could actually suppress something. An org nobody
+          is chasing has nothing to pause, and a button that cannot have an
+          effect is worse than an absent one — an admin presses it and believes
+          they have stopped the mail. A paused org keeps its control even if it
+          falls out of the chase, so the pause stays visible and liftable. */}
+      {row.renewalChaseable || row.renewalPausedUntil ? (
+        <RenewalPauseControl
+          organizationId={row.id}
+          organizationName={row.name}
+          pausedUntil={row.renewalPausedUntil}
+          pauseReason={row.renewalPauseReason}
+        />
+      ) : (
+        <span className="inline-block w-7 h-7 shrink-0" />
+      )}
 
       <Link
         href={`/org/${row.slug}`}
