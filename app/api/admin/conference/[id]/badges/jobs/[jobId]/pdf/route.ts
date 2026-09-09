@@ -5,6 +5,10 @@ import {
   buildBadgeJobDocument,
   BadgeDocumentError,
 } from "@/lib/conference/badges/document";
+import {
+  buildReprintLabelDocument,
+  LabelDocumentError,
+} from "@/lib/conference/badges/label-document";
 
 /**
  * Serve one badge job's printable document.
