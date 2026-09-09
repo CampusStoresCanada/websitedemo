@@ -88,8 +88,45 @@ if (FETCH || FETCH_ONLY || !existsSync(CACHE)) {
     if (who && mem.user_id != null) byUserId.set(mem.user_id, who);
   }
 
+  /**
+   * Comments come from the cache `circle-comments.mts` just built, NOT from one
+   * API call per post.
+   *
+   * ⛔ Both scripts fetched the same comments, minutes apart, in the same nightly.
+   * This one walked 787 posts at one `listComments` call each; the other pulls all
+   * 3,033 comments from the global `/comments` endpoint in ~31 paginated calls and
+   * caches them with postId, spaceName, userId and userName already on every
+   * record. Everything needed here was already on disk.
+   *
+   * ⚠️ The redundancy was mine: 58ac3d0 added listComments without checking that
+   * circle-comments.mts already had the data. ~800 Circle calls a night, every
+   * night — the largest of the three standing Circle costs, ahead of badge polling
+   * and the RSVP cron. Reading the cache takes the nightly from ~850 to ~50.
+   *
+   * ⚠️ The nightly runs circle-comments.mts FIRST so this cache is today's. If it
+   * is absent we fall back to fetching per post rather than quietly embedding a
+   * corpus with no replies — half of every thread missing would read as a quiet
+   * community rather than a broken fetch.
+   */
+  const COMMENT_CACHE = ".cache/circle-comments.json";
+  type CachedComment = { id: number; postId: number | null; body: string; userId: number | null };
+  const commentsByPost = new Map<number, CachedComment[]>();
+  const haveCommentCache = existsSync(COMMENT_CACHE);
+  if (haveCommentCache) {
+    for (const c of JSON.parse(readFileSync(COMMENT_CACHE, "utf8")) as CachedComment[]) {
+      if (c.postId == null) continue;
+      const list = commentsByPost.get(c.postId);
+      if (list) list.push(c); else commentsByPost.set(c.postId, [c]);
+    }
+  }
+
   const spaces = await circle.listSpaces();
-  console.log(`fetching posts and comments from ${spaces.length} spaces…`);
+  console.log(
+    `fetching posts from ${spaces.length} spaces — comments: ` +
+      (haveCommentCache
+        ? `${commentsByPost.size} posts from cache (no per-post calls)`
+        : "⚠️ cache absent, falling back to one API call per post")
+  );
 
   for (const space of spaces) {
     const posts: Awaited<ReturnType<typeof circle.listPosts>> = [];
@@ -109,11 +146,26 @@ if (FETCH || FETCH_ONLY || !existsSync(CACHE)) {
       }
       // ⛔ The replies are the half that was never fetched, and they carry the
       // answers — who a member was pointed at, and which partner volunteered.
-      for (const cm of await circle.listComments(p.id)) {
-        const body = postBodyText(cm.body).slice(0, 2000);
+      //
+      // ⚠️ From the cache when we have it; one call per post only as a fallback.
+      // The two sources spell the author differently — `userId` on the cached
+      // record, `user_id` from the API — so they are normalised to one shape here
+      // rather than cast. A cast would compile and silently attribute every cached
+      // reply to nobody, which reads as an anonymous community.
+      const replies: { id: number; body: unknown; author: number | null }[] =
+        haveCommentCache
+          ? (commentsByPost.get(p.id) ?? []).map((c) => ({
+              id: c.id, body: c.body, author: c.userId ?? null,
+            }))
+          : (await circle.listComments(p.id)).map((c) => ({
+              id: c.id, body: c.body, author: c.user_id ?? null,
+            }));
+      for (const cm of replies) {
+        const body = postBodyText(cm.body as Parameters<typeof postBodyText>[0]).slice(0, 2000);
         if (body.length > 20) {
           docs.push({ kind: "comment", id: cm.id, postId: p.id, space: space.name,
-                      author: byUserId.get(cm.user_id) ?? null, text: body });
+                      author: cm.author == null ? null : byUserId.get(cm.author) ?? null,
+                      text: body });
         }
       }
     }

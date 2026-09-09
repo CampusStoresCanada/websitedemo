@@ -1,13 +1,15 @@
 /**
  * Place everyone in one space and read off who is near whom.
  *
- *   npx tsx scripts/match-space.mts              # compute + report, writes nothing
- *   npx tsx scripts/match-space.mts --write      # also persist an UNPROMOTED run
- *   npx tsx scripts/match-space.mts --reembed    # ignore the vector cache
+ *   npx tsx scripts/match-space.mts                      # compute + report, writes nothing
+ *   npx tsx scripts/match-space.mts --write              # persist an UNPROMOTED run
+ *   npx tsx scripts/match-space.mts --write --promote    # persist, and go live IF healthy
+ *   npx tsx scripts/match-space.mts --reembed            # ignore the vector cache
  *
- * ⛔ `--write` never promotes. A new run lands with status 'complete' and the
- * site keeps reading whatever is promoted until a human moves it. Nothing here
- * changes what a member sees.
+ * ⛔ `--write` alone still never promotes — a run lands at `complete` and the site
+ * keeps serving whatever is live. `--promote` does not mean "promote whatever came
+ * out" either: it runs the health checks beside the promotion block below, and a
+ * run failing any of them stays `complete` with the reason in `notes`.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -27,6 +29,26 @@ const MODEL = "nomic-embed-text";
 const VEC_CACHE = ".cache/space-vectors.json";
 const WRITE = process.argv.includes("--write");
 const REEMBED = process.argv.includes("--reembed");
+/**
+ * Promote this run if it passes the health checks below.
+ *
+ * ⛔ The old design said promotion was "a human's decision, not a side effect of
+ * the job finishing", and left every run at `complete`. That gate was never once
+ * walked through: 125,974 edges accumulated across every run since the engine was
+ * built and NOTHING was ever promoted, so `readMatchEdges()` returned null on
+ * every surface and the conference scheduler's objective silently degraded from
+ * `matchTotal × occupancy` to occupancy alone — seating people by which rooms fit.
+ *
+ * ⚠️ And it fought the retention in this same file. `KEEP_COMPLETE = 3` prunes the
+ * edges of all but the last three complete runs, so an unpromoted run's work was
+ * deleted three nights later. The job was computing something nothing could read
+ * and then removing it.
+ *
+ * A safety gate nobody operates is not a safety gate. The real protection is that
+ * a BAD run must not go live, and that is a check a machine can make — so it is
+ * made below, every night, instead of being deferred to an intention.
+ */
+const PROMOTE = process.argv.includes("--promote");
 const NOW = new Date();
 
 const db = createClient(
@@ -962,13 +984,103 @@ if (WRITE) {
     const { error: e } = await db.from("match_edges").insert(edges.slice(i, i + 500));
     if (e) { console.error("edge insert failed:", e.message); process.exit(1); }
   }
-  // Only now is the run a fact. ⛔ Still `complete`, never `promoted` — what the
-  // site serves is a human's decision, not a side effect of the job finishing.
+  // Only now is the run a fact.
   const { error: doneErr } = await db
     .from("match_runs")
     .update({ status: "complete", completed_at: new Date().toISOString() })
     .eq("id", run!.id);
   if (doneErr) { console.error("run completion failed:", doneErr.message); process.exit(1); }
+
+  /**
+   * Should this run go live?
+   *
+   * ⛔ Each check guards a failure that has actually happened here, not one I
+   * imagined. A run failing any of them stays `complete` — the site keeps serving
+   * the previous promoted run, which is the safe direction — and the reason goes
+   * into `notes`, so the morning has an answer instead of a mystery.
+   */
+  if (PROMOTE) {
+    const { data: promotedRow } = await db
+      .from("match_runs").select("id").eq("status", "promoted").limit(1).maybeSingle();
+    const livingId = (promotedRow as { id?: string } | null)?.id ?? null;
+
+    let priorEdges = 0;
+    let priorSubjects = 0;
+    if (livingId) {
+      const { data: prior } = await db
+        .from("match_edges").select("subject_org_id, direction").eq("run_id", livingId);
+      const rowsPrior = (prior ?? []) as { subject_org_id: string; direction: string }[];
+      priorEdges = rowsPrior.length;
+      priorSubjects = new Set(rowsPrior.map((r) => `${r.direction}:${r.subject_org_id}`)).size;
+    }
+
+    const subjectsNow = new Set(edges.map((e) => `${e.direction}:${e.subject_org_id}`)).size;
+    const directionsNow = new Set(edges.map((e) => e.direction));
+    const distinctScores = new Set(edges.map((e) => Number(e.score).toFixed(2))).size;
+    const failures: string[] = [];
+
+    // ⛔ Both directions or nothing. Losing one empties a whole surface — Your
+    // Market, or the partner panel — while the run still reports success.
+    if (directionsNow.size < 2) {
+      failures.push(`only ${directionsNow.size} direction(s): ${[...directionsNow].join(", ") || "none"}`);
+    }
+
+    // ⚠️ A half-written script once produced 8,700 edges where the night before had
+    // 12,700, and it read as a regression rather than a truncation. 60% leaves room
+    // for the corpus genuinely shrinking without letting a partial write through.
+    if (livingId && priorEdges > 0 && edges.length < priorEdges * 0.6) {
+      failures.push(`${edges.length} edges vs ${priorEdges} promoted (under 60%)`);
+    }
+
+    // A subject with no edges has no list at all. Losing a fifth of them is a
+    // corpus failure, not a ranking one, and should not reach anybody's page.
+    if (livingId && priorSubjects > 0 && subjectsNow < priorSubjects * 0.8) {
+      failures.push(`${subjectsNow} subjects vs ${priorSubjects} promoted (under 80%)`);
+    }
+
+    // ⛔ The calibration collapse, caught by its own signature. A hard-coded band
+    // once clamped 98% of pairs to zero and left 68 distinct scores across 6,000
+    // edges. Identical scores still rank, still write, still report success — and
+    // tell every member the same thing.
+    if (edges.length >= 100 && distinctScores < edges.length * 0.1) {
+      failures.push(`${distinctScores} distinct scores across ${edges.length} edges — calibration collapsed`);
+    }
+
+    if (failures.length > 0) {
+      await db.from("match_runs")
+        .update({ notes: `not promoted: ${failures.join("; ")}` }).eq("id", run!.id);
+      console.error(`\n⛔ NOT PROMOTED — ${failures.length} check(s) failed:`);
+      for (const f of failures) console.error(`   · ${f}`);
+      console.error(`   the site keeps serving ${livingId ? livingId.slice(0, 8) : "nothing"}`);
+    } else {
+      // ⚠️ Supersede first, then promote. A unique partial index allows exactly one
+      // promoted run, so the old one must step down before the new one stands up.
+      // The reverse order fails the index and leaves the OLD run live — safe, but
+      // silent, which is how you serve month-old matches without noticing.
+      if (livingId) {
+        const { error: supErr } = await db.from("match_runs")
+          .update({ status: "superseded" }).eq("status", "promoted").neq("id", run!.id);
+        if (supErr) {
+          console.error("supersede failed, leaving the old run live:", supErr.message);
+          process.exit(1);
+        }
+      }
+      const { error: promErr } = await db.from("match_runs")
+        .update({ status: "promoted", promoted_at: new Date().toISOString() }).eq("id", run!.id);
+      if (promErr) {
+        // ⛔ Loud, because this is the one state nothing else detects: the old run
+        // stepped down, the new one did not stand up, and every match surface is
+        // empty with no run marked live.
+        console.error("⛔ PROMOTION FAILED AFTER SUPERSEDE — NO RUN IS LIVE:", promErr.message);
+        console.error(`   recover: update match_runs set status='promoted' where id='${run!.id}'`);
+        process.exit(1);
+      }
+      console.log(
+        `\npromoted ${run!.id.slice(0, 8)} — ${edges.length} edges, ${subjectsNow} subjects` +
+          (livingId ? `, superseded ${livingId.slice(0, 8)}` : ", first promoted run")
+      );
+    }
+  }
 
   if (askRows.length > 0) {
     // ⛔ Upsert on (ask, candidate) so a re-run refreshes the suggestion without

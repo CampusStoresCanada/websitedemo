@@ -185,13 +185,32 @@ echo "$MODEL ready (${DIMS} dimensions)"
 # while comments refreshed nightly, so the newest question was never looked at and
 # the screen said "not scored yet" about it forever. A tool for fresh questions
 # that cannot see fresh questions is worse than no tool.
+# ⛔ COMMENTS FIRST — this order is load-bearing, not tidiness.
+#
+# circle-embed reads the comment cache instead of calling listComments once per
+# post. Running it first would embed YESTERDAY's replies: every answer posted
+# today would sit out a night, which is the same "cannot see fresh questions"
+# failure described above wearing different clothes.
+#
+# ⚠️ The two scripts were fetching the same comments by different routes in the
+# same run — ~31 paginated calls here, 787 per-post calls there. That was ~800
+# Circle calls a night for data already on disk.
+npx tsx scripts/circle-comments.mts || echo "comment refresh failed — continuing on the cached comments"
+
 npx tsx scripts/circle-embed.mts --fetch-only || echo "corpus refresh failed — continuing on the cached corpus"
 
-npx tsx scripts/circle-comments.mts || echo "comment refresh failed — continuing on the cached corpus"
-
-# ⛔ --write records the run; it NEVER promotes. What the site serves stays a
-# human decision.
-npx tsx scripts/match-space.mts --write
+# ⛔ --promote does NOT mean "promote whatever came out". The run goes live only
+# if it passes the health checks in match-space.mts — both directions present,
+# edge count and subject coverage within reach of the run it replaces, and scores
+# actually distinct. Fail any and it stays `complete`, the site keeps serving the
+# previous run, and the reason is written to match_runs.notes.
+#
+# ⚠️ This replaced a human gate that was never once used: 125,974 edges across
+# every run ever built and nothing promoted, so every match surface read empty and
+# the conference scheduler seated people by room occupancy alone. A gate nobody
+# operates is not a gate — and the retention in this same job was deleting the
+# unpromoted work three nights later.
+npx tsx scripts/match-space.mts --write --promote
 STATUS=$?
 
 # Keep the log readable: the last ~2000 lines is several weeks of runs.
