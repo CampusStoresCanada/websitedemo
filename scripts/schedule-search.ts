@@ -93,7 +93,9 @@ async function main() {
         "  late add: --extend-active | --extend-run <runId> — extend a frozen " +
         "schedule instead of solving a new one\n" +
         "  --allow-unscored: solve with no promoted match run (arbitrary pairings)\n" +
-        "  --send: email the people whose schedule this is (needs --persist)"
+        "  --send: email the people whose schedule this is (needs --persist)\n" +
+        "  --only-if-changed: on a late add, write nothing when nobody was seated\n" +
+        "  --force: extend before the freeze date (normally refused)"
     );
     process.exit(1);
   }
@@ -306,6 +308,35 @@ async function main() {
       }
       runId = active.id as string;
     }
+
+    /**
+     * ⛔ A LATE ADD IS A POST-FREEZE OPERATION BY DEFINITION. Before the freeze
+     * nothing has been sent, so the right move is a full re-solve — which finds
+     * a better schedule and costs nobody a change, because nobody has been told
+     * one yet. Running late-add early quietly locks in a worse schedule and
+     * makes the freeze meaningless.
+     */
+    const { data: conf } = await db
+      .from("conference_instances")
+      .select("schedule_freeze_at")
+      .eq("id", conferenceId)
+      .maybeSingle();
+    const freezeAt = (conf as { schedule_freeze_at?: string | null } | null)?.schedule_freeze_at;
+    if (!freezeAt) {
+      console.error(
+        "no schedule_freeze_at set on this conference — a late add is defined\n" +
+          "relative to the freeze. Set it in the conference details form first."
+      );
+      process.exit(2);
+    }
+    if (new Date(freezeAt) > new Date() && !process.argv.includes("--force")) {
+      console.error(
+        `schedule does not freeze until ${freezeAt} — before then, re-solve in full\n` +
+          "instead: a late add preserves a schedule nobody has been sent yet.\n" +
+          "  pass --force to extend anyway."
+      );
+      process.exit(2);
+    }
     extendFrom = await loadFrozenRun(db, runId!, exhibitorSeats);
     console.log(
       `late add: extending run ${runId} — ${extendFrom.length} existing meetings held fixed`
@@ -409,6 +440,19 @@ async function main() {
   if (!persist) {
     console.log("\ndry run — nothing written. pass --persist to create a draft run.");
     return;
+  }
+
+  /**
+   * ⚠️ For the nightly. A late add that seated nobody has nothing to record, and
+   * writing an identical draft run every night buries the one night that
+   * mattered under thirteen that did not.
+   */
+  if (process.argv.includes("--only-if-changed") && outcome.lateAdd) {
+    const { newlySeated, alsoGained, addedMeetings } = outcome.lateAdd;
+    if (newlySeated.length + alsoGained.length + addedMeetings === 0) {
+      console.log("\nnothing to add — no run written.");
+      return;
+    }
   }
 
   const activePolicySet = await getActivePolicySet();
