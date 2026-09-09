@@ -62,13 +62,26 @@ export function renderReprintLabel(params: {
   stock: ReprintStock;
   /** Left edge of the variable band on the badge, in design px. */
   bandX: number;
-  /** Draw the roll edges and a centre tick, for an alignment proof. */
+  /** Draw the roll edges, for an alignment proof. */
   showGuides?: boolean;
+  /**
+   * ⛔ Left-align every line to the sticker's own edge.
+   *
+   * The badge hangs its name text at x=44, further left than anything else on
+   * the card — the logo plate starts at 122 and the QR plate at 129. That is
+   * fine for ink printed INTO the design, but a physical sticker whose edge sits
+   * at 44 overhangs the card's visual margin and reads as misplaced. A sticker
+   * is an object with an edge, so its edge is what has to line up.
+   */
+  anchorTextToEdge?: boolean;
 }): { html: string; widthMm: number; heightMm: number } {
   const { template, delta, stock, bandX } = params;
   const dpi = template.canvas.dpi;
   const front = template.front;
-  const clamp = (s: BadgeSlotText) => clampSlotToStock(s, { bandX, stock, dpi });
+  const clamp = (s: BadgeSlotText) => {
+    const anchored = params.anchorTextToEdge ? { ...s, x: bandX } : s;
+    return clampSlotToStock(anchored, { bandX, stock, dpi });
+  };
 
   const placed: Placed[] = [];
   if (delta.includes("organization")) {
