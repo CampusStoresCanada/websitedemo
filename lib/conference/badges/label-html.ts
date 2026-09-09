@@ -86,6 +86,25 @@ export function renderReprintLabel(params: {
    * different one puts the text somewhere the sticker is not.
    */
   bandX?: number;
+  /**
+   * ⛔ WHICH SIDE. A reprint onto a company blank needs TWO labels, not one.
+   *
+   * The blank carries everything that is true of the ORGANISATION — its name,
+   * logo, map, and on the back its registration type's schedule and the venue.
+   * What it cannot carry is anything true of a PERSON, because no person was
+   * named to it when it printed. On the front that is the name and title; on the
+   * back it is the badge QR, which is derived per person from their token row
+   * and is unique to them on every badge in the run.
+   *
+   * ⚠️ Miss the back label and the reprint LOOKS complete — right name, right
+   * company, right schedule — and scans as nothing. That is worse than an
+   * obviously blank card, because nobody checks a badge that looks finished.
+   */
+  side?: "front" | "back";
+  /** The person's badge QR, already encoded. Back labels only. */
+  qrDataUri?: string | null;
+  /** Line under the QR on the back — from the template's qr_caption block. */
+  qrCaption?: string | null;
   /** Draw the roll edges, for an alignment proof. */
   showGuides?: boolean;
   /**
@@ -118,6 +137,59 @@ export function renderReprintLabel(params: {
     const anchored = params.anchorTextToEdge ? { ...s, x: bandX } : s;
     return clampSlotToStock(anchored, { bandX, stock, dpi });
   };
+
+  // ── BACK LABEL ────────────────────────────────────────────────────────────
+  // ⛔ Rendered from the BACK slots at their own coordinates, same principle as
+  // the front: the sticker joins a card that already exists, so it has to land
+  // where that card's design put the QR.
+  if (params.side === "back") {
+    const backCfg = template.back;
+    const qr = backCfg.qr;
+    if (!params.qrDataUri) {
+      // ⛔ No payload, no label. A back label with no QR is a blank sticker
+      // applied over a blank area — it looks like the reprint was completed.
+      return { html: "", widthMm: stock.widthMm, heightMm: 0 };
+    }
+    const bandX = Math.min(qr.x, ...(backCfg.blocks ?? []).map((b) => b.x));
+    const K2 = 96 / dpi;
+    const widthPx2 = (stock.widthMm / 25.4) * dpi;
+    const PAD2 = 16;
+    const caption = (params.qrCaption ?? "").trim();
+    const capBlock = (backCfg.blocks ?? []).find((b) => b.source === "qr_caption");
+    const capPt = capBlock?.sizePt ?? 7;
+    const capPx = designPxFromPt(capPt, dpi);
+    const top2 = qr.y - PAD2;
+    const bottom2 = caption && capBlock
+      ? Math.max(qr.y + qr.size, capBlock.y + capPx * 1.3) + PAD2
+      : qr.y + qr.size + PAD2;
+    const h2 = bottom2 - top2;
+    const capHtml = caption && capBlock
+      ? `<div class="s" style="left:${(capBlock.x - bandX) * K2}px;top:${(capBlock.y - top2) * K2}px;` +
+        `width:${Math.max(0, Math.min(capBlock.width, bandX + widthPx2 - capBlock.x)) * K2}px;` +
+        `font-family:var(--font-primary);font-size:${capPx * K2}px;line-height:1.2;">${escapeHtml(caption)}</div>`
+      : "";
+    return {
+      widthMm: stock.widthMm,
+      heightMm: (h2 / dpi) * 25.4,
+      html: `<!doctype html><html><head><meta charset="utf-8">
+<link rel="stylesheet" href="${TYPEKIT}" />
+<style>
+  @page { size: ${(widthPx2 / dpi).toFixed(4)}in ${(h2 / dpi).toFixed(4)}in; margin: 0; }
+  :root { --font-primary: ${template.fonts.primary}; }
+  html,body { margin:0; padding:0; background:transparent; }
+  .label { position:relative; width:${widthPx2 * K2}px; height:${h2 * K2}px; overflow:hidden; }
+  .s { position:absolute; color:#000; }
+  /* ⛔ White plate behind the QR. On frosted clear film the badge shows through,
+     and a QR needs its quiet zone opaque or the map behind it kills contrast. */
+  .qrp { position:absolute; background:#fff; }
+  .qr { position:absolute; }
+</style></head><body><div class="label">
+  <div class="qrp" style="left:${(qr.x - bandX - 8) * K2}px;top:${(qr.y - top2 - 8) * K2}px;width:${(qr.size + 16) * K2}px;height:${(qr.size + 16) * K2}px;"></div>
+  <img class="qr" src="${params.qrDataUri}" alt="" style="left:${(qr.x - bandX) * K2}px;top:${(qr.y - top2) * K2}px;width:${qr.size * K2}px;height:${qr.size * K2}px;" />
+  ${capHtml}
+</div></body></html>`,
+    };
+  }
 
   const placed: Placed[] = [];
   if (delta.includes("organization")) {

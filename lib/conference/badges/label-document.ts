@@ -17,6 +17,10 @@ import { normalizeBadgeTemplateConfig, resolveBadgeVariant } from "@/lib/confere
 import { renderReprintLabel } from "@/lib/conference/badges/label-html";
 import { reservedPlatesFromOverlay } from "@/lib/conference/badges/label-placement";
 import { normalizeBadgePrintStock } from "@/lib/conference/badges/print-stock";
+import QRCode from "qrcode";
+import {
+  badgeScanUrl, deriveBadgeToken, BADGE_TOKEN_FORMAT,
+} from "@/lib/conference/badges/tokens";
 import { DEFAULT_REPRINT_STOCK, type ReprintPlan } from "@/lib/conference/badges/reprint-plan";
 
 export class LabelDocumentError extends Error {}
@@ -45,12 +49,42 @@ async function platesForVariant(front: { layerOrder: string[] }, canvasWidthPx: 
   }
 }
 
+/**
+ * The person's badge QR, derived the same way the printed badge derives it.
+ *
+ * ⛔ From the token ROW ID through deriveBadgeToken — not re-minted, not the
+ * person id. A second derivation rule would produce a code that scans to
+ * nothing while looking perfectly valid.
+ *
+ * ⚠️ Returns null when the person has no token row, and the caller must treat
+ * that as "no back label" rather than printing an empty sticker.
+ */
+async function personQrDataUri(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any, conferenceId: string, personId: string
+): Promise<string | null> {
+  const { data: row } = await db
+    .from("conference_badge_tokens")
+    .select("id, token_format, revoked_at")
+    .eq("conference_id", conferenceId)
+    .eq("person_id", personId)
+    .maybeSingle();
+  if (!row || row.revoked_at) return null;
+  if (row.token_format !== BADGE_TOKEN_FORMAT) return null;
+  const svg = await QRCode.toString(badgeScanUrl(deriveBadgeToken(conferenceId, row.id as string)), {
+    type: "svg", errorCorrectionLevel: "M", margin: 0,
+  });
+  return "data:image/svg+xml;utf8," + encodeURIComponent(svg);
+}
+
 export async function buildReprintLabelDocument(params: {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any -- admin or service-role client
   db: any;
   conferenceId: string;
   jobId: string;
-}): Promise<{ html: string; widthMm: number; heightMm: number }> {
+  /** Which sticker. A reprint onto a blank needs both. */
+  side?: "front" | "back";
+}): Promise<{ html: string; widthMm: number; heightMm: number; side: "front" | "back" }> {
   const { db, conferenceId, jobId } = params;
 
   const { data: job } = await db
@@ -105,7 +139,19 @@ export async function buildReprintLabelDocument(params: {
   const gap = display.lastIndexOf(" ");
   const stock = plan.stockSpec ?? DEFAULT_REPRINT_STOCK;
 
+  const side = params.side ?? "front";
+  const qrDataUri = side === "back"
+    ? await personQrDataUri(db, conferenceId, job.person_id as string)
+    : null;
+  if (side === "back" && !qrDataUri) {
+    throw new LabelDocumentError(
+      "No usable badge token for this person, so there is no back label to print. " +
+      "A back sticker with no QR would look like a finished reprint and scan as nothing."
+    );
+  }
   const out = renderReprintLabel({
+    side,
+    qrDataUri,
     person: {
       firstName: gap > 0 ? display.slice(0, gap) : display,
       lastName: gap > 0 ? display.slice(gap + 1) : "",
@@ -120,7 +166,7 @@ export async function buildReprintLabelDocument(params: {
   });
 
   if (!out.html) throw new LabelDocumentError("There is nothing to print on this label.");
-  return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm };
+  return { html: out.html, widthMm: out.widthMm, heightMm: out.heightMm, side };
 }
 
 /** So the print stock policy stays one normalizer. */
