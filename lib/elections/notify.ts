@@ -8,12 +8,19 @@
  * still be told they have been nominated. Being unable to receive your own
  * nomination is disenfranchisement by mailing-list preference.
  *
- * The cost of that choice is that a dead address is also not filtered out. We
- * cannot currently detect one — Resend delivery events have never reached the
- * webhook, so `comms_suppressions` holds unsubscribes only and bounce
- * auto-suppression is not functioning. So this module returns a per-recipient
- * outcome for every send and the callers surface it, rather than assuming that
- * "no error" means "it arrived". For an election the honest position is: we
+ * A dead address IS now filtered out, though — that exemption was never meant
+ * to cover mailboxes that do not exist. Since 2026-09-02, `comms_suppressions`
+ * records why an address was suppressed, and `lib/email/send.ts` blocks any
+ * send to a hard-bounced one regardless of how transactional it is. An
+ * unsubscribed nominee still gets their nomination; a nominee whose mailbox was
+ * deleted gets a skip we can see, instead of a bounce we never noticed.
+ * (Before this, the blocker was that Resend delivery events never reached the
+ * webhook — fixed 2026-08-22, confirmed flowing 2026-09-02.)
+ *
+ * This module still returns a per-recipient outcome for every send and the
+ * callers still surface it, rather than assuming "no error" means "it arrived".
+ * A blocked send reports `HARD_BOUNCE_BLOCKED_ERROR`, which reads as a skip
+ * rather than an outage. For an election the honest position is unchanged: we
  * know what we attempted, not what landed.
  *
  * Nothing here throws. An election action must never fail because an email

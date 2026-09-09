@@ -5,9 +5,9 @@
        every stored layout position keeps its meaning. Trim is 9.04 units in. -->
 
   <!-- White plate behind the organization logo -->
-  <circle cx="56.038" cy="103" r="28.803" fill="#ffffff"/>
+  <circle cx="57" cy="103" r="27.5" fill="#ffffff"/>
   <!-- Exhibitor lead-capture QR plate -->
-  <rect x="24.826" y="303.933" width="50.615" height="50.615" fill="#ffffff"/>
+  <rect x="31" y="257" width="51" height="51" fill="#ffffff"/>
 
   <!-- Conference logo, inside the 0.125in trim -->
   <g transform="translate(170.968,312.00) scale(0.74641)">
