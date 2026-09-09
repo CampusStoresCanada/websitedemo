@@ -425,6 +425,43 @@ export async function createSchedulerDraftRun(
       memberContacts
     );
 
+    /**
+     * ⛔ REFUSE TO SOLVE WITHOUT MATCH DATA.
+     *
+     * `available` is false when no match_run has status='promoted'. Every
+     * orgTotalFor() then returns 0, so matchTotal(e) × occupancy(e) becomes
+     * 0 × occupancy and the objective is occupancy alone — the solver packs
+     * rooms and pairs people arbitrarily within the legal moves, producing a
+     * confident-looking schedule that cannot answer "why these five meetings".
+     *
+     * ⚠️ `available` has always been computed here and read by NOTHING. The one
+     * signal separating "misconfigured" from "working" sat unused beside the bug
+     * it describes.
+     *
+     * No override on this path deliberately. The CLI has --allow-unscored for
+     * benches and smoke tests; an admin pressing a button should never be able
+     * to publish an unscored schedule by accident, and a draft nobody can
+     * justify is not a useful draft.
+     */
+    if (!matchScoreLookup.available) {
+      await adminClient
+        .from("scheduler_runs")
+        .update({
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          constraint_violations: {
+            error: "NO_PROMOTED_MATCH_RUN",
+          } as unknown as Json,
+        })
+        .eq("id", runRow.id);
+      return {
+        success: false,
+        error:
+          "No promoted match run: every pair would score 0 and the schedule would " +
+          "be arbitrary. Promote a match run, then try again.",
+      };
+    }
+
     const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
     const schedulableExhibitors = candidates.exhibitors.filter((e) =>
       orgIdsHoldingSuites.has(e.organizationId)

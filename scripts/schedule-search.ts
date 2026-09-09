@@ -90,7 +90,8 @@ async function main() {
       "usage: schedule-search.ts <conferenceId> [--patience N] [--swap-trials N] " +
         "[--pref-pct N] [--no-ils] [--restarts N] [--persist]\n" +
         "  late add: --extend-active | --extend-run <runId> — extend a frozen " +
-        "schedule instead of solving a new one"
+        "schedule instead of solving a new one\n" +
+        "  --allow-unscored: solve with no promoted match run (arbitrary pairings)"
     );
     process.exit(1);
   }
@@ -200,6 +201,41 @@ async function main() {
     candidates.delegates.map((d: (typeof candidates.delegates)[number]) => d.organizationId),
     memberContacts
   );
+
+  /**
+   * ⛔ REFUSE TO SOLVE WITHOUT MATCH DATA.
+   *
+   * `available` is false when no match_run has status='promoted' — the engine
+   * ran but nobody made a run live. Every orgTotalFor() then returns 0, so
+   *
+   *     matchTotal(e) × occupancy(e)  →  0 × occupancy
+   *
+   * and the objective collapses to occupancy alone: the solver packs rooms and
+   * pairs people at random within the legal moves. It produces a complete,
+   * confident-looking schedule that cannot answer "why did I get these five
+   * meetings", because the answer is "no reason".
+   *
+   * ⚠️ This was computed and thrown away. `loadMeetingMatchScores` has always
+   * returned `available`, and NOTHING read it — the one signal that separates
+   * "misconfigured" from "working" was sitting unused next to the bug it
+   * describes.
+   *
+   * `--allow-unscored` exists because the bench and any pre-promotion smoke test
+   * legitimately have no promoted run. It must be typed deliberately.
+   */
+  if (!scores.available && !process.argv.includes("--allow-unscored")) {
+    console.error(
+      "refusing to solve: no promoted match run, so every pair scores 0 and the\n" +
+        "objective collapses to occupancy alone — the schedule would be arbitrary.\n" +
+        "  promote a match run first, or pass --allow-unscored to solve anyway."
+    );
+    process.exit(2);
+  }
+  if (!scores.available) {
+    console.warn(
+      "⚠️  --allow-unscored: no promoted match run. Pairings below are NOT matched."
+    );
+  }
 
   const delegateSeats = new Map(
     candidates.delegates.map((d: (typeof candidates.delegates)[number]) => [
