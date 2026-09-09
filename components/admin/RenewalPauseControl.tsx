@@ -138,7 +138,7 @@ export function RenewalPauseControl({
           onClick={() => !busy && setOpen(false)}
         >
           <div
-            className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
+            className="w-full max-w-md max-h-[90vh] overflow-y-auto rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-[17px] font-semibold" style={{ color: INK }}>
