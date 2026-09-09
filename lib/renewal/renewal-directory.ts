@@ -1,6 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getBillingConfig, getProgramsConfig, getRenewalConfig } from "@/lib/policy/engine";
-import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
+import { getBillingConfig, getProgramsConfig } from "@/lib/policy/engine";
+import { getCurrentRenewalSeason } from "@/lib/renewal/season";
 import { isInRenewalChase } from "@/lib/renewal/notification-pause";
 import { evaluateBucketPrice } from "@/lib/membership/pricing-core";
 import type { MembershipProgramDef } from "@/lib/policy/types";
@@ -116,7 +116,7 @@ export interface RenewalDirectory {
 export async function getRenewalDirectory(): Promise<RenewalDirectory> {
   const db = createAdminClient();
 
-  const [{ data: orgs }, billing, programs, renewal] = await Promise.all([
+  const [{ data: orgs }, billing, programs, season] = await Promise.all([
     db
       .from("organizations")
       .select(
@@ -130,26 +130,10 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       .order("name"),
     getBillingConfig(),
     getProgramsConfig(),
-    getRenewalConfig(),
+    // The one existing reader for "are we in a renewal season, and which
+    // cycle is being billed". Not re-derived here — see isInRenewalChase().
+    getCurrentRenewalSeason(new Date()),
   ]);
-
-  // The reminder window is one shared condition, not a per-org date — every
-  // org renews on the same calendar day — so it is resolved once here and
-  // handed to each row, exactly as renewalReminderRun() resolves it once
-  // outside its per-org worker.
-  const cycleStartDate = nextCycleStartOnOrAfter(new Date(), renewal.cycle_start_month_day);
-  const daysUntilCycleStart = Math.round(
-    (new Date(`${cycleStartDate}T00:00:00Z`).getTime() -
-      new Date(
-        `${new Date().toLocaleDateString("en-CA", { timeZone: renewal.dispatch_timezone })}T00:00:00Z`
-      ).getTime()) /
-      86_400_000
-  );
-  const chaseWindow = {
-    reminderWindowOpen:
-      daysUntilCycleStart >= 0 && daysUntilCycleStart <= Math.max(...renewal.reminder_days),
-    renewalYear: Number(cycleStartDate.split("-")[0]) + 1,
-  };
 
   const programByOrgType = new Map(programs.map((p) => [p.orgTypeValue, p]));
   const orgList = (orgs ?? []).filter((o) => programByOrgType.has(o.type));
@@ -258,7 +242,7 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       renewalPauseReason: o.renewal_pause_reason,
       renewalChaseable: isInRenewalChase(
         { membershipStatus: o.membership_status, membershipExpiresAt: o.membership_expires_at },
-        chaseWindow
+        season
       ),
     };
   });

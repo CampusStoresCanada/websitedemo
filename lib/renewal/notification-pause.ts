@@ -71,36 +71,40 @@ export const RENEWAL_PAUSE_COLUMNS = "renewal_notifications_paused_until" as con
  * cannot have an effect — and worse, one an admin may press believing they
  * have stopped something.
  *
+ * The window comes from getCurrentRenewalSeason() rather than being derived
+ * here. That function already resolves the season from the same policy config
+ * the crons run on, and already carries the note that its renewalYear must
+ * match jobs.ts exactly. A second derivation in this file drifted from it
+ * immediately: computing the cycle with nextCycleStartOnOrAfter() on a day
+ * just past Sept 1 yields the NEXT cycle (2027-09-01, renewalYear 2028) while
+ * the season containing today is the current one (2026-09-01, renewalYear
+ * 2027) — so the paid-through comparison was made against a cycle that has
+ * not started, and the Sept-to-Oct tail, where renewal_charge_failed mail
+ * goes out to active-but-unpaid orgs, fell outside the window entirely.
+ *
  * The two live cases, mirroring the gates in lib/renewal/jobs.ts:
  *
- *   - `grace`: the weekly grace reminder is going out now, and the lock notice
- *     is coming. This is the case the tool was built for.
- *   - `active`/`reactivated` while the shared reminder window is open, and the
- *     org has not already paid through the cycle being billed. That window is
- *     one global condition, not a per-org date — every org renews on the same
- *     calendar day — so the caller computes it once and passes it in.
+ *   - `grace`: the weekly grace reminder is going out now, and the lock
+ *     notice is coming. Independent of the season — a grace period can outlive
+ *     it — so this is checked first.
+ *   - `active`/`reactivated` inside the season, not yet paid through the cycle
+ *     being billed. Covers both the reminder run before the cycle starts and
+ *     the charge-failed mail after it.
  *
- * Everything else is out of the chase for longer than a pause can last. Note
- * this is "not being chased *now*", not "exempt": an active org paid up to
- * 2027-08-31 is chased again the moment next August's window opens. A pause
- * caps at 120 days and cannot reach that far, so the control appears then,
- * not now.
+ * Not "exempt": an active org paid to 2027-08-31 re-enters the chase when next
+ * August's season opens. It is out of the chase today, and a pause caps at 120
+ * days, so one set now could not reach that mail anyway.
  */
 export function isInRenewalChase(
   org: { membershipStatus: string | null; membershipExpiresAt: string | null },
-  window: { reminderWindowOpen: boolean; renewalYear: number }
+  season: { renewalYear: number } | null
 ): boolean {
   if (org.membershipStatus === "grace") return true;
+  if (!season) return false;
+  if (org.membershipStatus !== "active" && org.membershipStatus !== "reactivated") return false;
 
-  if (
-    window.reminderWindowOpen &&
-    (org.membershipStatus === "active" || org.membershipStatus === "reactivated")
-  ) {
-    // A null expiry means an outstanding renewal, not an unknown one — so it
-    // stays in the chase rather than being filtered out of it.
-    if (!org.membershipExpiresAt) return true;
-    return new Date(org.membershipExpiresAt).getFullYear() < window.renewalYear;
-  }
-
-  return false;
+  // A null expiry means an outstanding renewal, not an unknown one — so it
+  // stays in the chase rather than being filtered out of it.
+  if (!org.membershipExpiresAt) return true;
+  return new Date(org.membershipExpiresAt).getFullYear() < season.renewalYear;
 }
