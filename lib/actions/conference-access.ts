@@ -16,6 +16,7 @@ import type { GrantType } from "@/lib/conference/grants";
 import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
+import { normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
 
 /**
  * Conference fulfillment obligations — derived from a person's v3 holdings.
@@ -86,7 +87,15 @@ async function loadV3Held(
   const byId = new Map(
     buildEntityGraph(entityRows ?? [], refRows ?? []).map((e) => [e.id, e])
   );
-  const registration = heldIds.map((id) => byId.get(id)).find((e) => e?.kind === "registration") ?? null;
+  // Deterministic: the seat query has no ORDER BY, so an unordered `.find()`
+  // could hand the preview a different registration type than the print run
+  // chose for the same person. Sorted by name so the answer is stable, and
+  // preflight blocks any multi-type person before a badge is printed anyway.
+  const registration =
+    heldIds
+      .map((id) => byId.get(id))
+      .filter((e): e is NonNullable<typeof e> => e?.kind === "registration")
+      .sort((a, b) => a.name.localeCompare(b.name))[0] ?? null;
 
   // Held things AND everything reachable from them. The seat itself counts —
   // a directly bought Meet & Greet ticket is an `event` in its own right, not
@@ -414,7 +423,13 @@ export async function loadMyConferenceObligations(): Promise<Result<{
     // the print run could resolve different layouts for the same badge.
     variantKey: registrationEntityId,
     variantName: registrationName,
-    template: (templateRow.data?.field_mapping as unknown) ?? null,
+    // Normalised here, not raw. The print path calls normalizeBadgeTemplateConfig
+    // and this one did not, so the member's preview and the printed badge were
+    // reading two different shapes of the same template — and the raw shape
+    // throws outright on a pre-migration (role-keyed) template.
+    template: templateRow.data?.field_mapping
+      ? normalizeBadgeTemplateConfig(templateRow.data.field_mapping)
+      : null,
   };
 
   return {
