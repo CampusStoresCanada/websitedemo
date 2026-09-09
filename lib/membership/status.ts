@@ -22,9 +22,26 @@ export const ORG_PROFILE_RESOLVABLE_STATUSES: OrgMembershipStatus[] = [
   "canceled",
 ];
 
+/**
+ * Orgs whose membership currently ENTITLES them to things — the paid-up set.
+ * Grace belongs here: a grace org is a member whose renewal is in flight, not
+ * a lapsed one, and it keeps every entitlement until the gate moves it to
+ * locked.
+ *
+ * ⛔ Not the same question as PUBLIC_LISTABLE_ORG_STATUSES above. That one asks
+ * "does this org appear to the world"; this one asks "is this org a current
+ * member". They were conflated in the partner exports, which quietly billed
+ * partners for a member list that omitted every store mid-renewal.
+ */
+export const ORG_ACCESS_ACTIVE_STATUSES: OrgMembershipStatus[] = [
+  "active",
+  "grace",
+  "reactivated",
+];
+
 /** Can this org access member/partner features? */
 export function isOrgAccessActive(status: OrgMembershipStatus | null): boolean {
-  return status !== null && ["active", "grace", "reactivated"].includes(status);
+  return status !== null && ORG_ACCESS_ACTIVE_STATUSES.includes(status);
 }
 
 /** Should this org appear in public directories / map? */

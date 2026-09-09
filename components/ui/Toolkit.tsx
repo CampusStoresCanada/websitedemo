@@ -97,6 +97,9 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
   const { user, profile, permissionState, organizations } = useAuth();
   const { editMode, setEditMode, isAdmin, canEditOrg } = useToolkit();
   const isPartnerViewing = !!user && hasPermission(permissionState, "partner") && !hasPermission(permissionState, "member");
+  // CSC staff. Deliberately NOT useToolkit()'s isAdmin, which also counts any
+  // org_admin — a partner's own admin is one, and would match that.
+  const isCscAdmin = !!user && hasPermission(permissionState, "admin");
   const partnerOwnOrgSlugs = organizations
     .filter(uo => uo.organization?.type === "Vendor Partner" && uo.role === "org_admin")
     .map(uo => uo.organization?.slug)
@@ -613,6 +616,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
           pathname={pathname}
           onClose={handleClose}
           isPartner={isPartnerViewing}
+          isCscAdmin={isCscAdmin}
           partnerOwnOrgSlugs={partnerOwnOrgSlugs}
         />
       )}
@@ -2785,7 +2789,7 @@ function BookmarkModal({
 // ExportModal
 // ─────────────────────────────────────────────────────────────────────────────
 
-function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs = [] }: { pathname: string; onClose: () => void; isPartner?: boolean; partnerOwnOrgSlugs?: string[] }) {
+function ExportModal({ pathname, onClose, isPartner = false, isCscAdmin = false, partnerOwnOrgSlugs = [] }: { pathname: string; onClose: () => void; isPartner?: boolean; isCscAdmin?: boolean; partnerOwnOrgSlugs?: string[] }) {
   const context = detectPageContext(pathname);
   const isPartnerOwnPage = context.type === "org" && partnerOwnOrgSlugs.includes(context.slug);
   const [downloading, setDownloading] = useState<string | null>(null);
@@ -2859,30 +2863,39 @@ function ExportModal({ pathname, onClose, isPartner = false, partnerOwnOrgSlugs 
       }] : []),
     ];
   } else if (context.type === "members_directory") {
+    const memberDirectoryOption = {
+      label: "Member Directory CSV",
+      description: "Name, city, province, and website for all members",
+      icon: "📋",
+      action: () => run("Member Directory CSV", () => exportMembersDirectory()),
+    };
+    const fullDirectoryOption = {
+      label: "Full Member Directory CSV",
+      description: "Every member and every contact on file there — one row per person. Anyone who's hidden their info is excluded, not just blanked.",
+      icon: "📚",
+      action: () => run("Full Member Directory CSV", () => exportFullMemberDirectoryCSV()),
+    };
+
     if (isPartner) {
       options = [
         {
+          // Scoped to the partner's own category, so it only means anything to
+          // someone who HAS one — a CSC admin doesn't, hence partner-only.
           label: "My Buyer Contacts",
           description: "One row per member that carries your category — buyer name, email, phone, buying window",
           icon: "📇",
           action: () => run("My Buyer Contacts", () => exportMemberBuyersCSV()),
         },
-        {
-          label: "Full Member Directory CSV",
-          description: "Every visible member and every contact on file there — one row per person. Anyone who's hidden their info is excluded, not just blanked.",
-          icon: "📚",
-          action: () => run("Full Member Directory CSV", () => exportFullMemberDirectoryCSV()),
-        },
+        fullDirectoryOption,
       ];
+    } else if (isCscAdmin) {
+      // CSC staff previously saw ONLY the plain store list here: the partner
+      // branch tested for "exactly partner", and an admin outranks that. So the
+      // one export partners ask about was the one export staff couldn't pull,
+      // couldn't check, and couldn't send on request.
+      options = [memberDirectoryOption, fullDirectoryOption];
     } else {
-      options = [
-        {
-          label: "Member Directory CSV",
-          description: "Name, city, province, and website for all members",
-          icon: "📋",
-          action: () => run("Member Directory CSV", () => exportMembersDirectory()),
-        },
-      ];
+      options = [memberDirectoryOption];
     }
   } else if (context.type === "partners_directory") {
     options = [

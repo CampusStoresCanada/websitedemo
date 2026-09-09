@@ -91,3 +91,47 @@ export async function getViewerContext(): Promise<ViewerContext> {
     viewerOrgAdminIds: ctx.orgAdminOrgIds,
   };
 }
+
+/**
+ * Viewer context for an ORG PAGE — the plain viewer context plus the
+ * "I'm looking at my own org" elevation.
+ *
+ * Only ever raises the floor to "org_admin", never lowers it: a CSC global
+ * admin who also belongs to this org keeps their higher level. A lapsed org
+ * gets no elevation at all — its own people see exactly the public view until
+ * it reactivates (getOrganizationForViewer enforces that independently too).
+ *
+ * Lives here rather than in the page because the org page is no longer the
+ * only reader: the toolkit's Contacts CSV export has to resolve the viewer
+ * identically or the file disagrees with the screen it was exported from.
+ */
+export async function getOrgPageViewerContext(slug: string): Promise<{
+  /** The viewer as they are everywhere else — NOT elevated. */
+  viewer: ViewerContext;
+  /** The viewer as this org's page should treat them. */
+  effectiveViewer: ViewerContext;
+  org: { id: string; membership_status: string | null; public_code: string | null } | null;
+  orgAccessActive: boolean;
+}> {
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const viewer = await getViewerContext();
+
+  const { data: org } = await createAdminClient()
+    .from("organizations")
+    .select("id, membership_status, public_code")
+    .eq("slug", slug)
+    .maybeSingle();
+
+  const isAlreadyCscAdmin =
+    viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+  const orgAccessActive = isOrgAccessActive(
+    (org?.membership_status as Parameters<typeof isOrgAccessActive>[0]) ?? null
+  );
+
+  const effectiveViewer =
+    org && viewer.viewerOrgIds.includes(org.id) && !isAlreadyCscAdmin && orgAccessActive
+      ? { ...viewer, viewerLevel: "org_admin" as const }
+      : viewer;
+
+  return { viewer, effectiveViewer, org: org ?? null, orgAccessActive };
+}
