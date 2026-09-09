@@ -165,32 +165,121 @@ async function getAccessToken(): Promise<string> {
 // API request helper
 // ─────────────────────────────────────────────────────────────────
 
+// ─────────────────────────────────────────────────────────────────
+// Transport
+//
+// A bare fetch is not a safe transport for money. On 2026-09-01 a single
+// Intuit 504 on a *customer lookup* permanently killed a $5,198 sales
+// receipt: nothing here retried, so the owning queue spent its whole
+// three-attempt budget inside 45 minutes and marked the row terminally
+// failed. Intuit incidents routinely outlast 45 minutes, which made
+// "transient" and "fatal" the same thing.
+//
+// Two rules:
+//
+//  1. Retry only what a retry can fix — timeouts, rate limits, gateway and
+//     server errors, and network faults. A 400/401/403/404 is our bug or our
+//     config; it will fail identically forever, and spending attempts on it
+//     only delays the human who has to fix it. QBApiError carries that
+//     verdict outward so the queue layer can pick a backoff to match
+//     (see lib/quickbooks/queue.ts).
+//
+//  2. Stay inside the caller's lease. A single queue row can make several of
+//     these calls, three workers run concurrently, and each holds a 5-minute
+//     lease — so attempts and backoff are deliberately tight. Surviving a
+//     long outage is the queue ladder's job, not this function's.
+// ─────────────────────────────────────────────────────────────────
+
+/** Per-attempt ceiling. There was no timeout at all before, so a hung socket
+ *  could eat the worker's entire lease while holding rows in `processing`. */
+const REQUEST_TIMEOUT_MS = 10_000;
+const REQUEST_ATTEMPTS = 3;
+/** 400ms then 1200ms — worst case ~31.6s per call, three calls deep still
+ *  well inside a 5-minute lease. No jitter: at three concurrent workers
+ *  there is no herd to disperse, and determinism makes this testable. */
+const RETRY_BACKOFF_MS = [400, 1200];
+
+const RETRYABLE_STATUSES = new Set([408, 429, 500, 502, 503, 504]);
+
+/** A QBO API failure that knows whether trying again could ever help. */
+export class QBApiError extends Error {
+  /** HTTP status, or null when the request never got a response. */
+  readonly status: number | null;
+  readonly retryable: boolean;
+  /** How many attempts this call actually made before giving up. */
+  readonly attempts: number;
+
+  constructor(params: {
+    message: string;
+    status: number | null;
+    retryable: boolean;
+    attempts: number;
+  }) {
+    super(params.message);
+    this.name = "QBApiError";
+    this.status = params.status;
+    this.retryable = params.retryable;
+    this.attempts = params.attempts;
+  }
+}
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 async function qbRequest<T>(
   method: "GET" | "POST",
   path: string,
   body?: unknown
 ): Promise<T> {
   const { apiBase, realmId } = await getConfig2();
-  const accessToken = await getAccessToken();
   const separator = path.includes("?") ? "&" : "?";
   const url = `${apiBase}/v3/company/${realmId}${path}${separator}minorversion=65`;
 
-  const res = await fetch(url, {
-    method,
-    headers: {
-      Authorization: `Bearer ${accessToken}`,
-      "Content-Type": "application/json",
-      Accept: "application/json",
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
+  let lastError: QBApiError | null = null;
 
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(`QB API ${method} ${path} failed (${res.status}): ${text}`);
+  for (let attempt = 1; attempt <= REQUEST_ATTEMPTS; attempt++) {
+    // Re-read per attempt rather than hoisting: getAccessToken refreshes an
+    // expired token, so a token that lapses mid-sequence self-heals.
+    const accessToken = await getAccessToken();
+
+    try {
+      const res = await fetch(url, {
+        method,
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: body ? JSON.stringify(body) : undefined,
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      });
+
+      if (res.ok) return (await res.json()) as T;
+
+      const text = await res.text();
+      lastError = new QBApiError({
+        message: `QB API ${method} ${path} failed (${res.status}): ${text}`,
+        status: res.status,
+        retryable: RETRYABLE_STATUSES.has(res.status),
+        attempts: attempt,
+      });
+    } catch (err) {
+      // A timeout aborts as AbortError; DNS/TCP/TLS faults land here too.
+      // Both are worth another go — neither says anything about the request.
+      lastError = new QBApiError({
+        message: `QB API ${method} ${path} failed (no response): ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+        status: null,
+        retryable: true,
+        attempts: attempt,
+      });
+    }
+
+    if (!lastError.retryable || attempt === REQUEST_ATTEMPTS) break;
+    await sleep(RETRY_BACKOFF_MS[attempt - 1] ?? RETRY_BACKOFF_MS.at(-1)!);
   }
 
-  return res.json();
+  throw lastError!;
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -324,6 +413,37 @@ export async function createQBPayment(input: QBPaymentInput): Promise<QBPayment>
 // Sales Receipt / Refund Receipt — already-paid conference commerce
 // (no AR, no Invoice — Stripe already collected the money)
 // ─────────────────────────────────────────────────────────────────
+
+/**
+ * Find an already-posted document by the DocNumber we derived from our own row
+ * id — the pre-flight that makes a retry safe to press.
+ *
+ * Every write path stamps `DocNumber: qboDocNumber(<our row id>)`, so the
+ * document QBO holds is addressable from our side without storing anything.
+ * That closes the one window a queue row cannot see: QBO created the document
+ * and the write-back of its id never landed. Retrying then posts a second one.
+ * There is a live example on record of a retry that would have double-posted
+ * $4,520 for exactly this reason.
+ *
+ * ⚠️ Only sound where the DocNumber identifies ONE document. It does for
+ * invoices and sales receipts (one per invoice / order / payment). It does NOT
+ * for refunds: both refund paths derive DocNumber from the *parent* invoice or
+ * order, so two partial refunds of the same parent share one DocNumber, and
+ * adopting the first would silently skip the second. Refund workers therefore
+ * guard on their own stored receipt id only — see the callers.
+ */
+export async function findQBDocumentByDocNumber(
+  entity: "Invoice" | "SalesReceipt",
+  docNumber: string
+): Promise<{ Id: string } | null> {
+  const escaped = docNumber.replace(/'/g, "\\'");
+  const query = `SELECT Id, DocNumber FROM ${entity} WHERE DocNumber = '${escaped}'`;
+  const res = await qbRequest<{ QueryResponse: Record<string, Array<{ Id: string }> | undefined> }>(
+    "GET",
+    `/query?query=${encodeURIComponent(query)}`
+  );
+  return res.QueryResponse?.[entity]?.[0] ?? null;
+}
 
 export async function createQBSalesReceipt(input: QBSalesReceiptInput): Promise<QBSalesReceipt> {
   const res = await qbRequest<{ SalesReceipt: QBSalesReceipt }>("POST", "/salesreceipt", input);

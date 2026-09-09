@@ -8,10 +8,12 @@ import {
   createQBPayment,
   createQBRefundReceipt,
   qboDocNumber,
+  findQBDocumentByDocNumber,
 } from "./client";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { isFeatureEnabled } from "@/lib/data";
+import { adoptExistingReceipt, failQueueRow, releaseUnprocessedRows, startRunBudget } from "./queue";
 import type { QBExportQueueRow, QBMembershipRefundQueueRow } from "./types";
 import type { Invoice } from "@/lib/stripe/types";
 
@@ -320,7 +322,21 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
 
   if (!rows || rows.length === 0) return result;
 
-  for (const row of rows) {
+  // Stop starting rows once the run's budget is spent. qbRequest now
+  // retries, so a slow Intuit day costs real wall-clock, and overrunning
+  // the 5-minute lease would let another worker reclaim a row still being
+  // processed and post it twice. Unstarted rows go back on the queue and
+  // wait for the next tick.
+  const isOutOfBudget = startRunBudget();
+  for (const [rowIndex, row] of rows.entries()) {
+    if (isOutOfBudget()) {
+      await releaseUnprocessedRows(
+        db,
+        "qbo_export_queue",
+        rows.slice(rowIndex).map((r) => r.id)
+      );
+      break;
+    }
     result.processed++;
     try {
       await processExportRow(db, row);
@@ -329,7 +345,7 @@ export async function quickbooksExportRun(): Promise<QBExportJobResult> {
       result.failed++;
       const message = err instanceof Error ? err.message : String(err);
       result.errors.push(`invoice ${row.invoice_id}: ${message}`);
-      await failRow(db, row, message);
+      await failRow(db, row, err);
     }
   }
 
@@ -386,6 +402,16 @@ async function processExportRow(
   // Skip if already has a QB invoice (re-run safety)
   if (row.qbo_invoice_id) {
     await markComplete(db, row, row.qbo_invoice_id, row.qbo_payment_id);
+    return;
+  }
+
+  // The stored id above only covers a retry after the write-back landed. If
+  // QBO created the invoice and we crashed before recording it, the row still
+  // looks unposted — and retrying would post a second one. Ask QBO directly,
+  // using the DocNumber we derive from this invoice's own id.
+  const alreadyPosted = await findQBDocumentByDocNumber("Invoice", qboDocNumber(invoice.id));
+  if (alreadyPosted) {
+    await markComplete(db, row, alreadyPosted.Id, row.qbo_payment_id);
     return;
   }
 
@@ -468,28 +494,16 @@ async function markComplete(
     .eq("id", row.id);
 }
 
+// Backoff and exhaustion now live in lib/quickbooks/queue.ts, which picks the
+// ladder from the failure's kind — a transient Intuit fault gets ~40 hours,
+// anything unclassified keeps this queue's original three attempts. No alert
+// is raised here: /admin/ops surfaces this queue's failed rows directly.
 async function failRow(
   db: ReturnType<typeof createAdminClient>,
   row: QBExportQueueRow,
-  message: string
+  err: unknown
 ) {
-  const newRetryCount = row.retry_count + 1;
-  const exhausted = newRetryCount >= row.max_retries;
-
-  // Exponential backoff: 5m, 20m, 60m
-  const backoffMinutes = [5, 20, 60][Math.min(row.retry_count, 2)];
-  const nextRetry = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
-
-  await db
-    .from("qbo_export_queue")
-    .update({
-      status: exhausted ? "failed" : "retrying",
-      retry_count: newRetryCount,
-      next_retry_at: exhausted ? null : nextRetry,
-      error_message: message,
-      lease_expires_at: null,
-    })
-    .eq("id", row.id);
+  await failQueueRow(db, "qbo_export_queue", row, err);
 }
 
 // ─────────────────────────────────────────────────────────────────
@@ -591,9 +605,39 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
   }
   if (!rows || rows.length === 0) return result;
 
-  for (const row of rows) {
+  // Stop starting rows once the run's budget is spent. qbRequest now
+  // retries, so a slow Intuit day costs real wall-clock, and overrunning
+  // the 5-minute lease would let another worker reclaim a row still being
+  // processed and post it twice. Unstarted rows go back on the queue and
+  // wait for the next tick.
+  const isOutOfBudget = startRunBudget();
+  for (const [rowIndex, row] of rows.entries()) {
+    if (isOutOfBudget()) {
+      await releaseUnprocessedRows(
+        db,
+        "qbo_membership_refund_queue",
+        rows.slice(rowIndex).map((r) => r.id)
+      );
+      break;
+    }
     result.processed++;
     try {
+      // Refunds get the stored-id guard only, NOT the DocNumber pre-flight:
+      // this path derives DocNumber from the parent invoice, so two partial
+      // refunds of one invoice share it and adopting the first would silently
+      // swallow the second. A refund whose write-back was lost therefore still
+      // needs a human to check QBO — /admin/ops flags exactly that case.
+      if (row.qbo_refund_receipt_id) {
+        await adoptExistingReceipt(
+          db,
+          "qbo_membership_refund_queue",
+          row.id,
+          row.qbo_refund_receipt_id
+        );
+        result.succeeded++;
+        continue;
+      }
+
       const { data: invoice, error: invErr } = await db
         .from("invoices")
         .select(`
@@ -663,7 +707,7 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
       result.failed++;
       const message = err instanceof Error ? err.message : String(err);
       result.errors.push(`invoice ${row.invoice_id}: ${message}`);
-      await failRefundRow(db, row, message);
+      await failRefundRow(db, row, err);
     }
   }
 
@@ -673,23 +717,14 @@ export async function quickbooksExportRefundRun(): Promise<QBExportJobResult> {
 async function failRefundRow(
   db: ReturnType<typeof createAdminClient>,
   row: QBMembershipRefundQueueRow,
-  message: string
+  err: unknown
 ): Promise<void> {
-  const newRetryCount = row.retry_count + 1;
-  const exhausted = newRetryCount >= row.max_retries;
-  const backoffMinutes = [5, 20, 60][Math.min(row.retry_count, 2)];
-  const nextRetry = new Date(Date.now() + backoffMinutes * 60 * 1000).toISOString();
-
-  await db
-    .from("qbo_membership_refund_queue")
-    .update({
-      status: exhausted ? "failed" : "retrying",
-      retry_count: newRetryCount,
-      next_retry_at: exhausted ? null : nextRetry,
-      error_message: message,
-      lease_expires_at: null,
-    })
-    .eq("id", row.id);
+  const { exhausted, message } = await failQueueRow(
+    db,
+    "qbo_membership_refund_queue",
+    row,
+    err
+  );
 
   if (exhausted) {
     await raiseAlertIfNotOpen({

@@ -5,6 +5,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { evaluateOpsAlerts } from "@/lib/ops/alerts";
+import { QB_QUEUE_TABLES, type QBQueueTable } from "@/lib/quickbooks/queue";
 import {
   graceStateTransitionRun,
   renewalChargeRun,
@@ -878,7 +879,23 @@ export async function deleteSchedulerRunAction(
   return { success: true };
 }
 
-export async function retryQBExportAction(
+/**
+ * Requeue a failed row on ANY of the five QBO worker queues.
+ *
+ * Only qbo_export_queue was ever retryable from here, which is why a dead
+ * misc-receipt row — $4,689.50 of collected money with no QuickBooks entry —
+ * sat invisible for a week in September 2026 with no button to press.
+ *
+ * Safe to press because the workers now pre-flight QuickBooks by DocNumber
+ * before creating anything, so a retry adopts an already-posted document
+ * rather than posting a second one. The exception is the two refund queues:
+ * their DocNumber comes from the parent invoice/order and cannot distinguish
+ * partial refunds, so a refund whose write-back was lost still needs a human
+ * to check QuickBooks first. The panel says so; this is deliberately not
+ * blocked, because the operator is the one who can look.
+ */
+export async function retryQBQueueRowAction(
+  queue: string,
   rowId: string,
   reason: string
 ): Promise<{ success: boolean; error?: string }> {
@@ -887,6 +904,13 @@ export async function retryQBExportAction(
     return { success: false, error: auth.error };
   }
 
+  // Allow-list: `queue` arrives from the client, and this writes with the
+  // service-role key. Never interpolate it into .from() unchecked.
+  if (!(QB_QUEUE_TABLES as readonly string[]).includes(queue)) {
+    return { success: false, error: `Unknown QuickBooks queue: ${queue}` };
+  }
+  const table = queue as QBQueueTable;
+
   const trimmedReason = reason.trim();
   if (trimmedReason.length < 8) {
     return { success: false, error: "Reason is required (minimum 8 characters)." };
@@ -894,7 +918,7 @@ export async function retryQBExportAction(
 
   const db = createAdminClient();
   const { error } = await db
-    .from("qbo_export_queue")
+    .from(table)
     .update({
       status: "pending",
       retry_count: 0,
@@ -904,29 +928,119 @@ export async function retryQBExportAction(
     })
     .eq("id", rowId);
 
-  if (error) {
-    await logAuditEventSafe({
-      action: "qbo_export_retry_request",
-      entityType: "qbo_export_queue",
-      entityId: rowId,
-      actorId: auth.ctx.userId,
-      actorType: "user",
-      details: { rowId, reason: trimmedReason, success: false, error: error.message },
-    });
-    return { success: false, error: `Failed to queue retry: ${error.message}` };
-  }
+  const auditDetails = {
+    rowId,
+    queue: table,
+    reason: trimmedReason,
+    success: !error,
+    ...(error ? { error: error.message } : {}),
+  };
 
   await logAuditEventSafe({
     action: "qbo_export_retry_request",
-    entityType: "qbo_export_queue",
+    entityType: table,
     entityId: rowId,
     actorId: auth.ctx.userId,
     actorType: "user",
-    details: { rowId, reason: trimmedReason, success: true },
+    details: auditDetails,
   });
+
+  if (error) {
+    return { success: false, error: `Failed to queue retry: ${error.message}` };
+  }
 
   revalidatePath("/admin/ops");
   return { success: true };
+}
+
+/**
+ * Close a failed QBO queue row on purpose, without posting it to QuickBooks.
+ *
+ * The counterpart to retry, and the reason `skipped` exists as a status: some
+ * failed rows are correct to leave unposted — a duplicate refund row whose
+ * retry would double-post, a payment already entered in QuickBooks by hand.
+ * Before this they had to stay `failed` forever, which meant the backlog alert
+ * could never legitimately clear, and an alert that can never clear is one
+ * people stop reading.
+ *
+ * The reason is required and goes into `error_message`, where the failed panel
+ * and anyone reading the row later will see it.
+ */
+export async function skipQBQueueRowAction(
+  queue: string,
+  rowId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  if (!(QB_QUEUE_TABLES as readonly string[]).includes(queue)) {
+    return { success: false, error: `Unknown QuickBooks queue: ${queue}` };
+  }
+  const table = queue as QBQueueTable;
+
+  const trimmedReason = reason.trim();
+  if (trimmedReason.length < 8) {
+    return { success: false, error: "Reason is required (minimum 8 characters)." };
+  }
+
+  const db = createAdminClient();
+
+  // Preserve whatever the row already said. That text is usually the diagnosis
+  // the skip decision was made FROM — the failing QuickBooks error, or an
+  // earlier operator's note — and overwriting it would destroy the only record
+  // of why this row exists in the state it does.
+  const { data: existing } = await db
+    .from(table)
+    .select("error_message")
+    .eq("id", rowId)
+    .maybeSingle();
+
+  const priorMessage = (existing as { error_message?: string | null } | null)?.error_message;
+  const note = `Skipped by admin: ${trimmedReason}`;
+
+  const { error } = await db
+    .from(table)
+    .update({
+      status: "skipped",
+      next_retry_at: null,
+      lease_expires_at: null,
+      processed_at: new Date().toISOString(),
+      error_message: priorMessage ? `${note}\n\nPrior state: ${priorMessage}` : note,
+    })
+    .eq("id", rowId);
+
+  await logAuditEventSafe({
+    action: "qbo_export_skip_request",
+    entityType: table,
+    entityId: rowId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      rowId,
+      queue: table,
+      reason: trimmedReason,
+      success: !error,
+      ...(error ? { error: error.message } : {}),
+    },
+  });
+
+  if (error) {
+    return { success: false, error: `Failed to skip row: ${error.message}` };
+  }
+
+  revalidatePath("/admin/ops");
+  return { success: true };
+}
+
+/** Back-compat wrapper for the original invoice-export-only button. */
+export async function retryQBExportAction(
+  rowId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  return retryQBQueueRowAction("qbo_export_queue", rowId, reason);
 }
 
 export async function ignoreQBReconciliationItemAction(

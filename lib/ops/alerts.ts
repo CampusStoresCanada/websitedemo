@@ -1,6 +1,10 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { EXPECTED_BOARD_SIZE } from "@/lib/board/vote-roster";
+// Type-only: lib/quickbooks/client.ts imports raiseAlertIfNotOpen from this
+// file, so a value import here would close a runtime cycle. `import type` is
+// erased at compile time and cannot.
+import type { QBQueueTable } from "@/lib/quickbooks/queue";
 import {
   diffDbAccessDrift,
   type DbAccessDriftReport,
@@ -711,7 +715,26 @@ async function evaluateRetentionOverdue(): Promise<CandidateAlert | null> {
   };
 }
 
-async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
+/**
+ * Failed rows across ALL five QBO worker queues, not just invoice export.
+ *
+ * Why this rule has to be the durable signal: the per-row alerts the workers
+ * raise (`qbo_misc_receipt_failed:…`, `qbo_conference_receipt_failed:…`, and
+ * friends) come from raiseAlertIfNotOpen at the moment of failure, and — per
+ * the note on PERIODIC_RULE_KEYS above — event-raised alerts are deliberately
+ * never re-evaluated here. So once a human resolves one, nothing raises it
+ * again: the row is terminally failed and will never fail a second time.
+ *
+ * That is exactly how $4,689.50 of collected money sat unposted and unflagged
+ * for a week in September 2026. Its alert was resolved on 2026-09-03 while the
+ * queue row was still `failed`, and the last signal went out with it.
+ *
+ * This rule is periodic, so it re-raises for as long as any queue still holds
+ * a failed row, and auto-resolves the moment the last one clears. Resolving it
+ * by hand cannot silence it — only fixing or retiring the row can. That is the
+ * point: "resolved" should describe the money, not the notification.
+ */
+export async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
   const db = createAdminClient() as unknown as {
     from: (table: string) => {
       select: (columns: string, opts?: { count?: "exact"; head?: boolean }) => {
@@ -724,23 +747,51 @@ async function evaluateQBExportBacklog(): Promise<CandidateAlert | null> {
     };
   };
 
-  const { count, error } = await db
-    .from("qbo_export_queue")
-    .select("id", { count: "exact", head: true })
-    .eq("status", "failed");
+  const QUEUES: Array<{ table: QBQueueTable; label: string }> = [
+    { table: "qbo_export_queue", label: "invoice export" },
+    { table: "qbo_membership_refund_queue", label: "membership refund" },
+    { table: "qbo_conference_receipt_queue", label: "conference receipt" },
+    { table: "qbo_conference_refund_queue", label: "conference refund" },
+    { table: "qbo_misc_receipt_queue", label: "misc receipt" },
+  ];
 
-  if (error) {
-    throw new Error(`Failed to evaluate QB export backlog: ${error.message}`);
+  const byQueue: Record<string, number> = {};
+  let failedCount = 0;
+
+  for (const queue of QUEUES) {
+    const { count, error } = await db
+      .from(queue.table)
+      .select("id", { count: "exact", head: true })
+      .eq("status", "failed");
+
+    if (error) {
+      throw new Error(
+        `Failed to evaluate QB export backlog (${queue.table}): ${error.message}`,
+      );
+    }
+
+    const queueCount = count ?? 0;
+    if (queueCount > 0) byQueue[queue.label] = queueCount;
+    failedCount += queueCount;
   }
 
-  const failedCount = count ?? 0;
   if (failedCount === 0) return null;
+
+  // Named per queue rather than a bare total: "1 misc receipt" and "1 invoice
+  // export" need very different people looking at them, and the message is
+  // frozen at creation time, so the breakdown has to be in it.
+  const breakdown = Object.entries(byQueue)
+    .map(([label, n]) => `${n} ${label}`)
+    .join(", ");
 
   return {
     ruleKey: "qbo_export_backlog",
     severity: failedCount >= 3 ? "critical" : "warning",
-    message: `${failedCount} QB export(s) have exhausted all retries and need attention.`,
-    details: { failedCount },
+    message:
+      `${failedCount} QuickBooks export(s) have exhausted all retries and need attention ` +
+      `(${breakdown}). Money may be collected in Stripe with nothing in QuickBooks. ` +
+      `Retry from /admin/ops — resolving this alert will not clear it while a row is still failed.`,
+    details: { failedCount, byQueue },
   };
 }
 
