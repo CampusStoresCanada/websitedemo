@@ -302,3 +302,35 @@ export async function spareCountsForJob(
 ): Promise<SpareCounts> {
   return computeSpareCounts({ stock, ...(await loadSpareBasis(db, conferenceId, run)) });
 }
+
+/**
+ * How the spare stack divides across registration types.
+ *
+ * ⛔ THE SPARE MANIFEST IS NOT RECORDED ANYWHERE, so it has to be re-derived by
+ * the same rule that produced it — proportional to seats sold, largest first,
+ * remainder to the last. Two copies of that rule would mean the desk is told to
+ * reach for a stack the printer never made.
+ *
+ * ⚠️ A spare carries the SCHEDULE of the type it was printed for. That is why
+ * which types have spares is a question with consequences and not bookkeeping:
+ * 📏 on this conference 98 spares divide 58/32/5/2/1, so a late Full Conference
+ * signup has exactly one correct card in the box.
+ */
+export function spareCountsByType(
+  run: { types: Array<{ entityId: string; name: string; seats: unknown[] }> },
+  total: number
+): Array<{ entityId: string; name: string; count: number }> {
+  const sold = run.types
+    .map((type) => ({ entityId: type.entityId, name: type.name, sold: type.seats.length }))
+    .filter((e) => e.sold > 0);
+  const soldTotal = sold.reduce((sum, e) => sum + e.sold, 0) || 1;
+  let remaining = total;
+  return sold.map((e, i) => {
+    const count =
+      i === sold.length - 1
+        ? remaining
+        : Math.min(remaining, Math.round((total * e.sold) / soldTotal));
+    remaining -= count;
+    return { entityId: e.entityId, name: e.name, count };
+  });
+}

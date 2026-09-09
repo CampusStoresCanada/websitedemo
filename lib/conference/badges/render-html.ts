@@ -123,7 +123,13 @@ function splitDisplayName(person: BadgePersonRecord): {
   return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
 }
 
-function splitOrganizationSmart(orgName: string): { line1: string; line2: string } {
+/**
+ * ⛔ EXPORTED so the reprint label splits an organisation name the same way the
+ * badge does. It did not, and printed "McMaster University" on one line where
+ * the badge prints "MCMASTER" bold over "UNIVERSITY" light — a sticker that
+ * looks nothing like the card it is joining.
+ */
+export function splitOrganizationSmart(orgName: string): { line1: string; line2: string } {
   const words = compactWhitespace(orgName).split(" ").filter(Boolean);
   if (words.length <= 1) return { line1: orgName, line2: "" };
   let bestIdx = 1;

@@ -24,6 +24,7 @@ import {
 import { arrangeBadges, normalizeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgePrintStock,
+  spareCountsByType,
   spareCountsForJob,
 } from "@/lib/conference/badges/print-stock";
 
@@ -939,23 +940,18 @@ export async function buildBadgeJobDocument(params: {
       // ⛔ Split across the types that actually sell seats, because a spare
       // carries its type's schedule. Proportional to seats sold, so the stack
       // the desk reaches for most is the one it has most of.
-      const soldByType = run.types
-        .map((type) => ({ type, sold: type.seats.length }))
-        .filter((entry) => entry.sold > 0);
-      const soldTotal = soldByType.reduce((sum, entry) => sum + entry.sold, 0) || 1;
       const counts = await spareCountsForJob(db, conferenceId, run, stock);
-      let remaining = counts.total;
+      // ⛔ ONE rule for how spares divide across types — shared with the desk, so
+      // it is told to reach for a stack that actually exists.
+      const byType = spareCountsByType(run, counts.total);
       const spares: HydratedBadgePerson[] = [];
-      soldByType.forEach((entry, i) => {
-        const share =
-          i === soldByType.length - 1
-            ? remaining
-            : Math.min(remaining, Math.round((counts.total * entry.sold) / soldTotal));
-        remaining -= share;
-        for (let n = 0; n < share; n += 1) {
-          spares.push(spareBadgeRecord({ type: entry.type, index: n, venue }));
+      for (const entry of byType) {
+        const type = run.types.find((t) => t.entityId === entry.entityId);
+        if (!type) continue;
+        for (let n = 0; n < entry.count; n += 1) {
+          spares.push(spareBadgeRecord({ type, index: n, venue }));
         }
-      });
+      }
       ordered = [...ordered, ...spares];
     }
   }

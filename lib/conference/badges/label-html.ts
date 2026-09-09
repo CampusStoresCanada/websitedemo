@@ -13,6 +13,7 @@
  */
 
 import { fitTextLayout, designPxFromPt } from "@/lib/conference/badges/text-fit";
+import { splitOrganizationSmart } from "@/lib/conference/badges/render-html";
 import { clampSlotToStock, type ReprintStock, type DeltaField } from "@/lib/conference/badges/reprint-plan";
 import {
   computeLabelPlacement,
@@ -233,8 +234,14 @@ export function renderReprintLabel(params: {
 
   const placed: Placed[] = [];
   if (delta.includes("organization")) {
-    const p1 = place(params.person.organizationName ?? "", clamp(front.organizationLine1), dpi);
+    // ⛔ Same splitter the badge uses. A two-word organisation is a bold line
+    // over a light one; dumping the whole name into line 1 produced a sticker
+    // that read nothing like the card beside it.
+    const { line1, line2 } = splitOrganizationSmart((params.person.organizationName ?? "").toUpperCase());
+    const p1 = place(line1, clamp(front.organizationLine1), dpi);
     if (p1) placed.push(p1);
+    const p2 = place(line2, clamp(front.organizationLine2), dpi);
+    if (p2) placed.push(p2);
   }
   if (delta.includes("name")) {
     const f = place(params.person.firstName.toUpperCase(), clamp(front.firstName), dpi);
