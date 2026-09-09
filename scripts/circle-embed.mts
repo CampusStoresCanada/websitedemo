@@ -111,21 +111,36 @@ if (FETCH || FETCH_ONLY || !existsSync(CACHE)) {
   const COMMENT_CACHE = ".cache/circle-comments.json";
   type CachedComment = { id: number; postId: number | null; body: string; userId: number | null };
   const commentsByPost = new Map<number, CachedComment[]>();
-  const haveCommentCache = existsSync(COMMENT_CACHE);
-  if (haveCommentCache) {
-    for (const c of JSON.parse(readFileSync(COMMENT_CACHE, "utf8")) as CachedComment[]) {
-      if (c.postId == null) continue;
-      const list = commentsByPost.get(c.postId);
-      if (list) list.push(c); else commentsByPost.set(c.postId, [c]);
-    }
+  if (!existsSync(COMMENT_CACHE)) {
+    // ⛔ REFUSE, rather than fall back to one API call per post.
+    //
+    // A fallback here is how the leak survives its own fix. The expensive path
+    // would still exist, would fire whenever .cache was wiped or on any fresh
+    // clone, and would do it silently — which is exactly how ~11,000 calls went
+    // unnoticed for a week. A path nothing takes is still a path something can
+    // take.
+    //
+    // ⚠️ Nor may this proceed with no comments at all. They are 2,868 of 3,656
+    // documents and they carry the answers — who a member was pointed at, which
+    // partner volunteered. Embedding the questions without the replies would read
+    // as a quiet community rather than a broken fetch, and nothing downstream
+    // could tell the difference.
+    //
+    // The nightly builds this cache immediately before calling us, so this is a
+    // real failure, not an inconvenience.
+    console.error(`No ${COMMENT_CACHE}. Run this first:\n  npx tsx scripts/circle-comments.mts`);
+    process.exit(1);
+  }
+  for (const c of JSON.parse(readFileSync(COMMENT_CACHE, "utf8")) as CachedComment[]) {
+    if (c.postId == null) continue;
+    const list = commentsByPost.get(c.postId);
+    if (list) list.push(c); else commentsByPost.set(c.postId, [c]);
   }
 
   const spaces = await circle.listSpaces();
   console.log(
     `fetching posts from ${spaces.length} spaces — comments: ` +
-      (haveCommentCache
-        ? `${commentsByPost.size} posts from cache (no per-post calls)`
-        : "⚠️ cache absent, falling back to one API call per post")
+      `${commentsByPost.size} posts from cache (no per-post calls)`
   );
 
   for (const space of spaces) {
@@ -147,24 +162,18 @@ if (FETCH || FETCH_ONLY || !existsSync(CACHE)) {
       // ⛔ The replies are the half that was never fetched, and they carry the
       // answers — who a member was pointed at, and which partner volunteered.
       //
-      // ⚠️ From the cache when we have it; one call per post only as a fallback.
-      // The two sources spell the author differently — `userId` on the cached
-      // record, `user_id` from the API — so they are normalised to one shape here
-      // rather than cast. A cast would compile and silently attribute every cached
-      // reply to nobody, which reads as an anonymous community.
-      const replies: { id: number; body: unknown; author: number | null }[] =
-        haveCommentCache
-          ? (commentsByPost.get(p.id) ?? []).map((c) => ({
-              id: c.id, body: c.body, author: c.userId ?? null,
-            }))
-          : (await circle.listComments(p.id)).map((c) => ({
-              id: c.id, body: c.body, author: c.user_id ?? null,
-            }));
+      // ⛔ From the cache, and ONLY from the cache. There is deliberately no
+      // per-post API path left in this file to fall back to.
+      const replies = commentsByPost.get(p.id) ?? [];
       for (const cm of replies) {
         const body = postBodyText(cm.body as Parameters<typeof postBodyText>[0]).slice(0, 2000);
         if (body.length > 20) {
+          // ⚠️ `userId` on the cached record — NOT `user_id`, the API's spelling.
+          // Reading the wrong one compiles and attributes every reply to nobody.
+          // The per-post path did exactly that: all 2,868 comments were anonymous
+          // in the corpus until this changed, so replies carried no supply signal.
           docs.push({ kind: "comment", id: cm.id, postId: p.id, space: space.name,
-                      author: cm.author == null ? null : byUserId.get(cm.author) ?? null,
+                      author: cm.userId == null ? null : byUserId.get(cm.userId) ?? null,
                       text: body });
         }
       }

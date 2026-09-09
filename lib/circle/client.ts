@@ -5,7 +5,6 @@
 import { CIRCLE_ADMIN_API_BASE, CIRCLE_V1_API_BASE, getCircleConfig } from "./config";
 import { CircleApiError } from "./types";
 import type {
-  CircleComment,
   CircleMember,
   CircleMemberInput,
   CirclePost,
@@ -559,35 +558,27 @@ export class CircleAdminClient {
   }
 
   /**
-   * Comments on a post.
+   * ⛔ THERE IS DELIBERATELY NO `listComments(postId)` HERE. Do not add one back.
    *
-   * ⚠️ The client could CREATE comments and never read them, so the whole
-   * thread structure was invisible to anything downstream. In "Ask the Partners"
-   * a member asks and partners answer — the question is a demand signal and each
-   * reply is a supply signal from whoever wrote it. That pairing is the most
-   * directly useful thing in the community and it was being thrown away.
+   * A per-post comment reader is one API call per post, and this community has
+   * ~790 posts. It existed for a week and cost ~11,000 Circle calls across 14
+   * runs before anyone noticed — 96% of all Circle traffic in that window — for
+   * data the same nightly was already fetching by another route.
+   *
+   * ⚠️ The cheap route already exists and is incremental: `scripts/circle-comments.mts`
+   * pages the GLOBAL /comments endpoint, stops as soon as a page holds nothing
+   * new (~1-2 calls a night), and writes `.cache/circle-comments.json` with
+   * postId, spaceName, userId and userName on every record. Read that.
+   *
+   * ⚠️ It is also the only source that attributes a reply: the per-post records
+   * spell the author `user_id` and the cache spells it `userId`, and reading the
+   * wrong one compiles cleanly while making all 2,868 comments anonymous. That is
+   * what actually happened, so replies carried no supply signal at all.
+   *
+   * If you genuinely need comments for ONE post, filter the cache by postId. If
+   * you need them fresher than the cache, run that script — do not reach for the
+   * API per post.
    */
-  async listComments(
-    postId: number,
-    options?: { per_page?: number; page?: number }
-  ): Promise<CircleComment[]> {
-    const params = {
-      post_id: postId,
-      per_page: options?.per_page ?? 100,
-      page: options?.page ?? 1,
-    };
-    try {
-      const result = await this.request<{ records?: CircleComment[] } | CircleComment[]>(
-        "GET",
-        "/comments",
-        { params }
-      );
-      return Array.isArray(result) ? result : (result.records ?? []);
-    } catch {
-      // A post with comments disabled 404s rather than returning empty.
-      return [];
-    }
-  }
 
   // ---- Event attendees ----------------------------------------------------
 
