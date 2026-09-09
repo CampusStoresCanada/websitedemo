@@ -2,7 +2,11 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getRenewalConfig } from "@/lib/policy/engine";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
-import { computeNewExpiresAt, nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
+import {
+  computeNewExpiresAt,
+  nextCycleStartOnOrAfter,
+  settlePaidInvoiceMembership,
+} from "@/lib/membership/renewal-activation";
 import {
   createProgramInvoice,
   finalizeAndSendInvoice,
@@ -805,40 +809,67 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
       processed++;
 
       try {
-        // Step 1: Reconcile — check if invoice has been paid
-        const { data: paidInvoice } = await db
-          .from("invoices")
-          .select("id, status, payment_source, paid_out_of_band_at")
-          .eq("organization_id", org.id)
-          .eq("status", "paid")
-          .order("created_at", { ascending: false })
-          .limit(1)
-          .maybeSingle();
+        // Step 1: Reconcile — has the renewal for THIS cycle actually been paid?
+        //
+        // This is a poll, not an event. The two real payment paths — the
+        // Stripe webhook and markPaidOutOfBand — call
+        // settlePaidInvoiceMembership the moment one specific invoice is
+        // paid, so they already know which invoice the money was for. This
+        // job instead re-scans an org's whole invoice history every night,
+        // where "a paid invoice exists" is a different and much weaker
+        // question: an org can have paid for a conference booth in August
+        // and still owe its dues on Aug 31.
+        //
+        // 2026-09-01: it took the newest paid invoice of ANY kind. Ookami
+        // Promo and MartiniVispak were restored to active on the strength of
+        // period-less booth payments of $13,560 and $6,780 while their $600
+        // and $630 renewal invoices sat unpaid — a membership nobody bought,
+        // left with an expiry date already in the past because a period-less
+        // invoice buys no time.
+        //
+        // So the invoice has to extend coverage beyond the expiry the org is
+        // in grace for. That is what "this payment settled the renewal" means;
+        // anything else is an unrelated payment being read as one.
+        const { data: paidInvoice } = org.membership_expires_at
+          ? await db
+              .from("invoices")
+              .select("id, billing_period_start, billing_period_end")
+              .eq("organization_id", org.id)
+              .eq("status", "paid")
+              .not("billing_period_end", "is", null)
+              .gt("billing_period_end", org.membership_expires_at)
+              .order("created_at", { ascending: false })
+              .limit(1)
+              .maybeSingle()
+          : { data: null };
 
         if (paidInvoice) {
-          // Payment was received — recover to active
-          const transResult = await transitionMembershipState(
-            org.id,
-            "active",
-            "renewal_job",
-            null,
-            "Payment reconciled during grace period"
-          );
+          // Settle through the same tail every other paid path uses, rather
+          // than transitioning the state by hand here.
+          //
+          // The hand-rolled version flipped the org to active and stopped,
+          // never advancing membership_expires_at — which is the second half
+          // of what went wrong on 2026-09-01. Both orgs came out of grace
+          // still carrying an expiry of 2026-08-31, so they were immediately
+          // eligible to be charged and graced all over again. Every other
+          // route to "this org has renewed" goes through
+          // settlePaidInvoiceMembership, which moves the expiry to the period
+          // the invoice actually bought and writes charge_succeeded under the
+          // cycle-end year the renewal readers query.
+          //
+          // Keyed on the invoice so a nightly re-run of this job settles the
+          // same payment once, not once per night.
+          const settlement = await settlePaidInvoiceMembership({
+            organizationId: org.id,
+            invoiceId: paidInvoice.id,
+            billingPeriodStart: paidInvoice.billing_period_start,
+            billingPeriodEnd: paidInvoice.billing_period_end,
+            triggeredBy: "out_of_band",
+            idempotencyKey: `grace_reconcile:${paidInvoice.id}`,
+            metadata: { reconciled_by: "grace_check_run" },
+          });
 
-          if (transResult.success) {
-            const renewalYear = org.membership_expires_at
-              ? getRenewalYear(org.membership_expires_at)
-              : new Date().getFullYear();
-
-            await recordRenewalEvent(
-              db,
-              org.id,
-              renewalYear,
-              "reactivation_payment",
-              paidInvoice.id,
-              { reconciled_by: "grace_check_run" }
-            );
-
+          if (settlement.activated) {
             succeeded++;
             continue;
           }
