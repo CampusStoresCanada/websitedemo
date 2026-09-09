@@ -129,12 +129,22 @@ export function computeLabelPlacement(params: {
   const top = designedTop - pad;
   let bottom = Math.max(...params.contentBottoms) + pad;
 
-  // ⛔ Centred on the card. Not aligned to any one plate: the logo disc, the QR
-  // plate and the QR image all have DIFFERENT left edges (122 / 129 / 140 on
-  // this conference), so "align to the plates" has no single answer. Centring
-  // gives equal margins and lands within a few px of the logo disc, which is
-  // the most prominent of them.
-  const x = Math.round((canvasW - widthPx) / 2);
+  // ⛔ ON THE BADGE'S OWN RAIL, not centred on the card.
+  //
+  // Centring was right when the template had no rail: the logo disc, the QR
+  // plate and the QR image all had different left edges, so "align to the
+  // plates" had no single answer and equal margins was the best available.
+  //
+  // The unified layout changed that. Every left edge now shares one x, so there
+  // IS a right answer and the label has to sit on it — a sticker applied 8px
+  // right of the column it is joining reads as crooked no matter how good its
+  // internal spacing is. Taken from the slots themselves so it tracks the
+  // template rather than restating a number that lives there.
+  //
+  // ⚠️ Clamped so a rail close to the right edge cannot push the label off the
+  // card; a label that overhangs is worse than one that is centred.
+  const rail = Math.min(...slots.map((s) => s.x));
+  const x = Math.max(0, Math.min(Math.round(rail), Math.round(canvasW - widthPx)));
 
   // Keep clear of any plate the label would otherwise cover. A label over the
   // QR plate is a label over a QR: it stops scanning, and it fails at a door.
