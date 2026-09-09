@@ -673,6 +673,47 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     maxLines: front.title.maxLines ?? 3,
     lineHeightEm: front.title.lineHeight ?? 1.15,
   });
+  /**
+   * ⛔ A ONE-LINE ORGANISATION NAME IS CENTRED ON THE LOGO.
+   *
+   * Two lines are a bold line above a light one, and together they optically
+   * balance the disc beside them. Drop the second line and the first would stay
+   * on the upper baseline — one line hanging at the top of a space built for
+   * two, with the disc beside it reading bottom-heavy. Stephen: "If there aren't
+   * two lines it is one bold line that is centered to the center of the logo."
+   *
+   * ⛔ This CANNOT live in the layout editor. It depends on the CONTENT of the
+   * badge being printed, not on the template: a one-line org and a two-line org
+   * share one set of coordinates and must resolve differently at render time.
+   * That is the whole reason this rule is code and the rail is config.
+   *
+   * ⛔ Derived from renderTextBlock's OWN box model, not from a cap-height
+   * constant. My first attempt used "a cap is 0.7em" and landed 7.5px (0.6mm)
+   * low, because that ratio is a property of the typeface, not a fact — and a
+   * number tuned until a render looks right is the hand-crafting this work has
+   * already been pulled up for once.
+   *
+   * renderTextBlock draws the box at `baselineY - em*0.8` with height `em*lh`.
+   * Setting that box's centre to the logo's centre and solving for baselineY
+   * needs no font metric and stays correct if the typeface changes:
+   *
+   *   top + height/2 = logoCentre
+   *   (baselineY - 0.8em) + (em*lh)/2 = logoCentre
+   *   baselineY = logoCentre + 0.8em - (em*lh)/2
+   */
+  const orgIsSingleLine = !(bindingValues.organizationLine2 ?? "").trim();
+  const orgSlot1 = orgIsSingleLine
+    ? {
+        ...front.organizationLine1,
+        baselineY: (() => {
+          const em = designPxFromPt(orgLayout1.sizePt, template.canvas.dpi);
+          const lh = orgLayout1.lineHeightEm;
+          return front.logo.y + front.logo.diameter / 2 + em * 0.8 - (em * lh) / 2;
+        })(),
+        weight: Math.max(front.organizationLine1.weight, 700),
+      }
+    : front.organizationLine1;
+
   const overflowFields: string[] = [];
   if (orgLayout1.overflowed) overflowFields.push("organizationLine1");
   if (orgLayout2.overflowed) overflowFields.push("organizationLine2");
@@ -818,7 +859,7 @@ export function renderBadgeHtml(options: RenderBadgeOptions): string {
     bindingValues.organizationLine1
       ? renderTextBlock({
           lines: [bindingValues.organizationLine1],
-          slot: front.organizationLine1,
+          slot: orgSlot1,
           layout: orgLayout1,
           dpi: template.canvas.dpi,
           scaleX,
