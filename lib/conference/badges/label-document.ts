@@ -109,7 +109,7 @@ export async function buildReprintLabelDocument(params: {
 
   const { data: person } = await db
     .from("conference_people")
-    .select("id, display_name, role_title, organization_id, organizations(name)")
+    .select("id, display_name, role_title, organization_id, organizations(name, logo_url)")
     .eq("id", job.person_id)
     .maybeSingle();
   if (!person) throw new LabelDocumentError("That person is no longer on this conference.");
@@ -157,6 +157,8 @@ export async function buildReprintLabelDocument(params: {
       lastName: gap > 0 ? display.slice(gap + 1) : "",
       roleTitle: String(person.role_title ?? ""),
       organizationName: (person.organizations as { name?: string } | null)?.name ?? "",
+      // ⛔ A spare carries no branding, so the sticker supplies the mark.
+      logoUrl: (person.organizations as { logo_url?: string } | null)?.logo_url ?? null,
     },
     template: { ...template, front },
     delta: plan.delta,

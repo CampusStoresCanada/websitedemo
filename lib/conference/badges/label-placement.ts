@@ -19,6 +19,24 @@ import type { BadgeTemplateConfigV1, BadgeFrontConfig } from "@/lib/conference/b
 export type Box = { x: number; y: number; width: number; height: number };
 
 /**
+ * ⛔ Air between the label's cut edge and any ink, in design px (2mm).
+ *
+ * Without it the sticker's left edge lands exactly on the badge's rail, which
+ * puts glyphs on the cut line — measured: "Stonehouse" and "Immediate" both had
+ * ink at x=0, with their side bearings clipped.
+ *
+ * ⚠️ HORIZONTAL ONLY — see the note at its use. Applied vertically it re-creates
+ * the QR-plate collision that removing the old padding fixed.
+ *
+ * ⚠️ This costs the edge alignment I built earlier, and that is the right trade.
+ * DK-2113 is frosted CLEAR: the sticker's own edge is nearly invisible once
+ * applied, so aligning the edge to the rail was aligning something nobody sees.
+ * What a reader sees is the INK, and the ink still lands on the rail because
+ * every slot keeps its own x — the label just starts 2mm further left.
+ */
+export const LABEL_EDGE_MARGIN_PX = 24;
+
+/**
  * The white plates in the overlay — the logo disc and the QR plate.
  *
  * ⛔ Read from the artwork, because the artwork is what gets printed. Declaring
@@ -52,6 +70,25 @@ export function reservedPlatesFromOverlay(svg: string, canvasWidthPx: number): B
     });
   }
   return out;
+}
+
+/**
+ * The band's left edge: the leftmost thing the label draws, less the cut margin.
+ *
+ * ⛔ Exported so the renderer and the placement cannot disagree. They did — the
+ * renderer centred while the placement used the rail, and the ink went on the
+ * cut line regardless of what the placement said.
+ */
+export function labelBandX(
+  front: BadgeFrontConfig,
+  delta: DeltaField[],
+  _dpi: number
+): number {
+  const slots = slotsForDelta(front, delta);
+  const xs = slots.map((s) => s.x);
+  if (delta.includes("logo")) xs.push(front.logo.x);
+  if (xs.length === 0) return 0;
+  return Math.max(0, Math.round(Math.min(...xs) - LABEL_EDGE_MARGIN_PX));
 }
 
 /** The slots a given delta actually prints, in draw order. */
@@ -94,6 +131,16 @@ export function computeLabelPlacement(params: {
   /** Rendered line counts per slot, in the same order slotsForDelta returns. */
   contentBottoms: number[];
   reserved?: Box[];
+  /**
+   * ⛔ The organisation logo's box, when the delta carries one.
+   *
+   * A spare is unbranded stock, so the sticker must supply the company mark as
+   * well as the person — and the logo sits ABOVE the name block, so leaving it
+   * out of the bounds produces a label that is correct in content and too short
+   * to hold it. Text slots alone cannot describe it: a logo has a diameter, not
+   * a baseline.
+   */
+  logoBox?: Box | null;
   /** Air between the label edge and a plate, in design px. */
   clearance?: number;
   /**
@@ -124,8 +171,13 @@ export function computeLabelPlacement(params: {
   }
 
   const designedTop = Math.min(
-    ...slots.map((s) => s.baselineY - designPxFromPt(s.defaultPt, dpi) * 0.8)
+    ...slots.map((s) => s.baselineY - designPxFromPt(s.defaultPt, dpi) * 0.8),
+    ...(params.logoBox ? [params.logoBox.y] : [])
   );
+  // ⛔ HORIZONTAL ONLY. Adding this margin vertically pushes the label back onto
+  // the QR plate — the exact collision removing `pad` fixed earlier. The vertical
+  // bounds belong to the design and the reserved plates; only the left and right
+  // cut edges need air.
   const top = designedTop - pad;
   let bottom = Math.max(...params.contentBottoms) + pad;
 
@@ -143,8 +195,14 @@ export function computeLabelPlacement(params: {
   //
   // ⚠️ Clamped so a rail close to the right edge cannot push the label off the
   // card; a label that overhangs is worse than one that is centred.
-  const rail = Math.min(...slots.map((s) => s.x));
-  const x = Math.max(0, Math.min(Math.round(rail), Math.round(canvasW - widthPx)));
+  const rail = Math.min(
+    ...slots.map((s) => s.x),
+    ...(params.logoBox ? [params.logoBox.x] : [])
+  );
+  const x = Math.max(
+    0,
+    Math.min(Math.round(rail - LABEL_EDGE_MARGIN_PX), Math.round(canvasW - widthPx))
+  );
 
   // Keep clear of any plate the label would otherwise cover. A label over the
   // QR plate is a label over a QR: it stops scanning, and it fails at a door.

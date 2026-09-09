@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { reservedPlatesFromOverlay, computeLabelPlacement } from "../label-placement";
+import {
+  reservedPlatesFromOverlay,
+  computeLabelPlacement,
+  LABEL_EDGE_MARGIN_PX,
+} from "../label-placement";
 import { DEFAULT_BADGE_TEMPLATE_CONFIG_V1 as T } from "../template";
 import { DEFAULT_REPRINT_STOCK } from "../reprint-plan";
 
@@ -46,7 +50,9 @@ describe("placing the label", () => {
   it("⛔ sits on the template's own rail, not centred on the card", () => {
     const p = computeLabelPlacement({ ...base, delta: ["name"], contentBottoms: [700] });
     // The sticker joins a column of left edges; centring would place it 8px off.
-    expect(p.box.x).toBe(Math.round(front.firstName.x));
+    // ⛔ Rail MINUS the cut margin: the ink lands on the rail, the label starts
+    // 2mm left of it so no glyph sits on the cut line.
+    expect(p.box.x).toBe(Math.round(front.firstName.x - LABEL_EDGE_MARGIN_PX));
   });
 
   it("clamps a rail that would push the label off the card", () => {
@@ -62,6 +68,8 @@ describe("placing the label", () => {
     // ⛔ No padding: the label is exactly the designed region. A "cut margin"
     // here is not in the editor and is what pushed an earlier version onto the
     // QR plate.
+    // ⛔ Vertical is untouched by the cut margin — applying it here would push
+    // the label onto the QR plate.
     expect(p.box.y).toBe(Math.round(555 - (64 / 72) * 300 * 0.8));
   });
 

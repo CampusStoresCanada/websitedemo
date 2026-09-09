@@ -14,7 +14,11 @@
 
 import { fitTextLayout, designPxFromPt } from "@/lib/conference/badges/text-fit";
 import { clampSlotToStock, type ReprintStock, type DeltaField } from "@/lib/conference/badges/reprint-plan";
-import { computeLabelPlacement, type Box } from "@/lib/conference/badges/label-placement";
+import {
+  computeLabelPlacement,
+  labelBandX,
+  type Box,
+} from "@/lib/conference/badges/label-placement";
 import type { BadgeTemplateConfigV1, BadgeSlotText } from "@/lib/conference/badges/template";
 
 const TYPEKIT = "https://use.typekit.net/uxh8ckq.css";
@@ -75,7 +79,12 @@ function place(text: string, slot: BadgeSlotText, dpi: number): Placed | null {
 }
 
 export function renderReprintLabel(params: {
-  person: { firstName: string; lastName: string; roleTitle: string; organizationName?: string };
+  person: {
+    firstName: string; lastName: string; roleTitle: string;
+    organizationName?: string;
+    /** ⛔ Required when the delta carries `logo` — a spare has no branding. */
+    logoUrl?: string | null;
+  };
   template: BadgeTemplateConfigV1;
   delta: DeltaField[];
   stock: ReprintStock;
@@ -133,13 +142,35 @@ export function renderReprintLabel(params: {
 }): { html: string; widthMm: number; heightMm: number; placement?: ReturnType<typeof computeLabelPlacement> } {
   const { template, delta, stock } = params;
   const dpi = template.canvas.dpi;
-  const bandX =
-    params.bandX ??
-    Math.round((template.canvas.widthIn * dpi - (stock.widthMm / 25.4) * dpi) / 2);
+  /**
+   * ⛔ ONE rule for the band's left edge, shared with computeLabelPlacement:
+   * the leftmost thing the label draws, less the cut margin.
+   *
+   * ⚠️ This used to be its own centred calculation while the placement used the
+   * rail — two answers to one question, which is why the ink kept landing on the
+   * cut line even after the placement was given a margin. Third time this file
+   * has grown a second copy of a number that lives elsewhere.
+   */
+  const bandX = params.bandX ?? labelBandX(template.front, delta, dpi);
   const front = template.front;
+  /**
+   * ⛔ EVERY SLOT KEEPS ITS OWN x. `anchorTextToEdge` is honoured only for slots
+   * already sitting on the band's left edge, which since the unified layout is
+   * where the name and title live anyway.
+   *
+   * ⚠️ Blanket re-anchoring was correct exactly once: when the badge hung its
+   * name text at x=44, left of everything else, and a sticker starting there
+   * overhung the card. The unified rail removed that problem and made the hack
+   * destructive — the organisation name sits BESIDE the logo at x=378, so
+   * forcing it to the rail printed "McMaster University" straight across the
+   * McMaster crest. Caught by rendering a spare, which is the only case that
+   * carries both.
+   */
   const clamp = (s: BadgeSlotText) => {
-    const anchored = params.anchorTextToEdge ? { ...s, x: bandX } : s;
-    return clampSlotToStock(anchored, { bandX, stock, dpi });
+    // ⛔ Slots always keep their own x now. The band starts LEFT of the rail by
+    // the cut margin, so a slot on the rail already renders with air beside it —
+    // re-anchoring would pull it back onto the cut.
+    return clampSlotToStock(s, { bandX, stock, dpi });
   };
 
   // ── BACK LABEL ────────────────────────────────────────────────────────────
@@ -195,6 +226,11 @@ export function renderReprintLabel(params: {
     };
   }
 
+  // ⛔ Only when the delta asks AND the org actually has a mark. A missing logo
+  // prints nothing rather than a placeholder circle: on a spare there is no
+  // white disc underneath, so an empty circle would be a drawn hole.
+  const wantsLogo = delta.includes("logo") && Boolean(params.person.logoUrl);
+
   const placed: Placed[] = [];
   if (delta.includes("organization")) {
     const p1 = place(params.person.organizationName ?? "", clamp(front.organizationLine1), dpi);
@@ -224,6 +260,9 @@ export function renderReprintLabel(params: {
     stock,
     contentBottoms: placed.map((p) => p.top + p.height),
     reserved: params.reserved,
+    logoBox: wantsLogo
+      ? { x: front.logo.x, y: front.logo.y, width: front.logo.diameter, height: front.logo.diameter }
+      : null,
   });
   if (placement.problem) return { html: "", widthMm: stock.widthMm, heightMm: 0, placement };
   const top = placement.box.y;
@@ -252,6 +291,18 @@ export function renderReprintLabel(params: {
     })
     .join("");
 
+  /**
+   * ⚠️ GREYSCALE, HIGH CONTRAST. Thermal prints one colour: the printer will
+   * dither a colour mark to black whatever we send it. Rendering it that way
+   * here means the proof shows what comes out of the QL rather than a colour
+   * logo that cannot exist on this stock.
+   */
+  const logoHtml = wantsLogo
+    ? `<img class="lg" src="${escapeHtml(params.person.logoUrl as string)}" alt="" ` +
+      `style="left:${(front.logo.x - bandX) * K}px;top:${(front.logo.y - top) * K}px;` +
+      `width:${front.logo.diameter * K}px;height:${front.logo.diameter * K}px;" />`
+    : "";
+
   const guides = params.showGuides
     ? `<div class="g" style="left:0;top:0;width:${widthPx * K}px;height:${heightPx * K}px;"></div>`
     : "";
@@ -272,6 +323,8 @@ export function renderReprintLabel(params: {
   /* Thermal prints one colour. Anything not black is a lie about the output. */
   .s { position:absolute; color:#000; }
   .g { position:absolute; box-sizing:border-box; border:2px dashed #d0021b; }
-</style></head><body><div class="label">${body}${guides}</div></body></html>`,
+  /* Thermal is one colour; show the mark as the printer will render it. */
+  .lg { position:absolute; object-fit:contain; filter:grayscale(1) contrast(1.6); }
+</style></head><body><div class="label">${logoHtml}${body}${guides}</div></body></html>`,
   };
 }

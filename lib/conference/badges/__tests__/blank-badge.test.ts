@@ -83,8 +83,17 @@ describe("a blank badge carries the organisation but no identity", () => {
     expect(html).not.toContain("api.qrserver.com");
   });
 
-  it("drops the caption that explains the code, since there is no code", () => {
-    expect(render(BLANK, "back")).not.toContain("identifies your badge");
+  /**
+   * ⛔ INVERTED DELIBERATELY. This used to assert the caption was dropped, on the
+   * reasoning that a line about a code is wrong when there is no code. Right
+   * about a badge, wrong about a BLANK: the caption never varies, so it belongs
+   * on the card the way the logo plate does — and printing it here means an
+   * on-site reprint supplies only the QR instead of re-printing a fixed line in
+   * monochrome on a sticker. A blank is never handed to anybody before that
+   * sticker goes on.
+   */
+  it("prints the caption, because it is invariant chrome the blank can carry", () => {
+    expect(render(BLANK, "back")).toContain("identifies your badge");
   });
 
   it("still prints the venue and the on-site contact", () => {

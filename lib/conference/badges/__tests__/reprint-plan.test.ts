@@ -115,7 +115,8 @@ describe("laying the variable layer out for the roll", () => {
 
   it("narrows a slot to the roll and moves nothing", () => {
     const out = clampSlotToStock({ x: 44, width: 850, baselineY: 555 }, band);
-    expect(out.width).toBeCloseTo(732.3, 0);
+    // 62mm of roll, less the right-hand cut margin so no glyph sits on the cut.
+    expect(out.width).toBeCloseTo(708.3, 0);
     expect(out.x).toBe(44);          // ⛔ position untouched
     expect(out.baselineY).toBe(555); // ⛔ vertical rhythm untouched
   });
@@ -135,7 +136,7 @@ describe("laying the variable layer out for the roll", () => {
     const out = placeFixedMark({ x: 705, size: 200 }, band);
     expect(out.size).toBe(200);
     expect(out.moved).toBe(true);
-    expect(out.x + out.size).toBeCloseTo(44 + 732.3, 0);
+    expect(out.x + out.size).toBeCloseTo(44 + 708.3, 0);
   });
 
   it("leaves a mark that already fits exactly where the badge puts it", () => {

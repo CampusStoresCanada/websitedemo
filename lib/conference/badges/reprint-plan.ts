@@ -88,7 +88,9 @@ export function clampSlotToStock<T extends { x: number; width: number }>(
   const stock = params.stock ?? DEFAULT_REPRINT_STOCK;
   const dpi = params.dpi ?? 300;
   const stockWidthPx = (stock.widthMm / 25.4) * dpi;
-  const rollRight = params.bandX + stockWidthPx;
+  // ⚠️ Both edges keep a margin, so a long line cannot run to the cut on either
+  // side. See LABEL_EDGE_MARGIN_PX — the left margin is already in bandX.
+  const rollRight = params.bandX + stockWidthPx - 24;
   // ⚠️ Only ever narrows. A slot already inside the roll keeps its width, so a
   // short line is not stretched and a walk-up's text never renders LARGER than
   // the pre-printed badge would have rendered it.
@@ -111,8 +113,10 @@ export function placeFixedMark(
   const stock = params.stock ?? DEFAULT_REPRINT_STOCK;
   const dpi = params.dpi ?? 300;
   const stockWidthPx = (stock.widthMm / 25.4) * dpi;
-  const rollRight = params.bandX + stockWidthPx;
-  if (mark.size > stockWidthPx) return { ...mark, fits: false, moved: false };
+  // Same cut margin as the text: a QR printed to the edge risks losing part of
+  // its quiet zone to the cut, and a QR without its quiet zone stops scanning.
+  const rollRight = params.bandX + stockWidthPx - 24;
+  if (mark.size > stockWidthPx - 48) return { ...mark, fits: false, moved: false };
   if (mark.x + mark.size <= rollRight) return { ...mark, fits: true, moved: false };
   return { x: rollRight - mark.size, size: mark.size, fits: true, moved: true };
 }
