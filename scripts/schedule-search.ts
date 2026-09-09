@@ -37,6 +37,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { sendSchedulesForRun } from "@/lib/conference/schedule-delivery";
 import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
@@ -91,7 +92,8 @@ async function main() {
         "[--pref-pct N] [--no-ils] [--restarts N] [--persist]\n" +
         "  late add: --extend-active | --extend-run <runId> — extend a frozen " +
         "schedule instead of solving a new one\n" +
-        "  --allow-unscored: solve with no promoted match run (arbitrary pairings)"
+        "  --allow-unscored: solve with no promoted match run (arbitrary pairings)\n" +
+        "  --send: email the people whose schedule this is (needs --persist)"
     );
     process.exit(1);
   }
@@ -456,6 +458,49 @@ async function main() {
   // ⛔ DRAFT ONLY. Nothing here promotes a run — publishing a schedule to the
   // people in it stays a deliberate human act in the admin UI.
   console.log(`\npersisted draft run ${run.id} with ${rows.length} meetings (NOT activated)`);
+
+  /**
+   * ⛔ SENDING IS A SEPARATE, DELIBERATE ACT. Steve: "we hold it until we want
+   * the final answer... we don't ship their schedule ASAP."
+   *
+   * So this never fires on its own. A late add that emailed on every run would
+   * tell one latecomer their schedule four times in January while the people
+   * around them got a fresh copy each time somebody else arrived. Batching is
+   * the point, and the batch boundary is a human deciding it is time.
+   *
+   * ⚠️ On a LATE ADD it sends only to the people whose day actually changed —
+   * `newlySeated` plus `alsoGained` — rather than re-announcing to the whole
+   * conference. On a full solve it sends to everyone holding a seat.
+   */
+  if (!process.argv.includes("--send")) {
+    console.log("  not sent. pass --send to email the people whose schedule this is.");
+    return;
+  }
+
+  const audience = outcome.lateAdd
+    ? [...outcome.lateAdd.newlySeated, ...outcome.lateAdd.alsoGained]
+    : undefined;
+
+  const delivery = await sendSchedulesForRun({
+    db,
+    conferenceId,
+    runId: run.id,
+    delegateSeatIds: audience,
+  });
+
+  console.log(
+    `\nsent ${delivery.sent.length}` +
+      (audience ? ` (late add: only those whose day changed)` : " (everyone with a seat)")
+  );
+  if (delivery.noEmail.length > 0) {
+    console.log(
+      `  ⚠️  ${delivery.noEmail.length} seat(s) have no email — they were NOT told: ` +
+        delivery.noEmail.join(", ")
+    );
+  }
+  if (delivery.unknownSeat.length > 0) {
+    console.log(`  ⚠️  ${delivery.unknownSeat.length} seat id(s) matched no seat holding`);
+  }
 }
 
 main().catch((e) => {
