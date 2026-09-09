@@ -7,7 +7,7 @@
   <!-- White plate behind the organization logo -->
   <circle cx="56.038" cy="103" r="28.803" fill="#ffffff"/>
   <!-- Exhibitor lead-capture QR plate -->
-  <rect x="24.826" y="257.174" width="50.615" height="50.615" fill="#ffffff"/>
+  <rect x="24.826" y="303.933" width="50.615" height="50.615" fill="#ffffff"/>
 
   <!-- Conference logo, inside the 0.125in trim -->
   <g transform="translate(180.85,312.00) scale(0.74641)">

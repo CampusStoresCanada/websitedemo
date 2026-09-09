@@ -7,9 +7,6 @@
   <!-- White plate behind the organization logo -->
   <circle cx="56.038" cy="103" r="28.803" fill="#ffffff"/>
 
-  <!-- Front QR plate -->
-  <rect x="24.826" y="257.174" width="50.615" height="50.615" fill="#ffffff"/>
-
   <!-- Conference logo, inside the 0.125in trim -->
   <g transform="translate(180.85,312.00) scale(0.74641)">
       <path fill="#ffffff" d="M22.1,6.03L1.07,31.23c-1.63,1.96-1.37,4.87.59,6.51l17.71,14.78c1.96,1.63,4.87,1.37,6.51-.59l21.03-25.2L22.1,6.03Z"/>
