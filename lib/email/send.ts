@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { wrapEmailBody } from "./layout";
 import { getPlatformIdentity } from "@/lib/data";
+import { loadHardBouncedEmails, normalizeEmail } from "@/lib/comms/suppressions";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 
@@ -79,6 +80,40 @@ export interface BatchSendResult {
 const BATCH_CHUNK_SIZE = 100; // Resend's batch endpoint limit per call
 
 /**
+ * Returned in place of a send when the address is a known dead mailbox.
+ * Distinct wording so callers and tests can tell it apart from a provider
+ * failure — this is a deliberate skip, not an outage.
+ */
+export const HARD_BOUNCE_BLOCKED_ERROR =
+  "skipped: address previously hard-bounced (comms_suppressions)";
+
+/**
+ * The deliverability gate, enforced here rather than per-caller.
+ *
+ * Every outbound email in the app funnels through sendEmail/sendEmailBatch,
+ * so this is the one place that cannot be bypassed by a new send path. It
+ * matters because the paths that most needed it were the ones that skipped
+ * the campaign system entirely: election, benchmarking and renewal mail all
+ * call sendEmail directly and are flagged transactional, so they never
+ * consulted comms_suppressions at all. That was correct for unsubscribes and
+ * wrong for dead mailboxes — a grace reminder was re-sent weekly to an
+ * address that had hard-bounced three times.
+ *
+ * Preferences are NOT checked here. An unsubscribe is a category-scoped
+ * decision that belongs to the campaign layer (filterSuppressedRecipients),
+ * and transactional mail is entitled to ignore it.
+ */
+async function blockedByHardBounce(recipients: string[]): Promise<Set<string>> {
+  try {
+    return await loadHardBouncedEmails(recipients);
+  } catch (err) {
+    // Fail open: never let a suppression-lookup failure stop mail.
+    console.error("[email/send] hard-bounce lookup failed, sending anyway:", err);
+    return new Set();
+  }
+}
+
+/**
  * Send many emails via Resend's batch endpoint, chunked to its 100-per-call
  * limit — one request per up-to-100 recipients instead of one request per
  * recipient. Used for campaign sends so a few-hundred-person send finishes
@@ -93,11 +128,29 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
   const identity = await getPlatformIdentity();
   const results: BatchSendResult[] = new Array(items.length);
 
+  // One lookup for the whole batch, not one per chunk.
+  const blocked = await blockedByHardBounce(items.map((i) => i.to));
+
   for (let start = 0; start < items.length; start += BATCH_CHUNK_SIZE) {
     const chunk = items.slice(start, start + BATCH_CHUNK_SIZE);
 
+    // `results` is positional — callers map it back to their own recipient
+    // list by index — so suppressed items must keep their slot rather than
+    // shrink the array. Send only the allowed ones, remembering where each
+    // came from, and fill the skipped slots in place.
+    const allowed: Array<{ item: BatchSendItem; offset: number }> = [];
+    chunk.forEach((item, i) => {
+      if (blocked.has(normalizeEmail(item.to))) {
+        results[start + i] = { success: false, error: HARD_BOUNCE_BLOCKED_ERROR };
+      } else {
+        allowed.push({ item, offset: i });
+      }
+    });
+
+    if (allowed.length === 0) continue;
+
     const payload = await Promise.all(
-      chunk.map(async (item) => ({
+      allowed.map(async ({ item }) => ({
         from: fromAddress,
         to: intercept ?? item.to,
         subject: intercept ? `[DEV → ${item.to}] ${item.subject}` : item.subject,
@@ -112,23 +165,25 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
       });
 
       if (error) {
-        for (let i = 0; i < chunk.length; i++) {
-          results[start + i] = { success: false, error: error.message };
+        for (const { offset } of allowed) {
+          results[start + offset] = { success: false, error: error.message };
         }
         continue;
       }
 
+      // Resend's error indices refer to the payload we just sent, which is
+      // `allowed` — not `chunk`. Map through it.
       const failedByIndex = new Map(data.errors.map((e) => [e.index, e.message]));
-      chunk.forEach((_, i) => {
+      allowed.forEach(({ offset }, i) => {
         const failMessage = failedByIndex.get(i);
-        results[start + i] = failMessage
+        results[start + offset] = failMessage
           ? { success: false, error: failMessage }
           : { success: true, messageId: data.data[i]?.id };
       });
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown email error";
-      for (let i = 0; i < chunk.length; i++) {
-        results[start + i] = { success: false, error: msg };
+      for (const { offset } of allowed) {
+        results[start + offset] = { success: false, error: msg };
       }
     }
   }
@@ -144,6 +199,14 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
   const subject = intercept
     ? `[DEV → ${options.to}] ${options.subject}`
     : options.subject;
+
+  // Checked against the INTENDED recipient, not the dev intercept address,
+  // so local runs behave the same as production.
+  const blocked = await blockedByHardBounce([options.to]);
+  if (blocked.has(normalizeEmail(options.to))) {
+    console.warn(`[email/send] ${HARD_BOUNCE_BLOCKED_ERROR}: ${options.to}`);
+    return { success: false, error: HARD_BOUNCE_BLOCKED_ERROR };
+  }
 
   try {
     const { data, error } = await resend.emails.send({

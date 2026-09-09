@@ -319,13 +319,12 @@ export async function renewalReminderRun(): Promise<JobResult> {
         // with no contact left, an invoice being settled some other way. It
         // stops the chase without cancelling the org or voiding revenue, both
         // of which are decisions someone should make deliberately.
-        //
         // Matched on STATUS, not on a date. Invoices are generated ~30 days
         // before the cycle starts and carry a billing_period_start of Aug 31,
         // so neither created_at nor billing_period_start lines up with
-        // cycleBillingPeriodStart — a date filter here silently matches nothing
-        // and the flag stays a no-op. "An open invoice somebody told us to stop
-        // chasing" is the actual condition, and it says itself.
+        // cycleBillingPeriodStart — a date filter here silently matched nothing
+        // and the flag stayed a no-op. "An open invoice somebody told us to
+        // stop chasing" is the actual condition, and it says itself.
         const { data: suppressedInvoice } = await db
           .from("invoices")
           .select("id")

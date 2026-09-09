@@ -77,7 +77,7 @@ export async function loadMemberMap(conferenceId: string): Promise<MemberMap> {
       db.from("conference_entity_refs").select("from_entity_id, to_entity_id, role")
         .eq("conference_id", conferenceId),
       db.from("entity_balances")
-        .select("entity_id, organization_id, organizations(name, slug, company_description, primary_category)")
+        .select("entity_id, organization_id, organizations(name, slug, company_description, primary_category, is_test)")
         .eq("conference_id", conferenceId),
     ]);
 
@@ -96,8 +96,19 @@ export async function loadMemberMap(conferenceId: string): Promise<MemberMap> {
   for (const row of balances ?? []) {
     if (row.entity_id && row.organization_id) orgIdByEntity.set(row.entity_id, row.organization_id);
     const org = (Array.isArray(row.organizations) ? row.organizations[0] : row.organizations) as
-      | { name: string; slug: string | null; company_description: string | null; primary_category: string | null }
+      | {
+          name: string; slug: string | null; company_description: string | null;
+          primary_category: string | null; is_test?: boolean;
+        }
       | null;
+    /**
+     * ⛔ Same exclusion as the directory, and it was missing here too: `is_test`
+     * is honoured by the homepage and the publication loaders but not by the two
+     * surfaces a member actually navigates the show with. A seeded test
+     * exhibitor would have been drawn on the floor plan, in a room, with a booth
+     * number.
+     */
+    if (org?.is_test) continue;
     if (row.entity_id && org?.name && !orgByEntity.has(row.entity_id)) {
       // Same parse the directory and the printed index use, so "apparel"
       // finds the same companies on all three.
