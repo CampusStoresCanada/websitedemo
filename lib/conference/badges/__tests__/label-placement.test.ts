@@ -43,11 +43,17 @@ describe("placing the label", () => {
     stock: DEFAULT_REPRINT_STOCK, reserved: plates,
   };
 
-  it("centres it, so the margins are equal", () => {
+  it("⛔ sits on the template's own rail, not centred on the card", () => {
     const p = computeLabelPlacement({ ...base, delta: ["name"], contentBottoms: [700] });
-    expect(p.box.x).toBe(Math.round((975 - 732.28) / 2));
-    // 975 - 732 leaves an odd remainder, so the margins are 121 and 122.
-    expect(Math.abs(975 - p.box.x - p.box.width - p.box.x)).toBeLessThanOrEqual(1);
+    // The sticker joins a column of left edges; centring would place it 8px off.
+    expect(p.box.x).toBe(Math.round(front.firstName.x));
+  });
+
+  it("clamps a rail that would push the label off the card", () => {
+    const far = { ...front, firstName: { ...front.firstName, x: 900 },
+                            lastName: { ...front.lastName, x: 900 } };
+    const p = computeLabelPlacement({ ...base, front: far, delta: ["name"], contentBottoms: [700] });
+    expect(p.box.x + p.box.width).toBeLessThanOrEqual(975);
   });
 
   it("⛔ takes its top from the DESIGNED box, not the fitted text", () => {
