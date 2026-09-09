@@ -199,6 +199,13 @@ function DirectoryRow({
         </div>
       </div>
 
+      <RenewalPauseControl
+        organizationId={row.id}
+        organizationName={row.name}
+        pausedUntil={row.renewalPausedUntil}
+        pauseReason={row.renewalPauseReason}
+      />
+
       <Link
         href={`/org/${row.slug}`}
         target="_blank"
@@ -249,12 +256,18 @@ function DirectoryRow({
 
         <InvoiceButton row={row} />
 
-        <RenewalPauseControl
-          organizationId={row.id}
-          organizationName={row.name}
-          pausedUntil={row.renewalPausedUntil}
-          pauseReason={row.renewalPauseReason}
-        />
+        <button
+          type="button"
+          disabled
+          className="flex items-center justify-center w-7 h-7 rounded-lg text-gray-300 cursor-not-allowed"
+          aria-label="More actions (coming soon)"
+        >
+          <svg width="15" height="4" viewBox="0 0 16 4" fill="currentColor">
+            <circle cx="1.85" cy="2" r="1.85" />
+            <circle cx="8" cy="2" r="1.85" />
+            <circle cx="14.15" cy="2" r="1.85" />
+          </svg>
+        </button>
       </div>
     </div>
   );

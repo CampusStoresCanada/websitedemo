@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import { useRouter } from "next/navigation";
 import {
   setRenewalNotificationPauseAction,
@@ -16,8 +16,7 @@ function todayInDispatchTz(): string {
 
 function addDays(iso: string, days: number): string {
   const [y, m, d] = iso.split("-").map(Number);
-  const dt = new Date(Date.UTC(y, m - 1, d + days));
-  return dt.toISOString().split("T")[0];
+  return new Date(Date.UTC(y, m - 1, d + days)).toISOString().split("T")[0];
 }
 
 export function formatPauseDate(iso: string): string {
@@ -32,12 +31,17 @@ export function formatPauseDate(iso: string): string {
 /**
  * Per-org control for pausing membership renewal notifications.
  *
- * Lives on the row's actions kebab in the membership directory. Pausing stops
- * outbound renewal mail for this org until a date and does nothing else — the
- * membership, its expiry, its invoice and the grace/lock countdown all carry
- * on exactly as they would have. The dialog says so, because the whole risk
- * of a control like this is somebody reaching for it believing it buys the
- * member time.
+ * Sits inline on the directory row, next to the view-organization link, as a
+ * single icon that opens the dialog directly. It is deliberately not tucked
+ * behind an overflow menu: the whole point of the tool is that somebody
+ * reaches for it in the moment a member says "we already paid", and a control
+ * nobody can find is the same as not having one.
+ *
+ * Pausing stops outbound renewal mail for this org until a date and does
+ * nothing else — the membership, its expiry, its invoice and the grace/lock
+ * countdown all carry on exactly as they would have. The dialog says so,
+ * because the real risk of a control like this is somebody reaching for it
+ * believing it buys the member time.
  */
 export function RenewalPauseControl({
   organizationId,
@@ -51,31 +55,20 @@ export function RenewalPauseControl({
   pauseReason: string | null;
 }) {
   const router = useRouter();
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [dialogOpen, setDialogOpen] = useState(false);
+  const [open, setOpen] = useState(false);
   const [until, setUntil] = useState(() => addDays(todayInDispatchTz(), 30));
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wrapRef = useRef<HTMLDivElement>(null);
 
   const isPaused = !!pausedUntil;
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    function onDown(e: MouseEvent) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) setMenuOpen(false);
-    }
-    document.addEventListener("mousedown", onDown);
-    return () => document.removeEventListener("mousedown", onDown);
-  }, [menuOpen]);
-
-  function openDialog() {
-    setMenuOpen(false);
+  function openDialog(e: React.MouseEvent) {
+    e.stopPropagation();
     setUntil(pausedUntil ?? addDays(todayInDispatchTz(), 30));
     setReason(pauseReason ?? "");
     setError(null);
-    setDialogOpen(true);
+    setOpen(true);
   }
 
   async function save() {
@@ -91,77 +84,65 @@ export function RenewalPauseControl({
       setError(res.error ?? "Could not save the pause.");
       return;
     }
-    setDialogOpen(false);
+    setOpen(false);
     router.refresh();
   }
 
   async function resume() {
-    setMenuOpen(false);
     setBusy(true);
+    setError(null);
     const res = await clearRenewalNotificationPauseAction({ organizationId });
     setBusy(false);
-    if (res.success) router.refresh();
+    if (!res.success) {
+      setError(res.error ?? "Could not resume notifications.");
+      return;
+    }
+    setOpen(false);
+    router.refresh();
   }
 
+  const label = isPaused
+    ? `Reminders paused until ${formatPauseDate(pausedUntil)} — edit`
+    : "Pause renewal reminders";
+
   return (
-    <div className="relative shrink-0" ref={wrapRef} onClick={(e) => e.stopPropagation()}>
+    <>
       <button
         type="button"
-        onClick={() => setMenuOpen((v) => !v)}
+        onClick={openDialog}
         disabled={busy}
-        className={`flex items-center justify-center w-7 h-7 rounded-lg transition-colors disabled:opacity-40 ${
+        className={`flex items-center justify-center w-7 h-7 rounded-lg shrink-0 transition-colors disabled:opacity-40 ${
           isPaused
-            ? "text-amber-600 hover:bg-amber-50"
+            ? "text-amber-600 bg-amber-50 hover:bg-amber-100"
             : "text-gray-400 hover:text-[#16345a] hover:bg-[#16345a]/10"
         }`}
-        aria-label={`Actions for ${organizationName}`}
-        aria-haspopup="menu"
-        aria-expanded={menuOpen}
+        title={label}
+        aria-label={`${label} for ${organizationName}`}
       >
-        <svg width="15" height="4" viewBox="0 0 16 4" fill="currentColor">
-          <circle cx="1.85" cy="2" r="1.85" />
-          <circle cx="8" cy="2" r="1.85" />
-          <circle cx="14.15" cy="2" r="1.85" />
-        </svg>
+        {isPaused ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+            <rect x="6" y="4" width="4" height="16" rx="1" />
+            <rect x="14" y="4" width="4" height="16" rx="1" />
+          </svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2}>
+            <circle cx="12" cy="12" r="9" />
+            <path strokeLinecap="round" d="M10 9v6M14 9v6" />
+          </svg>
+        )}
       </button>
 
-      {menuOpen && (
-        <div
-          role="menu"
-          className="absolute right-0 top-9 z-30 w-64 rounded-xl border border-gray-200 bg-white py-1.5 shadow-lg"
-        >
-          <button
-            type="button"
-            role="menuitem"
-            onClick={openDialog}
-            className="block w-full px-3.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-          >
-            {isPaused ? "Edit notification pause…" : "Pause renewal notifications…"}
-          </button>
-          {isPaused && (
-            <button
-              type="button"
-              role="menuitem"
-              onClick={resume}
-              className="block w-full px-3.5 py-2 text-left text-[13px] text-gray-700 hover:bg-gray-50"
-            >
-              Resume notifications now
-            </button>
-          )}
-        </div>
-      )}
-
-      {dialogOpen && (
+      {open && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
-          onClick={() => !busy && setDialogOpen(false)}
+          onClick={() => !busy && setOpen(false)}
         >
           <div
             className="w-full max-w-md rounded-2xl bg-white p-6 shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h2 className="text-[17px] font-semibold" style={{ color: INK }}>
-              Pause renewal notifications
+              {isPaused ? "Renewal reminders paused" : "Pause renewal reminders"}
             </h2>
             <p className="mt-1 text-[13px] text-gray-500">{organizationName}</p>
 
@@ -174,7 +155,7 @@ export function RenewalPauseControl({
             </p>
 
             <label className="mt-4 block text-[12.5px] font-medium text-gray-700">
-              Resume notifications after
+              Resume reminders after
               <input
                 type="date"
                 value={until}
@@ -201,28 +182,44 @@ export function RenewalPauseControl({
 
             {error && <p className="mt-3 text-[12.5px] text-red-600">{error}</p>}
 
-            <div className="mt-5 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDialogOpen(false)}
-                disabled={busy}
-                className="rounded-lg border border-gray-300 px-3.5 py-2 text-[13px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={save}
-                disabled={busy || !reason.trim()}
-                className="rounded-lg px-3.5 py-2 text-[13px] font-medium text-white disabled:opacity-50"
-                style={{ background: INK }}
-              >
-                {busy ? "Saving…" : isPaused ? "Update pause" : "Pause notifications"}
-              </button>
+            <div className="mt-5 flex items-center justify-between gap-2">
+              {/* Resuming is the one action that needs to be reachable without
+                  re-justifying anything — the payment landed, stop being quiet. */}
+              {isPaused ? (
+                <button
+                  type="button"
+                  onClick={resume}
+                  disabled={busy}
+                  className="rounded-lg px-3 py-2 text-[13px] font-medium text-gray-600 hover:bg-gray-100 disabled:opacity-50"
+                >
+                  Resume now
+                </button>
+              ) : (
+                <span />
+              )}
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setOpen(false)}
+                  disabled={busy}
+                  className="rounded-lg border border-gray-300 px-3.5 py-2 text-[13px] font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={save}
+                  disabled={busy || !reason.trim()}
+                  className="rounded-lg px-3.5 py-2 text-[13px] font-medium text-white disabled:opacity-50"
+                  style={{ background: INK }}
+                >
+                  {busy ? "Saving…" : isPaused ? "Update pause" : "Pause reminders"}
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
