@@ -30,8 +30,24 @@ type Placed = {
   sizePt: number;
   trackingEm: number;
   lineHeightEm: number;
+  /** Where the fitted text actually sits. */
   top: number;
   height: number;
+  /**
+   * ⛔ Where the DESIGNED box sits — from the slot's defaultPt, not the fitted
+   * size. This is what bounds the sticker.
+   *
+   * Sizing the sticker to the fitted text makes its position depend on how long
+   * somebody's name is: a short name fits at a large size and starts high, a
+   * long one shrinks and starts low. 📏 FREDRICO fits at 31.3pt against a 64pt
+   * design, which put the sticker 109px — 9.2mm — below the box the designer
+   * draws. Stephen spotted it as the sticker sitting too low on the card.
+   *
+   * The designed box is also STABLE, which matters more for a physical process
+   * than for a rendering: every sticker is the same size, so the desk applies
+   * them the same way every time and the stock estimate is a constant.
+   */
+  designedTop: number;
 };
 
 /**
@@ -44,7 +60,9 @@ function place(text: string, slot: BadgeSlotText, dpi: number): Placed | null {
   if (!clean) return null;
   const layout = fitTextLayout(clean, slot, dpi);
   const fontPx = designPxFromPt(layout.sizePt, dpi);
+  const designedPx = designPxFromPt(slot.defaultPt, dpi);
   return {
+    designedTop: slot.baselineY - designedPx * 0.8,
     slot,
     lines: layout.lines,
     sizePt: layout.sizePt,
@@ -104,7 +122,11 @@ export function renderReprintLabel(params: {
   // The roll is continuous, so cutting to the content is free and a shorter
   // label is less to misalign.
   const PAD = 24; // design px of breathing room, so glyphs are not on the cut line
-  const top = Math.min(...placed.map((p) => p.top)) - PAD;
+  // ⛔ Top from the DESIGN, bottom from the CONTENT. The top is what has to line
+  // up with the card, so it comes from the slot box. The bottom follows the
+  // actual lines, because a designed bottom for a 3-line title would run into
+  // the exhibitor QR plate at y=1066 for a title that is only one line long.
+  const top = Math.min(...placed.map((p) => p.designedTop)) - PAD;
   const bottom = Math.max(...placed.map((p) => p.top + p.height)) + PAD;
   const widthPx = (stock.widthMm / 25.4) * dpi;
   const heightPx = bottom - top;
