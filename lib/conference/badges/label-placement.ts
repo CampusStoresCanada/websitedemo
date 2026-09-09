@@ -96,12 +96,25 @@ export function computeLabelPlacement(params: {
   reserved?: Box[];
   /** Air between the label edge and a plate, in design px. */
   clearance?: number;
+  /**
+   * ⛔ ZERO, and it must stay zero unless the editor says otherwise.
+   *
+   * I had this at 24px as a "cut margin". That is not in the layout editor, so
+   * it made the label bigger than the design — and the extra 24px pushed it from
+   * 1063 onto the QR plate at 1066, which then made the trimming code below fire.
+   * The collision was entirely manufactured by the padding.
+   *
+   * ⚠️ THE PRINCIPLE: if the label renders what the editor holds, it CANNOT
+   * collide with a plate, because the designer already placed those slots
+   * relative to it. Any collision means the render has drifted from the editor.
+   * A physical cut margin belongs to the printer's feed, not to the artwork.
+   */
   padding?: number;
 }): LabelPlacement {
   const { template, front, delta, stock } = params;
   const dpi = template.canvas.dpi;
   const canvasW = template.canvas.widthIn * dpi;
-  const pad = params.padding ?? 24;
+  const pad = params.padding ?? 0;
   const clearance = params.clearance ?? 12;
   const widthPx = (stock.widthMm / 25.4) * dpi;
 
@@ -132,6 +145,8 @@ export function computeLabelPlacement(params: {
     const overlapsX = x < plate.x + plate.width && x + widthPx > plate.x;
     if (!overlapsX) continue;
     if (plate.y >= top && plate.y < bottom) {
+      // ⛔ Reaching here means the render no longer matches the editor. Trim so
+      // nothing prints over a QR, but this is a SYMPTOM, not the fix.
       clearedOf.push(plate);
       bottom = plate.y - clearance;
       trimmed = true;
@@ -144,7 +159,9 @@ export function computeLabelPlacement(params: {
     clearedOf,
     trimmed,
     problem:
-      height <= 0
+      trimmed
+        ? "Label had to be shortened to clear a plate — the render has drifted from the layout editor."
+        : height <= 0
         ? "The label has nowhere to go between the design and the reserved plates."
         : null,
   };

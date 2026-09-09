@@ -53,16 +53,28 @@ describe("placing the label", () => {
   it("⛔ takes its top from the DESIGNED box, not the fitted text", () => {
     // firstName defaultPt 64 -> em 266.7px -> top 555 - 213.3 = 341.7, minus pad
     const p = computeLabelPlacement({ ...base, delta: ["name"], contentBottoms: [700] });
-    expect(p.box.y).toBe(Math.round(555 - (64 / 72) * 300 * 0.8 - 24));
+    // ⛔ No padding: the label is exactly the designed region. A "cut margin"
+    // here is not in the editor and is what pushed an earlier version onto the
+    // QR plate.
+    expect(p.box.y).toBe(Math.round(555 - (64 / 72) * 300 * 0.8));
   });
 
-  it("⛔ shortens rather than covering a QR plate", () => {
+  it("⛔ shortens rather than covering a QR plate, and says the render drifted", () => {
     const p = computeLabelPlacement({
       ...base, delta: ["name", "title"], contentBottoms: [1200], // would run past 1066
     });
     expect(p.trimmed).toBe(true);
     expect(p.clearedOf).toHaveLength(1);
     expect(p.box.y + p.box.height).toBeLessThan(1066);
+    // Trimming is a SYMPTOM: rendering the editor cannot collide with a plate.
+    expect(p.problem).toMatch(/drifted from the layout editor/);
+  });
+
+  it("⛔ does NOT trim when rendering what the editor holds", () => {
+    // Real geometry: title bottom 1063, QR plate 1066. No padding, no collision.
+    const p = computeLabelPlacement({ ...base, delta: ["name", "title"], contentBottoms: [1063] });
+    expect(p.trimmed).toBe(false);
+    expect(p.problem).toBeNull();
   });
 
   it("leaves a label that already clears the plate untouched", () => {

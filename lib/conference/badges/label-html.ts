@@ -14,6 +14,7 @@
 
 import { fitTextLayout, designPxFromPt } from "@/lib/conference/badges/text-fit";
 import { clampSlotToStock, type ReprintStock, type DeltaField } from "@/lib/conference/badges/reprint-plan";
+import { computeLabelPlacement, type Box } from "@/lib/conference/badges/label-placement";
 import type { BadgeTemplateConfigV1, BadgeSlotText } from "@/lib/conference/badges/template";
 
 const TYPEKIT = "https://use.typekit.net/uxh8ckq.css";
@@ -78,8 +79,13 @@ export function renderReprintLabel(params: {
   template: BadgeTemplateConfigV1;
   delta: DeltaField[];
   stock: ReprintStock;
-  /** Left edge of the variable band on the badge, in design px. */
-  bandX: number;
+  /**
+   * Left edge of the sticker on the badge, in design px.
+   *
+   * ⚠️ Defaults to the same centred value computeLabelPlacement uses. Passing a
+   * different one puts the text somewhere the sticker is not.
+   */
+  bandX?: number;
   /** Draw the roll edges, for an alignment proof. */
   showGuides?: boolean;
   /**
@@ -92,9 +98,21 @@ export function renderReprintLabel(params: {
    * is an object with an edge, so its edge is what has to line up.
    */
   anchorTextToEdge?: boolean;
-}): { html: string; widthMm: number; heightMm: number } {
-  const { template, delta, stock, bandX } = params;
+  /**
+   * ⛔ The overlay's reserved plates, so the label can be kept off them.
+   *
+   * Without these the placement has no idea the QR plate exists and will happily
+   * size a label straight over it — measured: 543+545 = 1088 against a plate
+   * starting at 1066. A label over a QR is a badge that stops scanning at a door.
+   * Read them with reservedPlatesFromOverlay(); do not retype the coordinates.
+   */
+  reserved?: Box[];
+}): { html: string; widthMm: number; heightMm: number; placement?: ReturnType<typeof computeLabelPlacement> } {
+  const { template, delta, stock } = params;
   const dpi = template.canvas.dpi;
+  const bandX =
+    params.bandX ??
+    Math.round((template.canvas.widthIn * dpi - (stock.widthMm / 25.4) * dpi) / 2);
   const front = template.front;
   const clamp = (s: BadgeSlotText) => {
     const anchored = params.anchorTextToEdge ? { ...s, x: bandX } : s;
@@ -118,25 +136,27 @@ export function renderReprintLabel(params: {
   }
   if (placed.length === 0) return { html: "", widthMm: stock.widthMm, heightMm: 0 };
 
-  // ⚠️ The label's own extent, from what is actually on it — not a fixed size.
-  // The roll is continuous, so cutting to the content is free and a shorter
-  // label is less to misalign.
-  const PAD = 24; // design px of breathing room, so glyphs are not on the cut line
-  // ⛔ Top from the DESIGN, bottom from the CONTENT. The top is what has to line
-  // up with the card, so it comes from the slot box. The bottom follows the
-  // actual lines, because a designed bottom for a 3-line title would run into
-  // the exhibitor QR plate at y=1066 for a title that is only one line long.
-  const top = Math.min(...placed.map((p) => p.designedTop)) - PAD;
-  const bottom = Math.max(...placed.map((p) => p.top + p.height)) + PAD;
-  const widthPx = (stock.widthMm / 25.4) * dpi;
-  const heightPx = bottom - top;
-  // ⛔ CSS px are 1/96in; the slot geometry is in DESIGN px at the template's dpi
-  // (300). Emitting design px straight into CSS lays the label out ~3x too large
-  // and Chrome clips it — the first proof printed "FRED" instead of "FREDRICO".
-  // render-html.ts carries a scaleX/scaleY for exactly this; this is the same
-  // conversion for a one-slot page.
+  // ⛔ ONE placement implementation. The box comes from label-placement.ts —
+  // the same function the pipeline uses to decide where the sticker goes on the
+  // card — so the label that gets printed and the position it gets applied at
+  // can never disagree. Computing bounds here as well is how a renderer and a
+  // placer drift apart by 9mm and nobody notices until it is on a card.
+  const placement = computeLabelPlacement({
+    template,
+    front,
+    delta,
+    stock,
+    contentBottoms: placed.map((p) => p.top + p.height),
+    reserved: params.reserved,
+  });
+  if (placement.problem) return { html: "", widthMm: stock.widthMm, heightMm: 0, placement };
+  const top = placement.box.y;
+  const widthPx = placement.box.width;
+  const heightPx = placement.box.height;
+  // ⛔ CSS px are 1/96in; slot geometry is DESIGN px at the template's dpi.
+  // Emitting design px straight into CSS lays the label out ~3x too large and
+  // Chrome clips it — the first proof printed "FRED" instead of "FREDRICO".
   const K = 96 / dpi;
-
   const body = placed
     .map((p) => {
       const fontPx = designPxFromPt(p.sizePt, dpi) * K;
@@ -161,6 +181,7 @@ export function renderReprintLabel(params: {
     : "";
 
   return {
+    placement,
     widthMm: stock.widthMm,
     heightMm: (heightPx / dpi) * 25.4,
     html: `<!doctype html><html><head><meta charset="utf-8">
