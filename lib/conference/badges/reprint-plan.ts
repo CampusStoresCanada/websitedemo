@@ -59,38 +59,62 @@ export const REPRINT_STOCKS: Record<string, ReprintStock> = {
 export const DEFAULT_REPRINT_STOCK = REPRINT_STOCKS.brother_ql_dk2113;
 
 /**
- * Fit the badge's variable layer onto the roll.
+ * Lay the badge's variable layer out for the roll.
  *
- * ⛔ SCALE, do not CROP. Cropping to 62mm cuts a name in half — verified by
- * rendering it: "SHAWN" on an 850px band runs off a 732px label. Scaling keeps
- * the design intact and pays for it in size: narrower margins, a smaller name,
- * a monochrome logo. That is the right trade because it is paid ONLY by walk-ups.
+ * ⛔ RE-LAYOUT, NOT A SCALE TRANSFORM. A uniform reduction is a hack that fails
+ * on contact with the physical card: the label is stuck onto a blank that was
+ * printed at full size, so a photographically shrunk label has a logo and a
+ * vertical rhythm that line up with nothing. The label and the blank share one
+ * coordinate space or the whole approach is pointless.
  *
- * ⛔ The alternative — narrowing the badge itself so the label matches 1:1 —
- * shrinks 886 of 962 first names on every pre-printed badge to accommodate a
- * handful of desk reprints. Measured, not guessed.
+ * So NOTHING is scaled. What changes is exactly two things:
  *
- * ⚠️ So a walk-up's badge is legibly not quite a pre-printed one. That is the
- * price of not telling us you were coming, and it is a feature: it is honest
- * about which badges were planned for.
+ *   SLOT WIDTH   clamped so the slot cannot run past the edge of the roll.
+ *   FONT SIZE    falls out of that — `fitTextLayout` already computes the size
+ *                that fits a given width, and it is the same engine the badge
+ *                itself uses. No second sizing rule.
+ *
+ * What is deliberately untouched:
+ *
+ *   x, baselineY   every element stays where the badge puts it
+ *   logo diameter  a logo is a fixed mark, not a thing that shrinks 14%
+ *   QR size        a QR that shrinks stops scanning; if it will not fit it MOVES
+ *   spacing        vertical rhythm is the design, and it is preserved exactly
  */
-export function fitToStock(params: {
-  /** Width of the variable layer's bounding box, in badge design px. */
-  bandWidthPx: number;
-  stock?: ReprintStock;
-  dpi?: number;
-}): { stock: ReprintStock; stockWidthPx: number; scale: number } {
+export function clampSlotToStock<T extends { x: number; width: number }>(
+  slot: T,
+  params: { bandX: number; stock?: ReprintStock; dpi?: number }
+): T {
   const stock = params.stock ?? DEFAULT_REPRINT_STOCK;
   const dpi = params.dpi ?? 300;
   const stockWidthPx = (stock.widthMm / 25.4) * dpi;
-  return {
-    stock,
-    stockWidthPx,
-    // ⚠️ Never scale UP. A band narrower than the roll prints at its own size
-    // with margin to spare; blowing it up to fill 62mm would make a walk-up's
-    // name LARGER than a pre-printed one, which is backwards.
-    scale: Math.min(1, stockWidthPx / params.bandWidthPx),
-  };
+  const rollRight = params.bandX + stockWidthPx;
+  // ⚠️ Only ever narrows. A slot already inside the roll keeps its width, so a
+  // short line is not stretched and a walk-up's text never renders LARGER than
+  // the pre-printed badge would have rendered it.
+  return { ...slot, width: Math.min(slot.width, Math.max(0, rollRight - slot.x)) };
+}
+
+/**
+ * Where a fixed-size mark has to sit to stay on the roll.
+ *
+ * ⛔ Moves it, never shrinks it. A QR below about 15mm stops scanning reliably
+ * on thermal film, and a logo that changes size between a pre-printed badge and
+ * a reprint reads as a mistake. If a fixed mark cannot fit at its own size the
+ * answer is a layout change by a human, not a quiet reduction — so this reports
+ * `fits: false` rather than solving it.
+ */
+export function placeFixedMark(
+  mark: { x: number; size: number },
+  params: { bandX: number; stock?: ReprintStock; dpi?: number }
+): { x: number; size: number; fits: boolean; moved: boolean } {
+  const stock = params.stock ?? DEFAULT_REPRINT_STOCK;
+  const dpi = params.dpi ?? 300;
+  const stockWidthPx = (stock.widthMm / 25.4) * dpi;
+  const rollRight = params.bandX + stockWidthPx;
+  if (mark.size > stockWidthPx) return { ...mark, fits: false, moved: false };
+  if (mark.x + mark.size <= rollRight) return { ...mark, fits: true, moved: false };
+  return { x: rollRight - mark.size, size: mark.size, fits: true, moved: true };
 }
 
 /** Which physical card the operator is holding. */

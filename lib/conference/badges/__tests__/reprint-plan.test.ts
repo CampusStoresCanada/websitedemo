@@ -92,33 +92,59 @@ describe("which stock to reach for", () => {
   });
 });
 
-import { fitToStock, DEFAULT_REPRINT_STOCK, REPRINT_STOCKS } from "../reprint-plan";
+import {
+  clampSlotToStock,
+  placeFixedMark,
+  DEFAULT_REPRINT_STOCK,
+  REPRINT_STOCKS,
+} from "../reprint-plan";
 
 /**
- * ⛔ Scale, never crop. Cropping cut "SHAWN" in half on a rendered proof; the
- * design survives scaling and pays for it in size.
+ * ⛔ The label is laid out in the BADGE's coordinates, not shrunk to fit. It is
+ * applied to a blank printed at full size — a photographically reduced label has
+ * a logo and a vertical rhythm that line up with nothing on the card underneath.
  */
-describe("fitting the variable layer to the roll", () => {
-  it("declares the stock rather than assuming 62mm somewhere in a renderer", () => {
+describe("laying the variable layer out for the roll", () => {
+  const band = { bandX: 44 };
+
+  it("declares the stock rather than burying 62 in a renderer", () => {
     expect(DEFAULT_REPRINT_STOCK.widthMm).toBe(62);
     expect(DEFAULT_REPRINT_STOCK.platform).toContain("QL-1110");
     expect(DEFAULT_REPRINT_STOCK.monochrome).toBe(true);
   });
 
-  it("shrinks a band that is wider than the roll", () => {
-    // The front company-blank band is 850px of an 975px badge at 300dpi.
-    const { scale, stockWidthPx } = fitToStock({ bandWidthPx: 850 });
-    expect(stockWidthPx).toBeCloseTo(732.3, 0);
-    expect(scale).toBeCloseTo(0.861, 2);
+  it("narrows a slot to the roll and moves nothing", () => {
+    const out = clampSlotToStock({ x: 44, width: 850, baselineY: 555 }, band);
+    expect(out.width).toBeCloseTo(732.3, 0);
+    expect(out.x).toBe(44);          // ⛔ position untouched
+    expect(out.baselineY).toBe(555); // ⛔ vertical rhythm untouched
   });
 
-  it("⛔ never scales UP, so a walk-up's name is never bigger than a printed one", () => {
-    expect(fitToStock({ bandWidthPx: 400 }).scale).toBe(1);
+  it("⛔ leaves a slot that already fits completely alone", () => {
+    const out = clampSlotToStock({ x: 44, width: 400, baselineY: 555 }, band);
+    expect(out.width).toBe(400);
   });
 
-  it("follows the declared stock, so different hardware needs no code change", () => {
+  it("follows the declared stock, so other hardware needs no code change", () => {
     const wide = { ...REPRINT_STOCKS.brother_ql_dk2113, id: "wide", widthMm: 102 };
-    expect(fitToStock({ bandWidthPx: 850, stock: wide }).scale).toBe(1);
+    const out = clampSlotToStock({ x: 44, width: 850 }, { ...band, stock: wide });
+    expect(out.width).toBe(850);
+  });
+
+  it("⛔ moves a QR rather than shrinking it — a small QR stops scanning", () => {
+    const out = placeFixedMark({ x: 705, size: 200 }, band);
+    expect(out.size).toBe(200);
+    expect(out.moved).toBe(true);
+    expect(out.x + out.size).toBeCloseTo(44 + 732.3, 0);
+  });
+
+  it("leaves a mark that already fits exactly where the badge puts it", () => {
+    const out = placeFixedMark({ x: 88, size: 216 }, { bandX: 75 });
+    expect(out).toMatchObject({ x: 88, size: 216, moved: false, fits: true });
+  });
+
+  it("⛔ refuses rather than quietly shrinking a mark wider than the roll", () => {
+    expect(placeFixedMark({ x: 44, size: 900 }, band).fits).toBe(false);
   });
 
   it("puts the stock on a label plan and leaves it off a full-badge one", () => {
