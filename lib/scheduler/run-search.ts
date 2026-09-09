@@ -24,6 +24,7 @@ import {
 } from "./search";
 import { isBlackedOut } from "./blackout";
 import { validateScheduleConstraints } from "./constraints";
+import { lateAdd } from "./late-add";
 import { describeTotals } from "./objective";
 import type {
   DelegateProfile,
@@ -87,6 +88,20 @@ export type SearchInputs = {
    * 54 finished worse than a schedule already in hand and were thrown away.
    */
   ils?: { strength: number } | false;
+  /**
+   * A FROZEN schedule to extend instead of solving from scratch.
+   *
+   * ⛔ SAME PROCESS, SAME MACHINE, DIFFERENT SCOPE — the late-add path. When set,
+   * this does not search at all: no greedy seed, no restarts, no ILS. It applies
+   * only the additive moves to the schedule given, because after the freeze the
+   * existing schedule is a given and the only question is what fits in the gaps
+   * around it.
+   *
+   * ⚠️ Restarts and ILS are meaningless here and would be actively harmful. A
+   * restart reseeds the greedy and builds a fresh schedule; a perturbation moves
+   * seated people. Both are exactly what a late add must never do.
+   */
+  extendFrom?: ScheduleAssignment[];
   /** Percentile a stated pick is worth, passed to describeTotals. Default 0.75. */
   preferencePercentile?: number;
   /**
@@ -116,6 +131,20 @@ export type SearchOutcome = {
   preferenceShare: number;
   preferenceWeight: number;
   rescueMoves: number;
+  /**
+   * Present only on a late-add run.
+   *
+   * ⛔ `alsoGained` is an obligation, not a statistic: those delegates hold a
+   * schedule that is now out of date and need `conference_schedule_ready`
+   * re-sent. A late add is not finished when the run is written — it is
+   * finished when the people whose day changed have been told.
+   */
+  lateAdd?: {
+    newlySeated: string[];
+    alsoGained: string[];
+    stillWithoutMeetings: string[];
+    addedMeetings: number;
+  };
   scoreDistribution: ReturnType<typeof describeTotals>;
 };
 
@@ -222,6 +251,62 @@ export function runSchedulerSearch(input: SearchInputs): SearchOutcome {
     }
     return { value: improved.after.value, result: { draw: firstDraw!, improved } };
   };
+
+  /**
+   * LATE ADD — one pass over a frozen schedule, no search.
+   *
+   * The greedy still runs, but ONLY to obtain delegateTargetMeetings for the
+   * diagnostics recompute below; its assignments are discarded. Solving from
+   * scratch here would be the bug.
+   */
+  if (input.extendFrom) {
+    const targetsOnly = generateSchedule(generateInput);
+    const result = lateAdd(input.extendFrom, { ...optimizeContext, seed: input.seed });
+    const after = result.objective.after;
+    return {
+      assignments: result.assignments,
+      // Recomputed against what is being kept, same as the search path below.
+      diagnostics: validateScheduleConstraints({
+        meetingSlots: input.meetingSlots,
+        assignments: result.assignments,
+        delegates: input.delegates,
+        exhibitors: input.exhibitors,
+        delegateTargetMeetings: targetsOnly.diagnostics.delegateTargetMeetings,
+        exhibitorTargetMeetings: Math.max(
+          1,
+          Math.floor(input.meetingSlots.length / Math.max(1, input.exhibitors.length))
+        ),
+        policy: input.policy,
+      }),
+      /**
+       * ⚠️ A single-draw spread, reported honestly rather than omitted. One draw
+       * is the correct number here — reading `restarts: 1` should say "this did
+       * not search", not "the search was flat".
+       */
+      spread: {
+        restarts: 1,
+        best: after.value,
+        worst: after.value,
+        median: after.value,
+        distinctValues: 1,
+      },
+      winningSeed: input.seed,
+      objectiveValue: after.value,
+      satisfiedPreferences: after.satisfiedPreferences,
+      mutualPreferences: after.mutualPreferences,
+      preferenceShare: after.preferenceShare,
+      preferenceWeight: after.preferenceWeight,
+      // Rescue is disabled in late-add scope, so this is zero by construction.
+      rescueMoves: 0,
+      scoreDistribution,
+      lateAdd: {
+        newlySeated: result.newlySeated,
+        alsoGained: result.alsoGained,
+        stillWithoutMeetings: result.stillWithoutMeetings,
+        addedMeetings: result.added.length,
+      },
+    };
+  }
 
   const search = input.untilCold
     ? searchUntilCold({
