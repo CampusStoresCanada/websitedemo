@@ -103,7 +103,11 @@ export function renderReprintLabel(params: {
   side?: "front" | "back";
   /** The person's badge QR, already encoded. Back labels only. */
   qrDataUri?: string | null;
-  /** Line under the QR on the back — from the template's qr_caption block. */
+  /**
+   * ⚠️ Normally UNUSED and that is correct. The qr_caption line is invariant
+   * chrome and now prints on the blank itself, so the back sticker carries the
+   * QR alone. Kept for a conference whose caption is not on its blanks.
+   */
   qrCaption?: string | null;
   /** Draw the roll edges, for an alignment proof. */
   showGuides?: boolean;

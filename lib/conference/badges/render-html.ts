@@ -372,12 +372,28 @@ function backBlockRows(params: {
       });
     }
   } else if (block.source === "qr_caption") {
-    // ⛔ The caption is ABOUT the code, so no code means no caption. A blank
-    // badge has no token and prints no QR; leaving this in pointed the holder
-    // at empty space and told them it identified them, which is the opposite of
-    // what a blank says. Keyed on the payload rather than the image so it also
-    // covers a badge whose QR failed to generate.
-    if (person.qrPayload) {
+    // ⛔ INVARIANT CHROME — prints on every badge, blanks included.
+    //
+    // The text never varies by person or by registration type, so it belongs to
+    // the card the way the logo plate does. That makes it something a company
+    // blank CAN carry, which in turn means an on-site reprint only has to supply
+    // the QR itself rather than re-printing a line already sitting there in
+    // colour. One less thing on the sticker is one less thing to misalign.
+    //
+    // ⚠️ THIS REVERSES AN EARLIER FIX OF MINE, deliberately. I gated it on
+    // `person.qrPayload` because a caption over empty space tells the holder a
+    // code identifies them when none is there. That was right about a BADGE and
+    // wrong about a BLANK: a blank is never handed to anybody before a sticker
+    // goes on it, so the only moment the line is untrue is while the card is in
+    // a box. Stephen's read — it does not change between varieties, so treat it
+    // as a background layer — is the better one.
+    //
+    // ⛔ The gate survives for the one case it was really protecting: a badge for
+    // a REAL PERSON whose QR failed to generate. That is a genuine defect and the
+    // caption must not paper over it. A blank has no person at all, which is what
+    // separates the two.
+    const captionHasPerson = Boolean(person.firstName?.trim() || person.lastName?.trim());
+    if (person.qrPayload || !captionHasPerson) {
       plain(
         block.text?.trim() ||
           "This code identifies your badge for check-in and scanning on site."
