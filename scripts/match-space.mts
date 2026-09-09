@@ -11,7 +11,7 @@
  * out" either: it runs the health checks beside the promotion block below, and a
  * run failing any of them stays `complete` with the reason in `notes`.
  */
-import { readFileSync, writeFileSync, existsSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { createClient } from "@supabase/supabase-js";
 import { getCircleClient } from "@/lib/circle/client";
@@ -1044,6 +1044,32 @@ if (WRITE) {
     // tell every member the same thing.
     if (edges.length >= 100 && distinctScores < edges.length * 0.1) {
       failures.push(`${distinctScores} distinct scores across ${edges.length} edges — calibration collapsed`);
+    }
+
+    /**
+     * ⛔ Is the INPUT fresh? The other four checks read the OUTPUT, and a stale
+     * corpus produces output that passes all of them.
+     *
+     * This check exists because of a hole I opened myself. The nightly swallows
+     * fetch failures — `npx tsx scripts/circle-embed.mts || echo "continuing on the
+     * cached corpus"` — and `.cache/` is gitignored, so it is absent on any fresh
+     * clone. Chain those: the fetch exits non-zero, the `||` eats it, and this
+     * script then ranks YESTERDAY's corpus and promotes it. Same edge count, same
+     * subjects, same score spread; every output check green.
+     *
+     * ⚠️ So freshness is asserted where the decision is made, not in the plumbing
+     * that feeds it. A guard upstream only holds while every caller keeps calling
+     * it correctly; a guard at the gate holds whatever upstream does. Six hours is
+     * generous for a long embedding pass and still catches a cache that missed a
+     * whole night.
+     */
+    const MAX_INPUT_AGE_H = 6;
+    for (const input of [".cache/circle-corpus.json", ".cache/circle-comments.json"]) {
+      if (!existsSync(input)) { failures.push(`${input} missing`); continue; }
+      const ageH = (Date.now() - statSync(input).mtimeMs) / 3_600_000;
+      if (ageH > MAX_INPUT_AGE_H) {
+        failures.push(`${input} is ${ageH.toFixed(1)}h old (max ${MAX_INPUT_AGE_H}h) — the fetch did not run`);
+      }
     }
 
     if (failures.length > 0) {

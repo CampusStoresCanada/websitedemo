@@ -195,6 +195,16 @@ echo "$MODEL ready (${DIMS} dimensions)"
 # ⚠️ The two scripts were fetching the same comments by different routes in the
 # same run — ~31 paginated calls here, 787 per-post calls there. That was ~800
 # Circle calls a night for data already on disk.
+# ⚠️ These `||` clauses are deliberate — a Circle outage should not cost us the
+# whole night's ranking, and yesterday's corpus still ranks usefully. But they mean
+# a FETCH FAILURE IS NOT AN EXIT CODE, so nothing downstream can infer freshness
+# from success. match-space therefore checks the cache MTIMES itself before it
+# promotes, rather than trusting that these lines ran.
+#
+# ⛔ Do not "fix" this by making them fatal and dropping that check. The check is
+# what holds when someone adds a fourth step, or runs the scripts by hand in the
+# wrong order, or clones fresh with no .cache at all (it is gitignored — 0 tracked
+# files). A guard in the plumbing protects only the callers that remember it.
 npx tsx scripts/circle-comments.mts || echo "comment refresh failed — continuing on the cached comments"
 
 npx tsx scripts/circle-embed.mts --fetch-only || echo "corpus refresh failed — continuing on the cached corpus"
