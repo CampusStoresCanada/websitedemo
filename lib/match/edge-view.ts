@@ -15,10 +15,34 @@ import type { StoredEdge, StoredReason } from "./read-types";
  * ⚠️ Derived from `total`, which already discounts by coverage — so a pair that
  * matched on one axis and was silent on every other cannot present as "high"
  * merely because that one axis was perfect. The old 0–3 scale could.
+ *
+ * ⛔ The thresholds are PERCENTILES, because `total` is a percentile.
+ *
+ * `calibrate()` maps each pair to its position in the run's own distribution, so
+ * 75 means "in the top quarter of everything this run surfaced". Any threshold
+ * that is not itself a percentile is a number fitted to one run's shape, which is
+ * the mistake calibrate() exists to prevent — and it duly reappeared here.
+ *
+ * ⚠️ Measured on run 98a59853 (12,775 live edges), the old 45/25 cut produced:
+ *
+ *     member_to_partner   70.9% high · 27.1% medium ·  2.0% low
+ *     partner_to_member   20.8% high ·  4.6% medium · 74.5% low
+ *
+ * Same thresholds, opposite verdicts, and neither is about match quality. One
+ * scale spans BOTH directions on purpose (so two edges are comparable), but
+ * members carry person-level text and partners carry a company blurb, so
+ * member→partner sits at the top of that shared distribution by construction. A
+ * fixed cut therefore reads out which side of the corpus is denser and calls it
+ * confidence. At 75/50 the member list becomes 28.7 / 35.1 / 36.2.
+ *
+ * ⚠️ partner_to_member stays bimodal — 17 / 3 / 80 — and that is left alone
+ * deliberately. A partner really does have a handful of plausible stores and a
+ * long tail of irrelevant ones; flattening that to look balanced would be
+ * inventing reassurance. "Three strong, the rest weak" is the true shape.
  */
 export function confidenceBucket(total: number): "high" | "medium" | "low" {
-  if (total >= 45) return "high";
-  if (total >= 25) return "medium";
+  if (total >= 75) return "high";
+  if (total >= 50) return "medium";
   return "low";
 }
 

@@ -16,9 +16,31 @@ describe("confidence buckets", () => {
   it("reads from total, so coverage is already priced in", () => {
     // The old 0–3 scale let a single perfect axis present as "high". `total`
     // discounts by how much we actually know, so it cannot.
-    expect(confidenceBucket(50)).toBe("high");
-    expect(confidenceBucket(30)).toBe("medium");
+    expect(confidenceBucket(80)).toBe("high");
+    expect(confidenceBucket(60)).toBe("medium");
     expect(confidenceBucket(10)).toBe("low");
+  });
+
+  it("⛔ cuts at percentiles, because total IS a percentile", () => {
+    // calibrate() maps each pair to its rank position in the run, so a threshold
+    // only means something if it is itself a percentile. The old 45/25 cut was
+    // fitted to one run's shape — exactly what calibrate() exists to avoid — and
+    // on live run 98a59853 it called 70.9% of every member's list "high".
+    expect(confidenceBucket(75)).toBe("high"); // top quarter of the run
+    expect(confidenceBucket(74.9)).toBe("medium");
+    expect(confidenceBucket(50)).toBe("medium"); // above the run's median
+    expect(confidenceBucket(49.9)).toBe("low");
+  });
+
+  it("⚠️ a mid-40s pair is NOT strong — the regression this replaces", () => {
+    // 45 was the old "high" cut. It is below the run's median, so it described
+    // the denser side of the corpus rather than a good match.
+    expect(confidenceBucket(45)).toBe("low");
+  });
+
+  it("holds at the ends", () => {
+    expect(confidenceBucket(100)).toBe("high");
+    expect(confidenceBucket(0)).toBe("low");
   });
 });
 
