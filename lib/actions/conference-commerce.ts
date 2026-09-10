@@ -1608,6 +1608,70 @@ export async function createConferenceCheckout(
       if (!sent.success) {
         return { success: false, error: sent.error ?? "Could not send the invoice." };
       }
+
+      /**
+       * ⛔ ADMIT AND INVOICE — the entitlement lands now, the money lands later.
+       *
+       * Stephen's framing, and it is the narrow one: the reservation window
+       * exists for BOOTHS, where two buyers cannot have the same numbered space.
+       * A registration or an event seat has no such exclusivity, so holding one
+       * hostage to a 30-day invoice serves nobody — least of all the person
+       * standing at the desk who needs a badge printed before they walk away.
+       *
+       * ⛔ MINT WITHOUT ASSERTING PAYMENT. process_conference_order_paid does two
+       * separable things: it flips status to 'paid', and it mints. The mints sit
+       * OUTSIDE that branch and are idempotent — mint_v3_for_order skips any
+       * order item that already has an entity_purchases row. So calling them
+       * directly grants the seat and consumes capacity while leaving the order
+       * honestly unpaid, and when invoice.paid later runs the full RPC the mints
+       * no-op and only the status moves.
+       *
+       * ⚠️ NOT MEMBERSHIPS. A bundled membership-renewal line is dues, not a
+       * conference supply, and advancing an org's membership on an unpaid
+       * invoice would extend their standing on a promise. That stays where it
+       * is — in fulfilConferenceOrder, on invoice.paid.
+       */
+      const { error: mintV3Error } = await adminClient.rpc("mint_v3_for_order", {
+        p_order_id: order.id,
+      });
+      if (mintV3Error) {
+        return {
+          success: false,
+          error: `Invoice sent but the entitlement did not mint: ${mintV3Error.message}`,
+        };
+      }
+      /**
+       * ⚠️ v3 ONLY, deliberately. process_conference_order_paid also calls
+       * mint_grant_balances_for_order — the LEGACY grant model — but that
+       * function is not exposed to service_role and is not in the generated
+       * types, and this conference runs on v3: seats come from
+       * entity_balance_seats, which mint_v3_for_order creates.
+       *
+       * The legacy grants still mint when invoice.paid runs the full RPC, so
+       * nothing is lost; they simply are not what a badge is printed from.
+       */
+
+      /**
+       * ⛔ AND TAKE IT OUT OF THE EXPIRY CRON'S REACH.
+       *
+       * expireStalePendingConferenceOrders cancels any 'pending' order past
+       * expires_at, and cart_reservation_minutes defaults to 15. Without this an
+       * invoiced order is canceled a quarter of an hour after it is sent, while
+       * the invoice stays live — the company gets billed for a canceled order,
+       * and paying it three weeks later revives it and raises an ops alert every
+       * single time.
+       *
+       * ⚠️ NULL rather than a far-future date: `.lt("expires_at", now)` excludes
+       * nulls in SQL, and null is also the honest value. An invoice is not a
+       * fifteen-minute hold that happens to be long; it has no hold at all.
+       */
+      const { error: holdError } = await adminClient
+        .from("conference_orders")
+        .update({ expires_at: null })
+        .eq("id", order.id);
+      if (holdError) {
+        return { success: false, error: `Could not clear the reservation hold: ${holdError.message}` };
+      }
       // ⚠️ finalizeAndSendInvoice writes the hosted URL onto the row rather than
       // returning it — read it back so the desk can show a QR to pay from.
       const { data: sentRow } = await adminClient
