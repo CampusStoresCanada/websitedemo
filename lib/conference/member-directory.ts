@@ -49,7 +49,7 @@ export async function loadMemberDirectory(conferenceId: string): Promise<MemberD
     .from("entity_balances")
     .select(
       "entity:conference_entities!entity_balances_entity_id_fkey(kind, name), " +
-      "organizations(id, name, slug, logo_url, company_description, primary_category)"
+      "organizations(id, name, slug, logo_url, company_description, primary_category, is_test)"
     )
     .eq("conference_id", conferenceId)) as unknown as { data: BalanceRow[] | null };
 
@@ -59,6 +59,19 @@ export async function loadMemberDirectory(conferenceId: string): Promise<MemberD
     if (entity?.kind !== "booth") continue;
     const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
     if (!org) continue;
+    /**
+     * ⛔ Test orgs are excluded from every MEMBER-FACING surface, and this was
+     * not one of them. `is_test` is honoured by the homepage, the publication
+     * loaders and dashboard-stats, but the conference directory and map read
+     * organizations through an embedded select and never looked — so seeding a
+     * test exhibitor to exercise the scheduler would have put a fake company in
+     * front of members, in the directory they use to plan their day.
+     *
+     * ⚠️ Deliberately NOT applied to meeting-candidates: a test org must still
+     * be schedulable, or test data cannot exercise the solver at all. Visible
+     * and schedulable are different questions.
+     */
+    if ((org as { is_test?: boolean }).is_test) continue;
 
     const existing = byOrg.get(org.id);
     if (existing) {

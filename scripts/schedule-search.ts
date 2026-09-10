@@ -37,6 +37,7 @@
  */
 import { createAdminClient } from "@/lib/supabase/admin";
 import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { sendSchedulesForRun } from "@/lib/conference/schedule-delivery";
 import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
 import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
@@ -90,7 +91,11 @@ async function main() {
       "usage: schedule-search.ts <conferenceId> [--patience N] [--swap-trials N] " +
         "[--pref-pct N] [--no-ils] [--restarts N] [--persist]\n" +
         "  late add: --extend-active | --extend-run <runId> — extend a frozen " +
-        "schedule instead of solving a new one"
+        "schedule instead of solving a new one\n" +
+        "  --allow-unscored: solve with no promoted match run (arbitrary pairings)\n" +
+        "  --send: email the people whose schedule this is (needs --persist)\n" +
+        "  --only-if-changed: on a late add, write nothing when nobody was seated\n" +
+        "  --force: extend before the freeze date (normally refused)"
     );
     process.exit(1);
   }
@@ -201,6 +206,41 @@ async function main() {
     memberContacts
   );
 
+  /**
+   * ⛔ REFUSE TO SOLVE WITHOUT MATCH DATA.
+   *
+   * `available` is false when no match_run has status='promoted' — the engine
+   * ran but nobody made a run live. Every orgTotalFor() then returns 0, so
+   *
+   *     matchTotal(e) × occupancy(e)  →  0 × occupancy
+   *
+   * and the objective collapses to occupancy alone: the solver packs rooms and
+   * pairs people at random within the legal moves. It produces a complete,
+   * confident-looking schedule that cannot answer "why did I get these five
+   * meetings", because the answer is "no reason".
+   *
+   * ⚠️ This was computed and thrown away. `loadMeetingMatchScores` has always
+   * returned `available`, and NOTHING read it — the one signal that separates
+   * "misconfigured" from "working" was sitting unused next to the bug it
+   * describes.
+   *
+   * `--allow-unscored` exists because the bench and any pre-promotion smoke test
+   * legitimately have no promoted run. It must be typed deliberately.
+   */
+  if (!scores.available && !process.argv.includes("--allow-unscored")) {
+    console.error(
+      "refusing to solve: no promoted match run, so every pair scores 0 and the\n" +
+        "objective collapses to occupancy alone — the schedule would be arbitrary.\n" +
+        "  promote a match run first, or pass --allow-unscored to solve anyway."
+    );
+    process.exit(2);
+  }
+  if (!scores.available) {
+    console.warn(
+      "⚠️  --allow-unscored: no promoted match run. Pairings below are NOT matched."
+    );
+  }
+
   const delegateSeats = new Map(
     candidates.delegates.map((d: (typeof candidates.delegates)[number]) => [
       d.registrationId,
@@ -267,6 +307,35 @@ async function main() {
         process.exit(2);
       }
       runId = active.id as string;
+    }
+
+    /**
+     * ⛔ A LATE ADD IS A POST-FREEZE OPERATION BY DEFINITION. Before the freeze
+     * nothing has been sent, so the right move is a full re-solve — which finds
+     * a better schedule and costs nobody a change, because nobody has been told
+     * one yet. Running late-add early quietly locks in a worse schedule and
+     * makes the freeze meaningless.
+     */
+    const { data: conf } = await db
+      .from("conference_instances")
+      .select("schedule_freeze_at")
+      .eq("id", conferenceId)
+      .maybeSingle();
+    const freezeAt = (conf as { schedule_freeze_at?: string | null } | null)?.schedule_freeze_at;
+    if (!freezeAt) {
+      console.error(
+        "no schedule_freeze_at set on this conference — a late add is defined\n" +
+          "relative to the freeze. Set it in the conference details form first."
+      );
+      process.exit(2);
+    }
+    if (new Date(freezeAt) > new Date() && !process.argv.includes("--force")) {
+      console.error(
+        `schedule does not freeze until ${freezeAt} — before then, re-solve in full\n` +
+          "instead: a late add preserves a schedule nobody has been sent yet.\n" +
+          "  pass --force to extend anyway."
+      );
+      process.exit(2);
     }
     extendFrom = await loadFrozenRun(db, runId!, exhibitorSeats);
     console.log(
@@ -373,6 +442,19 @@ async function main() {
     return;
   }
 
+  /**
+   * ⚠️ For the nightly. A late add that seated nobody has nothing to record, and
+   * writing an identical draft run every night buries the one night that
+   * mattered under thirteen that did not.
+   */
+  if (process.argv.includes("--only-if-changed") && outcome.lateAdd) {
+    const { newlySeated, alsoGained, addedMeetings } = outcome.lateAdd;
+    if (newlySeated.length + alsoGained.length + addedMeetings === 0) {
+      console.log("\nnothing to add — no run written.");
+      return;
+    }
+  }
+
   const activePolicySet = await getActivePolicySet();
   if (!activePolicySet) throw new Error("no active policy set — cannot record a reproducible run");
 
@@ -420,6 +502,49 @@ async function main() {
   // ⛔ DRAFT ONLY. Nothing here promotes a run — publishing a schedule to the
   // people in it stays a deliberate human act in the admin UI.
   console.log(`\npersisted draft run ${run.id} with ${rows.length} meetings (NOT activated)`);
+
+  /**
+   * ⛔ SENDING IS A SEPARATE, DELIBERATE ACT. Steve: "we hold it until we want
+   * the final answer... we don't ship their schedule ASAP."
+   *
+   * So this never fires on its own. A late add that emailed on every run would
+   * tell one latecomer their schedule four times in January while the people
+   * around them got a fresh copy each time somebody else arrived. Batching is
+   * the point, and the batch boundary is a human deciding it is time.
+   *
+   * ⚠️ On a LATE ADD it sends only to the people whose day actually changed —
+   * `newlySeated` plus `alsoGained` — rather than re-announcing to the whole
+   * conference. On a full solve it sends to everyone holding a seat.
+   */
+  if (!process.argv.includes("--send")) {
+    console.log("  not sent. pass --send to email the people whose schedule this is.");
+    return;
+  }
+
+  const audience = outcome.lateAdd
+    ? [...outcome.lateAdd.newlySeated, ...outcome.lateAdd.alsoGained]
+    : undefined;
+
+  const delivery = await sendSchedulesForRun({
+    db,
+    conferenceId,
+    runId: run.id,
+    delegateSeatIds: audience,
+  });
+
+  console.log(
+    `\nsent ${delivery.sent.length}` +
+      (audience ? ` (late add: only those whose day changed)` : " (everyone with a seat)")
+  );
+  if (delivery.noEmail.length > 0) {
+    console.log(
+      `  ⚠️  ${delivery.noEmail.length} seat(s) have no email — they were NOT told: ` +
+        delivery.noEmail.join(", ")
+    );
+  }
+  if (delivery.unknownSeat.length > 0) {
+    console.log(`  ⚠️  ${delivery.unknownSeat.length} seat id(s) matched no seat holding`);
+  }
 }
 
 main().catch((e) => {
