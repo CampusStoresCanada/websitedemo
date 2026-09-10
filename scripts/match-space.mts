@@ -23,6 +23,7 @@ import {
   bestMatchingAct, removeCommonDirection,
   type SignalVector, type Placed,
 } from "@/lib/match/space";
+import { orgVocabulary, corpusDocumentFrequency, MIN_TOKEN_LENGTH } from "@/lib/match/vocabulary";
 
 const OLLAMA = process.env.OLLAMA_URL ?? "http://localhost:11434";
 const MODEL = "nomic-embed-text";
@@ -563,6 +564,136 @@ for (const p of centred) {
   }
 }
 console.log(`placed: ${memberPeople.length} member people · ${memberOrgs.length} member orgs · ${partnerOrgs.length} partner orgs`);
+
+// ── a partner's own vocabulary, for the /partners search ─────────────────────
+/**
+ * ⛔ WHY THIS EXISTS: that search matches DECLARED text only — NACS taxonomy,
+ * category, description, an AI website summary. A partner whose site says
+ * "decorated apparel solutions" never matches "hoodies", even when hoodies are
+ * plainly what they sell and discuss. The behavioural corpus knows the word and
+ * the search could not reach it.
+ *
+ * ⛔ AND WHY KEYWORDS RATHER THAN VECTORS. Blending the behavioural embedding into
+ * the search is unavailable twice over: these vectors are nomic, computed on this
+ * Mac, and there is no ollama on Vercel to embed a query with the same model; and
+ * sending the corpus to Voyage instead would push members-only Circle content
+ * through a third-party vendor, which is the line drawn for this engine. So
+ * behaviour joins the LOCAL Postgres full-text half of the hybrid — nothing leaves
+ * the building, nothing is billed per search.
+ *
+ * ⛔ SINGLE TOKENS · ORG-ATTRIBUTED · MIN 2 DOCUMENTS, enforced and tested in
+ * lib/match/vocabulary.ts. This column is readable from the PUBLIC search, so: no
+ * phrases, because an exact phrase would let anyone logged out confirm a private
+ * post exists; no author, so a match says "this partner talks about hoodies" and
+ * never who said it; and nothing appearing in a single document, which is what
+ * protects a one-person partner whose org vocabulary is otherwise one human's voice.
+ */
+if (WRITE) {
+  /**
+   * ⛔ AUTHORED, never RECEIVED. This distinction is the whole feature.
+   *
+   * `opened` / `clicked` / `rsvped` docs carry the text of the thing acted UPON —
+   * a campaign's body, an event's description — not anything the actor wrote. That
+   * is deliberate for the engine: opening a mail about hoodies is weak evidence of
+   * interest in hoodies, and `rarityWeight` discounts mail the whole association
+   * opened. For VOCABULARY it is catastrophic.
+   *
+   * ⚠️ Measured, first attempt: six partners came out with the identical keyword
+   * list (session, join, office, hours, agenda, noon, friday, orientation…) and
+   * four more with another (asker, excerpt, suffix, password, pitch, thread…) —
+   * that second set being the variable names from our own partner_ask_invite email
+   * body. Everyone who opened the same CSC email inherited CSC's words. It would
+   * have made a partner findable by "orientation" because they opened an
+   * announcement, and made ten partners indistinguishable from each other.
+   *
+   * So only verbs where the owner is the AUTHOR count: `posted` and `commented`
+   * (their own writing in the community) and `preferred` (their own org record and
+   * role titles). This is the same rule the corpus already applies to CSC's own
+   * voice — an announcement says what the association is doing, not what anybody
+   * sells — carried one step further to say that READING an announcement doesn't
+   * make its words yours either.
+   */
+  const AUTHORED: ReadonlySet<Doc["verb"]> = new Set(["posted", "commented", "preferred"]);
+  const partnerDocsByOrg = new Map<string, { text: string }[]>();
+  for (const p of partnerOrgs) partnerDocsByOrg.set(p.id.slice(4), []);
+  let ownActs = 0, receivedSkipped = 0, titlesSkipped = 0;
+  for (const d of docs) {
+    // ⛔ The org's OWN acts only — its own record, or a post by one of its own
+    // contacts. A member's words ABOUT a partner are the MEMBER's act; letting them
+    // in would put one org's writing into another org's mouth, and make a partner
+    // findable by words they never used.
+    let orgId: string | undefined;
+    const isOrgOwned = d.owner.startsWith("org:");
+    if (isOrgOwned) orgId = d.owner.slice(4);
+    else if (d.owner.startsWith("person:")) orgId = contactOrg.get(d.owner.slice(7));
+    if (!orgId) continue;
+    const bucket = partnerDocsByOrg.get(orgId);
+    if (!bucket) continue; // not a partner org
+    if (!AUTHORED.has(d.verb)) { receivedSkipped++; continue; }
+    // ⛔ A `preferred` doc owned by a PERSON is their role title, and a job title is
+    // not product vocabulary. Measured: Boxercraft's entire fingerprint came out as
+    // "southeast / states / director / sales", which describes a person's job and
+    // tells a buyer nothing about what the company sells. Org-owned `preferred` is
+    // the org record itself — description, category, procurement notes — and stays.
+    if (d.verb === "preferred" && !isOrgOwned) { titlesSkipped++; continue; }
+    bucket.push({ text: d.text });
+    ownActs++;
+  }
+
+  /**
+   * ⛔ STRIP EVERY KNOWN PERSON'S NAME. This is the triangulation guard.
+   *
+   * ⚠️ Measured on the first clean run: `terri`, `luna`, `philippe`, `shannon`,
+   * `alexa`, `gagnon`, `stewart`, `blackadder` all landed in partner fingerprints —
+   * people signing their own posts. Searching "Terri" from a logged-out browser
+   * would have surfaced Merangue.
+   *
+   * That is the People search arriving through the back door, with none of its
+   * consent gate: exactly ONE contact of 953 has consented to public listing, and
+   * this would have made hundreds findable by first name. A per-person consent
+   * decision cannot be undone by an org-level derived column.
+   *
+   * ⚠️ Names are stripped GLOBALLY, not per org — every name in `contacts`, not
+   * just this partner's staff. A member's name appearing in a partner's post is the
+   * same exposure, and matching only the partner's own roster would miss it.
+   */
+  const personNameTokens = new Set<string>();
+  for (const n of contactName.values()) {
+    for (const tok of String(n).toLowerCase().split(/[^a-z]+/)) {
+      if (tok.length >= MIN_TOKEN_LENGTH) personNameTokens.add(tok);
+    }
+  }
+  // ⚠️ An org's own name is NOT a person and must survive — "roots", "randmar",
+  // "merangue" are the most useful terms a partner has. Only remove a name token
+  // that no organisation also uses.
+  for (const n of orgName.values()) {
+    for (const tok of String(n).toLowerCase().split(/[^a-z]+/)) personNameTokens.delete(tok);
+  }
+
+  const vocabDf = corpusDocumentFrequency(partnerDocsByOrg, personNameTokens);
+  let vocabWritten = 0, vocabEmpty = 0;
+  const vocabAt = new Date().toISOString();
+  for (const [orgId, orgDocs] of partnerDocsByOrg) {
+    const terms = orgVocabulary(orgDocs, vocabDf, partnerDocsByOrg.size, personNameTokens);
+    if (terms.length === 0) vocabEmpty++;
+    const { error: vErr } = await db
+      .from("organizations")
+      // ⚠️ Written even when EMPTY, deliberately. Clearing is half the job: a
+      // partner whose acts no longer support any term must lose its old keywords,
+      // or a fingerprint from months ago keeps ranking them for words they have
+      // stopped using — and nothing would ever say so.
+      .update({ behaviour_keywords: terms, behaviour_keywords_updated_at: vocabAt })
+      .eq("id", orgId);
+    if (vErr) { console.error(`vocabulary write failed for ${orgId}:`, vErr.message); continue; }
+    vocabWritten++;
+  }
+  console.log(
+    `vocabulary: ${vocabWritten} partners from ${ownActs} AUTHORED acts` +
+      ` (${receivedSkipped} received + ${titlesSkipped} role-title acts excluded,` +
+      ` ${personNameTokens.size} person-name tokens blocked,` +
+      ` ${vocabEmpty} partners had nothing survive the 2-document guard)`
+  );
+}
 
 // ── read off who is near whom ────────────────────────────────────────────────
 const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
