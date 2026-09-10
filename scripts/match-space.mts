@@ -1048,7 +1048,9 @@ if (WRITE) {
       // ask?" independently of whether it produced anybody.
       asksConsidered,
     },
-    notes: "embedding space — unpromoted",
+    // ⚠️ Not "unpromoted" — that is a claim about an outcome this row cannot yet
+    // have. Overwritten with the real result if the promotion gate passes below.
+    notes: "embedding space — run in progress",
   }).select("id").single();
   if (error) { console.error("run insert failed:", error.message); process.exit(1); }
 
@@ -1130,6 +1132,7 @@ if (WRITE) {
    * the previous promoted run, which is the safe direction — and the reason goes
    * into `notes`, so the morning has an answer instead of a mystery.
    */
+  let didPromote = false;
   if (PROMOTE) {
     const { data: promotedRow } = await db
       .from("match_runs").select("id").eq("status", "promoted").limit(1).maybeSingle();
@@ -1232,6 +1235,14 @@ if (WRITE) {
         console.error(`   recover: update match_runs set status='promoted' where id='${run!.id}'`);
         process.exit(1);
       }
+      didPromote = true;
+      // ⛔ The row's own note still read "embedding space — unpromoted", written at
+      // insert time as a prediction. Left alone it means the PROMOTED run describes
+      // itself as unpromoted to every future reader — including evaluateMatchRunStale
+      // and anyone debugging at 3am. A note is a record, not a guess made earlier.
+      await db.from("match_runs")
+        .update({ notes: `embedding space — promoted, ${edges.length} edges, ${subjectsNow} subjects` })
+        .eq("id", run!.id);
       console.log(
         `\npromoted ${run!.id.slice(0, 8)} — ${edges.length} edges, ${subjectsNow} subjects` +
           (livingId ? `, superseded ${livingId.slice(0, 8)}` : ", first promoted run")
@@ -1302,10 +1313,46 @@ if (WRITE) {
   const KEEP_COMPLETE = 3;   // last few nights, so runs stay comparable
   const KEEP_SUPERSEDED = 1; // the immediate rollback target
 
+  /**
+   * ⛔ ABANDONED RUNS COUNT TOO. This query used to select only `complete` and
+   * `superseded`, so a run that died mid-flight kept its edges FOREVER — nothing
+   * ever selected it, so nothing ever pruned it.
+   *
+   * ⚠️ Found the morning after auto-promotion shipped: one `running` row from an
+   * interrupted manual run holding 8,000 orphan edges, invisible to the very
+   * retention written to stop this table growing without bound. Every future crash
+   * would have added a few thousand more, silently, and the table would have grown
+   * exactly as it did before retention existed.
+   *
+   * A run still `running` after six hours is not running — the job takes minutes,
+   * so the process is gone and nobody is coming back for the row. The CURRENT run
+   * is already `complete` by this point, and `keep` protects it regardless.
+   */
+  const ABANDONED_AFTER_H = 6;
+  const abandonedBefore = new Date(Date.now() - ABANDONED_AFTER_H * 3_600_000).toISOString();
+  const { data: stuck } = await db
+    .from("match_runs")
+    .select("id")
+    .eq("status", "running")
+    .lt("started_at", abandonedBefore);
+  for (const r of ((stuck ?? []) as { id: string }[])) {
+    if (r.id === run!.id) continue;
+    // ⚠️ Marked `failed`, never deleted. The row is a few hundred bytes and it is
+    // the evidence that something TRIED and died — which is what
+    // evaluateMatchRunStale reads to tell "the Mac crashed mid-run" from "the Mac
+    // never woke up". Those have different fixes.
+    await db.from("match_runs")
+      .update({ status: "failed", notes: `abandoned — still 'running' after ${ABANDONED_AFTER_H}h` })
+      .eq("id", r.id);
+  }
+  if ((stuck ?? []).length > 0) {
+    console.log(`marked ${(stuck ?? []).length} abandoned run(s) failed — their edges are now prunable`);
+  }
+
   const { data: runsByStatus } = await db
     .from("match_runs")
     .select("id, status, started_at")
-    .in("status", ["complete", "superseded"])
+    .in("status", ["complete", "superseded", "failed"])
     .order("started_at", { ascending: false });
 
   const keep = new Set<string>([run!.id]);
@@ -1313,6 +1360,9 @@ if (WRITE) {
   for (const r of (runsByStatus ?? []) as { id: string; status: string }[]) {
     if (r.status === "complete" && nComplete < KEEP_COMPLETE) { keep.add(r.id); nComplete++; }
     if (r.status === "superseded" && nSuperseded < KEEP_SUPERSEDED) { keep.add(r.id); nSuperseded++; }
+    // ⚠️ `failed` keeps NOTHING. A complete run is worth holding for comparison and
+    // a superseded one is the rollback target; a half-written run's edges are
+    // neither — an unknown fraction of a ranking nobody should ever read.
   }
   const prunable = ((runsByStatus ?? []) as { id: string }[])
     .map((r) => r.id)
@@ -1347,7 +1397,16 @@ if (WRITE) {
     );
   }
 
-  console.log(`\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, NOT promoted`);
+  // ⚠️ Reports what ACTUALLY happened. This line used to end every run with the
+  // words "NOT promoted" regardless — so the first successful auto-promotion
+  // printed "promoted 2f8d02a8" and then "NOT promoted" four lines later, in the
+  // same log, about the same run. A log that contradicts itself is worse than a
+  // quiet one: whoever reads it next has to go to the database to find out which
+  // half was true.
+  console.log(
+    `\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, ` +
+      (didPromote ? "PROMOTED (live)" : PROMOTE ? "not promoted (failed a health check)" : "not promoted (--promote not passed)")
+  );
 }
 
 // ── hub check ────────────────────────────────────────────────────────────────
