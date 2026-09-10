@@ -16,6 +16,7 @@ import ColorizedImage from "@/components/ui/ColorizedImage";
 import { ProtectedSection } from "@/components/ui/GreyBlur";
 import BlurredField from "@/components/ui/BlurredField";
 import BenchmarkingDetails from "./BenchmarkingDetails";
+import type { ManualEditMark } from "@/lib/benchmarking/manual-edit";
 import BenchmarkingComparison from "./BenchmarkingComparison";
 import PartnerViewOfMember from "./PartnerViewOfMember";
 import EditableProcurementSection from "./EditableProcurementSection";
@@ -66,6 +67,8 @@ interface MemberProfileProps {
   allBenchmarking: BenchmarkingWithOrg[];
   /** Set when detail is withheld — reciprocity or the store's disclosure choice. */
   benchmarkingWithheldReason?: string | null;
+  benchmarkingManualEdits?: Record<string, ManualEditMark>;
+  benchmarkingYearIsPublished?: boolean;
   viewerLevel: ViewerLevel;
   conferenceAttendance: Array<{
     id: string;
@@ -118,6 +121,8 @@ export default function MemberProfile({
   benchmarking,
   allBenchmarking,
   benchmarkingWithheldReason,
+  benchmarkingManualEdits = {},
+  benchmarkingYearIsPublished = false,
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
@@ -343,6 +348,12 @@ export default function MemberProfile({
   // ones testing a conference before it goes public, and need to be able to
   // assign seats bought against it (e.g. via dev-checkout) to verify the flow.
   const isCscAdmin = viewerLevel === "admin" || viewerLevel === "super_admin";
+  // Gates the STOREFRONT only — what is on sale really does depend on sales
+  // being open. It no longer gates the attendance columns: who is going is not
+  // a secret from the org's own people, and hiding the column from a member
+  // who cannot edit it anyway just made the roster look empty. Editing is
+  // gated on canEditConferenceAttendance (this org's admins, CSC admins,
+  // super admins).
   const hasPublicConference = currentConferenceIsPublic || isCscAdmin;
 
   // Which conference_people row (if any) represents each contact, scoped to
@@ -876,7 +887,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg
                     ? <span className="flex flex-col gap-0.5">
                         <span>{organization.email || "—"}</span>
-                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                        <span className="text-xs text-gray-400">Public record — printed in the directory. Use a shared inbox, never a personal address</span>
                       </span>
                     : renderOrgField(organization.email, "email")}
                 </span>
@@ -977,7 +988,7 @@ export default function MemberProfile({
               ctaText="Sign In"
               ctaLink="/login"
             >
-              <div data-onboarding="contacts_section">
+              <div id="team" data-onboarding="contacts_section" className="scroll-mt-20">
                 <div className="flex items-center gap-2 mb-4">
                   <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold">Staffing</h3>
                   {editMode && canEditThisOrg && (
@@ -1002,7 +1013,7 @@ export default function MemberProfile({
                       <th className="pb-2 pr-4 font-semibold">Email</th>
                       <th className="pb-2 pr-4 font-semibold">Role</th>
                       <th className="pb-2 pr-4 font-semibold">Phone</th>
-                      {hasPublicConference && assignableEntities.map((entity) => (
+                      {assignableEntities.map((entity) => (
                         <th key={entity.entityId} className="pb-2 pl-3 font-semibold">{entity.name}</th>
                       ))}
                       {/* Badge/check-in status is a CSC staff concern, not something an org admin manages or needs to see. */}
@@ -1044,7 +1055,7 @@ export default function MemberProfile({
                         <td className="py-2 text-gray-400" {...(!editMode ? fieldProps("contacts", "work_phone_number", contact.id, organization.id) : {})}>
                           {renderContactField(contact.work_phone_number as string | null, contact.phone as string | null, "phone")}
                         </td>
-                        {hasPublicConference && assignableEntities.map((entity) => {
+                        {assignableEntities.map((entity) => {
                           const cell = getEntityAttendanceCell(contact, entity);
                           return (
                             <td key={entity.entityId} className="py-2 pl-3 text-xs" onClick={(e) => e.stopPropagation()}>
@@ -1102,7 +1113,7 @@ export default function MemberProfile({
                         data-add-contact
                         data-organization-id={organization.id}
                       >
-                        <td colSpan={4 + (hasPublicConference ? assignableEntities.length : 0) + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
+                        <td colSpan={4 + assignableEntities.length + (isCscAdmin ? 2 : 0)} className="py-3 text-center text-emerald-600 font-medium">
                           <span className="flex items-center justify-center gap-2">
                             <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
                               <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
@@ -1221,8 +1232,14 @@ export default function MemberProfile({
             </div>
           </div>
         </div>
-      ) : !editMode && (
-        benchmarking && allBenchmarking.length > 0 && (
+      ) : (
+        // Edit mode used to drop this whole section — the wrapper was
+        // `!editMode &&`, so the moment a store turned the Toolkit on, its own
+        // figures left the page. That, not a missing input, is why there was no
+        // way to correct them: you cannot click what is not rendered. Same
+        // shape of fault as the opt-out toggle noted below, one level further
+        // out. In edit mode it now renders for whoever may actually edit it.
+        benchmarking && allBenchmarking.length > 0 && (!editMode || canEditThisOrg) && (
           <div className="bg-white border-t border-gray-200">
             <div className="max-w-7xl mx-auto px-8 py-12">
               {/*
@@ -1250,6 +1267,10 @@ export default function MemberProfile({
               <BenchmarkingDetails
                 benchmarking={benchmarking}
                 organizationName={organization.name}
+                editable={editMode && canEditThisOrg}
+                organizationId={organization.id}
+                manualEdits={benchmarkingManualEdits}
+                yearIsPublished={benchmarkingYearIsPublished}
               />
               <div className="mt-12 pt-8 border-t border-gray-200">
                 <BenchmarkingComparison
@@ -1497,7 +1518,7 @@ export default function MemberProfile({
                   {editMode && canEditThisOrg
                     ? <span className="flex flex-col gap-0.5">
                         <span>{organization.email || "—"}</span>
-                        <span className="text-xs text-gray-400">Public email — use a shared inbox, not a personal address</span>
+                        <span className="text-xs text-gray-400">Public record — printed in the directory. Use a shared inbox, never a personal address</span>
                       </span>
                     : renderOrgField(organization.email, "email")}
                 </span>
@@ -1624,7 +1645,7 @@ export default function MemberProfile({
                         <div className="text-sm text-gray-400" {...fieldProps("contacts", "work_email", contact.id, organization.id)}>
                           {renderContactField(contact.work_email as string | null, contact.email as string | null, "email")}
                         </div>
-                        {hasPublicConference && assignableEntities.map((entity) => {
+                        {assignableEntities.map((entity) => {
                           const cell = getEntityAttendanceCell(contact, entity);
                           return (
                             <div key={entity.entityId} className="text-xs mt-1 font-medium">

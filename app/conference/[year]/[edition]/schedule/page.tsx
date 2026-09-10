@@ -45,7 +45,7 @@ export default async function ConferenceSchedulePage({
   const scheduleTimeline = await getConferenceScheduleTimeline(conference.id, delegateRegistration?.id
     ? {
         viewerRole: "delegate",
-        viewerRegistrationId: delegateRegistration.id,
+        viewerSeatId: delegateRegistration.id,
         viewerMeetingRole: "delegate",
       }
     : {
@@ -80,7 +80,7 @@ export default async function ConferenceSchedulePage({
 
       <ScheduleClient
         conferenceId={conference.id}
-        delegateRegistrationId={delegateRegistration?.id ?? null}
+        delegateSeatId={delegateRegistration?.id ?? null}
         scheduleItems={scheduleTimeline.items}
         personalizedItems={delegateRegistration?.id ? scheduleTimeline.items : null}
         meetings={meetings}

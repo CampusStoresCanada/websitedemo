@@ -1,6 +1,6 @@
 "use server";
 
-import { requireAdmin } from "@/lib/auth/guards";
+import { requireAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { parseConferenceDocuments, type ConferenceDocument } from "@/lib/conference-documents";
 
@@ -83,4 +83,34 @@ export async function getConferenceDocumentUrl(
   }
 
   return { success: true, url: signedData.signedUrl };
+}
+
+/**
+ * A signed URL for a supplier form, for any signed-in user.
+ *
+ * `resolveConferenceDocuments` above is admin-only because it hands back the
+ * whole documents array — venue contracts and planning docs among them. This
+ * one takes a single storage path that the page already decided to show, so
+ * the authorisation question is just "are you signed in".
+ *
+ * Which is the right bar for these: Encore's order form is marked proprietary,
+ * and it is also the thing they asked us to circulate so exhibitors can fill
+ * it in and send it back. Withholding it from the people it was printed for
+ * would be confidentiality theatre — but it still should not sit on the open
+ * web, which is why it is a signed URL and not /public.
+ */
+export async function getServiceDocumentUrl(
+  storagePath: string
+): Promise<{ success: true; url: string } | { success: false; error: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const { data, error } = await createAdminClient().storage
+    .from("conference-documents")
+    .createSignedUrl(storagePath, SIGNED_URL_TTL_SECONDS);
+
+  if (error || !data?.signedUrl) {
+    return { success: false, error: error?.message ?? "Could not open that document." };
+  }
+  return { success: true, url: data.signedUrl };
 }

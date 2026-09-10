@@ -8,8 +8,6 @@ import {
 import type { Database, Json } from "@/lib/database.types";
 import { getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
-import { computeMatchScore } from "@/lib/scheduler/scoring";
 import {
   buildWhyLowerReasons,
   countConsumedSwaps,
@@ -18,8 +16,6 @@ import {
   rankSwapAlternatives,
 } from "@/lib/scheduler/swaps";
 import type {
-  DelegateProfile,
-  ExhibitorProfile,
   ScoreBreakdown,
   SwapAlternative,
   SwapCapStatus,
@@ -27,6 +23,9 @@ import type {
   SwapRequestSummary,
 } from "@/lib/scheduler/types";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { loadMeetingCandidates, siblingSeatIds } from "@/lib/conference/meeting-candidates";
+import { loadMeetingMatchScores } from "@/lib/conference/meeting-match-scores";
+import { loadSeatHoldings } from "@/lib/conference/seats";
 
 type SwapRequestRow = Database["public"]["Tables"]["swap_requests"]["Row"];
 type SwapCapIncreaseRequestRow =
@@ -105,9 +104,9 @@ function mapSwapRequestSummary(row: SwapRequestRow): SwapRequestSummary {
     id: row.id,
     conferenceId: row.conference_id,
     schedulerRunId: row.scheduler_run_id,
-    delegateRegistrationId: row.delegate_registration_id,
+    delegateSeatId: row.delegate_seat_id,
     dropScheduleId: row.drop_schedule_id,
-    replacementExhibitorId: row.replacement_exhibitor_id,
+    replacementExhibitorSeatId: row.replacement_exhibitor_seat_id,
     replacementScheduleId: row.replacement_schedule_id,
     status: row.status as SwapRequestSummary["status"],
     swapNumber: row.swap_number,
@@ -140,14 +139,14 @@ async function resolveActiveRun(conferenceId: string): Promise<{
 
 async function getApprovedExtraSwaps(
   conferenceId: string,
-  delegateRegistrationId: string
+  delegateSeatId: string
 ): Promise<number> {
   const adminClient = createAdminClient();
   const { data, error } = await adminClient
     .from("swap_cap_increase_requests")
     .select("requested_extra_swaps")
     .eq("conference_id", conferenceId)
-    .eq("delegate_registration_id", delegateRegistrationId)
+    .eq("delegate_seat_id", delegateSeatId)
     .eq("status", "approved");
 
   if (error) throw new Error(error.message);
@@ -157,7 +156,7 @@ async function getApprovedExtraSwaps(
 
 async function getSwapCapStatus(
   conferenceId: string,
-  delegateRegistrationId: string,
+  delegateSeatId: string,
   countMode: SwapCountMode,
   baseCap: number
 ): Promise<SwapCapStatus> {
@@ -167,8 +166,8 @@ async function getSwapCapStatus(
       .from("swap_requests")
       .select("status")
       .eq("conference_id", conferenceId)
-      .eq("delegate_registration_id", delegateRegistrationId),
-    getApprovedExtraSwaps(conferenceId, delegateRegistrationId),
+      .eq("delegate_seat_id", delegateSeatId),
+    getApprovedExtraSwaps(conferenceId, delegateSeatId),
   ]);
 
   if (swapError) throw new Error(swapError.message);
@@ -186,38 +185,13 @@ async function getSwapCapStatus(
   };
 }
 
-function toDelegateProfile(
-  row: Database["public"]["Tables"]["conference_registrations"]["Row"]
-): DelegateProfile {
-  return {
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    categoryResponsibilities: normalizeStringArray(row.category_responsibilities),
-    buyingTimeline: normalizeStringArray(row.buying_timeline),
-    topPriorities: normalizeStringArray(row.top_priorities),
-    meetingIntent: normalizeStringArray(row.meeting_intent),
-    purchasingAuthority: row.purchasing_authority,
-    top5Preferences: normalizeStringArray(row.top_5_preferences),
-    blackoutList: normalizeStringArray(row.blackout_list),
-  };
-}
-
-function toExhibitorProfile(
-  row: Database["public"]["Tables"]["conference_registrations"]["Row"]
-): ExhibitorProfile {
-  return {
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    primaryCategory: row.primary_category,
-    secondaryCategories: normalizeStringArray(row.secondary_categories),
-    buyingCyclesTargeted: normalizeStringArray(row.buying_cycles_targeted),
-    meetingOutcomeIntent: normalizeStringArray(row.meeting_outcome_intent),
-    salesReadiness: normalizeSalesReadiness(row.sales_readiness),
-  };
-}
-
+/**
+ * `toDelegateProfile` / `toExhibitorProfile` are GONE. They mapped
+ * conference_registrations rows into solver profiles — a second copy of the
+ * mapping the scheduler did, from a table with no writer. Both now come from
+ * loadMeetingCandidates, so a swap is scored against the same idea of a person
+ * that produced the meeting it is replacing.
+ */
 function extractBreakdown(value: Json): ScoreBreakdown | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const v = value as Record<string, unknown>;
@@ -239,7 +213,7 @@ function extractBreakdown(value: Json): ScoreBreakdown | null {
 
 export async function requestSwap(
   conferenceId: string,
-  delegateRegistrationId: string,
+  delegateSeatId: string,
   dropScheduleId: string
 ): Promise<
   | ActionSuccess<{ requestId: string; alternatives: SwapAlternative[]; capStatus: SwapCapStatus }>
@@ -249,22 +223,65 @@ export async function requestSwap(
   if (!auth.ok) return { success: false, error: auth.error };
 
   const adminClient = createAdminClient();
-  const { data: delegateReg, error: delegateError } = await adminClient
-    .from("conference_registrations")
-    .select("*")
-    .eq("id", delegateRegistrationId)
-    .eq("conference_id", conferenceId)
-    .single();
+  /**
+   * The delegate is a named SEAT. conference_registrations has 0 rows and no
+   * writer, so this lookup could only ever fail — which is why swaps has never
+   * run either.
+   */
+  const candidates = await loadMeetingCandidates(adminClient, conferenceId);
+  // Same promoted run the scheduler ranked on — see toSolverRecords.
+  const promotedScores = await loadMeetingMatchScores(
+    candidates.delegates.map((d) => d.organizationId)
+  );
+  const delegateSeat = candidates.seatById.get(delegateSeatId) ?? null;
+  const delegateReg = delegateSeat
+    ? {
+        holderUserId: delegateSeat.holderUserId,
+        organization_id: delegateSeat.organizationId,
+        conference_id: delegateSeat.conferenceId,
+      }
+    : null;
 
-  if (delegateError || !delegateReg) {
-    return { success: false, error: "Delegate registration not found." };
+  if (!delegateReg) {
+    return { success: false, error: "That delegate seat was not found in this conference." };
   }
 
   if (
-    delegateReg.user_id !== auth.ctx.userId &&
+    delegateReg.holderUserId !== auth.ctx.userId &&
     !isGlobalAdmin(auth.ctx.globalRole)
   ) {
     return { success: false, error: "Not authorized for this delegate." };
+  }
+
+  /**
+   * ⛔ SWAPS CLOSE WHEN THE SCHEDULE FREEZES — same date, same argument as the
+   * late-add path. After the freeze people have been told where to be, and a
+   * swap moves somebody: the delegate swapping, and everyone whose room gains
+   * or loses them.
+   *
+   * ⚠️ Checked here so the UI can say so honestly, and AGAIN inside
+   * commit_swap_request, because this action is one caller and the function is
+   * the only place that cannot be bypassed. Two checks of one rule is right when
+   * one is advisory and the other is the actual gate.
+   *
+   * Reads the same `schedule_freeze_at` the scheduler does, rather than a second
+   * date that could drift out of step with it.
+   */
+  const { data: freezeRow } = await adminClient
+    .from("conference_instances")
+    .select("schedule_freeze_at")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  const freezeAt = (freezeRow as { schedule_freeze_at?: string | null } | null)
+    ?.schedule_freeze_at;
+  if (freezeAt && new Date(freezeAt) <= new Date()) {
+    return {
+      success: false,
+      code: "SCHEDULE_FROZEN",
+      error:
+        "The meeting schedule is final and can no longer be changed. " +
+        "If something is genuinely wrong, conference staff can still help.",
+    };
   }
 
   try {
@@ -273,7 +290,7 @@ export async function requestSwap(
     const countMode = scheduling.swap_count_mode ?? "requested";
     const capStatus = await getSwapCapStatus(
       conferenceId,
-      delegateRegistrationId,
+      delegateSeatId,
       countMode,
       scheduling.swap_cap
     );
@@ -282,7 +299,7 @@ export async function requestSwap(
       await adminClient.from("swap_requests").insert({
         conference_id: conferenceId,
         scheduler_run_id: activeRun.id,
-        delegate_registration_id: delegateRegistrationId,
+        delegate_seat_id: delegateSeatId,
         drop_schedule_id: dropScheduleId,
         status: "denied_cap_reached",
         swap_number: capStatus.consumed + 1,
@@ -297,7 +314,7 @@ export async function requestSwap(
         details: {
           success: false,
           conferenceId,
-          delegateRegistrationId,
+          delegateSeatId,
           dropScheduleId,
           reason: "cap_reached",
           consumed: capStatus.consumed,
@@ -323,7 +340,7 @@ export async function requestSwap(
       return { success: false, error: "Drop schedule not found in active run." };
     }
 
-    if (!dropSchedule.delegate_registration_ids.includes(delegateRegistrationId)) {
+    if (!dropSchedule.delegate_seat_ids.includes(delegateSeatId)) {
       return { success: false, error: "Dropped meeting does not belong to delegate." };
     }
 
@@ -338,12 +355,17 @@ export async function requestSwap(
 
     const activeSchedules = runSchedules ?? [];
     const delegateSchedules = activeSchedules.filter((row) =>
-      row.delegate_registration_ids.includes(delegateRegistrationId)
+      row.delegate_seat_ids.includes(delegateSeatId)
     );
-    const linkedRegistrationId = delegateReg.linked_registration_id;
-    const linkedSchedules = linkedRegistrationId
+    /**
+     * A person named to more than one seat must not be booked into both at
+     * once. This was `linked_registration_id` — a hand-kept pointer at a second
+     * registration. Two seats with the same holder say it without being told.
+     */
+    const linkedSeatIds = siblingSeatIds(delegateSeatId, candidates.seatById.values());
+    const linkedSchedules = linkedSeatIds.length
       ? activeSchedules.filter((row) =>
-          row.delegate_registration_ids.includes(linkedRegistrationId)
+          row.delegate_seat_ids.some((id: string) => linkedSeatIds.includes(id))
         )
       : [];
     const occupiedSlotIds = new Set(
@@ -355,42 +377,37 @@ export async function requestSwap(
       linkedSchedules.map((row) => row.meeting_slot_id)
     );
 
-    const exhibitorIds = [...new Set(activeSchedules.map((row) => row.exhibitor_registration_id))];
-    const { data: exhibitorRegs, error: exhibitorError } = await adminClient
-      .from("conference_registrations")
-      .select("*")
-      .eq("conference_id", conferenceId)
-      .in("id", exhibitorIds);
-
-    if (exhibitorError) throw new Error(exhibitorError.message);
+    // Same profiles the scheduler used to make these meetings — one source, so a
+    // swap cannot be scored against a different idea of who the exhibitor is.
+    const exhibitorRegs = candidates.exhibitors;
 
     const exhibitorById = new Map(
-      (exhibitorRegs ?? []).map((row) => [row.id, row] as const)
+      exhibitorRegs.map((row) => [row.registrationId, row] as const)
     );
 
     const existingOrgIds = new Set<string>();
     for (const schedule of delegateSchedules) {
       if (schedule.id === dropScheduleId) continue;
-      const exhibitor = exhibitorById.get(schedule.exhibitor_registration_id);
-      if (exhibitor?.organization_id) existingOrgIds.add(exhibitor.organization_id);
+      const exhibitor = exhibitorById.get(schedule.exhibitor_seat_id);
+      if (exhibitor?.organizationId) existingOrgIds.add(exhibitor.organizationId);
     }
 
     const { data: matchScores, error: scoreError } = await adminClient
       .from("match_scores")
       .select(
-        "exhibitor_registration_id, total_score, score_breakdown, match_reasons, is_blackout"
+        "exhibitor_seat_id, total_score, score_breakdown, match_reasons, is_blackout"
       )
       .eq("conference_id", conferenceId)
       .eq("scheduler_run_id", activeRun.id)
-      .eq("delegate_registration_id", delegateRegistrationId);
+      .eq("delegate_seat_id", delegateSeatId);
 
     if (scoreError) throw new Error(scoreError.message);
 
     const scoreByExhibitor = new Map(
-      (matchScores ?? []).map((row) => [row.exhibitor_registration_id, row] as const)
+      (matchScores ?? []).map((row) => [row.exhibitor_seat_id, row] as const)
     );
 
-    const originalScore = scoreByExhibitor.get(dropSchedule.exhibitor_registration_id);
+    const originalScore = scoreByExhibitor.get(dropSchedule.exhibitor_seat_id);
     const originalBreakdown =
       originalScore && extractBreakdown(originalScore.score_breakdown)
         ? (extractBreakdown(originalScore.score_breakdown) as ScoreBreakdown)
@@ -405,12 +422,15 @@ export async function requestSwap(
           };
     const originalTotal = originalScore ? Number(originalScore.total_score) : 0;
 
-    const delegateProfile = toDelegateProfile(delegateReg);
+    const delegateProfile = candidates.delegates.find((d) => d.registrationId === delegateSeatId);
+    if (!delegateProfile) {
+      return { success: false, error: "That seat is not a schedulable delegate seat." };
+    }
     const alternatives: SwapAlternative[] = [];
 
     for (const schedule of activeSchedules) {
       if (schedule.id === dropScheduleId) continue;
-      if (schedule.delegate_registration_ids.includes(delegateRegistrationId)) continue;
+      if (schedule.delegate_seat_ids.includes(delegateSeatId)) continue;
       if (
         hasLinkedSlotConflict(
           schedule.meeting_slot_id,
@@ -420,15 +440,15 @@ export async function requestSwap(
       ) {
         continue;
       }
-      if (schedule.delegate_registration_ids.length >= scheduling.meeting_group_max) continue;
+      if (schedule.delegate_seat_ids.length >= scheduling.meeting_group_max) continue;
 
-      const exhibitorReg = exhibitorById.get(schedule.exhibitor_registration_id);
+      const exhibitorReg = exhibitorById.get(schedule.exhibitor_seat_id);
       if (!exhibitorReg) continue;
 
-      const exhibitorOrgId = exhibitorReg.organization_id;
+      const exhibitorOrgId = exhibitorReg.organizationId;
       if (existingOrgIds.has(exhibitorOrgId)) continue;
 
-      const exhibitorBlackoutList = normalizeStringArray(exhibitorReg.blackout_list);
+      const exhibitorBlackoutList = exhibitorReg.blackoutList;
       if (
         isTwoWayBlackout(
           delegateReg.organization_id,
@@ -440,19 +460,38 @@ export async function requestSwap(
         continue;
       }
 
-      const persistedScore = scoreByExhibitor.get(exhibitorReg.id);
+      const persistedScore = scoreByExhibitor.get(exhibitorReg.registrationId);
       const persistedBreakdown =
         persistedScore && extractBreakdown(persistedScore.score_breakdown);
 
+      /**
+       * ⛔ NO v2 FALLBACK. This used to fall back to computeMatchScore when a
+       * run had not persisted a row, which meant an alternative could be ranked
+       * by a different scorer than the meeting it was replacing — the swap would
+       * look worse or better for reasons that had nothing to do with the match.
+       * Both now come from the promoted run; an absent row is a real 0.
+       */
       const computedScore =
         persistedScore && persistedBreakdown
           ? {
               totalScore: Number(persistedScore.total_score),
               breakdown: persistedBreakdown,
               reasons: persistedScore.match_reasons ?? [],
-              isBlackout: persistedScore.is_blackout,
+              isBlackout: false,
             }
-          : computeMatchScore(delegateProfile, toExhibitorProfile(exhibitorReg));
+          : {
+              totalScore:
+                promotedScores.orgTotalFor(delegateReg.organization_id, exhibitorReg.organizationId),
+              breakdown: promotedScores.breakdownFor(
+                delegateReg.organization_id,
+                exhibitorReg.organizationId
+              ),
+              reasons: promotedScores.reasonsFor(
+                delegateReg.organization_id,
+                exhibitorReg.organizationId
+              ),
+              isBlackout: false,
+            };
 
       if (
         !Number.isFinite(computedScore.totalScore) ||
@@ -464,7 +503,7 @@ export async function requestSwap(
       const whyLower = buildWhyLowerReasons(originalBreakdown, computedScore.breakdown);
       alternatives.push({
         scheduleId: schedule.id,
-        exhibitorRegistrationId: exhibitorReg.id,
+        exhibitorSeatId: exhibitorReg.registrationId,
         exhibitorOrganizationId: exhibitorOrgId,
         score: computedScore.totalScore,
         scoreDeltaFromOriginal: computedScore.totalScore - originalTotal,
@@ -482,7 +521,7 @@ export async function requestSwap(
       .insert({
         conference_id: conferenceId,
         scheduler_run_id: activeRun.id,
-        delegate_registration_id: delegateRegistrationId,
+        delegate_seat_id: delegateSeatId,
         drop_schedule_id: dropScheduleId,
         status: "options_generated",
         swap_number: swapNumber,
@@ -504,7 +543,7 @@ export async function requestSwap(
       details: {
         success: true,
         conferenceId,
-        delegateRegistrationId,
+        delegateSeatId,
         dropScheduleId,
         alternativesGenerated: rankedAlternatives.length,
       },
@@ -535,7 +574,7 @@ export async function requestSwap(
       details: {
         success: false,
         conferenceId,
-        delegateRegistrationId,
+        delegateSeatId,
         dropScheduleId,
         reason: "request_failed",
         error: error instanceof Error ? error.message : "Swap request failed.",
@@ -566,18 +605,19 @@ export async function commitSwap(
     return { success: false, error: "Swap request not found." };
   }
 
-  const { data: delegateReg, error: delegateError } = await adminClient
-    .from("conference_registrations")
-    .select("user_id")
-    .eq("id", swapRequest.delegate_registration_id)
-    .single();
+  // Who owns this swap = who is named to the seat.
+  const { seats } = await loadSeatHoldings(adminClient, {
+    conferenceId: swapRequest.conference_id,
+    entityKinds: ["registration"],
+  });
+  const delegateReg = seats.find((seat) => seat.seatId === swapRequest.delegate_seat_id) ?? null;
 
-  if (delegateError || !delegateReg) {
-    return { success: false, error: "Delegate registration not found." };
+  if (!delegateReg) {
+    return { success: false, error: "That delegate seat was not found." };
   }
 
   if (
-    delegateReg.user_id !== auth.ctx.userId &&
+    delegateReg.holderUserId !== auth.ctx.userId &&
     !isGlobalAdmin(auth.ctx.globalRole)
   ) {
     return { success: false, error: "Not authorized for this swap request." };
@@ -693,13 +733,13 @@ export async function getSwapRequest(
     return { success: true, data: mapSwapRequestSummary(data) };
   }
 
-  const { data: delegateReg } = await adminClient
-    .from("conference_registrations")
-    .select("user_id")
-    .eq("id", data.delegate_registration_id)
-    .single();
+  const { seats } = await loadSeatHoldings(adminClient, {
+    conferenceId: data.conference_id,
+    entityKinds: ["registration"],
+  });
+  const delegateReg = seats.find((seat) => seat.seatId === data.delegate_seat_id) ?? null;
 
-  if (!delegateReg || delegateReg.user_id !== auth.ctx.userId) {
+  if (!delegateReg || delegateReg.holderUserId !== auth.ctx.userId) {
     return { success: false, error: "Not authorized for this swap request." };
   }
 
@@ -708,7 +748,7 @@ export async function getSwapRequest(
 
 export async function listSwapRequests(
   conferenceId: string,
-  delegateRegistrationId?: string
+  delegateSeatId?: string
 ): Promise<ActionSuccess<SwapRequestSummary[]> | ActionFailure> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -720,8 +760,8 @@ export async function listSwapRequests(
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: false });
 
-  if (delegateRegistrationId) {
-    query = query.eq("delegate_registration_id", delegateRegistrationId);
+  if (delegateSeatId) {
+    query = query.eq("delegate_seat_id", delegateSeatId);
   }
 
   const { data, error } = await query;
@@ -735,7 +775,7 @@ export async function listSwapRequests(
 
 export async function requestSwapCapIncrease(
   conferenceId: string,
-  delegateRegistrationId: string,
+  delegateSeatId: string,
   requestedExtraSwaps: number,
   reason: string
 ): Promise<ActionSuccess<SwapCapIncreaseRequestRow> | ActionFailure> {
@@ -746,18 +786,15 @@ export async function requestSwapCapIncrease(
   }
 
   const adminClient = createAdminClient();
-  const { data: delegateReg, error: delegateError } = await adminClient
-    .from("conference_registrations")
-    .select("user_id, conference_id")
-    .eq("id", delegateRegistrationId)
-    .single();
+  const { seats } = await loadSeatHoldings(adminClient, { conferenceId, entityKinds: ["registration"] });
+  const delegateReg = seats.find((seat) => seat.seatId === delegateSeatId) ?? null;
 
-  if (delegateError || !delegateReg || delegateReg.conference_id !== conferenceId) {
-    return { success: false, error: "Delegate registration not found." };
+  if (!delegateReg) {
+    return { success: false, error: "That delegate seat was not found in this conference." };
   }
 
   if (
-    delegateReg.user_id !== auth.ctx.userId &&
+    delegateReg.holderUserId !== auth.ctx.userId &&
     !isGlobalAdmin(auth.ctx.globalRole)
   ) {
     return { success: false, error: "Not authorized for this delegate." };
@@ -767,7 +804,7 @@ export async function requestSwapCapIncrease(
     .from("swap_cap_increase_requests")
     .insert({
       conference_id: conferenceId,
-      delegate_registration_id: delegateRegistrationId,
+      delegate_seat_id: delegateSeatId,
       requested_by: auth.ctx.userId,
       requested_extra_swaps: requestedExtraSwaps,
       reason,
@@ -785,7 +822,7 @@ export async function requestSwapCapIncrease(
       details: {
         success: false,
         conferenceId,
-        delegateRegistrationId,
+        delegateSeatId,
         requestedExtraSwaps,
         error: error?.message ?? "Failed to create cap increase request.",
       },
@@ -805,7 +842,7 @@ export async function requestSwapCapIncrease(
     details: {
       success: true,
       conferenceId,
-      delegateRegistrationId,
+      delegateSeatId,
       requestedExtraSwaps,
     },
   });
@@ -815,7 +852,7 @@ export async function requestSwapCapIncrease(
 
 export async function listSwapCapIncreaseRequests(
   conferenceId: string,
-  delegateRegistrationId?: string
+  delegateSeatId?: string
 ): Promise<ActionSuccess<SwapCapIncreaseRequestRow[]> | ActionFailure> {
   const auth = await requireAdmin();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -827,8 +864,8 @@ export async function listSwapCapIncreaseRequests(
     .eq("conference_id", conferenceId)
     .order("created_at", { ascending: false });
 
-  if (delegateRegistrationId) {
-    query = query.eq("delegate_registration_id", delegateRegistrationId);
+  if (delegateSeatId) {
+    query = query.eq("delegate_seat_id", delegateSeatId);
   }
 
   const { data, error } = await query;
@@ -899,7 +936,7 @@ export async function decideSwapCapIncreaseRequest(
       success: true,
       conferenceId: data.conference_id,
       decision,
-      delegateRegistrationId: data.delegate_registration_id,
+      delegateSeatId: data.delegate_seat_id,
     },
   });
 
@@ -908,7 +945,7 @@ export async function decideSwapCapIncreaseRequest(
 
 export async function adminGrantSwapCapIncrease(
   conferenceId: string,
-  delegateRegistrationId: string,
+  delegateSeatId: string,
   extraSwaps: number,
   reason: string
 ): Promise<ActionSuccess<SwapCapIncreaseRequestRow> | ActionFailure> {
@@ -928,21 +965,18 @@ export async function adminGrantSwapCapIncrease(
   }
 
   const adminClient = createAdminClient();
-  const { data: delegateReg, error: delegateError } = await adminClient
-    .from("conference_registrations")
-    .select("id, conference_id")
-    .eq("id", delegateRegistrationId)
-    .single();
+  const { seats } = await loadSeatHoldings(adminClient, { conferenceId, entityKinds: ["registration"] });
+  const delegateReg = seats.find((seat) => seat.seatId === delegateSeatId) ?? null;
 
-  if (delegateError || !delegateReg || delegateReg.conference_id !== conferenceId) {
-    return { success: false, error: "Delegate registration not found." };
+  if (!delegateReg) {
+    return { success: false, error: "That delegate seat was not found in this conference." };
   }
 
   const { data, error } = await adminClient
     .from("swap_cap_increase_requests")
     .insert({
       conference_id: conferenceId,
-      delegate_registration_id: delegateRegistrationId,
+      delegate_seat_id: delegateSeatId,
       requested_by: auth.ctx.userId,
       requested_extra_swaps: extraSwaps,
       reason: reason || "Admin override",
@@ -963,7 +997,7 @@ export async function adminGrantSwapCapIncrease(
       details: {
         success: false,
         conferenceId,
-        delegateRegistrationId,
+        delegateSeatId,
         extraSwaps,
         error: error?.message ?? "Failed to grant swap cap override.",
       },
@@ -983,7 +1017,7 @@ export async function adminGrantSwapCapIncrease(
     details: {
       success: true,
       conferenceId,
-      delegateRegistrationId,
+      delegateSeatId,
       extraSwaps,
     },
   });

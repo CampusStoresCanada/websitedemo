@@ -10,5 +10,17 @@ export const CHECK_TYPES = [
   "travel_info_submitted",
   "payment_complete",
   "legal_document_accepted",
+  "directory_profile_complete",
+  "self_reported",
+  "directory_profile_enriched",
+  "top_choices_declared",
 ] as const;
 export type CheckType = (typeof CHECK_TYPES)[number];
+
+/**
+ * Who answers a task. "Org admins answer for the company, people answer for
+ * themselves." The reminder engine processes `org` tasks only — it is
+ * org-scoped throughout — while `person` tasks render on /me/conference.
+ */
+export const TASK_AUDIENCES = ["org", "person"] as const;
+export type TaskAudience = (typeof TASK_AUDIENCES)[number];

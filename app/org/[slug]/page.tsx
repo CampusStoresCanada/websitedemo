@@ -1,10 +1,15 @@
+import { headers } from "next/headers";
 import { notFound } from "next/navigation";
 import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
+import { isBot, recordDirectoryScan } from "@/lib/publication/scan-tracking";
+import { recordAct } from "@/lib/signals/inbox";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
+import ConferenceChecklistSection from "@/components/org/ConferenceChecklistSection";
+import MeetingPreferencesSection from "@/components/org/MeetingPreferencesSection";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import type {
   PendingTransferInfo,
@@ -15,6 +20,8 @@ import { resolvePartnerLinksForViewer } from "@/lib/actions/get-partner-document
 import { listRFPsForOrg, listRFPsForPartner } from "@/lib/actions/rfps";
 import type { RFPWithContext } from "@/lib/types/rfp";
 import { getPartnerMarketData, checkNudgeCooldown } from "@/lib/actions/partner-market";
+import { loadMarketRatings } from "@/lib/actions/market-ratings";
+import type { RatingRow } from "@/lib/match/rating-standing";
 import type { MarketData } from "@/lib/actions/partner-market";
 import { getMemberSupplierData } from "@/lib/actions/member-suppliers";
 import type { SupplierData } from "@/lib/actions/member-suppliers";
@@ -25,6 +32,12 @@ import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/l
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
+import { isOrgAccessActive } from "@/lib/membership/status";
+import {
+  getManualEditMarks,
+  surveyYearIsPublished,
+} from "@/lib/benchmarking/manual-edit";
+import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -91,9 +104,11 @@ export const dynamic = "force-dynamic";
 
 interface PageProps {
   params: Promise<{ slug: string }>;
+  /** `?s=b` marks an arrival from an exhibitor badge — see the scan record below. */
+  searchParams: Promise<{ s?: string }>;
 }
 
-export default async function OrgProfilePage({ params }: PageProps) {
+export default async function OrgProfilePage({ params, searchParams }: PageProps) {
   const { slug } = await params;
   // Resolves the viewer AND the "own org" elevation. Shared with the toolkit's
   // Contacts CSV export, which has to land on the same answer as this page or
@@ -107,6 +122,71 @@ export default async function OrgProfilePage({ params }: PageProps) {
   if (!organization) {
     notFound();
   }
+
+  // An exhibitor's badge front encodes /org/<slug>?s=b and lands here directly,
+  // without passing through /scan — so this is the only place that scan can be
+  // counted.
+  //
+  // ⛔ Only recorded when the marker is present. /e/[code] logs every visit
+  // because every visit there IS a directory arrival; this page carries ordinary
+  // web traffic, and logging all of it as "link" would drown the signal and
+  // change what "did the printed book get used" means.
+  //
+  // ⛔ public_code comes from the UNMASKED admin lookup above, not from
+  // `organization`. That object has been through applyFieldMask, which rewrites
+  // or nulls any field the viewer is not entitled to — so for an anonymous
+  // scanner the masked value is not the real code, and the write would either
+  // insert nonsense or (because recordDirectoryScan swallows everything) fail
+  // in complete silence.
+  const { s: scanSource } = await searchParams;
+  const scanPublicCode = orgIdRow?.public_code as string | null | undefined;
+  if (scanSource === "b" && orgIdRow?.id && scanPublicCode) {
+    const userAgent = (await headers()).get("user-agent");
+    // ⛔ ONE bot check gating BOTH writes.
+    //
+    // `recordDirectoryScan` filters bots internally; `recordAct` does NOT. This
+    // is a public page carrying a URL printed on a badge, so it gets crawled —
+    // and without this the crawler was silently skipped from the scan counts
+    // while still being fed into the signal spine, which is the input to
+    // scoring. Verified: five bot-UA requests produced 0 directory rows and 2
+    // signals. A missing user agent counts as a bot; a person has one.
+    if (!isBot(userAgent)) {
+      // Awaited, not fire-and-forget: this runs during render and a floating
+      // promise can be killed before it lands. recordDirectoryScan never throws.
+      await recordDirectoryScan({
+        organizationId: orgIdRow.id,
+        publicCode: scanPublicCode,
+        userAgent,
+        source: "badge",
+      });
+      // The attributable half. recordAct resolves the actor from the session
+      // itself and stores unattributed rows too, so a signed-out passer-by
+      // still counts without pretending to be someone.
+      //
+      // ⛔ This inbox row is a POINTER, not evidence — it carries no provenance.
+      // The authoritative record of a badge arrival is `directory_scan_events`
+      // (org grain, above) and `conference_badge_scans` (person grain). Join
+      // back to those rather than training on the payload here.
+      void recordAct({
+        source: "conference",
+        verb: "scanned",
+        objectType: "org",
+        objectOrgId: orgIdRow.id,
+        dedupeKey: `conference:badge-front:${orgIdRow.id}`,
+      });
+    }
+  }
+
+  // Which of this store's figures were corrected outside the survey. Read here
+  // rather than in the component because it is a database read, and only for a
+  // row the viewer is already entitled to see — getOrganizationForViewer has
+  // decided that above, and returns null when they are not.
+  const benchmarkingManualEdits = benchmarking
+    ? await getManualEditMarks(benchmarking.id)
+    : {};
+  const benchmarkingYearIsPublished = benchmarking
+    ? await surveyYearIsPublished(benchmarking.fiscal_year)
+    : false;
 
   // Check for active sponsorship
   const today = new Date().toISOString().slice(0, 10);
@@ -360,6 +440,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
   let orgRFPs: RFPWithContext[] = [];
   let partnerRFPs: RFPWithContext[] = [];
   let partnerMarket: MarketData | null = null;
+  let canRateMarket = false;
+  let marketRatings: RatingRow[] = [];
   let canNudge = false;
   let nudgeAvailableAt: string | null = null;
   let memberSuppliers: SupplierData | null = null;
@@ -397,7 +479,22 @@ export default async function OrgProfilePage({ params }: PageProps) {
         organization.id,
         (orgExtra2.primary_category as string | null) ?? null
       );
-      partnerMarket = marketResult.data ?? { matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 };
+      partnerMarket = marketResult.data ?? { runId: null, matches: [], topMatches: [], totalMatches: 0, withoutProcurementCount: 0 };
+
+      /**
+       * ⛔ Rating is an ORG ADMIN act, while reading the market is org-level.
+       * `is_customer` is this vendor's customer list, and publishing it should
+       * not be open to every member of their staff.
+       *
+       * ⚠️ `loadMarketRatings` re-checks the caller itself — this only decides
+       * whether to render the controls. A UI flag is not an authorization.
+       */
+      canRateMarket = viewer.viewerOrgAdminIds?.includes(organization.id) === true
+        || viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
+      if (canRateMarket) {
+        const r = await loadMarketRatings(organization.id);
+        marketRatings = r.rows;
+      }
       const cooldown = await checkNudgeCooldown();
       canNudge = cooldown.canSend;
       nudgeAvailableAt = cooldown.availableAt ?? null;
@@ -504,6 +601,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
         benchmarking={benchmarking}
         allBenchmarking={allBenchmarking}
         benchmarkingWithheldReason={benchmarkingWithheldReason}
+        benchmarkingManualEdits={benchmarkingManualEdits}
+        benchmarkingYearIsPublished={benchmarkingYearIsPublished}
         viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}
@@ -519,6 +618,15 @@ export default async function OrgProfilePage({ params }: PageProps) {
         viewerUserId={viewerUserId}
         pendingTransfer={pendingTransfer}
         transferCandidates={transferCandidates}
+      />
+      <ConferenceChecklistSection
+        orgId={organization.id}
+        slug={slug}
+        conferenceId={currentConferenceId}
+      />
+      <MeetingPreferencesSection
+        orgId={organization.id}
+        conferenceId={currentConferenceId}
       />
       </>
     );
@@ -547,6 +655,8 @@ export default async function OrgProfilePage({ params }: PageProps) {
       canEditLinks={canEditLinks}
       partnerRFPs={partnerRFPs}
       partnerMarket={partnerMarket}
+      canRateMarket={canRateMarket}
+      marketRatings={marketRatings}
       canNudge={canNudge}
       nudgeAvailableAt={nudgeAvailableAt}
       renewalWindowOpen={renewalWindowOpen}
@@ -554,6 +664,15 @@ export default async function OrgProfilePage({ params }: PageProps) {
       viewerUserId={viewerUserId}
       pendingTransfer={pendingTransfer}
       transferCandidates={transferCandidates}
+    />
+    <ConferenceChecklistSection
+      orgId={organization.id}
+      slug={slug}
+      conferenceId={currentConferenceId}
+    />
+    <MeetingPreferencesSection
+      orgId={organization.id}
+      conferenceId={currentConferenceId}
     />
     </>
   );

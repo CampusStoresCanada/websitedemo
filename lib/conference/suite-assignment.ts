@@ -1,9 +1,25 @@
 /**
- * One suite = one full day of independent meeting rotations, so an org
- * pinned to two suites would get two concurrent schedules — double the
- * meeting time a registration is meant to buy, regardless of how many
- * booths (Connected-tier or otherwise) it purchased. Pure so the scheduler
- * action and tests share one source of truth.
+ * An org MAY hold more than one suite — it buys throughput, not time.
+ *
+ * The old rule here was "one org, one suite", on the reasoning that two suites
+ * are two concurrent rotations and therefore double the meeting time a
+ * registration buys. The ED's ruling (2026-09-01) splits that in two, and only
+ * half of it was ever true:
+ *
+ *   they may run a second suite      — a second check-out desk, more people met
+ *   they do NOT get more time        — no delegate meets the same org twice
+ *
+ * The second half is already a hard constraint in the solver
+ * (DUPLICATE_EXHIBITOR_ORG, keyed by delegate → organization across every
+ * assignment, regardless of suite). So the limit that matters is enforced where
+ * meetings are actually made, and the pre-flight "one org, one suite" check was
+ * rejecting a legal arrangement before the solver ever saw it.
+ *
+ * ⛔ Two suites needs two PEOPLE. Each suite is pinned to a different exhibitor
+ * registration; an org with one staffer can only staff one room, and the other
+ * stays empty rather than being handed to somebody else.
+ *
+ * Pure so the scheduler action and tests share one source of truth.
  */
 
 export type Suite = { id: string; suite_number: number };
@@ -21,22 +37,11 @@ export function buildSuiteOrgAssignmentsBySuiteId(
   return bySuiteId;
 }
 
-/** An org assigned to more than one suite, if any — the case the scheduler must reject. */
-export function findDuplicateSuiteOrgAssignment(
-  suites: Suite[],
-  suiteOrgAssignmentsBySuiteNumber: Record<string, string>
-): { orgId: string; suiteNumbers: number[] } | null {
-  const suiteNumbersByOrgId = new Map<string, number[]>();
-  for (const suite of suites) {
-    const orgId = suiteOrgAssignmentsBySuiteNumber[String(suite.suite_number)];
-    if (!orgId) continue;
-    const list = suiteNumbersByOrgId.get(orgId) ?? [];
-    list.push(suite.suite_number);
-    suiteNumbersByOrgId.set(orgId, list);
-  }
-
-  for (const [orgId, suiteNumbers] of suiteNumbersByOrgId) {
-    if (suiteNumbers.length > 1) return { orgId, suiteNumbers };
-  }
-  return null;
-}
+/**
+ * `reservedSuiteIds` is GONE — subsumed by the stronger rule.
+ *
+ * It kept held suites out of the free-fill pool. With free-fill deleted a suite
+ * is only ever reached through a pin, and pins come only from holders, so
+ * nothing can take a room it does not hold. A guard that can never fire reads
+ * like protection and is really just something else to keep in step.
+ */

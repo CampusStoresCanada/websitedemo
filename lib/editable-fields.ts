@@ -44,13 +44,45 @@ export const EDITABLE_COLUMNS = {
     "hex",
     "name",
   ],
+  // The full set of figures the org page renders, so a store can correct any
+  // of its own results between cycles. Editing these is gated further in
+  // update-field: only the store's newest year, and never while that year's
+  // survey is open — see lib/benchmarking/manual-edit.ts. Every write here is
+  // recorded as an amendment.
+  //
+  // Deliberately absent: derived values (sales per FTE, margins — computed, not
+  // stored), workflow columns (status, submitted_at, amended_at, verified_by),
+  // and disclosure_level, which has its own control with its own consequences.
   benchmarking: [
+    // Store profile
     "enrollment_fte",
     "num_store_locations",
     "institution_type",
     "pos_system",
     "total_square_footage",
+    // Sales
+    "total_gross_sales_instore",
+    "total_online_sales",
+    "sales_course_supplies",
+    "sales_course_supplies_online",
+    "sales_general_books",
+    "sales_technology",
+    "sales_stationary",
+    "sales_custom_merch",
+    "sales_food_beverage",
+    // Expenses and financials
+    "net_profit",
+    "total_cogs",
+    "expense_hr",
+    "expense_rent_maintenance",
+    "marketing_spend",
+    "central_funding",
+    // Staffing
     "fulltime_employees",
+    "parttime_fte_offpeak",
+    "student_fte_average",
+    "manager_years_current_position",
+    "manager_years_in_industry",
   ],
   site_content: [
     "title",
@@ -141,20 +173,36 @@ export function fieldProps<T extends EditableTable>(
   entityId: string,
   /** Pass the org's UUID when this field is on an org page (/org/[slug]).
    *  Org-page edits bypass the second-signer queue and write immediately. */
-  orgId?: string
+  orgId?: string,
+  /** The stored value, when what the element displays is a formatted version of
+   *  it. The editor seeds its input from this instead of the rendered text.
+   *  Without it, "$1.2M" or "12,500 sq ft" is what gets parsed and sent. */
+  rawValue?: string | number | null
 ): {
   id: string;
   "data-field": string;
   "data-entity-id": string;
   "data-flaggable": true;
   "data-org-id"?: string;
+  "data-organization-id"?: string;
+  "data-raw-value"?: string;
 } {
   return {
     id: editAnchorId(table, column as string, entityId),
     "data-field": `${table}.${column}`,
     "data-entity-id": entityId,
     "data-flaggable": true,
-    ...(orgId ? { "data-org-id": orgId } : {}),
+    // Both spellings on purpose, and they are read by different features:
+    // submit-flag walks up to the nearest [data-org-id], while the Toolkit's
+    // edit overlay reads [data-organization-id] off the element itself. Only
+    // the first was ever emitted here, so every inline edit looked to
+    // updateField like an off-org-page edit — which routed Tier 2 fields into
+    // the approval queue instead of writing them, and skipped the client-side
+    // check that you may edit the org you are pointing at.
+    ...(orgId ? { "data-org-id": orgId, "data-organization-id": orgId } : {}),
+    ...(rawValue !== undefined && rawValue !== null
+      ? { "data-raw-value": String(rawValue) }
+      : {}),
   };
 }
 

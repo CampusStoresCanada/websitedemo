@@ -63,6 +63,13 @@ export type TemplateKey =
   | "grace_weekly_reminder"
   | "membership_locked"
   | "opt_out_confirmation"
+  // Vendor partners renew a PARTNERSHIP, not a membership. Separate templates
+  // rather than a shared one with a noun variable: the two audiences are paying
+  // for different things, the copy will keep diverging, and a shared template is
+  // one careless edit away from telling partners they can vote.
+  | "partnership_renewal_reminder"
+  | "partnership_grace_reminder"
+  | "partnership_suspended"
   // User management
   | "org_user_invited"
   | "org_user_added_to_org"
@@ -82,6 +89,33 @@ export type TemplateKey =
   | "conference_reminder"
   | "conference_waitlist_approved"
   | "conference_checklist_reminder"
+  // Sent to ONE person about their own listing — never to their org admin.
+  | "directory_visibility_ask"
+  // Benchmarking. Transactional: the survey is a membership obligation and a
+  // member benefit, not a commercial message, so these bypass suppressions on
+  // the same reasoning as election mail. See lib/benchmarking/notify.ts.
+  | "benchmarking_invitation"
+  | "benchmarking_beta_invitation"
+  | "benchmarking_reminder"
+  | "benchmarking_submission_received"
+  // Elections
+  | "election_call_for_nominations"
+  | "election_nomination_received"
+  | "election_cosign_request"
+  | "election_store_permission_request"
+  | "election_nomination_ready"
+  | "election_nomination_incomplete"
+  // Balloting. The ballot is never in the email — these drive members back to
+  // the site, where the session identifies them. See lib/elections/notify.ts.
+  | "election_ballots_open"
+  | "election_ballot_reminder"
+  // Post-AGM. The members elect at the meeting (Part V S3(e)), so this cannot
+  // be sent before it — see lib/elections/documents/results-announcement.ts.
+  | "election_results_announced"
+  // AGM — By-Law Part VII notices, both date-bound
+  | "agm_notice_of_meeting"
+  | "agm_proxy_form"
+  | "agm_package_available"
   | "prospective_booth_payment_confirmation"
   | "prospective_booth_application_reminder"
   // Events

@@ -19,6 +19,7 @@ export default async function ConferenceFloorPlanPage({
     <FloorPlanManager
       conferenceId={id}
       floorPlanUrl={result.data.floorPlanUrl}
+      surfaces={result.data.surfaces}
       booths={result.data.booths}
     />
   );

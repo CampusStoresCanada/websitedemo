@@ -1,0 +1,1429 @@
+/**
+ * Place everyone in one space and read off who is near whom.
+ *
+ *   npx tsx scripts/match-space.mts                      # compute + report, writes nothing
+ *   npx tsx scripts/match-space.mts --write              # persist an UNPROMOTED run
+ *   npx tsx scripts/match-space.mts --write --promote    # persist, and go live IF healthy
+ *   npx tsx scripts/match-space.mts --reembed            # ignore the vector cache
+ *
+ * ⛔ `--write` alone still never promotes — a run lands at `complete` and the site
+ * keeps serving whatever is live. `--promote` does not mean "promote whatever came
+ * out" either: it runs the health checks beside the promotion block below, and a
+ * run failing any of them stays `complete` with the reason in `notes`.
+ */
+import { readFileSync, writeFileSync, existsSync, mkdirSync, statSync } from "node:fs";
+import { createHash } from "node:crypto";
+import { createClient } from "@supabase/supabase-js";
+import { getCircleClient } from "@/lib/circle/client";
+import { normalize } from "@/lib/signals/embedding";
+import { redactContactDetails, countRedactions, isExcludedSpace } from "@/lib/signals/redact";
+import { postBodyText } from "@/lib/signals/circle-backfill";
+import {
+  poolSignals, nearest, placementConfidence, calibrate, rarityWeight,
+  bestMatchingAct, removeCommonDirection,
+  type SignalVector, type Placed,
+} from "@/lib/match/space";
+import { orgVocabulary, corpusDocumentFrequency, MIN_TOKEN_LENGTH } from "@/lib/match/vocabulary";
+
+const OLLAMA = process.env.OLLAMA_URL ?? "http://localhost:11434";
+const MODEL = "nomic-embed-text";
+const VEC_CACHE = ".cache/space-vectors.json";
+const WRITE = process.argv.includes("--write");
+const REEMBED = process.argv.includes("--reembed");
+/**
+ * Promote this run if it passes the health checks below.
+ *
+ * ⛔ The old design said promotion was "a human's decision, not a side effect of
+ * the job finishing", and left every run at `complete`. That gate was never once
+ * walked through: 125,974 edges accumulated across every run since the engine was
+ * built and NOTHING was ever promoted, so `readMatchEdges()` returned null on
+ * every surface and the conference scheduler's objective silently degraded from
+ * `matchTotal × occupancy` to occupancy alone — seating people by which rooms fit.
+ *
+ * ⚠️ And it fought the retention in this same file. `KEEP_COMPLETE = 3` prunes the
+ * edges of all but the last three complete runs, so an unpromoted run's work was
+ * deleted three nights later. The job was computing something nothing could read
+ * and then removing it.
+ *
+ * A safety gate nobody operates is not a safety gate. The real protection is that
+ * a BAD run must not go live, and that is a check a machine can make — so it is
+ * made below, every night, instead of being deferred to an intention.
+ */
+const PROMOTE = process.argv.includes("--promote");
+const NOW = new Date();
+
+const db = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+// ── what each entity has said ────────────────────────────────────────────────
+// One "document" is one act with its own date. Declared text is undated on
+// purpose: this site never timestamps a form, and treating undated as ancient
+// would decay every member's own description to nothing.
+interface Doc { owner: string; text: string; verb: "posted" | "preferred" | "commented" | "rsvped" | "opened" | "clicked"; at: Date | null; weight?: number }
+
+const docs: Doc[] = [];
+// ⛔ Redaction happens HERE, at the single door into the corpus. Doing it at
+// each call site means the next source someone adds is the one that forgets —
+// and a personal detail that reaches an embedding cannot be taken back out.
+const redacted = { emails: 0, phones: 0 };
+const add = (owner: string, text: string | null | undefined, verb: Doc["verb"], at: Date | null, weight?: number) => {
+  const raw = (text ?? "").replace(/\s+/g, " ").trim();
+  if (raw.length <= 25) return;
+  const found = countRedactions(raw);
+  redacted.emails += found.emails;
+  redacted.phones += found.phones;
+  docs.push({ owner, text: redactContactDetails(raw).slice(0, 4000), verb, at, weight });
+};
+
+const { data: orgs, error: orgErr } = await db
+  .from("organizations")
+  .select("id,name,type,company_description,website_summary,primary_category,procurement_info")
+  .in("type", ["Member", "Vendor Partner"])
+  .is("archived_at", null)
+  .neq("is_test", true);
+
+if (orgErr) { console.error("organizations:", orgErr.message); process.exit(1); }
+const orgType = new Map<string, string>();
+const orgName = new Map<string, string>();
+for (const o of orgs ?? []) {
+  orgType.set(o.id, o.type as string);
+  orgName.set(o.id, o.name as string);
+  const pi = (o.procurement_info ?? {}) as Record<string, unknown>;
+  // ⛔ Content only — the NAME is deliberately not part of the position.
+  // "University of Calgary Bookstore" embeds to something, so an org with no
+  // description would still get placed, near every other org whose name says
+  // "university bookstore". That is a confident match made entirely of nothing.
+  const content = [
+    o.company_description,
+    o.website_summary,
+    o.primary_category,
+    Array.isArray(pi.store_services) ? (pi.store_services as string[]).join(", ") : null,
+    typeof pi.requirements_notes === "string" ? pi.requirements_notes : null,
+  ].filter(Boolean).join(". ");
+  add(`org:${o.id}`, content, "preferred", null);
+}
+
+// ⛔ No `.in()` over the org list here. 159 UUIDs is ~6KB of query string, which
+// PostgREST answers with an empty result rather than an error — the filter looks
+// applied and the table looks empty. Pull and filter in memory instead.
+const { data: allContacts, error: contactErr } = await db
+  .from("contacts")
+  .select("id,name,role_title,organization_id,profile_id,email")
+  .limit(5000);
+if (contactErr) { console.error("contacts:", contactErr.message); process.exit(1); }
+const contacts = (allContacts ?? []).filter((c) => orgType.has(c.organization_id as string));
+
+const contactOrg = new Map<string, string>();
+const contactName = new Map<string, string>();
+const byDisplay = new Map<string, string>();
+// ⚠️ profile_id is NOT unique on contacts — one login can hold several contact
+// rows (per person, per org). A Map would silently keep the last one, so the
+// value is a LIST and an event attaches to every row that login owns.
+const byProfile = new Map<string, string[]>();
+for (const c of contacts ?? []) {
+  contactOrg.set(c.id, c.organization_id as string);
+  contactName.set(c.id, c.name as string);
+  byDisplay.set(`${c.name} · ${orgName.get(c.organization_id as string) ?? "?"}`, c.id);
+  if (c.profile_id) byProfile.set(c.profile_id as string, [...(byProfile.get(c.profile_id as string) ?? []), c.id]);
+  // A title is what a person is FOR. Short, but it is the only declared thing
+  // most people have, and it is what separates a director from a coordinator.
+  if (c.role_title) add(`person:${c.id}`, String(c.role_title), "preferred", null);
+}
+
+// ⛔ CSC's own voice is not procurement signal.
+//
+// Steve, on his 101 posts: "sorta worthless. I am a functionary... a human
+// function of the outputs and inputs of the org." An announcement says what the
+// association is doing, not what anybody buys. CSC is org type 'Staff', so it
+// falls outside the Member/Vendor Partner filter above and its people never
+// enter `byDisplay` — this counter exists so that stays TRUE BY MEASUREMENT
+// rather than by a filter someone can quietly widen later.
+let cscVoice = 0;
+// Directors deliberating is the association reasoning about ITSELF — it says
+// nothing about what any store buys. Counted so the exclusion is visible.
+let governance = 0;
+
+// Circle posts, attributed through the display string the corpus was built with.
+let corpusPosts = 0, attributed = 0;
+if (existsSync(".cache/circle-corpus.json")) {
+  const corpus = JSON.parse(readFileSync(".cache/circle-corpus.json", "utf8")) as {
+    kind: string; text: string; author?: string | null; at?: string | null; space?: string | null;
+  }[];
+  for (const d of corpus) {
+    if (d.kind !== "post") continue;
+    corpusPosts++;
+    if (isExcludedSpace(d.space)) { governance++; continue; }
+    if (d.author?.includes("Campus Stores Canada")) { cscVoice++; continue; }
+    const cid = d.author ? byDisplay.get(d.author) : undefined;
+    if (!cid) continue;
+    attributed++;
+    add(`person:${cid}`, d.text, "posted", d.at ? new Date(d.at) : null);
+  }
+}
+
+// Circle comments — the half that carries the answers.
+//
+// ⚠️ A comment's author is nested (`user.id`); a post's is flat (`user_id`).
+// That single difference left 0 of 2,850 comments attributed in the first pass.
+// The bulk feed also dates every one, which posts in the old cache are not.
+const { data: cmMaps } = await db
+  .from("circle_member_mapping")
+  .select("circle_member_id,contact_id")
+  .not("contact_id", "is", null);
+const memberToContact = new Map<number, string>(
+  (cmMaps ?? []).map((m) => [Number(m.circle_member_id), m.contact_id as string])
+);
+
+let comments = 0, commentsAttributed = 0, commentsCsc = 0;
+if (existsSync(".cache/circle-comments.json")) {
+  const circle = getCircleClient();
+  const userToContact = new Map<number, string>();
+  if (circle) {
+    // circle_member_mapping stores the MEMBER id; a comment carries the USER id.
+    // Circle's own member list is the only bridge between the two id spaces.
+    const emailMap = await circle.buildEmailMap();
+    for (const mem of emailMap.values() as Iterable<{ id: number; user_id?: number }>) {
+      const cid = memberToContact.get(mem.id);
+      if (cid && mem.user_id != null) userToContact.set(mem.user_id, cid);
+    }
+  }
+
+  const rows = JSON.parse(readFileSync(".cache/circle-comments.json", "utf8")) as {
+    body: string; userId: number | null; userName: string | null;
+    createdAt: string | null; likes: number; spaceName?: string | null;
+  }[];
+  for (const c of rows) {
+    comments++;
+    if (isExcludedSpace(c.spaceName)) { governance++; continue; }
+    if (c.userName?.includes("Campus Stores Canada")) { commentsCsc++; continue; }
+    const cid = c.userId != null ? userToContact.get(c.userId) : undefined;
+    if (!cid || !contactOrg.has(cid)) continue;
+    commentsAttributed++;
+    // A reply people liked is a better answer than one nobody did. Strength of
+    // the ACT — not a judgement about what it was about.
+    add(`person:${cid}`, c.body, "commented", c.createdAt ? new Date(c.createdAt) : null,
+        1 + Math.min(c.likes, 5) * 0.2);
+  }
+  cscVoice += commentsCsc;
+}
+
+// ── Showing up is a CHOSEN act ───────────────────────────────────────────────
+//
+// Everything above is what someone said. This is what they turned up for, which
+// is a stronger claim and one nobody makes idly. The event's own title and
+// description are the text; `starts_at` dates it, so a 2019 webinar decays away
+// while last term's does not.
+//
+// ⚠️ Both feeds are single-valued — every RSVP is 'yes', every registration
+// 'registered'. No row is ever written for someone who stayed away, so the
+// negative has to be DERIVED from the invited population; see the block below.
+const { data: eventRows } = await db
+  .from("events")
+  .select("id,title,description,starts_at");
+const eventText = new Map<string, { text: string; at: Date | null }>();
+for (const e of eventRows ?? []) {
+  const text = [e.title, e.description].filter(Boolean).join(". ");
+  eventText.set(e.id as string, { text, at: e.starts_at ? new Date(e.starts_at as string) : null });
+}
+
+// How many distinct people each event drew, so a webinar everyone attended can
+// be down-weighted against one a handful chose.
+const eventReach = new Map<string, Set<string>>();
+const reach = (eid: string, cid: string) => {
+  const set = eventReach.get(eid) ?? new Set<string>();
+  set.add(cid);
+  eventReach.set(eid, set);
+};
+
+let rsvps = 0, rsvpAttached = 0;
+const { data: rsvpRows } = await db
+  .from("circle_event_rsvp_cache")
+  .select("event_id,circle_member_id");
+const rsvpPairs: { cid: string; eid: string }[] = [];
+for (const r of rsvpRows ?? []) {
+  rsvps++;
+  const cid = r.circle_member_id != null ? memberToContact.get(Number(r.circle_member_id)) : undefined;
+  const eid = r.event_id as string | null;
+  if (!cid || !eid || !eventText.has(eid) || !contactOrg.has(cid)) continue;
+  rsvpPairs.push({ cid, eid });
+  reach(eid, cid);
+}
+
+let regs = 0, regAttached = 0;
+const { data: regRows } = await db
+  .from("event_registrations")
+  .select("event_id,user_id,status");
+const regPairs: { cid: string; eid: string }[] = [];
+for (const r of regRows ?? []) {
+  regs++;
+  const eid = r.event_id as string | null;
+  const cids = r.user_id ? byProfile.get(r.user_id as string) : undefined;
+  if (!eid || !eventText.has(eid) || !cids) continue;
+  for (const cid of cids) {
+    if (!contactOrg.has(cid)) continue;
+    regPairs.push({ cid, eid });
+    reach(eid, cid);
+  }
+}
+
+// ⛔ Two passes on purpose: an act's rarity cannot be known until every act is
+// counted. Weighting as we went would score the first attendee of an event as
+// though they were its only one.
+const audience = new Set([...rsvpPairs, ...regPairs].map((p) => p.cid)).size;
+for (const { cid, eid } of rsvpPairs) {
+  const ev = eventText.get(eid)!;
+  add(`person:${cid}`, ev.text, "rsvped", ev.at, rarityWeight(eventReach.get(eid)!.size, audience));
+  rsvpAttached++;
+}
+for (const { cid, eid } of regPairs) {
+  const ev = eventText.get(eid)!;
+  add(`person:${cid}`, ev.text, "rsvped", ev.at, rarityWeight(eventReach.get(eid)!.size, audience));
+  regAttached++;
+}
+
+// ⛔ EVERYONE IS ALWAYS INVITED. Steve: "We don't know why you didn't attend an
+// event, but we know you didn't."
+//
+// So a non-attendance is an OBSERVATION, not missing data — and an earlier
+// comment here claiming absence might mean "not invited" was simply wrong. It is
+// weak and its meaning is unknown, which is fine: we are not required to know
+// what a signal means, only that it happened. It nudges the vector away and
+// nothing here pretends to say why.
+//
+// ⚠️ Magnitude is deliberately a fraction of attending — Steve's "low value
+// weighted signal". Turning up is a choice; not turning up has a hundred boring
+// explanations.
+const NON_ATTENDANCE = -0.2;
+let skipped = 0;
+const everyone = new Set([...rsvpPairs, ...regPairs].map((p) => p.cid));
+for (const [eid, went] of eventReach) {
+  const ev = eventText.get(eid)!;
+  if (ev.text.length <= 25) continue;
+  const w = rarityWeight(went.size, everyone.size);
+  for (const cid of everyone) {
+    if (went.has(cid)) continue;
+    skipped++;
+    add(`person:${cid}`, ev.text, "rsvped", ev.at, NON_ATTENDANCE * w);
+  }
+}
+console.log(`invited-and-did-not-go: ${skipped} weak negative signals`);
+
+// ── Email engagement ─────────────────────────────────────────────────────────
+//
+// ⚠️ The AUTHOR is CSC and the ACT is the member's. We exclude the association's
+// own voice everywhere else, and this is not a contradiction: nobody is claiming
+// the newsletter says what a member buys. What a member OPENED, and what they
+// clicked through from, is theirs — the email's subject is simply the topic they
+// engaged with. Steve: "we don't know why you opened an email 8 times, but it is
+// probably an indication of something."
+//
+// ⛔ Historical sends carry nothing. Engagement tracking was blind until the
+// Resend endpoint was enabled on 2026-09-02, so ~580 earlier deliveries have no
+// opens and never will. Absence before that date is a broken pipe, not disinterest.
+// ⛔ Resolve by the address the mail was SENT TO, not by login.
+//
+// `message_recipients.user_id` is NULL on every engaged delivery — a campaign is
+// addressed to an email, and the login link is not populated on that path. This
+// is not "email as an identity key": we are not inferring who someone is, we are
+// reading back the address a message was delivered to.
+//
+// ⚠️ It is still ambiguous where an inbox is shared, and shared inboxes are known
+// to exist here. An address matching several contact rows is REPORTED AND
+// DROPPED rather than attributed to a guess — one open is one human, and we do
+// not know which. ⛔ Never merge the rows to make the ambiguity go away.
+const { data: deliveries } = await db
+  .from("message_deliveries")
+  .select("opened_at, open_count, first_clicked_at, click_count, " +
+          "message_recipients!inner(contact_email), " +
+          "message_campaigns!inner(name, subject_override, body_override, " +
+          "message_templates(subject, body_html))");
+
+// email → the contact rows holding it. Length > 1 means we cannot say who acted.
+const byEmail = new Map<string, string[]>();
+for (const c of contacts) {
+  const addr = (c as { email?: string | null }).email?.trim().toLowerCase();
+  if (addr) byEmail.set(addr, [...(byEmail.get(addr) ?? []), c.id as string]);
+}
+
+let engaged = 0, opens = 0, clicks = 0, sharedInbox = 0;
+const campaignReach = new Map<string, Set<string>>();
+type Engagement = { cid: string; text: string; at: Date | null; verb: "opened" | "clicked"; count: number; key: string };
+const engagements: Engagement[] = [];
+
+for (const d of (deliveries ?? []) as unknown as Record<string, any>[]) {
+  const openedAt = d.opened_at as string | null;
+  const clickedAt = d.first_clicked_at as string | null;
+  if (!openedAt && !clickedAt) continue;
+
+  const addr = (d.message_recipients?.contact_email as string | null)?.trim().toLowerCase();
+  const cids = addr ? byEmail.get(addr) : undefined;
+  if (!cids?.length) continue;
+  if (cids.length > 1) { sharedInbox++; continue; }
+
+  const c = d.message_campaigns ?? {};
+  const t = c.message_templates ?? {};
+  const text = [c.subject_override || t.subject, c.name, postBodyText(c.body_override || t.body_html || "")]
+    .filter(Boolean).join(". ");
+  if (text.length <= 25) continue;
+
+  const key = String(c.name ?? "");
+  for (const cid of cids) {
+    if (!contactOrg.has(cid)) continue;
+    const set = campaignReach.get(key) ?? new Set<string>();
+    set.add(cid);
+    campaignReach.set(key, set);
+
+    // ⛔ A click is a different act from an open, not a bigger one — they went
+    // somewhere. Both are recorded; the verb profiles decide their weight and
+    // half-life, which is not a judgement made here.
+    if (openedAt) engagements.push({ cid, text, at: new Date(openedAt), verb: "opened", count: Number(d.open_count ?? 1), key });
+    if (clickedAt) engagements.push({ cid, text, at: new Date(clickedAt), verb: "clicked", count: Number(d.click_count ?? 1), key });
+  }
+}
+
+// ⛔ Second pass — a campaign's rarity is unknown until every delivery is
+// counted. A newsletter the whole association opened separates nobody.
+const mailAudience = new Set(engagements.map((e) => e.cid)).size;
+for (const e of engagements) {
+  // Repeat opens are repeat ACTS. Capped, because the twentieth open of the same
+  // mail is a mail client refetching images, not twenty decisions.
+  const repeat = 1 + Math.min(Math.max(e.count, 1) - 1, 4) * 0.25;
+  add(`person:${e.cid}`, e.text, e.verb, e.at, repeat * rarityWeight(campaignReach.get(e.key)!.size, mailAudience));
+  engaged++;
+  if (e.verb === "opened") opens++; else clicks++;
+}
+console.log(`email engagement: ${engaged} acts (${opens} opens, ${clicks} clicks) across ${campaignReach.size} campaigns` +
+  (sharedInbox ? ` · ${sharedInbox} dropped: shared inbox, cannot say who acted` : ""));
+
+console.log(`events ${eventText.size}, with text ${[...eventText.values()].filter((e) => e.text.length > 25).length}`);
+console.log(`rsvps ${rsvps}, attached ${rsvpAttached} · registrations ${regs}, attached ${regAttached}`);
+
+console.log(`documents ${docs.length} · orgs ${orgType.size} · contacts ${contactOrg.size}`);
+console.log(`circle posts    ${corpusPosts}, attributed ${attributed}`);
+console.log(`circle comments ${comments}, attributed ${commentsAttributed}`);
+console.log(`CSC's own voice excluded: ${cscVoice} documents`);
+console.log(`governance spaces excluded: ${governance} documents`);
+console.log(`redacted before embedding: ${redacted.emails} emails, ${redacted.phones} phone numbers`);
+
+// ── embed ────────────────────────────────────────────────────────────────────
+async function embed(texts: string[]): Promise<number[][]> {
+  const res = await fetch(`${OLLAMA}/api/embed`, {
+    method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ model: MODEL, input: texts }),
+  });
+  if (!res.ok) throw new Error(`ollama ${res.status}: ${await res.text()}`);
+  return (await res.json()).embeddings as number[][];
+}
+
+// ── Vectors, cached by CONTENT ───────────────────────────────────────────────
+//
+// ⛔ The cache is keyed on a hash of each text, never on the corpus's shape. An
+// earlier version keyed the whole file on `docs.length`: add one comment and
+// delete another, the count matches, and EVERY vector is silently reused against
+// the wrong document. A reorder did the same. Nothing errors — the run just
+// quietly describes a world that never existed.
+//
+// Content addressing also makes this genuinely incremental, which is the point:
+// only text nobody has embedded before ever reaches the model, however much else
+// moved around it.
+type VectorCache = { model: string; vectors: Record<string, number[]> };
+
+const textKey = (text: string) => createHash("sha1").update(text).digest("hex");
+
+let cache: VectorCache = { model: MODEL, vectors: {} };
+if (!REEMBED && existsSync(VEC_CACHE)) {
+  try {
+    const loaded = JSON.parse(readFileSync(VEC_CACHE, "utf8")) as Partial<VectorCache>;
+    // ⚠️ A cache built by a different model is not a cache, it is a trap:
+    // its vectors are incomparable with anything this run produces.
+    if (loaded.model === MODEL && loaded.vectors) cache = loaded as VectorCache;
+    else console.log("cache was built by a different model — re-embedding");
+  } catch {
+    console.log("cache unreadable — re-embedding");
+  }
+}
+
+// ⛔ Embed each distinct TEXT once. One event's description attaches to everyone
+// who attended it and everyone who did not, so the corpus holds tens of
+// thousands of documents over a few thousand unique strings.
+const distinct = new Map<string, string>(); // key → text
+for (const d of docs) distinct.set(textKey(d.text), d.text);
+
+const missing = [...distinct.entries()].filter(([key]) => !cache.vectors[key]);
+console.log(
+  `${distinct.size} distinct texts for ${docs.length} documents · ` +
+  `${distinct.size - missing.length} cached, ${missing.length} to embed`
+);
+
+if (missing.length > 0) {
+  for (let i = 0; i < missing.length; i += 32) {
+    const batch = missing.slice(i, i + 32);
+    const fresh = (await embed(batch.map(([, text]) => text))).map(normalize);
+    batch.forEach(([key], j) => { cache.vectors[key] = fresh[j]; });
+    process.stdout.write(`\r  embedded ${Math.min(i + 32, missing.length)}/${missing.length}`);
+  }
+  console.log();
+
+  // ⚠️ Prune anything the corpus no longer contains, or the cache grows without
+  // bound as posts are edited and old wordings linger forever.
+  const live = new Set(distinct.keys());
+  for (const key of Object.keys(cache.vectors)) if (!live.has(key)) delete cache.vectors[key];
+
+  mkdirSync(".cache", { recursive: true });
+  writeFileSync(VEC_CACHE, JSON.stringify(cache));
+}
+
+const vectors: number[][] = docs.map((d) => cache.vectors[textKey(d.text)]);
+
+// ── place ────────────────────────────────────────────────────────────────────
+//
+// ⛔ Centre the ACTS, not the pooled positions. Projection is linear, so pooling
+// centred acts lands in the same place as centring the pooled result — but doing
+// it here leaves individual acts in the SAME space as the positions, which is
+// what makes a best-act score comparable to a pooled one. Uncentred, every act
+// in this corpus scores ~0.6 against every partner, because it is all
+// campus-store text.
+const centredVectors = vectors; // ⚠️ see below — act-level centring was tested and reverted
+
+const byOwner = new Map<string, SignalVector[]>();
+const actsOf = new Map<string, { vector: number[]; text: string }[]>();
+docs.forEach((d, i) => {
+  const list = byOwner.get(d.owner) ?? [];
+  list.push({ vector: centredVectors[i], verb: d.verb, occurredAt: d.at, weight: d.weight });
+  byOwner.set(d.owner, list);
+  // Kept alongside so the winning act can be quoted back as the REASON.
+  const acts = actsOf.get(d.owner) ?? [];
+  acts.push({ vector: centredVectors[i], text: d.text });
+  actsOf.set(d.owner, acts);
+});
+
+const placed = new Map<string, Placed>();
+for (const [owner, sigs] of byOwner) {
+  const p = poolSignals(sigs, { now: NOW });
+  if (p) placed.set(owner, { id: owner, ...p });
+}
+
+// ⚠️ Centre over the WHOLE population before comparing anything. Uncentred, one
+// partner sat closest to the average of everything and took the #1 slot for 65
+// of 240 people — the space was reporting genericness as fit.
+// ⛔ A STORE IS ITS PEOPLE.
+//
+// Only 4 of 79 member orgs ever wrote a description, so placing orgs from their
+// own text placed almost none of them — while 280 of their PEOPLE placed fine,
+// because people write posts even when their store never filled in a form. The
+// site reads org-level rows, so the engine was person-rich and unusable.
+//
+// A store's position is therefore pooled from the acts of everyone who works
+// there, and only falls back to its own description when nobody there has said
+// anything. That is also the truer statement: what a store buys is what its
+// buyers do, not what somebody once typed into a profile field.
+//
+// ⚠️ Pooled BEFORE centring, so the store sits in the same space as everyone
+// else. Pooling centred vectors would average away the very direction that
+// centring exists to expose.
+const peopleByOrg = new Map<string, SignalVector[]>();
+for (const [owner, sigs] of byOwner) {
+  if (!owner.startsWith("person:")) continue;
+  const org = contactOrg.get(owner.slice(7));
+  if (!org || orgType.get(org) !== "Member") continue;
+  peopleByOrg.set(org, [...(peopleByOrg.get(org) ?? []), ...sigs]);
+}
+
+let orgsFromPeople = 0;
+for (const [org, sigs] of peopleByOrg) {
+  const pooled = poolSignals(sigs, { now: NOW });
+  if (!pooled) continue;
+  const key = `org:${org}`;
+  // Their own description wins if they wrote one — it is a deliberate statement
+  // about themselves, and this is only standing in for its absence.
+  if (!placed.has(key)) orgsFromPeople++;
+  if (!placed.has(key)) placed.set(key, { id: key, ...pooled });
+}
+console.log(`member orgs placed from their people: ${orgsFromPeople}`);
+
+// ⛔ Centre POSITIONS, not acts. Tested both against the one externally
+// validated pair we have — Waterloo → RAINS, where Steve knew of a real
+// relationship nobody had stated. Centring at act level demoted it from rank 1
+// to rank 11 and every Waterloo person with it. The common direction computed
+// over 8,887 individual acts is a different axis from the one over ~350 pooled
+// positions, and removing it takes the consistency signal with it.
+const centred = removeCommonDirection([...placed.values()]);
+
+const memberPeople: Placed[] = [], partnerOrgs: Placed[] = [], memberOrgs: Placed[] = [];
+for (const p of centred) {
+  const id = p.id;
+  if (id.startsWith("org:")) {
+    const t = orgType.get(id.slice(4));
+    if (t === "Vendor Partner") partnerOrgs.push(p);
+    else if (t === "Member") memberOrgs.push(p);
+  } else {
+    const org = contactOrg.get(id.slice(7));
+    if (org && orgType.get(org) === "Member") memberPeople.push(p);
+  }
+}
+console.log(`placed: ${memberPeople.length} member people · ${memberOrgs.length} member orgs · ${partnerOrgs.length} partner orgs`);
+
+// ── a partner's own vocabulary, for the /partners search ─────────────────────
+/**
+ * ⛔ WHY THIS EXISTS: that search matches DECLARED text only — NACS taxonomy,
+ * category, description, an AI website summary. A partner whose site says
+ * "decorated apparel solutions" never matches "hoodies", even when hoodies are
+ * plainly what they sell and discuss. The behavioural corpus knows the word and
+ * the search could not reach it.
+ *
+ * ⛔ AND WHY KEYWORDS RATHER THAN VECTORS. Blending the behavioural embedding into
+ * the search is unavailable twice over: these vectors are nomic, computed on this
+ * Mac, and there is no ollama on Vercel to embed a query with the same model; and
+ * sending the corpus to Voyage instead would push members-only Circle content
+ * through a third-party vendor, which is the line drawn for this engine. So
+ * behaviour joins the LOCAL Postgres full-text half of the hybrid — nothing leaves
+ * the building, nothing is billed per search.
+ *
+ * ⛔ SINGLE TOKENS · ORG-ATTRIBUTED · MIN 2 DOCUMENTS, enforced and tested in
+ * lib/match/vocabulary.ts. This column is readable from the PUBLIC search, so: no
+ * phrases, because an exact phrase would let anyone logged out confirm a private
+ * post exists; no author, so a match says "this partner talks about hoodies" and
+ * never who said it; and nothing appearing in a single document, which is what
+ * protects a one-person partner whose org vocabulary is otherwise one human's voice.
+ */
+if (WRITE) {
+  /**
+   * ⛔ AUTHORED, never RECEIVED. This distinction is the whole feature.
+   *
+   * `opened` / `clicked` / `rsvped` docs carry the text of the thing acted UPON —
+   * a campaign's body, an event's description — not anything the actor wrote. That
+   * is deliberate for the engine: opening a mail about hoodies is weak evidence of
+   * interest in hoodies, and `rarityWeight` discounts mail the whole association
+   * opened. For VOCABULARY it is catastrophic.
+   *
+   * ⚠️ Measured, first attempt: six partners came out with the identical keyword
+   * list (session, join, office, hours, agenda, noon, friday, orientation…) and
+   * four more with another (asker, excerpt, suffix, password, pitch, thread…) —
+   * that second set being the variable names from our own partner_ask_invite email
+   * body. Everyone who opened the same CSC email inherited CSC's words. It would
+   * have made a partner findable by "orientation" because they opened an
+   * announcement, and made ten partners indistinguishable from each other.
+   *
+   * So only verbs where the owner is the AUTHOR count: `posted` and `commented`
+   * (their own writing in the community) and `preferred` (their own org record and
+   * role titles). This is the same rule the corpus already applies to CSC's own
+   * voice — an announcement says what the association is doing, not what anybody
+   * sells — carried one step further to say that READING an announcement doesn't
+   * make its words yours either.
+   */
+  const AUTHORED: ReadonlySet<Doc["verb"]> = new Set(["posted", "commented", "preferred"]);
+  const partnerDocsByOrg = new Map<string, { text: string }[]>();
+  for (const p of partnerOrgs) partnerDocsByOrg.set(p.id.slice(4), []);
+  let ownActs = 0, receivedSkipped = 0, titlesSkipped = 0;
+  for (const d of docs) {
+    // ⛔ The org's OWN acts only — its own record, or a post by one of its own
+    // contacts. A member's words ABOUT a partner are the MEMBER's act; letting them
+    // in would put one org's writing into another org's mouth, and make a partner
+    // findable by words they never used.
+    let orgId: string | undefined;
+    const isOrgOwned = d.owner.startsWith("org:");
+    if (isOrgOwned) orgId = d.owner.slice(4);
+    else if (d.owner.startsWith("person:")) orgId = contactOrg.get(d.owner.slice(7));
+    if (!orgId) continue;
+    const bucket = partnerDocsByOrg.get(orgId);
+    if (!bucket) continue; // not a partner org
+    if (!AUTHORED.has(d.verb)) { receivedSkipped++; continue; }
+    // ⛔ A `preferred` doc owned by a PERSON is their role title, and a job title is
+    // not product vocabulary. Measured: Boxercraft's entire fingerprint came out as
+    // "southeast / states / director / sales", which describes a person's job and
+    // tells a buyer nothing about what the company sells. Org-owned `preferred` is
+    // the org record itself — description, category, procurement notes — and stays.
+    if (d.verb === "preferred" && !isOrgOwned) { titlesSkipped++; continue; }
+    bucket.push({ text: d.text });
+    ownActs++;
+  }
+
+  /**
+   * ⛔ STRIP EVERY KNOWN PERSON'S NAME. This is the triangulation guard.
+   *
+   * ⚠️ Measured on the first clean run: `terri`, `luna`, `philippe`, `shannon`,
+   * `alexa`, `gagnon`, `stewart`, `blackadder` all landed in partner fingerprints —
+   * people signing their own posts. Searching "Terri" from a logged-out browser
+   * would have surfaced Merangue.
+   *
+   * That is the People search arriving through the back door, with none of its
+   * consent gate: exactly ONE contact of 953 has consented to public listing, and
+   * this would have made hundreds findable by first name. A per-person consent
+   * decision cannot be undone by an org-level derived column.
+   *
+   * ⚠️ Names are stripped GLOBALLY, not per org — every name in `contacts`, not
+   * just this partner's staff. A member's name appearing in a partner's post is the
+   * same exposure, and matching only the partner's own roster would miss it.
+   */
+  const personNameTokens = new Set<string>();
+  for (const n of contactName.values()) {
+    for (const tok of String(n).toLowerCase().split(/[^a-z]+/)) {
+      if (tok.length >= MIN_TOKEN_LENGTH) personNameTokens.add(tok);
+    }
+  }
+  // ⚠️ An org's own name is NOT a person and must survive — "roots", "randmar",
+  // "merangue" are the most useful terms a partner has. Only remove a name token
+  // that no organisation also uses.
+  for (const n of orgName.values()) {
+    for (const tok of String(n).toLowerCase().split(/[^a-z]+/)) personNameTokens.delete(tok);
+  }
+
+  const vocabDf = corpusDocumentFrequency(partnerDocsByOrg, personNameTokens);
+  let vocabWritten = 0, vocabEmpty = 0;
+  const vocabAt = new Date().toISOString();
+  for (const [orgId, orgDocs] of partnerDocsByOrg) {
+    const terms = orgVocabulary(orgDocs, vocabDf, partnerDocsByOrg.size, personNameTokens);
+    if (terms.length === 0) vocabEmpty++;
+    const { error: vErr } = await db
+      .from("organizations")
+      // ⚠️ Written even when EMPTY, deliberately. Clearing is half the job: a
+      // partner whose acts no longer support any term must lose its old keywords,
+      // or a fingerprint from months ago keeps ranking them for words they have
+      // stopped using — and nothing would ever say so.
+      .update({ behaviour_keywords: terms, behaviour_keywords_updated_at: vocabAt })
+      .eq("id", orgId);
+    if (vErr) { console.error(`vocabulary write failed for ${orgId}:`, vErr.message); continue; }
+    vocabWritten++;
+  }
+  console.log(
+    `vocabulary: ${vocabWritten} partners from ${ownActs} AUTHORED acts` +
+      ` (${receivedSkipped} received + ${titlesSkipped} role-title acts excluded,` +
+      ` ${personNameTokens.size} person-name tokens blocked,` +
+      ` ${vocabEmpty} partners had nothing survive the 2-document guard)`
+  );
+}
+
+// ── read off who is near whom ────────────────────────────────────────────────
+const median = (xs: number[]) => [...xs].sort((a, b) => a - b)[Math.floor(xs.length / 2)] ?? 0;
+const label = (id: string) =>
+  id.startsWith("org:") ? (orgName.get(id.slice(4)) ?? id)
+  : `${contactName.get(id.slice(7)) ?? "?"} (${orgName.get(contactOrg.get(id.slice(7)) ?? "") ?? "?"})`;
+
+type Row = {
+  subject: string; candidate: string; sim: number; score: number; conf: number;
+  bestSim: number | null; bestText: string | null;
+  direction: "member_to_partner" | "partner_to_member";
+  /**
+   * ⛔ How well the CANDIDATE is placed, not just the subject.
+   *
+   * The edge carried only the subject's confidence, so for partner_to_member
+   * every row shared one number and nothing said how much we actually know about
+   * the store being recommended. New Brunswick Community College — no
+   * description, no categories, ONE act to its name — ranked #1 for thirteen of
+   * eighty partners, and no consumer could tell it apart from Calgary with 254.
+   *
+   * ⚠️ A vector built from almost nothing lands near the middle of the space, and
+   * the middle is close to everything. That is the hub effect, and it looks
+   * exactly like a strong match until you ask what it was built from. This is the
+   * same failure as the old scorer's score=100/confidence=0.03, reproduced.
+   */
+  candConf: number;
+  /** Similarity after shrinking toward the typical pair by candidate confidence. */
+  simAdj: number;
+};
+
+/**
+ * ⛔ BOTH DIRECTIONS, ranked separately — never one transposed into the other.
+ *
+ * Cosine is symmetric, so it is tempting to compute member→partner once and read
+ * it backwards. The similarity survives that; the RANKING does not. A member's
+ * 25 nearest partners is a different set from a partner's 50 nearest members, and
+ * `rank` is per subject. Transposing would hand a partner a list ordered by how
+ * much each member matters to OTHER partners.
+ *
+ * ⚠️ The partner page (`Your Market`) reads `partner_to_member` and nothing else.
+ * Until now the engine wrote only `member_to_partner`, so promoting one of its
+ * runs would have emptied that page for every partner — silently, because the
+ * reader treats an empty result as a real answer rather than falling back.
+ *
+ * Candidates there are member ORGS, not people: the panel renders a store and
+ * resolves its buyer from `category_buyers` separately. Member orgs are pooled
+ * from their people's acts, so a store places even when it never wrote anything.
+ */
+const rows: Row[] = [];
+const addRows = (
+  subjects: Placed[],
+  candidates: Placed[],
+  k: number,
+  direction: Row["direction"]
+) => {
+for (const subj of subjects) {
+  const acts = actsOf.get(subj.id) ?? [];
+  for (const n of nearest(subj, candidates, { k })) {
+    const candidate = candidates.find((p) => p.id === n.id)!;
+    // ⛔ The single strongest thing they said about this candidate — the number
+    // AND the sentence. Waterloo's pooled position reaches 0.27 against RAINS
+    // while Ana's post about Roots reaches 0.6: the evidence was always there,
+    // pooling just diluted it with staplers and chocolates.
+    const best = bestMatchingAct(acts.map((a) => a.vector), candidate.vector);
+    rows.push({
+      subject: subj.id, candidate: n.id, sim: n.similarity, score: 0,
+      conf: placementConfidence(subj),
+      candConf: placementConfidence(candidate),
+      simAdj: 0, // filled once the run's typical similarity is known
+
+      bestSim: best?.similarity ?? null,
+      bestText: best ? acts[best.index].text.slice(0, 300) : null,
+      direction,
+    });
+  }
+}
+};
+
+addRows([...memberPeople, ...memberOrgs], partnerOrgs, 25, "member_to_partner");
+// 50 to match what the partner panel renders, so its list is never truncated by
+// the engine rather than by the surface that knows how many it wants.
+addRows(partnerOrgs, memberOrgs, 50, "partner_to_member");
+
+/**
+ * ⛔ SHRINK toward the middle by how much evidence the candidate's position rests
+ * on — do not multiply by it.
+ *
+ * A vector built from almost nothing lands near the centre of the space, and the
+ * centre is close to everything. That is the hub effect, and it is not a modest
+ * bias: eight member orgs placed from under 0.2 confidence took 31 of 80 top
+ * slots, while forty-five well-placed orgs took 34. Per edge, a barely-placed
+ * store was five times likelier to rank #1. New Brunswick Community College —
+ * one act, no description, no categories — was top for thirteen partners.
+ *
+ * ⚠️ Multiplying by confidence would be the obvious fix and the wrong one. It
+ * makes "we know nothing about them" mean "they are a bad match", pushing sparse
+ * orgs to the BOTTOM. That is a different error, not a correction: a store we
+ * have no data on is not a poor prospect, it is an unremarkable one. Shrinkage
+ * says exactly that — with little evidence, regress toward what a typical pair
+ * looks like rather than trusting an estimate built on one sentence.
+ *
+ *     adjusted = conf * observed + (1 - conf) * typical
+ *
+ * At conf 0.11 a store lands essentially at the median whatever its raw cosine;
+ * at conf 0.97 it is left alone. ⛔ The candidate's confidence, not the
+ * subject's: the subject's applies equally to all of its edges and so cannot
+ * change the order of its own list, which is what a surface renders.
+ *
+ * ⚠️ Per direction. member→partner and partner→member have different similarity
+ * distributions, so one shared "typical" would drag one direction toward the
+ * other's centre.
+ */
+const typicalByDirection = new Map<Row["direction"], number>();
+for (const d of ["member_to_partner", "partner_to_member"] as Row["direction"][]) {
+  typicalByDirection.set(d, median(rows.filter((r) => r.direction === d).map((r) => r.sim)));
+}
+for (const r of rows) {
+  const typical = typicalByDirection.get(r.direction) ?? 0;
+  r.simAdj = r.candConf * r.sim + (1 - r.candConf) * typical;
+}
+
+/**
+ * ⚠️ ONE scale across both directions, not one per direction.
+ *
+ * Calibrating separately would make 80 mean "top fifth of member→partner" in one
+ * row and "top fifth of partner→member" in the next, so no consumer could compare
+ * two edges or apply a single threshold. One run, one meaning.
+ */
+const scale = calibrate(rows.map((r) => r.simAdj));
+for (const r of rows) r.score = scale(r.simAdj);
+
+const sims = rows.map((r) => r.sim).sort((a, b) => a - b);
+const q = (p: number) => sims[Math.floor(sims.length * p)] ?? 0;
+console.log(`\npairs ${rows.length}`);
+console.log(`similarity  min ${q(0).toFixed(3)}  p25 ${q(.25).toFixed(3)}  median ${q(.5).toFixed(3)}  p75 ${q(.75).toFixed(3)}  max ${q(.999).toFixed(3)}`);
+console.log(`distinct scores (2dp): ${new Set(rows.map((r) => r.score.toFixed(2))).size} of ${rows.length}`);
+
+// ⛔ Dedupe on DISPLAY, never by merging the contacts.
+//
+// `contacts` is per (person, org) and the same human legitimately holds several
+// rows — Dianne Salopek has three at Sheridan — so "Dianne → Resero" printed
+// three times. A shared name is not evidence of one record: merging identities
+// is forbidden, and collapsing them here is a rendering decision, not a write.
+// ⚠️ The cost is real and worth stating: her signal is split across three
+// vectors, so she is placed three times from a third of her evidence each. That
+// is a data question for a human, not something a matcher may quietly fix.
+const withBest = rows.filter((r) => r.bestSim !== null);
+if (withBest.length) {
+  const lift = withBest.filter((r) => (r.bestSim ?? 0) > r.sim).length;
+  console.log(`\nbest-act beats the pooled position on ${lift} of ${withBest.length} pairs ` +
+    `(median pooled ${median(withBest.map((r) => r.sim)).toFixed(3)}, ` +
+    `median best-act ${median(withBest.map((r) => r.bestSim!)).toFixed(3)})`);
+}
+
+console.log(`\ntop person → partner pairings:`);
+const shown = new Set<string>();
+for (const r of [...rows].filter((x) => x.subject.startsWith("person:")).sort((a, b) => b.sim - a.sim)) {
+  const key = `${label(r.subject)}→${label(r.candidate)}`;
+  if (shown.has(key)) continue;
+  shown.add(key);
+  console.log(`  ${r.sim.toFixed(3)}  ${label(r.subject)}  →  ${label(r.candidate)}`);
+  if (shown.size >= 15) break;
+}
+const dupPeople = new Map<string, number>();
+for (const p of memberPeople) dupPeople.set(label(p.id), (dupPeople.get(label(p.id)) ?? 0) + 1);
+const split = [...dupPeople.values()].filter((n) => n > 1).length;
+if (split) console.log(`\n⚠️  ${split} people hold more than one contact row — their signal is split across them`);
+
+// ── Open questions → who could answer them ───────────────────────────────────
+//
+// The one surface where the whole loop closes on live data: the engine shows a
+// list, an admin picks a subset, some of those reply. shown ⊇ chosen ⊇ replied,
+// and each narrowing is a labelled fact.
+//
+// ⛔ THE WHOLE COMMUNITY, not just partners. Half the answers in "Ask the
+// Partners" come from MEMBERS — Sandy Nemeth and Shannon Blackadder answering
+// sourcing questions because they are the people who actually know. Steve:
+// "there are experts on both sides of the transaction." Ranking only vendors
+// throws away half the expertise in the room.
+//
+// ⚠️ Computed here, nightly, because the site cannot reach this model. An ask
+// posted today is scored tonight and the tool has it tomorrow — which is the
+// right trade for a surface used a handful of times a year, and it keeps member
+// conversation on this machine rather than at an embedding vendor.
+const ASK_SPACE = "Ask the Partners";
+let asksConsidered: string[] = [];
+const askRows: {
+  ask_ref: string; run_id: string | null; candidate_org_id: string;
+  candidate_contact_id: string | null; recommended: boolean;
+  rank: number; similarity: number; reason: string | null;
+  candidate_last_spoke_at: string | null; answered_this_ask: boolean;
+}[] = [];
+
+// ⛔ THE TOOL IS AN ACTIVATION ENGINE, NOT A Q&A MATCHER.
+//
+// Steve: "I'm taking people who aren't answering questions in Circle and forcing
+// the email into their inbox telling them to go answer it. If they never sign in
+// they never get the notification, if they never get the notification they never
+// get curious about what we're doing as a group. I'm using that space as a
+// carrot — here's the sale, go get it."
+//
+// So the question is two-fold: WHO IS BEST ABLE TO ANSWER THIS, WHO IS NOT
+// ALREADY ANSWERING IN CIRCLE. An already-active candidate is a wasted send —
+// they would have seen the ask anyway. Ranking on relevance alone put a member
+// who posts constantly at rank 1, which is the clearest possible failure.
+//
+// 70 of 80 partner orgs have NEVER posted or commented. That silence is the
+// product, not a data gap.
+//
+// ⚠️ Recorded as FACTS — when they last spoke, whether they already answered
+// this one — never as a score adjustment. Dormancy is a filter and relevance is
+// the rank, the same split as blackouts and the spotlight. Baking silence into
+// the similarity would make "they are quiet" indistinguishable from "they are a
+// good fit", and the surface could never explain which it was reacting to.
+const lastSpoke = new Map<string, Date>();
+const noteVoice = (who: string | null | undefined, at: string | null | undefined) => {
+  if (!who) return;
+  const cid = byDisplay.get(who) ?? [...contactName.entries()].find(([, n]) => n === who)?.[0];
+  if (!cid) return;
+  const when = at ? new Date(at) : null;
+  if (!when || Number.isNaN(when.getTime())) return;
+  const prev = lastSpoke.get(cid);
+  if (!prev || when > prev) lastSpoke.set(cid, when);
+};
+
+if (WRITE && existsSync(".cache/circle-corpus.json")) {
+  const corpus = JSON.parse(readFileSync(".cache/circle-corpus.json", "utf8")) as {
+    kind: string; text: string; postId?: string | number | null; space?: string | null;
+  }[];
+  const asks = corpus.filter((d) => d.kind === "post" && d.space === ASK_SPACE && d.postId);
+
+  // Everyone who could answer: partner orgs AND member people. An org answers
+  // through a person, so member candidates are person-grain — "ask Sandy", not
+  // "ask the University of Manitoba".
+  const answerers: Placed[] = [...partnerOrgs, ...memberPeople];
+
+  // Who has spoken, and when — from the same corpora the space is built from.
+  for (const d of corpus) {
+    if (d.kind === "post") noteVoice((d as { author?: string | null }).author, (d as { at?: string | null }).at);
+  }
+  if (existsSync(".cache/circle-comments.json")) {
+    for (const c of JSON.parse(readFileSync(".cache/circle-comments.json", "utf8")) as
+         { userName?: string | null; createdAt?: string | null; postId?: number | string | null }[]) {
+      noteVoice(c.userName, c.createdAt);
+    }
+  }
+
+  // Who already replied to each ask — emailing them "go answer this" is noise.
+  const answeredAsk = new Set<string>();
+  if (existsSync(".cache/circle-comments.json")) {
+    for (const c of JSON.parse(readFileSync(".cache/circle-comments.json", "utf8")) as
+         { userName?: string | null; postId?: number | string | null }[]) {
+      const cid = c.userName ? [...contactName.entries()].find(([, n]) => n === c.userName)?.[0] : null;
+      if (cid && c.postId) answeredAsk.add(`${c.postId}\u001f${cid}`);
+    }
+  }
+
+  for (const ask of asks) {
+    const key = textKey(redactContactDetails(ask.text.replace(/\s+/g, " ").trim()).slice(0, 4000));
+    const vector = cache.vectors[key];
+    // An ask too short to have been embedded has no position and gets no list —
+    // better than a list built from nothing.
+    if (!vector) continue;
+
+    const placedAsk: Placed = { id: `ask:${ask.postId}`, vector, contributing: 1, mass: 1 };
+
+    /**
+     * ⛔ Rank the two pools SEPARATELY, then merge.
+     *
+     * One shared top-12 looks fair and is not. 79 member stores post constantly
+     * and have years of text to match on; a silent partner has a description and
+     * nothing else, which is exactly why they are the ones worth emailing. So
+     * members took most slots — ten of twelve on four of six asks, and TWELVE of
+     * twelve on the Kodak question, leaving the tool whose entire purpose is
+     * enticing quiet partners with nobody at all to offer.
+     *
+     * That is not the engine judging partners a poor fit. It is a scoring
+     * population competing for a fixed number of seats, where one side writes far
+     * more than the other. Guaranteeing depth in each pool measures them against
+     * their own kind and leaves the merged order honest.
+     *
+     * ⚠️ Both pools are still real answerers — a store that already solved this
+     * sourcing problem is a good person to ask. This widens the list; it does not
+     * privilege partners within it.
+     */
+    const perPool = [
+      ...nearest(placedAsk, partnerOrgs, { k: 12 }),
+      ...nearest(placedAsk, memberPeople, { k: 12 }),
+    ];
+    // Merged into one honest ordering: rank stays a global statement about this
+    // ask, so a partner at #14 is genuinely the fourteenth-best answer and the
+    // screen is not quietly re-numbering a filtered list to look better.
+    const ranked = perPool.sort((a, b) => b.similarity - a.similarity || a.id.localeCompare(b.id));
+
+    ranked.forEach((n, i) => {
+      const isPerson = n.id.startsWith("person:");
+      const contactId = isPerson ? n.id.slice(7) : null;
+      const orgId = isPerson ? contactOrg.get(n.id.slice(7))! : n.id.slice(4);
+      const acts = actsOf.get(n.id) ?? [];
+      const best = bestMatchingAct(acts.map((a) => a.vector), vector);
+      askRows.push({
+        ask_ref: String(ask.postId), run_id: null,
+        candidate_org_id: orgId, candidate_contact_id: contactId,
+        recommended: true,
+        rank: i + 1,
+        similarity: Number(n.similarity.toFixed(6)),
+        reason: best ? acts[best.index].text.slice(0, 300) : null,
+        candidate_last_spoke_at: contactId ? (lastSpoke.get(contactId)?.toISOString() ?? null) : null,
+        answered_this_ask: contactId ? answeredAsk.has(`${ask.postId}\u001f${contactId}`) : false,
+      });
+    });
+  }
+  // ⛔ Which asks were LOOKED AT, recorded as a fact of this run.
+  //
+  // Three of eight asks score to zero candidates. Without this list, a reader
+  // cannot tell "the run has not reached this ask" from "the run considered it
+  // and nobody matched" — both are simply an absence of rows — and the screen
+  // then tells an operator to wait overnight for a list that already exists and
+  // is empty. Derived at read time it would be a guess about what a job did;
+  // written here it is the job's own account.
+  asksConsidered = asks.map((a) => String(a.postId));
+  console.log(
+    `asks scored: ${asks.length}, with candidates: ` +
+      `${new Set(askRows.map((r) => r.ask_ref)).size}, rows: ${askRows.length}`
+  );
+}
+
+if (WRITE) {
+  // ⛔ Claim the run BEFORE doing the work, not after.
+  //
+  // Writing only on success means a crash leaves no row at all — and "the Mac
+  // started and died" then looks exactly like "the Mac never woke up". Those
+  // have different fixes, so the watchdog on Vercel has to be able to tell them
+  // apart. A row with no `completed_at` is the evidence that something tried.
+  const { data: run, error } = await db.from("match_runs").insert({
+    started_at: NOW.toISOString(), completed_at: null,
+    status: "running", embedding_model: MODEL, resolver_version: "space-v1",
+    // ⛔ `weights` is NOT NULL, and this engine HAS no per-axis weights — that
+    // is the whole point of it. Rather than write `{}` and let a reader assume
+    // the weights were lost, record what the run actually did: the shape of the
+    // computation, so a future run can be compared against this one.
+    weights: {
+      engine: "embedding-space",
+      model: MODEL,
+      centred: true,
+      calibration: "per-run percentile",
+      note: "no named axes and no typed weights — see lib/match/space.ts",
+    },
+    counts: {
+      docs: docs.length, placed: placed.size, pairs: rows.length,
+      // Read by lib/comms/ask-candidates.ts to answer "have we looked at this
+      // ask?" independently of whether it produced anybody.
+      asksConsidered,
+    },
+    // ⚠️ Not "unpromoted" — that is a claim about an outcome this row cannot yet
+    // have. Overwritten with the real result if the promotion gate passes below.
+    notes: "embedding space — run in progress",
+  }).select("id").single();
+  if (error) { console.error("run insert failed:", error.message); process.exit(1); }
+
+  // ⛔ `rank` is 1-based WITHIN each subject, ordered by raw similarity.
+  //
+  // An earlier version wrote 0 for every row. `readMatchEdges` orders by this
+  // column, so every consumer was silently handed edges in whatever order the
+  // database returned them — a ranked list that was not ranked, with nothing to
+  // indicate it.
+  //
+  // ⚠️ Ordered by SIMILARITY, not by `total`. `total` is a percentile across ALL
+  // pairs in the run, so one member's whole shortlist sits in the 98th–100th and
+  // is nearly flat: the top ten of a real member span 1.3 points out of 100.
+  // Similarity keeps its spread and is the only honest within-subject ordering.
+  // ⚠️ Rank per (DIRECTION, subject). A partner org is a subject in one direction
+  // and a candidate in the other; counting its ranks in one sequence would number
+  // a partner's member list starting from wherever its member→partner rows left
+  // off, and every list would silently begin at the wrong number.
+  const bySubjectRank = new Map<string, number>();
+  // ⛔ Rank on the ADJUSTED similarity, or the shrinkage changes the score while
+  // leaving the order untouched — a discount nobody can see and nothing acts on.
+  const ranked = [...rows].sort((a, b) => b.simAdj - a.simAdj);
+  const rankOf = new Map<string, number>();
+  const rankKey = (r: Row) => `${r.direction}\u001f${r.subject}`;
+  for (const r of ranked) {
+    const next = (bySubjectRank.get(rankKey(r)) ?? 0) + 1;
+    bySubjectRank.set(rankKey(r), next);
+    rankOf.set(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`, next);
+  }
+
+  const edges = rows.map((r) => ({
+    run_id: run!.id, direction: r.direction,
+    subject_org_id: r.subject.startsWith("org:") ? r.subject.slice(4) : contactOrg.get(r.subject.slice(7)),
+    subject_contact_id: r.subject.startsWith("person:") ? r.subject.slice(7) : null,
+    // ⚠️ Candidates are org-grain in both directions today, but slice by prefix
+    // rather than assuming: a person-grain candidate would otherwise write the
+    // first 4 characters of a contact id into an org column and fail the FK.
+    candidate_org_id: r.candidate.startsWith("org:")
+      ? r.candidate.slice(4)
+      : contactOrg.get(r.candidate.slice(7)),
+    candidate_contact_id: r.candidate.startsWith("person:") ? r.candidate.slice(7) : null,
+    total: Number(r.score.toFixed(2)), score: Number(r.score.toFixed(2)),
+    confidence: Number(r.conf.toFixed(4)),
+    rank: rankOf.get(`${r.direction}\u001f${r.subject}\u001f${r.candidate}`) ?? 0,
+    breakdown: {
+      // Raw cosine, kept alongside the adjusted value so the discount is visible
+      // rather than baked in silently.
+      similarity: Number(r.sim.toFixed(6)),
+      adjustedSimilarity: Number(r.simAdj.toFixed(6)),
+      bestActSimilarity: r.bestSim === null ? null : Number(r.bestSim.toFixed(6)),
+      // ⚠️ Both sides' placement confidence, so a reader can discount a match to
+      // an org we barely know instead of taking its rank at face value.
+      subjectConfidence: Number(r.conf.toFixed(4)),
+      candidateConfidence: Number(r.candConf.toFixed(4)),
+    },
+    // ⛔ The reason is the ACT, quoted. "Waterloo → RAINS" is a number;
+    // "because Ana said their Roots sales fell 25%" is something a human can use.
+    reasons: r.bestText
+      ? [{ kind: "observed", axis: "semantic", text: r.bestText, evidence: [],
+           supports: true, sourceOrgId: null, sourceVisibility: "unset" }]
+      : [],
+  }));
+  for (let i = 0; i < edges.length; i += 500) {
+    const { error: e } = await db.from("match_edges").insert(edges.slice(i, i + 500));
+    if (e) { console.error("edge insert failed:", e.message); process.exit(1); }
+  }
+  // Only now is the run a fact.
+  const { error: doneErr } = await db
+    .from("match_runs")
+    .update({ status: "complete", completed_at: new Date().toISOString() })
+    .eq("id", run!.id);
+  if (doneErr) { console.error("run completion failed:", doneErr.message); process.exit(1); }
+
+  /**
+   * Should this run go live?
+   *
+   * ⛔ Each check guards a failure that has actually happened here, not one I
+   * imagined. A run failing any of them stays `complete` — the site keeps serving
+   * the previous promoted run, which is the safe direction — and the reason goes
+   * into `notes`, so the morning has an answer instead of a mystery.
+   */
+  let didPromote = false;
+  if (PROMOTE) {
+    const { data: promotedRow } = await db
+      .from("match_runs").select("id").eq("status", "promoted").limit(1).maybeSingle();
+    const livingId = (promotedRow as { id?: string } | null)?.id ?? null;
+
+    let priorEdges = 0;
+    let priorSubjects = 0;
+    if (livingId) {
+      const { data: prior } = await db
+        .from("match_edges").select("subject_org_id, direction").eq("run_id", livingId);
+      const rowsPrior = (prior ?? []) as { subject_org_id: string; direction: string }[];
+      priorEdges = rowsPrior.length;
+      priorSubjects = new Set(rowsPrior.map((r) => `${r.direction}:${r.subject_org_id}`)).size;
+    }
+
+    const subjectsNow = new Set(edges.map((e) => `${e.direction}:${e.subject_org_id}`)).size;
+    const directionsNow = new Set(edges.map((e) => e.direction));
+    const distinctScores = new Set(edges.map((e) => Number(e.score).toFixed(2))).size;
+    const failures: string[] = [];
+
+    // ⛔ Both directions or nothing. Losing one empties a whole surface — Your
+    // Market, or the partner panel — while the run still reports success.
+    if (directionsNow.size < 2) {
+      failures.push(`only ${directionsNow.size} direction(s): ${[...directionsNow].join(", ") || "none"}`);
+    }
+
+    // ⚠️ A half-written script once produced 8,700 edges where the night before had
+    // 12,700, and it read as a regression rather than a truncation. 60% leaves room
+    // for the corpus genuinely shrinking without letting a partial write through.
+    if (livingId && priorEdges > 0 && edges.length < priorEdges * 0.6) {
+      failures.push(`${edges.length} edges vs ${priorEdges} promoted (under 60%)`);
+    }
+
+    // A subject with no edges has no list at all. Losing a fifth of them is a
+    // corpus failure, not a ranking one, and should not reach anybody's page.
+    if (livingId && priorSubjects > 0 && subjectsNow < priorSubjects * 0.8) {
+      failures.push(`${subjectsNow} subjects vs ${priorSubjects} promoted (under 80%)`);
+    }
+
+    // ⛔ The calibration collapse, caught by its own signature. A hard-coded band
+    // once clamped 98% of pairs to zero and left 68 distinct scores across 6,000
+    // edges. Identical scores still rank, still write, still report success — and
+    // tell every member the same thing.
+    if (edges.length >= 100 && distinctScores < edges.length * 0.1) {
+      failures.push(`${distinctScores} distinct scores across ${edges.length} edges — calibration collapsed`);
+    }
+
+    /**
+     * ⛔ Is the INPUT fresh? The other four checks read the OUTPUT, and a stale
+     * corpus produces output that passes all of them.
+     *
+     * This check exists because of a hole I opened myself. The nightly swallows
+     * fetch failures — `npx tsx scripts/circle-embed.mts || echo "continuing on the
+     * cached corpus"` — and `.cache/` is gitignored, so it is absent on any fresh
+     * clone. Chain those: the fetch exits non-zero, the `||` eats it, and this
+     * script then ranks YESTERDAY's corpus and promotes it. Same edge count, same
+     * subjects, same score spread; every output check green.
+     *
+     * ⚠️ So freshness is asserted where the decision is made, not in the plumbing
+     * that feeds it. A guard upstream only holds while every caller keeps calling
+     * it correctly; a guard at the gate holds whatever upstream does. Six hours is
+     * generous for a long embedding pass and still catches a cache that missed a
+     * whole night.
+     */
+    const MAX_INPUT_AGE_H = 6;
+    for (const input of [".cache/circle-corpus.json", ".cache/circle-comments.json"]) {
+      if (!existsSync(input)) { failures.push(`${input} missing`); continue; }
+      const ageH = (Date.now() - statSync(input).mtimeMs) / 3_600_000;
+      if (ageH > MAX_INPUT_AGE_H) {
+        failures.push(`${input} is ${ageH.toFixed(1)}h old (max ${MAX_INPUT_AGE_H}h) — the fetch did not run`);
+      }
+    }
+
+    if (failures.length > 0) {
+      await db.from("match_runs")
+        .update({ notes: `not promoted: ${failures.join("; ")}` }).eq("id", run!.id);
+      console.error(`\n⛔ NOT PROMOTED — ${failures.length} check(s) failed:`);
+      for (const f of failures) console.error(`   · ${f}`);
+      console.error(`   the site keeps serving ${livingId ? livingId.slice(0, 8) : "nothing"}`);
+    } else {
+      // ⚠️ Supersede first, then promote. A unique partial index allows exactly one
+      // promoted run, so the old one must step down before the new one stands up.
+      // The reverse order fails the index and leaves the OLD run live — safe, but
+      // silent, which is how you serve month-old matches without noticing.
+      if (livingId) {
+        const { error: supErr } = await db.from("match_runs")
+          .update({ status: "superseded" }).eq("status", "promoted").neq("id", run!.id);
+        if (supErr) {
+          console.error("supersede failed, leaving the old run live:", supErr.message);
+          process.exit(1);
+        }
+      }
+      const { error: promErr } = await db.from("match_runs")
+        .update({ status: "promoted", promoted_at: new Date().toISOString() }).eq("id", run!.id);
+      if (promErr) {
+        // ⛔ Loud, because this is the one state nothing else detects: the old run
+        // stepped down, the new one did not stand up, and every match surface is
+        // empty with no run marked live.
+        console.error("⛔ PROMOTION FAILED AFTER SUPERSEDE — NO RUN IS LIVE:", promErr.message);
+        console.error(`   recover: update match_runs set status='promoted' where id='${run!.id}'`);
+        process.exit(1);
+      }
+      didPromote = true;
+      // ⛔ The row's own note still read "embedding space — unpromoted", written at
+      // insert time as a prediction. Left alone it means the PROMOTED run describes
+      // itself as unpromoted to every future reader — including evaluateMatchRunStale
+      // and anyone debugging at 3am. A note is a record, not a guess made earlier.
+      await db.from("match_runs")
+        .update({ notes: `embedding space — promoted, ${edges.length} edges, ${subjectsNow} subjects` })
+        .eq("id", run!.id);
+      console.log(
+        `\npromoted ${run!.id.slice(0, 8)} — ${edges.length} edges, ${subjectsNow} subjects` +
+          (livingId ? `, superseded ${livingId.slice(0, 8)}` : ", first promoted run")
+      );
+    }
+  }
+
+  if (askRows.length > 0) {
+    // ⛔ Upsert on (ask, candidate) so a re-run refreshes the suggestion without
+    // stacking duplicates — and without touching selected_at, which belongs to
+    // whatever a human already decided.
+    const { error: askErr } = await db
+      .from("ask_recommendations")
+      .upsert(
+        askRows.map((r) => ({ ...r, run_id: run!.id })),
+        { onConflict: "ask_ref,candidate_org_id,candidate_contact_id", ignoreDuplicates: false }
+      );
+    if (askErr) console.error("ask recommendations failed:", askErr.message);
+    else console.log(`ask recommendations: ${askRows.length} rows`);
+  }
+
+  /**
+   * ⛔ Retract what this run no longer stands behind.
+   *
+   * The upsert refreshes rows it writes and is blind to rows it does not. A
+   * candidate that drops out of an ask's top set keeps its row, still flagged
+   * `recommended` with a stale rank — NorQuest College sat at rank 12 for the
+   * notebooks ask two runs after the engine stopped ranking it, colliding with
+   * the live rank 12. Left alone the table accretes phantom recommendations that
+   * a surface will happily show as current, and the evaluation data then counts
+   * a pick of a suggestion no engine ever made.
+   *
+   * ⚠️ Only rows this job owns. `selected_at is null` spares anything a human has
+   * already acted on, and `recommended = true` spares their corrections — those
+   * are the record of a decision, not a suggestion to withdraw. Scoped to the
+   * asks actually considered, so an ask this run never looked at keeps whatever
+   * an earlier run said about it.
+   */
+  if (asksConsidered.length > 0) {
+    const { error: staleErr, count } = await db
+      .from("ask_recommendations")
+      .delete({ count: "exact" })
+      .in("ask_ref", asksConsidered)
+      .neq("run_id", run!.id)
+      .is("selected_at", null)
+      .eq("recommended", true);
+    if (staleErr) console.error("stale retraction failed:", staleErr.message);
+    else if (count) console.log(`retracted ${count} stale recommendation(s)`);
+  }
+
+  /**
+   * ⛔ Prune old EDGES. The job that creates the bulk is the job that clears it.
+   *
+   * Each run writes ~8,700 edges and nothing removed them, so the table reached
+   * 101 MB across 18 runs while the cron was broken. Now that it fires nightly
+   * that is ~3.2M rows and 2+ GB a year, nearly all of it belonging to runs
+   * nobody will ever read again.
+   *
+   * ⛔ `promoted` is untouchable — `lib/match/read.ts` selects `status = 'promoted'`
+   * and that run IS what the site serves. Deleting its edges would empty every
+   * match surface on the site while every dashboard still said the run was fine.
+   *
+   * ⚠️ Only edges are dropped, never `match_runs` rows. The run record is a few
+   * hundred bytes and it is what `evaluateMatchRunStale` reads to know this
+   * machine is still reporting in — pruning history would blind the alarm meant
+   * to notice this job dying.
+   */
+  const KEEP_COMPLETE = 3;   // last few nights, so runs stay comparable
+  const KEEP_SUPERSEDED = 1; // the immediate rollback target
+
+  /**
+   * ⛔ ABANDONED RUNS COUNT TOO. This query used to select only `complete` and
+   * `superseded`, so a run that died mid-flight kept its edges FOREVER — nothing
+   * ever selected it, so nothing ever pruned it.
+   *
+   * ⚠️ Found the morning after auto-promotion shipped: one `running` row from an
+   * interrupted manual run holding 8,000 orphan edges, invisible to the very
+   * retention written to stop this table growing without bound. Every future crash
+   * would have added a few thousand more, silently, and the table would have grown
+   * exactly as it did before retention existed.
+   *
+   * A run still `running` after six hours is not running — the job takes minutes,
+   * so the process is gone and nobody is coming back for the row. The CURRENT run
+   * is already `complete` by this point, and `keep` protects it regardless.
+   */
+  const ABANDONED_AFTER_H = 6;
+  const abandonedBefore = new Date(Date.now() - ABANDONED_AFTER_H * 3_600_000).toISOString();
+  const { data: stuck } = await db
+    .from("match_runs")
+    .select("id")
+    .eq("status", "running")
+    .lt("started_at", abandonedBefore);
+  for (const r of ((stuck ?? []) as { id: string }[])) {
+    if (r.id === run!.id) continue;
+    // ⚠️ Marked `failed`, never deleted. The row is a few hundred bytes and it is
+    // the evidence that something TRIED and died — which is what
+    // evaluateMatchRunStale reads to tell "the Mac crashed mid-run" from "the Mac
+    // never woke up". Those have different fixes.
+    await db.from("match_runs")
+      .update({ status: "failed", notes: `abandoned — still 'running' after ${ABANDONED_AFTER_H}h` })
+      .eq("id", r.id);
+  }
+  if ((stuck ?? []).length > 0) {
+    console.log(`marked ${(stuck ?? []).length} abandoned run(s) failed — their edges are now prunable`);
+  }
+
+  const { data: runsByStatus } = await db
+    .from("match_runs")
+    .select("id, status, started_at")
+    .in("status", ["complete", "superseded", "failed"])
+    .order("started_at", { ascending: false });
+
+  const keep = new Set<string>([run!.id]);
+  let nComplete = 0, nSuperseded = 0;
+  for (const r of (runsByStatus ?? []) as { id: string; status: string }[]) {
+    if (r.status === "complete" && nComplete < KEEP_COMPLETE) { keep.add(r.id); nComplete++; }
+    if (r.status === "superseded" && nSuperseded < KEEP_SUPERSEDED) { keep.add(r.id); nSuperseded++; }
+    // ⚠️ `failed` keeps NOTHING. A complete run is worth holding for comparison and
+    // a superseded one is the rollback target; a half-written run's edges are
+    // neither — an unknown fraction of a ranking nobody should ever read.
+  }
+  const prunable = ((runsByStatus ?? []) as { id: string }[])
+    .map((r) => r.id)
+    .filter((id) => !keep.has(id));
+
+  /**
+   * ⚠️ ONE RUN PER STATEMENT. Deleting twelve runs' edges in a single `.in()`
+   * was ~98,000 rows and died on `canceling statement due to statement timeout`
+   * — which the job reported and then carried on, so the table would have kept
+   * growing while the log claimed a prune step existed.
+   *
+   * A per-night cap keeps the job's own runtime bounded no matter how large the
+   * backlog is; it drains over a few nights instead of one long delete. What is
+   * left is logged, because a cap nobody can see reads as "fully cleaned".
+   */
+  const MAX_RUNS_PRUNED = 5;
+  if (prunable.length > 0) {
+    let pruned = 0, done = 0;
+    for (const id of prunable.slice(0, MAX_RUNS_PRUNED)) {
+      const { error: pruneErr, count } = await db
+        .from("match_edges")
+        .delete({ count: "exact" })
+        .eq("run_id", id);
+      // Keep going: one slow run must not block the rest of the backlog.
+      if (pruneErr) { console.error(`edge prune failed for ${id.slice(0, 8)}:`, pruneErr.message); continue; }
+      pruned += count ?? 0; done++;
+    }
+    const left = prunable.length - done;
+    console.log(
+      `pruned ${pruned} edges from ${done} old run(s)` +
+        (left > 0 ? ` — ${left} still to prune, next run picks them up` : "")
+    );
+  }
+
+  // ⚠️ Reports what ACTUALLY happened. This line used to end every run with the
+  // words "NOT promoted" regardless — so the first successful auto-promotion
+  // printed "promoted 2f8d02a8" and then "NOT promoted" four lines later, in the
+  // same log, about the same run. A log that contradicts itself is worse than a
+  // quiet one: whoever reads it next has to go to the database to find out which
+  // half was true.
+  console.log(
+    `\nwrote run ${run!.id.slice(0, 8)} — ${edges.length} edges, ` +
+      (didPromote ? "PROMOTED (live)" : PROMOTE ? "not promoted (failed a health check)" : "not promoted (--promote not passed)")
+  );
+}
+
+// ── hub check ────────────────────────────────────────────────────────────────
+// A vector near everything is a vector that means nothing. If one partner takes
+// the top slot for most subjects, the space is reporting genericness, not fit.
+const topOf = new Map<string, string>();
+for (const r of rows) {
+  const cur = topOf.get(r.subject);
+  if (!cur || r.sim > rows.find((x) => x.subject === r.subject && x.candidate === cur)!.sim) {
+    topOf.set(r.subject, r.candidate);
+  }
+}
+const hubs = new Map<string, number>();
+for (const c of topOf.values()) hubs.set(c, (hubs.get(c) ?? 0) + 1);
+const ranked = [...hubs.entries()].sort((a, b) => b[1] - a[1]);
+console.log(`\ndistinct partners taking a #1 slot: ${ranked.length} of ${partnerOrgs.length}`);
+console.log(`most common #1s:`);
+for (const [id, n] of ranked.slice(0, 6)) {
+  console.log(`  ${String(n).padStart(3)} / ${topOf.size}  ${label(id)}`);
+}

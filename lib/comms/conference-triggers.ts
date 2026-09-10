@@ -61,7 +61,7 @@ export async function triggerConferenceRegistrationConfirmation(params: {
       registration_role: registrationRole,
       conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
       conference_location: conferenceLocation,
-      my_conference_url: `${appUrl}/me/conference/${conferenceId}`,
+      my_conference_url: `${appUrl}/me#conference_checklist`,
     },
   });
 }
@@ -112,7 +112,7 @@ export async function triggerConferencePaymentConfirmation(params: {
       conference_year: String(conference.year),
       amount_paid: formatCents(order.total_cents ?? 0),
       order_ref: orderId.slice(0, 8).toUpperCase(),
-      my_conference_url: `${appUrl}/me/conference/${conferenceId}`,
+      my_conference_url: `${appUrl}/me#conference_checklist`,
     },
   });
 }
@@ -201,6 +201,75 @@ export async function triggerProspectiveBoothApplicationReminder(params: {
       company_name: payment.company_name,
       booth_name: boothName,
       apply_url: prospectApplyUrl(payment),
+    },
+  });
+}
+
+/**
+ * Tell one person their meeting schedule is ready.
+ *
+ * ⛔ IDEMPOTENCY IS KEYED ON (person, RUN), not on person. A second call for the
+ * same run sends nothing; a NEW run — which is what a late add produces — sends
+ * again, because their day genuinely changed. Keying on the person alone would
+ * make the first send permanent and swallow every correction after it, which is
+ * the failure this whole path exists to avoid.
+ */
+export async function triggerConferenceScheduleReady(params: {
+  db: AdminClient;
+  conferenceId: string;
+  runId: string;
+  /** Stable identity for idempotency — the holder person, or the seat if unlinked. */
+  personKey: string;
+  attendeeName: string;
+  attendeeEmail: string;
+  orgName: string;
+}): Promise<void> {
+  const { db, conferenceId, runId, personKey, attendeeName, attendeeEmail, orgName } = params;
+
+  const { data: conference, error } = await db
+    .from("conference_instances")
+    .select("year, start_date, end_date, location_city, location_province, location_venue")
+    .eq("id", conferenceId)
+    .single();
+
+  if (error || !conference) {
+    console.error(
+      `triggerConferenceScheduleReady: conference ${conferenceId} not found: ${error?.message}`
+    );
+    return;
+  }
+
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "";
+  const conferenceLocation = [
+    conference.location_venue,
+    conference.location_city,
+    conference.location_province,
+  ]
+    .filter(Boolean)
+    .join(", ");
+
+  await triggerAutomation({
+    triggerSource: "conference",
+    triggerEventKey: `conference_schedule_ready:${personKey}:${runId}`,
+    templateKey: "conference_schedule_ready",
+    automationMode: "auto_send",
+    campaignName: `Schedule Ready: ${attendeeName}`,
+    audience: {
+      type: "custom_emails",
+      filters: { emails: [attendeeEmail], conference_instance_id: conferenceId },
+    },
+    variableValues: {
+      contact_name: attendeeName,
+      org_name: orgName,
+      conference_year: String(conference.year),
+      conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
+      conference_location: conferenceLocation,
+      /**
+       * ⚠️ Deliberately the live agenda, not a rendering of the schedule in the
+       * email. A late add can change what they are looking at; a link stays
+       * correct and a pasted table goes stale the moment anybody else arrives.
+       */
+      my_conference_url: `${appUrl}/me#conference`,
     },
   });
 }

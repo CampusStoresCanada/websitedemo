@@ -3,12 +3,20 @@
 import { canManageOrganization, isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
+  isIdentityProjectionField,
+  PERSON_OBLIGATION_FIELDS,
+  SELF_EDITABLE_PERSON_FIELDS,
+} from "@/lib/conference/person-fields";
+import {
   computePersonObligations,
   type PersonObligationFields,
   type PersonObligationStatus,
 } from "@/lib/conference/access";
 import type { GrantType } from "@/lib/conference/grants";
 import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
+import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
+import { resolveAccess } from "@/lib/conference/entity-commerce";
+import { normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
 
 /**
  * Conference fulfillment obligations — derived from a person's v3 holdings.
@@ -22,28 +30,86 @@ import { grantTypesForKinds } from "@/lib/conference/entity-obligations";
 type AdminDb = ReturnType<typeof createAdminClient>;
 type Result<T> = { success: true; data: T } | { success: false; error: string };
 
-const PERSON_OBLIGATION_FIELDS = [
-  "display_name",
-  "contact_email",
-  "dietary_restrictions",
-  "accessibility_needs",
-  "emergency_contact_name",
-  "emergency_contact_phone",
-] as const;
+
 
 /** Distinct grant types implied by the kinds of seats a person occupies. */
-async function loadV3HeldGrantTypes(db: AdminDb, personId: string, conferenceId: string): Promise<GrantType[]> {
-  const { data } = await db
-    .from("entity_balance_seats")
-    .select("entity:conference_entities!entity_balance_seats_entity_id_fkey(kind)")
-    .eq("conference_id", conferenceId)
-    .eq("holder_person_id", personId);
-  const kinds = new Set<string>();
-  for (const row of data ?? []) {
-    const entity = Array.isArray(row.entity) ? row.entity[0] : row.entity;
-    if (entity?.kind) kinds.add(entity.kind);
+/**
+ * What a person effectively holds — following the graph, not one hop.
+ *
+ * ⚠️ This read the KIND of the entity each seat points at and stopped there,
+ * which was wrong in a way that mattered. A Connected Exhibitor Staff
+ * Registration is kind `registration`, and it `includes` twelve meals across
+ * Tuesday, Wednesday and Thursday. Reading one hop saw `registration` only, so
+ * `meal` never entered the set, so `meal_access` never fired — and CSC fed
+ * those exhibitors twelve times without ever asking whether they could eat it.
+ * Plain Exhibitor Staff Registration was the same with eight.
+ *
+ * The relationship was expressed correctly in the graph the whole time; the
+ * resolver just did not follow it. Same shape as the seat_assigned bug that
+ * checked one entity instead of every entity of its kind.
+ *
+ * `resolveAccess` is the walker the storefront already uses to price day
+ * passes, so entitlement and obligation now come from ONE traversal at ONE
+ * depth rather than two functions disagreeing about how far to look.
+ */
+/**
+ * What this person holds, from their seats.
+ *
+ * Returns the grant types (what we may ASK them) and the registration entity
+ * (what we BUILD them — their badge's layout variant). Both come from the same
+ * seat read, because they are the same fact asked twice: a seat is the whole
+ * story of someone attending. Nothing here consults `person_kind`, which is a
+ * sediment column written by eight disagreeing code paths.
+ */
+async function loadV3Held(
+  db: AdminDb,
+  personId: string,
+  conferenceId: string
+): Promise<{ grantTypes: GrantType[]; registrationEntityId: string | null; registrationName: string | null }> {
+  const [{ data: seats }, { data: entityRows }, { data: refRows }] = await Promise.all([
+    db
+      .from("entity_balance_seats")
+      .select("entity_id")
+      .eq("conference_id", conferenceId)
+      .eq("holder_person_id", personId),
+    db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
+    db
+      .from("conference_entity_refs")
+      .select("from_entity_id, to_entity_id, role, quantity")
+      .eq("conference_id", conferenceId),
+  ]);
+
+  const heldIds = [...new Set((seats ?? []).map((s) => s.entity_id).filter((id): id is string => !!id))];
+  if (heldIds.length === 0) {
+    return { grantTypes: [], registrationEntityId: null, registrationName: null };
   }
-  return grantTypesForKinds(kinds);
+
+  const byId = new Map(
+    buildEntityGraph(entityRows ?? [], refRows ?? []).map((e) => [e.id, e])
+  );
+  // Deterministic: the seat query has no ORDER BY, so an unordered `.find()`
+  // could hand the preview a different registration type than the print run
+  // chose for the same person. Sorted by name so the answer is stable, and
+  // preflight blocks any multi-type person before a badge is printed anyway.
+  const registration =
+    heldIds
+      .map((id) => byId.get(id))
+      .filter((e): e is NonNullable<typeof e> => e?.kind === "registration")
+      .sort((a, b) => a.name.localeCompare(b.name))[0] ?? null;
+
+  // Held things AND everything reachable from them. The seat itself counts —
+  // a directly bought Meet & Greet ticket is an `event` in its own right, not
+  // something reached through an offer.
+  const kinds = new Set<string>();
+  for (const id of resolveAccess(heldIds, byId)) {
+    const kind = byId.get(id)?.kind;
+    if (kind) kinds.add(kind);
+  }
+  return {
+    grantTypes: grantTypesForKinds(kinds),
+    registrationEntityId: registration?.id ?? null,
+    registrationName: registration?.name ?? null,
+  };
 }
 
 /**
@@ -133,7 +199,256 @@ export async function resolvePersonObligations(
     return { success: false, error: "Not authorized to view this person's readiness." };
   }
 
-  const grantTypes = await loadV3HeldGrantTypes(db, personId, conferenceId);
+  const { grantTypes } = await loadV3Held(db, personId, conferenceId);
   const fields = person as unknown as PersonObligationFields;
   return { success: true, data: computePersonObligations(grantTypes, fields) };
+}
+
+/**
+ * The conference details this contact owes, if they're on a conference at all.
+ *
+ * Fetched by the contact-edit modal itself rather than threaded down through
+ * MemberProfile and PartnerProfile as a prop. Editing a person is already a
+ * click-and-open action, so one query at open costs nothing, and it means the
+ * Conference tab appears everywhere that modal is used — both profiles, the
+ * Toolkit, the person picker — without four call sites learning about
+ * conference obligations.
+ *
+ * Returns null when this person holds nothing, which is the signal to render
+ * no tab at all.
+ */
+export async function loadContactConferenceObligations(
+  contactId: string,
+  organizationId: string
+): Promise<Result<{
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  missing: string[];
+  values: Record<string, string | null>;
+  /** False for an org admin: they see answered-or-not, never the answer. */
+  canSeeValues: boolean;
+} | null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+  if (!canManageOrganization(auth.ctx, organizationId) && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this organization." };
+  }
+
+  /**
+   * An org admin may know WHETHER their colleague has answered. They may not
+   * read the answer.
+   *
+   * Steve, 2026-08-27: "we aren't displaying the conference information to
+   * everyone, just the staff and the member". Dietary restrictions and
+   * accessibility needs are health information about a named person; a manager
+   * needs to know whether to chase, not what the allergy is. CSC staff running
+   * the event do need the values — they are the ones telling the caterer.
+   */
+  const canSeeValues = isGlobalAdmin(auth.ctx.globalRole);
+
+  const db = createAdminClient();
+  // Everything this person may edit about themselves, not just what is
+  // outstanding — the modal shows the whole set so someone can correct a
+  // seat preference they already gave without waiting to be asked for it.
+  const columns = [
+    ...new Set([...PERSON_OBLIGATION_FIELDS, ...SELF_EDITABLE_PERSON_FIELDS]),
+  ];
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select(`id, conference_id, ${columns.join(", ")}`)
+    .eq("contact_id", contactId)
+    .eq("organization_id", organizationId)
+    .neq("assignment_status", "canceled")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person) return { success: true, data: null };
+
+  const row = person as unknown as { id: string; conference_id: string };
+  const { grantTypes } = await loadV3Held(db, row.id, row.conference_id);
+  const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
+  if (status.obligations.length === 0) return { success: true, data: null };
+
+  const values: Record<string, string | null> = {};
+  for (const field of columns) {
+    const raw = (person as unknown as Record<string, string | null>)[field] ?? null;
+    // Blanked at the SOURCE, not hidden in the component — a value that never
+    // leaves the server cannot leak through a payload someone inspects.
+    // Identity fields are not private; a badge name is printed on a badge.
+    values[field] = canSeeValues || isIdentityProjectionField(field)
+      ? raw
+      : raw && raw.trim() ? "__answered__" : null;
+  }
+
+  return {
+    success: true,
+    data: {
+      personId: row.id,
+      conferenceId: row.conference_id,
+      fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
+      /** Outstanding right now — used to mark a field, never to hide one. */
+      missing: status.missing.map((o) => o.key),
+      values,
+      canSeeValues,
+    },
+  };
+}
+
+/**
+ * The signed-in person's own conference details, keyed on WHO THEY ARE.
+ *
+ * The org-side loader keys on (contact, organisation) because an admin is
+ * looking at one specific contact row. That is the wrong key for a person
+ * looking at themselves: a seat belongs to the human, and it is held through
+ * whichever organisation happened to seat them. Steve holds a seat through a
+ * partner org while his contact record on /me is the CSC one — keyed on
+ * contact, his own details were invisible to him.
+ *
+ * `user_id` is also the key `updateConferencePersonSelf` guards on, so read
+ * and write now agree about who the person is.
+ */
+export async function loadMyConferenceObligations(): Promise<Result<{
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  missing: string[];
+  values: Record<string, string | null>;
+  /**
+   * The person's own check-ins, answered here too.
+   *
+   * A hotel booking is not a field — "I'm staying with family" is a complete
+   * answer — but it IS a thing only this person can tell us about themselves,
+   * which is the same reason dietary lives here. Collecting it somewhere else
+   * because the control looks different was two ways to do one job.
+   */
+  checkIns: {
+    taskId: string;
+    name: string;
+    description: string;
+    state: "done" | "not_applicable" | "pending";
+  }[];
+  /**
+   * What the badge will say, plus the template the print run will use.
+   *
+   * Resolved the same way lib/actions/conference-badges.ts resolves it —
+   * active version, else the newest draft — so the preview and the print
+   * cannot disagree about which layout applies. Null template means none has
+   * been designed yet, and the preview says so rather than drawing one.
+   */
+  badge: {
+    displayName: string | null;
+    roleTitle: string | null;
+    organizationName: string | null;
+    /** The registration type held — the badge's layout variant key. */
+    variantKey: string | null;
+    variantName: string | null;
+    template: unknown | null;
+  };
+} | null>> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const columns = [
+    ...new Set([...PERSON_OBLIGATION_FIELDS, ...SELF_EDITABLE_PERSON_FIELDS]),
+  ];
+  const { data: person, error } = await db
+    .from("conference_people")
+    .select(`id, conference_id, contact_id, ${columns.join(", ")}`)
+    .eq("user_id", auth.ctx.userId)
+    .neq("assignment_status", "canceled")
+    .order("updated_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) return { success: false, error: error.message };
+  if (!person) return { success: true, data: null };
+
+  const row = person as unknown as { id: string; conference_id: string; contact_id: string | null };
+  const { grantTypes, registrationEntityId, registrationName } = await loadV3Held(
+    db,
+    row.id,
+    row.conference_id
+  );
+  const status = computePersonObligations(grantTypes, person as unknown as PersonObligationFields);
+
+  const values: Record<string, string | null> = {};
+  for (const field of columns) {
+    values[field] = (person as unknown as Record<string, string | null>)[field] ?? null;
+  }
+
+  const { loadPersonalTasks } = await import("@/lib/conference/checklist-tasks");
+  const tasks = await loadPersonalTasks(db, row.conference_id, row.id);
+
+  // The badge prints from the canonical contact, falling back to the
+  // projection only where it has been deliberately set — the same precedence
+  // the obligations use, so the preview cannot disagree with the print run.
+  const { data: contactRow } = row.contact_id
+    ? await db.from("contacts").select("name, role_title, organization_id, organizations(name)")
+        .eq("id", row.contact_id).maybeSingle()
+    : { data: null };
+  const org = contactRow
+    ? (Array.isArray((contactRow as Record<string, unknown>).organizations)
+        ? ((contactRow as Record<string, unknown>).organizations as { name: string }[])[0]
+        : ((contactRow as Record<string, unknown>).organizations as { name: string } | null))
+    : null;
+  const templateQuery = db
+    .from("badge_template_configs")
+    .select("field_mapping")
+    .eq("conference_id", row.conference_id);
+  let templateRow = await templateQuery
+    .eq("status", "active")
+    .order("config_version", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  // Same fallback the badge pipeline uses: a draft is still the design that
+  // would print today.
+  if (!templateRow.data) {
+    templateRow = await db
+      .from("badge_template_configs")
+      .select("field_mapping")
+      .eq("conference_id", row.conference_id)
+      .order("config_version", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+  }
+
+  const badgeFor = {
+    displayName: (values.display_name as string | null) ?? contactRow?.name ?? null,
+    roleTitle: contactRow?.role_title ?? null,
+    organizationName: org?.name ?? null,
+    // The layout key is the registration type they hold. This used to collapse
+    // `person_kind` into one of two roles, which meant the member's preview and
+    // the print run could resolve different layouts for the same badge.
+    variantKey: registrationEntityId,
+    variantName: registrationName,
+    // Normalised here, not raw. The print path calls normalizeBadgeTemplateConfig
+    // and this one did not, so the member's preview and the printed badge were
+    // reading two different shapes of the same template — and the raw shape
+    // throws outright on a pre-migration (role-keyed) template.
+    template: templateRow.data?.field_mapping
+      ? normalizeBadgeTemplateConfig(templateRow.data.field_mapping)
+      : null,
+  };
+
+  return {
+    success: true,
+    data: {
+      personId: row.id,
+      conferenceId: row.conference_id,
+      fields: status.obligations.map((o) => ({ key: o.key, label: o.label })),
+      missing: status.missing.map((o) => o.key),
+      values,
+      badge: badgeFor,
+      checkIns: tasks
+        .filter((t) => t.source === "self_reported")
+        .map((t) => ({
+          taskId: t.taskId,
+          name: t.name,
+          description: t.description,
+          state: t.state,
+        })),
+    },
+  };
 }

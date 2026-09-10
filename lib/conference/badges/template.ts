@@ -1,4 +1,18 @@
-export type BadgeRole = "delegate" | "exhibitor";
+import type { AccessSummary, AgendaItem } from "../entity-commerce";
+
+/**
+ * The key every badge layout hangs off: normally a `conference_entities.id` of
+ * kind `registration`, i.e. an actual ticket type this conference sells.
+ *
+ * `DEFAULT_VARIANT` is the one reserved key — the look every type inherits
+ * unless someone deliberately differentiates it. A conference nobody has
+ * differentiated has exactly one variant and every badge matches.
+ *
+ * There is no `BadgeRole`. It was "delegate" | "exhibitor" and it existed only
+ * to pick between two hardcoded designs; a badge builder that works for a home
+ * show or an academic summit cannot have opinions about what a person "is".
+ */
+export const DEFAULT_VARIANT = "default";
 
 export type BadgeSlotText = {
   x: number;
@@ -93,6 +107,34 @@ export type BadgeTextBindingKey =
 
 export type BadgeLogoBindingKey = "person.logo_url" | "none" | "static_url";
 
+/**
+ * What a badge layout varies BY.
+ *
+ * Normally a `conference_entities.id` of kind `registration` — the actual
+ * ticket types this conference sells. `"delegate"` and `"exhibitor"` are the
+ * legacy keys from when the pipeline hardcoded two roles; they still resolve so
+ * existing templates keep rendering, but new differentiation should key off the
+ * registration type, because that is the thing that actually differs between a
+ * one-day member pass and a four-day exhibitor.
+ */
+export type BadgeVariantKey = string;
+
+export type BadgeVariantTheme = {
+  frontBackgroundUrl: string | null;
+  backBackgroundUrl: string | null;
+  frontOverlayUrl: string | null;
+  accentColor: string;
+  textColor: string;
+  mapTintColor: string;
+  mapTintOpacity: number;
+  logoStyle: "icon";
+};
+
+export type BadgeVariantLayout = {
+  front: BadgeFrontConfig;
+  back: BadgeBackConfig;
+};
+
 export type BadgeTemplateConfigV1 = {
   schema: "badge_template_config_v1";
   canvas: {
@@ -110,28 +152,36 @@ export type BadgeTemplateConfigV1 = {
     styleId: string;
     defaultZoom: number;
   };
-  roles: Record<
-    BadgeRole,
-    {
-      frontBackgroundUrl: string | null;
-      backBackgroundUrl: string | null;
-      frontOverlayUrl: string | null;
-      accentColor: string;
-      textColor: string;
-      mapTintColor: string;
-      mapTintOpacity: number;
-      logoStyle: "icon";
-    }
-  >;
-  roleLayouts?: Partial<
-    Record<
-      BadgeRole,
-      {
-        front: BadgeFrontConfig;
-        back: BadgeBackConfig;
-      }
-    >
-  >;
+  /**
+   * Whose number to print as the onsite contact — a `contacts.id`, NOT a name
+   * and number copied onto the card. The renderer reads that profile at print
+   * time, so a coordinator who changes their number between now and the
+   * conference changes what the badge says.
+   */
+  onsiteContactId: string | null;
+  /**
+   * Per-variant styling. Keyed by `BadgeVariantKey`, which is normally a
+   * registration entity id — so a conference with "Vendor", "Public" and "VIP"
+   * gets those three, and one with a single ticket type gets one. `delegate`
+   * and `exhibitor` remain present as the legacy fallback keys.
+   */
+  variants: Record<string, BadgeVariantTheme> & { [DEFAULT_VARIANT]: BadgeVariantTheme };
+  /**
+   * Per-variant geometry.
+   *
+   * ⚠️ Normalisation ALWAYS materialises a `default` entry cloned from the base
+   * `front`/`back`, so this is never empty and the base fields below are not
+   * consulted at render time once a template has been normalised once. Editing
+   * `config.front` without also writing `variantLayouts.default` is a silent
+   * no-op on the printed badge. (An earlier version of this comment claimed an
+   * untouched conference has no entries here — it does, and believing otherwise
+   * is how a base-only edit disappears.)
+   *
+   * A registration type gets its own entry only when someone differentiates it;
+   * everything else resolves to `default`. That is the "if they all look the
+   * same, magic" case.
+   */
+  variantLayouts?: Partial<Record<BadgeVariantKey, BadgeVariantLayout>>;
   front: BadgeFrontConfig;
   back: BadgeBackConfig;
 };
@@ -171,6 +221,49 @@ export type BadgeFrontConfig = {
     title: BadgeSlotText;
 };
 
+/**
+ * What a back-of-badge block renders. The operator places and labels the block;
+ * its CONTENT is derived from the entity graph for the registration type this
+ * badge is for, so a home show and an academic summit both get a correct back
+ * without anyone authoring copy per conference.
+ */
+export type BadgeBackBlockSource =
+  | "access_summary"
+  | "agenda"
+  | "qr_caption"
+  | "venue";
+
+export type BadgeBackBlock = {
+  id: string;
+  source: BadgeBackBlockSource;
+  /** Operator-authored label above the derived content; null prints no heading. */
+  heading: string | null;
+  x: number;
+  y: number;
+  width: number;
+  sizePt: number;
+  family: "primary" | "secondary" | "slab";
+  /** Derived content is unbounded; a printed card is not. Overflow is reported,
+   *  never silently dropped — see renderBackBlock. */
+  maxLines?: number;
+  /**
+   * Operator-authored text for the parts no graph can supply — the QR caption's
+   * wording, or an onsite contact number to sit under the venue address. Blocks
+   * whose content IS derived ignore it.
+   */
+  text?: string | null;
+  /**
+   * Stack this block with the other flow blocks instead of pinning it to `y`.
+   *
+   * Derived content varies per registration type — a day pass grants four items,
+   * a full delegate twenty-seven — so fixed coordinates collide for one type or
+   * waste half the card for another. Flow blocks share one column that starts at
+   * the FIRST flow block's x/y/width and carries that block's `maxLines` as the
+   * budget for the whole column.
+   */
+  flow?: boolean;
+};
+
 export type BadgeBackConfig = {
   qr: {
     x: number;
@@ -180,23 +273,50 @@ export type BadgeBackConfig = {
   shapes: BadgeShapeLayer[];
   images: BadgeImageLayer[];
   textLayers: BadgeFreeTextLayer[];
+  blocks: BadgeBackBlock[];
 };
 
 export type BadgePersonRecord = {
   id: string;
-  personKind: string;
+  /** The registration type this badge is for — a `conference_entities.id`, and
+   *  the layout variant key. Null only for a record built outside a run. */
+  variantKey: string | null;
+  /** That type's own name, for display in operator surfaces. */
+  variantName: string | null;
   displayName: string | null;
   firstName: string | null;
   lastName: string | null;
   roleTitle: string | null;
   organizationName: string | null;
   logoUrl: string | null;
+  /** What the QR encodes — a scan URL carrying a revocable token. */
   qrPayload: string;
+  /** The QR itself, pre-rendered as an inline SVG data URI. No network at print time. */
+  qrImageDataUri: string | null;
+  /**
+   * The ORGANISATION's own page, and its QR.
+   *
+   * ⛔ A different destination from `qrPayload`, on purpose. The back carries
+   * the person and is protected — a scan there needs a session and can trigger
+   * a consent request. The front points at `/org/<slug>`, which is already
+   * viewer-aware: `getViewerContext()` masks by ViewerLevel (public →
+   * authenticated → partner → member → org_admin → …) and the page renders
+   * MemberProfile or PartnerProfile by org type. So a passer-by sees the public
+   * card and a signed-in viewer sees specials, pricing and catalogue — without
+   * the badge deciding any of that. The physical placement IS the boundary.
+   */
+  organizationSlug: string | null;
+  orgQrImageDataUri: string | null;
   latitude: number | null;
   longitude: number | null;
   city: string | null;
   province: string | null;
   organizationType: string | null;
+  /** What this badge's registration type admits the holder to. Null when the
+   *  record was built outside a run and no catalogue graph was available. */
+  access: AccessSummary | null;
+  /** That same entitlement as a timed, day-ordered list, for the printed back. */
+  agenda: AgendaItem[];
 };
 
 export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {
@@ -212,29 +332,20 @@ export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {
     secondary: "Calibri, Arial, sans-serif",
     slab: "\"museo-slab\", Georgia, serif",
   },
+  onsiteContactId: null,
   mapbox: {
     styleId: "mapbox/light-v11",
     defaultZoom: 11.5,
   },
-  roles: {
-    delegate: {
+  variants: {
+    [DEFAULT_VARIANT]: {
       frontBackgroundUrl: null,
       backBackgroundUrl: null,
-      frontOverlayUrl: "/badges/delegate-front-overlay-v1.png",
+      frontOverlayUrl: "/badges/delegate-front-overlay-v2.svg",
       accentColor: "#e72a28",
       textColor: "#111111",
       mapTintColor: "#e72a28",
       mapTintOpacity: 0.14,
-      logoStyle: "icon",
-    },
-    exhibitor: {
-      frontBackgroundUrl: null,
-      backBackgroundUrl: null,
-      frontOverlayUrl: "/badges/exhibitor-front-overlay-v1.png",
-      accentColor: "#16345a",
-      textColor: "#111111",
-      mapTintColor: "#16345a",
-      mapTintOpacity: 0.16,
       logoStyle: "icon",
     },
   },
@@ -353,6 +464,44 @@ export const DEFAULT_BADGE_TEMPLATE_CONFIG_V1: BadgeTemplateConfigV1 = {
     shapes: [],
     images: [],
     textLayers: [],
+    // A badge back is where door and meal staff actually look. Every block
+    // below is derived from this badge's registration type, so these defaults
+    // stay correct for a conference that sells different things entirely.
+    blocks: [
+      {
+        id: "back_agenda",
+        source: "agenda",
+        heading: "YOUR SCHEDULE",
+        x: 75,
+        y: 90,
+        width: 825,
+        sizePt: 5.9,
+        family: "primary",
+        flow: true,
+        // Budget for the whole flow column, down to the QR.
+        maxLines: 35,
+      },
+      {
+        id: "back_qr_caption",
+        source: "qr_caption",
+        heading: null,
+        x: 330,
+        y: 1240,
+        width: 570,
+        sizePt: 7,
+        family: "primary",
+      },
+      {
+        id: "back_venue",
+        source: "venue",
+        heading: null,
+        x: 330,
+        y: 1360,
+        width: 570,
+        sizePt: 6.5,
+        family: "primary",
+      },
+    ],
   },
 };
 
@@ -364,10 +513,24 @@ export function normalizeBadgeTemplateConfig(
   if (source.schema !== "badge_template_config_v1") {
     return DEFAULT_BADGE_TEMPLATE_CONFIG_V1;
   }
+  /**
+   * Rewrite display font names to their loaded family, idempotently.
+   *
+   * ⛔ This was `.replace(/\bGotham\b/gi, '"gotham"')`. A double-quote is a
+   * non-word character, so `\b` still matches INSIDE the replacement — every
+   * pass wrapped the result again. Normalisation runs on every read, so the
+   * stored value grew by two quotes each time: the live CSC 2027 templates
+   * reached 1,956 characters of quote marks around a 34-character stack. The
+   * emitted `--font-primary` was invalid CSS, so every badge silently rendered
+   * in the Calibri/Arial fallback. `Museo Slab` never showed it because
+   * `museo-slab` does not re-match `Museo Slab`.
+   *
+   * The lookarounds make it a no-op on an already-normalised stack.
+   */
   const normalizeFontStack = (stack: string): string =>
     stack
-      .replace(/\bGotham\b/gi, "\"gotham\"")
-      .replace(/\bMuseo Slab\b/gi, "\"museo-slab\"");
+      .replace(/(?<!")\bGotham\b(?!")/gi, '"gotham"')
+      .replace(/(?<!")\bMuseo Slab\b(?!")/gi, '"museo-slab"');
   const deepClone = <T>(input: T): T => JSON.parse(JSON.stringify(input)) as T;
 
   const allowedLayerIds = new Set<string>([
@@ -588,6 +751,46 @@ export function normalizeBadgeTemplateConfig(
       ...DEFAULT_BADGE_TEMPLATE_CONFIG_V1.back.qr,
       ...(source.back?.qr ?? {}),
     },
+    // Configs stored before derived blocks existed carry no `blocks` key at all.
+    // They inherit the defaults rather than rendering a blank back; an operator
+    // who has deliberately emptied the array keeps their empty back.
+    blocks: !Array.isArray(source.back?.blocks)
+      ? DEFAULT_BADGE_TEMPLATE_CONFIG_V1.back.blocks
+      : source.back.blocks
+          .filter((block) => block && typeof block === "object")
+          .map((block, index) => {
+            const candidate = block as Partial<BadgeBackBlock>;
+            const source_: BadgeBackBlockSource =
+              candidate.source === "agenda" ||
+              candidate.source === "qr_caption" ||
+              candidate.source === "venue"
+                ? candidate.source
+                : "access_summary";
+            const family =
+              candidate.family === "primary" || candidate.family === "slab"
+                ? candidate.family
+                : "secondary";
+            return {
+              id: String(candidate.id ?? `back_block_${index + 1}`),
+              source: source_,
+              heading:
+                typeof candidate.heading === "string" && candidate.heading.trim()
+                  ? candidate.heading
+                  : null,
+              x: Number(candidate.x ?? 75),
+              y: Number(candidate.y ?? 75),
+              width: Number(candidate.width ?? 825),
+              sizePt: Number(candidate.sizePt ?? 7),
+              family,
+              ...(Number.isFinite(Number(candidate.maxLines))
+                ? { maxLines: Number(candidate.maxLines) }
+                : {}),
+              ...(typeof candidate.text === "string" && candidate.text.trim()
+                ? { text: candidate.text }
+                : {}),
+              ...(candidate.flow === true ? { flow: true } : {}),
+            };
+          }),
     shapes: (Array.isArray(source.back?.shapes) ? source.back.shapes : [])
       .filter((shape) => shape && typeof shape === "object")
       .map((shape, index) => {
@@ -665,51 +868,74 @@ export function normalizeBadgeTemplateConfig(
       }),
   };
 
-  const sourceRoleLayouts =
-    source.roleLayouts && typeof source.roleLayouts === "object"
-      ? (source.roleLayouts as Partial<
-          Record<BadgeRole, { front: BadgeFrontConfig; back: BadgeBackConfig }>
-        >)
-      : {};
+  // Same rule as `variants` above — new shape wins outright, legacy is history.
+  const legacyLayouts = (source as unknown as {
+    roleLayouts?: Partial<Record<BadgeVariantKey, Partial<BadgeVariantLayout>>>;
+  }).roleLayouts;
+  const sourceRoleLayouts: Partial<Record<BadgeVariantKey, Partial<BadgeVariantLayout>>> =
+    source.variantLayouts ?? legacyLayouts ?? {};
 
-  const normalizedRoleLayouts: Partial<
-    Record<BadgeRole, { front: BadgeFrontConfig; back: BadgeBackConfig }>
-  > = {
-    delegate: {
-      front:
-        sourceRoleLayouts.delegate?.front && typeof sourceRoleLayouts.delegate.front === "object"
-          ? deepClone({ ...normalizedFront, ...sourceRoleLayouts.delegate.front } as BadgeFrontConfig)
-          : deepClone(normalizedFront),
-      back:
-        sourceRoleLayouts.delegate?.back && typeof sourceRoleLayouts.delegate.back === "object"
-          ? deepClone({
-              ...normalizedBack,
-              ...sourceRoleLayouts.delegate.back,
-              qr: {
-                ...normalizedBack.qr,
-                ...(sourceRoleLayouts.delegate.back?.qr ?? {}),
-              },
-            } as BadgeBackConfig)
-          : deepClone(normalizedBack),
-    },
-    exhibitor: {
-      front:
-        sourceRoleLayouts.exhibitor?.front && typeof sourceRoleLayouts.exhibitor.front === "object"
-          ? deepClone({ ...normalizedFront, ...sourceRoleLayouts.exhibitor.front } as BadgeFrontConfig)
-          : deepClone(normalizedFront),
-      back:
-        sourceRoleLayouts.exhibitor?.back && typeof sourceRoleLayouts.exhibitor.back === "object"
-          ? deepClone({
-              ...normalizedBack,
-              ...sourceRoleLayouts.exhibitor.back,
-              qr: {
-                ...normalizedBack.qr,
-                ...(sourceRoleLayouts.exhibitor.back?.qr ?? {}),
-              },
-            } as BadgeBackConfig)
-          : deepClone(normalizedBack),
+  /**
+   * Merge one variant's overrides onto the base layout.
+   *
+   * A variant stores only what it changes; everything unstated falls through to
+   * the base. That is what makes "all badges look the same" the default and
+   * differentiation the deliberate act.
+   */
+  const layoutForVariant = (
+    override: Partial<BadgeVariantLayout> | undefined
+  ): BadgeVariantLayout => ({
+    front:
+      override?.front && typeof override.front === "object"
+        ? deepClone({ ...normalizedFront, ...override.front } as BadgeFrontConfig)
+        : deepClone(normalizedFront),
+    back:
+      override?.back && typeof override.back === "object"
+        ? deepClone({
+            ...normalizedBack,
+            ...override.back,
+            qr: { ...normalizedBack.qr, ...(override.back?.qr ?? {}) },
+          } as BadgeBackConfig)
+        : deepClone(normalizedBack),
+  });
+
+  // Every key the source carries survives normalisation. Previously this
+  // rebuilt exactly `delegate` and `exhibitor` and silently DROPPED anything
+  // else, so a layout keyed to a registration type could never round-trip
+  // through a save. The two legacy keys stay guaranteed for back-compat.
+  const normalizedRoleLayouts: Partial<Record<BadgeVariantKey, BadgeVariantLayout>> = {};
+  for (const key of new Set<string>([DEFAULT_VARIANT, ...Object.keys(sourceRoleLayouts)])) {
+    // `delegate` was the base look; it becomes the default variant's layout.
+    const source_ = key === DEFAULT_VARIANT ? (sourceRoleLayouts[DEFAULT_VARIANT] ?? sourceRoleLayouts.delegate) : sourceRoleLayouts[key];
+    normalizedRoleLayouts[key] = layoutForVariant(source_);
+  }
+  delete normalizedRoleLayouts.delegate;
+
+  // Same for per-variant styling.
+  // Legacy templates keyed their look off `roles.delegate` / `roles.exhibitor`.
+  // `delegate` was the majority look, so it becomes the default everything
+  // inherits; `exhibitor` is preserved as an ordinary named variant so its
+  // design is not lost, and a data migration re-keys it onto the registration
+  // types that actually require a booth.
+  // ⛔ Legacy `roles` is ROLLBACK DATA, not merge input. Merging both left the
+  // old `exhibitor` key alive as a fourth variant — it showed up in the editor
+  // as a tab called "exhibitor" next to the real registration types, and its
+  // theme could still be resolved. Once a template carries `variants`, the
+  // legacy keys are history and are ignored.
+  const legacy = (source as unknown as { roles?: Record<string, Partial<BadgeVariantTheme>> }).roles;
+  const sourceVariants: Record<string, Partial<BadgeVariantTheme>> =
+    (source.variants as Record<string, Partial<BadgeVariantTheme>> | undefined) ?? legacy ?? {};
+  const base = DEFAULT_BADGE_TEMPLATE_CONFIG_V1.variants[DEFAULT_VARIANT];
+  const normalizedVariants: Record<string, BadgeVariantTheme> = {
+    [DEFAULT_VARIANT]: {
+      ...base,
+      ...(sourceVariants[DEFAULT_VARIANT] ?? sourceVariants.delegate ?? {}),
     },
   };
+  for (const [key, value] of Object.entries(sourceVariants)) {
+    if (key === DEFAULT_VARIANT || key === "delegate") continue;
+    normalizedVariants[key] = { ...base, ...(value ?? {}) };
+  }
 
   return {
     ...DEFAULT_BADGE_TEMPLATE_CONFIG_V1,
@@ -735,22 +961,52 @@ export function normalizeBadgeTemplateConfig(
       ...DEFAULT_BADGE_TEMPLATE_CONFIG_V1.mapbox,
       ...(source.mapbox ?? {}),
     },
-    roles: {
-      delegate: {
-        ...DEFAULT_BADGE_TEMPLATE_CONFIG_V1.roles.delegate,
-        ...(source.roles?.delegate ?? {}),
-      },
-      exhibitor: {
-        ...DEFAULT_BADGE_TEMPLATE_CONFIG_V1.roles.exhibitor,
-        ...(source.roles?.exhibitor ?? {}),
-      },
-    },
-    roleLayouts: normalizedRoleLayouts,
+    onsiteContactId:
+      typeof source.onsiteContactId === "string" && source.onsiteContactId.trim()
+        ? source.onsiteContactId.trim()
+        : null,
+    variants: normalizedVariants as BadgeTemplateConfigV1["variants"],
+    variantLayouts: normalizedRoleLayouts,
     front: normalizedFront,
     back: normalizedBack,
   };
 }
 
-export function personRoleFromKind(kind: string): BadgeRole {
-  return kind.toLowerCase() === "exhibitor" ? "exhibitor" : "delegate";
+
+/**
+ * Pick the layout and styling for one badge.
+ *
+ * Resolution order, most specific first:
+ *   1. the person's registration type (a `conference_entities.id`)
+ *   2. the legacy `delegate` / `exhibitor` key
+ *   3. the template's base `front` / `back`
+ *
+ * This is the ONLY place a person is turned into a layout. Anything that needs
+ * to know what a badge looks like calls this rather than reaching into
+ * `roleLayouts` itself — otherwise the fallback order gets restated slightly
+ * differently in each caller, which is how the print run and the preview start
+ * disagreeing about the same badge.
+ */
+export function resolveBadgeVariant(
+  template: BadgeTemplateConfigV1,
+  params: { variantKey?: string | null }
+): { front: BadgeFrontConfig; back: BadgeBackConfig; theme: BadgeVariantTheme; resolvedKey: string } {
+  const layouts = template.variantLayouts ?? {};
+  // ONE key decision for both maps. These used to be resolved separately —
+  // `key` gated on variantLayouts, `theme` on variants — so a variant with a
+  // colour but no layout (exactly what the setup wizard produces) reported
+  // resolvedKey "default" while wearing its own theme, and the rendered badge
+  // carried class="badge variant-default" in the wrong colour.
+  const known = Boolean(
+    params.variantKey && (layouts[params.variantKey] || template.variants[params.variantKey])
+  );
+  const key = known && params.variantKey ? params.variantKey : DEFAULT_VARIANT;
+  const layout = layouts[key] ?? layouts[DEFAULT_VARIANT] ?? null;
+  const theme = template.variants[key] ?? template.variants[DEFAULT_VARIANT];
+  return {
+    front: layout?.front ?? template.front,
+    back: layout?.back ?? template.back,
+    theme,
+    resolvedKey: key,
+  };
 }

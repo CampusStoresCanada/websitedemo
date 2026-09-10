@@ -123,6 +123,23 @@ export default async function BenchmarkingComparePage() {
   );
 
   // By institution type. Uses the controlled vocabulary already on the field.
+  //
+  // Polytechnic is DELIBERATELY not merged into College, decided 2026-08-27,
+  // even though there are only two of them and the cut therefore always
+  // suppresses. They are the same size and a different business: median 10,600
+  // FTE against College's 9,470, but $1,034 revenue per student against $317 —
+  // trades materials, tools and equipment, at a 43% margin against 32%. Both sit
+  // above every college, with a $630 gap to the highest one and nothing between.
+  //
+  // Merging would barely move the college median and would tell NAIT and
+  // Lethbridge Polytechnic they run 3x their peers, permanently, in a panel
+  // headed "Stores like yours". Suppression exists to stop a cut misleading
+  // someone; a large wrong cut misleads more confidently than a small one.
+  //
+  // Neither store is left without comparison — both keep the all-stores and
+  // regional cuts, and NAIT keeps its size band. What they lack is a TYPE peer
+  // group, and the fix for that is more polytechnics filing (Sheridan, BCIT,
+  // SAIT, Red River, Humber), not a broader bucket.
   const myType = rows.find((r) => r.organization_id === organization.id)
     ?.institution_type as string | undefined;
   if (myType) {

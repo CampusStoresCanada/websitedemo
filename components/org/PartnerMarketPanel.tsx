@@ -1,9 +1,36 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useTransition } from "react";
 import Link from "next/link";
 import type { MarketMatch, MarketData } from "@/lib/actions/partner-market";
 import { notifyMembersWithoutProcurement } from "@/lib/actions/partner-market";
+import { recordMarketRating } from "@/lib/actions/market-ratings";
+import {
+  currentStanding,
+  type RatingRow,
+  type RatingAxis,
+  type RatingValue,
+} from "@/lib/match/rating-standing";
+
+/**
+ * ⛔ Two axes, never one scale.
+ *
+ * "Currently doing business together" is a FACT, and it means two opposite things
+ * at once — the strongest evidence the engine was right, and a row that is
+ * useless to show. On one scale with the quality grades, both signals are lost.
+ *
+ * ⚠️ Each fit grade names a DECISION rather than a strength. "Two thumbs" versus
+ * "one thumb" has no shared meaning, so raters drift and the middle fills with
+ * hedging; "would you approach them" is answerable the same way twice.
+ */
+const FIT_CHOICES: { value: RatingValue; label: string; on: string; hint: string }[] = [
+  { value: "would_approach", label: "Would approach", on: "bg-green-600 text-white border-green-600",
+    hint: "Worth contacting — the engine got this right." },
+  { value: "wrong_time", label: "Right fit, wrong time", on: "bg-amber-500 text-white border-amber-500",
+    hint: "Good match, not this season. We'll ask again rather than drop them." },
+  { value: "not_a_fit", label: "Not a fit", on: "bg-red-600 text-white border-red-600",
+    hint: "The engine misread this store, or misread you." },
+];
 
 interface PartnerMarketPanelProps {
   market: MarketData;
@@ -15,6 +42,16 @@ interface PartnerMarketPanelProps {
   anchorId?: string;
   /** Override the outer wrapper classes — e.g., to fit a rounded-card layout instead of the org page's full-bleed section */
   containerClassName?: string;
+  /**
+   * ⛔ Org ADMINS only. Reading this market is an org-level perk; rating it is an
+   * admin act, because `is_customer` is the org's customer list and not every
+   * member of staff should be publishing it.
+   */
+  canRate?: boolean;
+  /** Every verdict this partner has recorded. Staleness is computed here, from now. */
+  ratings?: RatingRow[];
+  /** Whose market this is — the org a verdict is recorded against and authorized by. */
+  partnerOrgId?: string;
 }
 
 function ConfidencePip({ confidence }: { confidence: "high" | "medium" | "low" }) {
@@ -59,10 +96,56 @@ export default function PartnerMarketPanel({
   orgName,
   anchorId = "your-market",
   containerClassName,
+  canRate = false,
+  ratings = [],
+  partnerOrgId,
 }: PartnerMarketPanelProps) {
   const [nudgeSent, setNudgeSent] = useState(false);
   const [nudgeSending, setNudgeSending] = useState(false);
   const [nudgeError, setNudgeError] = useState<string | null>(null);
+
+  // Local echo so a click lands instantly; the server action is the record.
+  const [local, setLocal] = useState<Record<string, RatingValue>>({});
+  const [rateFailed, setRateFailed] = useState<Record<string, true>>({});
+  const [, startRating] = useTransition();
+  // ⚠️ One `now` for the render, so two rows cannot disagree about whether the
+  // same month has elapsed.
+  const [now] = useState(() => new Date());
+
+  const rate = (
+    memberOrgId: string, axis: RatingAxis, value: RatingValue, rank: number
+  ) => {
+    if (!partnerOrgId) return;
+    const k = `${memberOrgId}:${axis}`;
+    setLocal((p) => ({ ...p, [k]: value }));
+    setRateFailed((p) => { const n = { ...p }; delete n[k]; return n; });
+    startRating(async () => {
+      // ⛔ The action re-checks the caller against `partnerOrgId`. This component
+      // only decides what to SHOW; it is never the thing granting permission.
+      const res = await recordMarketRating({
+        partnerOrgId, memberOrgId, axis, value, runId: market.runId, rank,
+      });
+      // ⚠️ Roll back if it did not land. A button left coloured shows a verdict
+      // that exists nowhere — and here that could mean a partner believing they
+      // have flagged a customer we are still advertising to them as a prospect.
+      if (!res.ok) {
+        setLocal((p) => { const n = { ...p }; delete n[k]; return n; });
+        setRateFailed((p) => ({ ...p, [k]: true }));
+      }
+    });
+  };
+
+  const standingFor = (memberOrgId: string) => {
+    const stored = currentStanding(ratings, memberOrgId, now);
+    const fitLocal = local[`${memberOrgId}:fit`];
+    const relLocal = local[`${memberOrgId}:relationship`];
+    return {
+      fit: fitLocal ?? stored.fit?.value ?? null,
+      fitStale: !fitLocal && !!stored.fit?.stale,
+      isCustomer: (relLocal ?? stored.relationship?.value) === "is_customer",
+      relStale: !relLocal && !!stored.relationship?.stale,
+    };
+  };
 
   async function handleNudge() {
     setNudgeSending(true);
@@ -109,7 +192,15 @@ export default function PartnerMarketPanel({
         {market.topMatches.length > 0 && (
           <div className="space-y-2 mb-8">
             {market.topMatches.map((match) => (
-              <div key={match.orgId} className="flex items-start gap-3 rounded-xl border border-gray-100 bg-white px-4 py-3 hover:border-gray-200 hover:shadow-sm transition-all">
+              <div key={match.orgId} className={`flex items-start gap-3 rounded-xl border px-4 py-3 transition-all ${
+                canRate && standingFor(match.orgId).isCustomer
+                  // ⛔ Dimmed, NOT removed. A row that vanishes on click cannot be
+                  // un-clicked — an accidental "already a customer" would hide a
+                  // real prospect permanently, from the one screen able to undo it.
+                  // Prospect counts and exports are where the suppression belongs.
+                  ? "border-blue-100 bg-blue-50/40 opacity-70"
+                  : "border-gray-100 bg-white hover:border-gray-200 hover:shadow-sm"
+              }`}>
                 <ConfidencePip confidence={match.confidence} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -128,6 +219,63 @@ export default function PartnerMarketPanel({
                     )}
                   </div>
                   <ContactLine match={match} />
+
+                  {canRate && partnerOrgId && (() => {
+                    const st = standingFor(match.orgId);
+                    return (
+                      <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        {/*
+                          ⛔ The relationship toggle sits apart from the grades, with a
+                          divider, because it is a different kind of statement. An
+                          existing customer is simultaneously the best evidence the
+                          engine works and the least useful row on this page.
+                        */}
+                        <button
+                          type="button"
+                          title="You already sell to this store. We'll stop showing them as a prospect — and ask again in a few months, because accounts change."
+                          onClick={() => rate(match.orgId, "relationship", st.isCustomer ? "not_customer" : "is_customer", match.rank)}
+                          className={`rounded border px-2 py-0.5 text-xs transition ${
+                            st.isCustomer
+                              ? "bg-blue-600 text-white border-blue-600"
+                              : "border-gray-300 text-gray-500 hover:border-blue-400 hover:text-blue-700"
+                          }`}
+                        >
+                          {st.isCustomer ? "✓ Current customer" : "Already a customer"}
+                        </button>
+
+                        <span className="mx-1 h-4 w-px bg-gray-200" aria-hidden />
+
+                        {FIT_CHOICES.map((c) => (
+                          <button
+                            key={c.value}
+                            type="button"
+                            title={c.hint}
+                            onClick={() => rate(match.orgId, "fit", c.value, match.rank)}
+                            className={`rounded border px-2 py-0.5 text-xs transition ${
+                              st.fit === c.value ? c.on : "border-gray-300 text-gray-500 hover:border-gray-400"
+                            }`}
+                          >
+                            {c.label}
+                          </button>
+                        ))}
+
+                        {/*
+                          ⚠️ Stale is shown, never silently reverted. The claim is still
+                          being honoured; we are asking whether it still holds. Dropping
+                          it quietly would be the same error as reading "no rows" as
+                          "no answer".
+                        */}
+                        {(st.fitStale || st.relStale) && (
+                          <span className="text-xs text-amber-600" title="You told us this a while ago — still true?">
+                            still true?
+                          </span>
+                        )}
+                        {(rateFailed[`${match.orgId}:fit`] || rateFailed[`${match.orgId}:relationship`]) && (
+                          <span className="text-xs text-red-600">not saved</span>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             ))}

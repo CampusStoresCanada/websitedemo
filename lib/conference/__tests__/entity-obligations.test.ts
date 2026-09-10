@@ -12,7 +12,15 @@ describe("grantTypesForKinds — v3 holdings → obligation grant types", () => 
   });
 
   it("dedupes across kinds that share a grant type", () => {
-    expect(grantTypesForKinds(["session", "event", "networking"])).toEqual(["education_access"]);
+    // session and networking both map to education_access and nothing else.
+    // `event` used to be the third kind here; it now also carries meal_access
+    // (a social function feeds people), so it no longer belongs in a test
+    // about deduping down to a single grant type.
+    expect(grantTypesForKinds(["session", "networking"])).toEqual(["education_access"]);
+  });
+
+  it("an event carries education AND meal access, deduped against a session", () => {
+    expect(grantTypesForKinds(["session", "event"]).sort()).toEqual(["education_access", "meal_access"]);
   });
 
   it("kinds with no attendee obligations contribute nothing", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { computeAllMatchScores } from "../scoring";
+import { fixtureMatchScores } from "./score-fixtures";
 import { generateSchedule } from "../generate";
 import type {
   DelegateProfile,
@@ -55,6 +55,7 @@ function fixtureExhibitors(): ExhibitorProfile[] {
       registrationId: "e1",
       organizationId: "org-e1",
       userId: "u-e1",
+      blackoutList: [],
       primaryCategory: "snacks",
       secondaryCategories: ["snacks"],
       buyingCyclesTargeted: ["holiday"],
@@ -65,6 +66,7 @@ function fixtureExhibitors(): ExhibitorProfile[] {
       registrationId: "e2",
       organizationId: "org-e2",
       userId: "u-e2",
+      blackoutList: [],
       primaryCategory: "beverages",
       secondaryCategories: ["beverages"],
       buyingCyclesTargeted: ["spring"],
@@ -96,7 +98,7 @@ describe("generateSchedule", () => {
   it("is deterministic for same seed and same inputs", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
     const slots = fixtureSlots();
 
     const first = generateSchedule({
@@ -124,7 +126,7 @@ describe("generateSchedule", () => {
   it("never places blacked out pairs", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
 
     const result = generateSchedule({
       delegates,
@@ -136,16 +138,43 @@ describe("generateSchedule", () => {
     });
 
     const d2Assignments = result.assignments.filter((assignment) =>
-      assignment.delegateRegistrationIds.includes("d2")
+      assignment.delegateSeatIds.includes("d2")
     );
     const hasBlackout = d2Assignments.some((assignment) => assignment.exhibitorOrganizationId === "org-e1");
     expect(hasBlackout).toBe(false);
   });
 
+  it("NEVER puts an exhibitor in a suite they do not hold", () => {
+    /**
+     * The regression that started this: Boxercraft bought booth 305 ($4,000, no
+     * suite) and the solver sat them in unsold suite 107 ($6,000). A suite is
+     * part of a booth — `booth --includes--> suite` — so holding the booth is
+     * the ONLY way to get one. A solver does not give away inventory.
+     */
+    const delegates = fixtureDelegates();
+    const exhibitors = fixtureExhibitors();
+
+    const result = generateSchedule({
+      delegates,
+      exhibitors,
+      meetingSlots: [{ id: "s1", dayNumber: 1, slotNumber: 1, suiteId: "suite-nobody-holds" }],
+      matchScores: fixtureMatchScores(delegates, exhibitors),
+      policy,
+      // Nobody is pinned: nobody holds this suite.
+      suitePinnedExhibitorBySuiteId: {},
+      seed: 7,
+    });
+
+    expect(result.assignments).toEqual([]);
+    expect(
+      result.diagnostics.violations.some((v) => v.code === "EXHIBITOR_WITHOUT_SUITE")
+    ).toBe(true);
+  });
+
   it("reports soft warnings when targets are not fully met", () => {
     const delegates = fixtureDelegates();
     const exhibitors = fixtureExhibitors();
-    const scores = computeAllMatchScores(delegates, exhibitors);
+    const scores = fixtureMatchScores(delegates, exhibitors);
 
     // Only 1 slot + 1 suite → most delegates/exhibitors won't meet targets.
     // These are soft violations → completed_with_warnings (not infeasible).
@@ -159,6 +188,10 @@ describe("generateSchedule", () => {
         delegateCoveragePct: 1,
         meetingGroupMax: 1,
       },
+      // One suite, held by one exhibitor. The others hold none, so they are not
+      // scheduled — and are reported as EXHIBITOR_WITHOUT_SUITE rather than
+      // being dealt into rooms they did not buy.
+      suitePinnedExhibitorBySuiteId: { "suite-1": exhibitors[0].registrationId },
       seed: 12,
     });
 

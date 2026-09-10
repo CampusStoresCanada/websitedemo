@@ -557,6 +557,29 @@ export class CircleAdminClient {
     return { id: result.comment?.id ?? result.id ?? 0 };
   }
 
+  /**
+   * ⛔ THERE IS DELIBERATELY NO `listComments(postId)` HERE. Do not add one back.
+   *
+   * A per-post comment reader is one API call per post, and this community has
+   * ~790 posts. It existed for a week and cost ~11,000 Circle calls across 14
+   * runs before anyone noticed — 96% of all Circle traffic in that window — for
+   * data the same nightly was already fetching by another route.
+   *
+   * ⚠️ The cheap route already exists and is incremental: `scripts/circle-comments.mts`
+   * pages the GLOBAL /comments endpoint, stops as soon as a page holds nothing
+   * new (~1-2 calls a night), and writes `.cache/circle-comments.json` with
+   * postId, spaceName, userId and userName on every record. Read that.
+   *
+   * ⚠️ It is also the only source that attributes a reply: the per-post records
+   * spell the author `user_id` and the cache spells it `userId`, and reading the
+   * wrong one compiles cleanly while making all 2,868 comments anonymous. That is
+   * what actually happened, so replies carried no supply signal at all.
+   *
+   * If you genuinely need comments for ONE post, filter the cache by postId. If
+   * you need them fresher than the cache, run that script — do not reach for the
+   * API per post.
+   */
+
   // ---- Event attendees ----------------------------------------------------
 
   async listEventAttendees(

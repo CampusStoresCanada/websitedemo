@@ -5,11 +5,17 @@ import type { Database, Json } from "@/lib/database.types";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getActivePolicySet, getSchedulingConfig } from "@/lib/policy/engine";
 import { logAuditEventSafe } from "@/lib/ops/audit";
-import { computeAllMatchScores } from "@/lib/scheduler/scoring";
 import { generateSchedule } from "@/lib/scheduler/generate";
-import { normalizeStringArray, normalizeSalesReadiness } from "@/lib/scheduler/normalize";
 import { loadConferenceMeetingGeometry } from "@/lib/conference/meeting-geometry-loader";
-import { buildSuiteOrgAssignmentsBySuiteId, findDuplicateSuiteOrgAssignment } from "@/lib/conference/suite-assignment";
+import { buildSuiteOrgAssignmentsBySuiteId } from "@/lib/conference/suite-assignment";
+import { loadMeetingCandidates } from "@/lib/conference/meeting-candidates";
+import { lateAdd } from "@/lib/scheduler/late-add";
+import { validateScheduleConstraints } from "@/lib/scheduler/constraints";
+import { loadMeetingMatchScores, toSolverRecords } from "@/lib/conference/meeting-match-scores";
+import { optimizeSchedule } from "@/lib/scheduler/optimize";
+import { bestOfRestarts } from "@/lib/scheduler/search";
+import { describeTotals } from "@/lib/scheduler/objective";
+import { isBlackedOut } from "@/lib/scheduler/blackout";
 import type {
   DelegateProfile,
   ExhibitorProfile,
@@ -71,25 +77,21 @@ function formatTimeFromDate(date: Date): string {
 }
 
 /**
- * Suite→org assignment is just a plain entity attribute with no built-in
- * limit, so this is the one place that actually enforces "one org, one
- * suite" before a schedule can be generated — see suite-assignment.ts for
- * why that limit matters.
+ * Suite→org is DERIVED now (see lib/conference/inclusion.ts): the sale is
+ * recorded on the booth, and the booth includes the suite.
+ *
+ * This used to throw DUPLICATE_SUITE_ASSIGNMENT when an org held two suites,
+ * and told the admin to "unassign the extra suite in Build" — i.e. to clear the
+ * hand-typed copy that no longer exists. Both halves are gone: holding two
+ * suites is legal (it buys throughput, not time — see suite-assignment.ts), and
+ * the limit that matters (no delegate meets the same org twice) is a hard
+ * constraint inside the solver, where meetings are actually made.
  */
 async function buildSuiteOrgAssignments(
-  adminClient: ReturnType<typeof createAdminClient>,
+  _adminClient: ReturnType<typeof createAdminClient>,
   suites: Array<{ id: string; suite_number: number }>,
   suiteOrgAssignmentsBySuiteNumber: Record<string, string>
 ): Promise<Record<string, string>> {
-  const duplicate = findDuplicateSuiteOrgAssignment(suites, suiteOrgAssignmentsBySuiteNumber);
-  if (duplicate) {
-    const { data: org } = await adminClient.from("organizations").select("name").eq("id", duplicate.orgId).maybeSingle();
-    throw new Error(
-      `DUPLICATE_SUITE_ASSIGNMENT: ${org?.name ?? duplicate.orgId} is assigned to suites #${duplicate.suiteNumbers.join(", #")}. ` +
-        "An organization can only be pinned to one suite's meeting schedule, regardless of how many booths it purchased — " +
-        "unassign the extra suite(s) in Build before running the scheduler."
-    );
-  }
   return buildSuiteOrgAssignmentsBySuiteId(suites, suiteOrgAssignmentsBySuiteNumber);
 }
 
@@ -113,31 +115,44 @@ async function ensureMeetingScaffolding(
 
   const { data: existingSuites, error: suitesError } = await adminClient
     .from("conference_suites")
-    .select("id, suite_number")
+    .select("id, suite_number, entity_id")
     .eq("conference_id", conferenceId)
     .order("suite_number", { ascending: true });
 
   if (suitesError) throw new Error(suitesError.message);
 
+  /**
+   * Fill the GAPS, do not seed-once.
+   *
+   * This used to be `if (suites.length === 0)`, which made the whole function a
+   * one-shot bootstrap wearing an "ensure" name: the first run froze the grid,
+   * and a booth sold afterwards got no suite row and no meeting slots — not
+   * late, never. Selling a booth is the normal case, not the setup case.
+   *
+   * Rows are matched on entity_id (the Suite thing), so re-running is a no-op
+   * when nothing new has sold.
+   */
   let suites = existingSuites ?? [];
-  if (suites.length === 0) {
-    // Seed the operational suite rows 1:1 from the Suite entities (carry their
-    // number + a link back), instead of N anonymous rows from a count.
-    const suiteRows = geometry.suites.map((s) => ({
+  const haveSuiteEntityIds = new Set(suites.map((s) => s.entity_id).filter(Boolean));
+  const missingSuiteRows = geometry.suites
+    .filter((s) => !haveSuiteEntityIds.has(s.id))
+    .map((s) => ({
       conference_id: conferenceId,
       suite_number: s.suiteNumber,
       entity_id: s.id,
       is_active: true,
     }));
 
+  if (missingSuiteRows.length > 0) {
     const { data: insertedSuites, error: insertSuitesError } = await adminClient
       .from("conference_suites")
-      .insert(suiteRows)
-      .select("id, suite_number")
-      .order("suite_number", { ascending: true });
+      .insert(missingSuiteRows)
+      .select("id, suite_number, entity_id");
 
     if (insertSuitesError) throw new Error(insertSuitesError.message);
-    suites = insertedSuites ?? [];
+    suites = [...suites, ...(insertedSuites ?? [])].sort(
+      (a, b) => a.suite_number - b.suite_number
+    );
   }
 
   const { data: existingSlots, error: slotsError } = await adminClient
@@ -148,19 +163,19 @@ async function ensureMeetingScaffolding(
     .order("slot_number", { ascending: true });
 
   if (slotsError) throw new Error(slotsError.message);
-  if (existingSlots && existingSlots.length > 0) {
-    const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
-      adminClient,
-      suites,
-      geometry.suiteOrgAssignmentsBySuiteNumber
-    );
-    return {
-      suitesCount: suites.length,
-      meetingSlots: existingSlots,
-      suites,
-      suiteOrgAssignmentsBySuiteId,
-    };
-  }
+
+  /**
+   * Same rule as the suites above: build the full intended grid every time, then
+   * insert only what is absent. A suite that appears later (a booth sold after
+   * the first run) gets its meeting times on the next run instead of never.
+   *
+   * The key mirrors the table's uniqueness constraint
+   * (conference_id, day_number, slot_number, suite_id), so an existing slot is
+   * left exactly as it is — including any assignment already made against it.
+   */
+  const slotKey = (r: { day_number: number; slot_number: number; suite_id: string | null }) =>
+    `${r.day_number}|${r.slot_number}|${r.suite_id ?? ""}`;
+  const haveSlotKeys = new Set((existingSlots ?? []).map(slotKey));
 
   const startBase = "1970-01-01T00:00:00.000Z";
   const slotRows: Database["public"]["Tables"]["meeting_slots"]["Insert"][] = [];
@@ -196,14 +211,31 @@ async function ensureMeetingScaffolding(
     }
   }
 
-  const { data: insertedSlots, error: insertSlotsError } = await adminClient
-    .from("meeting_slots")
-    .insert(slotRows)
-    .select("*")
-    .order("day_number", { ascending: true })
-    .order("slot_number", { ascending: true });
+  const newSlotRows = slotRows.filter(
+    (r) =>
+      !haveSlotKeys.has(
+        slotKey({
+          day_number: r.day_number,
+          slot_number: r.slot_number,
+          suite_id: r.suite_id ?? null,
+        })
+      )
+  );
 
-  if (insertSlotsError) throw new Error(insertSlotsError.message);
+  let insertedSlots: MeetingSlotRow[] = [];
+  if (newSlotRows.length > 0) {
+    const { data, error: insertSlotsError } = await adminClient
+      .from("meeting_slots")
+      .insert(newSlotRows)
+      .select("*");
+
+    if (insertSlotsError) throw new Error(insertSlotsError.message);
+    insertedSlots = data ?? [];
+  }
+
+  const meetingSlots = [...(existingSlots ?? []), ...insertedSlots].sort(
+    (a, b) => a.day_number - b.day_number || a.slot_number - b.slot_number
+  );
 
   const suiteOrgAssignmentsBySuiteId = await buildSuiteOrgAssignments(
     adminClient,
@@ -213,83 +245,59 @@ async function ensureMeetingScaffolding(
 
   return {
     suitesCount: suites.length,
-    meetingSlots: insertedSlots ?? [],
+    // The WHOLE grid, not just what this run added — the solver schedules
+    // against every slot, and returning only the new ones would quietly plan
+    // around an empty room.
+    meetingSlots,
     suites,
     suiteOrgAssignmentsBySuiteId,
   };
 }
 
+/**
+ * Candidate loading lives in lib/conference/meeting-candidates.ts so the swaps
+ * path builds its profiles from the same code. Only the scheduler's own
+ * precondition — you cannot solve with one side of the table empty — stays here.
+ */
 async function loadEligibleCandidates(conferenceId: string): Promise<{
   delegates: DelegateProfile[];
   exhibitors: ExhibitorProfile[];
+  contactBySeatId: Map<string, string>;
+  topChoices: Awaited<ReturnType<typeof loadMeetingCandidates>>["topChoices"];
 }> {
   const adminClient = createAdminClient();
-
-  // Schedulable candidates are the conference's submitted/confirmed registrations
-  // of the relevant type. (The old paid-product eligibility gate was retired with
-  // the v3 cutover — see docs/CONFERENCE_V2_BLUEPRINT.md.)
-  const [delegatesResult, exhibitorsResult] = await Promise.all([
-    adminClient
-      .from("conference_registrations")
-      .select(
-        "id, organization_id, user_id, category_responsibilities, buying_timeline, top_priorities, meeting_intent, purchasing_authority, top_5_preferences, blackout_list"
-      )
-      .eq("conference_id", conferenceId)
-      .in("status", ["submitted", "confirmed"])
-      .in("registration_type", ["delegate", "observer"]),
-    adminClient
-      .from("conference_registrations")
-      .select(
-        "id, organization_id, user_id, primary_category, secondary_categories, buying_cycles_targeted, meeting_outcome_intent, sales_readiness"
-      )
-      .eq("conference_id", conferenceId)
-      .in("status", ["submitted", "confirmed"])
-      .eq("registration_type", "exhibitor"),
-  ]);
-
-  if (delegatesResult.error) {
-    throw new Error(`Failed to load delegate candidates: ${delegatesResult.error.message}`);
-  }
-  if (exhibitorsResult.error) {
-    throw new Error(`Failed to load exhibitor candidates: ${exhibitorsResult.error.message}`);
-  }
-
-  const delegates: DelegateProfile[] = (delegatesResult.data ?? []).map((row) => ({
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    categoryResponsibilities: normalizeStringArray(row.category_responsibilities),
-    buyingTimeline: normalizeStringArray(row.buying_timeline),
-    topPriorities: normalizeStringArray(row.top_priorities),
-    meetingIntent: normalizeStringArray(row.meeting_intent),
-    purchasingAuthority: row.purchasing_authority,
-    top5Preferences: normalizeStringArray(row.top_5_preferences),
-    blackoutList: normalizeStringArray(row.blackout_list),
-  }));
-
-  const exhibitors: ExhibitorProfile[] = (exhibitorsResult.data ?? []).map((row) => ({
-    registrationId: row.id,
-    organizationId: row.organization_id,
-    userId: row.user_id,
-    primaryCategory: row.primary_category,
-    secondaryCategories: normalizeStringArray(row.secondary_categories),
-    buyingCyclesTargeted: normalizeStringArray(row.buying_cycles_targeted),
-    meetingOutcomeIntent: normalizeStringArray(row.meeting_outcome_intent),
-    salesReadiness: normalizeSalesReadiness(row.sales_readiness),
-  }));
+  const { delegates, exhibitors, seatById, contactBySeatId, topChoices } =
+    await loadMeetingCandidates(adminClient, conferenceId);
 
   if (delegates.length === 0 || exhibitors.length === 0) {
     throw new Error(
-      "INSUFFICIENT_ACTIVE_REGISTRATIONS: paid order metadata did not resolve to active delegate/exhibitor registrations."
+      `INSUFFICIENT_NAMED_SEATS: the scheduler needs at least one delegate and one exhibitor named to a registration seat. ` +
+        `Found ${delegates.length} delegate(s) and ${exhibitors.length} exhibitor(s) across ${seatById.size} named registration seat(s).`
     );
   }
 
-  return { delegates, exhibitors };
+  return { delegates, exhibitors, contactBySeatId, topChoices };
 }
 
 export async function createSchedulerDraftRun(
   conferenceId: string,
-  seed?: number
+  seed?: number,
+  /**
+   * ⛔ SAME BUILDER, DIFFERENT SCOPE. Steve: "it is literally trying to find the
+   * best in the outstanding holes." Passing `extendRunId` does not start a
+   * second scheduler — it runs this one seeded from that run's schedule instead
+   * of from the greedy, with only the additive moves enabled.
+   *
+   * That is the whole difference between before and after the freeze. Before,
+   * every slot is negotiable and the search may rearrange anything. After, the
+   * existing schedule is a given and the only question is what fits in the gaps
+   * around it.
+   *
+   * ⚠️ Restarts are deliberately NOT used in this mode. A restart reseeds the
+   * greedy and builds a fresh schedule, which is exactly the thing a late add
+   * must never do — it would discard the frozen schedule and move everybody.
+   */
+  options?: { extendRunId?: string }
 ): Promise<SchedulerActionSuccess<SchedulerRunSummary> | SchedulerActionFailure> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
@@ -395,13 +403,107 @@ export async function createSchedulerDraftRun(
       usedPinnedExhibitorRegistrationIds.add(chosen.registrationId);
     }
 
-    const matchScores = computeAllMatchScores(candidates.delegates, candidates.exhibitors);
+    /**
+     * MEETINGS ARE A SUITE BENEFIT. An exhibitor whose booth includes no suite
+     * is not a scheduling candidate at all — the ED's rule, 2026-09-01:
+     * "$4000 booths shouldn't get meetings at all, that isn't a part of
+     * included."
+     *
+     * So they are filtered out here rather than left in and reported as
+     * unscheduled. Leaving them in made every run permanently "below exhibitor
+     * target" and flagged a $4,000 booth as a problem to fix, when getting no
+     * meetings is precisely what that booth costs less for.
+     */
+    const memberContacts = candidates.delegates
+      .map((d) => ({
+        contactId: candidates.contactBySeatId.get(d.registrationId) ?? "",
+        orgId: d.organizationId,
+      }))
+      .filter((c) => c.contactId);
+    const matchScoreLookup = await loadMeetingMatchScores(
+      candidates.delegates.map((d) => d.organizationId),
+      memberContacts
+    );
+
+    /**
+     * ⛔ REFUSE TO SOLVE WITHOUT MATCH DATA.
+     *
+     * `available` is false when no match_run has status='promoted'. Every
+     * orgTotalFor() then returns 0, so matchTotal(e) × occupancy(e) becomes
+     * 0 × occupancy and the objective is occupancy alone — the solver packs
+     * rooms and pairs people arbitrarily within the legal moves, producing a
+     * confident-looking schedule that cannot answer "why these five meetings".
+     *
+     * ⚠️ `available` has always been computed here and read by NOTHING. The one
+     * signal separating "misconfigured" from "working" sat unused beside the bug
+     * it describes.
+     *
+     * No override on this path deliberately. The CLI has --allow-unscored for
+     * benches and smoke tests; an admin pressing a button should never be able
+     * to publish an unscored schedule by accident, and a draft nobody can
+     * justify is not a useful draft.
+     */
+    if (!matchScoreLookup.available) {
+      await adminClient
+        .from("scheduler_runs")
+        .update({
+          status: "failed",
+          completed_at: new Date().toISOString(),
+          constraint_violations: {
+            error: "NO_PROMOTED_MATCH_RUN",
+          } as unknown as Json,
+        })
+        .eq("id", runRow.id);
+      return {
+        success: false,
+        error:
+          "No promoted match run: every pair would score 0 and the schedule would " +
+          "be arbitrary. Promote a match run, then try again.",
+      };
+    }
+
+    const orgIdsHoldingSuites = new Set(Object.values(scaffolding.suiteOrgAssignmentsBySuiteId));
+    const schedulableExhibitors = candidates.exhibitors.filter((e) =>
+      orgIdsHoldingSuites.has(e.organizationId)
+    );
+    const exhibitorsWithoutSuiteEntitlement =
+      candidates.exhibitors.length - schedulableExhibitors.length;
+
+    /**
+     * No exhibitor holds a suite → there is nothing to schedule, and saying
+     * "completed" would be a green run that did nothing. Fail with the reason,
+     * because the two causes need opposite fixes: nobody named to the seat of a
+     * suite-holding booth (name someone), versus every exhibitor being on a
+     * booth that includes no suite (they were never getting meetings).
+     */
+    if (schedulableExhibitors.length === 0) {
+      throw new Error(
+        `NO_EXHIBITOR_HOLDS_A_SUITE: ${candidates.exhibitors.length} exhibitor(s) are named to seats, ` +
+          `but none is on a booth that includes a suite, so there is no room for a meeting to happen in. ` +
+          `Meetings come with a suite; a booth without one does not get them.`
+      );
+    }
+
+    /**
+     * ⛔ ONE SCORE SOURCE. This was computeAllMatchScores — the v2 scorer, whose
+     * five of six inputs lost their home when the meeting system came off
+     * conference_registrations, leaving it effectively two axes. The greedy
+     * ranked on that while the local search ranked on match_edges and swaps
+     * ranked on persisted v2 rows: three notions of a good pairing in one
+     * pipeline, none agreeing. All three now read the promoted run.
+     */
+    const matchScores = toSolverRecords({
+      delegates: candidates.delegates,
+      exhibitors: schedulableExhibitors,
+      contactBySeatId: candidates.contactBySeatId,
+      scores: matchScoreLookup,
+    });
 
     const persistedScoreInput = matchScores.map((score) => ({
       conference_id: conferenceId,
       scheduler_run_id: runRow.id,
-      delegate_registration_id: score.delegateRegistrationId,
-      exhibitor_registration_id: score.exhibitorRegistrationId,
+      delegate_seat_id: score.delegateSeatId,
+      exhibitor_seat_id: score.exhibitorSeatId,
       total_score: Number.isFinite(score.totalScore) ? score.totalScore : -999999,
       score_breakdown: score.breakdown as unknown as Json,
       match_reasons: score.reasons,
@@ -416,18 +518,34 @@ export async function createSchedulerDraftRun(
     const { data: persistedScores, error: persistedScoresError } = await adminClient
       .from("match_scores")
       .insert(persistedScoreInput)
-      .select("id, delegate_registration_id, exhibitor_registration_id");
+      .select("id, delegate_seat_id, exhibitor_seat_id");
 
     if (persistedScoresError) throw new Error(persistedScoresError.message);
 
     const scoreIdByKey = new Map<string, string>();
     for (const row of persistedScores ?? []) {
-      scoreIdByKey.set(`${row.delegate_registration_id}:${row.exhibitor_registration_id}`, row.id);
+      scoreIdByKey.set(`${row.delegate_seat_id}:${row.exhibitor_seat_id}`, row.id);
     }
 
-    const generateResult = generateSchedule({
+    /**
+     * HOW MANY SCHEDULES TO DRAW BEFORE PICKING ONE.
+     *
+     * ⛔ A single greedy-plus-local-search is ONE sample, and its quality
+     * depends on the arbitrary order it started from. Steve: "you can't maximize
+     * on one fill, you generate thousands and pick the best."
+     *
+     * ⚠️ Deliberately modest for a request-scoped run, because this one is
+     * synchronous behind an admin click. The work is pure arithmetic and
+     * embarrassingly parallel — every restart is independent — so the real home
+     * for a large sweep is a machine we control rather than a hosted function
+     * with a request timeout. Raising this is the cheapest quality lever here;
+     * `restart_spread` on the run says whether it is buying anything.
+     */
+    const SCHEDULER_RESTARTS = 24;
+
+    const generateInput = {
       delegates: candidates.delegates,
-      exhibitors: candidates.exhibitors,
+      exhibitors: schedulableExhibitors,
       meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
         id: slot.id,
         dayNumber: slot.day_number,
@@ -445,7 +563,245 @@ export async function createSchedulerDraftRun(
       },
       suitePinnedExhibitorBySuiteId,
       seed: runSeed,
-    });
+    };
+
+    const generateResult = generateSchedule(generateInput);
+
+    /**
+     * The greedy is the SEED, not the answer. It fills slots in order and stops,
+     * which delivers pairings but leaves room-time on the floor — measured on a
+     * 14-exhibitor run: 122 of a possible 130 pairings, occupying 11.2% of
+     * suite-slots. Local search then maximizes the stated objective
+     * (Σ matchTotal × timeOccupancy) by splitting packed meetings into more
+     * occupied slots and filling dead ones.
+     *
+     * ⛔ Legality is a filter on moves, never a term. The search cannot pair a
+     * refused org, double-book a person, or seat an exhibitor in a room they do
+     * not hold — those are not worse moves, they are not moves.
+     */
+    const delegateSeatFacts = new Map(
+      candidates.delegates.map((d) => [
+        d.registrationId,
+        {
+          orgId: d.organizationId,
+          contactId: candidates.contactBySeatId.get(d.registrationId) ?? null,
+        },
+      ])
+    );
+    const exhibitorSeatFacts = new Map<string, { orgId: string; suiteId: string }>();
+    for (const [suiteId, exhibitorSeatId] of Object.entries(suitePinnedExhibitorBySuiteId)) {
+      const exhibitor = schedulableExhibitors.find((e) => e.registrationId === exhibitorSeatId);
+      if (exhibitor) exhibitorSeatFacts.set(exhibitorSeatId, { orgId: exhibitor.organizationId, suiteId });
+    }
+
+    const blackoutByExhibitorSeat = new Map(
+      schedulableExhibitors.map((e) => [e.registrationId, e])
+    );
+    const delegateById = new Map(candidates.delegates.map((d) => [d.registrationId, d]));
+
+    /**
+     * The shape of this run's scores, computed once and recorded on the run.
+     *
+     * ⛔ `degenerate` is a DIAGNOSTIC, never a correction. If it is true the
+     * weight is 0 and stated picks contribute nothing — which is the right
+     * failure, because a floor there would let picks drive the whole schedule
+     * while the engine underneath said nothing and the result still looked fine.
+     * Fix the engine, never the weight.
+     */
+    const scoreDistribution = describeTotals(matchScoreLookup.orgTotals);
+
+    const optimizeContext = {
+      meetingSlots: scaffolding.meetingSlots.map<MeetingSlotInput>((slot) => ({
+        id: slot.id,
+        dayNumber: slot.day_number,
+        slotNumber: slot.slot_number,
+        suiteId: slot.suite_id,
+      })),
+      policy: {
+        meetingGroupMin: schedulingPolicy.meeting_group_min,
+        meetingGroupMax: schedulingPolicy.meeting_group_max,
+      },
+      exhibitorSeats: exhibitorSeatFacts,
+      delegateSeats: delegateSeatFacts,
+      mayMeet: (delegateSeatId: string, exhibitorSeatId: string) => {
+        const delegate = delegateById.get(delegateSeatId);
+        const exhibitor = blackoutByExhibitorSeat.get(exhibitorSeatId);
+        if (!delegate || !exhibitor) return false;
+        return !isBlackedOut(delegate, exhibitor);
+      },
+      objective: {
+        delegateSeats: delegateSeatFacts,
+        exhibitorSeats: exhibitorSeatFacts,
+        orgTotalFor: matchScoreLookup.orgTotalFor,
+        personTotalFor: matchScoreLookup.personTotalFor,
+        /**
+         * What people ASKED for, alongside what the engine INFERS — two terms,
+         * never one number. Both come from loadMeetingCandidates already split
+         * by grain, so an org's pick counts once for the store and a delegate's
+         * once for that person. See lib/scheduler/objective.ts for why this is
+         * not folded into match_edges upstream.
+         */
+        orgPreferredFor: candidates.topChoices.orgPicked,
+        personPreferredFor: candidates.topChoices.personPicked,
+        /**
+         * ⛔ COMPUTED FROM THIS RUN'S OWN DISTRIBUTION, never a constant.
+         *
+         * `total` is becoming a per-run percentile, so any weight fitted to one
+         * night's numbers silently re-scales on the next — with no error, which
+         * is how the match session lost 98% of its pairs to a hand-fitted band
+         * after a recalibration. p75 − p50 keeps the meaning fixed instead:
+         * "honouring a stated pick is worth upgrading one pairing from median to
+         * upper quartile", true whatever the scale underneath.
+         */
+        preferenceWeight: scoreDistribution.weight,
+      },
+      seed: runSeed,
+    };
+
+    /**
+     * DRAW MANY SCHEDULES, KEEP THE BEST — the outer loop, not one fill.
+     *
+     * Each restart reseeds the greedy ordering, the tiebreaks and the fill
+     * order, then scores the finished schedule on the one objective. Restart
+     * seeds are derived from `runSeed`, so the same run reproduces the same
+     * winner exactly — a schedule nobody can regenerate is one nobody can
+     * explain to a member who asks why they got these five meetings.
+     */
+    const extendRunId = options?.extendRunId;
+    /**
+     * Set by whichever scope ran. A late add has NO restart spread — it draws
+     * once from the frozen schedule — and rescue is disabled, so both are
+     * reported as absent rather than as zeroes that look like a flat search.
+     */
+    let restartSpread: {
+      restarts: number; best: number; worst: number; median: number;
+      distinctValues: number; winningSeed: number;
+    } | null = null;
+    let rescueMoves = 0;
+    /** The objective of the schedule actually saved, whichever scope produced it. */
+    let objectiveAfter: { satisfiedPreferences: number; preferenceShare: number } | null = null;
+    let lateAddSummary: SchedulerRunSummary["lateAdd"] | undefined;
+    /** Pre-existing meetings keep the score ids the frozen run recorded. */
+    const preservedScoreIds = new Map<string, string[]>();
+
+    if (extendRunId) {
+      /**
+       * LATE ADD — extend a frozen schedule rather than build one.
+       *
+       * The seed is the promoted run's own assignments, so everything already
+       * sent out is a fixed starting point. lateAdd() then applies only the
+       * additive moves and VERIFIES that nobody lost a meeting, throwing if
+       * they did.
+       */
+      const { data: frozenRows, error: frozenError } = await adminClient
+        .from("schedules")
+        .select("meeting_slot_id, exhibitor_seat_id, delegate_seat_ids, match_score_ids")
+        .eq("scheduler_run_id", extendRunId)
+        .eq("status", "scheduled");
+
+      if (frozenError) throw new Error(frozenError.message);
+      if (!frozenRows || frozenRows.length === 0) {
+        throw new Error(
+          `cannot extend run ${extendRunId}: it has no scheduled meetings. ` +
+            "A late add needs a frozen schedule to add to."
+        );
+      }
+
+      const exhibitorOrgBySeat = new Map(
+        [...optimizeContext.exhibitorSeats.entries()].map(([id, e]) => [id, e.orgId])
+      );
+
+      const frozenAssignments = frozenRows.map((row) => {
+        const key = `${row.meeting_slot_id}::${row.exhibitor_seat_id}`;
+        preservedScoreIds.set(key, (row.match_score_ids as string[] | null) ?? []);
+        return {
+          meetingSlotId: row.meeting_slot_id as string,
+          exhibitorSeatId: row.exhibitor_seat_id as string,
+          exhibitorOrganizationId:
+            exhibitorOrgBySeat.get(row.exhibitor_seat_id as string) ?? "",
+          delegateSeatIds: (row.delegate_seat_ids as string[] | null) ?? [],
+          matchScoreKeys: [] as string[],
+        };
+      });
+
+      const result = lateAdd(frozenAssignments, { ...optimizeContext, seed: runSeed });
+
+      generateResult.assignments = result.assignments;
+      /**
+       * ⚠️ Recomputed against what is actually being SAVED. The full path below
+       * still reports the greedy draw's diagnostics, which describes a schedule
+       * that was never persisted — the same bug already fixed in run-search.ts.
+       * Not fixing it here in the same change, but a late add must not inherit
+       * it: its whole purpose is to report truthfully who ended up with what.
+       */
+      generateResult.diagnostics = validateScheduleConstraints({
+        meetingSlots: generateInput.meetingSlots,
+        assignments: result.assignments,
+        delegates: generateInput.delegates,
+        exhibitors: generateInput.exhibitors,
+        delegateTargetMeetings: generateResult.diagnostics.delegateTargetMeetings,
+        exhibitorTargetMeetings: Math.max(
+          1,
+          Math.floor(
+            generateInput.meetingSlots.length / Math.max(1, generateInput.exhibitors.length)
+          )
+        ),
+        policy: generateInput.policy,
+      });
+
+      objectiveAfter = {
+        satisfiedPreferences: result.objective.after.satisfiedPreferences,
+        preferenceShare: result.objective.after.preferenceShare,
+      };
+      lateAddSummary = {
+        newlySeated: result.newlySeated,
+        alsoGained: result.alsoGained,
+        stillWithoutMeetings: result.stillWithoutMeetings,
+        addedMeetings: result.added.length,
+      };
+    } else {
+      /**
+       * DRAW MANY SCHEDULES, KEEP THE BEST — the outer loop, not one fill.
+       *
+       * Each restart reseeds the greedy ordering, the tiebreaks and the fill
+       * order, then scores the finished schedule on the one objective. Restart
+       * seeds are derived from `runSeed`, so the same run reproduces the same
+       * winner exactly — a schedule nobody can regenerate is one nobody can
+       * explain to a member who asks why they got these five meetings.
+       */
+      const search = bestOfRestarts({
+        baseSeed: runSeed,
+        restarts: SCHEDULER_RESTARTS,
+        attempt: (seed) => {
+          const draw = generateSchedule({ ...generateInput, seed });
+          const improved = optimizeSchedule(draw.assignments, {
+            ...optimizeContext,
+            seed,
+          });
+          return {
+            value: improved.after.value,
+            result: { draw, improved },
+          };
+        },
+      });
+
+      const optimized = search.best.result.improved;
+      generateResult.assignments = optimized.assignments;
+      generateResult.diagnostics = search.best.result.draw.diagnostics;
+      restartSpread = {
+        restarts: search.spread.restarts,
+        best: search.spread.best,
+        worst: search.spread.worst,
+        median: search.spread.median,
+        distinctValues: search.spread.distinctValues,
+        winningSeed: search.best.seed,
+      };
+      rescueMoves = optimized.movesApplied.rescue;
+      objectiveAfter = {
+        satisfiedPreferences: optimized.after.satisfiedPreferences,
+        preferenceShare: optimized.after.preferenceShare,
+      };
+    }
 
     // Hard constraint violations (BLACKOUT, DUPLICATE_EXHIBITOR_ORG, GROUP_BOUNDS)
     // → infeasible: discard assignments, nothing usable.
@@ -496,11 +852,20 @@ export async function createSchedulerDraftRun(
         conference_id: conferenceId,
         scheduler_run_id: runRow.id,
         meeting_slot_id: assignment.meetingSlotId,
-        exhibitor_registration_id: assignment.exhibitorRegistrationId,
-        delegate_registration_ids: assignment.delegateRegistrationIds,
-        match_score_ids: assignment.matchScoreKeys
-          .map((key) => scoreIdByKey.get(key))
-          .filter((id): id is string => Boolean(id)),
+        exhibitor_seat_id: assignment.exhibitorSeatId,
+        delegate_seat_ids: assignment.delegateSeatIds,
+        /**
+         * ⚠️ A meeting carried over from the frozen run keeps the score ids that
+         * run recorded. Its matchScoreKeys are empty by construction — they are
+         * not stored on `schedules` and cannot be reconstructed — so mapping
+         * them would silently blank the provenance of every pre-existing
+         * meeting the moment a late add ran.
+         */
+        match_score_ids:
+          preservedScoreIds.get(`${assignment.meetingSlotId}::${assignment.exhibitorSeatId}`) ??
+          assignment.matchScoreKeys
+            .map((key) => scoreIdByKey.get(key))
+            .filter((id): id is string => Boolean(id)),
         status: "scheduled",
       }));
 
@@ -519,9 +884,53 @@ export async function createSchedulerDraftRun(
         status: "completed",
         completed_at: new Date().toISOString(),
         total_delegates: candidates.delegates.length,
-        total_exhibitors: candidates.exhibitors.length,
+        // The exhibitors that could actually be scheduled — a booth with no
+        // suite is not one, so counting it here would overstate the roster.
+        total_exhibitors: schedulableExhibitors.length,
         total_meetings_created: schedulesInput.length,
         constraint_violations: generateResult.diagnostics as unknown as Json,
+        // Recorded, not warned about: a booth with no suite gets no meetings by
+        // design. Kept visible so "why is my exhibitor count lower than my
+        // exhibitor list" has an answer that is not a bug hunt.
+        metadata: {
+          ...(runRow.metadata as Record<string, unknown> | null),
+          exhibitors_without_suite_entitlement: exhibitorsWithoutSuiteEntitlement,
+          /**
+           * What the scores looked like the night this ran, and what one stated
+           * pick was therefore worth. Recorded because the weight is derived
+           * from the distribution rather than fixed: without this a schedule
+           * from February is unreadable in June, and a degenerate run is
+           * indistinguishable from a run where nobody picked anything.
+           */
+          /**
+           * Did drawing many schedules buy anything? `distinct_values` of 1
+           * means every restart landed identically — the extra compute bought
+           * nothing and either the space is flat or the seed is not reaching
+           * the decisions it should. A finding, not a success.
+           */
+          restart_spread: restartSpread
+            ? {
+                restarts: restartSpread.restarts,
+                best: restartSpread.best,
+                worst: restartSpread.worst,
+                median: restartSpread.median,
+                distinct_values: restartSpread.distinctValues,
+                winning_seed: restartSpread.winningSeed,
+              }
+            : null,
+          /** Non-zero means the best schedule left someone with nothing. */
+          rescue_moves: rescueMoves,
+          score_distribution: {
+            edges: scoreDistribution.count,
+            distinct_values: scoreDistribution.distinct,
+            p50: scoreDistribution.p50,
+            p75: scoreDistribution.p75,
+            degenerate: scoreDistribution.degenerate,
+          },
+          preference_weight: scoreDistribution.weight,
+          satisfied_preferences: objectiveAfter?.satisfiedPreferences ?? null,
+          preference_share: objectiveAfter?.preferenceShare ?? null,
+        } as unknown as Json,
       })
       .eq("id", runRow.id)
       .select("*")
@@ -543,12 +952,23 @@ export async function createSchedulerDraftRun(
         runSeed,
         status: completedRun.status,
         totalMeetingsCreated: schedulesInput.length,
+        // A late add is auditable as one: which run it extended, and who it
+        // obliges somebody to write to.
+        extendedRunId: extendRunId ?? null,
+        lateAdd: lateAddSummary ?? null,
       },
     });
 
     return {
       success: true,
-      data: mapRunSummary(completedRun),
+      /**
+       * ⛔ `lateAdd` rides on the summary because the caller cannot get it any
+       * other way — it is derived by comparing before and after, and both are
+       * gone once this returns. `alsoGained` in particular is an obligation:
+       * those people hold a schedule that is now wrong and need
+       * `conference_schedule_ready` re-sent.
+       */
+      data: { ...mapRunSummary(completedRun), lateAdd: lateAddSummary },
     };
   } catch (error) {
     await adminClient

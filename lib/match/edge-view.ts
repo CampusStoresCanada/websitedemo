@@ -1,0 +1,218 @@
+/**
+ * Interpreting a stored edge for display.
+ *
+ * Pure, and deliberately NOT in `read.ts`: that module is `server-only` because
+ * it touches the database, which is a protection worth keeping — but it also
+ * makes anything inside it untestable. These are the parts worth testing, so
+ * they live where a test can reach them.
+ */
+
+import type { StoredEdge, StoredReason } from "./read-types";
+
+/**
+ * The three-bucket confidence the existing panels render.
+ *
+ * ⚠️ Derived from `total`, which already discounts by coverage — so a pair that
+ * matched on one axis and was silent on every other cannot present as "high"
+ * merely because that one axis was perfect. The old 0–3 scale could.
+ *
+ * ⛔ The thresholds are PERCENTILES, because `total` is a percentile.
+ *
+ * `calibrate()` maps each pair to its position in the run's own distribution, so
+ * 75 means "in the top quarter of everything this run surfaced". Any threshold
+ * that is not itself a percentile is a number fitted to one run's shape, which is
+ * the mistake calibrate() exists to prevent — and it duly reappeared here.
+ *
+ * ⚠️ Measured on run 98a59853 (12,775 live edges), the old 45/25 cut produced:
+ *
+ *     member_to_partner   70.9% high · 27.1% medium ·  2.0% low
+ *     partner_to_member   20.8% high ·  4.6% medium · 74.5% low
+ *
+ * Same thresholds, opposite verdicts, and neither is about match quality. One
+ * scale spans BOTH directions on purpose (so two edges are comparable), but
+ * members carry person-level text and partners carry a company blurb, so
+ * member→partner sits at the top of that shared distribution by construction. A
+ * fixed cut therefore reads out which side of the corpus is denser and calls it
+ * confidence. At 75/50 the member list becomes 28.7 / 35.1 / 36.2.
+ *
+ * ⚠️ partner_to_member stays bimodal — 17 / 3 / 80 — and that is left alone
+ * deliberately. A partner really does have a handful of plausible stores and a
+ * long tail of irrelevant ones; flattening that to look balanced would be
+ * inventing reassurance. "Three strong, the rest weak" is the true shape.
+ */
+export function confidenceBucket(total: number): "high" | "medium" | "low" {
+  if (total >= 75) return "high";
+  if (total >= 50) return "medium";
+  return "low";
+}
+
+/**
+ * The category the match was made on, recovered from its reason.
+ *
+ * The old matchers returned `matchingCategory` / `matchingSubcategories` because
+ * they had them to hand mid-loop. The engine carries the same facts as evidence
+ * on the category reason, so the panels keep their contract without the scoring
+ * being duplicated to produce it.
+ */
+export function categoryEvidence(reasons: readonly StoredReason[]): {
+  category: string;
+  subcategories: string[];
+} {
+  const category = reasons.find((r) => r.axis === "category" && r.supports);
+  if (!category) return { category: "", subcategories: [] };
+  return { category: category.evidence[0] ?? "", subcategories: [...category.evidence] };
+}
+
+/** Did the certification axis actually fire for this pair? */
+export function hasCertificationMatch(edge: StoredEdge): boolean {
+  const value = edge.breakdown.certification;
+  return typeof value === "number" && value > 0;
+}
+
+
+/**
+ * The common filter, offered as a convenience.
+ *
+ * ⛔ NOT a gate, and not the engine's opinion. `match_edges` stores every reason
+ * with its provenance precisely so each surface can answer "who is reading
+ * this?" for itself — an ops dashboard shows everything, a member sees their own
+ * hidden answers, a partner-facing panel does not, and the print directory has
+ * its own rule again. None of that is knowable from inside a scorer.
+ *
+ * This helper implements only the most common of those: show a reason unless it
+ * reveals another org's deliberately hidden section. Surfaces with a different
+ * answer should read `sourceOrgId` / `sourceVisibility` directly rather than
+ * bending this.
+ */
+export function reasonsVisibleTo(
+  reasons: readonly StoredReason[],
+  readerOrgId: string | null
+): StoredReason[] {
+  return reasons.filter((r) => {
+    if (r.sourceVisibility !== "hidden") return true;
+    // Your own hidden answers are still yours to see. Hiding is directional: it
+    // conceals from others, never from the person who set it.
+    return !!r.sourceOrgId && r.sourceOrgId === readerOrgId;
+  });
+}
+
+
+/** One surface-level adjustment, and why it was applied. */
+export interface AppliedBoost {
+  /** Rendered to the reader — "New Partner", "Exhibiting", whatever the rule is. */
+  label: string;
+  /** Multiplier on `total`. 1.15 is a nudge; 2.0 is a thumb on the scale. */
+  multiplier: number;
+}
+
+export interface BoostedEdge {
+  edge: StoredEdge;
+  /** ⛔ The engine's fit score, untouched. Always available for comparison. */
+  total: number;
+  /** After surface boosts. Sort on this when promoting; never store it as fit. */
+  promoted: number;
+  boosts: AppliedBoost[];
+}
+
+/**
+ * Apply promotional weighting on top of a match, without corrupting it.
+ *
+ * ⛔ Boosts belong HERE, not in the score. The 90-day new-partner spotlight is a
+ * business decision — CSC wants new partners to get early visibility — and it is
+ * not evidence that they fit anyone. Folded into `total` it becomes impossible to
+ * ever ask "did they rank because they match, or because we promoted them", which
+ * is the question you need when judging whether the engine works at all.
+ *
+ * It is also time-bounded, and a run is a snapshot: baked in, day 89 and day 91
+ * produce different stored scores for reasons that have nothing to do with fit.
+ * And the spotlight carries an **exclusion list** (lib/membership/new-partner-
+ * spotlight.ts), which is policy the scorer should not have to know — that file
+ * applies it in one place so an opt-out cannot leak through one surface and not
+ * another. Ask it, here, rather than teaching the engine a second copy.
+ *
+ * Both numbers come back so a surface can rank by `promoted` and still say why:
+ * "Merangue — New Partner", rather than silently reordering.
+ *
+ *   const map = await getSpotlightMap();
+ *   const ranked = applyBoosts(edges, (e) =>
+ *     map.has(e.candidateOrgId) ? [{ label: "New Partner", multiplier: 1.25 }] : []
+ *   );
+ */
+export function applyBoosts(
+  edges: readonly StoredEdge[],
+  boostsFor: (edge: StoredEdge) => AppliedBoost[]
+): BoostedEdge[] {
+  return edges
+    .map((edge) => {
+      const boosts = boostsFor(edge);
+      const multiplier = boosts.reduce((acc, b) => acc * b.multiplier, 1);
+      return { edge, total: edge.total, promoted: edge.total * multiplier, boosts };
+    })
+    .sort((a, b) => b.promoted - a.promoted);
+}
+
+/**
+ * Give promoted candidates a bounded number of slots, without reordering the rest.
+ *
+ * ⛔ Use this, not `applyBoosts`, for anything that promotes on a list. A
+ * multiplier cannot work here and the numbers are unambiguous: within one
+ * member's shortlist the top ten scores span **1.3 points out of 100**, because
+ * `total` is a percentile across every pair in the run and a member's whole
+ * shortlist sits in the 98th–100th. Measured against a real member:
+ *
+ *     x1.02  →  5 of the top 8 replaced by new partners
+ *     x1.05  →  7 of the top 8
+ *     x1.25  →  7 of the top 8
+ *
+ * Even a 2% thumb is a bulldozer. There is no multiplier small enough to be a
+ * nudge and large enough to do anything, so the mechanism itself is wrong.
+ *
+ * Reserving slots is bounded and predictable instead: at most `slots` positions
+ * change, the rest of the list keeps its fit order, and a reader can be told
+ * exactly which entries were placed rather than earned.
+ */
+export function promoteIntoSlots<T>(
+  items: readonly T[],
+  isPromoted: (item: T) => boolean,
+  options: { slots?: number; within?: number } = {}
+): { item: T; promoted: boolean }[] {
+  const slots = options.slots ?? 1;
+  const within = options.within ?? 10;
+  if (slots <= 0 || items.length === 0) {
+    return items.map((item) => ({ item, promoted: false }));
+  }
+
+  const head = items.slice(0, within);
+  const tail = items.slice(within);
+  const already = head.filter(isPromoted).length;
+  const shortBy = Math.min(slots - already, tail.filter(isPromoted).length);
+
+  // ⚠️ Already enough of them near the top: change NOTHING. A promotion that
+  // fires when the candidate would have ranked there anyway is a thumb pressing
+  // on its own side of the scale, and it makes the boost impossible to evaluate.
+  if (shortBy <= 0) {
+    return items.map((item) => ({ item, promoted: false }));
+  }
+
+  // The best promoted candidates from below the fold, in their existing order —
+  // never a random pick, so the same input always produces the same list.
+  const lifted = tail.filter(isPromoted).slice(0, shortBy);
+  const liftedSet = new Set(lifted);
+
+  // ⛔ Make room by pushing the weakest un-promoted entries DOWN, never by
+  // dropping them. An earlier version deleted them: a member asking for ten
+  // suggestions silently got eight, and the two best things we had to say were
+  // the ones thrown away. Promotion reorders a list; it must never shorten it.
+  const displaced = new Set(
+    head.filter((i) => !isPromoted(i)).slice(-shortBy)
+  );
+
+  return [
+    ...head.filter((i) => !displaced.has(i)).map((item) => ({ item, promoted: false })),
+    ...lifted.map((item) => ({ item, promoted: true })),
+    // Displaced entries outrank everything still below the fold, so they sit at
+    // the top of the tail rather than at the bottom of the list.
+    ...[...displaced].map((item) => ({ item, promoted: false })),
+    ...tail.filter((i) => !liftedSet.has(i)).map((item) => ({ item, promoted: false })),
+  ];
+}

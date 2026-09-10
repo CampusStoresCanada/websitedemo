@@ -1,3 +1,4 @@
+import { isBlackedOut } from "./blackout";
 import type { ScoreBreakdown, SwapAlternative, SwapCountMode } from "./types";
 
 interface CapCountRow {
@@ -14,25 +15,21 @@ const CONSUMES_REQUESTED = new Set([
 
 const CONSUMES_COMMITTED = new Set(["approved_committed"]);
 
-function formatLabel(key: keyof ScoreBreakdown): string {
-  switch (key) {
-    case "category_overlap":
-      return "category overlap";
-    case "buying_timeline_match":
-      return "timeline overlap";
-    case "priority_alignment":
-      return "priority alignment";
-    case "top_5_preference":
-      return "top 5 preference";
-    case "meeting_intent_match":
-      return "meeting intent fit";
-    case "purchasing_authority":
-      return "purchasing authority fit";
-    case "blackout_penalty":
-      return "blackout compatibility";
-    default:
-      return key;
-  }
+const AXIS_LABELS: Record<string, string> = {
+  // The engine's nine axes.
+  category: "category overlap",
+  certification: "certification fit",
+  province: "province fit",
+  timing: "buying-cycle timing",
+  requirements: "stated requirements",
+  services: "store services",
+  cohort: "cohort similarity",
+  semantic: "description similarity",
+  behavioural: "past behaviour",
+};
+
+function formatLabel(key: string): string {
+  return AXIS_LABELS[key] ?? key;
 }
 
 export function buildWhyLowerReasons(
@@ -40,12 +37,18 @@ export function buildWhyLowerReasons(
   alternative: ScoreBreakdown
 ): string[] {
   const whyLower: string[] = [];
-  const keys = Object.keys(original) as Array<keyof ScoreBreakdown>;
 
-  for (const key of keys) {
-    if (key === "blackout_penalty") continue;
-    const originalScore = Number(original[key] ?? 0);
-    const alternativeScore = Number(alternative[key] ?? 0);
+  for (const key of Object.keys(original)) {
+    const originalScore = original[key];
+    const alternativeScore = alternative[key];
+    /**
+     * ⛔ null is not zero — it means the axis never had anything to say about
+     * one of these pairs. Reporting "province is lower (0 vs 0.4)" for an axis
+     * we never observed states a judgement we never made. Two pairs can only be
+     * compared on an axis where BOTH were actually scored.
+     */
+    if (originalScore === null || originalScore === undefined) continue;
+    if (alternativeScore === null || alternativeScore === undefined) continue;
     if (alternativeScore < originalScore) {
       whyLower.push(
         `${formatLabel(key)} is lower (${alternativeScore} vs ${originalScore})`
@@ -56,15 +59,20 @@ export function buildWhyLowerReasons(
   return whyLower;
 }
 
+/**
+ * @deprecated Prefer `isBlackedOut` from ./blackout directly. Kept as a thin
+ * adapter so the swap call site and its tests keep their positional shape —
+ * the rule itself now lives in exactly one place.
+ */
 export function isTwoWayBlackout(
   delegateOrgId: string,
   delegateBlackoutList: string[],
   exhibitorOrgId: string,
   exhibitorBlackoutList: string[]
 ): boolean {
-  return (
-    delegateBlackoutList.includes(exhibitorOrgId) ||
-    exhibitorBlackoutList.includes(delegateOrgId)
+  return isBlackedOut(
+    { organizationId: delegateOrgId, blackoutList: delegateBlackoutList },
+    { organizationId: exhibitorOrgId, blackoutList: exhibitorBlackoutList }
   );
 }
 

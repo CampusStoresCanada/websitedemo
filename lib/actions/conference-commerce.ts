@@ -1,7 +1,11 @@
 "use server";
 
 import crypto from "node:crypto";
-import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import {
+  isGlobalAdmin,
+  requireAuthenticated,
+  requireConferenceOpsAccess,
+} from "@/lib/auth/guards";
 import { stripe } from "@/lib/stripe/client";
 import { resolveConferenceOrderTaxRates } from "@/lib/stripe/tax";
 import { createAdminClient } from "@/lib/supabase/admin";
@@ -76,10 +80,26 @@ interface CheckoutInput {
   successUrl: string;
   cancelUrl: string;
   idempotencyKey?: string;
+  /** Desk sale: conference ops transacting for an attending org. */
+  allowConferenceOps?: boolean;
 }
 
+/**
+ * ⛔ `allowConferenceOps` is an EXPLICIT capability, not a widened role.
+ *
+ * Conference operations staff sell on an attending organisation's behalf at the
+ * desk — that is the job, and it is the same trust level that already lets them
+ * create booth sales. But it is not something every commerce call should
+ * inherit, so callers opt in one at a time and the flag names why.
+ *
+ * ⚠️ requireConferenceOpsAccess is NOT the same as isGlobalAdmin: it also passes
+ * an org admin of an allowlisted masthead org. So a desk operator can be
+ * conference ops and fail this check, which is exactly what blocked selling a
+ * fifth badge to somebody standing at the desk.
+ */
 async function assertUserCanManageOrg(params: {
   organizationId: string;
+  allowConferenceOps?: boolean;
 }): Promise<
   | { ok: true; userId: string; userEmail: string | null }
   | { ok: false; error: string }
@@ -87,8 +107,13 @@ async function assertUserCanManageOrg(params: {
   const auth = await requireAuthenticated();
   if (!auth.ok) return { ok: false, error: auth.error };
 
-  const canAccess =
+  let canAccess =
     isGlobalAdmin(auth.ctx.globalRole) || auth.ctx.activeOrgIds.includes(params.organizationId);
+
+  if (!canAccess && params.allowConferenceOps) {
+    const ops = await requireConferenceOpsAccess();
+    canAccess = ops.ok;
+  }
 
   if (!canAccess) {
     return { ok: false, error: "You are not authorized to manage commerce for this organization." };
@@ -611,6 +636,8 @@ export async function addOfferToCart(params: {
   organizationId: string;
   offerEntityId: string;
   quantity?: number;
+  /** Desk sale: conference ops transacting for an attending org. */
+  allowConferenceOps?: boolean;
   /** One slot per unit being added — `null`/omitted entries are "assign later." Registration offers only. */
   attendees?: (AttendeeRef | null)[];
 }): Promise<
@@ -620,7 +647,10 @@ export async function addOfferToCart(params: {
     }>
   | CommerceFailure
 > {
-  const authz = await assertUserCanManageOrg({ organizationId: params.organizationId });
+  const authz = await assertUserCanManageOrg({
+    organizationId: params.organizationId,
+    allowConferenceOps: params.allowConferenceOps,
+  });
   if (!authz.ok) return { success: false, error: authz.error };
 
   const quantity = Math.max(1, params.quantity ?? 1);
@@ -1286,7 +1316,10 @@ export async function clearCart(params: {
 export async function createConferenceCheckout(
   input: CheckoutInput
 ): Promise<CommerceSuccess<{ checkoutUrl: string; orderId: string; checkoutSessionId: string }> | CommerceFailure> {
-  const authz = await assertUserCanManageOrg({ organizationId: input.organizationId });
+  const authz = await assertUserCanManageOrg({
+    organizationId: input.organizationId,
+    allowConferenceOps: input.allowConferenceOps,
+  });
   if (!authz.ok) return { success: false, error: authz.error };
 
   try {

@@ -7,6 +7,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { listDirectoryContacts } from "@/lib/contacts/directory";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getViewerContext } from "@/lib/visibility/viewer";
 import { loadVisibilityConfig, applyFieldMask } from "@/lib/visibility/engine";
@@ -24,7 +25,7 @@ import type {
 // ---------------------------------------------------------------------------
 
 export async function captureOrgProfileSnapshot(
-  slug: string
+  slug: string,
 ): Promise<OrgProfileSnapshot | null> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return null;
@@ -34,19 +35,33 @@ export async function captureOrgProfileSnapshot(
   const { data: org, error: orgError } = await supabase
     .from("organizations")
     .select(
-      "id, name, slug, type, province, city, website, logo_url, company_description, fte, square_footage, certifications"
+      "id, name, slug, type, province, city, website, logo_url, company_description, fte, square_footage, certifications, show_contacts",
     )
     .eq("slug", slug)
     .maybeSingle();
 
   if (orgError || !org) return null;
 
-  const { data: contactRows } = await supabase
-    .from("contacts")
-    .select("name, role_title, email, phone")
-    .eq("organization_id", org.id)
-    .is("archived_at", null)
-    .order("name");
+  // A snapshot is served from /s/[id] with NO authentication — anyone holding
+  // the link sees it, and links get forwarded. So this is deliberately
+  // stricter than the live org profile, which only hides these from
+  // non-privileged viewers: nobody who asked not to be listed, and no org that
+  // switched contacts off, ends up inside a shareable artifact — regardless of
+  // how privileged the person capturing it happened to be.
+  const contactRows = (
+    await listDirectoryContacts<{
+      name: string | null;
+      role_title: string | null;
+      email: string | null;
+      phone: string | null;
+    }>({
+      organizationIds: [org.id],
+      fields: "name, role_title, email, phone",
+    })
+  ).sort((a, b) => (a.name ?? "").localeCompare(b.name ?? ""));
+
+  const orgHidesContacts =
+    (org as { show_contacts?: boolean | null }).show_contacts === false;
 
   // Mask per the CURRENT authenticated viewer's level, same rules as the
   // org profile page itself — a snapshot should never reveal more than the
@@ -55,14 +70,14 @@ export async function captureOrgProfileSnapshot(
   const visibilityConfig = await loadVisibilityConfig();
   const isOwnOrg = viewer.viewerOrgAdminIds.includes(org.id);
 
-  const contacts = (contactRows ?? []).map((c) => {
+  const contacts = (orgHidesContacts ? [] : contactRows).map((c) => {
     const masked = applyFieldMask(
       c as unknown as Record<string, unknown>,
       viewer.viewerLevel,
       visibilityConfig,
       "contacts",
       isOwnOrg,
-      org.type
+      org.type,
     ) as Partial<Contact>;
 
     return {
@@ -101,7 +116,7 @@ export async function captureOrgProfileSnapshot(
  * Capture an event snapshot. `slugOrId` may be a slug (from URL) or a UUID.
  */
 export async function captureEventSnapshot(
-  slugOrId: string
+  slugOrId: string,
 ): Promise<EventSnapshot | null> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return null;
@@ -109,13 +124,17 @@ export async function captureEventSnapshot(
   const { supabase } = auth.ctx;
 
   // Try slug first, fall back to id
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(slugOrId);
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      slugOrId,
+    );
   const query = supabase
     .from("events")
-    .select("id, title, slug, description, starts_at, ends_at, location, is_virtual");
-  const { data: event, error } = await (isUuid
-    ? query.eq("id", slugOrId)
-    : query.eq("slug", slugOrId)
+    .select(
+      "id, title, slug, description, starts_at, ends_at, location, is_virtual",
+    );
+  const { data: event, error } = await (
+    isUuid ? query.eq("id", slugOrId) : query.eq("slug", slugOrId)
   ).maybeSingle();
 
   if (error || !event) return null;
@@ -145,22 +164,29 @@ export async function captureEventSnapshot(
  */
 export async function captureConferenceSnapshot(
   yearOrId: string,
-  editionCode?: string
+  editionCode?: string,
 ): Promise<ConferenceSnapshot | null> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return null;
 
   const { supabase } = auth.ctx;
 
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(yearOrId);
+  const isUuid =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(
+      yearOrId,
+    );
   let query = supabase
     .from("conference_instances")
-    .select("id, name, year, edition_code, start_date, end_date, location_city, location_province, location_venue");
+    .select(
+      "id, name, year, edition_code, start_date, end_date, location_city, location_province, location_venue",
+    );
 
   if (isUuid) {
     query = query.eq("id", yearOrId) as typeof query;
   } else if (editionCode) {
-    query = query.eq("year", parseInt(yearOrId, 10)).eq("edition_code", editionCode) as typeof query;
+    query = query
+      .eq("year", parseInt(yearOrId, 10))
+      .eq("edition_code", editionCode) as typeof query;
   } else {
     return null;
   }
@@ -190,7 +216,7 @@ export async function captureConferenceSnapshot(
 // ---------------------------------------------------------------------------
 
 export async function captureResourcesSnapshot(
-  pageUrl: string
+  pageUrl: string,
 ): Promise<ResourcesSnapshot> {
   return {
     type: "resources",

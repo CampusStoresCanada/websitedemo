@@ -4,6 +4,9 @@ import { getConferenceCatalogReadiness } from "@/lib/actions/conference-entities
 import ConferenceOverview from "@/components/admin/conference/ConferenceOverview";
 import ConferenceLifecycle from "@/components/admin/conference/ConferenceLifecycle";
 import type { ConferenceStatus } from "@/lib/constants/conference";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { loadAttendance } from "@/lib/conference/attendance";
+import AttendancePanel from "@/components/admin/conference/AttendancePanel";
 
 export const metadata = { title: "Conference Overview | Admin" };
 
@@ -13,10 +16,13 @@ export default async function ConferenceOverviewPage({
   params: Promise<{ id: string }>;
 }) {
   const { id } = await params;
-  const [result, readinessResult, catalogResult] = await Promise.all([
+  const [result, readinessResult, catalogResult, attendance] = await Promise.all([
     getConference(id),
     getConferenceStatusReadiness(id),
     getConferenceCatalogReadiness(id),
+    // ⚠️ Never let a counting problem take down the overview. An empty panel is
+    // a missing report; a thrown error is a conference nobody can administer.
+    loadAttendance(createAdminClient(), id).catch(() => []),
   ]);
   if (!result.success || !result.data) {
     return <div className="text-center py-12 text-gray-500">Conference not found.</div>;
@@ -34,6 +40,7 @@ export default async function ConferenceOverviewPage({
         />
       )}
       <ConferenceOverview conference={conference} forSaleCount={forSaleCount} />
+      <AttendancePanel rows={attendance} />
     </div>
   );
 }

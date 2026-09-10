@@ -2,10 +2,14 @@
 
 import { requireAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import type { ReprintPlan } from "@/lib/conference/badges/reprint-plan";
+import { getBadgePrintStock } from "@/lib/conference/badges/print-stock";
 import { logAuditEventSafe } from "@/lib/ops/audit";
+import { resolveBadgeRun, unnamedSeats } from "@/lib/conference/badges/run";
+import { normalizeArrangement, type BadgeArrangement } from "@/lib/conference/badges/arrangement";
 import {
   normalizeBadgeTemplateConfig,
-  type BadgeRole,
+  resolveBadgeVariant,
   type BadgeTextBindingKey,
   type BadgeFrontConfig,
 } from "@/lib/conference/badges/template";
@@ -27,6 +31,8 @@ export type DelegateBatchOrderMode = "delegate_first_name" | "delegate_last_name
 export type ExhibitorBatchOrderMode = "exhibitor_room_number" | "exhibitor_org_name";
 
 export type BadgeSetupSessionState = {
+  /** How the print file is stacked — see lib/conference/badges/arrangement.ts. */
+  arrangement?: BadgeArrangement;
   startFrom?: "blank" | "current";
   canvasPreset?: "oversized" | "trimmed";
   delegateOverlay?: string;
@@ -66,18 +72,14 @@ type BadgePreflightIssue = {
   code:
     | "MISSING_CANONICAL_PERSON"
     | "MISSING_TEMPLATE"
+    | "MULTIPLE_REGISTRATION_TYPES"
+    | "MISSING_NAME"
+    | "ROSTER_LOAD_FAILED"
     | "TEXT_OVERFLOW";
   message: string;
   personId?: string;
 };
 
-function splitDisplayName(value: string): { firstName: string; lastName: string } {
-  const display = compactWhitespace(value);
-  if (!display) return { firstName: "", lastName: "" };
-  const parts = display.split(/\s+/);
-  if (parts.length === 1) return { firstName: parts[0], lastName: "" };
-  return { firstName: parts.slice(0, -1).join(" "), lastName: parts[parts.length - 1] };
-}
 
 function splitOrganizationSmart(orgName: string): { line1: string; line2: string } {
   const words = compactWhitespace(orgName).split(" ").filter(Boolean);
@@ -149,9 +151,6 @@ function bindingValue(params: {
   }
 }
 
-function roleForPersonKind(kind: string): BadgeRole {
-  return compactWhitespace(kind).toLowerCase() === "exhibitor" ? "exhibitor" : "delegate";
-}
 
 function personLabel(firstName: string, lastName: string, displayName: string, personId: string): string {
   const full = compactWhitespace(`${firstName} ${lastName}`);
@@ -164,33 +163,77 @@ async function runBadgePreflight(params: {
   conferenceId: string;
   personId?: string | null;
   templateVersion?: number | null;
+  /** Whether this run will also print a card for each unnamed seat. */
+  includeBlanks?: boolean;
 }): Promise<BadgePreflightIssue[]> {
   const db = createAdminClient();
   const issues: BadgePreflightIssue[] = [];
 
-  const peopleQuery = db
-    .from("conference_people")
-    .select(
-      "id, canonical_person_id, person_kind, display_name, first_name, last_name, role_title, delegate_title, organization_name, badge_org_name, organization_id, badge_organization_id, city, province"
-    )
-    .eq("conference_id", params.conferenceId)
-    .neq("assignment_status", "canceled");
-  const peopleScoped =
-    params.personId && params.personId.trim().length > 0
-      ? await peopleQuery.eq("id", params.personId).limit(1)
-      : await peopleQuery;
-  const peopleRows = (peopleScoped.data as Array<Record<string, unknown>> | null) ?? [];
-  for (const row of peopleRows) {
-    const personId = typeof row.id === "string" ? row.id : undefined;
-    const canonicalPersonId =
-      typeof row.canonical_person_id === "string" && row.canonical_person_id.length > 0
-        ? row.canonical_person_id
-        : null;
-    if (!canonicalPersonId) {
+  // Every column named here must exist on conference_people. This select
+  // carried eight that the v3 cutover removed — first_name, last_name,
+  // delegate_title, organization_name, badge_org_name, badge_organization_id,
+  // city, province — and Postgres rejects the whole statement on the first of
+  // them. Because the result was read as `.data ?? []` with no error check,
+  // that hard failure surfaced as "0 people, 0 issues, preflight passed" on
+  // every run. Name and title resolve from `contacts`, org/city/province from
+  // `organizations`; the fallback chain below already preferred both sources.
+  // The roster is resolved in ONE place — lib/conference/badges/roster.ts. This
+  // function used to rebuild it inline: its own people query, its own contacts
+  // and organizations lookups, and its own `person_kind` → role mapping. That
+  // made four independent answers to "what kind of badge is this" across the
+  // print pipeline, and preflight was checking a different one than the PDF
+  // rendered.
+  let run: Awaited<ReturnType<typeof resolveBadgeRun>>;
+  try {
+    run = await resolveBadgeRun(params.conferenceId);
+  } catch (error) {
+    return [
+      {
+        code: "ROSTER_LOAD_FAILED",
+        message: error instanceof Error ? error.message : "Could not load the conference roster.",
+      },
+    ];
+  }
+  // Walk the run forwards: each type, then the seats somebody is named to.
+  //
+  // ⚠️ This used to say an unnamed seat "is simply not a badge to check". That
+  // stopped being true when blanks became printable: a blank has no name and no
+  // identity, but it still carries the ORGANISATION's name across the front, and
+  // 152 of them can go in one file. The org half is checked separately below,
+  // and only when the run is actually printing them.
+  const entries = run.types.flatMap((type) =>
+    type.seats
+      .filter((seat) => seat.person)
+      .filter((seat) => !params.personId?.trim() || seat.person!.personId === params.personId)
+      .map((seat) => ({ type, person: seat.person! }))
+  );
+
+  // One person, one face. Holding seats on two registration types is not
+  // something to resolve by tie-break — a human picks which badge they get.
+  for (const clash of run.peopleInMultipleTypes) {
+    issues.push({
+      code: "MULTIPLE_REGISTRATION_TYPES",
+      message: `${clash.displayName} holds seats on more than one registration type (${clash.typeNames.join(", ")}) — decide which badge they get before printing.`,
+      personId: clash.personId,
+    });
+  }
+
+  for (const { person } of entries) {
+    // An empty name used to pass preflight and print the literal word ATTENDEE
+    // (see splitDisplayName in render-html). That placeholder is gone, so an
+    // unnamed badge now prints blank — which is worse, and worth blocking.
+    if (!person.firstName && !person.lastName && !person.displayName) {
+      issues.push({
+        code: "MISSING_NAME",
+        message: "This person has no name on their conference record or their linked contact — their badge would print blank.",
+        personId: person.personId,
+      });
+    }
+    if (!person.hasIdentityLink) {
       issues.push({
         code: "MISSING_CANONICAL_PERSON",
         message: "Conference person is missing canonical person linkage.",
-        personId,
+        personId: person.personId,
       });
     }
   }
@@ -229,105 +272,15 @@ async function runBadgePreflight(params: {
   // Resilient mode: overlay assets are optional. Renderer already handles null overlays.
   const template = normalizeBadgeTemplateConfig(configResult.data.field_mapping ?? null);
 
-  const canonicalIds = Array.from(
-    new Set(
-      peopleRows
-        .map((row) => (typeof row.canonical_person_id === "string" ? row.canonical_person_id : null))
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-  const orgIds = Array.from(
-    new Set(
-      peopleRows
-        .map((row) =>
-          typeof row.organization_id === "string"
-            ? row.organization_id
-            : typeof row.badge_organization_id === "string"
-              ? row.badge_organization_id
-              : null
-        )
-        .filter((value): value is string => Boolean(value))
-    )
-  );
-
-  const canonicalById = new Map<string, { first_name: string | null; last_name: string | null; title: string | null }>();
-  if (canonicalIds.length > 0) {
-    const { data: canonicalRows } = await db
-      .from("contacts")
-      .select("id, first_name, last_name, title:role_title")
-      .in("id", canonicalIds);
-    for (const row of (canonicalRows as Array<Record<string, unknown>> | null) ?? []) {
-      if (typeof row.id !== "string") continue;
-      canonicalById.set(row.id, {
-        first_name: typeof row.first_name === "string" ? row.first_name : null,
-        last_name: typeof row.last_name === "string" ? row.last_name : null,
-        title: typeof row.title === "string" ? row.title : null,
-      });
-    }
-  }
-
-  const orgById = new Map<string, { name: string | null; city: string | null; province: string | null }>();
-  if (orgIds.length > 0) {
-    const { data: orgRows } = await db
-      .from("organizations")
-      .select("id, name, city, province")
-      .in("id", orgIds);
-    for (const row of (orgRows as Array<Record<string, unknown>> | null) ?? []) {
-      if (typeof row.id !== "string") continue;
-      orgById.set(row.id, {
-        name: typeof row.name === "string" ? row.name : null,
-        city: typeof row.city === "string" ? row.city : null,
-        province: typeof row.province === "string" ? row.province : null,
-      });
-    }
-  }
-
-  for (const row of peopleRows) {
-    const personId = typeof row.id === "string" ? row.id : null;
-    if (!personId) continue;
-    const role = roleForPersonKind(typeof row.person_kind === "string" ? row.person_kind : "");
-    const roleLayout = template.roleLayouts?.[role] ?? null;
-    const front: BadgeFrontConfig = roleLayout?.front ?? template.front;
-    const canonical =
-      typeof row.canonical_person_id === "string"
-        ? canonicalById.get(row.canonical_person_id) ?? null
-        : null;
-    const organizationId =
-      typeof row.organization_id === "string"
-        ? row.organization_id
-        : typeof row.badge_organization_id === "string"
-          ? row.badge_organization_id
-          : null;
-    const org = organizationId ? orgById.get(organizationId) ?? null : null;
-    const displayName = compactWhitespace(
-      typeof row.display_name === "string" ? row.display_name : ""
-    );
-    const rowFirst = compactWhitespace(typeof row.first_name === "string" ? row.first_name : "");
-    const rowLast = compactWhitespace(typeof row.last_name === "string" ? row.last_name : "");
-    const fallbackSplit = splitDisplayName(displayName);
-    const firstName = compactWhitespace(
-      canonical?.first_name || rowFirst || fallbackSplit.firstName
-    );
-    const lastName = compactWhitespace(
-      canonical?.last_name || rowLast || fallbackSplit.lastName
-    );
-    const roleTitle = compactWhitespace(
-      canonical?.title ||
-        (typeof row.role_title === "string" ? row.role_title : "") ||
-        (typeof row.delegate_title === "string" ? row.delegate_title : "")
-    );
-    const organizationName = compactWhitespace(
-      (typeof row.organization_name === "string" ? row.organization_name : "") ||
-        (typeof row.badge_org_name === "string" ? row.badge_org_name : "") ||
-        org?.name ||
-        ""
-    );
-    const city = compactWhitespace(
-      (typeof row.city === "string" ? row.city : "") || org?.city || ""
-    );
-    const province = compactWhitespace(
-      (typeof row.province === "string" ? row.province : "") || org?.province || ""
-    );
+  for (const entry of entries) {
+    const personId = entry.person.personId;
+    // The layout IS the registration type being iterated. Nothing is derived.
+    const { front } = resolveBadgeVariant(template, { variantKey: entry.type.entityId });
+    const { displayName, firstName, lastName, roleTitle } = entry.person;
+    const seat = entry.type.seats.find((s) => s.person?.personId === personId);
+    const organizationName = seat?.organizationName ?? "";
+    const city = seat?.organizationCity ?? "";
+    const province = seat?.organizationProvince ?? "";
     const orgSplit = splitOrganizationSmart(organizationName.toUpperCase());
     const computedFirst = front.firstName.allCaps ? firstName.toUpperCase() : firstName;
     const computedLast = front.lastName.allCaps ? lastName.toUpperCase() : lastName;
@@ -412,6 +365,59 @@ async function runBadgePreflight(params: {
         personId,
         message: `${personLabel(firstName, lastName, displayName, personId)}: ${check.field} does not fully fit its text box.`,
       });
+    }
+  }
+
+  // Blanks, when the run is printing them.
+  //
+  // Only the organisation lines: a blank has no name and no title by design, so
+  // the person checks above have nothing to look at. ⛔ Deduped by (type,
+  // organisation) — one company with forty unnamed seats is ONE thing to fix,
+  // and forty identical warnings would bury the run's real issues.
+  if (params.includeBlanks) {
+    const seen = new Set<string>();
+    for (const { type, seat } of unnamedSeats(run)) {
+      const key = `${type.entityId}:${seat.organizationName}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const { front } = resolveBadgeVariant(template, { variantKey: type.entityId });
+      const orgSplit = splitOrganizationSmart(seat.organizationName.toUpperCase());
+      const person = {
+        displayName: "",
+        firstName: "",
+        lastName: "",
+        roleTitle: "",
+        organizationName: seat.organizationName,
+        city: seat.organizationCity,
+        province: seat.organizationProvince,
+      };
+      const computed = {
+        orgLine1: orgSplit.line1,
+        orgLine2: orgSplit.line2,
+        firstName: "",
+        lastName: "",
+        roleTitle: "",
+      };
+      for (const [field, slot] of [
+        ["organizationLine1", front.organizationLine1],
+        ["organizationLine2", front.organizationLine2],
+      ] as const) {
+        const value = bindingValue({
+          binding: front.bindings[field],
+          person,
+          computed,
+        });
+        if (!value.trim()) continue;
+        const layout = fitTextLayout(value, slot, template.canvas.dpi, {
+          maxLines: slot.maxLines ?? 1,
+          lineHeightEm: slot.lineHeight ?? 1.12,
+        });
+        if (!layout.overflowed) continue;
+        issues.push({
+          code: "TEXT_OVERFLOW",
+          message: `Blank ${type.name} badge for ${seat.organizationName}: ${field} does not fully fit its text box.`,
+        });
+      }
     }
   }
 
@@ -618,10 +624,14 @@ async function insertBadgeEvent(params: {
 export async function createPreprintedBadgeJob(params: {
   conferenceId: string;
   templateVersion: number | null;
-  delegateOrderMode?: DelegateBatchOrderMode;
-  delegateOrderDirection?: "asc" | "desc";
-  exhibitorOrderMode?: ExhibitorBatchOrderMode;
-  exhibitorOrderDirection?: "asc" | "desc";
+  /**
+   * Also print a card for every seat nobody has been named to.
+   *
+   * Off unless asked for. An operator generating a package expects the badges
+   * they have names for; silently doubling a 15-badge file to 166 because the
+   * roster is incomplete is not a decision to make on their behalf.
+   */
+  includeBlanks?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -632,13 +642,18 @@ export async function createPreprintedBadgeJob(params: {
 
   const db = createAdminClient();
   const nowIso = new Date().toISOString();
-  const delegateOrderMode = params.delegateOrderMode ?? "delegate_last_name";
-  const exhibitorOrderMode = params.exhibitorOrderMode ?? "exhibitor_org_name";
-  const delegateOrderDirection = params.delegateOrderDirection ?? "asc";
-  const exhibitorOrderDirection = params.exhibitorOrderDirection ?? "asc";
+  // How the print file is stacked, from the conference's saved arrangement.
+  // Falls back to one section per registration type when nobody has set one.
+  const arrangementRun = await resolveBadgeRun(params.conferenceId);
+  const arrangement = normalizeArrangement(
+    (await getBadgeSetupSession(params.conferenceId)).data?.state?.arrangement ?? null,
+    arrangementRun.types.map((t) => ({ entityId: t.entityId, name: t.name }))
+  );
+
   const preflightIssues = await runBadgePreflight({
     conferenceId: params.conferenceId,
     templateVersion: params.templateVersion,
+    includeBlanks: params.includeBlanks === true,
   });
   const blockingIssues = preflightIssues.filter(
     (issue) => issue.code !== "TEXT_OVERFLOW"
@@ -671,16 +686,24 @@ export async function createPreprintedBadgeJob(params: {
       template_version: params.templateVersion,
       initiated_by: auth.ctx.userId,
       metadata: {
-        ordering: {
-          delegate: {
-            mode: delegateOrderMode,
-            direction: delegateOrderDirection,
-          },
-          exhibitor: {
-            mode: exhibitorOrderMode,
-            direction: exhibitorOrderDirection,
-          },
-        },
+        // The arrangement is SNAPSHOT onto the job, the same way template_version
+        // is. Re-rendering an old job must reproduce the file that was printed,
+        // not whatever the operator has since changed the arrangement to.
+        arrangement,
+        // Same reasoning, and it matters more here: the unnamed seats a blank
+        // stack is built from shrink every time somebody is named, so a job
+        // regenerated next week would otherwise come back a different length.
+        includeBlanks: params.includeBlanks === true,
+        // ⛔ Snapshot, for the same reason as the two above. The spare counts
+        // are a PERCENTAGE of numbers that move — the roster grows as people
+        // are named, and the exhibitor basis follows sales once they overtake
+        // the floor — so a job regenerated a week later would come back a
+        // different length. Freezing the policy on the job means reprinting the
+        // file reproduces the box that was delivered.
+        //
+        // ⚠️ Without this the pipeline read `metadata.printStock` and found
+        // nothing on every job, so spares silently never printed.
+        printStock: await getBadgePrintStock(params.conferenceId),
       },
       started_at: nowIso,
       updated_at: nowIso,
@@ -745,11 +768,15 @@ export async function createPreprintedBadgeJob(params: {
       conferenceId: params.conferenceId,
       pipelineType: "preprinted",
       status: "pdf_generated",
-      delegateOrderMode,
-      delegateOrderDirection,
-      exhibitorOrderMode,
-      exhibitorOrderDirection,
       templateVersion: params.templateVersion,
+      // The audit record says how the file was stacked, in the arrangement's
+      // own terms — not the retired delegate/exhibitor sort modes.
+      sections: arrangement.sections.map((section) => ({
+        label: section.label,
+        types: section.entityIds.length,
+        sortBy: section.sortBy,
+        direction: section.direction,
+      })),
     },
   });
 
@@ -825,6 +852,8 @@ export async function requestBadgeReprint(params: {
   reason: string;
   note?: string | null;
   transportMethod: "pdf" | "printer_bridge";
+  /** What the label should carry, recorded even when nothing can print it yet. */
+  plan?: ReprintPlan;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -891,6 +920,12 @@ export async function requestBadgeReprint(params: {
       metadata: {
         qr_payload: token.data.qrPayload,
         token_id: token.data.tokenId,
+        // ⛔ Snapshot, like every other job metadata field. What the desk had in
+        // hand is a fact about the moment, not something to re-derive later —
+        // the blanks for a company run out as they are used, so asking the same
+        // question next week gives a different answer about a card that has
+        // already been printed and handed over.
+        ...(params.plan ? { reprint_plan: params.plan } : {}),
       },
       started_at: nowIso,
       updated_at: nowIso,

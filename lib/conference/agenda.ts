@@ -1,6 +1,7 @@
 import type { BuildEntity } from "@/lib/actions/conference-entities";
 import { effectiveAttributes, effectiveRefs } from "./entity-graph";
 import { zonedWallTimeToUtcIso } from "./tz";
+import { CONTAINMENT_ROLE } from "./inclusion";
 
 /**
  * Derive a linear, day-grouped, nestable agenda from the v3 catalog graph —
@@ -210,7 +211,7 @@ function pickParent(
     const parentEntity = byId.get(parent.id);
     if (!parentEntity) continue;
     const includesChild = effectiveRefs(parentEntity, byId).some(
-      (r) => r.role === "includes" && r.toEntityId === child.id
+      (r) => r.role === CONTAINMENT_ROLE && r.toEntityId === child.id
     );
     if (includesChild) return parent.id;
   }

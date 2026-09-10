@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { updateField } from "@/lib/actions/update-field";
 import { setContactHidden } from "@/lib/actions/user-management";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
@@ -27,6 +27,51 @@ export interface OrgEditData {
   procurementInfo: ProcurementInfo | null;
 }
 
+import { loadMyConferenceObligations } from "@/lib/actions/conference-access";
+import { updateConferencePersonSelf } from "@/lib/actions/conference-people";
+import { answerPersonalTask } from "@/lib/actions/conference-tasks";
+import BadgePreview from "@/components/me/BadgePreview";
+
+type ConferenceObligations = {
+  personId: string;
+  conferenceId: string;
+  fields: { key: string; label: string }[];
+  missing: string[];
+  values: Record<string, string | null>;
+  checkIns: {
+    taskId: string;
+    name: string;
+    description: string;
+    state: "done" | "not_applicable" | "pending";
+  }[];
+  badge: {
+    displayName: string | null;
+    roleTitle: string | null;
+    organizationName: string | null;
+    variantKey: string | null;
+    variantName: string | null;
+    template: unknown | null;
+  };
+};
+
+/**
+ * Everything a person may set about their own conference record, in the order
+ * it makes sense to read. Labels match what /me/conference used before this
+ * moved; the obligations engine supplies its own labels for the ones it owns,
+ * and these fill in for the travel fields it has no opinion about.
+ */
+const SELF_CONFERENCE_FIELDS: { key: string; label: string; kind?: "select" }[] = [
+  { key: "dietary_restrictions", label: "Dietary restrictions" },
+  { key: "accessibility_needs", label: "Accessibility needs" },
+  { key: "mobile_phone", label: "Mobile phone" },
+  { key: "emergency_contact_name", label: "Emergency contact name" },
+  { key: "emergency_contact_phone", label: "Emergency contact phone" },
+  // Travel — travel_mode, preferred_departure_airport, road_origin_address,
+  // seat_preference — is deliberately absent. Those fields exist and are
+  // self-editable at the server, but CSC is not running travel yet and asking
+  // for a departure airport before anyone can act on it collects data we have
+  // no plan for. Add them back when travel is a thing, not before.
+];
 interface SelfEditModalProps {
   orgEditData: OrgEditData[];
 }
@@ -65,8 +110,40 @@ function initProcurementState(contactId: string, info: ProcurementInfo | null): 
   return { buyerCategories, subcategoryMap };
 }
 
+/**
+ * Opens this modal straight onto the Conference tab from elsewhere on the page.
+ *
+ * A deadline that says "these are under Edit" is a signpost, not a control —
+ * the reader still has to find the button, open it, and pick the right tab. A
+ * hash link does the whole journey in one click, and it survives being
+ * bookmarked or sent to someone.
+ */
+export const EDIT_CONFERENCE_HASH = "#edit-conference";
+
 export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfEditModalProps) {
   const [open, setOpen] = useState(false);
+  const [openToConference, setOpenToConference] = useState(false);
+
+  useEffect(() => {
+    const openFromHash = () => {
+      if (window.location.hash === EDIT_CONFERENCE_HASH) {
+        setOpenToConference(true);
+        setOpen(true);
+      }
+    };
+    openFromHash();
+    window.addEventListener("hashchange", openFromHash);
+    return () => window.removeEventListener("hashchange", openFromHash);
+  }, []);
+
+  function closeAndClearHash() {
+    setOpen(false);
+    setOpenToConference(false);
+    // Leave the address bar clean, or the same link cannot be used twice.
+    if (window.location.hash === EDIT_CONFERENCE_HASH) {
+      window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
+    }
+  }
   // Lifted, mutable copy of the server-rendered prop. The page is a server
   // component, so `initialOrgEditData` is fixed at request time — without this,
   // closing and reopening the modal would re-derive state from stale data and
@@ -97,7 +174,7 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
       </button>
 
       {open && (
-        <SelfEditModalInner orgEditData={orgEditData} onClose={() => setOpen(false)} onSaved={handleSaved} />
+        <SelfEditModalInner orgEditData={orgEditData} onClose={closeAndClearHash} onSaved={handleSaved} initialTab={openToConference ? "conference" : "details"} />
       )}
     </>
   );
@@ -105,10 +182,12 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
 
 function SelfEditModalInner({
   orgEditData,
+  initialTab = "details",
   onClose,
   onSaved,
 }: {
   orgEditData: OrgEditData[];
+  initialTab?: "details" | "conference";
   onClose: () => void;
   onSaved: (orgId: string, patch: { contact: ContactEditData; procurementInfo: ProcurementInfo | null }) => void;
 }) {
@@ -145,15 +224,50 @@ function SelfEditModalInner({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  type Tab = "details" | "procurement";
-  const [tab, setTab] = useState<Tab>("details");
+  type Tab = "details" | "procurement" | "conference";
+  const [tab, setTab] = useState<Tab>(initialTab);
 
   const activeOrg = orgEditData.find((o) => o.orgId === activeOrgId)!;
   const fields = fieldStates[activeOrgId];
   const isHidden = hiddenStates[activeOrgId];
   const procState = procStates[activeOrgId];
   const showProcurement = !!procState;
-  const activeTab: Tab = showProcurement ? tab : "details";
+
+  /**
+   * The conference details only this person can answer.
+   *
+   * An org admin sees these as outstanding on the roster and is given a way to
+   * chase; the answer itself is typed here, by the person the answer is about.
+   * Loaded per active org, because someone may hold seats through more than
+   * one of them.
+   */
+  const [conferenceObligations, setConferenceObligations] =
+    useState<ConferenceObligations | null>(null);
+  const [conferenceFields, setConferenceFields] = useState<Record<string, string>>({});
+
+  // Not scoped to the active org tab: a conference seat belongs to the person,
+  // whichever organisation seated them. Loaded once, not per org switch.
+  useEffect(() => {
+    let cancelled = false;
+    void loadMyConferenceObligations().then((result) => {
+      if (cancelled || !result.success || !result.data) return;
+      // The tab appears when this person is on a conference at all — they may
+      // want to correct a seat preference nobody has asked them for.
+      setConferenceObligations(result.data);
+      setConferenceFields(
+        Object.fromEntries(
+          SELF_CONFERENCE_FIELDS.map((f) => [f.key, result.data!.values[f.key] ?? ""])
+        )
+      );
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const showConference = conferenceObligations !== null;
+  const activeTab: Tab =
+    (tab === "procurement" && !showProcurement) || (tab === "conference" && !showConference)
+      ? "details"
+      : tab;
 
   function switchOrg(orgId: string) {
     setActiveOrgId(orgId);
@@ -173,9 +287,57 @@ function SelfEditModalInner({
     setProcStates((prev) => ({ ...prev, [activeOrgId]: updater(prev[activeOrgId]) }));
   }
 
+  async function answerCheckIn(
+    taskId: string,
+    state: "done" | "not_applicable" | "pending"
+  ) {
+    setSaving(true);
+    setError(null);
+    const result = await answerPersonalTask({
+      personId: conferenceObligations!.personId,
+      taskId,
+      state,
+      revalidate: "/me",
+    });
+    setSaving(false);
+    if (!result.success) {
+      setError(result.error ?? "Could not save that.");
+      return;
+    }
+    // Reflect it without closing — someone may be answering several at once.
+    setConferenceObligations((prev) =>
+      prev
+        ? {
+            ...prev,
+            checkIns: prev.checkIns.map((c) => (c.taskId === taskId ? { ...c, state } : c)),
+          }
+        : prev
+    );
+  }
+
   async function handleSave() {
     setSaving(true);
     setError(null);
+
+    // The conference tab writes to conference_people, not contacts, so it
+    // saves on its own path and returns — the contact/procurement work below
+    // has nothing to do with it.
+    if (activeTab === "conference" && conferenceObligations) {
+      // updateConferencePersonSelf has guarded this since the v2 projection:
+      // it writes only SELF_EDITABLE fields and only when the signed-in user IS
+      // the person. Empty means "none on file", stored as NULL so the
+      // obligation stays outstanding rather than reading as answered.
+      const result = await updateConferencePersonSelf(
+        conferenceObligations.personId,
+        Object.fromEntries(
+          Object.entries(conferenceFields).map(([k, v]) => [k, v.trim() || null])
+        )
+      );
+      setSaving(false);
+      if (result.success) onClose();
+      else setError(result.error ?? "Could not save that.");
+      return;
+    }
 
     const contact = activeOrg.contact;
     const original = initFieldState(contact);
@@ -324,8 +486,8 @@ function SelfEditModalInner({
             </div>
           )}
 
-          {/* Details / Procurement sub-tabs — only when procurement is available for this org */}
-          {showProcurement && (
+          {/* Sub-tabs — shown when this org has anything beyond details. */}
+          {(showProcurement || showConference) && (
             <div className="flex border-b border-gray-100 shrink-0">
               <button
                 onClick={() => { setTab("details"); setError(null); }}
@@ -337,21 +499,137 @@ function SelfEditModalInner({
               >
                 Details
               </button>
-              <button
-                onClick={() => { setTab("procurement"); setError(null); }}
-                className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  activeTab === "procurement"
-                    ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
-                    : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                Procurement
-              </button>
+              {showProcurement && (
+                <button
+                  onClick={() => { setTab("procurement"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    activeTab === "procurement"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Procurement
+                </button>
+              )}
+              {showConference && (
+                <button
+                  onClick={() => { setTab("conference"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    activeTab === "conference"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Conference
+                </button>
+              )}
             </div>
           )}
 
           {/* Body */}
           <div className="overflow-y-auto flex-1">
+          {activeTab === "conference" && conferenceObligations && (
+            <div className="px-6 py-5 space-y-4">
+              <p className="text-xs text-gray-500">
+                Only you can set these. They go to catering, travel and the on-site
+                team — never into the printed directory. Your colleagues can see
+                whether you&rsquo;ve answered, not what you said or how to change it.
+              </p>
+              {SELF_CONFERENCE_FIELDS.map((f) => {
+                // Marked, not filtered. Someone who owes a dietary answer sees
+                // it flagged; someone who does not can still set one.
+                const outstanding = conferenceObligations.missing.includes(f.key);
+                return (
+                  <div key={f.key}>
+                    <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1.5">
+                      {f.label}
+                      {outstanding && (
+                        <span className="ml-2 normal-case tracking-normal text-[11px] font-medium text-amber-700">
+                          still needed
+                        </span>
+                      )}
+                    </label>
+                    {f.kind === "select" ? (
+                      <select
+                        value={conferenceFields[f.key] ?? ""}
+                        onChange={(e) =>
+                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                      >
+                        <option value="">Not sure yet</option>
+                        <option value="flight">Flight</option>
+                        <option value="road">Road</option>
+                      </select>
+                    ) : (
+                      <input
+                        value={conferenceFields[f.key] ?? ""}
+                        onChange={(e) =>
+                          setConferenceFields((prev) => ({ ...prev, [f.key]: e.target.value }))
+                        }
+                        placeholder={SELF_CONFERENCE_PLACEHOLDERS[f.key] ?? ""}
+                        className="w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#EE2A2E]/20 focus:border-[#EE2A2E]"
+                      />
+                    )}
+                  </div>
+                );
+              })}
+              <p className="text-xs text-gray-400">
+                Leave one blank if it doesn&rsquo;t apply — we&rsquo;d rather keep asking than
+                record a guess.
+              </p>
+
+              {conferenceObligations.checkIns.length > 0 && (
+                // Same tab as the fields above, because "things only you can
+                // tell us about yourself" is one job. A hotel is answered with
+                // buttons rather than typed, which is a difference in the
+                // control, not a reason for a second place to go.
+                <div className="border-t border-gray-100 pt-4">
+                  {conferenceObligations.checkIns.map((c) => (
+                    <div key={c.taskId} className="mb-3 last:mb-0">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                        {c.name}
+                      </p>
+                      <p className="mt-0.5 text-xs text-gray-500">{c.description}</p>
+                      {/* Show the badge rather than ask them to picture it. A
+                          misspelling is obvious at a glance and nearly
+                          invisible in a form. */}
+                      {c.name.toLowerCase().includes("badge") && (
+                        <div className="mt-2">
+                          <BadgePreview
+                            template={
+                              conferenceObligations.badge.template as never
+                            }
+                            variantKey={conferenceObligations.badge.variantKey}
+                            person={conferenceObligations.badge}
+                          />
+                        </div>
+                      )}
+                      <div className="mt-1.5 flex flex-wrap gap-1.5">
+                        {CHECK_IN_ANSWERS.map((a) => (
+                          <button
+                            key={a.state}
+                            type="button"
+                            disabled={saving}
+                            aria-pressed={c.state === a.state}
+                            onClick={() => void answerCheckIn(c.taskId, a.state)}
+                            className={`rounded-full px-3 py-1 text-xs font-semibold disabled:opacity-50 ${
+                              c.state === a.state
+                                ? "bg-[#163D6D] text-white"
+                                : "border border-gray-300 text-gray-600 hover:border-gray-400"
+                            }`}
+                          >
+                            {a.label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           {activeTab === "details" && (
           <div className="px-6 py-5 space-y-4">
 
@@ -521,3 +799,26 @@ function SelfEditModalInner({
     </>
   );
 }
+
+/** Same examples the org-side modal uses; "Dietary restrictions" alone gets
+ *  answered "none" by people who do need a gluten-free plate. */
+const SELF_CONFERENCE_PLACEHOLDERS: Record<string, string> = {
+  dietary_restrictions: "Vegetarian, celiac, nut allergy…",
+  accessibility_needs: "Step-free access, seating near the front…",
+  emergency_contact_name: "Who we call if something happens",
+  emergency_contact_phone: "Mobile is best",
+  mobile_phone: "How the on-site team reaches you",
+  preferred_departure_airport: "YYC, YYZ…",
+  road_origin_address: "Where you're driving from",
+  seat_preference: "Aisle, window, extra legroom…",
+};
+
+/** The three answers a check-in can take, first-person like the fields above. */
+const CHECK_IN_ANSWERS: {
+  state: "pending" | "done" | "not_applicable";
+  label: string;
+}[] = [
+  { state: "pending", label: "Not yet" },
+  { state: "done", label: "Done" },
+  { state: "not_applicable", label: "Doesn't apply" },
+];

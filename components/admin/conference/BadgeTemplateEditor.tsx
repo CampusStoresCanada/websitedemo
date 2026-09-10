@@ -11,14 +11,14 @@ import {
   type SetStateAction,
 } from "react";
 import type {
+  BadgeBackBlockSource,
   BadgeFrontLayerId,
   BadgeLogoBindingKey,
-  BadgeRole,
   BadgeShapeKind,
   BadgeTextBindingKey,
   BadgeTemplateConfigV1,
 } from "@/lib/conference/badges/template";
-import { normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
+import { DEFAULT_VARIANT, normalizeBadgeTemplateConfig } from "@/lib/conference/badges/template";
 import { designPxFromPt, fitTextLayout, slotHeightDesignPx } from "@/lib/conference/badges/text-fit";
 
 type Props = {
@@ -30,12 +30,50 @@ type Props = {
 };
 
 type EditorSide = "front" | "back";
+/**
+ * The blocks an admin can put on the back, in plain language.
+ *
+ * ⛔ Kept in step with `BadgeBackBlockSource`. These are the four questions a
+ * badge back can answer from the catalogue; which of them THIS conference wants,
+ * where, and under what heading is not ours to decide.
+ */
+const BACK_BLOCK_SOURCES: readonly BadgeBackBlockSource[] = [
+  "access_summary",
+  "agenda",
+  "qr_caption",
+  "venue",
+] as const;
+
+/**
+ * What a block looks like on the canvas.
+ *
+ * ⛔ Sample text, not the real thing — the words come from each holder's own
+ * entitlement at print time. An empty rectangle would tell an admin nothing
+ * about how much room the block actually needs.
+ */
+const BACK_BLOCK_SAMPLE: Record<BadgeBackBlockSource, string> = {
+  access_summary:
+    "Mon, Feb 1 · Tue, Feb 2 · Wed, Feb 3\nAll meals included\nCurated meetings — Get Organized",
+  agenda:
+    "Mon, Feb 1\n  5:30 PM  Meet & Greet · Vista Salon\nTue, Feb 2\n  8:00 AM  Breakfast · Vista Salon\n  9:30 AM  Meeting Block 1\n 12:15 PM  Lunch · Vista Salon",
+  qr_caption: "This code identifies your badge for check-in and scanning on site.",
+  venue: "5875 Airport Road, Mississauga, Ontario\nOn site: Carolyn Potter · (416) 807-8700",
+};
+
+const BACK_BLOCK_LABELS: Record<BadgeBackBlockSource, string> = {
+  access_summary: "What this admits you to",
+  agenda: "Schedule",
+  qr_caption: "QR caption",
+  venue: "Venue & onsite contact",
+};
+
 type SelectedLayer =
   | BadgeFrontLayerId
   | "back_qr"
   | `back_image:${string}`
   | `back_shape:${string}`
   | `back_text:${string}`
+  | `back_block:${string}`
   | "role_background"
   | "role_tint"
   | "role_overlay";
@@ -154,6 +192,10 @@ function isFrontFreeTextLayer(layerId: SelectedLayer): layerId is `text:${string
   return layerId.startsWith("text:");
 }
 
+function isBackBlockLayer(layerId: SelectedLayer): layerId is `back_block:${string}` {
+  return layerId.startsWith("back_block:");
+}
+
 function isBackFreeTextLayer(layerId: SelectedLayer): layerId is `back_text:${string}` {
   return layerId.startsWith("back_text:");
 }
@@ -178,6 +220,7 @@ function labelForLayer(layerId: SelectedLayer): string {
   if (layerId.startsWith("back_image:")) return layerId.replace("back_image:", "back_image_");
   if (layerId.startsWith("back_shape:")) return layerId.replace("back_shape:", "back_shape_");
   if (layerId.startsWith("back_text:")) return layerId.replace("back_text:", "back_text_");
+  if (layerId.startsWith("back_block:")) return layerId.replace("back_block:", "");
   if (layerId.startsWith("image:image_bg_")) {
     return `background_${layerId.replace("image:image_bg_", "")}`;
   }
@@ -191,39 +234,71 @@ function cloneDeep<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
+/**
+ * A layout for every variant the template has, seeded from the base where one
+ * is missing. Four separate places used to hand-build `{delegate, exhibitor}`
+ * here; each of them silently dropped every registration-type layout.
+ */
+function seedLayoutsFor(
+  config: BadgeTemplateConfigV1,
+  extraKeys: string[] = []
+): NonNullable<BadgeTemplateConfigV1["variantLayouts"]> {
+  const out: NonNullable<BadgeTemplateConfigV1["variantLayouts"]> = {};
+  for (const key of new Set([DEFAULT_VARIANT, ...Object.keys(config.variants), ...extraKeys])) {
+    out[key] =
+      config.variantLayouts?.[key] ?? {
+        front: cloneDeep(config.front),
+        back: cloneDeep(config.back),
+      };
+  }
+  return out;
+}
+
 export default function BadgeTemplateEditor({
   initialConfig,
   initialVersion,
   initialName,
   initialStatus,
   saveAction,
-}: Props) {
+  variantLabels = {},
+}: Props & { variantLabels?: Record<string, string> }) {
   const normalizedInitialConfig = normalizeBadgeTemplateConfig(initialConfig);
   const [config, setConfigState] = useState<BadgeTemplateConfigV1>(() => {
-    const roleLayouts = {
-      delegate:
-        normalizedInitialConfig.roleLayouts?.delegate ?? {
-          front: cloneDeep(normalizedInitialConfig.front),
-          back: cloneDeep(normalizedInitialConfig.back),
-        },
-      exhibitor:
-        normalizedInitialConfig.roleLayouts?.exhibitor ?? {
-          front: cloneDeep(normalizedInitialConfig.front),
-          back: cloneDeep(normalizedInitialConfig.back),
-        },
-    };
+    // Seed a layout for every variant the template actually has — previously
+    // this built exactly `delegate` and `exhibitor`, so after those keys stopped
+    // existing the editor read `undefined` the moment a tab was clicked.
+    const variantLayouts = seedLayoutsFor(normalizedInitialConfig);
     return {
       ...normalizedInitialConfig,
-      roleLayouts,
-      front: cloneDeep(roleLayouts.delegate.front),
-      back: cloneDeep(roleLayouts.delegate.back),
+      variantLayouts,
+      front: cloneDeep(variantLayouts[DEFAULT_VARIANT]!.front),
+      back: cloneDeep(variantLayouts[DEFAULT_VARIANT]!.back),
     };
   });
   const [version, setVersion] = useState<number>(initialVersion);
   const [name, setName] = useState<string>(initialName);
   const [status, setStatus] = useState<"draft" | "active" | "archived">(initialStatus);
-  const [role, setRole] = useState<BadgeRole>("delegate");
-  const [cloneTargetRole, setCloneTargetRole] = useState<BadgeRole>("exhibitor");
+  // The variant being edited. A string, because a conference has whatever
+  // registration types it sells — the two-tab UI above this is the last
+  // remaining place that assumes exactly two.
+  /**
+   * Every variant an admin may design: the default, plus every registration
+   * type this conference sells.
+   *
+   * ⛔ This used to be `Object.keys(config.variants)` — only the variants the
+   * template already stored. On CSC 2027 that was three of ten: you could not
+   * design a badge for a day pass because no day pass had ever been given one,
+   * which is circular. A type with no stored variant inherits the default until
+   * somebody edits it; editing it is what creates the override.
+   */
+  const editableVariantKeys = [
+    DEFAULT_VARIANT,
+    ...Object.keys(variantLabels),
+    ...Object.keys(config.variants).filter((k) => k !== DEFAULT_VARIANT),
+  ].filter((k, i, all) => all.indexOf(k) === i);
+
+  const [role, setRole] = useState<string>(DEFAULT_VARIANT);
+  const [cloneTargetRole, setCloneTargetRole] = useState<string>(DEFAULT_VARIANT);
   const [side, setSide] = useState<EditorSide>("front");
   const [selectedLayer, setSelectedLayer] = useState<SelectedLayer>("firstName");
   const [selectedLayers, setSelectedLayers] = useState<SelectedLayer[]>(["firstName"]);
@@ -258,7 +333,10 @@ export default function BadgeTemplateEditor({
   const dims = useMemo(() => designPx(config), [config]);
   const scale = PREVIEW_WIDTH / dims.width;
   const previewHeight = dims.height * scale;
-  const roleTheme = config.roles[role];
+  // A registration type nobody has differentiated yet has no stored variant —
+  // it inherits the default. Reading it directly returned undefined, which is
+  // what crashed the editor the moment such a tab was clicked.
+  const roleTheme = config.variants[role] ?? config.variants[DEFAULT_VARIANT];
   const frontQr = config.front.qr ?? { x: 705, y: 1210, size: 200 };
   const frontLayerOrder = useMemo(() => {
     const withBase = [...config.front.layerOrder];
@@ -285,22 +363,16 @@ export default function BadgeTemplateEditor({
             ? (updater as (value: BadgeTemplateConfigV1) => BadgeTemplateConfigV1)(prev)
             : updater;
         const normalized = normalizeBadgeTemplateConfig(computed);
-        const existingLayouts = {
-          delegate:
-            normalized.roleLayouts?.delegate ?? {
-              front: cloneDeep(normalized.front),
-              back: cloneDeep(normalized.back),
-            },
-          exhibitor:
-            normalized.roleLayouts?.exhibitor ?? {
-              front: cloneDeep(normalized.front),
-              back: cloneDeep(normalized.back),
-            },
-        };
+        // ⛔ This used to be an object literal with exactly `delegate` and
+        // `exhibitor` keys, and it did NOT spread `normalized.variantLayouts`.
+        // Once layouts became keyed by registration type, the first keystroke in
+        // the editor replaced the whole map with two dead keys and silently
+        // destroyed every per-type layout — which then fell back to `default`
+        // with no error, printing exhibitor badges in the delegate colour.
         return {
           ...normalized,
-          roleLayouts: {
-            ...existingLayouts,
+          variantLayouts: {
+            ...(normalized.variantLayouts ?? {}),
             [role]: {
               front: cloneDeep(normalized.front),
               back: cloneDeep(normalized.back),
@@ -338,9 +410,13 @@ export default function BadgeTemplateEditor({
   ]);
 
   useEffect(() => {
-    setCloneTargetRole((prev) =>
-      prev === role ? (role === "delegate" ? "exhibitor" : "delegate") : prev
-    );
+    // Any number of variants, so "the other one" is just the first that is not
+    // the one being edited — not a hardcoded opposite.
+    setCloneTargetRole((prev: string) => {
+      if (prev !== role) return prev;
+      const others = editableVariantKeys.filter((k) => k !== role);
+      return others[0] ?? role;
+    });
   }, [role]);
 
   const commitSnapshot = useCallback((baseline: EditorSnapshot, next: EditorSnapshot) => {
@@ -360,21 +436,12 @@ export default function BadgeTemplateEditor({
   useEffect(() => {
     setConfigState((prev) => {
       const normalized = normalizeBadgeTemplateConfig(prev);
-      const existingLayouts = normalized.roleLayouts ?? {
-        delegate: {
-          front: cloneDeep(normalized.front),
-          back: cloneDeep(normalized.back),
-        },
-        exhibitor: {
-          front: cloneDeep(normalized.front),
-          back: cloneDeep(normalized.back),
-        },
-      };
+      const existingLayouts = seedLayoutsFor(normalized, editableVariantKeys);
       const target = existingLayouts[role];
       if (!target) return normalized;
       return {
         ...normalized,
-        roleLayouts: existingLayouts,
+        variantLayouts: existingLayouts,
         front: cloneDeep(target.front),
         back: cloneDeep(target.back),
       };
@@ -553,24 +620,21 @@ export default function BadgeTemplateEditor({
   }
 
   function roleLayoutSnapshot(prev: BadgeTemplateConfigV1) {
-    const existing = prev.roleLayouts ?? {
-      delegate: { front: cloneDeep(prev.front), back: cloneDeep(prev.back) },
-      exhibitor: { front: cloneDeep(prev.front), back: cloneDeep(prev.back) },
-    };
-    return {
-      delegate: {
-        front: cloneDeep(existing.delegate?.front ?? prev.front),
-        back: cloneDeep(existing.delegate?.back ?? prev.back),
-      },
-      exhibitor: {
-        front: cloneDeep(existing.exhibitor?.front ?? prev.front),
-        back: cloneDeep(existing.exhibitor?.back ?? prev.back),
-      },
-    } as Record<BadgeRole, { front: BadgeTemplateConfigV1["front"]; back: BadgeTemplateConfigV1["back"] }>;
+    // Snapshot EVERY variant. Rebuilding two named keys here dropped each
+    // registration type's layout on any operation that took a snapshot.
+    const existing = seedLayoutsFor(prev, editableVariantKeys);
+    const out: Record<string, { front: BadgeTemplateConfigV1["front"]; back: BadgeTemplateConfigV1["back"] }> = {};
+    for (const [key, layout] of Object.entries(existing)) {
+      out[key] = {
+        front: cloneDeep(layout?.front ?? prev.front),
+        back: cloneDeep(layout?.back ?? prev.back),
+      };
+    }
+    return out;
   }
 
   function layerSetting(layerId: SelectedLayer) {
-    if (layerId === "back_qr" || isBackImageLayer(layerId) || isBackShapeLayer(layerId) || isBackFreeTextLayer(layerId)) {
+    if (layerId === "back_qr" || isBackImageLayer(layerId) || isBackShapeLayer(layerId) || isBackFreeTextLayer(layerId) || isBackBlockLayer(layerId)) {
       return backLayerSettings[layerId] ?? { visible: true, locked: false };
     }
     const mappedId: BadgeFrontLayerId =
@@ -587,7 +651,7 @@ export default function BadgeTemplateEditor({
     layerId: SelectedLayer,
     patch: Partial<{ visible: boolean; locked: boolean }>
   ) {
-    if (layerId === "back_qr" || isBackImageLayer(layerId) || isBackShapeLayer(layerId) || isBackFreeTextLayer(layerId)) {
+    if (layerId === "back_qr" || isBackImageLayer(layerId) || isBackShapeLayer(layerId) || isBackFreeTextLayer(layerId) || isBackBlockLayer(layerId)) {
       setBackLayerSettings((prev) => ({
         ...prev,
         [layerId]: {
@@ -704,6 +768,22 @@ export default function BadgeTemplateEditor({
         startClientY: event.clientY,
         startX: shape.x,
         startY: shape.y,
+        groupStart: undefined,
+      });
+      return;
+    }
+    if (isBackBlockLayer(layerId)) {
+      const blockId = layerId.replace("back_block:", "");
+      const block = (config.back.blocks ?? []).find((item) => item.id === blockId);
+      if (!block) return;
+      setDragState({
+        layerId,
+        mode: "move",
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: block.x,
+        startY: block.y,
         groupStart: undefined,
       });
       return;
@@ -891,6 +971,24 @@ export default function BadgeTemplateEditor({
         resizeAxis,
         startWidth: text.width,
         startHeight: text.sizePt,
+      });
+      return;
+    }
+    if (isBackBlockLayer(layerId)) {
+      const blockId = layerId.replace("back_block:", "");
+      const block = (config.back.blocks ?? []).find((item) => item.id === blockId);
+      if (!block) return;
+      setDragState({
+        layerId,
+        mode: "resize",
+        pointerId: event.pointerId,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        startX: block.x,
+        startY: block.y,
+        resizeAxis,
+        startWidth: block.width,
+        startHeight: block.sizePt,
       });
       return;
     }
@@ -1105,6 +1203,28 @@ export default function BadgeTemplateEditor({
             ...prev.back,
             shapes: (prev.back.shapes ?? []).map((shape) =>
               shape.id === shapeId ? { ...shape, width: nextWidth, height: nextHeight } : shape
+            ),
+          },
+        }));
+        return;
+      }
+      if (isBackBlockLayer(dragState.layerId)) {
+        const blockId = dragState.layerId.replace("back_block:", "");
+        const nextPt = Math.max(
+          4,
+          Math.min(
+            72,
+            Math.round(((dragState.startHeight ?? 24) + (dy * 72) / config.canvas.dpi) * 10) / 10
+          )
+        );
+        setConfig((prev) => ({
+          ...prev,
+          back: {
+            ...prev.back,
+            blocks: (prev.back.blocks ?? []).map((block) =>
+              block.id === blockId
+                ? { ...block, width: Math.max(20, nextWidth), sizePt: nextPt }
+                : block
             ),
           },
         }));
@@ -1340,6 +1460,19 @@ export default function BadgeTemplateEditor({
           ...prev.back,
           textLayers: (prev.back.textLayers ?? []).map((text) =>
             text.id === textId ? { ...text, x: nextX, y: nextY } : text
+          ),
+        },
+      }));
+      return;
+    }
+    if (isBackBlockLayer(dragState.layerId)) {
+      const blockId = dragState.layerId.replace("back_block:", "");
+      setConfig((prev) => ({
+        ...prev,
+        back: {
+          ...prev.back,
+          blocks: (prev.back.blocks ?? []).map((block) =>
+            block.id === blockId ? { ...block, x: nextX, y: nextY } : block
           ),
         },
       }));
@@ -1856,10 +1989,10 @@ export default function BadgeTemplateEditor({
     if (selectedLayer === "role_background") {
       setConfig((prev) => ({
         ...prev,
-        roles: {
-          ...prev.roles,
+        variants: {
+          ...prev.variants,
           [role]: {
-            ...prev.roles[role],
+            ...prev.variants[role],
             frontBackgroundUrl: null,
           },
         },
@@ -1870,10 +2003,10 @@ export default function BadgeTemplateEditor({
     if (selectedLayer === "role_overlay") {
       setConfig((prev) => ({
         ...prev,
-        roles: {
-          ...prev.roles,
+        variants: {
+          ...prev.variants,
           [role]: {
-            ...prev.roles[role],
+            ...prev.variants[role],
             frontOverlayUrl: null,
           },
         },
@@ -1884,10 +2017,10 @@ export default function BadgeTemplateEditor({
     if (selectedLayer === "role_tint") {
       setConfig((prev) => ({
         ...prev,
-        roles: {
-          ...prev.roles,
+        variants: {
+          ...prev.variants,
           [role]: {
-            ...prev.roles[role],
+            ...prev.variants[role],
             mapTintOpacity: 0,
           },
         },
@@ -2042,13 +2175,13 @@ export default function BadgeTemplateEditor({
     }
   }
 
-  function cloneSelectedToBadge(targetRole: BadgeRole) {
+  function cloneSelectedToBadge(targetRole: string) {
     if (targetRole === role || !selectedLayer) return;
     setConfig((prev) => {
       const layouts = roleLayoutSnapshot(prev);
       const source = layouts[role];
       const target = cloneDeep(layouts[targetRole]);
-      const targetTheme = cloneDeep(prev.roles[targetRole]);
+      const targetTheme = cloneDeep(prev.variants[targetRole]);
       const nextLayerOrder = [...target.front.layerOrder];
       const layersToClone: SelectedLayer[] = Array.from(
         new Set(
@@ -2086,16 +2219,16 @@ export default function BadgeTemplateEditor({
           continue;
         }
         if (layerId === "role_background") {
-          targetTheme.frontBackgroundUrl = prev.roles[role].frontBackgroundUrl;
+          targetTheme.frontBackgroundUrl = prev.variants[role].frontBackgroundUrl;
           continue;
         }
         if (layerId === "role_overlay") {
-          targetTheme.frontOverlayUrl = prev.roles[role].frontOverlayUrl;
+          targetTheme.frontOverlayUrl = prev.variants[role].frontOverlayUrl;
           continue;
         }
         if (layerId === "role_tint") {
-          targetTheme.mapTintColor = prev.roles[role].mapTintColor;
-          targetTheme.mapTintOpacity = prev.roles[role].mapTintOpacity;
+          targetTheme.mapTintColor = prev.variants[role].mapTintColor;
+          targetTheme.mapTintOpacity = prev.variants[role].mapTintOpacity;
           continue;
         }
         if (layerId === "logo") {
@@ -2176,16 +2309,16 @@ export default function BadgeTemplateEditor({
 
       return {
         ...prev,
-        roles: {
-          ...prev.roles,
+        variants: {
+          ...prev.variants,
           [targetRole]: targetTheme,
         },
-        roleLayouts: nextLayouts,
+        variantLayouts: nextLayouts,
       };
     });
   }
 
-  function cloneCurrentSideLayoutToBadge(targetRole: BadgeRole) {
+  function cloneCurrentSideLayoutToBadge(targetRole: string) {
     if (targetRole === role) return;
     setConfig((prev) => {
       const layouts = roleLayoutSnapshot(prev);
@@ -2198,7 +2331,7 @@ export default function BadgeTemplateEditor({
       }
       return {
         ...prev,
-        roleLayouts: {
+        variantLayouts: {
           ...layouts,
           [targetRole]: target,
         },
@@ -2209,6 +2342,14 @@ export default function BadgeTemplateEditor({
   function frontLayerPosition(layerId: SelectedLayer): { x: number; y: number } | null {
     if (layerId === "role_visuals") return null;
     if (layerId === "back_qr") return { x: config.back.qr.x, y: config.back.qr.y };
+    // Blocks answer here too, or nudge and align silently skip them: both filter
+    // on whatever this returns, so a missing case looks like a dead button.
+    if (isBackBlockLayer(layerId)) {
+      const blockId = layerId.replace("back_block:", "");
+      const block = (config.back.blocks ?? []).find((item) => item.id === blockId);
+      if (!block) return null;
+      return { x: block.x, y: block.y };
+    }
     if (isBackImageLayer(layerId)) {
       const imageId = layerId.replace("back_image:", "");
       const image = (config.back.images ?? []).find((item) => item.id === imageId);
@@ -2269,6 +2410,19 @@ export default function BadgeTemplateEditor({
       setConfig((prev) => ({
         ...prev,
         back: { ...prev.back, qr: { ...prev.back.qr, x, y } },
+      }));
+      return;
+    }
+    if (isBackBlockLayer(layerId)) {
+      const blockId = layerId.replace("back_block:", "");
+      setConfig((prev) => ({
+        ...prev,
+        back: {
+          ...prev.back,
+          blocks: (prev.back.blocks ?? []).map((block) =>
+            block.id === blockId ? { ...block, x, y } : block
+          ),
+        },
       }));
       return;
     }
@@ -2478,8 +2632,8 @@ export default function BadgeTemplateEditor({
 
   const serializedConfig = JSON.stringify({
     ...config,
-    roleLayouts: {
-      ...(config.roleLayouts ?? {}),
+    variantLayouts: {
+      ...(config.variantLayouts ?? {}),
       [role]: {
         front: config.front,
         back: config.back,
@@ -2507,6 +2661,16 @@ export default function BadgeTemplateEditor({
         (text) => text.id === selectedLayer.replace("text:", "")
       ) ?? null
     : null;
+  // Derived blocks — the schedule, the QR caption, the venue line. Their CONTENT
+  // comes from the entity graph, but every decision about them (where, how big,
+  // what heading, whether at all) belongs to whoever runs the conference. They
+  // were hardcoded until now, which meant CSC's answers were everyone's answers.
+  const selectedBackBlock = isBackBlockLayer(selectedLayer)
+    ? (config.back.blocks ?? []).find(
+        (block) => block.id === selectedLayer.replace("back_block:", "")
+      ) ?? null
+    : null;
+
   const selectedBackFreeText = isBackFreeTextLayer(selectedLayer)
     ? (config.back.textLayers ?? []).find(
         (text) => text.id === selectedLayer.replace("back_text:", "")
@@ -2624,6 +2788,57 @@ export default function BadgeTemplateEditor({
         ),
       },
     }));
+  }
+
+  function updateBackBlocks(
+    next: (blocks: BadgeTemplateConfigV1["back"]["blocks"]) => BadgeTemplateConfigV1["back"]["blocks"]
+  ) {
+    setConfig((prev) => ({
+      ...prev,
+      back: { ...prev.back, blocks: next(prev.back.blocks ?? []) },
+    }));
+  }
+
+  function updateSelectedBackBlock(patch: Record<string, unknown>) {
+    if (!selectedBackBlock) return;
+    updateBackBlocks((blocks) =>
+      blocks.map((block) => (block.id === selectedBackBlock.id ? { ...block, ...patch } : block))
+    );
+  }
+
+  function moveBackBlock(id: string, delta: -1 | 1) {
+    updateBackBlocks((blocks) => {
+      const index = blocks.findIndex((block) => block.id === id);
+      const target = index + delta;
+      if (index < 0 || target < 0 || target >= blocks.length) return blocks;
+      const next = [...blocks];
+      [next[index], next[target]] = [next[target], next[index]];
+      return next;
+    });
+  }
+
+  function addBackBlock(source: BadgeBackBlockSource) {
+    const id = `back_${source}_${Date.now().toString(36)}`;
+    updateBackBlocks((blocks) => [
+      ...blocks,
+      {
+        id,
+        source,
+        heading: null,
+        x: 75,
+        y: 90,
+        width: 825,
+        sizePt: 6,
+        family: "primary",
+      },
+    ]);
+    setSelectedLayer(`back_block:${id}`);
+    setSide("back");
+  }
+
+  function removeBackBlock(id: string) {
+    updateBackBlocks((blocks) => blocks.filter((block) => block.id !== id));
+    if (selectedLayer === `back_block:${id}`) setSelectedLayer("back_qr");
   }
 
   function updateSelectedBackFreeText(patch: Record<string, unknown>) {
@@ -2745,45 +2960,38 @@ export default function BadgeTemplateEditor({
           >
             Redo
           </button>
-          <button
-            type="button"
-            onClick={() => setRole("delegate")}
-            className={`rounded-md border px-3 py-1 text-xs font-medium ${
-              role === "delegate"
-                ? "border-gray-900 bg-gray-900 text-white"
-                : "border-gray-300 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            Delegate
-          </button>
-          <button
-            type="button"
-            onClick={() => setRole("exhibitor")}
-            className={`rounded-md border px-3 py-1 text-xs font-medium ${
-              role === "exhibitor"
-                ? "border-gray-900 bg-gray-900 text-white"
-                : "border-gray-300 text-gray-700 hover:bg-gray-50"
-            }`}
-          >
-            Exhibitor
-          </button>
+          {/* One tab per variant this template has — normally the conference's
+              registration types, plus the default everything inherits. Nothing
+              here knows the words "delegate" or "exhibitor". */}
+          {editableVariantKeys.map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setRole(key)}
+              title={key === DEFAULT_VARIANT ? "The look every type inherits unless differentiated" : variantLabels[key] ?? key}
+              className={`rounded-md border px-3 py-1 text-xs font-medium ${
+                role === key
+                  ? "border-gray-900 bg-gray-900 text-white"
+                  : "border-gray-300 text-gray-700 hover:bg-gray-50"
+              }`}
+            >
+              {key === DEFAULT_VARIANT ? "Default" : (variantLabels[key] ?? key)}
+            </button>
+          ))}
           <div className="ml-1 flex items-center gap-1 rounded-md border border-gray-300 px-2 py-1">
             <span className="text-[11px] text-gray-600">Clone selected to</span>
             <select
               value={cloneTargetRole}
               onChange={(event) =>
-                setCloneTargetRole(
-                  event.target.value === "delegate" ? "delegate" : "exhibitor"
-                )
+                setCloneTargetRole(event.target.value)
               }
               className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px]"
             >
-              <option value="delegate" disabled={role === "delegate"}>
-                Delegate
-              </option>
-              <option value="exhibitor" disabled={role === "exhibitor"}>
-                Exhibitor
-              </option>
+              {editableVariantKeys.map((key) => (
+                <option key={key} value={key} disabled={role === key}>
+                  {key === DEFAULT_VARIANT ? "Default" : (variantLabels[key] ?? key)}
+                </option>
+              ))}
             </select>
             <button
               type="button"
@@ -2799,18 +3007,15 @@ export default function BadgeTemplateEditor({
             <select
               value={cloneTargetRole}
               onChange={(event) =>
-                setCloneTargetRole(
-                  event.target.value === "delegate" ? "delegate" : "exhibitor"
-                )
+                setCloneTargetRole(event.target.value)
               }
               className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px]"
             >
-              <option value="delegate" disabled={role === "delegate"}>
-                Delegate
-              </option>
-              <option value="exhibitor" disabled={role === "exhibitor"}>
-                Exhibitor
-              </option>
+              {editableVariantKeys.map((key) => (
+                <option key={key} value={key} disabled={role === key}>
+                  {key === DEFAULT_VARIANT ? "Default" : (variantLabels[key] ?? key)}
+                </option>
+              ))}
             </select>
             <button
               type="button"
@@ -3090,6 +3295,46 @@ export default function BadgeTemplateEditor({
                         }`}
                       >
                         {labelForLayer(layerId)}
+                      </button>
+                      <div className="mt-1 flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateLayerSetting(layerId, { visible: !isLayerVisible(layerId) })
+                          }
+                          className="rounded border border-gray-300 px-1 py-0 text-[10px] text-gray-600 hover:bg-gray-50"
+                        >
+                          {isLayerVisible(layerId) ? "Hide" : "Show"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateLayerSetting(layerId, { locked: !isLayerLocked(layerId) })
+                          }
+                          className="rounded border border-gray-300 px-1 py-0 text-[10px] text-gray-600 hover:bg-gray-50"
+                        >
+                          {isLayerLocked(layerId) ? "Unlock" : "Lock"}
+                        </button>
+                      </div>
+                    </li>
+                  );
+                })}
+                {(config.back.blocks ?? []).map((block) => {
+                  const layerId = `back_block:${block.id}` as SelectedLayer;
+                  return (
+                    <li key={layerId}>
+                      <button
+                        type="button"
+                        onClick={(event) => selectLayer(layerId, event.shiftKey)}
+                        className={`w-full rounded-md border px-2 py-1 text-left text-xs ${
+                          selectedLayer === layerId
+                            ? "border-gray-900 bg-gray-900 text-white"
+                            : selectedLayers.includes(layerId)
+                              ? "border-red-400 bg-red-50 text-red-800"
+                              : "border-gray-200 bg-gray-50 text-gray-700 hover:bg-gray-100"
+                        }`}
+                      >
+                        {block.heading?.trim() || BACK_BLOCK_LABELS[block.source]}
                       </button>
                       <div className="mt-1 flex items-center gap-1">
                         <button
@@ -3729,6 +3974,70 @@ export default function BadgeTemplateEditor({
                     </div>
                   );
                 })}
+                {/* Derived blocks ARE layers. They draw on the canvas, drag,
+                    resize and lock like anything else — a settings form beside
+                    a canvas is not a layout tool. The content is sample text:
+                    the real words come from the badge holder's own entitlement
+                    at print time, so this shows the SHAPE and where it sits. */}
+                {(config.back.blocks ?? []).map((block) => {
+                  const layerId = `back_block:${block.id}` as SelectedLayer;
+                  if (!isLayerVisible(layerId)) return null;
+                  const fontSizePx = designPxFromPt(block.sizePt, config.canvas.dpi);
+                  return (
+                    <div
+                      key={layerId}
+                      role="button"
+                      tabIndex={0}
+                      onClick={(event) => selectLayer(layerId, event.shiftKey)}
+                      onPointerDown={(event) => startDrag(layerId, event)}
+                      onPointerMove={onDragMove}
+                      onPointerUp={endDrag}
+                      className={`absolute select-none border border-dashed ${
+                        selectedLayers.includes(layerId)
+                          ? "border-red-500 bg-red-50/40"
+                          : "border-sky-500/50 bg-sky-50/25"
+                      } ${selectedClass(layerId)}`}
+                      style={{
+                        left: block.x * scale,
+                        top: block.y * scale,
+                        width: block.width * scale,
+                        minHeight: Math.max(18, fontSizePx * 1.3 * scale),
+                        fontFamily: textFamilyStack(block.family, config.fonts),
+                        color: roleTheme.textColor,
+                        transformOrigin: "top left",
+                        lineHeight: 1,
+                      }}
+                    >
+                      <div
+                        style={{
+                          fontSize: fontSizePx * scale,
+                          lineHeight: 1.3,
+                          whiteSpace: "pre-wrap",
+                          overflowWrap: "break-word",
+                        }}
+                      >
+                        {block.heading ? (
+                          <div style={{ fontWeight: 700, letterSpacing: "0.09em" }}>
+                            {block.heading}
+                          </div>
+                        ) : null}
+                        {BACK_BLOCK_SAMPLE[block.source]}
+                      </div>
+                      <div
+                        className="absolute -right-1 top-1/2 h-5 w-2.5 -translate-y-1/2 cursor-e-resize rounded-sm bg-red-400"
+                        onPointerDown={(event) => startResize(layerId, event, "horizontal")}
+                      />
+                      <div
+                        className="absolute -bottom-1 left-1/2 h-2.5 w-5 -translate-x-1/2 cursor-s-resize rounded-sm bg-red-400"
+                        onPointerDown={(event) => startResize(layerId, event, "vertical")}
+                      />
+                      <div
+                        className="absolute -bottom-1 -right-1 h-2.5 w-2.5 cursor-se-resize rounded-sm bg-red-500"
+                        onPointerDown={(event) => startResize(layerId, event)}
+                      />
+                    </div>
+                  );
+                })}
                 {isLayerVisible("back_qr") ? (
                   <div
                     role="button"
@@ -3874,10 +4183,10 @@ export default function BadgeTemplateEditor({
                   onChange={(event) =>
                     setConfig((prev) => ({
                       ...prev,
-                      roles: {
-                        ...prev.roles,
+                      variants: {
+                        ...prev.variants,
                         [role]: {
-                          ...prev.roles[role],
+                          ...prev.variants[role],
                           frontBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -3893,10 +4202,10 @@ export default function BadgeTemplateEditor({
                   onChange={(event) =>
                     setConfig((prev) => ({
                       ...prev,
-                      roles: {
-                        ...prev.roles,
+                      variants: {
+                        ...prev.variants,
                         [role]: {
-                          ...prev.roles[role],
+                          ...prev.variants[role],
                           frontOverlayUrl: event.target.value.trim() || null,
                         },
                       },
@@ -3912,10 +4221,10 @@ export default function BadgeTemplateEditor({
                   onChange={(event) =>
                     setConfig((prev) => ({
                       ...prev,
-                      roles: {
-                        ...prev.roles,
+                      variants: {
+                        ...prev.variants,
                         [role]: {
-                          ...prev.roles[role],
+                          ...prev.variants[role],
                           backBackgroundUrl: event.target.value.trim() || null,
                         },
                       },
@@ -4188,10 +4497,10 @@ export default function BadgeTemplateEditor({
                           onChange={(event) =>
                             setConfig((prev) => ({
                               ...prev,
-                              roles: {
-                                ...prev.roles,
+                              variants: {
+                                ...prev.variants,
                                 [role]: {
-                                  ...prev.roles[role],
+                                  ...prev.variants[role],
                                   frontBackgroundUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4209,10 +4518,10 @@ export default function BadgeTemplateEditor({
                           onChange={(event) =>
                             setConfig((prev) => ({
                               ...prev,
-                              roles: {
-                                ...prev.roles,
+                              variants: {
+                                ...prev.variants,
                                 [role]: {
-                                  ...prev.roles[role],
+                                  ...prev.variants[role],
                                   frontOverlayUrl: event.target.value.trim() || null,
                                 },
                               },
@@ -4231,10 +4540,10 @@ export default function BadgeTemplateEditor({
                             onChange={(event) =>
                               setConfig((prev) => ({
                                 ...prev,
-                                roles: {
-                                  ...prev.roles,
+                                variants: {
+                                  ...prev.variants,
                                   [role]: {
-                                    ...prev.roles[role],
+                                    ...prev.variants[role],
                                     mapTintColor: event.target.value,
                                   },
                                 },
@@ -4254,10 +4563,10 @@ export default function BadgeTemplateEditor({
                             onChange={(event) =>
                               setConfig((prev) => ({
                                 ...prev,
-                                roles: {
-                                  ...prev.roles,
+                                variants: {
+                                  ...prev.variants,
                                   [role]: {
-                                    ...prev.roles[role],
+                                    ...prev.variants[role],
                                     mapTintOpacity: Number(event.target.value || 0),
                                   },
                                 },
@@ -5194,6 +5503,209 @@ export default function BadgeTemplateEditor({
                     </>
                   ) : null}
                 </div>
+              </>
+            ) : null}
+
+            {side === "back" ? (
+              <div className="rounded border border-gray-200 p-2">
+                <p className="text-[11px] font-semibold text-gray-700">
+                  Derived blocks
+                </p>
+                <p className="mt-1 text-[11px] text-gray-500">
+                  Content comes from this conference&apos;s catalogue — days, meals, rooms,
+                  the onsite contact. You decide where it sits, what it is called, and
+                  whether it appears at all.
+                </p>
+                <div className="mt-2 space-y-1">
+                  {(config.back.blocks ?? []).length === 0 ? (
+                    <p className="text-[11px] text-gray-500">No blocks. The back is blank.</p>
+                  ) : null}
+                  {(config.back.blocks ?? []).map((block, index) => (
+                    <div key={block.id} className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => setSelectedLayer(`back_block:${block.id}`)}
+                        className={`flex-1 rounded border px-2 py-1 text-left text-[11px] ${
+                          selectedLayer === `back_block:${block.id}`
+                            ? "border-accent bg-accent/10 font-semibold"
+                            : "border-gray-300"
+                        }`}
+                      >
+                        {block.heading?.trim() || BACK_BLOCK_LABELS[block.source]}
+                        <span className="ml-1 text-gray-400">
+                          ({BACK_BLOCK_LABELS[block.source]}
+                          {block.flow ? " · flows" : ""})
+                        </span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveBackBlock(block.id, -1)}
+                        disabled={index === 0}
+                        className="rounded border border-gray-300 px-1 py-1 text-[11px] disabled:opacity-30"
+                        aria-label="Move up"
+                      >
+                        ↑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveBackBlock(block.id, 1)}
+                        disabled={index === (config.back.blocks ?? []).length - 1}
+                        className="rounded border border-gray-300 px-1 py-1 text-[11px] disabled:opacity-30"
+                        aria-label="Move down"
+                      >
+                        ↓
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => removeBackBlock(block.id)}
+                        className="rounded border border-gray-300 px-1 py-1 text-[11px] text-gray-400 hover:text-red-500"
+                        aria-label="Remove block"
+                      >
+                        ×
+                      </button>
+                    </div>
+                  ))}
+                </div>
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {BACK_BLOCK_SOURCES.map((source) => (
+                    <button
+                      key={source}
+                      type="button"
+                      onClick={() => addBackBlock(source)}
+                      className="rounded border border-gray-300 px-2 py-1 text-[11px] hover:border-accent"
+                    >
+                      + {BACK_BLOCK_LABELS[source]}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            ) : null}
+
+            {side === "back" && selectedBackBlock ? (
+              <>
+                <label className="block text-xs text-gray-700">
+                  Heading
+                  <input
+                    type="text"
+                    value={selectedBackBlock.heading ?? ""}
+                    placeholder="No heading"
+                    onChange={(event) =>
+                      updateSelectedBackBlock({ heading: event.target.value.trim() || null })
+                    }
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                  />
+                </label>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="block text-xs text-gray-700">
+                    Horizontal position
+                    <input
+                      type="number"
+                      step={unitSystem === "in" ? 0.01 : 0.25}
+                      value={formatUnit(selectedBackBlock.x)}
+                      onChange={(event) => updateSelectedBackBlock({ x: parseUnit(event.target.value) })}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs text-gray-700">
+                    Vertical position
+                    <input
+                      type="number"
+                      step={unitSystem === "in" ? 0.01 : 0.25}
+                      value={formatUnit(selectedBackBlock.y)}
+                      onChange={(event) => updateSelectedBackBlock({ y: parseUnit(event.target.value) })}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs text-gray-700">
+                    Width
+                    <input
+                      type="number"
+                      step={unitSystem === "in" ? 0.01 : 0.25}
+                      value={formatUnit(selectedBackBlock.width)}
+                      onChange={(event) =>
+                        updateSelectedBackBlock({ width: parseUnit(event.target.value) })
+                      }
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                </div>
+                <div className="grid grid-cols-3 gap-2">
+                  <label className="block text-xs text-gray-700">
+                    Point size
+                    <input
+                      type="number"
+                      step={0.1}
+                      value={selectedBackBlock.sizePt}
+                      onChange={(event) =>
+                        updateSelectedBackBlock({ sizePt: Number(event.target.value || 0) })
+                      }
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                  <label className="block text-xs text-gray-700">
+                    Typeface
+                    <select
+                      value={selectedBackBlock.family}
+                      onChange={(event) => updateSelectedBackBlock({ family: event.target.value })}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    >
+                      <option value="primary">Primary</option>
+                      <option value="secondary">Secondary</option>
+                      <option value="slab">Slab</option>
+                    </select>
+                  </label>
+                  <label className="block text-xs text-gray-700">
+                    Line budget
+                    <input
+                      type="number"
+                      value={selectedBackBlock.maxLines ?? ""}
+                      placeholder="none"
+                      onChange={(event) =>
+                        updateSelectedBackBlock({
+                          maxLines: event.target.value ? Number(event.target.value) : undefined,
+                        })
+                      }
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                </div>
+                <label className="flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={Boolean(selectedBackBlock.flow)}
+                    onChange={(event) => updateSelectedBackBlock({ flow: event.target.checked })}
+                  />
+                  Stack with the other flowing blocks
+                </label>
+                <p className="text-[11px] text-gray-500">
+                  Flowing blocks share one column starting at the FIRST flowing block&apos;s
+                  position, and share its line budget. Derived content varies by
+                  registration type — a day pass grants a handful of items, a full
+                  delegate twenty-odd — so fixed positions collide for one type and waste
+                  the card for another. Anything over the budget is dropped and counted,
+                  never silently cut.
+                </p>
+                {selectedBackBlock.source === "qr_caption" ||
+                selectedBackBlock.source === "venue" ? (
+                  <label className="block text-xs text-gray-700">
+                    {selectedBackBlock.source === "qr_caption"
+                      ? "Caption wording"
+                      : "Extra line (e.g. an onsite number the catalogue does not hold)"}
+                    <textarea
+                      value={selectedBackBlock.text ?? ""}
+                      placeholder={
+                        selectedBackBlock.source === "qr_caption"
+                          ? "This code identifies your badge for check-in and scanning on site."
+                          : "Nothing extra"
+                      }
+                      onChange={(event) =>
+                        updateSelectedBackBlock({ text: event.target.value.trim() || undefined })
+                      }
+                      rows={2}
+                      className="mt-1 w-full rounded border border-gray-300 px-2 py-1 text-sm"
+                    />
+                  </label>
+                ) : null}
               </>
             ) : null}
 

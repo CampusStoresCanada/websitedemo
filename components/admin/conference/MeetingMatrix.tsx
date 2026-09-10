@@ -324,9 +324,9 @@ function ExhibitorLens({
   const groups = useMemo(() => {
     const m = new Map<string, { name: string; meetings: ScheduleOpsAssignment[] }>();
     for (const a of assignments) {
-      const g = m.get(a.exhibitorRegistrationId) ?? { name: a.exhibitorOrganizationName, meetings: [] };
+      const g = m.get(a.exhibitorSeatId) ?? { name: a.exhibitorOrganizationName, meetings: [] };
       g.meetings.push(a);
-      m.set(a.exhibitorRegistrationId, g);
+      m.set(a.exhibitorSeatId, g);
     }
     return [...m.values()]
       .map((g) => ({ ...g, meetings: [...g.meetings].sort(byDaySlot) }))
@@ -366,7 +366,7 @@ function DelegateLens({
   const groups = useMemo(() => {
     const m = new Map<string, { name: string; meetings: ScheduleOpsAssignment[] }>();
     for (const a of assignments) {
-      a.delegateRegistrationIds.forEach((id, idx) => {
+      a.delegateSeatIds.forEach((id, idx) => {
         const g = m.get(id) ?? { name: a.delegateNames[idx] ?? id, meetings: [] };
         g.meetings.push(a);
         m.set(id, g);
@@ -562,9 +562,9 @@ function CellEditor({
   onClose: () => void;
   onSaved: () => void;
 }) {
-  const [exhibitorId, setExhibitorId] = useState(cell.assignment?.exhibitorRegistrationId ?? "");
+  const [exhibitorId, setExhibitorId] = useState(cell.assignment?.exhibitorSeatId ?? "");
   const [delegateIds, setDelegateIds] = useState<string[]>(
-    cell.assignment?.delegateRegistrationIds ?? []
+    cell.assignment?.delegateSeatIds ?? []
   );
   const [q, setQ] = useState("");
   const [busy, setBusy] = useState(false);
@@ -590,8 +590,8 @@ function CellEditor({
     const res = await setMeetingAssignment(conferenceId, {
       runId,
       meetingSlotId: cell.meetingSlotId,
-      exhibitorRegistrationId: exhibitorId,
-      delegateRegistrationIds: delegateIds,
+      exhibitorSeatId: exhibitorId,
+      delegateSeatIds: delegateIds,
     });
     setBusy(false);
     if (res.success) onSaved();

@@ -59,3 +59,26 @@ export function formatDayMonth(value: string, timeZone = "America/Toronto"): str
   if (!day || !month) return null;
   return `${Number(day)} ${MONTHS[Number(month) - 1]}`;
 }
+
+const CALENDAR_DATE = /^(\d{4})-(\d{2})-(\d{2})$/;
+
+/**
+ * Format a bare calendar date — "2027-01-18" — as "18 January".
+ *
+ * Separate from `formatDayMonth` because a calendar date is not an instant.
+ * `formatDayMonth` is for timestamps and returns null here, which is how four
+ * supplier deadlines rendered as raw ISO strings on the exhibitor checklist.
+ *
+ * ⚠️ Deliberately NOT parsed into a Date. "2027-01-18" read as UTC midnight
+ * and printed in Toronto is 17 January — the same off-by-one that already told
+ * a company it had an extra day. A deadline written 18 January means the 18th
+ * wherever you are standing, so the digits are formatted directly.
+ */
+export function formatCalendarDate(value: string): string | null {
+  const match = CALENDAR_DATE.exec(value.trim());
+  if (!match) return null;
+  const [, year, month, day] = match;
+  const monthName = MONTHS[Number(month) - 1];
+  if (!monthName) return null;
+  return `${Number(day)} ${monthName} ${year}`;
+}

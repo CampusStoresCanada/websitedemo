@@ -17,6 +17,7 @@ export default function HotelInfo({
   bookingCutoff,
   rates = [],
   note,
+  viewerBooking,
 }: {
   venue: string;
   /** Verified venue coordinates (conference_instances.location_latitude/longitude) — the same
@@ -34,6 +35,13 @@ export default function HotelInfo({
   /** Free-text note under the rates — tax treatment, parking, block dates,
    *  who to contact for stays outside the block. */
   note?: string | null;
+  /** Where this viewer stands on "Book your hotel room", when we know.
+   *  Null for anonymous visitors and anyone not registered — they get the
+   *  generic version, because not knowing is not the same as outstanding. */
+  viewerBooking?: {
+    state: "done" | "not_applicable" | "pending";
+    evidence: string | null;
+  } | null;
 }) {
   if (!venue) return null;
 
@@ -43,6 +51,13 @@ export default function HotelInfo({
   const urgency = cutoffUrgency(bookingCutoff ?? null, today);
   const blockClosed = urgency === "passed";
   const canBook = Boolean(bookingUrl) && !blockClosed;
+
+  // Someone who has booked, or who told us they are staying elsewhere, has
+  // already dealt with this. Both are complete answers — the deadline is no
+  // longer news to either of them, so it drops to a plain line and the button
+  // stops being the loudest thing on the card.
+  const viewerSettled =
+    viewerBooking?.state === "done" || viewerBooking?.state === "not_applicable";
 
   return (
     <section className="rounded-2xl border border-[#E5E5E5] bg-white p-6 shadow-sm">
@@ -93,11 +108,13 @@ export default function HotelInfo({
           {bookingCutoff && !blockClosed && (
             <p
               className={`mt-3 text-sm ${
-                urgency === "soon" ? "font-semibold text-[#B45309]" : "text-[#6B6B6B]"
+                urgency === "soon" && !viewerSettled
+                  ? "font-semibold text-[#B45309]"
+                  : "text-[#6B6B6B]"
               }`}
             >
               Book by {formatCutoffDate(bookingCutoff)}
-              {urgency === "soon" && (
+              {urgency === "soon" && !viewerSettled && (
                 <>
                   {" — "}
                   {/* On the cutoff day itself the count is 0, and "0 days left"
@@ -113,14 +130,38 @@ export default function HotelInfo({
             </p>
           )}
 
+          {viewerBooking?.state === "done" && (
+            <p className="mt-3 text-sm font-medium text-[#166534]">
+              You&apos;re booked
+              {viewerBooking.evidence ? (
+                <>
+                  {" — confirmation "}
+                  <span className="font-mono text-[#1A1A1A]">{viewerBooking.evidence}</span>
+                </>
+              ) : (
+                "."
+              )}
+            </p>
+          )}
+
+          {viewerBooking?.state === "not_applicable" && (
+            <p className="mt-3 text-sm text-[#6B6B6B]">
+              You&apos;ve told us you&apos;re staying elsewhere.
+            </p>
+          )}
+
           {canBook ? (
             <a
               href={bookingUrl ?? undefined}
               target="_blank"
               rel="noopener noreferrer"
-              className="mt-4 inline-flex w-fit items-center justify-center rounded-full bg-[#1A1A1A] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3A3A3A]"
+              className={
+                viewerSettled
+                  ? "mt-3 inline-flex w-fit items-center justify-center text-sm font-medium text-[#6B6B6B] underline underline-offset-4 transition-colors hover:text-[#1A1A1A]"
+                  : "mt-4 inline-flex w-fit items-center justify-center rounded-full bg-[#1A1A1A] px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#3A3A3A]"
+              }
             >
-              Book your room
+              {viewerSettled ? "Change your booking" : "Book your room"}
             </a>
           ) : blockClosed ? (
             <p className="mt-3 text-sm text-[#6B6B6B]">

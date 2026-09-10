@@ -26,6 +26,7 @@ import RegisterBursaryInterestCTA from "@/components/conference/RegisterBursaryI
 import TuesdayAudienceNote from "@/components/conference/TuesdayAudienceNote";
 import HotelInfo from "@/components/conference/HotelInfo";
 import { parseHotelRates } from "@/lib/conference/hotel";
+import { loadViewerTaskState } from "@/lib/conference/checklist-status";
 import SponsorshipLadder from "@/components/conference/SponsorshipLadder";
 import ScheduleAtAGlance from "@/components/conference/ScheduleAtAGlance";
 import DeadlinesTimeline from "@/components/conference/DeadlinesTimeline";
@@ -250,6 +251,13 @@ export default async function ConferenceEditionHubPage({
   ) : undefined;
 
   const hotelRates = parseHotelRates(conference.hotel_rates);
+
+  // Where this viewer stands on booking a room, when there is anyone to ask.
+  // Anonymous visitors and people who aren't registered resolve to null and
+  // get the generic card — "we don't know" must never render as "you're late".
+  const viewerBooking = viewer.userId
+    ? await loadViewerTaskState(db, conference.id, viewer.userId, "Book your hotel room")
+    : null;
   const venue = [conference.location_venue?.trim(), conference.location_city?.trim(), conference.location_province?.trim()]
     .filter(Boolean)
     .join(", ");
@@ -358,6 +366,7 @@ export default async function ConferenceEditionHubPage({
                   bookingCutoff={conference.hotel_booking_cutoff}
                   rates={hotelRates}
                   note={conference.hotel_note}
+                  viewerBooking={viewerBooking}
                 />
               </div>
               {partnerOrg && (
@@ -566,6 +575,7 @@ export default async function ConferenceEditionHubPage({
                   bookingCutoff={conference.hotel_booking_cutoff}
                   rates={hotelRates}
                   note={conference.hotel_note}
+                  viewerBooking={viewerBooking}
                 />
                 </div>
                 {footerLinks}

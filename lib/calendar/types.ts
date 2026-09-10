@@ -33,7 +33,11 @@ export type CalendarRelatedEntityType =
   | "conference_legal_version"
   | "conference_program_item"
   | "event"
-  | "partner_rescrape";
+  | "partner_rescrape"
+  /** The renewal cadence itself, projected from policy — not a past job run. */
+  | "renewal_cycle"
+  | "conference_checklist"
+  | "election";
 
 // ── DB row ────────────────────────────────────────────────────────
 

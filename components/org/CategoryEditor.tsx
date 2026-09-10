@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { updateField } from "@/lib/actions/update-field";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
+import { splitStoredSelection } from "@/lib/publication/categories";
 
 // CategoryEditor uses the same taxonomy as the member procurement section
 // so that partner primary_category values map 1:1 to member procurement categories.
@@ -42,11 +43,43 @@ export default function CategoryEditor({
   onClose,
   onSaved,
 }: CategoryEditorProps) {
-  const initialSelected: string[] = currentValue
-    ? currentValue.split(",").map((s) => s.trim()).filter(Boolean)
-    : [];
+  /**
+   * ⛔ EVERY CHIP AT THE TOP MUST HAVE A CONTROL AT THE BOTTOM.
+   *
+   * The stored value can hold terms from an older vocabulary. They rendered as
+   * ordinary secondaries, but no checkbox in the list corresponds to them — so
+   * the two halves of this dialog looked unrelated, and the only way to get rid
+   * of one was the chip's own × button, which nobody would think to look for.
+   *
+   * Worse, it is how the double-vocabulary rows happened: someone ticked the
+   * modern category, the invisible legacy term stayed, and every save carried it
+   * forward. RAINS ended up holding "Apparel & Spirit Wear" AND "Apparel".
+   *
+   * So on load: leave recognised terms exactly as chosen, expand renamed ones
+   * through the shared ALIASES so they land on a real control, and put anything
+   * still unrecognised in its own group that SAYS it is not in the list.
+   *
+   * ⚠️ Only LEGACY tokens are expanded. A recognised class stays a class — if a
+   * partner picked only "Men's / Unisex", resolving that to Apparel as well
+   * would silently change what they said their primary was.
+   */
+  /**
+   * ⛔ Every chip at the top must have a control at the bottom — see
+   * `splitStoredSelection`. Legacy terms used to render as ordinary secondaries
+   * with no matching checkbox anywhere, which is why the two halves of this
+   * dialog looked unrelated and why unrecognised terms rode along on every save.
+   */
+  const { selected: initialSelected, legacy: legacyTerms } =
+    splitStoredSelection(currentValue);
 
   const [selected, setSelected] = useState<string[]>(initialSelected);
+  /**
+   * Terms the taxonomy cannot place at all — "General Merchandise", "Other".
+   * Held separately so they are VISIBLE rather than masquerading as choices,
+   * and still saved unless the partner drops them: this dialog must not delete
+   * what somebody declared just because we no longer have a word for it.
+   */
+  const [legacy, setLegacy] = useState<string[]>(legacyTerms);
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -104,7 +137,8 @@ export default function CategoryEditor({
 
   const handleSave = () => {
     setError(null);
-    const newValue = selected.join(", ");
+    // Unplaceable terms are preserved, at the end, unless explicitly removed.
+    const newValue = [...selected, ...legacy].join(", ");
     startTransition(async () => {
       const result = await updateField({
         table: "organizations",
@@ -267,6 +301,36 @@ export default function CategoryEditor({
 
           {/* Scrollable taxonomy area */}
           <div className="overflow-y-auto flex-1 px-6 py-4 space-y-6">
+
+            {/* Terms with no home in the current taxonomy */}
+            {legacy.length > 0 && (
+              <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3">
+                <p className="text-xs uppercase tracking-wider text-amber-700 font-semibold mb-1">
+                  Not in the current list
+                </p>
+                <p className="text-xs text-amber-800 mb-3">
+                  These were chosen before the categories changed. Pick the closest
+                  match below, then remove them — they are kept until you do.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {legacy.map((label) => (
+                    <span
+                      key={label}
+                      className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium border border-amber-300 bg-white text-amber-900"
+                    >
+                      {label}
+                      <button
+                        onClick={() => setLegacy((prev) => prev.filter((l) => l !== label))}
+                        className="text-amber-500 hover:text-amber-800"
+                        aria-label={`Remove ${label}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* Likely categories — AI suggestions not yet selected */}
             {likelySuggestions.length > 0 && (

@@ -81,7 +81,7 @@ export default function SwapRequestsPanel({
     await refresh();
   }
 
-  async function grantDirectOverride(delegateRegistrationId: string) {
+  async function grantDirectOverride(delegateSeatId: string) {
     setError(null);
     const extraInput = window.prompt("Grant how many additional swaps?", "1");
     if (!extraInput) return;
@@ -96,7 +96,7 @@ export default function SwapRequestsPanel({
 
     const result = await adminGrantSwapCapIncrease(
       conferenceId,
-      delegateRegistrationId,
+      delegateSeatId,
       extra,
       reason.trim()
     );
@@ -169,7 +169,7 @@ export default function SwapRequestsPanel({
                     <Timestamp iso={row.createdAt} format="compact" />
                   </td>
                   <td className="px-4 py-3 text-xs font-mono text-gray-700">
-                    {row.delegateRegistrationId.slice(0, 8)}
+                    {row.delegateSeatId.slice(0, 8)}
                   </td>
                   <td className="px-4 py-3 text-xs text-gray-700">{row.swapNumber}</td>
                   <td className="px-4 py-3 text-xs">
@@ -182,7 +182,7 @@ export default function SwapRequestsPanel({
                     {row.status === "denied_cap_reached" ? (
                       <button
                         type="button"
-                        onClick={() => void grantDirectOverride(row.delegateRegistrationId)}
+                        onClick={() => void grantDirectOverride(row.delegateSeatId)}
                         className="rounded-md border border-amber-300 px-2 py-1 text-xs font-medium text-amber-800 hover:border-amber-400"
                       >
                         Grant Override
@@ -226,7 +226,7 @@ export default function SwapRequestsPanel({
                       <Timestamp iso={row.created_at} format="compact" />
                     </td>
                     <td className="px-4 py-3 text-xs font-mono text-gray-700">
-                      {row.delegate_registration_id.slice(0, 8)}
+                      {row.delegate_seat_id.slice(0, 8)}
                     </td>
                     <td className="px-4 py-3 text-xs text-gray-700">{row.requested_extra_swaps}</td>
                     <td className="px-4 py-3 text-xs text-gray-600">{row.reason ?? "-"}</td>

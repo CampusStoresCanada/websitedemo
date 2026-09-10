@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase";
 import { applyFieldMask, loadVisibilityConfig } from "@/lib/visibility/engine";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getExhibitorStatusByOrg, type ExhibitorStatus } from "@/lib/conference/exhibitor-status";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
 
@@ -22,6 +23,8 @@ export interface HomeMapOrg {
   type: string;
   /** Set when this org has an active sponsorship agreement */
   sponsorTier?: SponsorTierInfo | null;
+  /** Booth numbers held for the current publicly-visible conference — drives the directory's Exhibitor chip. Empty/absent = not exhibiting. */
+  exhibitorBooths?: string[];
   city: string | null;
   province: string | null;
   latitude: number | null;
@@ -595,13 +598,15 @@ async function fetchSponsorTierByOrg(): Promise<Map<string, SponsorTierInfo>> {
 function mergeOrgsWithBenchmarking(
   orgRecords: HomeOrgRecord[],
   benchByOrg: Map<string, BenchmarkingSlice>,
-  sponsorByOrg?: Map<string, SponsorTierInfo>
+  sponsorByOrg?: Map<string, SponsorTierInfo>,
+  exhibitorByOrg?: Map<string, ExhibitorStatus>
 ): HomeMapOrg[] {
   return orgRecords.map((org) => {
     const bench = benchByOrg.get(org.id);
     return {
       ...org,
       sponsorTier: sponsorByOrg?.get(org.id) ?? null,
+      exhibitorBooths: exhibitorByOrg?.get(org.id)?.boothNumbers ?? [],
       enrollmentFte: bench?.enrollmentFte ?? null,
       posSystem: bench?.posSystem ?? null,
       servicesOffered: bench?.servicesOffered ?? null,
@@ -636,12 +641,15 @@ export async function getMembersPageData(): Promise<DirectoryPageData> {
 }
 
 export async function getPartnersPageData(): Promise<DirectoryPageData> {
-  const [result, sponsorByOrg] = await Promise.all([
+  const [result, sponsorByOrg, exhibitorByOrg] = await Promise.all([
     fetchMapOrgsWithBenchmarking("Vendor Partner"),
     fetchSponsorTierByOrg(),
+    getExhibitorStatusByOrg(),
   ]);
   if (!result) return { mapOrgs: [] };
-  return { mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg, sponsorByOrg) };
+  return {
+    mapOrgs: mergeOrgsWithBenchmarking(result.orgRecords, result.benchByOrg, sponsorByOrg, exhibitorByOrg),
+  };
 }
 
 // ---------------------------------------------------------------------------

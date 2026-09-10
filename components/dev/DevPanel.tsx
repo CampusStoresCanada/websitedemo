@@ -24,16 +24,43 @@ const PERMISSION_OPTIONS: { value: PermissionState | "real"; label: string }[] =
     { value: "super_admin", label: "Super Admin" },
   ];
 
-const TEST_ACCOUNTS = [
-  { email: "google@campusstores.ca", password: "Bl00p!Bl00p!", label: "Super Admin (Steve)" },
-  { email: "daviess@algonquincollege.com", password: "CSCBoard2026!", label: "Admin (Shawn)" },
-  { email: "adam.hustwitt@nscc.ca", password: "CSCMember2026!", label: "Org Admin — Member" },
-  { email: "maria.sucher@vitalsource.com", password: "CSCMember2026!", label: "Org Admin — Partner (VitalSource)" },
-  { email: "acain01@uoguelph.ca", password: "CSCUser2026!", label: "Member User" },
-  { email: "test.public.tier@example.com", password: "CSCTestPublic2026!", label: "Test Org — Public Tier (Non-Member)" },
-  { email: "test.partner@example.com", password: "CSCTestPartner2026!", label: "Test Org — Partner" },
-  { email: "test.member@example.com", password: "CSCTestMember2026!", label: "Test Org — Member" },
-];
+type DevAccount = { email: string; password: string; label: string };
+
+/**
+ * Quick-login personas, read from `NEXT_PUBLIC_DEV_ACCOUNTS` in `.env.local`.
+ *
+ * The credentials deliberately do NOT live in this file. It is tracked in git,
+ * so anything written here travels with every clone, worktree and agent session
+ * and stays in history afterwards. `.env.local` is already gitignored and never
+ * leaves the machine that made it.
+ *
+ * The component itself stays tracked on purpose: `app/layout.tsx` imports it, so
+ * gitignoring the file would break `next build` on any fresh clone — including
+ * Vercel. Unset env just means no quick-login buttons, which is exactly right
+ * anywhere that isn't a developer's laptop.
+ *
+ * Format — a JSON array on one line in `.env.local`:
+ *   NEXT_PUBLIC_DEV_ACCOUNTS=[{"email":"you@example.com","password":"…","label":"Super Admin"}]
+ */
+const TEST_ACCOUNTS: DevAccount[] = (() => {
+  const raw = process.env.NEXT_PUBLIC_DEV_ACCOUNTS;
+  if (!raw) return [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (a): a is DevAccount =>
+        !!a && typeof a === "object" &&
+        typeof (a as DevAccount).email === "string" &&
+        typeof (a as DevAccount).password === "string" &&
+        typeof (a as DevAccount).label === "string"
+    );
+  } catch {
+    // Malformed JSON shouldn't take the whole dev panel down.
+    console.warn("[DevPanel] NEXT_PUBLIC_DEV_ACCOUNTS is not valid JSON — quick login disabled.");
+    return [];
+  }
+})();
 
 export default function DevPanel() {
   const [show, setShow] = useState(false);

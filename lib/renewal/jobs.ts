@@ -15,6 +15,15 @@ import { stripe } from "@/lib/stripe/client";
 import { sendTransactional } from "@/lib/comms/send";
 import { isRenewalNotificationPaused } from "@/lib/renewal/notification-pause";
 import { raiseAlertIfNotOpen } from "@/lib/ops/alerts";
+import {
+  buildMembershipValueHtml,
+  getOpenElectionForRenewal,
+  resolveProgramFromOrgType,
+  renewalTemplateFor,
+  loadGloballySuppressedEmails,
+} from "./membership-value";
+import { formatMemberFacingDate } from "@/lib/comms/format";
+import { getProgramsConfig } from "@/lib/policy/engine";
 import { resolveOrgAdminEmails, resolveOrgPrimaryContactEmail } from "@/lib/supabase/user-lookup";
 import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import type { Json } from "@/lib/database.types";
@@ -235,6 +244,14 @@ export async function renewalReminderRun(): Promise<JobResult> {
   try {
     const reminderDays = config.reminder_days; // e.g., [30, 14, 7, 0]
     const timezone = config.dispatch_timezone; // e.g., "America/Toronto"
+    // Fetched once for the whole run, not per org. Null when no cycle is open,
+    // in which case the value clause simply omits the election.
+    const openElection = await getOpenElectionForRenewal();
+    // Member stores and vendor partners are both in this run and are paying for
+    // different things — the clause must not be the same for both.
+    const valuePrograms = await getProgramsConfig();
+    // The notice still goes to someone who unsubscribed; the pitch does not.
+    const suppressed = await loadGloballySuppressedEmails();
     const maxReminderDay = Math.max(...reminderDays);
     const activePolicySet = await getActivePolicySet();
     if (!activePolicySet) {
@@ -314,13 +331,12 @@ export async function renewalReminderRun(): Promise<JobResult> {
         // with no contact left, an invoice being settled some other way. It
         // stops the chase without cancelling the org or voiding revenue, both
         // of which are decisions someone should make deliberately.
-        //
         // Matched on STATUS, not on a date. Invoices are generated ~30 days
         // before the cycle starts and carry a billing_period_start of Aug 31,
         // so neither created_at nor billing_period_start lines up with
-        // cycleBillingPeriodStart — a date filter here silently matches nothing
-        // and the flag stays a no-op. "An open invoice somebody told us to stop
-        // chasing" is the actual condition, and it says itself.
+        // cycleBillingPeriodStart — a date filter here silently matched nothing
+        // and the flag stayed a no-op. "An open invoice somebody told us to
+        // stop chasing" is the actual condition, and it says itself.
         const { data: suppressedInvoice } = await db
           .from("invoices")
           .select("id")
@@ -427,15 +443,33 @@ export async function renewalReminderRun(): Promise<JobResult> {
             const reminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of reminderRecipients) {
               await sendTransactional({
-                templateKey: "renewal_reminder",
+                templateKey: renewalTemplateFor("reminder", resolveProgramFromOrgType(org.type, valuePrograms)),
                 to,
                 variables: {
-                  contact_name: org.name,
+                  // contact_name was the ORG name, so every reminder opened
+                  // "Hi Algonquin College," — resolveRenewalRecipients gives us
+                  // addresses, not names, so greet the store rather than
+                  // pretending to greet a person.
+                  contact_name: `${org.name} team`,
                   org_name: org.name,
-                  renewal_date: cycleBillingPeriodStart,
+                  // Was the raw stored value, so every reminder said
+                  // "renews on 2026-09-01".
+                  renewal_date: formatMemberFacingDate(cycleBillingPeriodStart),
                   days_until_expiry: reminderDay,
+                  // Was "" and rendered as "Your invoice for  has been
+                  // generated." The amount is not resolved at this point, so the
+                  // template now carries the sentence without it.
                   invoice_amount: "",
                   invoice_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                  membership_value_html: suppressed.has(to.trim().toLowerCase())
+                    ? ""
+                    : buildMembershipValueHtml({
+                    stage: "reminder",
+                    program: resolveProgramFromOrgType(org.type, valuePrograms),
+                    lapsesOn: null,
+                    election: openElection,
+                    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                  }),
                 },
               });
             }
@@ -779,12 +813,16 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
   try {
     const graceDays = config.grace_days; // e.g., 30
     const timezone = config.dispatch_timezone;
+    const openElection = await getOpenElectionForRenewal();
+    const valuePrograms = await getProgramsConfig();
+    // The notice still goes to someone who unsubscribed; the pitch does not.
+    const suppressed = await loadGloballySuppressedEmails();
 
     // Find all orgs currently in grace
     const { data: orgs, error: queryError } = await db
       .from("organizations")
       .select(
-        "id, name, email, membership_status, membership_expires_at, grace_period_started_at, renewal_notifications_paused_until"
+          "id, name, email, type, membership_status, membership_expires_at, grace_period_started_at, renewal_notifications_paused_until"
       )
       .eq("membership_status", "grace")
       .not("grace_period_started_at", "is", null);
@@ -930,12 +968,21 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               const lockedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
               for (const to of lockedRecipients) {
                 await sendTransactional({
-                  templateKey: "membership_locked",
+                  templateKey: renewalTemplateFor("locked", resolveProgramFromOrgType(org.type, valuePrograms)),
                   to,
                   variables: {
-                    contact_name: org.name,
+                    contact_name: `${org.name} team`,
                     org_name: org.name,
                     admin_contact_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/contact`,
+                    membership_value_html: suppressed.has(to.trim().toLowerCase())
+                      ? ""
+                      : buildMembershipValueHtml({
+                          stage: "locked",
+                          program: resolveProgramFromOrgType(org.type, valuePrograms),
+                          lapsesOn: null,
+                          election: openElection,
+                          appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                        }),
                   },
                 });
               }
@@ -970,6 +1017,17 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
             !isRenewalNotificationPaused(org, timezone) &&
             (daysSinceLastReminder === null || daysSinceLastReminder >= 7)
           ) {
+            // The date access actually stops, derived from where this org is in
+            // its own grace period rather than assumed.
+            const graceLapsesOn = org.grace_period_started_at
+              ? new Date(
+                  new Date(org.grace_period_started_at as string).getTime() +
+                    graceDays * 86_400_000
+                )
+                  .toISOString()
+                  .slice(0, 10)
+              : null;
+
             await recordRenewalEvent(db, org.id, renewalYear, "grace_reminder", undefined, {
               days_in_grace: Math.floor(daysInGrace),
               days_remaining: Math.ceil(graceDays - daysInGrace),
@@ -978,13 +1036,22 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
             const graceReminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of graceReminderRecipients) {
               await sendTransactional({
-                templateKey: "grace_weekly_reminder",
+                templateKey: renewalTemplateFor("grace", resolveProgramFromOrgType(org.type, valuePrograms)),
                 to,
                 variables: {
-                  contact_name: org.name,
+                  contact_name: `${org.name} team`,
                   org_name: org.name,
                   grace_days_remaining: Math.ceil(graceDays - daysInGrace),
                   payment_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/org/billing`,
+                  membership_value_html: suppressed.has(to.trim().toLowerCase())
+                    ? ""
+                    : buildMembershipValueHtml({
+                    stage: "grace",
+                    program: resolveProgramFromOrgType(org.type, valuePrograms),
+                    lapsesOn: graceLapsesOn,
+                    election: openElection,
+                    appUrl: process.env.NEXT_PUBLIC_APP_URL ?? "",
+                  }),
                 },
               });
             }

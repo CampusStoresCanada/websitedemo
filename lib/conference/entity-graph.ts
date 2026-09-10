@@ -1,5 +1,6 @@
 import type { BuildEntity, EntityRefView } from "../actions/conference-entities";
 import { RELATIONSHIP_BY_ROLE, SUGGESTION_BY_KIND } from "./entity-kinds";
+import { CONTAINMENT_ROLE } from "./inclusion";
 
 /**
  * Pure graph logic for the v3 catalog — inheritance, completeness, cycle safety.
@@ -45,7 +46,7 @@ export function effectiveRefs(entity: BuildEntity, byId: Map<string, BuildEntity
 
 /** Just the includes edges (with quantity), inheritance applied — what gets sold/granted. */
 export function effectiveIncludes(entity: BuildEntity, byId: Map<string, BuildEntity>): EffectiveRef[] {
-  return effectiveRefs(entity, byId).filter((r) => r.role === "includes");
+  return effectiveRefs(entity, byId).filter((r) => r.role === CONTAINMENT_ROLE);
 }
 
 /**

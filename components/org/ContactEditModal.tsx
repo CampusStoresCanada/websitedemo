@@ -5,12 +5,14 @@ import { updateField } from "@/lib/actions/update-field";
 import { addContact } from "@/lib/actions/add-contact";
 import { updateContactTags } from "@/lib/actions/update-contact-tags";
 import { updateProcurementInfo } from "@/lib/actions/procurement";
+import { loadContactConferenceObligations } from "@/lib/actions/conference-access";
 import {
   getContactLoginStatus,
   inviteExistingContact,
   type ContactLoginStatus,
 } from "@/lib/actions/user-management";
 import type { VisibleContact } from "@/lib/visibility/data";
+import { isPersonalObligation } from "@/lib/conference/access";
 import type { ProcurementInfo } from "@/lib/types/procurement";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { CONTACT_TAGS, hasNonMemberTag } from "@/lib/contacts/tags";
@@ -30,6 +32,23 @@ interface ContactEditModalProps {
   onCreated?: (contact: { id: string; name: string; email: string | null }) => void;
 }
 
+/**
+ * The conference details this person owes — loaded by the modal on open.
+ *
+ * The fields are the ones they OWE, derived from what they hold: a badge seat
+ * owes a badge name, a social ticket owes a dietary answer. Not a fixed form —
+ * asking everyone for everything is how a form teaches people to skip it.
+ */
+export interface ConferenceObligationInfo {
+  personId: string;
+  conferenceId: string;
+  /** Ordered as they should be shown; label is already reader-facing. */
+  fields: { key: string; label: string }[];
+  values: Record<string, string | null>;
+  /** False for an org admin — they get answered-or-not, never the answer. */
+  canSeeValues: boolean;
+}
+
 interface FieldState {
   name: string;
   work_email: string;
@@ -37,7 +56,7 @@ interface FieldState {
   work_phone_number: string;
 }
 
-type Tab = "details" | "procurement";
+type Tab = "details" | "procurement" | "conference";
 
 export default function ContactEditModal({
   contact,
@@ -60,6 +79,27 @@ export default function ContactEditModal({
     role_title: (contact?.role_title as string | null) ?? "",
     work_phone_number: (contact?.work_phone_number as string | null) ?? (contact?.phone as string | null) ?? "",
   });
+
+  // ── Conference tab — resolved on open, absent for anyone not attending ────
+  const [conferenceObligations, setConferenceObligations] =
+    useState<ConferenceObligationInfo | null>(null);
+
+  useEffect(() => {
+    if (isCreate || !contact?.id) return;
+    let cancelled = false;
+    void loadContactConferenceObligations(contact.id as string, organizationId).then((result) => {
+      // A failure here means no tab, never a broken modal: editing someone's
+      // name must not depend on the conference lookup succeeding.
+      if (cancelled || !result.success || !result.data) return;
+      setConferenceObligations(result.data);
+    });
+    return () => { cancelled = true; };
+  }, [isCreate, contact?.id, organizationId]);
+
+  const contactEmailForNudge =
+    ((contact?.work_email as string | null) ?? (contact?.email as string | null) ?? "").trim() || null;
+
+  const showConference = conferenceObligations !== null && conferenceObligations.fields.length > 0;
 
   // Segmentation tags — lapsed/prospect/conference-only/board/external
   // vendor. contact_type also carries unrelated values (e.g. "Staff",
@@ -317,6 +357,9 @@ export default function ContactEditModal({
   }
 
   const saveLabel = saving ? "Saving…" : isCreate ? "Add contact" : "Save";
+  // The Conference tab is a read-out with a chase link; there is nothing on it
+  // this viewer is permitted to write, so it gets no Save.
+  const showSaveButton = tab !== "conference";
 
   return (
     <>
@@ -341,8 +384,8 @@ export default function ContactEditModal({
             </button>
           </div>
 
-          {/* Tabs — only shown when procurement is available */}
-          {showProcurement && (
+          {/* Tabs — shown when this contact has anything beyond details. */}
+          {(showProcurement || showConference) && (
             <div className="flex border-b border-gray-100 shrink-0">
               <button
                 onClick={() => { setTab("details"); setError(null); }}
@@ -354,16 +397,30 @@ export default function ContactEditModal({
               >
                 Details
               </button>
-              <button
-                onClick={() => { setTab("procurement"); setError(null); }}
-                className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
-                  tab === "procurement"
-                    ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
-                    : "text-gray-400 hover:text-gray-600"
-                }`}
-              >
-                Procurement
-              </button>
+              {showProcurement && (
+                <button
+                  onClick={() => { setTab("procurement"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    tab === "procurement"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Procurement
+                </button>
+              )}
+              {showConference && (
+                <button
+                  onClick={() => { setTab("conference"); setError(null); }}
+                  className={`flex-1 py-2.5 text-xs font-semibold uppercase tracking-wider transition-colors ${
+                    tab === "conference"
+                      ? "border-b-2 border-[#EE2A2E] text-[#EE2A2E]"
+                      : "text-gray-400 hover:text-gray-600"
+                  }`}
+                >
+                  Conference
+                </button>
+              )}
             </div>
           )}
 
@@ -579,6 +636,79 @@ export default function ContactEditModal({
               </div>
             )}
 
+            {/* ── Conference tab ── */}
+            {tab === "conference" && conferenceObligations && (
+              <div className="px-6 py-5 space-y-4">
+                <p className="text-xs text-gray-500">
+                  What the organisers still need from this person, based on what
+                  they&rsquo;re booked into. Every one of these is theirs to answer — the
+                  badge name comes from the Details tab, and the rest only they can
+                  give us.
+                </p>
+                {/* Theirs to answer, not yours. Listed so you know what is
+                    holding the roster up and can chase the right person — but
+                    with no input, because a colleague's guess at an allergy
+                    reads as confirmed and is worse than a blank. The server
+                    refuses these from anyone but the person themselves. */}
+                {(() => {
+                  const theirs = conferenceObligations.fields.filter((f) =>
+                    isPersonalObligation(f.key)
+                  );
+                  if (theirs.length === 0) return null;
+                  const outstanding = theirs.filter(
+                    (f) => !(conferenceObligations.values[f.key] ?? "").trim()
+                  );
+                  const who = (contact?.name as string | null) ?? "This person";
+                  const mailto = contactEmailForNudge
+                    ? `mailto:${contactEmailForNudge}?subject=${encodeURIComponent(
+                        "Your conference details"
+                      )}&body=${encodeURIComponent(
+                        `Hi,\n\nCould you add your conference details before the show? Sign in and open your profile, click Edit, and fill in: ${outstanding
+                          .map((f) => f.label.toLowerCase())
+                          .join(", ")}.\n\nThanks!`
+                      )}`
+                    : null;
+                  return (
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-3">
+                      <p className="text-[11px] font-semibold uppercase tracking-wider text-gray-500">
+                        {who} adds these themselves
+                      </p>
+                      <ul className="mt-1.5 space-y-1">
+                        {theirs.map((f) => {
+                          const value = (conferenceObligations.values[f.key] ?? "").trim();
+                          return (
+                            <li key={f.key} className="text-sm text-gray-700">
+                              {f.label}:{" "}
+                              {!value ? (
+                                <span className="text-amber-800">not answered yet</span>
+                              ) : conferenceObligations.canSeeValues ? (
+                                <span className="text-gray-900">{value}</span>
+                              ) : (
+                                // A manager needs to know whether to chase, not
+                                // what the allergy is. The value never reaches
+                                // this browser — the server sends a marker.
+                                <span className="text-green-700">answered</span>
+                              )}
+                            </li>
+                          );
+                        })}
+                      </ul>
+                      {outstanding.length > 0 && (
+                        <p className="mt-2 text-xs text-gray-500">
+                          They sign in, open their own profile and click Edit.{" "}
+                          {mailto && (
+                            <a href={mailto} className="font-medium text-[#EE2A2E] hover:underline">
+                              Email them a reminder
+                            </a>
+                          )}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             {/* ── Procurement tab ── */}
             {tab === "procurement" && (
               <div className="px-6 py-5">
@@ -664,13 +794,15 @@ export default function ContactEditModal({
             >
               Cancel
             </button>
-            <button
-              onClick={() => void handleSave()}
-              disabled={saving}
-              className="px-4 py-2 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
-            >
-              {saveLabel}
-            </button>
+            {showSaveButton && (
+              <button
+                onClick={() => void handleSave()}
+                disabled={saving}
+                className="px-4 py-2 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
+              >
+                {saveLabel}
+              </button>
+            )}
           </div>
 
         </div>
@@ -678,3 +810,18 @@ export default function ContactEditModal({
     </>
   );
 }
+
+/**
+ * Concrete examples, because "Dietary restrictions" alone gets answered "none"
+ * by people who do need a gluten-free plate. Kept here rather than on the
+ * obligation definition: what someone owes is a fact worth a schema, how to
+ * ask them is not.
+ */
+const CONFERENCE_PLACEHOLDERS: Record<string, string> = {
+  display_name: "Name as it should read on the badge",
+  contact_email: "Where their confirmation goes",
+  dietary_restrictions: "Vegetarian, celiac, nut allergy…",
+  accessibility_needs: "Step-free access, seating near the front…",
+  emergency_contact_name: "Who we call if something happens",
+  emergency_contact_phone: "Mobile is best",
+};

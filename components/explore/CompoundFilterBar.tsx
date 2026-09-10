@@ -16,6 +16,8 @@ interface CompoundFilterBarProps {
   mandateCounts: Record<string, number>;
   partnerCategoryCounts?: Record<string, number>;
   certificationCounts?: Record<string, number>;
+  /** How many partners in the current cohort hold a booth — drives the Exhibiting filter row. */
+  exhibitingCount?: number;
   canViewCancoll?: boolean;
   checkedCategories?: Set<string>;
   setCheckedCategories?: React.Dispatch<React.SetStateAction<Set<string>>>;
@@ -49,6 +51,7 @@ export function CompoundFilterBar({
   mandateCounts,
   partnerCategoryCounts,
   certificationCounts,
+  exhibitingCount = 0,
   canViewCancoll = false,
   checkedCategories,
   setCheckedCategories,
@@ -130,6 +133,7 @@ export function CompoundFilterBar({
       case "shopping": return `Shopping: ${value}`;
       case "certification": return `Certification: ${value}`;
       case "cancoll": return "CANCOLL Members";
+      case "exhibiting": return "Exhibiting";
       default: return `${key}: ${value}`;
     }
   };
@@ -327,6 +331,26 @@ export function CompoundFilterBar({
                         </label>
                       ))}
                   </div>
+                </div>
+              )}
+              {/* Exhibiting — derived from booth ownership, not a stored field,
+                  so it sits apart from the Certification list above. */}
+              {exhibitingCount > 0 && (
+                <div className="p-2.5 border-b border-gray-100">
+                  <label className="flex items-center gap-2 py-1 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={compoundFilters.exhibiting === "true"}
+                      onChange={(e) =>
+                        setCompoundFilters((f) => ({ ...f, exhibiting: e.target.checked ? "true" : undefined }))
+                      }
+                      className="h-3.5 w-3.5 rounded border-gray-300 text-[#EE2A2E] focus:ring-[#EE2A2E] cursor-pointer flex-shrink-0"
+                    />
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src="/certifications/exhibitor-2027.svg" alt="" className="h-4 w-4 rounded-full flex-shrink-0" />
+                    <span className="flex-1 text-xs text-gray-600">Exhibiting at the conference</span>
+                    <span className="text-[10px] text-gray-400 tabular-nums">{exhibitingCount}</span>
+                  </label>
                 </div>
               )}
             </>

@@ -42,6 +42,7 @@ export async function PATCH(
 
   let payload: {
     op?: "update" | "manual_check_in" | "reprint_badge";
+    testMode?: boolean;
     patch?: Record<string, unknown>;
     reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
     reprintNote?: string | null;
@@ -55,6 +56,7 @@ export async function PATCH(
   try {
     payload = (await request.json()) as {
       op?: "update" | "manual_check_in" | "reprint_badge";
+      testMode?: boolean;
       patch?: Record<string, unknown>;
       reprintReason?: "damaged" | "lost" | "name_change" | "ops_override";
       reprintNote?: string | null;
@@ -70,7 +72,9 @@ export async function PATCH(
   }
 
   if (payload.op === "manual_check_in") {
-    const result = await markConferencePersonCheckedInManual(personId);
+    const result = await markConferencePersonCheckedInManual(personId, {
+      testMode: payload.testMode === true,
+    });
     if (!result.success) {
       const lowerError = result.error?.toLowerCase() ?? "";
       const status =

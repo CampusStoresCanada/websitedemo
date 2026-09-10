@@ -15,6 +15,13 @@ export type ChecklistInput = {
   name: string;
   description: string | null;
   scopeEntityId: string | null;
+  /**
+   * Target everyone listed in a publication instead of everyone who bought
+   * something at the conference. Mutually exclusive with scopeEntityId — one
+   * says "orgs holding this item", the other says "orgs printed in this book",
+   * and they answer different questions.
+   */
+  publicationId?: string | null;
   deadlineAt: string; // ISO
   active: boolean;
 };
@@ -29,11 +36,21 @@ export async function saveChecklist(
   if (!input.deadlineAt) return { success: false, error: "Set a deadline." };
 
   const db = createAdminClient();
+  // ⚠️ `publicationId` is a THREE-state field, and the distinction is
+  // load-bearing: `undefined` means "this caller does not manage publication
+  // scope, leave it alone", `null` means "clear it". Writing `?? null` here
+  // instead would let any older form that has never heard of publication scope
+  // silently wipe it on an unrelated edit — the Directory Listing checklist
+  // would quietly revert from 123 organisations to the 30 who bought something.
+  const managesPublication = input.publicationId !== undefined;
   const row = {
     conference_id: conferenceId,
     name: input.name.trim(),
     description: input.description?.trim() || null,
-    scope_entity_id: input.scopeEntityId,
+    // Publication scope wins and clears the entity scope: a checklist cannot
+    // sensibly be "orgs holding booth 12" AND "everyone in the directory".
+    scope_entity_id: input.publicationId ? null : input.scopeEntityId,
+    ...(managesPublication ? { publication_id: input.publicationId } : {}),
     deadline_at: input.deadlineAt,
     active: input.active,
     updated_at: new Date().toISOString(),

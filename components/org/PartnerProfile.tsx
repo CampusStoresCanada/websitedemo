@@ -49,6 +49,7 @@ import type { RFPWithContext } from "@/lib/types/rfp";
 import PartnerRFPFeed from "@/components/rfps/PartnerRFPFeed";
 import type { MarketData } from "@/lib/actions/partner-market";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
+import type { RatingRow } from "@/lib/match/rating-standing";
 
 // ── Category grouping ─────────────────────────────────────────────────────────
 // primary_category is a flat comma-separated string of parent categories and
@@ -107,6 +108,9 @@ interface PartnerProfileProps {
   canEditLinks: boolean;
   partnerRFPs?: RFPWithContext[];
   partnerMarket?: MarketData | null;
+  /** ⛔ Org admins only — rating is an admin act, reading the market is not. */
+  canRateMarket?: boolean;
+  marketRatings?: RatingRow[];
   canNudge?: boolean;
   nudgeAvailableAt?: string | null;
   conferenceAttendance: Array<{
@@ -233,6 +237,8 @@ export default function PartnerProfile({
   canEditLinks,
   partnerRFPs = [],
   partnerMarket = null,
+  canRateMarket = false,
+  marketRatings = [],
   canNudge = false,
   nudgeAvailableAt = null,
   renewalWindowOpen = false,
@@ -847,7 +853,7 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {/* Store Contact — Members and above can see — partners and public are gated */}
+          {/* Vendor Contact — Members and above can see — partners and public are gated */}
           {primaryContact && (
             <ProtectedSection
               bypass={isOwnOrgPage}
@@ -855,7 +861,7 @@ export default function PartnerProfile({
             >
               <div className="mb-10">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-                  Store Contact
+                  Vendor Contact
                 </h3>
                 <div className="flex flex-wrap gap-8 text-gray-500">
                   <span data-flaggable data-field="contacts.work_email" data-entity-id={primaryContact.id}>
@@ -1077,7 +1083,7 @@ export default function PartnerProfile({
               bypass={isOwnOrgPage}
               requiredPermission="member"
             >
-              <div>
+              <div id="team" className="scroll-mt-20">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
                   Staffing
                 </h3>
@@ -1373,7 +1379,7 @@ export default function PartnerProfile({
             </div>
           )}
 
-          {/* Store Contact — Members and above can see */}
+          {/* Vendor Contact — Members and above can see */}
           {primaryContact && (
             <ProtectedSection
               bypass={isOwnOrgPage}
@@ -1381,7 +1387,7 @@ export default function PartnerProfile({
             >
               <div className="mb-8">
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
-                  Store Contact
+                  Vendor Contact
                 </h3>
                 <div className="flex flex-wrap gap-4 text-gray-500 text-sm">
                   <span data-flaggable data-field="contacts.work_email" data-entity-id={primaryContact.id}>
@@ -1639,6 +1645,9 @@ export default function PartnerProfile({
           market={partnerMarket}
           canNudge={canNudge}
           nudgeAvailableAt={nudgeAvailableAt}
+          canRate={canRateMarket}
+          ratings={marketRatings}
+          partnerOrgId={organization.id}
         />
       )}
 

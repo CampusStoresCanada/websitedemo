@@ -11,6 +11,7 @@
  */
 
 import { collectDataObligations, type DataObligation, type GrantType } from "./grants";
+import { isSelfEditablePersonField } from "./person-fields";
 
 export type PersonObligationStatus = {
   obligations: DataObligation[];
@@ -41,4 +42,17 @@ export function computePersonObligations(
   const obligations = collectDataObligations(heldGrantTypes);
   const missing = obligations.filter((obligation) => !fieldIsPresent(fields[obligation.key]));
   return { obligations, missing, isReady: missing.length === 0 };
+}
+
+/**
+ * Which obligations belong to the PERSON rather than the organisation.
+ *
+ * Delegates to the field policy the server has enforced all along
+ * (lib/conference/person-fields.ts) rather than restating it. An earlier
+ * version of this file listed the four keys again, which is how a policy
+ * quietly drifts: the list that decides what the UI shows must be the list
+ * that decides what the write accepts.
+ */
+export function isPersonalObligation(key: string): boolean {
+  return isSelfEditablePersonField(key);
 }

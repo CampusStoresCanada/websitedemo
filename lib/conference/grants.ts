@@ -53,7 +53,7 @@ export type GrantScopeKind =
 export type DataObligation = {
   key: string;
   label: string;
-  deadline: "badge_print" | "offsite_lock" | "travel_cutoff" | "registration_close";
+  deadline: "badge_print" | "offsite_lock" | "travel_cutoff" | "registration_close" | "catering_cutoff";
 };
 
 export type GrantTypeDefinition = {
@@ -115,7 +115,10 @@ export const GRANT_TYPE_DEFINITIONS: Record<GrantType, GrantTypeDefinition> = {
     allowsScopeAll: true,
     usesRegistrationType: false,
     dataObligations: [
-      { key: "dietary_restrictions", label: "Dietary restrictions", deadline: "registration_close" },
+      // Catering locks before registration does — 18 January for CSC 2027,
+      // thirteen days before registration_close. Borrowing that symbol showed
+      // people a date almost a fortnight later than the caterer's.
+      { key: "dietary_restrictions", label: "Dietary restrictions", deadline: "catering_cutoff" },
     ],
   },
   meeting_access: {

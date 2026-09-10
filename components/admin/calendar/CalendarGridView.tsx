@@ -1,5 +1,6 @@
 import type { CalendarItemEnriched, CalendarLayer, DaySaturation } from "@/lib/calendar/types";
 import CalendarItemCard, { isResolved, itemSortRank } from "./CalendarItemCard";
+import { calendarDayKey } from "@/lib/calendar/day-key";
 
 type Props = {
   items: CalendarItemEnriched[];
@@ -36,7 +37,7 @@ export default function CalendarGridView({
   const byDate = new Map<string, CalendarItemEnriched[]>();
   for (const item of items) {
     if (!activeLayers.has(item.layer)) continue;
-    const key = item.starts_at.slice(0, 10);
+    const key = calendarDayKey(item.starts_at);
     const [y, m] = key.split("-");
     if (parseInt(y, 10) !== year || parseInt(m, 10) !== monthN) continue;
     const arr = byDate.get(key);

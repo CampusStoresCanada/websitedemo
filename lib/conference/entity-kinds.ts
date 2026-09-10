@@ -64,6 +64,7 @@ export const RELATIONSHIPS: Relationship[] = [
   { role: "involved_in", label: "Involved in", verb: "involved in", hasQuantity: false, hint: "Sessions or things this takes part in." },
   { role: "when", label: "When", verb: "on", hasQuantity: false, targetHint: "day" },
   { role: "where", label: "Where", verb: "at", hasQuantity: false, targetHint: "venue" },
+  { role: "placed_on", label: "Placed on", verb: "placed on", hasQuantity: false, targetHint: "floorplan", hint: "The surface (floor plan) this sits on, with its x/y placement. Distinct from `where`, which is the venue something happens at — a thing can be both." },
   { role: "who", label: "Who", verb: "for", hasQuantity: false, targetHint: "audience", hint: "Inherited from the website; add your own too." },
   { role: "about", label: "About", verb: "about", hasQuantity: false, hint: "Comms, emails, notices tied to this." },
   { role: "requires", label: "Requires", verb: "requires", hasQuantity: false, targetHint: "policy", hint: "A policy (terms/waiver) anyone holding this must accept before they're complete." },

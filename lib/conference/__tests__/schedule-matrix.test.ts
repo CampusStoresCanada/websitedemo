@@ -10,8 +10,8 @@ function slot(id: string, suiteId: string, slotNumber: number): ScheduleOpsSlot 
 function assignment(
   meetingSlotId: string,
   suiteId: string,
-  exhibitorRegistrationId: string,
-  delegateRegistrationIds: string[]
+  exhibitorSeatId: string,
+  delegateSeatIds: string[]
 ): ScheduleOpsAssignment {
   return {
     id: `a-${meetingSlotId}`,
@@ -20,10 +20,10 @@ function assignment(
     suiteId,
     dayNumber: 1,
     slotNumber: 1,
-    exhibitorRegistrationId,
+    exhibitorSeatId,
     exhibitorOrganizationName: "Acme",
-    delegateRegistrationIds,
-    delegateNames: delegateRegistrationIds,
+    delegateSeatIds,
+    delegateNames: delegateSeatIds,
     status: "scheduled",
     isManual: false,
   };

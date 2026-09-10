@@ -1,9 +1,13 @@
 "use server";
 
 import { requireAuthenticated } from "@/lib/auth/guards";
-import { createClient } from "@/lib/supabase/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import type { AnySnapshot, SnapshotRecord, SnapshotType } from "@/lib/snapshots/types";
+import { createClient } from "@/lib/supabase/server";
+import type {
+  AnySnapshot,
+  SnapshotRecord,
+  SnapshotType,
+} from "@/lib/snapshots/types";
 import {
   captureOrgProfileSnapshot,
   captureEventSnapshot,
@@ -84,15 +88,15 @@ export async function resolveSnapshot(id: string): Promise<{
 }> {
   // Read with the service role, not the session client. anon can no longer
   // SELECT page_snapshots directly — which is the point: a snapshot must only
-  // ever be served through here, where expiry is enforced. A direct API read
-  // ran neither that check nor any of the recipient scoping.
+  // ever be served through here, where expiry is enforced and contacts who
+  // have since withdrawn are removed. A direct API read ran neither check.
   const supabase = createAdminClient();
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data, error } = await (supabase as any)
     .from("page_snapshots")
     .select(
-      "id, type, snapshot, page_url, page_title, note, created_by, recipient_email, expires_at, created_at"
+      "id, type, snapshot, page_url, page_title, note, created_by, recipient_email, expires_at, created_at",
     )
     .eq("id", id)
     .maybeSingle();
@@ -111,7 +115,61 @@ export async function resolveSnapshot(id: string): Promise<{
     return { valid: false, reason: "expired", record: row };
   }
 
-  return { valid: true, record: row };
+  return { valid: true, record: await withdrawnContactsRemoved(row) };
+}
+
+/**
+ * Drop contacts who have asked to be hidden SINCE the snapshot was taken.
+ *
+ * Capture-time filtering (lib/snapshots/capture.ts) handles the common case,
+ * but a snapshot is a frozen copy served from /s/[id] with no authentication
+ * — anyone holding the forwarded link sees it. If someone asks to be removed
+ * the day after a snapshot is captured, capture-time filtering cannot help
+ * them; only re-checking on the way out can.
+ *
+ * Matching is by name because that is all a snapshot stores. That is blunt:
+ * a shared name means an unrelated person can suppress someone else's entry.
+ * Erring toward showing too little is the right side to err on here.
+ */
+async function withdrawnContactsRemoved(
+  row: SnapshotRecord,
+): Promise<SnapshotRecord> {
+  const snapshot = row.snapshot as { contacts?: { name?: string }[] } | null;
+  const contacts = snapshot?.contacts;
+  if (!Array.isArray(contacts) || contacts.length === 0) return row;
+
+  const names = contacts
+    .map((c) => c?.name)
+    .filter((n): n is string => typeof n === "string" && n.length > 0);
+  if (names.length === 0) return row;
+
+  const db = createAdminClient();
+  const { data, error } = await db
+    .from("contacts")
+    .select("name")
+    .in("name", names)
+    .eq("hidden", true);
+
+  // Fail closed on error: an unreadable check must not silently publish
+  // someone who may have asked to be removed.
+  if (error) {
+    console.error("[snapshots] hidden re-check failed:", error);
+    return {
+      ...row,
+      snapshot: { ...(snapshot ?? {}), contacts: [] },
+    } as unknown as SnapshotRecord;
+  }
+
+  const withdrawn = new Set((data ?? []).map((c) => c.name));
+  if (withdrawn.size === 0) return row;
+
+  return {
+    ...row,
+    snapshot: {
+      ...(snapshot ?? {}),
+      contacts: contacts.filter((c) => !c?.name || !withdrawn.has(c.name)),
+    },
+  } as unknown as SnapshotRecord;
 }
 
 // ---------------------------------------------------------------------------
@@ -127,7 +185,7 @@ export interface MemberSearchResult {
 }
 
 export async function searchMembersForShare(
-  query: string
+  query: string,
 ): Promise<MemberSearchResult[]> {
   const auth = await requireAuthenticated();
   if (!auth.ok) return [];
@@ -189,7 +247,10 @@ export async function captureAndCreateSnapshot({
     snapshot = await captureEventSnapshot(eventMatch[1]);
   } else if (conferenceMatch) {
     type = "conference";
-    snapshot = await captureConferenceSnapshot(conferenceMatch[1], conferenceMatch[2]);
+    snapshot = await captureConferenceSnapshot(
+      conferenceMatch[1],
+      conferenceMatch[2],
+    );
   } else if (resourcesMatch) {
     type = "resources";
     snapshot = await captureResourcesSnapshot(pathname);
@@ -250,7 +311,9 @@ export async function shareInternally({
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const adminClient = createAdminClient();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: recipientAuthData } = await (adminClient as any).auth.admin.getUserById(recipientId);
+  const { data: recipientAuthData } = await (
+    adminClient as any
+  ).auth.admin.getUserById(recipientId);
   const recipientEmail: string = recipientAuthData?.user?.email ?? "";
   if (!recipientEmail) {
     return { success: false, error: "Could not resolve recipient email" };
@@ -277,7 +340,10 @@ export async function shareInternally({
   });
 
   if (shareResult.error || !shareResult.id) {
-    return { success: false, error: shareResult.error ?? "Failed to create share record" };
+    return {
+      success: false,
+      error: shareResult.error ?? "Failed to create share record",
+    };
   }
 
   // Build URL with ?ishare=<id> so recipient lands with highlight + panel
@@ -285,7 +351,7 @@ export async function shareInternally({
   if (!appUrl) {
     const { headers } = await import("next/headers");
     const h = await headers();
-    const host  = h.get("host") ?? "";
+    const host = h.get("host") ?? "";
     const proto = h.get("x-forwarded-proto") ?? "https";
     if (host) appUrl = `${proto}://${host}`;
   }

@@ -1237,7 +1237,12 @@ function EditSelectionOverlay({
         e.preventDefault();
         e.stopPropagation();
 
-        const text = hoveredElement.textContent?.trim() || '';
+        // Prefer the stored value when the element is showing a formatted one.
+        // formatCurrency abbreviates — "$1.2M" — so seeding the editor from the
+        // rendered text would round a store's net profit to one decimal place
+        // the moment anyone opened the field, whether or not they changed it.
+        const rawValue = hoveredElement.getAttribute('data-raw-value');
+        const text = rawValue ?? (hoveredElement.textContent?.trim() || '');
         const field = hoveredElement.getAttribute('data-field') || '';
         const entityId = hoveredElement.getAttribute('data-entity-id') || '';
         const organizationId = hoveredElement.getAttribute('data-organization-id') || '';
@@ -1462,6 +1467,24 @@ const MULTILINE_COLUMNS = new Set([
   "subtitle",
 ]);
 
+/**
+ * Strip display formatting so a numeric column gets a number.
+ *
+ * Two sites need the identical rule — seeding the input and parsing what comes
+ * back — and they had drifted into two copies of it. The currency symbol was in
+ * neither, which did not matter while the only numeric fields here were FTE and
+ * square footage; it does now that the whole sales and expense breakdown is
+ * editable and every one of those renders with a "$".
+ */
+function stripDisplayFormatting(value: string): string {
+  return value
+    .replace(/,/g, "")
+    .replace(/\s*sq\s*ft$/i, "")
+    .replace(/^\s*\$\s*/, "")
+    .replace(/^\s*-\s*\$\s*/, "-")
+    .trim();
+}
+
 function isMultilineField(column: string, currentValue: string): boolean {
   if (MULTILINE_COLUMNS.has(column)) return true;
   // Also treat any value with a newline or over 120 chars as multiline
@@ -1485,7 +1508,7 @@ function FieldEditPopover({
   // Strip display formatting from the initial value so the input shows a clean,
   // editable value. formatNumber() adds commas; square_footage appends " sq ft".
   const cleanInitialText = (() => {
-    const stripped = selectedElement.text.replace(/,/g, '').replace(/\s*sq\s*ft$/i, '').trim();
+    const stripped = stripDisplayFormatting(selectedElement.text);
     return stripped || selectedElement.text;
   })();
 
@@ -1529,7 +1552,7 @@ function FieldEditPopover({
       // Coerce to number for numeric columns.
       // formatNumber() adds commas (e.g. "12,500") and sq ft suffixes — strip those
       // before sending so Postgres doesn't reject the cast.
-      const stripped = value.replace(/,/g, '').replace(/\s*sq\s*ft$/i, '').trim();
+      const stripped = stripDisplayFormatting(value);
       const asNum = stripped !== '' ? Number(stripped) : NaN;
       const coercedValue: string | number | null = (!isNaN(asNum) && stripped !== '')
         ? asNum

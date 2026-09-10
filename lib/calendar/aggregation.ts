@@ -8,12 +8,14 @@
 //   conference_instances, policy_sets, message_campaigns,
 //   renewal_job_runs, scheduler_runs, retention_jobs, ops_alerts,
 //   benchmarking_surveys, billing_runs, conference_legal_versions,
-//   conference_entities, signup_applications
+//   conference_entities, signup_applications, events,
+//   renewal cycle (from policy), conference checklists, elections + AGM
 //
 // ALWAYS called from a server context (API route or server page).
 // ─────────────────────────────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { calendarDayKey } from "./day-key";
 import type { Json } from "@/lib/database.types";
 import type {
   CalendarItem,
@@ -27,6 +29,9 @@ import type {
 } from "./types";
 
 const SATURATION_THRESHOLD = 5;
+
+/** Only a real uuid may go in related_entity_id; derived sources carry none. */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 // ── Severity computation ───────────────────────────────────────────
 
@@ -80,7 +85,13 @@ function makeProjected(
     source_mode:          "projected",
     source_key:           sk(entityType, entityId, event),
     related_entity_type:  entityType as CalendarItem["related_entity_type"],
-    related_entity_id:    entityId,
+    // `related_entity_id` is a uuid COLUMN, but some sources are derived rather
+    // than stored — the renewal cadence is computed from policy and has no row
+    // to point at, so its identity is a synthetic key like "2026-09-01".
+    // Passing that through rejected the whole 50-row upsert chunk and took
+    // unrelated events and checklist items down with it. The full identity
+    // still lives in source_key, which is text and is what upserts conflict on.
+    related_entity_id:    UUID_RE.test(entityId) ? entityId : null,
     status,
     severity:             computeSeverity(startsAt, now, status),
     metadata:             { event, ...extraMeta },
@@ -315,6 +326,154 @@ export async function syncAndFetchCalendar(
     ));
   }
 
+  // ── 14. Renewal cycle — the dates themselves, not just past runs ──
+  //
+  // `renewal_job_runs` (source 4) records what has ALREADY run. That is the
+  // wrong half for a calendar: the ED needs to see the reminder landing in
+  // three days, not the one that fired last month. The cadence is policy, so
+  // it is projected from policy rather than hardcoded.
+  const { data: renewalPolicy } = await supabase
+    .from("policy_values")
+    .select("key, value_json")
+    .in("key", ["renewal.cycle_start_month_day", "renewal.reminder_days", "renewal.grace_days"]);
+
+  const policyBy = new Map((renewalPolicy ?? []).map((r) => [r.key, r.value_json]));
+  const cycleMonthDay = typeof policyBy.get("renewal.cycle_start_month_day") === "string"
+    ? (policyBy.get("renewal.cycle_start_month_day") as string)
+    : null;
+  const reminderDays = Array.isArray(policyBy.get("renewal.reminder_days"))
+    ? (policyBy.get("renewal.reminder_days") as number[])
+    : [];
+  const graceDays = typeof policyBy.get("renewal.grace_days") === "number"
+    ? (policyBy.get("renewal.grace_days") as number)
+    : 0;
+
+  if (cycleMonthDay) {
+    const [mm, dd] = cycleMonthDay.split("-").map(Number);
+    // Project the cycle either side of now so a window looking backwards or
+    // forwards both resolve — cheap, and the window filter drops the rest.
+    for (const year of [now.getUTCFullYear(), now.getUTCFullYear() + 1]) {
+      const cycleStart = new Date(Date.UTC(year, mm - 1, dd, 12, 0, 0));
+      const id = `${year}-${cycleMonthDay}`;
+      const meta = { cycle_start: cycleStart.toISOString().slice(0, 10), reminder_days: reminderDays };
+
+      for (const day of reminderDays) {
+        const at = new Date(cycleStart.getTime() - day * 24 * 60 * 60 * 1000);
+        projected.push(makeProjected(
+          day === 0 ? `Renewal notice: cycle starts today` : `Renewal reminder: ${day} days out`,
+          day === 0
+            ? "Final renewal notice on the day the new cycle begins."
+            : `Automated reminder to members and partners renewing this cycle, ${day} days before the deadline.`,
+          "renewals_billing", "admin_ops", at, null,
+          "renewal_cycle", id, `reminder_${day}`, now, meta
+        ));
+      }
+
+      projected.push(makeProjected(
+        `Membership cycle ${year}–${String(year + 1).slice(2)} begins`,
+        "New membership and partnership year starts. Unrenewed organisations enter grace.",
+        "renewals_billing", "admin_ops", cycleStart, null,
+        "renewal_cycle", id, "cycle_start", now, meta
+      ));
+
+      if (graceDays > 0) {
+        const graceEnd = new Date(cycleStart.getTime() + graceDays * 24 * 60 * 60 * 1000);
+        projected.push(makeProjected(
+          `Grace period ends`,
+          `${graceDays} days after the cycle start. Organisations still unpaid lose access — and, in an election year, eligibility to nominate or vote.`,
+          "renewals_billing", "admin_ops", graceEnd, null,
+          "renewal_cycle", id, "grace_end", now, { ...meta, grace_days: graceDays }
+        ));
+      }
+    }
+  }
+
+  // ── 15. Conference checklist reminders ───────────────────────────
+  //
+  // Each checkpoint is a real send on a real date. An INACTIVE checklist is
+  // still projected, deliberately: "this was going to go out on the 17th and
+  // is switched off" is exactly what an admin needs to see, and hiding it
+  // makes a silent non-send indistinguishable from nothing being scheduled.
+  const { data: checklists } = await supabase
+    .from("conference_checklists")
+    .select("id, name, deadline_at, active, conference_id, publication_id, conference_checklist_checkpoints(id, days_before_deadline)");
+
+  for (const cl of checklists ?? []) {
+    const deadline = new Date(cl.deadline_at);
+    const checkpoints = (cl.conference_checklist_checkpoints ?? []) as { id: string; days_before_deadline: number }[];
+    const offNote = cl.active ? "" : " This checklist is switched off and will send nothing until it is activated.";
+    const meta = { checklist_name: cl.name, checklist_active: cl.active, publication_scoped: !!cl.publication_id };
+
+    for (const cp of checkpoints) {
+      const at = new Date(deadline.getTime() - cp.days_before_deadline * 24 * 60 * 60 * 1000);
+      projected.push(makeProjected(
+        `${cl.name}: reminder (${cp.days_before_deadline} days out)`,
+        `Digest to organisations with outstanding items on this checklist.${offNote}`,
+        "communications", "admin_ops", at, null,
+        "conference_checklist", cp.id, "checkpoint", now, meta
+      ));
+    }
+
+    projected.push(makeProjected(
+      `${cl.name}: deadline`,
+      cl.publication_id
+        ? `Content freeze. Whatever is confirmed by now is what prints.${offNote}`
+        : `Final date for the items on this checklist.${offNote}`,
+      "communications", "admin_ops", deadline, null,
+      "conference_checklist", cl.id, "deadline", now, meta
+    ));
+  }
+
+  // ── 16. Elections and the AGM notice window ──────────────────────
+  const { data: electionsData } = await supabase
+    .from("elections")
+    .select("id, slug, cycle_year, status, agm_date, nominations_open_at, nominations_close_at, ballots_open_at, ballots_close_at, seats_available");
+
+  for (const el of electionsData ?? []) {
+    // A date column is midnight UTC; read it as a morning in Eastern so it
+    // lands on the right day for everyone reading the calendar.
+    const at = (d: string | null) => (d ? new Date(`${d}T09:00:00-05:00`) : null);
+    const draftNote = el.status === "draft"
+      ? " ⚠ This election is still a draft, so nothing will fire automatically."
+      : "";
+    const meta = { election_status: el.status, cycle_year: el.cycle_year, seats: el.seats_available };
+    const label = `Board election ${el.cycle_year}`;
+
+    const milestones: [Date | null, string, string, string][] = [
+      [at(el.nominations_open_at), `${label}: nominations open`, `Call for nominations goes out. ${el.seats_available} seats.${draftNote}`, "nominations_open"],
+      [at(el.nominations_close_at), `${label}: nominations close`, `Each nomination needs two co-signers from distinct stores.${draftNote}`, "nominations_close"],
+      [at(el.ballots_open_at), `${label}: voting opens`, `One ballot per store, cast by an org admin.${draftNote}`, "ballots_open"],
+      [at(el.ballots_close_at), `${label}: voting closes`, `Ballots seal at close.${draftNote}`, "ballots_close"],
+    ];
+    for (const [when, title, description, event] of milestones) {
+      if (when) projected.push(makeProjected(title, description, "membership", "admin_ops", when, null, "election", el.id, event, now, meta));
+    }
+
+    if (el.agm_date) {
+      const agm = at(el.agm_date)!;
+      projected.push(makeProjected(
+        `Annual General Meeting ${el.cycle_year}`,
+        "Results are declared at the AGM.",
+        "membership", "people", agm, null, "election", el.id, "agm", now, meta
+      ));
+
+      // The notice is a WINDOW, not a deadline: too early is as defective as
+      // too late, and missing it means the meeting was improperly called.
+      // Modelled with a real start and end so it reads as a window on the
+      // calendar rather than a single day someone can slip past.
+      const day = 24 * 60 * 60 * 1000;
+      projected.push(makeProjected(
+        `AGM notice must go out`,
+        "By-Law notice window: no earlier than 35 days and no later than 21 days before the meeting. Sending outside it makes the meeting improperly called.",
+        "legal_retention", "admin_ops",
+        new Date(agm.getTime() - 35 * day),
+        new Date(agm.getTime() - 21 * day),
+        "election", el.id, "agm_notice_window", now,
+        { ...meta, agm_date: el.agm_date }
+      ));
+    }
+  }
+
   // ── Upsert projected rows (batched) ──────────────────────────────
   // confirmed_at / confirmed_by are intentionally excluded from the upsert
   // so existing admin confirmations are never overwritten by a sync.
@@ -328,8 +487,21 @@ export async function syncAndFetchCalendar(
       requires_confirmation: p.requires_confirmation,
     }));
     const CHUNK = 50;
+    // ⚠️ The result IS inspected. It was not, and a category the CHECK
+    // constraint did not allow ("events") rejected every chunk carrying one —
+    // 55 events missing from the calendar with no error anywhere, and any
+    // projected row unlucky enough to share the chunk went down with it.
+    // A silent write failure here looks exactly like "nothing was scheduled".
     for (let i = 0; i < rows.length; i += CHUNK) {
-      await supabase.from("calendar_items").upsert(rows.slice(i, i + CHUNK), { onConflict: "source_key", ignoreDuplicates: false });
+      const { error } = await supabase
+        .from("calendar_items")
+        .upsert(rows.slice(i, i + CHUNK), { onConflict: "source_key", ignoreDuplicates: false });
+      if (error) {
+        console.error(
+          `[calendar] upsert failed for rows ${i}–${i + CHUNK}: ${error.message}. ` +
+          `Categories in this chunk: ${[...new Set(rows.slice(i, i + CHUNK).map((r) => r.category))].join(", ")}`
+        );
+      }
     }
   }
 

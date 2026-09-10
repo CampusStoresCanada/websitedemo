@@ -2,6 +2,14 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
+import {
+  readMatchEdges,
+  confidenceBucket,
+  categoryEvidence,
+  hasCertificationMatch,
+} from "@/lib/match/read";
+import { reasonsVisibleTo, promoteIntoSlots } from "@/lib/match/edge-view";
+import { getSpotlightMap } from "@/lib/membership/new-partner-spotlight";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 const SUB_TO_PARENT = new Map<string, string>();
@@ -40,6 +48,15 @@ export interface SupplierMatch {
   primaryContact: SupplierContact | null;
   catalogueUrl: string | null;
   hasCertMatch: boolean;
+  /**
+   * Why this rose above its fit, if it did.
+   *
+   * ⛔ The boost is NEVER folded into `confidence`. A 90-day spotlight is a
+   * decision CSC made, not evidence the partner suits this member — surfacing it
+   * as a visible label is what keeps "ranked because they match" answerable from
+   * "ranked because we promoted them". Empty for everyone not being promoted.
+   */
+  promotedFor: string[];
 }
 
 export interface SupplierData {
@@ -102,6 +119,164 @@ export async function getMemberSupplierData(
     return { success: true, data: { matches: [], topMatches: [], totalMatches: 0, hasAssignments: false } };
   }
 
+  // ── 3b. The engine, if it has an answer ──────────────────────────────────
+  //
+  // This function and getPartnerMarketData were the same algorithm written twice
+  // in opposite directions — parse categories, score parent/sub overlap 1/1.5/2/3,
+  // bucket, sort, slice. Both now read one engine, and the duplicate below
+  // survives only as the fallback.
+  //
+  // ⚠️ Null means the engine is UNAVAILABLE (migration unapplied, no promoted
+  // run, last night's job failed) — never "no matches". An empty array is a real
+  // answer and is returned as one. Rendering an empty panel because a batch job
+  // died is worse than quietly doing the old thing.
+  // ⛔ A PERSON logs in and looks at orgs — an org never logs in.
+  //
+  // Eight people at Waterloo get eight different lists, and they track what each
+  // one actually does: the apparel specialist gets RAINS, Dynasty and Barbarian
+  // Bruzer; the campus tech manager gets Resero, Bookware and PrismRBS; the
+  // course materials manager gets VitalSource and Login Canada. Serving the ORG
+  // row shows all eight the same page and throws that away — which is the same
+  // failure as the old engine telling 45 stores about Merangue.
+  //
+  // ⚠️ Falls back to the org row, never to nothing. Someone who has never posted
+  // has no position of their own, and their store's is the best available
+  // answer — see "a store is its people" in scripts/match-space.mts.
+  const personalEdges = contactId
+    ? await readMatchEdges({
+        subjectOrgId: orgId,
+        direction: "member_to_partner",
+        subjectContactId: contactId,
+        limit: 50,
+      })
+    : null;
+
+  const edges =
+    personalEdges && personalEdges.length > 0
+      ? personalEdges
+      : await readMatchEdges({
+          subjectOrgId: orgId,
+          direction: "member_to_partner",
+          limit: 50,
+        });
+
+  if (edges) {
+    if (edges.length === 0) {
+      return { success: true, data: { matches: [], topMatches: [], totalMatches: 0, hasAssignments: true } };
+    }
+
+    const orgIds = edges.map((e) => e.candidateOrgId);
+
+    // Narrow row shapes rather than `any`: these are the only columns read, and
+    // naming them means a schema change surfaces here instead of at render.
+    type PartnerRow = {
+      id: string;
+      name: string;
+      slug: string;
+      province: string | null;
+      catalogue_url: string | null;
+    };
+    type ContactRow = {
+      name: string | null;
+      role_title: string | null;
+      work_email: string | null;
+      email: string | null;
+      organization_id: string;
+    };
+
+    const [partnerResult, contactResult] = await Promise.all([
+      db
+        .from("organizations")
+        .select("id, name, slug, province, catalogue_url")
+        .in("id", orgIds),
+      db
+        .from("contacts")
+        .select("name, role_title, work_email, email, organization_id")
+        .in("organization_id", orgIds)
+        .not("hidden", "eq", true)
+        .is("archived_at", null),
+    ]);
+
+    const orgById = new Map<string, PartnerRow>(
+      ((partnerResult.data ?? []) as unknown as PartnerRow[]).map((o) => [o.id, o])
+    );
+    const contactByOrg = new Map<string, ContactRow>();
+    for (const c of (contactResult.data ?? []) as unknown as ContactRow[]) {
+      if (!contactByOrg.has(c.organization_id)) contactByOrg.set(c.organization_id, c);
+    }
+
+    // ⛔ Promotion sits ON TOP of the ranking, not inside the score.
+    //
+    // New partners get early visibility because CSC decided they should, and that
+    // is not a claim about fit. `applyBoosts` returns both numbers so this surface
+    // can order by the promoted one and still name the reason — "Merangue, New
+    // Partner" — rather than silently reordering and leaving nobody able to ask
+    // whether the engine is any good.
+    //
+    // ⚠️ The spotlight is read here, per request, NEVER baked into the nightly
+    // run: a run is a snapshot, so day 89 and day 91 would otherwise store
+    // different scores for two orgs whose fit never changed.
+    // ⛔ SLOTS, not a multiplier. Measured on a real member's list, the top ten
+    // fit scores span 1.3 points out of 100 — `total` is a percentile across
+    // every pair in the run, so one member's shortlist all sits in the 98th–100th.
+    // A 1.02x thumb replaced 5 of the top 8 with new partners; 1.25x replaced 7.
+    // There is no multiplier small enough to be a nudge, so the mechanism is
+    // wrong rather than the number.
+    //
+    // Two reserved slots in the top ten is bounded and legible instead: at most
+    // two positions move, everyone displaced moves DOWN rather than out, and the
+    // label says which entries were placed rather than earned.
+    const spotlight = await getSpotlightMap();
+    const engineMatches: SupplierMatch[] = promoteIntoSlots(
+      // An org archived since last night's run must not surface, even though the
+      // run legitimately included it.
+      edges.filter((e) => orgById.has(e.candidateOrgId)),
+      (e) => spotlight.has(e.candidateOrgId),
+      { slots: 2, within: 10 }
+    )
+      .map(({ item: edge, promoted }) => {
+        const org = orgById.get(edge.candidateOrgId)!;
+        const contact = contactByOrg.get(edge.candidateOrgId);
+        // The reader is this member, looking at their own supplier list. The
+        // engine stores every reason with its provenance and takes no view on
+        // audiences; deciding one is this surface's job.
+        const { category, subcategories } = categoryEvidence(reasonsVisibleTo(edge.reasons, orgId));
+        return {
+          orgId: edge.candidateOrgId,
+          orgName: org.name,
+          orgSlug: org.slug,
+          province: org.province ?? null,
+          matchingCategory: category,
+          matchingSubcategories: subcategories,
+          confidence: confidenceBucket(edge.total),
+          primaryContact: contact
+            ? {
+                name: contact.name ?? null,
+                roleTitle: contact.role_title ?? null,
+                email: contact.work_email || contact.email || null,
+              }
+            : null,
+          catalogueUrl: org.catalogue_url ?? null,
+          promotedFor: promoted ? ["New Partner"] : [],
+          hasCertMatch: hasCertificationMatch(edge),
+        };
+      });
+
+    return {
+      success: true,
+      data: {
+        matches: engineMatches,
+        topMatches: engineMatches.slice(0, 10),
+        totalMatches: engineMatches.length,
+        hasAssignments: true,
+      },
+    };
+  }
+
+  // ── Fallback: the original inline scorer ─────────────────────────────────
+  // Kept deliberately. It runs whenever the engine has nothing, so a failed
+  // nightly job degrades to yesterday's behaviour rather than to an empty panel.
+
   // 4. Get org's preferred certifications for bonus scoring
   const preferredCerts: string[] = Array.isArray(pi?.preferred_certifications)
     ? (pi!.preferred_certifications as string[])
@@ -158,7 +333,34 @@ export async function getMemberSupplierData(
     }
   }
 
+  // ⚠️ The fallback must promote the same partners as the engine path, and in the
+  // same order. A member seeing "New Partner" on one page load and not the next —
+  // because a batch job failed and the surface silently fell back — reads as the
+  // site being broken rather than as a degraded path.
+  //
+  // ⛔ Same rule as the engine path: the multiplier moves the ORDER, never the
+  // stored score. `conf()` below still reads the untouched `score`, so a promoted
+  // partner is not also reported as a better fit than it is.
+  // ⚠️ The same mechanism and the same order as the engine path. A member seeing
+  // "New Partner" on one page load and not the next — because a batch job failed
+  // and the surface silently fell back — reads as the site being broken rather
+  // than as a degraded path.
+  const fallbackSpotlight = await getSpotlightMap();
   scored.sort((a, b) => b.score - a.score);
+
+  const arranged = promoteIntoSlots(
+    scored,
+    (r) => fallbackSpotlight.has(r.partner.id as string),
+    { slots: 2, within: 10 }
+  );
+  const promotedIds = new Set(
+    arranged.filter((r) => r.promoted).map((r) => r.item.partner.id as string)
+  );
+  // ⛔ Take the ARRANGED order, not just the labels. Labelling without
+  // reordering would put a "New Partner" badge on a row that never moved, which
+  // says we promoted something we did not.
+  scored.length = 0;
+  scored.push(...arranged.map((r) => r.item));
 
   // 7. Fetch primary contacts for matched partner orgs
   const matchedOrgIds = scored.map(s => s.partner.id as string);
@@ -190,6 +392,7 @@ export async function getMemberSupplierData(
       orgName: partner.name as string,
       orgSlug: partner.slug as string,
       province: (partner.province as string | null) ?? null,
+      promotedFor: promotedIds.has(partner.id as string) ? ["New Partner"] : [],
       matchingCategory: matchCat,
       matchingSubcategories: matchSubs,
       confidence: conf(score),

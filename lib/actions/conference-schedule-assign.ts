@@ -19,13 +19,13 @@ export async function setMeetingAssignment(
   input: {
     runId: string;
     meetingSlotId: string;
-    exhibitorRegistrationId: string;
-    delegateRegistrationIds: string[];
+    exhibitorSeatId: string;
+    delegateSeatIds: string[];
   }
 ): Promise<Result<{ id: string }>> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { success: false, error: auth.error };
-  if (!input.exhibitorRegistrationId) {
+  if (!input.exhibitorSeatId) {
     return { success: false, error: "Pick an exhibitor for this meeting." };
   }
 
@@ -56,21 +56,21 @@ export async function setMeetingAssignment(
   if (siblingIds.length > 0) {
     const { data: sibAssignments } = await db
       .from("schedules")
-      .select("exhibitor_registration_id, delegate_registration_ids")
+      .select("exhibitor_seat_id, delegate_seat_ids")
       .eq("conference_id", conferenceId)
       .eq("scheduler_run_id", input.runId)
       .neq("status", "canceled")
       .in("meeting_slot_id", siblingIds);
     const conflicts = sibAssignments ?? [];
 
-    if (conflicts.some((c) => c.exhibitor_registration_id === input.exhibitorRegistrationId)) {
+    if (conflicts.some((c) => c.exhibitor_seat_id === input.exhibitorSeatId)) {
       return {
         success: false,
         error: "That exhibitor is already in another suite at this time. Clear it there first.",
       };
     }
-    const busyDelegates = new Set(conflicts.flatMap((c) => c.delegate_registration_ids ?? []));
-    const clashing = input.delegateRegistrationIds.filter((d) => busyDelegates.has(d));
+    const busyDelegates = new Set(conflicts.flatMap((c) => c.delegate_seat_ids ?? []));
+    const clashing = input.delegateSeatIds.filter((d) => busyDelegates.has(d));
     if (clashing.length > 0) {
       return {
         success: false,
@@ -94,8 +94,8 @@ export async function setMeetingAssignment(
     const { error } = await db
       .from("schedules")
       .update({
-        exhibitor_registration_id: input.exhibitorRegistrationId,
-        delegate_registration_ids: input.delegateRegistrationIds,
+        exhibitor_seat_id: input.exhibitorSeatId,
+        delegate_seat_ids: input.delegateSeatIds,
         status: "scheduled",
         is_manual: true,
       })
@@ -109,8 +109,8 @@ export async function setMeetingAssignment(
         conference_id: conferenceId,
         scheduler_run_id: input.runId,
         meeting_slot_id: input.meetingSlotId,
-        exhibitor_registration_id: input.exhibitorRegistrationId,
-        delegate_registration_ids: input.delegateRegistrationIds,
+        exhibitor_seat_id: input.exhibitorSeatId,
+        delegate_seat_ids: input.delegateSeatIds,
         match_score_ids: [],
         status: "scheduled",
         is_manual: true,
@@ -133,8 +133,8 @@ export async function setMeetingAssignment(
       conferenceId,
       runId: input.runId,
       meetingSlotId: input.meetingSlotId,
-      exhibitorRegistrationId: input.exhibitorRegistrationId,
-      delegateCount: input.delegateRegistrationIds.length,
+      exhibitorSeatId: input.exhibitorSeatId,
+      delegateCount: input.delegateSeatIds.length,
     },
   });
 

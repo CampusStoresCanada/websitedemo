@@ -14,7 +14,7 @@ import type { SwapAlternative } from "@/lib/scheduler/types";
 interface MeetingRow {
   scheduleId: string;
   meetingSlotId: string;
-  exhibitorRegistrationId: string;
+  exhibitorSeatId: string;
   exhibitorOrganizationId: string;
   exhibitorName: string;
   dayNumber: number;
@@ -39,14 +39,14 @@ type ViewMode = "conference" | "my_meetings";
 
 export default function ScheduleClient({
   conferenceId,
-  delegateRegistrationId,
+  delegateSeatId,
   scheduleItems,
   personalizedItems,
   meetings,
   registerHref,
 }: {
   conferenceId: string;
-  delegateRegistrationId: string | null;
+  delegateSeatId: string | null;
   scheduleItems: ConferenceScheduleItem[];
   personalizedItems: ConferenceScheduleItem[] | null;
   meetings: MeetingRow[];
@@ -75,14 +75,14 @@ export default function ScheduleClient({
   );
 
   const activeItems = viewMode === "conference" ? scheduleItems : personalizedItems ?? [];
-  const canUsePersonalized = Boolean(delegateRegistrationId);
+  const canUsePersonalized = Boolean(delegateSeatId);
 
   async function handleGenerateOptions(scheduleId: string) {
-    if (!delegateRegistrationId) return;
+    if (!delegateSeatId) return;
     setError(null);
     setInfo(null);
     startTransition(async () => {
-      const result = await requestSwap(conferenceId, delegateRegistrationId, scheduleId);
+      const result = await requestSwap(conferenceId, delegateSeatId, scheduleId);
       if (!result.success) {
         setError(result.error);
         setShowCapIncrease(result.code === "SWAP_CAP_REACHED");
@@ -129,7 +129,7 @@ export default function ScheduleClient({
   }
 
   async function handleCapIncreaseRequest() {
-    if (!delegateRegistrationId) return;
+    if (!delegateSeatId) return;
     setError(null);
     setInfo(null);
     const reason = window.prompt("Why do you need additional swaps?");
@@ -138,7 +138,7 @@ export default function ScheduleClient({
     startTransition(async () => {
       const result = await requestSwapCapIncrease(
         conferenceId,
-        delegateRegistrationId,
+        delegateSeatId,
         1,
         reason.trim()
       );

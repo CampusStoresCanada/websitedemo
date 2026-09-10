@@ -11,101 +11,16 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
+import { STEP_SCHEDULE } from "./nudge-schedule";
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Step schedule — one entry per nudge-able step.
-// session_1_welcome is handled by WelcomeModal (in-app only), not here.
-// ─────────────────────────────────────────────────────────────────────────────
-
-type StepSchedule = {
-  /** Days after journey_started_at to send the initial nudge */
-  sendAfterDays: number;
-  /** Days after last send/reminder to fire a reminder (null = no reminder) */
-  reminderEveryDays: number | null;
-  /** Max reminders before giving up (0 = no reminders, 1 = one reminder, etc.) */
-  maxReminders: number;
-  /** Delivery channel for this step */
-  channel: "email" | "in_app" | "both";
-  /** If set, this step only fires when a specific platform condition is true */
-  conditional?: "conference_within_60_days" | "benchmarking_open";
-};
-
-const STEP_SCHEDULE: Record<string, StepSchedule> = {
-  profile_description: {
-    sendAfterDays: 2,
-    reminderEveryDays: 5, // Day 7 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  profile_logo: {
-    sendAfterDays: 2,
-    reminderEveryDays: 8, // Day 10 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  profile_hero: {
-    sendAfterDays: 3,
-    reminderEveryDays: 11, // Day 14 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  contacts_sorted: {
-    sendAfterDays: 4,
-    reminderEveryDays: 10, // Day 14 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  contact_photos: {
-    sendAfterDays: 5,
-    reminderEveryDays: 16, // Day 21 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  conference_delegates: {
-    sendAfterDays: 5,
-    reminderEveryDays: 7, // Weekly
-    maxReminders: 4,
-    channel: "both",
-    conditional: "conference_within_60_days",
-  },
-  visibility_intro: {
-    sendAfterDays: 10,
-    reminderEveryDays: 11, // Day 21 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  network_members: {
-    sendAfterDays: 14,
-    reminderEveryDays: null,
-    maxReminders: 0,
-    channel: "email",
-  },
-  network_partners: {
-    sendAfterDays: 14,
-    reminderEveryDays: null,
-    maxReminders: 0,
-    channel: "email",
-  },
-  network_member_space: {
-    sendAfterDays: 17,
-    reminderEveryDays: 11, // Day 28 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  events_discovery: {
-    sendAfterDays: 18,
-    reminderEveryDays: 12, // Day 30 if not done
-    maxReminders: 1,
-    channel: "email",
-  },
-  benchmarking_survey: {
-    sendAfterDays: 0, // Fires immediately when survey opens (conditional)
-    reminderEveryDays: 14,
-    maxReminders: 2,
-    channel: "both",
-    conditional: "benchmarking_open",
-  },
-};
+/**
+ * Most one person hears from us in a single run. Journeys go back to 2026-05-26,
+ * so any newly-scheduled step is instantly past its sendAfterDays for every
+ * existing row — without a cap, switching on four steps would land four emails
+ * in one morning. Deterministic order (earliest sendAfterDays first) means the
+ * rest simply arrive on following days.
+ */
+const MAX_SENDS_PER_USER_PER_RUN = 1;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for the DB rows we read
@@ -137,6 +52,9 @@ interface UserContext {
   hasHero: boolean;
   hasContacts: boolean;
   hasContactPhotos: boolean;
+  hasFeaturedProduct: boolean;
+  hasCatalogueOrLinks: boolean;
+  hasBackground: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -170,7 +88,15 @@ interface NudgeEmailOptions {
   isReminder: boolean;
 }
 
-function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; html: string } | null {
+/**
+ * Exported so the copy can be rendered and read before it goes out. These are
+ * unsolicited emails to real partners; the body is the product, and reviewing
+ * it in a browser beats reading template literals in a diff.
+ * `sendEmail` wraps whatever this returns in the branded CSC layout
+ * (lib/email/layout.ts) at send time — this is the content block, not the
+ * whole message.
+ */
+export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; html: string } | null {
   const { firstName, orgName, orgSlug, stepKey, isReminder } = opts;
   const base = appUrl();
   const orgUrl = `${base}/org/${orgSlug}`;
@@ -255,6 +181,64 @@ function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; html: stri
           headline: "Conference time is coming.",
           body: `Have you sorted who's going from ${orgName}? Getting your delegates confirmed early means smoother logistics on our end — and yours. You can manage this right on your org page.`,
           ctaText: "Sort my delegates",
+          ctaUrl: orgUrl,
+        }),
+      };
+
+    case "profile_categories":
+      return {
+        subject: isReminder
+          ? `${orgName}'s categories — worth a second look`
+          : `Did we get ${orgName}'s categories right?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "We guessed. You'd know better.",
+          body: `Your categories decide where ${orgName} turns up when a member goes looking for a supplier. We set them from what we knew when we built your profile — an educated guess at best, and nobody here sells what you sell.<br><br>Worth a look to correct them. Be specific: it's better to appear in three categories you genuinely serve than a dozen you don't.`,
+          ctaText: "Check my categories",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? "Takes about a minute — and it's the field members search on." : undefined,
+        }),
+      };
+
+    case "profile_featured_product":
+      return {
+        subject: isReminder
+          ? `Still nothing featured for ${orgName}`
+          : `What's the one thing you want members to see?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Pick one product to lead with.",
+          body: `Your profile has a Featured Product slot, and ${orgName}'s is empty. It's the thing members see first when they land on your page — a new line, a seasonal item, whatever you'd point at if someone walked up to your booth.<br><br>One product. A name and a sentence about it is plenty.`,
+          ctaText: "Feature a product",
+          ctaUrl: orgUrl,
+        }),
+      };
+
+    case "profile_links_docs":
+      return {
+        subject: isReminder
+          ? `${orgName}'s catalogue — still missing`
+          : `Get your catalogue in front of members`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Members are looking for your range.",
+          body: `${orgName} doesn't have a catalogue or price list linked yet. Members browsing the directory can see who you are, but not what you carry — and that's usually the next thing they want.<br><br>A link to your catalogue is enough. It doesn't have to be hosted here.`,
+          ctaText: "Add my catalogue",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? "A link is fine — no upload needed." : undefined,
+        }),
+      };
+
+    // Parked: no STEP_SCHEDULE entry, so this is never built. Kept so
+    // re-enabling the step is one line in nudge-schedule.ts.
+    case "profile_background":
+      return {
+        subject: `Finish off ${orgName}'s page`,
+        html: nudgeHtml({
+          firstName,
+          headline: "One last touch.",
+          body: `${orgName}'s profile page has a background image slot that's still empty. It sits behind your hero and logo and is the difference between a page that looks filled in and one that looks unfinished.<br><br>Purely cosmetic — but it's the last thing on the list.`,
+          ctaText: "Add a background",
           ctaUrl: orgUrl,
         }),
       };
@@ -468,6 +452,38 @@ async function autoCompleteIfDone(
         return true;
       }
       break;
+    // Presence tests mirror lib/publication/completeness.ts's isFieldFilled —
+    // never ask a partner for something the directory already has.
+    //
+    // profile_categories is deliberately absent. CSC staff populated categories
+    // by guessing at what each partner sells, so a non-empty value is an
+    // unverified assumption, not a confirmation — and auto-completing on it
+    // would silence the nudge for exactly the 31 of 32 partners whose
+    // categories most need a human to check them. This step always sends.
+    case "profile_featured_product":
+      if (ctx.hasFeaturedProduct) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "profile_links_docs":
+      if (ctx.hasCatalogueOrLinks) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
+    case "profile_background":
+      if (ctx.hasBackground) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
   }
   return false;
 }
@@ -559,10 +575,15 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, company_description, logo_url, hero_image_url")
+    .select("id, name, slug, province, company_description, logo_url, hero_image_url, highlight_product_name, catalogue_url, partner_links, banner_url")
     .in("id", orgIds);
 
-  type OrgRow = { id: string; name: string; slug: string; province: string | null; company_description: string | null; logo_url: string | null; hero_image_url: string | null };
+  type OrgRow = {
+    id: string; name: string; slug: string; province: string | null;
+    company_description: string | null; logo_url: string | null; hero_image_url: string | null;
+    highlight_product_name: string | null;
+    catalogue_url: string | null; partner_links: unknown; banner_url: string | null;
+  };
   const orgById = new Map<string, OrgRow>();
   for (const o of (orgs ?? []) as OrgRow[]) orgById.set(o.id, o);
 
@@ -606,6 +627,11 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       hasHero: Boolean(org.hero_image_url),
       hasContacts: orgHasContacts.get(orgId) ?? false,
       hasContactPhotos: orgHasPhotos.get(orgId) ?? false,
+      hasFeaturedProduct: Boolean(org.highlight_product_name?.trim()),
+      hasCatalogueOrLinks:
+        Boolean(org.catalogue_url?.trim()) ||
+        (Array.isArray(org.partner_links) && org.partner_links.length > 0),
+      hasBackground: Boolean(org.banner_url?.trim()),
     });
   }
 
@@ -617,7 +643,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       continue;
     }
 
-    for (const row of userRows) {
+    // Earliest step in the journey first, so when the cap bites, the row that
+    // goes out is the one that was due longest — not whatever the DB returned first.
+    const ordered = [...userRows].sort(
+      (a, b) => (STEP_SCHEDULE[a.step_key]?.sendAfterDays ?? 999) - (STEP_SCHEDULE[b.step_key]?.sendAfterDays ?? 999)
+    );
+    let sentForUser = 0;
+
+    for (const row of ordered) {
       result.processed++;
       const schedule = STEP_SCHEDULE[row.step_key];
 
@@ -677,6 +710,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         continue;
       }
 
+      // Cap sends per user per run. Checked after auto-complete so a capped
+      // user's remaining rows still get marked done when the data says so.
+      if (sentForUser >= MAX_SENDS_PER_USER_PER_RUN) {
+        result.skipped++;
+        result.log.push(`cap ${ctx.email} / ${row.step_key}: already nudged this run`);
+        continue;
+      }
+
       // ── Build the email ──
       const emailContent = buildNudgeEmail({
         firstName: ctx.firstName,
@@ -706,6 +747,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       }
 
       result.sent++;
+      sentForUser++;
       result.log.push(`sent ${ctx.email} / ${row.step_key} (${shouldSendReminder ? "reminder" : "initial"})`);
 
       // ── Update the progress row ──

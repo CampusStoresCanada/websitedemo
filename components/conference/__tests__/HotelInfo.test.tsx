@@ -182,3 +182,77 @@ describe("HotelInfo note", () => {
     expect(html).toContain("Our room block has closed");
   });
 });
+
+describe("HotelInfo for a viewer we know about", () => {
+  const BOOKING_PROPS = {
+    venue: VENUE,
+    rates: RATES,
+    bookingUrl: "https://book.hilton.com/csc27",
+    bookingCutoff: "2027-03-12",
+  };
+
+  it("confirms the booking and shows the code back to them", () => {
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "done", evidence: "ABC123" }} />
+    );
+    expect(html).toContain("You&#x27;re booked");
+    expect(html).toContain("ABC123");
+  });
+
+  it("confirms a booking we have no code for", () => {
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "done", evidence: null }} />
+    );
+    expect(html).toContain("You&#x27;re booked");
+  });
+
+  it("does not chase someone who has booked, even in the final fortnight", () => {
+    atDate("2027-03-05");
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "done", evidence: "ABC123" }} />
+    );
+    // The deadline is still stated, but as a fact rather than a warning.
+    expect(html).toContain("Book by Friday, March 12, 2027");
+    expect(html).not.toContain("days left at this rate");
+    expect(html).not.toContain("#B45309");
+  });
+
+  it("does not chase someone staying elsewhere", () => {
+    atDate("2027-03-05");
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "not_applicable", evidence: null }} />
+    );
+    expect(html).toContain("staying elsewhere");
+    expect(html).not.toContain("days left at this rate");
+    expect(html).not.toContain("You&#x27;re booked");
+  });
+
+  it("demotes the button to a quiet link once they have dealt with it", () => {
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "done", evidence: "ABC123" }} />
+    );
+    expect(html).toContain("Change your booking");
+    expect(html).not.toContain("Book your room");
+  });
+
+  it("still chases someone who is genuinely outstanding", () => {
+    atDate("2027-03-05");
+    const html = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "pending", evidence: null }} />
+    );
+    expect(html).toContain("7 days left at this rate");
+    expect(html).toContain("Book your room");
+  });
+
+  it("treats an unknown viewer as unknown, never as outstanding-and-settled", () => {
+    atDate("2027-03-05");
+    const anon = renderToStaticMarkup(<HotelInfo {...BOOKING_PROPS} />);
+    const pending = renderToStaticMarkup(
+      <HotelInfo {...BOOKING_PROPS} viewerBooking={{ state: "pending", evidence: null }} />
+    );
+    // Anonymous gets exactly the generic card — no personal claim either way.
+    expect(anon).toBe(pending);
+    expect(anon).not.toContain("You&#x27;re booked");
+    expect(anon).not.toContain("staying elsewhere");
+  });
+});
