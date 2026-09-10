@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObjec
 import dynamic from "next/dynamic";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { maySeeCancoll } from "@/lib/visibility/cancoll";
 import { hasPermission } from "@/lib/auth/permissions";
 import { getPrimaryContactsForMap } from "@/lib/actions/map-contacts";
 import type { HomeMapOrg } from "@/lib/homepage";
@@ -167,7 +168,13 @@ export default function MapExplore({
   const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
   const isPartnerViewing = !!user && !isMember;
-  const canViewCancoll = isMember || isCancollMember;
+  // CANCOLL is reciprocal — holders and CSC staff only. It used to include
+  // every CSC member, but membership and the purchasing group are different
+  // things: 29 of the 80 member orgs don't carry it.
+  const canViewCancoll = maySeeCancoll({
+    isCancollMember,
+    isCscStaff: permissionState === "admin" || permissionState === "super_admin",
+  });
 
   const discoveryFocus = initialState?.focus ?? "all";
 

@@ -2,9 +2,28 @@
 
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
+import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_ACCESS_ACTIVE_STATUSES } from "@/lib/membership/status";
+import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
+import { getOrganizationForViewer } from "@/lib/visibility/data";
+import { isVisibleTo } from "@/lib/contacts/visibility";
+import { parseOrgCategories } from "@/lib/publication/categories";
 
-/** Export contacts for an org as CSV rows. */
+/**
+ * Export contacts for an org as CSV rows — exactly the contacts the caller can
+ * see on that org's page, resolved by the same reader the page uses.
+ *
+ * This used to query `contacts` through the caller's own session client. That
+ * table has no public SELECT policy (the PII fix in
+ * 20260723220000_scope_contacts_select_to_service_role.sql); the only surviving
+ * policy is "your own org". So on anyone else's org page RLS filtered every row
+ * away and returned `error: null`, and the button handed over a file containing
+ * nothing but the header — no error, no explanation. Meanwhile the page beside
+ * it was rendering those same contacts in full, because it reads through
+ * getOrganizationForViewer (admin client + field masking).
+ *
+ * Going through getOrganizationForViewer makes the file and the screen one
+ * answer. Masking still applies — an export can't reveal what the page won't.
+ */
 export async function exportOrgContacts(slug: string): Promise<{
   csv?: string;
   filename?: string;
@@ -13,37 +32,37 @@ export async function exportOrgContacts(slug: string): Promise<{
   const auth = await requireAuthenticated();
   if (!auth.ok) return { error: "Not authenticated" };
 
-  const { supabase } = auth.ctx;
+  const { effectiveViewer } = await getOrgPageViewerContext(slug);
+  const { organization, contacts } = await getOrganizationForViewer(slug, effectiveViewer);
 
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("id, name")
-    .eq("slug", slug)
-    .single();
+  if (!organization) return { error: "Organization not found" };
 
-  if (!org) return { error: "Organization not found" };
-
-  const { data: contacts, error } = await supabase
-    .from("contacts")
-    .select("name, role_title, email, phone, hidden")
-    .eq("organization_id", org.id)
-    .eq("hidden", false)
-    .order("name");
-
-  if (error) return { error: "Failed to load contacts" };
-
-  const rows = [
-    ["Name", "Title", "Email", "Phone"],
-    ...(contacts ?? []).map((c) => [
+  // A masked-away contact still comes back as a row — the mask nulls the
+  // fields, it doesn't drop the person. One partner exporting another
+  // partner's page hits exactly that (contact PII between vendors is withheld
+  // outright, not even teased), so drop rows the viewer can read nothing from
+  // rather than handing over a file of bare commas.
+  const exportable = contacts
+    .map((c) => [
       c.name ?? "",
       c.role_title ?? "",
-      c.email ?? "",
-      c.phone ?? "",
-    ]),
-  ];
+      c.work_email || c.email || "",
+      c.work_phone_number || c.phone || "",
+    ])
+    .filter(([name, , email, phone]) => name || email || phone);
+
+  // Empty is a real answer here — the org hid its contact section, everyone
+  // there opted out, this viewer isn't entitled to any of it, or there's simply
+  // nobody on file. Say so instead of downloading a header-only file that reads
+  // as a broken button.
+  if (exportable.length === 0) {
+    return { error: `No contact details are available to you for ${organization.name}.` };
+  }
+
+  const rows = [["Name", "Title", "Email", "Phone"], ...exportable];
 
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
-  const filename = `${org.name.replace(/[^a-z0-9]/gi, "_")}_contacts.csv`;
+  const filename = `${organization.name.replace(/[^a-z0-9]/gi, "_")}_contacts.csv`;
 
   return { csv, filename };
 }
@@ -241,18 +260,28 @@ export async function exportFullMemberDirectoryCSV(): Promise<{
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (m: any) => m.organization?.type === "Vendor Partner" && m.role === "org_admin"
   );
-  if (!isPartnerAdmin) return { error: "Partner org admin access required" };
+  // CSC staff too — they field the "can you send me the member list" requests,
+  // and a gate that locks out the only people who can answer one just moves the
+  // work to a manual export. They already see every contact on every org page.
+  const isCscAdmin = ["admin", "super_admin"].includes(auth.ctx.globalRole ?? "");
+  if (!isPartnerAdmin && !isCscAdmin) return { error: "Partner org admin access required" };
 
   // Admin client: this crosses into contacts on orgs the partner has no
   // membership in, which is exactly what a directory export needs to do —
   // the RLS policy on contacts (correctly) only covers your own org.
   const db = createAdminClient();
 
+  // ⛔ Entitlement, not public listing. This used to filter on
+  // PUBLIC_LISTABLE_ORG_STATUSES (active/reactivated), which silently dropped
+  // every member in grace — 20 of 52 stores and 181 of 371 people on the day
+  // this was found, because renewals run Aug–Oct and grace is where a member
+  // sits while theirs is in flight. A partner pays for the member list; a
+  // store being late on its invoice is not a reason to withhold it.
   const { data: orgs, error: orgsError } = await db
     .from("organizations")
     .select("id, name, city, province, website")
     .eq("type", "Member")
-    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .in("membership_status", ORG_ACCESS_ACTIVE_STATUSES)
     .is("archived_at", null)
     .eq("is_test", false)
     .order("name");
@@ -261,16 +290,24 @@ export async function exportFullMemberDirectoryCSV(): Promise<{
   if (!orgs || orgs.length === 0) return { error: "No visible members found." };
 
   const orgIds = orgs.map((o) => o.id);
-  const { data: contacts } = await db
+  // ⛔ Consent is per person and it is THEIRS. Filtering on the legacy `hidden`
+  // boolean alone only worked because setMyDirectoryVisibility happens to keep
+  // the two in step; any other writer of either column reintroduces the drift,
+  // and a CSV already in a vendor's CRM cannot be recalled. So ask
+  // lib/contacts/visibility.ts, which is the one place that rule lives.
+  // Viewer "member" is the right audience: the choice partners fall under is
+  // literally labelled "Members and partners only".
+  const { data: contactRows } = await db
     .from("contacts")
-    .select("organization_id, name, role_title, work_email, email, work_phone_number, phone")
+    .select("organization_id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
     .in("organization_id", orgIds)
     .is("archived_at", null)
-    .not("hidden", "eq", true)
     .order("name");
 
+  const contacts = (contactRows ?? []).filter((c) => isVisibleTo(c, "member"));
+
   const contactsByOrgId = new Map<string, { name: string; roleTitle: string; email: string; phone: string }[]>();
-  for (const c of contacts ?? []) {
+  for (const c of contacts) {
     if (!c.organization_id) continue;
     const list = contactsByOrgId.get(c.organization_id) ?? [];
     list.push({
@@ -340,12 +377,36 @@ export async function exportMemberBuyersCSV(): Promise<{
   }
   if (!partnerCategory) return { error: "No primary category set on your partner profile." };
 
+  // `primary_category` is a comma-joined selection of taxonomy terms, mixing
+  // departments and classes — "primary" is only the first element by
+  // convention. This used to compare the WHOLE string with `===` against a
+  // member's single category, so it matched only for partners carrying exactly
+  // one term: all 15 multi-category partners got "No members carry ..." and
+  // read it as a data gap rather than a parse bug.
+  //
+  // parseOrgCategories is the one reader for this column (lib/publication/
+  // categories.ts) — it applies the legacy ALIASES and infers a department from
+  // a class, so a partner who picked only "Audio & Video" still matches a store
+  // buying "Technology & Electronics". Do not hand-split this.
+  const parsedPartner = parseOrgCategories(partnerCategory);
+  const partnerTerms = new Set<string>([
+    ...parsedPartner.departments,
+    ...parsedPartner.classes,
+  ]);
+  if (partnerTerms.size === 0) {
+    return {
+      error: `Your profile's categories (${partnerCategory}) aren't in the current taxonomy, so they can't be matched to member buyers yet.`,
+    };
+  }
+
   // Fetch all active member orgs with procurement_info
   const { data: orgs, error: orgsError } = await db
     .from("organizations")
     .select("id, name, province, institution_type: benchmarking(institution_type), procurement_info")
     .eq("type", "Member")
-    .eq("membership_status", "active")
+    // Same entitlement set as the full directory export — a member in grace is
+    // still a buyer the partner paid to reach.
+    .in("membership_status", ORG_ACCESS_ACTIVE_STATUSES)
     .is("archived_at", null)
     .order("name");
 
@@ -356,9 +417,10 @@ export async function exportMemberBuyersCSV(): Promise<{
   for (const org of (orgs ?? []) as any[]) {
     const pi = org.procurement_info as Record<string, unknown> | null;
     const buyers = Array.isArray(pi?.category_buyers) ? pi!.category_buyers as any[] : [];
-    const entry = buyers.find((b: any) => b.category === partnerCategory);
-    if (entry && Array.isArray(entry.contact_ids)) {
-      for (const id of entry.contact_ids) contactIdSet.add(String(id));
+    for (const entry of buyers.filter((b: any) => partnerTerms.has(String(b?.category)))) {
+      if (Array.isArray(entry.contact_ids)) {
+        for (const id of entry.contact_ids) contactIdSet.add(String(id));
+      }
     }
   }
 
@@ -366,12 +428,13 @@ export async function exportMemberBuyersCSV(): Promise<{
   if (contactIdSet.size > 0) {
     const { data: contactRows } = await db
       .from("contacts")
-      .select("id, name, role_title, work_email, email, work_phone_number, phone")
+      .select("id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
       .in("id", Array.from(contactIdSet))
-      .is("archived_at", null)
-      .not("hidden", "eq", true);
+      .is("archived_at", null);
 
-    for (const c of (contactRows ?? []) as any[]) {
+    // Same per-person consent rule as the full directory export — being named
+    // as a category buyer by your org is not you agreeing to be listed.
+    for (const c of ((contactRows ?? []) as any[]).filter((c) => isVisibleTo(c, "member"))) {
       contactById.set(String(c.id), {
         name: String(c.name ?? ""),
         roleTitle: (c.role_title as string | null) ?? null,
@@ -387,10 +450,16 @@ export async function exportMemberBuyersCSV(): Promise<{
     return iso.slice(0, 3);
   };
 
-  // First pass: collect orgs that carry this category and identify those with no resolved buyer
-  type OrgEntry = { org: any; pi: Record<string, unknown>; entry: any; hasBuyer: boolean };
+  // First pass: collect every (member, matching category) pair, and note which
+  // of them have no resolved buyer.
+  //
+  // One row per PAIR, not per org. A store can name a different buyer for each
+  // category, so a partner carrying three of them would otherwise get whichever
+  // entry sorted first and silently lose the other two buyers — the same shape
+  // of omission as the string comparison this replaces.
+  type OrgEntry = { org: any; pi: Record<string, unknown>; entry: any; category: string; hasBuyer: boolean };
   const qualifying: OrgEntry[] = [];
-  const needsPrimaryContactOrgIds: string[] = [];
+  const needsPrimaryContactOrgIds = new Set<string>();
 
   for (const org of (orgs ?? []) as any[]) {
     const pi = org.procurement_info as Record<string, unknown> | null;
@@ -398,29 +467,31 @@ export async function exportMemberBuyersCSV(): Promise<{
     if (pi.show_categories === false) continue;
 
     const buyers = Array.isArray(pi.category_buyers) ? pi.category_buyers as any[] : [];
-    const entry = buyers.find((b: any) => b.category === partnerCategory);
-    if (!entry) continue; // doesn't carry this category
+    for (const entry of buyers) {
+      const category = String(entry?.category ?? "");
+      if (!partnerTerms.has(category)) continue; // store doesn't buy this category
 
-    const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
-    const hasBuyer = contactIds.some((id) => contactById.has(id));
+      const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
+      const hasBuyer = contactIds.some((id) => contactById.has(id));
 
-    qualifying.push({ org, pi, entry, hasBuyer });
-    if (!hasBuyer) needsPrimaryContactOrgIds.push(String(org.id));
+      qualifying.push({ org, pi, entry, category, hasBuyer });
+      if (!hasBuyer) needsPrimaryContactOrgIds.add(String(org.id));
+    }
   }
 
   // Fetch primary contacts for orgs that had no assigned buyer
   const primaryContactByOrgId = new Map<string, { name: string; roleTitle: string | null; email: string | null; phone: string | null }>();
-  if (needsPrimaryContactOrgIds.length > 0) {
+  if (needsPrimaryContactOrgIds.size > 0) {
+    const primaryOrgIds = Array.from(needsPrimaryContactOrgIds);
     const { data: primaryRows } = await db
       .from("contacts")
-      .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone")
-      .in("organization_id", needsPrimaryContactOrgIds)
+      .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
+      .in("organization_id", primaryOrgIds)
       .eq("is_primary", true)
       .is("archived_at", null)
-      .not("hidden", "eq", true)
-      .limit(needsPrimaryContactOrgIds.length);
+      .limit(primaryOrgIds.length);
 
-    for (const c of (primaryRows ?? []) as any[]) {
+    for (const c of ((primaryRows ?? []) as any[]).filter((c) => isVisibleTo(c, "member"))) {
       const orgId = String(c.organization_id);
       if (!primaryContactByOrgId.has(orgId)) {
         primaryContactByOrgId.set(orgId, {
@@ -433,11 +504,14 @@ export async function exportMemberBuyersCSV(): Promise<{
     }
   }
 
+  // "Matching Category" is new: with a multi-category partner the buyer named
+  // in a row is the buyer FOR A PARTICULAR CATEGORY, and without the column the
+  // reader can't tell which — or why the same store appears twice.
   const rows: string[][] = [
-    ["Organization", "Province", "Institution Type", "Contact Type", "Buyer Name", "Buyer Role", "Buyer Email", "Buyer Phone", "Buying Window", "Vendor Preferences"],
+    ["Organization", "Province", "Institution Type", "Matching Category", "Contact Type", "Buyer Name", "Buyer Role", "Buyer Email", "Buyer Phone", "Buying Window", "Vendor Preferences"],
   ];
 
-  for (const { org, pi, entry, hasBuyer } of qualifying) {
+  for (const { org, pi, entry, category, hasBuyer } of qualifying) {
     // Resolve buyer contact
     const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
     let contactType = "Category Buyer";
@@ -484,6 +558,7 @@ export async function exportMemberBuyersCSV(): Promise<{
       org.name ?? "",
       org.province ?? "",
       instType,
+      category,
       contactType,
       buyerName,
       buyerRole,
@@ -494,10 +569,23 @@ export async function exportMemberBuyersCSV(): Promise<{
     ]);
   }
 
-  if (rows.length === 1) return { error: `No members carry ${partnerCategory} in their procurement profile yet.` };
+  // Report the TERMS that were actually matched on, not the raw column. The old
+  // message echoed the whole joined string, which made a parse bug look like a
+  // statement about the members' data.
+  if (rows.length === 1) {
+    return {
+      error: `No members have named a buyer for ${Array.from(partnerTerms).join(", ")} yet.`,
+    };
+  }
 
   const year = new Date().getFullYear();
-  const categorySlug = partnerCategory.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  // Name the file after the partner's lead department, not the whole joined
+  // selection — that produced filenames like
+  // `csc-technology-electronics-peripherals-accessories-audio-video-buyers-2026.csv`.
+  const categorySlug = (parsedPartner.departments[0] ?? partnerCategory)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
   return { csv, filename: `csc-${categorySlug}-buyers-${year}.csv` };
 }

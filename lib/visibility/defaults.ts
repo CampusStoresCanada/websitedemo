@@ -44,6 +44,13 @@ export const DEFAULT_VISIBILITY_CONFIG: VisibilityConfig = {
     "organizations.student_count",
     // Contacts
     "contacts.profile_picture_url",
+    // Certifications are DECLARED promotional claims (Buy Ontario, Canadian
+    // Owned, Fair Trade, En Francais) — the whole point of them is that buyers
+    // can see them, so they belong here alongside primary_category. Unlisted
+    // fields fail closed in isFieldVisible, which is why they were rendering
+    // for admins only. CANCOLL rides in the same column but is gated
+    // separately at render (CertificationBadges' showCancoll).
+    "organizations.certifications",
     // Benchmarking — summary-level fields
     "benchmarking.institution_type",
     "benchmarking.enrollment_fte",

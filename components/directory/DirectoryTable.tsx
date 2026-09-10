@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { maySeeCancoll } from "@/lib/visibility/cancoll";
 import { hasPermission } from "@/lib/auth/permissions";
 import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import type { HomeMapOrg } from "@/lib/homepage";
@@ -199,8 +200,13 @@ export default function DirectoryTable({
   onOrgClick,
   searchRanking,
 }: DirectoryTableProps) {
-  const { user, permissionState } = useAuth();
+  const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
+  // Same reciprocal rule as the org page and the map — not "is a member".
+  const canViewCancoll = maySeeCancoll({
+    isCancollMember,
+    isCscStaff: permissionState === "admin" || permissionState === "super_admin",
+  });
   // A logged-in partner (or any non-member) viewing a member-populated list
   // should see a vendor-relevant column set rather than blurred operational data.
   const isPartnerViewing = !!user && !isMember;
@@ -574,7 +580,7 @@ export default function DirectoryTable({
                           {org.certifications.length > 0 ? (
                             <CertificationBadges
                               certifications={org.certifications}
-                              showCancoll={isMember}
+                              showCancoll={canViewCancoll}
                               highlightSet={new Set(memberProfile?.preferredCertifications ?? [])}
                               size="sm"
                             />
