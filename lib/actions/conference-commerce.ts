@@ -9,6 +9,7 @@ import {
 import { stripe } from "@/lib/stripe/client";
 import { resolveConferenceOrderTaxRates } from "@/lib/stripe/tax";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { ensureStripeCustomer, finalizeAndSendInvoice } from "@/lib/stripe/billing";
 import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 // Relative imports: these pure modules are pulled in unmocked by vitest, where
@@ -82,6 +83,16 @@ interface CheckoutInput {
   idempotencyKey?: string;
   /** Desk sale: conference ops transacting for an attending org. */
   allowConferenceOps?: boolean;
+  /**
+   * ⛔ How they are paying. "invoice" sends the ORGANISATION a Stripe invoice
+   * instead of taking a card now — Carolyn's actual sentence at the desk is
+   * "are you able to pay now, or would you like us to invoice your company?"
+   *
+   * ⚠️ The order is created identically either way, by the same RPC with the
+   * same per-line tax, and both fulfil through fulfilConferenceOrder. Only the
+   * Stripe object differs.
+   */
+  paymentMethod?: "card" | "invoice";
 }
 
 /**
@@ -1476,6 +1487,126 @@ export async function createConferenceCheckout(
         ...(stripeTaxRateId ? { tax_rates: [stripeTaxRateId] } : {}),
       };
     });
+
+    // ── INVOICE INSTEAD OF A CARD ──────────────────────────────────────────
+    // ⛔ The ORDER above is identical either way — same RPC, same per-line tax.
+    // Only the Stripe object differs, and fulfilment is shared, so an invoiced
+    // registration produces the same seat, receipt and badge as a card one.
+    if (input.paymentMethod === "invoice") {
+      const stripeCustomerId = await ensureStripeCustomer(input.organizationId);
+      // ⛔ Invoice created FIRST, then items attached to it. Creating items
+      // loose against the customer lets Stripe sweep an unrelated draft in, and
+      // this is somebody's registration, not a floating charge.
+      const stripeInvoice = await stripe.invoices.create({
+        customer: stripeCustomerId,
+        collection_method: "send_invoice",
+        days_until_due: 30,
+        currency: order.currency.toLowerCase(),
+        // ⛔ conference_order_id is what invoice.paid routes on. Without it the
+        // money lands and nobody gets a seat.
+        metadata: {
+          checkout_kind: "conference",
+          conference_id: input.conferenceId,
+          conference_order_id: order.id,
+          organization_id: input.organizationId,
+          org_id: input.organizationId,
+        },
+      });
+      if (!stripeInvoice.id) {
+        return { success: false, error: "Stripe did not return an invoice id." };
+      }
+
+      for (const li of lineItems) {
+        const pd = li.price_data as {
+          currency: string;
+          unit_amount: number;
+          product_data: { name: string };
+        };
+        const rates = (li as { tax_rates?: string[] }).tax_rates;
+        await stripe.invoiceItems.create({
+          customer: stripeCustomerId,
+          invoice: stripeInvoice.id,
+          // ⚠️ `amount` is the LINE total. Stripe has no unit_amount here, so a
+          // quantity has to be multiplied in — getting this wrong invoices one
+          // seat when somebody bought four.
+          amount: pd.unit_amount * (li.quantity ?? 1),
+          currency: pd.currency,
+          description: `${pd.product_data.name}${(li.quantity ?? 1) > 1 ? ` x${li.quantity}` : ""}`,
+          ...(rates ? { tax_rates: rates } : {}),
+        });
+      }
+
+      // ⛔ Read the tax back rather than computing it. Stripe totals a taxed
+      // line the moment it is attached, and the order already priced each line
+      // per its own rule — a second calculation here is a second answer.
+      const priced = await stripe.invoices.retrieve(stripeInvoice.id);
+      const taxCents = priced.total - priced.subtotal;
+      const totalCents = priced.total;
+
+      const { data: invoiceRow, error: invErr } = await adminClient
+        .from("invoices")
+        .insert({
+          organization_id: input.organizationId,
+          type: "conference",
+          amount_cents: order.subtotal_cents ?? order.total_cents,
+          tax_amount_cents: taxCents,
+          total_cents: totalCents,
+          currency: order.currency,
+          description: `Conference registration — order ${order.id}`,
+          status: "draft",
+          stripe_invoice_id: stripeInvoice.id,
+          stripe_customer_id: stripeCustomerId,
+          created_by: authz.userId,
+          metadata: { conference_order_id: order.id, conference_id: input.conferenceId },
+        })
+        .select("id")
+        .single();
+      if (invErr || !invoiceRow) {
+        return { success: false, error: invErr?.message ?? "Could not record the invoice." };
+      }
+
+      // ⛔ The link invoice.paid follows back to the order. This column has
+      // existed since the schema was written and nothing populated it.
+      const { error: linkErr } = await adminClient
+        .from("conference_orders")
+        .update({ invoice_id: invoiceRow.id })
+        .eq("id", order.id);
+      if (linkErr) return { success: false, error: linkErr.message };
+
+      const sent = await finalizeAndSendInvoice(invoiceRow.id);
+      if (!sent.success) {
+        return { success: false, error: sent.error ?? "Could not send the invoice." };
+      }
+      // ⚠️ finalizeAndSendInvoice writes the hosted URL onto the row rather than
+      // returning it — read it back so the desk can show a QR to pay from.
+      const { data: sentRow } = await adminClient
+        .from("invoices")
+        .select("hosted_invoice_url")
+        .eq("id", invoiceRow.id)
+        .maybeSingle();
+
+      await logAuditEventSafe({
+        action: "conference_checkout_invoice",
+        entityType: "conference_order",
+        entityId: order.id,
+        actorId: authz.userId,
+        actorType: "user",
+        details: {
+          invoiceId: invoiceRow.id,
+          stripeInvoiceId: stripeInvoice.id,
+          totalCents: order.total_cents,
+        },
+      });
+
+      return {
+        success: true,
+        data: {
+          checkoutUrl: (sentRow?.hosted_invoice_url as string | null) ?? "",
+          orderId: order.id,
+          checkoutSessionId: "",
+        },
+      };
+    }
 
     const session = await stripe.checkout.sessions.create({
       mode: "payment",

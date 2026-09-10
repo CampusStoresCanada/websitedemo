@@ -478,6 +478,190 @@ async function mintProspectiveRegistration(
   });
 }
 
+/**
+ * Everything that must happen when a conference order is PAID — whatever paid it.
+ *
+ * ⛔ Extracted so invoicing cannot become a SECOND fulfilment. Marking the order
+ * paid, queueing the QuickBooks receipt, minting attendees onto seats and
+ * advancing a bundled membership renewal are four writes that belong together
+ * and in this order. A second copy drifts on the first change somebody makes to
+ * one of them, and the symptom is an attendee holding no seat, or a receipt that
+ * never reaches QuickBooks.
+ *
+ * ⚠️ `source` is for logs ONLY. The behaviour is identical either way on
+ * purpose: a registration paid by card at the desk and one invoiced to the
+ * organisation must produce the same seat, the same receipt and the same badge.
+ * If they ever need to differ, that is a decision to make here rather than a
+ * difference to discover in QuickBooks.
+ */
+async function fulfilConferenceOrder(
+  db: AdminClient,
+  params: {
+    orderId: string;
+    conferenceId: string | null;
+    orgId: string | null;
+    userId?: string | null;
+    checkoutSessionId?: string | null;
+    paymentIntentId?: string | null;
+    source: "checkout" | "invoice";
+  }
+): Promise<void> {
+  const orderId = params.orderId;
+  const conferenceId = params.conferenceId;
+  const orgId = params.orgId;
+  const userId = params.userId ?? null;
+  // Read the pre-payment status: a buyer can take longer than the 60-minute
+  // pending window and still complete a real payment. The RPC revives such
+  // an order rather than fulfilling it behind a 'canceled' status, but a
+  // human should know it happened — whatever it holds may have been offered
+  // to someone else during the gap.
+  const { data: priorOrder } = await db
+    .from("conference_orders")
+    .select("status, expires_at")
+    .eq("id", orderId)
+    .maybeSingle();
+
+  const { error: conferenceOrderError } = await db.rpc("process_conference_order_paid", {
+    p_order_id: orderId,
+    // ⚠️ NULL when an invoice paid this, and the RPC handles that: it stores
+    // `coalesce(p_checkout_session_id, existing.stripe_checkout_session_id)`.
+    // The generated type says `string` because supabase-js does not model the
+    // nullability of a `text` argument — the SQL has always accepted null.
+    // ⛔ Putting the INVOICE id in this column instead would be a lie that
+    // survives into reconciliation: a checkout session id that is not one.
+    p_checkout_session_id: (params.checkoutSessionId ?? null) as unknown as string,
+    p_payment_intent_id: params.paymentIntentId ?? undefined,
+  });
+
+  if (conferenceOrderError) {
+    throw new Error(
+      `Failed to mark conference order as paid (${orderId}): ${conferenceOrderError.message}`
+    );
+  }
+
+  if (priorOrder?.status === "canceled") {
+    await raiseAlertIfNotOpen({
+      ruleKey: `conference_order_paid_after_expiry:${orderId}`,
+      severity: "warning",
+      message:
+        `Conference order ${orderId} was paid after its checkout window expired ` +
+        `(${priorOrder.expires_at}) and has been revived to paid. Confirm nothing it holds was resold in the gap.`,
+      details: {
+        orderId,
+        expiresAt: priorOrder.expires_at,
+        checkoutSessionId: params.checkoutSessionId ?? undefined,
+      },
+    });
+  }
+
+  await enqueueQBConferenceReceipt(orderId);
+
+
+
+
+
+  if (conferenceId && orgId) {
+    await mintRegistrationAttendeesFromOrder(db, orderId, conferenceId, orgId);
+  }
+
+  // If this order bundled a membership-renewal line, advance the org's
+  // membership_expires_at through the same shared helper the invoice path
+  // uses. Recomputed from the org's CURRENT expiry at payment time (not
+  // whatever was true at checkout-session creation) since Stripe sessions
+  // can take time to complete. Logged, not thrown, on failure — the
+  // payment already succeeded and the order is already marked paid.
+  if (orgId) {
+    const { data: orderItems } = await db
+      .from("conference_order_items")
+      .select("unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
+      .eq("order_id", orderId)
+      .not("offer_entity_id", "is", null);
+    // unit_price_cents (not the catalog price_cents) is what was actually
+    // charged — priceMembershipRenewalForOrg prices a renewal line at 0
+    // when coverage was already satisfied by checkout time (e.g. someone
+    // else at the org paid the outstanding invoice directly in the
+    // meantime), so a $0 line here means there's nothing to activate.
+    const hasMembershipLine = (orderItems ?? []).some((item) => {
+      const offer = Array.isArray(item.offer) ? item.offer[0] : item.offer;
+      return offer?.kind === "membership_renewal" && item.unit_price_cents > 0;
+    });
+
+    if (hasMembershipLine) {
+      const [{ data: org }, { data: conference }] = await Promise.all([
+        db.from("organizations").select("membership_expires_at").eq("id", orgId).single(),
+        conferenceId
+          ? db.from("conference_instances").select("end_date").eq("id", conferenceId).maybeSingle()
+          : Promise.resolve({ data: null }),
+      ]);
+      // mustCoverThrough: a booth bought well ahead of a conference can
+      // need more than one fiscal-year extension to actually reach it —
+      // without this, the renewal wouldn't satisfy the gate that prompted it.
+      const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
+        org?.membership_expires_at ?? null,
+        conference?.end_date ?? null
+      );
+      const result = await activateMembershipRenewal({
+        organizationId: orgId,
+        newExpiresAt: billingPeriodEnd,
+        billingPeriodStart,
+        triggeredBy: "conference_checkout",
+        idempotencyKey: `conference_order:${orderId}`,
+        invoiceId: null,
+        metadata: { conference_order_id: orderId },
+      });
+      if (!result.success) {
+        console.error(
+          `${params.source}: membership renewal activation failed for order ${orderId}: ${result.error}`
+        );
+      }
+    }
+
+    // Each booth purchased at a sponsor tier's self-serve price (Bronze/
+    // Connected) gets a draft sponsor agreement auto-created so it lands in
+    // the admin sponsorship queue instead of relying on someone noticing
+    // the sale. An order can contain more than one booth (an org can hold
+    // multiple), so every booth line needs its own call, not just the first.
+    const boothItems = (orderItems ?? [])
+      .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
+      .filter((offer) => offer?.kind === "booth");
+    for (const boothItem of boothItems) {
+      if (boothItem?.id && boothItem.price_cents != null) {
+        await createSponsorAgreementFromBoothPurchase({
+          organizationId: orgId,
+          boothEntityId: boothItem.id,
+          boothEntityName: boothItem.name,
+          boothPriceCents: boothItem.price_cents,
+        });
+      }
+    }
+  }
+
+  if (conferenceId && orgId && userId) {
+    const { error: cartClearError } = await db
+      .from("cart_items")
+      .delete()
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", orgId)
+      .eq("user_id", userId);
+
+    if (cartClearError) {
+      console.error(
+        `Failed to clear cart after conference payment (order ${orderId}): ${cartClearError.message}`
+      );
+    }
+  }
+
+  if (conferenceId && orgId && userId) {
+    await triggerConferencePaymentConfirmation({
+      db,
+      conferenceId,
+      orderId: orderId,
+      organizationId: orgId,
+      userId,
+    });
+  }
+}
+
 async function handleCheckoutSessionCompleted(
   session: Stripe.Checkout.Session,
   raw: Record<string, unknown>,
@@ -497,154 +681,18 @@ async function handleCheckoutSessionCompleted(
   const checkoutKind = session.metadata?.checkout_kind ?? null;
   const paymentIntentId = extractStringField(raw, "payment_intent");
 
-  if (checkoutKind === "conference" && conferenceOrderId) {
-    // Read the pre-payment status: a buyer can take longer than the 60-minute
-    // pending window and still complete a real payment. The RPC revives such
-    // an order rather than fulfilling it behind a 'canceled' status, but a
-    // human should know it happened — whatever it holds may have been offered
-    // to someone else during the gap.
-    const { data: priorOrder } = await db
-      .from("conference_orders")
-      .select("status, expires_at")
-      .eq("id", conferenceOrderId)
-      .maybeSingle();
-
-    const { error: conferenceOrderError } = await db.rpc("process_conference_order_paid", {
-      p_order_id: conferenceOrderId,
-      p_checkout_session_id: session.id,
-      p_payment_intent_id: paymentIntentId ?? undefined,
-    });
-
-    if (conferenceOrderError) {
-      throw new Error(
-        `Failed to mark conference order as paid (${conferenceOrderId}): ${conferenceOrderError.message}`
-      );
-    }
-
-    if (priorOrder?.status === "canceled") {
-      await raiseAlertIfNotOpen({
-        ruleKey: `conference_order_paid_after_expiry:${conferenceOrderId}`,
-        severity: "warning",
-        message:
-          `Conference order ${conferenceOrderId} was paid after its checkout window expired ` +
-          `(${priorOrder.expires_at}) and has been revived to paid. Confirm nothing it holds was resold in the gap.`,
-        details: {
-          conferenceOrderId,
-          expiresAt: priorOrder.expires_at,
-          checkoutSessionId: session.id,
-        },
-      });
-    }
-
-    await enqueueQBConferenceReceipt(conferenceOrderId);
-
-    const conferenceId = session.metadata?.conference_id;
-    const orgId = session.metadata?.organization_id;
-    const userId = session.metadata?.user_id;
-
-    if (conferenceId && orgId) {
-      await mintRegistrationAttendeesFromOrder(db, conferenceOrderId, conferenceId, orgId);
-    }
-
-    // If this order bundled a membership-renewal line, advance the org's
-    // membership_expires_at through the same shared helper the invoice path
-    // uses. Recomputed from the org's CURRENT expiry at payment time (not
-    // whatever was true at checkout-session creation) since Stripe sessions
-    // can take time to complete. Logged, not thrown, on failure — the
-    // payment already succeeded and the order is already marked paid.
-    if (orgId) {
-      const { data: orderItems } = await db
-        .from("conference_order_items")
-        .select("unit_price_cents, offer:conference_entities!conference_order_items_offer_entity_id_fkey(id, name, kind, price_cents)")
-        .eq("order_id", conferenceOrderId)
-        .not("offer_entity_id", "is", null);
-      // unit_price_cents (not the catalog price_cents) is what was actually
-      // charged — priceMembershipRenewalForOrg prices a renewal line at 0
-      // when coverage was already satisfied by checkout time (e.g. someone
-      // else at the org paid the outstanding invoice directly in the
-      // meantime), so a $0 line here means there's nothing to activate.
-      const hasMembershipLine = (orderItems ?? []).some((item) => {
-        const offer = Array.isArray(item.offer) ? item.offer[0] : item.offer;
-        return offer?.kind === "membership_renewal" && item.unit_price_cents > 0;
-      });
-
-      if (hasMembershipLine) {
-        const [{ data: org }, { data: conference }] = await Promise.all([
-          db.from("organizations").select("membership_expires_at").eq("id", orgId).single(),
-          conferenceId
-            ? db.from("conference_instances").select("end_date").eq("id", conferenceId).maybeSingle()
-            : Promise.resolve({ data: null }),
-        ]);
-        // mustCoverThrough: a booth bought well ahead of a conference can
-        // need more than one fiscal-year extension to actually reach it —
-        // without this, the renewal wouldn't satisfy the gate that prompted it.
-        const { billingPeriodStart, billingPeriodEnd } = await computeNewExpiresAt(
-          org?.membership_expires_at ?? null,
-          conference?.end_date ?? null
-        );
-        const result = await activateMembershipRenewal({
-          organizationId: orgId,
-          newExpiresAt: billingPeriodEnd,
-          billingPeriodStart,
-          triggeredBy: "conference_checkout",
-          idempotencyKey: `conference_order:${conferenceOrderId}`,
-          invoiceId: null,
-          metadata: { conference_order_id: conferenceOrderId },
-        });
-        if (!result.success) {
-          console.error(
-            `checkout.session.completed: membership renewal activation failed for order ${conferenceOrderId}: ${result.error}`
-          );
-        }
-      }
-
-      // Each booth purchased at a sponsor tier's self-serve price (Bronze/
-      // Connected) gets a draft sponsor agreement auto-created so it lands in
-      // the admin sponsorship queue instead of relying on someone noticing
-      // the sale. An order can contain more than one booth (an org can hold
-      // multiple), so every booth line needs its own call, not just the first.
-      const boothItems = (orderItems ?? [])
-        .map((item) => (Array.isArray(item.offer) ? item.offer[0] : item.offer))
-        .filter((offer) => offer?.kind === "booth");
-      for (const boothItem of boothItems) {
-        if (boothItem?.id && boothItem.price_cents != null) {
-          await createSponsorAgreementFromBoothPurchase({
-            organizationId: orgId,
-            boothEntityId: boothItem.id,
-            boothEntityName: boothItem.name,
-            boothPriceCents: boothItem.price_cents,
-          });
-        }
-      }
-    }
-
-    if (conferenceId && orgId && userId) {
-      const { error: cartClearError } = await db
-        .from("cart_items")
-        .delete()
-        .eq("conference_id", conferenceId)
-        .eq("organization_id", orgId)
-        .eq("user_id", userId);
-
-      if (cartClearError) {
-        console.error(
-          `Failed to clear cart after conference payment (order ${conferenceOrderId}): ${cartClearError.message}`
-        );
-      }
-    }
-
-    if (conferenceId && orgId && userId) {
-      await triggerConferencePaymentConfirmation({
-        db,
-        conferenceId,
+    if (checkoutKind === "conference" && conferenceOrderId) {
+      await fulfilConferenceOrder(db, {
         orderId: conferenceOrderId,
-        organizationId: orgId,
-        userId,
+        conferenceId: session.metadata?.conference_id ?? null,
+        orgId: session.metadata?.organization_id ?? null,
+        userId: session.metadata?.user_id ?? null,
+        checkoutSessionId: session.id,
+        paymentIntentId,
+        source: "checkout",
       });
+      return { conferenceOrderId };
     }
-
-    return { conferenceOrderId };
-  }
 
   // Prospective booth payment — no org/user exists yet (that's the whole
   // point of "pay first, apply second"). Just mark the holding record paid;
@@ -738,6 +786,45 @@ async function handleInvoicePaid(
   db: AdminClient
 ) {
   const metadataOrgId = stripeInvoice.metadata?.org_id;
+
+  /**
+   * ⛔ A conference order invoiced at the desk fulfils HERE, through exactly the
+   * same function a card payment uses.
+   *
+   * Carolyn's sentence is "are you able to pay now, or would you like us to
+   * invoice your company?" — and the answer must not change what the attendee
+   * gets. Same seat, same receipt, same badge; only the payment instrument
+   * differs. Routed by conference_orders.invoice_id, a column that has existed
+   * since the schema was written and which nothing populated until now.
+   *
+   * ⚠️ Before the mint, not after: everything below this deals with membership
+   * renewals and is unrelated, but an early return would skip it for an org that
+   * had both. Fulfil the conference order and fall through.
+   */
+  if (stripeInvoice.id) {
+    const { data: invoiceRow } = await db
+      .from("invoices")
+      .select("id")
+      .eq("stripe_invoice_id", stripeInvoice.id)
+      .maybeSingle();
+    if (invoiceRow) {
+      const { data: order } = await db
+        .from("conference_orders")
+        .select("id, conference_id, organization_id, status")
+        .eq("invoice_id", invoiceRow.id)
+        .maybeSingle();
+      if (order) {
+        await fulfilConferenceOrder(db, {
+          orderId: order.id as string,
+          conferenceId: (order.conference_id as string | null) ?? null,
+          orgId: (order.organization_id as string | null) ?? null,
+          checkoutSessionId: null,
+          paymentIntentId: extractStringField(raw, "payment_intent"),
+          source: "invoice",
+        });
+      }
+    }
+  }
 
   let updatedInvoice: {
     id: string;
