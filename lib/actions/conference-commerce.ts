@@ -1333,6 +1333,36 @@ export async function createConferenceCheckout(
   });
   if (!authz.ok) return { success: false, error: authz.error };
 
+  /**
+   * ⛔ INVOICING IS STAFF ONLY, AND REFUSED BEFORE ANY WORK HAPPENS.
+   *
+   * This function is called from the PUBLIC cart page. A server action's
+   * arguments are attacker-controlled, so "our cart never sends invoice" is not
+   * a control — without this, any partner or member org admin could invoice
+   * themselves instead of paying, and assertUserCanManageOrg would wave them
+   * through because it is THEIR org.
+   *
+   * ⚠️ Checked HERE rather than at the Stripe branch: down there the cart has
+   * already been converted to a pending order, so a refusal would leave one
+   * stranded holding inventory for the reservation window.
+   *
+   * ⚠️ Deliberately NOT folded into allowConferenceOps. That flag says "ops may
+   * transact for an org they do not belong to". This says "deferring payment is
+   * a decision only staff can make". An org admin buying for their own org
+   * passes the first and must still fail this one.
+   *
+   * Stephen: it is a choice the admin makes in the moment, and if there is any
+   * doubt the answer is "I just need you to complete this credit card
+   * transaction" — which only works if the public can never reach the other
+   * branch.
+   */
+  if (input.paymentMethod === "invoice") {
+    const opsForInvoice = await requireConferenceOpsAccess();
+    if (!opsForInvoice.ok) {
+      return { success: false, error: "Invoicing is only available to conference staff." };
+    }
+  }
+
   try {
     const adminClient = createAdminClient();
 
@@ -1493,6 +1523,7 @@ export async function createConferenceCheckout(
     // Only the Stripe object differs, and fulfilment is shared, so an invoiced
     // registration produces the same seat, receipt and badge as a card one.
     if (input.paymentMethod === "invoice") {
+
       const stripeCustomerId = await ensureStripeCustomer(input.organizationId);
       // ⛔ Invoice created FIRST, then items attached to it. Creating items
       // loose against the customer lets Stripe sweep an unrelated draft in, and
