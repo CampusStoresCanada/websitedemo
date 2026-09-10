@@ -253,6 +253,37 @@ export async function requestSwap(
     return { success: false, error: "Not authorized for this delegate." };
   }
 
+  /**
+   * ⛔ SWAPS CLOSE WHEN THE SCHEDULE FREEZES — same date, same argument as the
+   * late-add path. After the freeze people have been told where to be, and a
+   * swap moves somebody: the delegate swapping, and everyone whose room gains
+   * or loses them.
+   *
+   * ⚠️ Checked here so the UI can say so honestly, and AGAIN inside
+   * commit_swap_request, because this action is one caller and the function is
+   * the only place that cannot be bypassed. Two checks of one rule is right when
+   * one is advisory and the other is the actual gate.
+   *
+   * Reads the same `schedule_freeze_at` the scheduler does, rather than a second
+   * date that could drift out of step with it.
+   */
+  const { data: freezeRow } = await adminClient
+    .from("conference_instances")
+    .select("schedule_freeze_at")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  const freezeAt = (freezeRow as { schedule_freeze_at?: string | null } | null)
+    ?.schedule_freeze_at;
+  if (freezeAt && new Date(freezeAt) <= new Date()) {
+    return {
+      success: false,
+      code: "SCHEDULE_FROZEN",
+      error:
+        "The meeting schedule is final and can no longer be changed. " +
+        "If something is genuinely wrong, conference staff can still help.",
+    };
+  }
+
   try {
     const activeRun = await resolveActiveRun(conferenceId);
     const scheduling = await getSchedulingConfig();
