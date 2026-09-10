@@ -6,6 +6,7 @@ import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { sendCircleNotification } from "@/lib/circle/notifications";
 import { sendEmail } from "@/lib/email/send";
+import { ORG_ACCESS_ACTIVE_STATUSES } from "@/lib/membership/status";
 
 const PARENT_SET = new Set<string>(VENDOR_CATEGORIES as readonly string[]);
 
@@ -134,13 +135,15 @@ export async function getPartnerMarketData(
 
   const db = createAdminClient();
 
-  // Fetch all active member orgs
+  // Every member the partner is entitled to reach — ⛔ including grace. A store
+  // whose renewal is in flight is still part of the market this partner bought
+  // access to; `active` alone hid 20 of 52 stores from every partner surface.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: orgs, error: orgsError } = await (db as any)
     .from("organizations")
     .select("id, name, slug, province, email, procurement_info")
     .eq("type", "Member")
-    .eq("membership_status", "active")
+    .in("membership_status", ORG_ACCESS_ACTIVE_STATUSES)
     .is("archived_at", null)
     .eq("is_test", false);
 

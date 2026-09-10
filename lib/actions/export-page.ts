@@ -2,9 +2,27 @@
 
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
+import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_ACCESS_ACTIVE_STATUSES } from "@/lib/membership/status";
+import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
+import { getOrganizationForViewer } from "@/lib/visibility/data";
+import { isVisibleTo } from "@/lib/contacts/visibility";
 
-/** Export contacts for an org as CSV rows. */
+/**
+ * Export contacts for an org as CSV rows — exactly the contacts the caller can
+ * see on that org's page, resolved by the same reader the page uses.
+ *
+ * This used to query `contacts` through the caller's own session client. That
+ * table has no public SELECT policy (the PII fix in
+ * 20260723220000_scope_contacts_select_to_service_role.sql); the only surviving
+ * policy is "your own org". So on anyone else's org page RLS filtered every row
+ * away and returned `error: null`, and the button handed over a file containing
+ * nothing but the header — no error, no explanation. Meanwhile the page beside
+ * it was rendering those same contacts in full, because it reads through
+ * getOrganizationForViewer (admin client + field masking).
+ *
+ * Going through getOrganizationForViewer makes the file and the screen one
+ * answer. Masking still applies — an export can't reveal what the page won't.
+ */
 export async function exportOrgContacts(slug: string): Promise<{
   csv?: string;
   filename?: string;
@@ -13,37 +31,37 @@ export async function exportOrgContacts(slug: string): Promise<{
   const auth = await requireAuthenticated();
   if (!auth.ok) return { error: "Not authenticated" };
 
-  const { supabase } = auth.ctx;
+  const { effectiveViewer } = await getOrgPageViewerContext(slug);
+  const { organization, contacts } = await getOrganizationForViewer(slug, effectiveViewer);
 
-  const { data: org } = await supabase
-    .from("organizations")
-    .select("id, name")
-    .eq("slug", slug)
-    .single();
+  if (!organization) return { error: "Organization not found" };
 
-  if (!org) return { error: "Organization not found" };
-
-  const { data: contacts, error } = await supabase
-    .from("contacts")
-    .select("name, role_title, email, phone, hidden")
-    .eq("organization_id", org.id)
-    .eq("hidden", false)
-    .order("name");
-
-  if (error) return { error: "Failed to load contacts" };
-
-  const rows = [
-    ["Name", "Title", "Email", "Phone"],
-    ...(contacts ?? []).map((c) => [
+  // A masked-away contact still comes back as a row — the mask nulls the
+  // fields, it doesn't drop the person. One partner exporting another
+  // partner's page hits exactly that (contact PII between vendors is withheld
+  // outright, not even teased), so drop rows the viewer can read nothing from
+  // rather than handing over a file of bare commas.
+  const exportable = contacts
+    .map((c) => [
       c.name ?? "",
       c.role_title ?? "",
-      c.email ?? "",
-      c.phone ?? "",
-    ]),
-  ];
+      c.work_email || c.email || "",
+      c.work_phone_number || c.phone || "",
+    ])
+    .filter(([name, , email, phone]) => name || email || phone);
+
+  // Empty is a real answer here — the org hid its contact section, everyone
+  // there opted out, this viewer isn't entitled to any of it, or there's simply
+  // nobody on file. Say so instead of downloading a header-only file that reads
+  // as a broken button.
+  if (exportable.length === 0) {
+    return { error: `No contact details are available to you for ${organization.name}.` };
+  }
+
+  const rows = [["Name", "Title", "Email", "Phone"], ...exportable];
 
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
-  const filename = `${org.name.replace(/[^a-z0-9]/gi, "_")}_contacts.csv`;
+  const filename = `${organization.name.replace(/[^a-z0-9]/gi, "_")}_contacts.csv`;
 
   return { csv, filename };
 }
@@ -241,18 +259,28 @@ export async function exportFullMemberDirectoryCSV(): Promise<{
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (m: any) => m.organization?.type === "Vendor Partner" && m.role === "org_admin"
   );
-  if (!isPartnerAdmin) return { error: "Partner org admin access required" };
+  // CSC staff too — they field the "can you send me the member list" requests,
+  // and a gate that locks out the only people who can answer one just moves the
+  // work to a manual export. They already see every contact on every org page.
+  const isCscAdmin = ["admin", "super_admin"].includes(auth.ctx.globalRole ?? "");
+  if (!isPartnerAdmin && !isCscAdmin) return { error: "Partner org admin access required" };
 
   // Admin client: this crosses into contacts on orgs the partner has no
   // membership in, which is exactly what a directory export needs to do —
   // the RLS policy on contacts (correctly) only covers your own org.
   const db = createAdminClient();
 
+  // ⛔ Entitlement, not public listing. This used to filter on
+  // PUBLIC_LISTABLE_ORG_STATUSES (active/reactivated), which silently dropped
+  // every member in grace — 20 of 52 stores and 181 of 371 people on the day
+  // this was found, because renewals run Aug–Oct and grace is where a member
+  // sits while theirs is in flight. A partner pays for the member list; a
+  // store being late on its invoice is not a reason to withhold it.
   const { data: orgs, error: orgsError } = await db
     .from("organizations")
     .select("id, name, city, province, website")
     .eq("type", "Member")
-    .in("membership_status", PUBLIC_LISTABLE_ORG_STATUSES)
+    .in("membership_status", ORG_ACCESS_ACTIVE_STATUSES)
     .is("archived_at", null)
     .eq("is_test", false)
     .order("name");
@@ -261,16 +289,24 @@ export async function exportFullMemberDirectoryCSV(): Promise<{
   if (!orgs || orgs.length === 0) return { error: "No visible members found." };
 
   const orgIds = orgs.map((o) => o.id);
-  const { data: contacts } = await db
+  // ⛔ Consent is per person and it is THEIRS. Filtering on the legacy `hidden`
+  // boolean alone only worked because setMyDirectoryVisibility happens to keep
+  // the two in step; any other writer of either column reintroduces the drift,
+  // and a CSV already in a vendor's CRM cannot be recalled. So ask
+  // lib/contacts/visibility.ts, which is the one place that rule lives.
+  // Viewer "member" is the right audience: the choice partners fall under is
+  // literally labelled "Members and partners only".
+  const { data: contactRows } = await db
     .from("contacts")
-    .select("organization_id, name, role_title, work_email, email, work_phone_number, phone")
+    .select("organization_id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
     .in("organization_id", orgIds)
     .is("archived_at", null)
-    .not("hidden", "eq", true)
     .order("name");
 
+  const contacts = (contactRows ?? []).filter((c) => isVisibleTo(c, "member"));
+
   const contactsByOrgId = new Map<string, { name: string; roleTitle: string; email: string; phone: string }[]>();
-  for (const c of contacts ?? []) {
+  for (const c of contacts) {
     if (!c.organization_id) continue;
     const list = contactsByOrgId.get(c.organization_id) ?? [];
     list.push({
@@ -345,7 +381,9 @@ export async function exportMemberBuyersCSV(): Promise<{
     .from("organizations")
     .select("id, name, province, institution_type: benchmarking(institution_type), procurement_info")
     .eq("type", "Member")
-    .eq("membership_status", "active")
+    // Same entitlement set as the full directory export — a member in grace is
+    // still a buyer the partner paid to reach.
+    .in("membership_status", ORG_ACCESS_ACTIVE_STATUSES)
     .is("archived_at", null)
     .order("name");
 
@@ -366,12 +404,13 @@ export async function exportMemberBuyersCSV(): Promise<{
   if (contactIdSet.size > 0) {
     const { data: contactRows } = await db
       .from("contacts")
-      .select("id, name, role_title, work_email, email, work_phone_number, phone")
+      .select("id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
       .in("id", Array.from(contactIdSet))
-      .is("archived_at", null)
-      .not("hidden", "eq", true);
+      .is("archived_at", null);
 
-    for (const c of (contactRows ?? []) as any[]) {
+    // Same per-person consent rule as the full directory export — being named
+    // as a category buyer by your org is not you agreeing to be listed.
+    for (const c of ((contactRows ?? []) as any[]).filter((c) => isVisibleTo(c, "member"))) {
       contactById.set(String(c.id), {
         name: String(c.name ?? ""),
         roleTitle: (c.role_title as string | null) ?? null,
@@ -413,14 +452,13 @@ export async function exportMemberBuyersCSV(): Promise<{
   if (needsPrimaryContactOrgIds.length > 0) {
     const { data: primaryRows } = await db
       .from("contacts")
-      .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone")
+      .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
       .in("organization_id", needsPrimaryContactOrgIds)
       .eq("is_primary", true)
       .is("archived_at", null)
-      .not("hidden", "eq", true)
       .limit(needsPrimaryContactOrgIds.length);
 
-    for (const c of (primaryRows ?? []) as any[]) {
+    for (const c of ((primaryRows ?? []) as any[]).filter((c) => isVisibleTo(c, "member"))) {
       const orgId = String(c.organization_id);
       if (!primaryContactByOrgId.has(orgId)) {
         primaryContactByOrgId.set(orgId, {

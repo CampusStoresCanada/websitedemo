@@ -1,5 +1,5 @@
 import { notFound } from "next/navigation";
-import { getViewerContext } from "@/lib/visibility/viewer";
+import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
@@ -25,8 +25,6 @@ import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/l
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
-import { isOrgAccessActive } from "@/lib/membership/status";
-import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -97,32 +95,11 @@ interface PageProps {
 
 export default async function OrgProfilePage({ params }: PageProps) {
   const { slug } = await params;
-  const viewer = await getViewerContext();
-
-  // Quick org ID lookup so we can elevate viewer level before fetching masked data.
-  // If the viewer is a member of this org, they see their own page unmasked.
-  // Only ever raises the floor to "org_admin" — never lowers it. A CSC global
-  // admin who also happens to belong to this org (e.g. as its real contact)
-  // must keep their higher "admin"/"super_admin" level, or this would silently
-  // downgrade them below what their actual role grants elsewhere on the page
-  // (e.g. draft-conference visibility, which checks for admin/super_admin).
-  const { data: orgIdRow } = await createAdminClient()
-    .from("organizations")
-    .select("id, membership_status")
-    .eq("slug", slug)
-    .maybeSingle();
-
-  const isAlreadyCscAdmin = viewer.viewerLevel === "admin" || viewer.viewerLevel === "super_admin";
-  // Don't elevate a viewer for a lapsed org's own page — they see exactly
-  // what a public visitor sees (getOrganizationForViewer enforces the same
-  // rule independently), so there's no "their own page" special case while
-  // the org isn't access-active.
-  const orgAccessActive = isOrgAccessActive(
-    (orgIdRow?.membership_status as OrgMembershipStatus | null) ?? null
-  );
-  const effectiveViewer = orgIdRow && viewer.viewerOrgIds.includes(orgIdRow.id) && !isAlreadyCscAdmin && orgAccessActive
-    ? { ...viewer, viewerLevel: "org_admin" as const }
-    : viewer;
+  // Resolves the viewer AND the "own org" elevation. Shared with the toolkit's
+  // Contacts CSV export, which has to land on the same answer as this page or
+  // the downloaded file contradicts the screen it came from.
+  const { viewer, effectiveViewer, orgAccessActive } =
+    await getOrgPageViewerContext(slug);
 
   const { organization, contacts, brandColors, benchmarking, allBenchmarking, benchmarkingWithheldReason } =
     await getOrganizationForViewer(slug, effectiveViewer);
