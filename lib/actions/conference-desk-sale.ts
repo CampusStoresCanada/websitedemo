@@ -25,7 +25,15 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { addOfferToCart, createConferenceCheckout } from "@/lib/actions/conference-commerce";
 
 export type DeskSaleResult =
-  | { ok: true; checkoutUrl: string; orderId: string; priceCents: number; offerName: string }
+  | {
+      ok: true;
+      /** Stripe Checkout URL, or the hosted invoice URL when invoiced. */
+      checkoutUrl: string;
+      orderId: string;
+      priceCents: number;
+      offerName: string;
+      paymentMethod: "card" | "invoice";
+    }
   | { ok: false; error: string };
 
 /**
@@ -46,6 +54,16 @@ export async function sellAtDesk(params: {
   /** Where Stripe returns to — usually the desk itself. */
   successUrl: string;
   cancelUrl: string;
+  /**
+   * ⛔ "Are you able to pay now, or would you like us to invoice your company?"
+   *
+   * ⚠️ INVOICE IS THE ONE THAT KEEPS THE LINE MOVING. Taking a card is the slow,
+   * failure-prone step at a desk with people behind them — a declined card, a
+   * phone with no signal, a person who left their wallet at the booth. Invoicing
+   * finishes in one keystroke and the badge prints immediately, because the seat
+   * is minted when the invoice is PAID and the order is created either way.
+   */
+  paymentMethod?: "card" | "invoice";
 }): Promise<DeskSaleResult> {
   const auth = await requireConferenceOpsAccess();
   if (!auth.ok) return { ok: false, error: auth.error };
@@ -84,6 +102,7 @@ export async function sellAtDesk(params: {
     successUrl: params.successUrl,
     cancelUrl: params.cancelUrl,
     allowConferenceOps: true,
+    paymentMethod: params.paymentMethod ?? "card",
   });
   if (!checkout.success) return { ok: false, error: checkout.error };
 
@@ -93,6 +112,7 @@ export async function sellAtDesk(params: {
     orderId: checkout.data.orderId,
     priceCents: added.data.unitPriceCents,
     offerName: offer.name as string,
+    paymentMethod: params.paymentMethod ?? "card",
   };
 }
 
