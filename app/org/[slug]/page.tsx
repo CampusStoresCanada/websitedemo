@@ -113,7 +113,10 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
   // Resolves the viewer AND the "own org" elevation. Shared with the toolkit's
   // Contacts CSV export, which has to land on the same answer as this page or
   // the downloaded file contradicts the screen it came from.
-  const { viewer, effectiveViewer, orgAccessActive } =
+  // ⚠️ `org` is bound as `orgIdRow` for the badge-scan block below, which predates
+  // this helper and reads id/public_code off it. The helper selects exactly those
+  // three columns, so this is the same row the inline version fetched.
+  const { viewer, effectiveViewer, orgAccessActive, org: orgIdRow } =
     await getOrgPageViewerContext(slug);
 
   const { organization, contacts, brandColors, benchmarking, allBenchmarking, benchmarkingWithheldReason } =
