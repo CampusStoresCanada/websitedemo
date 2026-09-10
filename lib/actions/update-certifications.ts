@@ -3,7 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerAuthState } from "@/lib/auth/server";
 import { hasPermission } from "@/lib/auth/permissions";
-import { CERTIFICATION_NAMES } from "@/lib/certifications";
+import { CERTIFICATION_NAMES, CANCOLL_CERT } from "@/lib/certifications";
 import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
 interface UpdateCertificationsResult {
@@ -36,16 +36,43 @@ export async function updateCertifications(
     return { success: false, error: "Insufficient permissions" };
   }
 
-  // Validate — only allow known certification names
-  const invalid = certifications.filter((c) => !CERTIFICATION_NAMES.includes(c));
+  const supabase = createAdminClient();
+
+  // CANCOLL shares this array but is NOT in CERTIFICATION_NAMES — it's
+  // admin-managed (updateCancollStatus / setCANCOLLMembership), not
+  // self-declared. It used to reach the validation below and fail it, rejecting
+  // the ENTIRE save: the 9 partners whose array carries "CANCOLL" could not
+  // toggle any badge at all. Strip it from the incoming list, validate the rest,
+  // then restore whatever the row actually holds — so this path can neither
+  // grant nor revoke CANCOLL, which is the property the validation was
+  // protecting in the first place.
+  const declared = certifications.filter((c) => c !== CANCOLL_CERT.name);
+
+  const invalid = declared.filter((c) => !CERTIFICATION_NAMES.includes(c));
   if (invalid.length > 0) {
     return { success: false, error: `Unknown certifications: ${invalid.join(", ")}` };
   }
 
-  const supabase = createAdminClient();
+  const { data: existing, error: readError } = await supabase
+    .from("organizations")
+    .select("certifications")
+    .eq("id", orgId)
+    .single();
+
+  if (readError) {
+    console.error("[updateCertifications] read error:", readError);
+    return { success: false, error: "Failed to update certifications" };
+  }
+
+  const hadCancoll =
+    Array.isArray(existing?.certifications) &&
+    (existing.certifications as string[]).includes(CANCOLL_CERT.name);
+
+  const next = hadCancoll ? [CANCOLL_CERT.name, ...declared] : declared;
+
   const { error } = await supabase
     .from("organizations")
-    .update({ certifications })
+    .update({ certifications: next })
     .eq("id", orgId);
 
   if (error) {

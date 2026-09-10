@@ -16,6 +16,7 @@ import type {
   Benchmarking,
 } from "@/lib/types/db";
 import { loadVisibilityConfig, applyFieldMask } from "./engine";
+import { viewerMaySeeCancoll, gateCancoll } from "./cancoll";
 import type { ViewerContext } from "./viewer";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -142,6 +143,20 @@ export async function getOrganizationForViewer(
     membership_expires_at: raw.organization.membership_expires_at,
     grace_period_started_at: raw.organization.grace_period_started_at,
   };
+
+  // CANCOLL rides in the same `certifications` array as the eight self-declared
+  // badges, but it is not one of them: it's a purchasing-group relationship and
+  // only orgs in that relationship (either side) may see it. The eight are
+  // public. Decided here, before serialisation — the array is now publicly
+  // visible, so a render-time filter would still ship the string to a client
+  // that has no business holding it.
+  const maySeeCancoll = viewerMaySeeCancoll(viewer, isOwnOrg);
+  if (Array.isArray(visibleOrg.certifications)) {
+    visibleOrg.certifications = gateCancoll(
+      visibleOrg.certifications as string[],
+      maySeeCancoll
+    );
+  }
 
   // Mask each contact
   const maskedContacts: VisibleContact[] = raw.contacts.map((contact) => {
