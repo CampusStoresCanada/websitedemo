@@ -1,4 +1,5 @@
 import type { NoticeState } from "@/lib/elections/service";
+import ConfirmSendButton from "./ConfirmSendButton";
 
 /**
  * The two By-Law Part VII obligations, with their windows on screen.
@@ -136,17 +137,17 @@ export default function AgmNoticePanel({
               <strong>Proxy form sent</strong> {state.proxySentAt.slice(0, 10)}.
             </p>
           ) : (
-            <form action={sendProxy} className="flex items-center gap-3">
-              <button
-                type="submit"
-                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
-              >
-                Send the proxy form on its own
-              </button>
+            <div className="flex items-center gap-3">
+              <ConfirmSendButton
+                action={sendProxy}
+                label="Send the proxy form on its own"
+                recipients={state.recipients ?? null}
+                audience="member administrators"
+              />
               <span className={`text-xs ${proxy.overdue ? "text-amber-700" : "text-gray-500"}`}>
                 {proxy.message}
               </span>
-            </form>
+            </div>
           )}
         </div>
       </div>

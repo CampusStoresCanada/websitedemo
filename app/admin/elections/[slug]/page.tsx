@@ -20,6 +20,7 @@ import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
+import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
 import {
   getCommitteeReview,
   getNoticeState,
@@ -365,6 +366,34 @@ export default async function ElectionReviewPage({
             proxy_form: [{ href: `/elections/${slug}/proxy`, label: "proxy form" }],
             agm_package: [{ href: `/elections/${slug}/package`, label: "AGM package" }],
           }}
+          // ⚠️ RESTORED. This prop was deleted by accident while wiring the
+          // per-step messages, which silently disarmed the confirmation on
+          // every membership-wide send — the guard added after the call went
+          // out to 39 stores by one press. An action missing from this map
+          // gets a plain button, so losing an entry loses the protection
+          // without breaking anything visible.
+          sendCounts={{
+            sendCall: {
+              recipients: messages?.find((m) => m.key === "call")?.recipientCount ?? null,
+              audience: "member administrators and staff",
+            },
+            circulateBallots: {
+              recipients: messages?.find((m) => m.key === "ballots_open")?.recipientCount ?? null,
+              audience: "member administrators",
+            },
+            sendAgmNotice: {
+              recipients: messages?.find((m) => m.key === "agm_notice")?.recipientCount ?? null,
+              audience: "member administrators",
+            },
+            sendProxyForm: {
+              recipients: messages?.find((m) => m.key === "proxy_form")?.recipientCount ?? null,
+              audience: "member administrators",
+            },
+            sendAgmPackage: {
+              recipients: messages?.find((m) => m.key === "agm_package")?.recipientCount ?? null,
+              audience: "member administrators",
+            },
+          }}
           actions={{
             sendCall,
             // Not `close` — that form needs its confirmation ticked, so the
@@ -451,18 +480,23 @@ export default async function ElectionReviewPage({
               membership receiving it twice reads as disorganisation.
             </p>
           ) : (
-            <form action={sendCall} className="flex items-center gap-3">
-              <button
-                type="submit"
-                className="rounded-lg bg-[#B92026] px-4 py-2 text-sm font-medium text-white hover:bg-[#9c1b20]"
-              >
-                Send the call for nominations
-              </button>
+            // The same send as the timeline's, and it was the UNGUARDED one —
+            // the confirmation only ever covered the timeline, so this panel
+            // still fired on a single press. Two buttons for one irreversible
+            // act is bad enough; one armed and the other not is how somebody
+            // presses the wrong one.
+            <div className="flex items-center gap-3">
+              <ConfirmSendButton
+                action={sendCall}
+                label="Send the call for nominations"
+                recipients={messages?.find((m) => m.key === "call")?.recipientCount ?? null}
+                audience="member administrators and staff"
+              />
               <span className="text-xs text-gray-500">
                 Emails every administrator at the {eligibility.eligible} currently eligible
                 institutions. Sends once.
               </span>
-            </form>
+            </div>
           )}
 
           {incomplete.length > 0 && (
@@ -479,13 +513,13 @@ export default async function ElectionReviewPage({
           )}
 
           {election.status === "balloting" && (
-            <form action={circulate} className="flex flex-wrap items-center gap-3">
-              <button
-                type="submit"
-                className="rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-              >
-                {ballotsCirculatedAt ? "Remind those who have not voted" : "Tell members voting is open"}
-              </button>
+            <div className="flex flex-wrap items-center gap-3">
+              <ConfirmSendButton
+                action={circulate}
+                label={ballotsCirculatedAt ? "Remind those who have not voted" : "Tell members voting is open"}
+                recipients={messages?.find((m) => m.key === "ballots_open")?.recipientCount ?? null}
+                audience="member administrators"
+              />
               <span className="text-xs text-gray-500">
                 {ballotsCirculatedAt ? (
                   <>
@@ -501,7 +535,7 @@ export default async function ElectionReviewPage({
                   </>
                 )}
               </span>
-            </form>
+            </div>
           )}
         </div>
         <p className="mt-3 text-xs text-gray-500">
@@ -529,6 +563,7 @@ export default async function ElectionReviewPage({
           }
           send={sendPackage}
           sentAt={agmPackageSentAt ? formatDate(agmPackageSentAt) : null}
+          recipientCount={messages?.find((m) => m.key === "agm_package")?.recipientCount ?? null}
           sendCount={agmPackageSendCount}
           error={packageError}
           uploaded={Boolean(uploaded)}

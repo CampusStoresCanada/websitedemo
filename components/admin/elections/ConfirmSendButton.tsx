@@ -53,7 +53,9 @@ export default function ConfirmSendButton({
       <p className="flex items-start gap-1.5 text-xs font-medium text-amber-900">
         <AlertTriangle size={14} className="mt-px shrink-0" />
         <span>
-          This sends a real email to {count} {audience}, now. It cannot be recalled.
+          This sends a real email to {count}{" "}
+          {recipients === 1 ? audience.replace(/s\b/, "") : audience}, now. It cannot be
+          recalled.
         </span>
       </p>
       <div className="mt-2 flex items-center gap-2">
