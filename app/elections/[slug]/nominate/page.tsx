@@ -123,7 +123,7 @@ export default async function NominatePage({
   // one; a person who administers two member stores has to say which.
   const actor = await resolveActor(auth.user.id, auth.organizations);
   const eligibleNominatorOrgs: { organizationId: string; name: string; contactId: string }[] = [];
-  for (const orgId of actor.adminOrganizationIds) {
+  for (const orgId of actor.staffOrganizationIds) {
     const verdict = await isOrganizationEligible(election.id, orgId);
     const contactId = actor.contactIdFor(orgId);
     if (verdict?.isEligible && contactId)
@@ -160,7 +160,7 @@ export default async function NominatePage({
     // Distinguish "your store hasn't renewed" from "you're not an admin" —
     // the first is fixable today by the person reading this.
     const anyOrgVerdicts = await Promise.all(
-      actor.adminOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
+      actor.staffOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
     );
     const renewalBlocked = anyOrgVerdicts.find((v) => v?.reasonCode === "renewal_outstanding");
     // CSC staff land here too, and for them nothing is broken — the association's
@@ -168,7 +168,7 @@ export default async function NominatePage({
     // isn't recorded" to the Executive Director reads as a bug and would send
     // him looking for one.
     const isAssociationStaff =
-      auth.globalRole === "super_admin" && actor.adminOrganizationIds.length > 0;
+      auth.globalRole === "super_admin" && actor.staffOrganizationIds.length > 0;
 
     return (
       <ElectionShell

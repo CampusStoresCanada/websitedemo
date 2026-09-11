@@ -903,8 +903,27 @@ export interface ElectionActor {
   contactIds: string[];
   /** The contact row to act as, given the organization in play. */
   contactIdFor: (organizationId: string) => string | null;
-  /** Organizations where this person is an active admin. */
+  /**
+   * Organizations where this person is an active admin.
+   *
+   * ⛔ THE VOTE. One ballot per institution, cast by its administrator — that
+   * is By-Law Part V, not a product decision, so do not widen this to make a
+   * page more welcoming. Nominating uses `staffOrganizationIds` instead.
+   */
   adminOrganizationIds: string[];
+  /**
+   * Organizations where this person is active in ANY role.
+   *
+   * Who may put a name forward. Restricting that to administrators meant 175 of
+   * the ~212 people at member stores could neither be told nominations had
+   * opened nor start one — the bulk of the membership, silently. Widened on the
+   * ED's decision 2026-09-11: receive and nominate for all member staff, the
+   * vote stays with administrators.
+   *
+   * Organization TYPE is filtered separately by eligibility, which is what
+   * keeps vendor partners out of all of this.
+   */
+  staffOrganizationIds: string[];
 }
 
 /**
@@ -934,6 +953,9 @@ export async function resolveActor(
     contactIdFor: (organizationId: string) => byOrg.get(organizationId) ?? null,
     adminOrganizationIds: organizations
       .filter((o) => o.role === "org_admin" && o.status === "active")
+      .map((o) => o.organization_id),
+    staffOrganizationIds: organizations
+      .filter((o) => o.status === "active")
       .map((o) => o.organization_id),
   };
 }

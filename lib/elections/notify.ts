@@ -224,6 +224,51 @@ async function loadOrgName(organizationId: string): Promise<string> {
  * asked is the nominee themselves — By-Law Part V S2(d) is the institution's
  * consent, and a nominee granting their own would make it meaningless.
  */
+/**
+ * Everyone active at an institution, in any role — not only its administrator.
+ *
+ * Used for the CALL FOR NOMINATIONS only, on the ED's decision 2026-09-11.
+ * Addressing administrators meant the call reached 37 of the ~212 people at
+ * member stores; the other 175 were never told nominations had opened, which
+ * is the likeliest reason nominations have been thin.
+ *
+ * ⛔ Deliberately NOT used for the ballot, its reminders, the AGM notice or the
+ * proxy form. Those either ask the reader to do something only an
+ * administrator can do, or discharge a Part VII obligation owed to the member
+ * entitled to vote. Telling two hundred people voting is open when thirty-seven
+ * of them can vote is worse than telling thirty-seven.
+ *
+ * Organization TYPE is filtered by the caller's eligibility list, which is what
+ * keeps vendor partners out.
+ */
+async function loadMemberStaffContacts(organizationId: string): Promise<ContactRow[]> {
+  const db = createAdminClient();
+  const { data: people } = await db
+    .from("user_organizations")
+    .select("user_id")
+    .eq("organization_id", organizationId)
+    .eq("status", "active");
+
+  const userIds = (people ?? []).map((p) => p.user_id as string);
+  if (userIds.length === 0) return [];
+
+  const { data } = await db
+    .from("contacts")
+    .select("id, email, name, first_name, last_name")
+    .eq("organization_id", organizationId)
+    .in("profile_id", userIds)
+    .is("archived_at", null);
+
+  return (data ?? []).map((c) => ({
+    id: c.id as string,
+    email: (c.email as string) ?? null,
+    name:
+      [c.first_name, c.last_name].filter(Boolean).join(" ") ||
+      (c.name as string) ||
+      "there",
+  }));
+}
+
 async function loadOrgAdminContacts(
   organizationId: string,
   excludeContactId?: string
@@ -410,7 +455,7 @@ export async function buildCallForNominations(
 ): Promise<PreparedMessages> {
   // Resolve every recipient first, then send once. The institutions are read
   // in parallel because each is an independent lookup.
-  const perOrg = await Promise.all(organizationIds.map((id) => loadOrgAdminContacts(id)));
+  const perOrg = await Promise.all(organizationIds.map((id) => loadMemberStaffContacts(id)));
   const admins = perOrg.flat();
 
   return {
