@@ -334,6 +334,46 @@ export default async function NominatePage({
         nominate a colleague, someone at another institution, or yourself.
       </p>
 
+      {/* What is actually happening here.
+          This page used to open with the two sentences above and then a search
+          box — it said who MAY stand and how to find them, and nothing about
+          what standing involves or what happens next. Someone arriving from the
+          call email had no way to find out what they were being asked for
+          without asking a person. */}
+      <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <h2 className="text-sm font-semibold text-gray-900">What you are putting someone forward for</h2>
+        <dl className="mt-2 space-y-2 text-sm text-gray-600">
+          <div>
+            <dt className="font-medium text-gray-900">The seat</dt>
+            <dd>
+              One of {election.seatsAvailable} seats on the Campus Stores Canada Board of
+              Directors, for a two-year term beginning at the annual general meeting on{" "}
+              {formatDate(election.schedule.agmDate)}.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-gray-900">What a nomination needs</dt>
+            <dd>
+              Three things, and none of them happen automatically: the nominee has to accept and
+              write a short statement, their institution has to agree to their serving, and{" "}
+              {election.config.nominations.cosignersRequired} member institutions have to put
+              their names behind it — yours counts as one. A nomination missing any of these on{" "}
+              {formatDate(election.schedule.nominationsCloseAt)} does not go on the ballot.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-gray-900">What happens after you submit</dt>
+            <dd>
+              The nominee gets an email asking them to accept — nothing is public until they do,
+              so nobody is named as a candidate without agreeing first. The nominating committee
+              then checks each nomination is complete. If more people stand than there are seats,
+              every member institution votes; if not, those nominated are acclaimed at the annual
+              general meeting.
+            </dd>
+          </div>
+        </dl>
+      </div>
+
       <form method="get" className="mt-6 flex gap-2">
         <input
           type="search"
