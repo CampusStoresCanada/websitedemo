@@ -15,6 +15,7 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import ElectionMessagesPanel from "@/components/admin/elections/ElectionMessagesPanel";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
@@ -116,6 +117,15 @@ export default async function ElectionReviewPage({
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
   const noticeState = await getNoticeState(slug);
+
+  // Loaded after the review, which is what persists the eligibility rows this
+  // reads — see getElectionMessagesForSlug.
+  const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
+  const { getServerAuthState } = await import("@/lib/auth/server");
+  const [messages, auth] = await Promise.all([
+    getElectionMessagesForSlug(slug),
+    getServerAuthState(),
+  ]);
 
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
     review;
@@ -314,6 +324,10 @@ export default async function ElectionReviewPage({
           Ballot links are on their way. Delivery tracking is not recording anything yet, so
           treat this as &ldquo;attempted&rdquo; — ballots arriving is the reliable signal.
         </div>
+      )}
+
+      {messages && messages.length > 0 && (
+        <ElectionMessagesPanel messages={messages} testEmail={auth.user?.email ?? null} />
       )}
 
       {timeline && (
