@@ -738,7 +738,7 @@ export async function signCosignature(
   if (sig.revoked_at) return fail("That signature request was withdrawn.");
 
   if (!signer.organizationIds.includes(sig.organization_id as string))
-    return fail("You are not an administrator of the institution this request was sent to.");
+    return fail("You are not recorded at the institution this request was sent to.");
 
   const nom = sig.nominations as { nominee_contact_id: string; elections: { slug: string } } | null;
   const election = nom ? await getElection(nom.elections.slug) : null;

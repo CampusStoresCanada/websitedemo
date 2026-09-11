@@ -16,6 +16,11 @@ import { getServerAuthState } from "@/lib/auth/server";
 import { getNominationByToken, nominationsOpen, resolveActor } from "@/lib/elections/service";
 import { ElectionShell, Notice, OutstandingList, SignInPrompt } from "@/components/elections/ElectionShell";
 import {
+  BOARD_SERVICE_BENEFITS,
+  BOARD_SERVICE_CONSIDERATIONS,
+  BOARD_SERVICE_NEXT_STEP,
+} from "@/lib/elections/board-service";
+import {
   acceptNominationAction,
   declineNominationAction,
   withdrawNominationAction,
@@ -149,6 +154,38 @@ export default async function AcceptNominationPage({
             </button>
           </form>
         </div>
+      )}
+
+      {/* The nominee is the one person being asked to decide, and until now this
+          page told them only what the process required of them — dates, a bio,
+          a statement — and never what they would be taking on or why anyone
+          does it. CSC's own case belongs here more than anywhere else. */}
+      {isNominee && (
+        <details className="mb-6 rounded-lg border border-gray-200 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+            What you are being asked to take on
+          </summary>
+          <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {BOARD_SERVICE_BENEFITS.map((b) => (
+              <div key={b.label} className="text-sm">
+                <dt className="font-medium text-gray-900">{b.label}</dt>
+                <dd className="text-gray-600">{b.detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-4 border-t border-gray-100 pt-3">
+            <p className="text-sm font-medium text-gray-900">What it asks of you</p>
+            <dl className="mt-1.5 space-y-1.5">
+              {BOARD_SERVICE_CONSIDERATIONS.map((c) => (
+                <div key={c.label} className="text-sm">
+                  <dt className="inline font-medium text-gray-900">{c.label} — </dt>
+                  <dd className="inline text-gray-600">{c.detail}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-sm text-gray-600">{BOARD_SERVICE_NEXT_STEP}</p>
+          </div>
+        </details>
       )}
 
       {isNominee && (

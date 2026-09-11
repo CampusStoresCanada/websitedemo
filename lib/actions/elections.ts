@@ -94,10 +94,15 @@ export async function signCosignatureAction(token: string): Promise<ActionResult
       error: `You do not have a contact record at ${found.organizationName}, so this signature cannot be attributed.`,
     };
 
+  // Any active member of the institution may co-sign, not only its
+  // administrator — widened on the ED's decision 2026-09-11, alongside
+  // nominating. A co-signature is the institution saying a name deserves to go
+  // in front of the members; restricting it to admins meant a nomination could
+  // stall waiting for one specific person to read an email.
   const result = await signCosignature(token, {
     profileId: auth.user.id,
     contactId,
-    organizationIds: actor.adminOrganizationIds,
+    organizationIds: actor.staffOrganizationIds,
   });
   if (!result.ok) return { ok: false, error: result.error };
 

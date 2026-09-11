@@ -53,7 +53,7 @@ export default async function CosignPage({
   const { nomination, election, organizationName, organizationId, signedAt, revokedAt } = found;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
   const actor = await resolveActor(auth.user.id, auth.organizations);
-  const isAdminHere = actor.adminOrganizationIds.includes(organizationId);
+  const isAdminHere = actor.staffOrganizationIds.includes(organizationId);
   const windowOpen = nominationsOpen(election);
 
   async function sign() {
