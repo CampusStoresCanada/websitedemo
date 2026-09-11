@@ -1098,7 +1098,7 @@ export async function listNominatableContacts(
     .or(`name.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%`)
     .limit(limit);
 
-  return (data ?? []).map((c) => ({
+  const rows = (data ?? []).map((c) => ({
     contactId: c.id as string,
     profileId: (c.profile_id as string) ?? null,
     name:
@@ -1109,6 +1109,26 @@ export async function listNominatableContacts(
     organizationId: c.organization_id as string,
     organizationName: (c.organizations as { name: string } | null)?.name ?? "Unknown institution",
   }));
+
+  // Collapsed for DISPLAY on (person, institution). People hold more than one
+  // contact row at the same store — sometimes with a stale job title on one of
+  // them — and a search for a colleague was returning the same human three
+  // times with no way to tell which to pick. That does not read as "our data is
+  // untidy", it reads as "this form is broken", and it is the point at which
+  // someone gives up on nominating.
+  //
+  // ⛔ Nothing is merged in the database. The duplicate rows stay exactly as
+  // they are; whichever one is shown nominates the same person at the same
+  // institution, and a genuine conflict is a human's to resolve, not ours.
+  // Prefers the row that carries a job title, since that is the one a member
+  // will recognise.
+  const best = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    const key = `${r.name.toLowerCase()}::${r.organizationId}`;
+    const seen = best.get(key);
+    if (!seen || (!seen.roleTitle && r.roleTitle)) best.set(key, r);
+  }
+  return [...best.values()];
 }
 
 export async function getNominatableContact(

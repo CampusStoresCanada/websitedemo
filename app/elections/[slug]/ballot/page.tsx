@@ -58,6 +58,11 @@ export default async function BallotPage({
   const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
   const previewing = await isAdminPreview({ preview });
 
+  // Same reason as the nominate page: a link that drops the flag drops the
+  // admin back onto the ordinary guards mid-preview.
+  const keepPreview = (href: string) =>
+    previewing ? `${href}${href.includes("?") ? "&" : "?"}preview=1` : href;
+
   const auth = await getServerAuthState();
   if (!auth.user)
     return <SignInPrompt returnTo={`/elections/${slug}/ballot`} action="cast your institution's ballot" />;
@@ -139,7 +144,7 @@ export default async function BallotPage({
             You administer more than one member institution. This is{" "}
             <strong>{viewerOrg!.name}</strong>&apos;s ballot — each institution has its own.{" "}
             {otherOrganizations.map((o) => (
-              <Link key={o.id} href={`/elections/${slug}/ballot?org=${o.id}`} className="underline">
+              <Link key={o.id} href={keepPreview(`/elections/${slug}/ballot?org=${o.id}`)} className="underline">
                 Switch to {o.name}
               </Link>
             ))}

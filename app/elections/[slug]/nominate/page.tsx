@@ -27,6 +27,11 @@ import {
   planNomination,
 } from "@/lib/elections/service";
 import { ElectionShell, Notice, SignInPrompt } from "@/components/elections/ElectionShell";
+import {
+  BOARD_SERVICE_BENEFITS,
+  BOARD_SERVICE_CONSIDERATIONS,
+  BOARD_SERVICE_NEXT_STEP,
+} from "@/lib/elections/board-service";
 import { submitNominationAction } from "@/lib/actions/elections";
 
 export const dynamic = "force-dynamic";
@@ -52,6 +57,13 @@ export default async function NominatePage({
   const { q, nominee: nomineeId, submitted, error, preview } = await searchParams;
   const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
   const previewing = await isAdminPreview({ preview });
+
+  // Every link and form on this page has to carry the flag forward. Without
+  // this the first search dropped it, the page re-rendered under the ordinary
+  // guards, and the admin landed on "nominations are not open" — a preview
+  // that works until you use it is worse than none.
+  const keepPreview = (href: string) =>
+    previewing ? `${href}${href.includes("?") ? "&" : "?"}preview=1` : href;
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -97,7 +109,7 @@ export default async function NominatePage({
         </div>
         <div className="mt-6 flex gap-3">
           <Link
-            href={`/elections/${slug}/nominate`}
+            href={keepPreview(`/elections/${slug}/nominate`)}
             className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
           >
             Nominate someone else
@@ -307,7 +319,7 @@ export default async function NominatePage({
               Submit nomination
             </button>
             <Link
-              href={`/elections/${slug}/nominate`}
+              href={keepPreview(`/elections/${slug}/nominate`)}
               className="text-sm text-gray-600 underline hover:text-gray-800"
             >
               Choose someone else
@@ -374,7 +386,40 @@ export default async function NominatePage({
         </dl>
       </div>
 
+      {/* Why anyone would want this — CSC's own case, which until now lived in
+          a Word document in the AGM folder and reached nobody. Open by default:
+          it is the answer to the question the reader actually has, and hiding
+          it behind a toggle is how it stayed unread for seven years. */}
+      <details open className="mt-5 rounded-lg border border-gray-200 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+          Why people stand for the board
+        </summary>
+
+        <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          {BOARD_SERVICE_BENEFITS.map((b) => (
+            <div key={b.label} className="text-sm">
+              <dt className="font-medium text-gray-900">{b.label}</dt>
+              <dd className="text-gray-600">{b.detail}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <p className="text-sm font-medium text-gray-900">What it asks of you</p>
+          <dl className="mt-1.5 space-y-1.5">
+            {BOARD_SERVICE_CONSIDERATIONS.map((c) => (
+              <div key={c.label} className="text-sm">
+                <dt className="inline font-medium text-gray-900">{c.label} — </dt>
+                <dd className="inline text-gray-600">{c.detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 text-sm text-gray-600">{BOARD_SERVICE_NEXT_STEP}</p>
+        </div>
+      </details>
+
       <form method="get" className="mt-6 flex gap-2">
+        {previewing && <input type="hidden" name="preview" value="1" />}
         <input
           type="search"
           name="q"
@@ -393,7 +438,7 @@ export default async function NominatePage({
       {me && (
         <p className="mt-3 text-sm">
           <Link
-            href={`/elections/${slug}/nominate?nominee=${me}`}
+            href={keepPreview(`/elections/${slug}/nominate?nominee=${me}`)}
             className="text-[#B92026] underline hover:text-[#9c1b20]"
           >
             Nominate myself
@@ -415,7 +460,7 @@ export default async function NominatePage({
           {results.map((r) => (
             <li key={r.contactId}>
               <Link
-                href={`/elections/${slug}/nominate?nominee=${r.contactId}`}
+                href={keepPreview(`/elections/${slug}/nominate?nominee=${r.contactId}`)}
                 className="flex items-center justify-between gap-4 px-4 py-3 text-sm hover:bg-gray-50"
               >
                 <span>
