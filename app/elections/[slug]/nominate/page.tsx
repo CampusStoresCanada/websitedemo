@@ -46,10 +46,12 @@ export default async function NominatePage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ q?: string; nominee?: string; submitted?: string; error?: string }>;
+  searchParams: Promise<{ q?: string; nominee?: string; submitted?: string; error?: string; preview?: string }>;
 }) {
   const { slug } = await params;
-  const { q, nominee: nomineeId, submitted, error } = await searchParams;
+  const { q, nominee: nomineeId, submitted, error, preview } = await searchParams;
+  const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
+  const previewing = await isAdminPreview({ preview });
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -120,7 +122,7 @@ export default async function NominatePage({
       });
   }
 
-  if (!nominationsOpen(election) || election.status !== "nominating") {
+  if (!previewing && (!nominationsOpen(election) || election.status !== "nominating")) {
     return (
       <ElectionShell eyebrow={eyebrow} title="Nominations are not open">
         <Notice tone="info">
@@ -130,6 +132,16 @@ export default async function NominatePage({
         </Notice>
       </ElectionShell>
     );
+  }
+
+  if (previewing && eligibleNominatorOrgs.length === 0) {
+    // A stand-in so the form renders. Clearly named, and inert: the action
+    // re-derives the actor from the session and will refuse this id.
+    eligibleNominatorOrgs.push({
+      organizationId: "preview",
+      name: "[the member's institution]",
+      contactId: "preview",
+    });
   }
 
   if (eligibleNominatorOrgs.length === 0) {
@@ -315,6 +327,8 @@ export default async function NominatePage({
       title="Nominate a director"
       subtitle={`${election.seatsAvailable} seats · nominations close ${formatDate(election.schedule.nominationsCloseAt)}`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
+
       <p className="text-sm text-gray-600">
         Any employee of a member institution in good standing may stand for the board. You can
         nominate a colleague, someone at another institution, or yourself.

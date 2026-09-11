@@ -15,7 +15,6 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
-import ElectionMessagesPanel from "@/components/admin/elections/ElectionMessagesPanel";
 import RepresentationPanel from "@/components/admin/elections/RepresentationPanel";
 import AgmNoticePanel from "@/components/admin/elections/AgmNoticePanel";
 import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedulePanel";
@@ -120,12 +119,28 @@ export default async function ElectionReviewPage({
 
   // Loaded after the review, which is what persists the eligibility rows this
   // reads — see getElectionMessagesForSlug.
+  const MESSAGE_STAGES: Record<string, string> = {
+    call: "call_for_nominations",
+    ballots_open: "circulate_ballots",
+    ballot_reminder: "ballots_close",
+    agm_notice: "agm_notice",
+    proxy_form: "proxy_form",
+    agm_package: "agm_package",
+    results: "announce_result",
+  };
+
   const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
   const { getServerAuthState } = await import("@/lib/auth/server");
   const [messages, auth] = await Promise.all([
     getElectionMessagesForSlug(slug),
     getServerAuthState(),
   ]);
+
+  const stageMessages: Record<string, (typeof messages extends null ? never : NonNullable<typeof messages>)[number]> = {};
+  for (const m of messages ?? []) {
+    const stageKey = MESSAGE_STAGES[m.key];
+    if (stageKey) stageMessages[stageKey] = m;
+  }
 
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
     review;
@@ -326,13 +341,24 @@ export default async function ElectionReviewPage({
         </div>
       )}
 
-      {messages && messages.length > 0 && (
-        <ElectionMessagesPanel messages={messages} testEmail={auth.user?.email ?? null} />
-      )}
-
       {timeline && (
         <ElectionTimeline
           stages={timeline}
+          testEmail={auth.user?.email ?? null}
+          // Keyed by STAGE, so each step carries the message it sends. The
+          // reminder hangs off "ballots close" because that is the step it
+          // belongs to in the cycle, even though it reuses the ballot template.
+          stageMessages={stageMessages}
+          // The member-facing page each step points at. Opened with ?preview=1,
+          // which an admin sees as an eligible member would — and which is
+          // display-only: every write path re-checks the actor independently.
+          stagePages={{
+            call_for_nominations: { href: `/elections/${slug}/nominate`, label: "nomination form" },
+            circulate_ballots: { href: `/elections/${slug}/ballot`, label: "ballot" },
+            ballots_close: { href: `/elections/${slug}/ballot`, label: "ballot" },
+            proxy_form: { href: `/elections/${slug}/proxy`, label: "proxy form" },
+            agm_package: { href: `/elections/${slug}/package`, label: "AGM package" },
+          }}
           actions={{
             sendCall,
             // Not `close` — that form needs its confirmation ticked, so the
