@@ -353,11 +353,17 @@ export default async function ElectionReviewPage({
           // which an admin sees as an eligible member would — and which is
           // display-only: every write path re-checks the actor independently.
           stagePages={{
-            call_for_nominations: { href: `/elections/${slug}/nominate`, label: "nomination form" },
-            circulate_ballots: { href: `/elections/${slug}/ballot`, label: "ballot" },
-            ballots_close: { href: `/elections/${slug}/ballot`, label: "ballot" },
-            proxy_form: { href: `/elections/${slug}/proxy`, label: "proxy form" },
-            agm_package: { href: `/elections/${slug}/package`, label: "AGM package" },
+            call_for_nominations: [
+              { href: `/elections/${slug}/nominate`, label: "nomination form" },
+              // Token-scoped, so there is no URL until a nomination exists.
+              // These render against a clearly-labelled stand-in.
+              { href: `/elections/accept/preview?slug=${slug}`, label: "nominee's page" },
+              { href: `/elections/cosign/preview?slug=${slug}`, label: "co-signer's page" },
+            ],
+            circulate_ballots: [{ href: `/elections/${slug}/ballot`, label: "ballot" }],
+            ballots_close: [{ href: `/elections/${slug}/ballot`, label: "ballot" }],
+            proxy_form: [{ href: `/elections/${slug}/proxy`, label: "proxy form" }],
+            agm_package: [{ href: `/elections/${slug}/package`, label: "AGM package" }],
           }}
           actions={{
             sendCall,

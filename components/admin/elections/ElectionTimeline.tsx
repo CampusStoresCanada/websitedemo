@@ -75,7 +75,7 @@ export default function ElectionTimeline({
    * ?preview=1, which bypasses what the page DISPLAYS and nothing that writes —
    * see lib/elections/preview.ts.
    */
-  stagePages?: Record<string, { href: string; label: string }>;
+  stagePages?: Record<string, { href: string; label: string }[]>;
   /** Pre-fills the test-send box on any preview opened from here. */
   testEmail?: string | null;
 }) {
@@ -130,17 +130,22 @@ export default function ElectionTimeline({
                   />
                 )}
 
-                {stagePages[stage.key] && (
-                  <a
-                    href={`${stagePages[stage.key].href}?preview=1`}
-                    target="_blank"
-                    rel="noreferrer"
-                    className="mt-1 inline-flex items-center gap-1 text-xs text-gray-500 underline decoration-gray-300 underline-offset-2 hover:text-gray-800"
-                  >
-                    <ExternalLink size={12} />
-                    See the {stagePages[stage.key].label} as a member does
-                  </a>
-                )}
+                {stagePages[stage.key]?.length ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {stagePages[stage.key].map((p) => (
+                      <a
+                        key={p.href}
+                        href={p.href.includes("?") ? `${p.href}&preview=1` : `${p.href}?preview=1`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-gray-500 underline decoration-gray-300 underline-offset-2 hover:text-gray-800"
+                      >
+                        <ExternalLink size={12} />
+                        See the {p.label} as a member does
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
 
                 {act && typeof runnable === "function" && (
                   sendCounts[act.key] ? (

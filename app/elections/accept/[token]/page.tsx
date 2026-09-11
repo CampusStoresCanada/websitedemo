@@ -41,15 +41,40 @@ function formatDate(iso: string): string {
 
 export default async function AcceptNominationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ preview?: string; slug?: string }>;
 }) {
   const { token } = await params;
+  const { preview, slug: previewSlug } = await searchParams;
   const auth = await getServerAuthState();
 
   if (!auth.user) return <SignInPrompt returnTo={`/elections/accept/${token}`} action="accept a nomination" />;
 
-  const found = await getNominationByToken(token);
+  // The token pages are the only member-facing screens with no URL an admin
+  // could visit, because the token does not exist until a nomination does. A
+  // stand-in lets the committee see them before the cycle opens.
+  const { isAdminPreview, PREVIEW_BANNER, sampleNomination } = await import("@/lib/elections/preview");
+  const previewing = token === "preview" && (await isAdminPreview({ preview }));
+
+  const found = previewing
+    ? await (async () => {
+        const { getElection } = await import("@/lib/elections/service");
+        const e = await getElection(previewSlug ?? "");
+        return e
+          ? {
+              nomination: sampleNomination({
+                electionId: e.id,
+                cosignersRequired: e.config.nominations.cosignersRequired,
+                nominationsCloseAt: e.schedule.nominationsCloseAt,
+              }),
+              election: e,
+            }
+          : null;
+      })()
+    : await getNominationByToken(token);
+
   if (!found) {
     return (
       <ElectionShell eyebrow="Campus Stores Canada · Elections" title="Nomination not found">
@@ -70,6 +95,9 @@ export default async function AcceptNominationPage({
     !nomination.storePermissionGrantedAt;
 
   const windowOpen = nominationsOpen(election);
+  // Distinguishes "not yet" from "too late" — see the notice below.
+  const beforeWindow =
+    new Date().toISOString().slice(0, 10) < election.schedule.nominationsOpenAt;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
 
   if (!isNominee && !canGrantStorePermission) {
@@ -138,6 +166,7 @@ export default async function AcceptNominationPage({
       title={nomination.nomineeName}
       subtitle={`${nomination.organizationName} · nominated for the Board of Directors`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
       {canGrantStorePermission && (
         <div className="mb-6 space-y-3">
           <Notice tone="warning">
@@ -199,11 +228,25 @@ export default async function AcceptNominationPage({
             </p>
           </div>
 
+          {/* "Not open" has two causes and they read very differently to a
+              nominee. Before the window, this said nominations "closed on"
+              a date still in the future — which tells someone who has just been
+              asked to stand that they are already too late. */}
           {!windowOpen && (
             <div className="mb-6">
-              <Notice tone="error">
-                Nominations closed on {formatDate(election.schedule.nominationsCloseAt)} and cannot be
-                reopened.
+              <Notice tone={beforeWindow ? "info" : "error"}>
+                {beforeWindow ? (
+                  <>
+                    Nominations open {formatDate(election.schedule.nominationsOpenAt)}. You can
+                    accept and write your statement from that date until{" "}
+                    {formatDate(election.schedule.nominationsCloseAt)}.
+                  </>
+                ) : (
+                  <>
+                    Nominations closed on {formatDate(election.schedule.nominationsCloseAt)} and
+                    cannot be reopened.
+                  </>
+                )}
               </Notice>
             </div>
           )}

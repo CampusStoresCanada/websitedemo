@@ -31,3 +31,65 @@ export async function isAdminPreview(
 /** Shown on every previewed page, so a screenshot can never be mistaken for the real thing. */
 export const PREVIEW_BANNER =
   "Preview — this is what an eligible member sees. Nothing here can be submitted from your account.";
+
+/**
+ * A stand-in nomination, so the nominee's page and the co-signer's page can be
+ * previewed before any nomination exists.
+ *
+ * These two are the only member-facing pages reachable solely by a token, so
+ * there is no URL an admin can visit to see them — which meant the committee
+ * could inspect every page a member touches EXCEPT the two that decide whether
+ * a nomination happens. Describing them in a chat window is not a preview.
+ *
+ * Typed as the real NominationView, so the shape cannot drift from the thing it
+ * imitates without the compiler saying so; only the values are invented, and
+ * every one of them is bracketed so a screenshot can never pass for real data.
+ *
+ * ⛔ Not persisted, and not reachable without the admin gate — isAdminPreview
+ * is checked before this is ever built.
+ */
+
+import type { NominationView } from "./service";
+
+export function sampleNomination(opts: {
+  electionId: string;
+  cosignersRequired: number;
+  nominationsCloseAt: string;
+}): NominationView {
+  return {
+    id: "preview",
+    electionId: opts.electionId,
+    status: "accepted",
+    source: "member",
+    nomineeContactId: "preview",
+    nomineeProfileId: null,
+    nomineeOrganizationId: "preview",
+    nomineeName: "[the nominee's name]",
+    organizationName: "[their institution]",
+    bio: "",
+    platform: "",
+    candidateAcceptedAt: null,
+    candidateDeclinedAt: null,
+    storePermissionGrantedAt: null,
+    withdrawnAt: null,
+    withdrawalRequestedAt: null,
+    acceptToken: "preview",
+    cosignatures: {
+      required: opts.cosignersRequired,
+      valid: 1,
+      satisfied: false,
+      signingOrganizationIds: ["preview"],
+      problems: [],
+      signedByDirectors: [],
+    },
+    candidate: { eligible: true, blocking: [], unverifiable: [] },
+    completeness: {
+      complete: false,
+      missing: [
+        "The nominee has not accepted yet.",
+        "Their institution has not given permission.",
+        `One more institution needs to co-sign (${opts.cosignersRequired} required).`,
+      ],
+    },
+  };
+}
