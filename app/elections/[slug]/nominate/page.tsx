@@ -27,6 +27,7 @@ import {
   planNomination,
 } from "@/lib/elections/service";
 import { ElectionShell, Notice, SignInPrompt } from "@/components/elections/ElectionShell";
+import NomineeSearch from "@/components/elections/NomineeSearch";
 import {
   BOARD_SERVICE_BENEFITS,
   BOARD_SERVICE_CONSIDERATIONS,
@@ -418,22 +419,12 @@ export default async function NominatePage({
         </div>
       </details>
 
-      <form method="get" className="mt-6 flex gap-2">
-        {previewing && <input type="hidden" name="preview" value="1" />}
-        <input
-          type="search"
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Search by name"
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[#2B2E33] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a1d21]"
-        >
-          Search
-        </button>
-      </form>
+      <NomineeSearch
+        slug={slug}
+        initialQuery={q ?? ""}
+        initialResults={results}
+        previewing={previewing}
+      />
 
       {me && (
         <p className="mt-3 text-sm">
@@ -455,25 +446,6 @@ export default async function NominatePage({
         </div>
       )}
 
-      {results.length > 0 && (
-        <ul className="mt-6 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-          {results.map((r) => (
-            <li key={r.contactId}>
-              <Link
-                href={keepPreview(`/elections/${slug}/nominate?nominee=${r.contactId}`)}
-                className="flex items-center justify-between gap-4 px-4 py-3 text-sm hover:bg-gray-50"
-              >
-                <span>
-                  <span className="font-medium text-gray-900">{r.name}</span>
-                  {r.roleTitle && <span className="text-gray-500"> · {r.roleTitle}</span>}
-                  <span className="block text-xs text-gray-500">{r.organizationName}</span>
-                </span>
-                <span className="text-xs text-gray-400">Choose</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
     </ElectionShell>
   );
 }
