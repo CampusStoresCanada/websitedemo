@@ -9,7 +9,7 @@ import { getBoardChecklist } from "@/lib/board/checklist";
 import { getElectionsWidgetData } from "@/lib/elections/dashboard-widget";
 import { getDashboardWidgetLayout, widgetSpan } from "@/lib/admin/dashboard-widgets";
 import { visibleNavGroups } from "@/lib/admin/nav";
-import { getCurrentRenewalSeason } from "@/lib/renewal/season";
+import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
@@ -101,7 +101,8 @@ export default async function AdminConsolePage() {
   // as two hand-written lists, the two disagreed: the grid was showing the
   // super-admin-only Configuration section to every admin.
   const navGroups = visibleNavGroups(auth.ok ? auth.ctx.globalRole : "admin", {
-    renewalSeason: (await getCurrentRenewalSeason(new Date())) !== null,
+    renewalBoardWindow:
+      (await resolveBoardRenewalWindow(new Date().toISOString().slice(0, 10))) !== null,
   });
 
   const db = createAdminClient();

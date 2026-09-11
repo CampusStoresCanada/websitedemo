@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAdmin } from "@/lib/auth/guards";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
-import { getCurrentRenewalSeason } from "@/lib/renewal/season";
+import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -19,11 +19,12 @@ export default async function AdminLayout({
   }
 
   // Conditions the sidebar cannot resolve itself — it is a client component,
-  // and the season comes from the same policy config the reminder and grace
+  // and the window comes from the same policy config the reminder and grace
   // crons run on. getRenewalConfig() is cached, so this is not a query per
   // admin page load.
   const conditions = {
-    renewalSeason: (await getCurrentRenewalSeason(new Date())) !== null,
+    renewalBoardWindow:
+      (await resolveBoardRenewalWindow(new Date().toISOString().slice(0, 10))) !== null,
   };
 
   return (

@@ -26,7 +26,7 @@ export type AdminRole = "super_admin" | "admin" | "user";
  * once a cycle was already open. A gate is right when the page is a work
  * surface that has no work outside the window, not when it is a door.
  */
-export type NavCondition = "renewalSeason";
+export type NavCondition = "renewalBoardWindow";
 
 export interface NavItem {
   href: string;
@@ -100,13 +100,21 @@ export const NAV_GROUPS: NavGroup[] = [
       {
         // Per-person, not a shared surface: it lists the stores assigned to
         // whoever is signed in, handed out from the Renewals tab on a board
-        // meeting. Hidden outside the renewal season, which is derived from
-        // the same policy config the reminder and grace crons run on.
+        // meeting.
+        //
+        // Gated on the BOARD window (cycle start -1mo to +3mo, so Aug 1 - Dec 1
+        // today), not the operational renewal season that ends at the grace
+        // cliff on Oct 1. The list is handed out at a board meeting, and the
+        // first meeting after the cliff — when "who lapsed" is finally settled
+        // — falls outside the operational season. Gating on it hid this link
+        // from every director the moment they were given work to do. It is the
+        // same window the Renewals tab and the page itself already resolve, so
+        // all three now agree.
         href: "/admin/renewals",
         label: "My renewal calls",
         title: "My Renewal Calls",
         description: "Stores assigned to you this cycle, with contact details and call status.",
-        showWhen: "renewalSeason",
+        showWhen: "renewalBoardWindow",
       },
     ],
   },
@@ -241,7 +249,7 @@ export const NAV_GROUPS: NavGroup[] = [
 
 /** Conditions that currently hold, resolved server-side once per render. */
 export interface NavConditions {
-  renewalSeason: boolean;
+  renewalBoardWindow: boolean;
 }
 
 export function hasAccess(role: AdminRole, minRole: AdminRole): boolean {

@@ -44,7 +44,7 @@ interface AdminSidebarProps {
 
 export default function AdminSidebar({
   globalRole = "admin",
-  conditions = { renewalSeason: false },
+  conditions = { renewalBoardWindow: false },
 }: AdminSidebarProps) {
   const pathname = usePathname();
   const groups = visibleNavGroups(globalRole, conditions);
