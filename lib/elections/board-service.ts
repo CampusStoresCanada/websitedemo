@@ -81,3 +81,38 @@ export const BOARD_SERVICE_CONSIDERATIONS: BoardServicePoint[] = [
 /** What the source document tells an undecided reader to do next. */
 export const BOARD_SERVICE_NEXT_STEP =
   "If you are interested, talk to a current board member or contact the CSC office to find out what level of time commitment to expect and which roles are open.";
+
+/**
+ * The same case, as email HTML.
+ *
+ * Built from the lists above rather than pasted into the template, so the page
+ * and the email cannot drift — editing one benefit changes both. The template
+ * carries it as {{benefits_html}}, which means the committee can still move it,
+ * cut it, or wrap it in their own words from the template editor without
+ * touching code.
+ *
+ * Deliberately plain markup: no flex, no grid, no background colours. Outlook
+ * renders a table-less two-column layout as a heap, and this has to survive
+ * every campus store's mail client, not just a modern one.
+ */
+export function boardServiceEmailHtml(): string {
+  const esc = (v: string) =>
+    v.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
+  const items = BOARD_SERVICE_BENEFITS.map(
+    (b) =>
+      `<li style="margin:0 0 8px 0;"><strong>${esc(b.label)}</strong> — ${esc(b.detail)}</li>`
+  ).join("");
+
+  const asks = BOARD_SERVICE_CONSIDERATIONS.map(
+    (c) => `<li style="margin:0 0 8px 0;"><strong>${esc(c.label)}</strong> — ${esc(c.detail)}</li>`
+  ).join("");
+
+  return [
+    `<p style="margin:24px 0 8px 0;"><strong>Why people stand for the board</strong></p>`,
+    `<ul style="margin:0 0 16px 0;padding-left:20px;">${items}</ul>`,
+    `<p style="margin:0 0 8px 0;"><strong>What it asks of you</strong></p>`,
+    `<ul style="margin:0 0 16px 0;padding-left:20px;">${asks}</ul>`,
+    `<p style="margin:0 0 16px 0;">${esc(BOARD_SERVICE_NEXT_STEP)}</p>`,
+  ].join("");
+}

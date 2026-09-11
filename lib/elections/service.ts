@@ -10,6 +10,7 @@
  */
 
 import crypto from "node:crypto";
+import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/database.types";
 import { getProgramsConfig } from "@/lib/policy/engine";
@@ -158,7 +159,22 @@ export async function getElection(slug: string): Promise<Election | null> {
  * wrong by the end of September. Callers gating an action should run this (or
  * `isOrganizationEligible`) rather than trusting a stored row.
  */
-export async function evaluateElectionEligibility(
+/**
+ * Memoized per request.
+ *
+ * This loads EVERY organization (211 today), evaluates each one, and upserts a
+ * verdict row for all of them (80) — and isOrganizationEligible is a thin
+ * wrapper around it, called once per store the viewer administers, inside a
+ * loop. So rendering the nomination page ran the whole thing twice for anyone
+ * with two stores, and once more on the admin review page for the committee
+ * panel. A search on that page is a full render, which meant every search
+ * re-evaluated the entire membership and rewrote all eighty rows.
+ *
+ * `cache` collapses that to one evaluation per request. It does not weaken the
+ * "re-evaluated at every gate" rule: the gate is the request, and within a
+ * single render the answer cannot have changed.
+ */
+export const evaluateElectionEligibility = cache(async function evaluateElectionEligibility(
   electionId: string
 ): Promise<{ verdicts: EligibilityVerdict[]; summary: EligibilitySummary }> {
   const db = createAdminClient();
@@ -243,7 +259,7 @@ export async function evaluateElectionEligibility(
   }
 
   return { verdicts, summary: summarizeEligibility(verdicts) };
-}
+});
 
 /**
  * Can this institution TAKE PART — nominate someone, co-sign a nomination?

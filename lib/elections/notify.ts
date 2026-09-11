@@ -30,6 +30,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
 import type { Election } from "./service";
+import { boardServiceEmailHtml } from "./board-service";
 
 export interface NotifyOutcome {
   template: string;
@@ -423,6 +424,9 @@ export async function buildCallForNominations(
         agm_date: formatDate(election.schedule.agmDate),
         nominations_close: formatDate(election.schedule.nominationsCloseAt),
         nominate_url: `${appUrl()}/elections/${election.slug}/nominate`,
+        // CSC's own case for serving, rendered from the same list the
+        // nomination page shows. The template decides where it sits.
+        benefits_html: boardServiceEmailHtml(),
       },
     })),
   };
