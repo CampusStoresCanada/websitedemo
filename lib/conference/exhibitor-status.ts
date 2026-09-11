@@ -15,6 +15,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { VISIBLE_CONFERENCE_STATUSES } from "@/lib/constants/conference";
+import { getActiveConferenceInstance } from "@/lib/actions/conference-availability";
 
 /** Public path to the conference mark used as the Exhibitor badge icon. */
 export const EXHIBITOR_BADGE_LOGO = "/logos/conference-2027-mark.svg";
@@ -158,4 +159,35 @@ export async function getExhibitorStatusByOrg(): Promise<Map<string, ExhibitorSt
     if (status) out.set(orgId, status);
   }
   return out;
+}
+
+/**
+ * Which orgs already hold a booth at the conference currently ON SALE.
+ *
+ * Deliberately not getExhibitorStatusByOrg() on its own. That reader answers
+ * "what is this org's booth standing", and to keep a profile from reading as
+ * blank in the gap between conferences it falls back to the most recently
+ * PAST one. For a sales question that fallback is exactly backwards: a partner
+ * who exhibited last year and has bought nothing for the upcoming show is the
+ * most worthwhile call on the list, and the fallback would report them as an
+ * exhibitor and hide them. So this narrows by conference id.
+ *
+ * Returns null when no conference is open for registration — "not yet in a
+ * booth" is not a meaningful thing to say about anyone when there is no booth
+ * to buy, and a caller should render nothing rather than tag the whole list.
+ */
+export async function getActiveConferenceBoothHolders(): Promise<{
+  conferenceId: string;
+  year: number;
+  orgIds: string[];
+} | null> {
+  const active = await getActiveConferenceInstance();
+  if (!active) return null;
+
+  const statusByOrg = await getExhibitorStatusByOrg();
+  const orgIds: string[] = [];
+  for (const [orgId, status] of statusByOrg) {
+    if (status.conferenceId === active.id) orgIds.push(orgId);
+  }
+  return { conferenceId: active.id, year: active.year, orgIds };
 }

@@ -67,6 +67,15 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
                 renewed
               </span>
             )}
+            {/* The other half of the same phone call. A partner who has not
+                booked a booth for the show that is currently selling is worth
+                asking while you already have them on the line — so the cue
+                belongs on this row, not on a separate sales report. */}
+            {entry.hasBooth === false && (
+              <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100">
+                not yet in a booth
+              </span>
+            )}
             {!entry.renewed && entry.notificationsPausedUntil && (
               <span className="ml-2 text-xs font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800">
                 reminders paused

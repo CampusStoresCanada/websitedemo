@@ -15,6 +15,7 @@ import BoardMeetingSection from "@/components/events/BoardMeetingSection";
 import { getBoardRenewalReport } from "@/lib/renewal/board-report";
 import { getRenewalSnapshot, getRenewalDelta } from "@/lib/renewal/snapshot";
 import { getAssignableBoardMembers, getAssignmentsByOrg } from "@/lib/renewal/outreach";
+import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
 import type { AssignableMember } from "@/lib/renewal/outreach";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import type { BoardRenewalReport } from "@/lib/renewal/board-report";
@@ -114,6 +115,7 @@ export default async function EventDetailPage({
     renewalDelta:   RenewalDelta | null;
     assignableMembers: AssignableMember[];
     assignmentsByOrg:  Record<string, string>;
+    boothHolderOrgIds: string[] | null;
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -179,6 +181,10 @@ export default async function EventDetailPage({
         assignmentsByOrg: renewalReport
           ? await getAssignmentsByOrg(adminDb, renewalReport.renewalYear)
           : {},
+        // Live for the same reason as the assignments above: booths keep
+        // selling after the meeting. Null when nothing is open for
+        // registration, which hides the cue rather than tagging everyone.
+        boothHolderOrgIds: renewalReport ? (await getActiveConferenceBoothHolders())?.orgIds ?? null : null,
         // Delta is computed against whichever figures are being shown — the
         // frozen ones if this meeting has a snapshot, otherwise live.
         renewalDelta:    renewalReport
@@ -397,6 +403,7 @@ export default async function EventDetailPage({
           renewalDelta={boardMeetingData.renewalDelta}
           assignableMembers={boardMeetingData.assignableMembers}
           assignmentsByOrg={boardMeetingData.assignmentsByOrg}
+          boothHolderOrgIds={boardMeetingData.boothHolderOrgIds}
           eventSlug={slug}
           reportPeriod={boardMeetingData.reportPeriod}
           isSA={isSA}

@@ -4,6 +4,7 @@ import { useState, useTransition } from "react";
 import LocalDate from "@/components/ui/LocalDate";
 import type { BoardRenewalReport, BoardRenewalTypeReport } from "@/lib/renewal/board-report";
 import type { RenewalOrgType } from "@/lib/renewal/renewal-progress";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 import {
   CONTACT_CHANNELS,
   CONTACT_OUTCOMES,
@@ -35,6 +36,11 @@ interface Props {
   /** LIVE assignment per org id — deliberately not read off the snapshot. The
    *  figures freeze to a meeting; who owns the conversation does not. */
   assignmentsByOrg: Record<string, string>;
+  /** Org ids holding a booth at the conference currently on sale. LIVE for the
+   *  same reason as assignments — booths keep selling after the meeting, and a
+   *  figure frozen into the minutes would go stale as a sales cue. Null when no
+   *  conference is open for registration, which hides the cue entirely. */
+  boothHolderOrgIds: string[] | null;
 }
 
 /**
@@ -412,18 +418,27 @@ function TypePanel({
   eventSlug,
   members,
   assignmentsByOrg,
+  boothHolderOrgIds,
 }: {
   type: BoardRenewalTypeReport;
   renewalYear: number;
   eventSlug: string;
   members: AssignableMember[];
   assignmentsByOrg: Record<string, string>;
+  boothHolderOrgIds: string[] | null;
 }) {
   const [open, setOpen] = useState(false);
   const [logging, setLogging] = useState<string | null>(null);
   // Counted from live assignments rather than type.assignedCount, which is
   // frozen into the snapshot alongside the figures.
   const assignedNow = type.outstanding.filter((o) => assignmentsByOrg[o.organizationId]).length;
+  // Only partners buy booths, so the cue is scoped to that section rather than
+  // shown as a blank column against every member store.
+  const boothCueApplies = boothHolderOrgIds !== null && type.orgType === ORG_TYPE.vendorPartner;
+  const boothHolders = new Set(boothHolderOrgIds ?? []);
+  const withoutBooth = boothCueApplies
+    ? type.outstanding.filter((o) => !boothHolders.has(o.organizationId)).length
+    : 0;
   const renewedPct = type.populationCount === 0 ? 0 : type.renewedCount / type.populationCount;
 
   return (
@@ -465,6 +480,7 @@ function TypePanel({
           <p className="text-xs text-gray-500 mb-2">
             {type.contactedCount} of {type.outstanding.length} spoken to
             {assignedNow > 0 && ` · ${assignedNow} assigned`}
+            {boothCueApplies && withoutBooth > 0 && ` · ${withoutBooth} not yet in a booth`}
             {type.contactedCount === 0 && type.outstanding.length > 0 && (
               <span className="text-[#9C0006] font-medium"> — nobody has been called yet</span>
             )}
@@ -493,6 +509,14 @@ function TypePanel({
                   <div className="flex items-center justify-between gap-3">
                     <span className="text-gray-700 min-w-0 truncate">{org.name}</span>
                     <span className="flex items-center gap-2 shrink-0">
+                      {/* Two asks, one call. Whoever takes this row should see
+                          that the booth conversation is still open before they
+                          dial, rather than finding out afterwards. */}
+                      {boothCueApplies && !boothHolders.has(org.organizationId) ? (
+                        <span className="text-xs px-1.5 py-0.5 rounded bg-blue-50 text-blue-800 border border-blue-100 whitespace-nowrap">
+                          not yet in a booth
+                        </span>
+                      ) : null}
                       {org.lastContactedAt ? (
                         <span
                           className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-800"
@@ -547,6 +571,7 @@ export default function MeetingRenewalsTab({
   eventSlug,
   assignableMembers,
   assignmentsByOrg,
+  boothHolderOrgIds,
 }: Props) {
   // The frozen figures win wherever they exist. The live report stays the
   // fallback for a meeting nobody has frozen yet, and the source is stated in
@@ -643,6 +668,7 @@ export default function MeetingRenewalsTab({
             eventSlug={eventSlug}
             members={assignableMembers}
             assignmentsByOrg={assignmentsByOrg}
+            boothHolderOrgIds={boothHolderOrgIds}
           />
         ))}
       </div>

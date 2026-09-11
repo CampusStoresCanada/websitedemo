@@ -1,6 +1,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getExpectedAmountsByOrg } from "./expected-amounts";
 import { CONTACT_CHANNELS, type ContactChannel, type ContactOutcome } from "./outreach";
+import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
+import { ORG_TYPE } from "@/lib/constants/org-types";
 
 export interface CallListContact {
   name: string;
@@ -18,6 +20,11 @@ export interface CallListEntry {
   amountCents: number;
   /** True once a payment lands — the row stays on the list, marked done. */
   renewed: boolean;
+  /** Partners only: do they hold a booth at the conference currently on sale?
+   *  null means the question does not apply — this is a member, or nothing is
+   *  on sale right now. False is the cue worth acting on: the renewal call is
+   *  already happening, and the booth is the other half of the conversation. */
+  hasBooth: boolean | null;
   /** Set when an admin has paused renewal notifications for this org — a
    *  payment in transit, usually. The row stays on the list, because the
    *  money is still outstanding and the assignment still stands, but the
@@ -68,7 +75,7 @@ export async function getRenewalCallList(
   const empty: RenewalCallList = { renewalYear, entries: [], outstandingCount: 0, contactedCount: 0 };
   if (orgIds.length === 0) return empty;
 
-  const [orgsRes, contactsRes, logRes, chargesRes, expectedByOrg] = await Promise.all([
+  const [orgsRes, contactsRes, logRes, chargesRes, expectedByOrg, boothHolders] = await Promise.all([
     db
       .from("organizations")
       .select("id, name, type, province, renewal_notifications_paused_until, renewal_pause_reason")
@@ -95,9 +102,13 @@ export async function getRenewalCallList(
       .eq("renewal_year", renewalYear)
       .in("organization_id", orgIds),
     getExpectedAmountsByOrg(db, orgIds, renewalYear),
+    // Null when no conference is open for registration, which turns the booth
+    // cue off for everybody rather than tagging the whole list.
+    getActiveConferenceBoothHolders(),
   ]);
 
   const renewedIds = new Set((chargesRes.data ?? []).map((r) => r.organization_id));
+  const boothHolderIds = boothHolders ? new Set(boothHolders.orgIds) : null;
 
   const contactByOrg = new Map<string, CallListContact>();
   for (const c of contactsRes.data ?? []) {
@@ -138,6 +149,8 @@ export async function getRenewalCallList(
     province: o.province,
     amountCents: expectedByOrg.get(o.id) ?? 0,
     renewed: renewedIds.has(o.id),
+    hasBooth:
+      boothHolderIds && o.type === ORG_TYPE.vendorPartner ? boothHolderIds.has(o.id) : null,
     notificationsPausedUntil: o.renewal_notifications_paused_until,
     pauseReason: o.renewal_pause_reason,
     contact: contactByOrg.get(o.id) ?? null,
