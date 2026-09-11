@@ -13,6 +13,10 @@
  */
 
 import type { TimelineStage } from "@/lib/elections/timeline";
+import ConfirmSendButton from "./ConfirmSendButton";
+import StageMessagePreview from "./StageMessagePreview";
+import { ExternalLink } from "lucide-react";
+import type { ElectionMessage } from "@/lib/elections/messages";
 
 const DOT: Record<TimelineStage["state"], string> = {
   done: "bg-green-600",
@@ -40,6 +44,10 @@ function when(stage: TimelineStage): string | null {
 export default function ElectionTimeline({
   stages,
   actions,
+  sendCounts = {},
+  stageMessages = {},
+  stagePages = {},
+  testEmail = null,
 }: {
   stages: TimelineStage[];
   /**
@@ -54,6 +62,22 @@ export default function ElectionTimeline({
    * broken software rather than as a step with a form attached.
    */
   actions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined>;
+  /**
+   * How many people each action would email, so the confirmation can name the
+   * number rather than ask a generic "are you sure?". Actions absent from this
+   * map send nothing and keep their plain button.
+   */
+  sendCounts?: Record<string, { recipients: number | null; audience: string }>;
+  /** The message each step sends, keyed by stage key. Steps that send nothing are absent. */
+  stageMessages?: Record<string, ElectionMessage>;
+  /**
+   * The member-facing page each step points at, keyed by stage key. Opened with
+   * ?preview=1, which bypasses what the page DISPLAYS and nothing that writes —
+   * see lib/elections/preview.ts.
+   */
+  stagePages?: Record<string, { href: string; label: string }[]>;
+  /** Pre-fills the test-send box on any preview opened from here. */
+  testEmail?: string | null;
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
@@ -99,15 +123,48 @@ export default function ElectionTimeline({
                   <p className="mt-0.5 text-xs text-gray-600">{stage.detail}</p>
                 )}
 
+                {stageMessages[stage.key] && (
+                  <StageMessagePreview
+                    message={stageMessages[stage.key]}
+                    testEmail={testEmail}
+                  />
+                )}
+
+                {stagePages[stage.key]?.length ? (
+                  <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
+                    {stagePages[stage.key].map((p) => (
+                      <a
+                        key={p.href}
+                        href={p.href.includes("?") ? `${p.href}&preview=1` : `${p.href}?preview=1`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="inline-flex items-center gap-1 text-xs text-gray-500 underline decoration-gray-300 underline-offset-2 hover:text-gray-800"
+                      >
+                        <ExternalLink size={12} />
+                        See the {p.label} as a member does
+                      </a>
+                    ))}
+                  </div>
+                ) : null}
+
                 {act && typeof runnable === "function" && (
-                  <form action={runnable} className="mt-2">
-                    <button
-                      type="submit"
-                      className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
-                    >
-                      {act.label}
-                    </button>
-                  </form>
+                  sendCounts[act.key] ? (
+                    <ConfirmSendButton
+                      action={runnable}
+                      label={act.label}
+                      recipients={sendCounts[act.key].recipients}
+                      audience={sendCounts[act.key].audience}
+                    />
+                  ) : (
+                    <form action={runnable} className="mt-2">
+                      <button
+                        type="submit"
+                        className="rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
+                      >
+                        {act.label}
+                      </button>
+                    </form>
+                  )
                 )}
 
                 {act && typeof runnable === "string" && (

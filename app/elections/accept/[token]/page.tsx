@@ -16,6 +16,11 @@ import { getServerAuthState } from "@/lib/auth/server";
 import { getNominationByToken, nominationsOpen, resolveActor } from "@/lib/elections/service";
 import { ElectionShell, Notice, OutstandingList, SignInPrompt } from "@/components/elections/ElectionShell";
 import {
+  BOARD_SERVICE_BENEFITS,
+  BOARD_SERVICE_CONSIDERATIONS,
+  BOARD_SERVICE_NEXT_STEP,
+} from "@/lib/elections/board-service";
+import {
   acceptNominationAction,
   declineNominationAction,
   withdrawNominationAction,
@@ -36,15 +41,40 @@ function formatDate(iso: string): string {
 
 export default async function AcceptNominationPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ preview?: string; slug?: string }>;
 }) {
   const { token } = await params;
+  const { preview, slug: previewSlug } = await searchParams;
   const auth = await getServerAuthState();
 
   if (!auth.user) return <SignInPrompt returnTo={`/elections/accept/${token}`} action="accept a nomination" />;
 
-  const found = await getNominationByToken(token);
+  // The token pages are the only member-facing screens with no URL an admin
+  // could visit, because the token does not exist until a nomination does. A
+  // stand-in lets the committee see them before the cycle opens.
+  const { isAdminPreview, PREVIEW_BANNER, sampleNomination } = await import("@/lib/elections/preview");
+  const previewing = token === "preview" && (await isAdminPreview({ preview }));
+
+  const found = previewing
+    ? await (async () => {
+        const { getElection } = await import("@/lib/elections/service");
+        const e = await getElection(previewSlug ?? "");
+        return e
+          ? {
+              nomination: sampleNomination({
+                electionId: e.id,
+                cosignersRequired: e.config.nominations.cosignersRequired,
+                nominationsCloseAt: e.schedule.nominationsCloseAt,
+              }),
+              election: e,
+            }
+          : null;
+      })()
+    : await getNominationByToken(token);
+
   if (!found) {
     return (
       <ElectionShell eyebrow="Campus Stores Canada · Elections" title="Nomination not found">
@@ -65,6 +95,9 @@ export default async function AcceptNominationPage({
     !nomination.storePermissionGrantedAt;
 
   const windowOpen = nominationsOpen(election);
+  // Distinguishes "not yet" from "too late" — see the notice below.
+  const beforeWindow =
+    new Date().toISOString().slice(0, 10) < election.schedule.nominationsOpenAt;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
 
   if (!isNominee && !canGrantStorePermission) {
@@ -133,6 +166,7 @@ export default async function AcceptNominationPage({
       title={nomination.nomineeName}
       subtitle={`${nomination.organizationName} · nominated for the Board of Directors`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
       {canGrantStorePermission && (
         <div className="mb-6 space-y-3">
           <Notice tone="warning">
@@ -151,6 +185,38 @@ export default async function AcceptNominationPage({
         </div>
       )}
 
+      {/* The nominee is the one person being asked to decide, and until now this
+          page told them only what the process required of them — dates, a bio,
+          a statement — and never what they would be taking on or why anyone
+          does it. CSC's own case belongs here more than anywhere else. */}
+      {isNominee && (
+        <details className="mb-6 rounded-lg border border-gray-200 px-4 py-3">
+          <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+            What you are being asked to take on
+          </summary>
+          <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+            {BOARD_SERVICE_BENEFITS.map((b) => (
+              <div key={b.label} className="text-sm">
+                <dt className="font-medium text-gray-900">{b.label}</dt>
+                <dd className="text-gray-600">{b.detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <div className="mt-4 border-t border-gray-100 pt-3">
+            <p className="text-sm font-medium text-gray-900">What it asks of you</p>
+            <dl className="mt-1.5 space-y-1.5">
+              {BOARD_SERVICE_CONSIDERATIONS.map((c) => (
+                <div key={c.label} className="text-sm">
+                  <dt className="inline font-medium text-gray-900">{c.label} — </dt>
+                  <dd className="inline text-gray-600">{c.detail}</dd>
+                </div>
+              ))}
+            </dl>
+            <p className="mt-3 text-sm text-gray-600">{BOARD_SERVICE_NEXT_STEP}</p>
+          </div>
+        </details>
+      )}
+
       {isNominee && (
         <>
           <div className="mb-6 space-y-1 text-sm text-gray-600">
@@ -162,11 +228,25 @@ export default async function AcceptNominationPage({
             </p>
           </div>
 
+          {/* "Not open" has two causes and they read very differently to a
+              nominee. Before the window, this said nominations "closed on"
+              a date still in the future — which tells someone who has just been
+              asked to stand that they are already too late. */}
           {!windowOpen && (
             <div className="mb-6">
-              <Notice tone="error">
-                Nominations closed on {formatDate(election.schedule.nominationsCloseAt)} and cannot be
-                reopened.
+              <Notice tone={beforeWindow ? "info" : "error"}>
+                {beforeWindow ? (
+                  <>
+                    Nominations open {formatDate(election.schedule.nominationsOpenAt)}. You can
+                    accept and write your statement from that date until{" "}
+                    {formatDate(election.schedule.nominationsCloseAt)}.
+                  </>
+                ) : (
+                  <>
+                    Nominations closed on {formatDate(election.schedule.nominationsCloseAt)} and
+                    cannot be reopened.
+                  </>
+                )}
               </Notice>
             </div>
           )}

@@ -31,15 +31,40 @@ export default async function CosignPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ error?: string }>;
+  searchParams: Promise<{ error?: string; preview?: string; slug?: string }>;
 }) {
   const { token } = await params;
-  const { error } = await searchParams;
+  const { error, preview, slug: previewSlug } = await searchParams;
   const auth = await getServerAuthState();
 
   if (!auth.user) return <SignInPrompt returnTo={`/elections/cosign/${token}`} action="co-sign a nomination" />;
 
-  const found = await getCosignatureByToken(token);
+  // Same reason as the nominee's page: token-scoped, so no URL exists until a
+  // nomination does, and this is the screen that decides whether one completes.
+  const { isAdminPreview, PREVIEW_BANNER, sampleNomination } = await import("@/lib/elections/preview");
+  const previewing = token === "preview" && (await isAdminPreview({ preview }));
+
+  const found = previewing
+    ? await (async () => {
+        const { getElection } = await import("@/lib/elections/service");
+        const e = await getElection(previewSlug ?? "");
+        if (!e) return null;
+        return {
+          cosignatureId: "preview",
+          organizationId: "preview",
+          organizationName: "[your institution]",
+          signedAt: null,
+          revokedAt: null,
+          nomination: sampleNomination({
+            electionId: e.id,
+            cosignersRequired: e.config.nominations.cosignersRequired,
+            nominationsCloseAt: e.schedule.nominationsCloseAt,
+          }),
+          election: e,
+        };
+      })()
+    : await getCosignatureByToken(token);
+
   if (!found) {
     return (
       <ElectionShell eyebrow="Campus Stores Canada · Elections" title="Signing request not found">
@@ -53,7 +78,7 @@ export default async function CosignPage({
   const { nomination, election, organizationName, organizationId, signedAt, revokedAt } = found;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
   const actor = await resolveActor(auth.user.id, auth.organizations);
-  const isAdminHere = actor.adminOrganizationIds.includes(organizationId);
+  const isAdminHere = actor.staffOrganizationIds.includes(organizationId);
   const windowOpen = nominationsOpen(election);
 
   async function sign() {
@@ -72,6 +97,7 @@ export default async function CosignPage({
       title={`Co-sign the nomination of ${nomination.nomineeName}`}
       subtitle={`${nomination.organizationName} · for the Board of Directors`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
       {revokedAt ? (
         <Notice tone="info">This signing request was withdrawn.</Notice>
       ) : signedAt ? (

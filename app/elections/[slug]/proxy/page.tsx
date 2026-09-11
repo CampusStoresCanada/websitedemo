@@ -47,10 +47,12 @@ export default async function ProxyPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ org?: string; error?: string; saved?: string; withdrawn?: string }>;
+  searchParams: Promise<{ org?: string; error?: string; saved?: string; withdrawn?: string; preview?: string }>;
 }) {
   const { slug } = await params;
-  const { org, error, saved, withdrawn } = await searchParams;
+  const { org, error, saved, withdrawn, preview } = await searchParams;
+  const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
+  const previewing = await isAdminPreview({ preview });
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -65,12 +67,25 @@ export default async function ProxyPage({
     );
   }
 
-  const { election, meetingId, eligibleOrganizations, organization, blocked, candidates, current } =
+  const { election, meetingId, eligibleOrganizations, organization: viewerOrganization, blocked, candidates, current } =
     state;
+  // CSC staff administer no member store, so the previewing admin has no
+  // organization of their own and the page would dereference null. Labelled,
+  // and inert — appointProxyAction re-derives the appointing store from the
+  // session and refuses this id.
+  const organization =
+    viewerOrganization ??
+    (previewing ? { id: "preview", name: "[your institution]" } : null)!;
+
+  // Same reason: the AGM meeting may not exist yet when the committee wants to
+  // look at this page. Inert for the same reason — the action resolves the
+  // meeting itself.
+  const meetingIdValue = meetingId ?? (previewing ? "preview" : "");
+
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Annual General Meeting`;
   const agmOn = formatDate(election.agmDate);
 
-  if (blocked || !organization) {
+  if ((blocked || !organization) && !previewing) {
     return (
       <ElectionShell eyebrow={eyebrow} title="You cannot appoint a proxy">
         <Notice tone="warning">
@@ -80,7 +95,7 @@ export default async function ProxyPage({
     );
   }
 
-  if (!meetingId) {
+  if (!meetingId && !previewing) {
     return (
       <ElectionShell eyebrow={eyebrow} title="Not open yet">
         <Notice tone="info">
@@ -111,6 +126,7 @@ export default async function ProxyPage({
 
   return (
     <ElectionShell eyebrow={eyebrow} title="Appoint a proxy">
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
       {error && <Notice tone="warning">{error}</Notice>}
       {saved && <Notice tone="success">Your proxy has been recorded.</Notice>}
       {withdrawn && <Notice tone="success">That proxy has been withdrawn.</Notice>}
@@ -168,7 +184,7 @@ export default async function ProxyPage({
           <form action={withdraw} className="mt-3">
             <input type="hidden" name="proxyId" value={current.id} />
             <input type="hidden" name="organizationId" value={organization.id} />
-            <input type="hidden" name="meetingId" value={meetingId} />
+            <input type="hidden" name="meetingId" value={meetingIdValue} />
             <button
               type="submit"
               className="rounded-md border border-green-700 px-3 py-1.5 text-sm font-medium text-green-900 hover:bg-green-100"
@@ -181,7 +197,7 @@ export default async function ProxyPage({
 
       <form action={appoint} className="mt-6 space-y-4">
         <input type="hidden" name="organizationId" value={organization.id} />
-        <input type="hidden" name="meetingId" value={meetingId} />
+        <input type="hidden" name="meetingId" value={meetingIdValue} />
 
         <div>
           <label htmlFor="proxyholderContactId" className="block text-sm font-medium text-gray-900">

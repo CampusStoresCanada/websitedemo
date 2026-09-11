@@ -51,10 +51,17 @@ export default async function BallotPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ org?: string; error?: string; saved?: string }>;
+  searchParams: Promise<{ org?: string; error?: string; saved?: string; preview?: string }>;
 }) {
   const { slug } = await params;
-  const { org, error, saved } = await searchParams;
+  const { org, error, saved, preview } = await searchParams;
+  const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
+  const previewing = await isAdminPreview({ preview });
+
+  // Same reason as the nominate page: a link that drops the flag drops the
+  // admin back onto the ordinary guards mid-preview.
+  const keepPreview = (href: string) =>
+    previewing ? `${href}${href.includes("?") ? "&" : "?"}preview=1` : href;
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -73,7 +80,14 @@ export default async function BallotPage({
     state;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
 
-  if (blocked) {
+  // In preview the viewer has no member institution of their own — CSC staff
+  // are not members — so the page would dereference a null organization. A
+  // labelled stand-in keeps the real layout intact and cannot be acted on:
+  // saveBallotAction re-derives the voter from the session and refuses it.
+  const viewerOrg =
+    organization ?? (previewing ? { id: "preview", name: "[the member's institution]" } : null);
+
+  if (blocked && !previewing) {
     return (
       <ElectionShell eyebrow={eyebrow} title="You cannot vote on this ballot">
         <Notice tone="warning">{blocked}</Notice>
@@ -93,7 +107,7 @@ export default async function BallotPage({
     );
   }
 
-  if (!open) {
+  if (!open && !previewing) {
     return (
       <ElectionShell eyebrow={eyebrow} title="Voting is not open">
         <Notice tone="info">
@@ -119,16 +133,18 @@ export default async function BallotPage({
   return (
     <ElectionShell
       eyebrow={eyebrow}
-      title={`Ballot for ${organization!.name}`}
+      title={`Ballot for ${viewerOrg!.name}`}
       subtitle={`Choose up to ${election.seatsAvailable} · closes ${formatDate(election.schedule.ballotsCloseAt)}`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
+
       {otherOrganizations.length > 0 && (
         <div className="mb-6">
           <Notice tone="info">
             You administer more than one member institution. This is{" "}
-            <strong>{organization!.name}</strong>&apos;s ballot — each institution has its own.{" "}
+            <strong>{viewerOrg!.name}</strong>&apos;s ballot — each institution has its own.{" "}
             {otherOrganizations.map((o) => (
-              <Link key={o.id} href={`/elections/${slug}/ballot?org=${o.id}`} className="underline">
+              <Link key={o.id} href={keepPreview(`/elections/${slug}/ballot?org=${o.id}`)} className="underline">
                 Switch to {o.name}
               </Link>
             ))}
@@ -164,12 +180,12 @@ export default async function BallotPage({
       )}
 
       <p className="text-sm text-gray-600">
-        {organization!.name} has <strong>one vote</strong>, however many administrators it has. Any
+        {viewerOrg!.name} has <strong>one vote</strong>, however many administrators it has. Any
         of you can open this page and change the ballot until it closes.
       </p>
 
       <form action={save} className="mt-6 space-y-6">
-        <input type="hidden" name="organizationId" value={organization!.id} />
+        <input type="hidden" name="organizationId" value={viewerOrg!.id} />
 
         <fieldset className="space-y-3">
           <legend className="text-sm font-medium text-gray-900">
@@ -214,7 +230,7 @@ export default async function BallotPage({
             <span>
               <span className="font-medium text-gray-900">Abstain</span>
               <span className="block text-gray-600">
-                Record that {organization!.name} took part without endorsing anyone. An abstention
+                Record that {viewerOrg!.name} took part without endorsing anyone. An abstention
                 does not count toward any candidate, and ticking it discards any selections above.
               </span>
             </span>
@@ -231,7 +247,7 @@ export default async function BallotPage({
 
       <p className="mt-8 border-t border-gray-200 pt-4 text-xs text-gray-500">
         Ballots close {formatDate(election.schedule.ballotsCloseAt)}. After they close the link
-        between this ballot and {organization!.name} is permanently removed — the record will show
+        between this ballot and {viewerOrg!.name} is permanently removed — the record will show
         that your institution voted, never how.
       </p>
     </ElectionShell>

@@ -94,10 +94,15 @@ export async function signCosignatureAction(token: string): Promise<ActionResult
       error: `You do not have a contact record at ${found.organizationName}, so this signature cannot be attributed.`,
     };
 
+  // Any active member of the institution may co-sign, not only its
+  // administrator — widened on the ED's decision 2026-09-11, alongside
+  // nominating. A co-signature is the institution saying a name deserves to go
+  // in front of the members; restricting it to admins meant a nomination could
+  // stall waiting for one specific person to read an email.
   const result = await signCosignature(token, {
     profileId: auth.user.id,
     contactId,
-    organizationIds: actor.adminOrganizationIds,
+    organizationIds: actor.staffOrganizationIds,
   });
   if (!result.ok) return { ok: false, error: result.error };
 
@@ -187,8 +192,16 @@ export async function submitNominationAction(
   if (!nomineeContactId) return { ok: false, error: "Choose who you are nominating." };
 
   const actor = await resolveActor(auth.user.id, auth.organizations);
-  if (!actor.adminOrganizationIds.includes(nominatorOrganizationId))
-    return { ok: false, error: "You are not an administrator of that institution." };
+  // Any active member of the institution may put a name forward — not only its
+  // administrator. Restricting this to admins meant 175 of the ~212 people at
+  // member stores could not start a nomination. Widened with the page, which
+  // now offers the form to the same people: a form that submits into a refusal
+  // is how we lose a nomination we asked for.
+  //
+  // ⛔ Not co-signing (below), not the store's permission, not the ballot —
+  // those three commit the INSTITUTION and stay with its administrator.
+  if (!actor.staffOrganizationIds.includes(nominatorOrganizationId))
+    return { ok: false, error: "You are not recorded at that institution." };
 
   const nominatorContactId = actor.contactIdFor(nominatorOrganizationId);
   if (!nominatorContactId)

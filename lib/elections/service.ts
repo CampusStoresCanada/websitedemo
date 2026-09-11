@@ -10,6 +10,7 @@
  */
 
 import crypto from "node:crypto";
+import { cache } from "react";
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { Json } from "@/lib/database.types";
 import { getProgramsConfig } from "@/lib/policy/engine";
@@ -158,7 +159,22 @@ export async function getElection(slug: string): Promise<Election | null> {
  * wrong by the end of September. Callers gating an action should run this (or
  * `isOrganizationEligible`) rather than trusting a stored row.
  */
-export async function evaluateElectionEligibility(
+/**
+ * Memoized per request.
+ *
+ * This loads EVERY organization (211 today), evaluates each one, and upserts a
+ * verdict row for all of them (80) — and isOrganizationEligible is a thin
+ * wrapper around it, called once per store the viewer administers, inside a
+ * loop. So rendering the nomination page ran the whole thing twice for anyone
+ * with two stores, and once more on the admin review page for the committee
+ * panel. A search on that page is a full render, which meant every search
+ * re-evaluated the entire membership and rewrote all eighty rows.
+ *
+ * `cache` collapses that to one evaluation per request. It does not weaken the
+ * "re-evaluated at every gate" rule: the gate is the request, and within a
+ * single render the answer cannot have changed.
+ */
+export const evaluateElectionEligibility = cache(async function evaluateElectionEligibility(
   electionId: string
 ): Promise<{ verdicts: EligibilityVerdict[]; summary: EligibilitySummary }> {
   const db = createAdminClient();
@@ -243,7 +259,7 @@ export async function evaluateElectionEligibility(
   }
 
   return { verdicts, summary: summarizeEligibility(verdicts) };
-}
+});
 
 /**
  * Can this institution TAKE PART — nominate someone, co-sign a nomination?
@@ -722,7 +738,7 @@ export async function signCosignature(
   if (sig.revoked_at) return fail("That signature request was withdrawn.");
 
   if (!signer.organizationIds.includes(sig.organization_id as string))
-    return fail("You are not an administrator of the institution this request was sent to.");
+    return fail("You are not recorded at the institution this request was sent to.");
 
   const nom = sig.nominations as { nominee_contact_id: string; elections: { slug: string } } | null;
   const election = nom ? await getElection(nom.elections.slug) : null;
@@ -887,8 +903,27 @@ export interface ElectionActor {
   contactIds: string[];
   /** The contact row to act as, given the organization in play. */
   contactIdFor: (organizationId: string) => string | null;
-  /** Organizations where this person is an active admin. */
+  /**
+   * Organizations where this person is an active admin.
+   *
+   * ⛔ THE VOTE. One ballot per institution, cast by its administrator — that
+   * is By-Law Part V, not a product decision, so do not widen this to make a
+   * page more welcoming. Nominating uses `staffOrganizationIds` instead.
+   */
   adminOrganizationIds: string[];
+  /**
+   * Organizations where this person is active in ANY role.
+   *
+   * Who may put a name forward. Restricting that to administrators meant 175 of
+   * the ~212 people at member stores could neither be told nominations had
+   * opened nor start one — the bulk of the membership, silently. Widened on the
+   * ED's decision 2026-09-11: receive and nominate for all member staff, the
+   * vote stays with administrators.
+   *
+   * Organization TYPE is filtered separately by eligibility, which is what
+   * keeps vendor partners out of all of this.
+   */
+  staffOrganizationIds: string[];
 }
 
 /**
@@ -918,6 +953,9 @@ export async function resolveActor(
     contactIdFor: (organizationId: string) => byOrg.get(organizationId) ?? null,
     adminOrganizationIds: organizations
       .filter((o) => o.role === "org_admin" && o.status === "active")
+      .map((o) => o.organization_id),
+    staffOrganizationIds: organizations
+      .filter((o) => o.status === "active")
       .map((o) => o.organization_id),
   };
 }
@@ -1098,7 +1136,7 @@ export async function listNominatableContacts(
     .or(`name.ilike.%${term}%,first_name.ilike.%${term}%,last_name.ilike.%${term}%`)
     .limit(limit);
 
-  return (data ?? []).map((c) => ({
+  const rows = (data ?? []).map((c) => ({
     contactId: c.id as string,
     profileId: (c.profile_id as string) ?? null,
     name:
@@ -1109,6 +1147,26 @@ export async function listNominatableContacts(
     organizationId: c.organization_id as string,
     organizationName: (c.organizations as { name: string } | null)?.name ?? "Unknown institution",
   }));
+
+  // Collapsed for DISPLAY on (person, institution). People hold more than one
+  // contact row at the same store — sometimes with a stale job title on one of
+  // them — and a search for a colleague was returning the same human three
+  // times with no way to tell which to pick. That does not read as "our data is
+  // untidy", it reads as "this form is broken", and it is the point at which
+  // someone gives up on nominating.
+  //
+  // ⛔ Nothing is merged in the database. The duplicate rows stay exactly as
+  // they are; whichever one is shown nominates the same person at the same
+  // institution, and a genuine conflict is a human's to resolve, not ours.
+  // Prefers the row that carries a job title, since that is the one a member
+  // will recognise.
+  const best = new Map<string, (typeof rows)[number]>();
+  for (const r of rows) {
+    const key = `${r.name.toLowerCase()}::${r.organizationId}`;
+    const seen = best.get(key);
+    if (!seen || (!seen.roleTitle && r.roleTitle)) best.set(key, r);
+  }
+  return [...best.values()];
 }
 
 export async function getNominatableContact(

@@ -11,6 +11,7 @@
  */
 
 import type { PackageItem } from "@/lib/elections/documents/agm-package";
+import ConfirmSubmitButton from "./ConfirmSubmitButton";
 
 const STATE_STYLE: Record<PackageItem["state"], { dot: string; label: string }> = {
   missing: { dot: "bg-red-500", label: "Outstanding" },
@@ -55,6 +56,7 @@ export default function AgmPackagePanel({
   send,
   sentAt,
   sendCount,
+  recipientCount = null,
   error,
   uploaded,
   sent,
@@ -72,6 +74,8 @@ export default function AgmPackagePanel({
   send: (formData: FormData) => Promise<void>;
   sentAt: string | null;
   sendCount: number;
+  /** How many people this reaches, for the confirmation. Null when unknown. */
+  recipientCount?: number | null;
   error?: string;
   uploaded?: boolean;
   sent?: boolean;
@@ -214,12 +218,11 @@ export default function AgmPackagePanel({
             </span>
           </label>
         )}
-        <button
-          type="submit"
-          className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-        >
-          {sentAt ? "Send again" : "Send the package"}
-        </button>
+        <ConfirmSubmitButton
+          label={sentAt ? "Send again" : "Send the package"}
+          recipients={recipientCount ?? null}
+          audience="member administrators"
+        />
       </form>
     </section>
   );

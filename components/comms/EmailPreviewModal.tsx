@@ -11,6 +11,8 @@ interface EmailPreviewModalProps {
   initialVariables?: Record<string, string>;
   /** Transactional templates never get the CASL unsubscribe/preferences footer link — see wrapEmailBody. */
   isTransactional?: boolean;
+  /** Pre-fills the test-send box, so the usual case is one click not one typed address. */
+  defaultTestEmail?: string;
   onClose: () => void;
 }
 
@@ -20,6 +22,7 @@ export default function EmailPreviewModal({
   variableKeys,
   initialVariables = {},
   isTransactional = false,
+  defaultTestEmail = "",
   onClose,
 }: EmailPreviewModalProps) {
   const [variables, setVariables] = useState<Record<string, string>>(
@@ -31,7 +34,7 @@ export default function EmailPreviewModal({
   const [loading, setLoading] = useState(false);
   const iframeRef = useRef<HTMLIFrameElement>(null);
 
-  const [testEmail, setTestEmail] = useState("");
+  const [testEmail, setTestEmail] = useState(defaultTestEmail);
   const [sendingTest, setSendingTest] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; message: string } | null>(null);
 

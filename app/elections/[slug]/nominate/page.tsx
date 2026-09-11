@@ -27,6 +27,12 @@ import {
   planNomination,
 } from "@/lib/elections/service";
 import { ElectionShell, Notice, SignInPrompt } from "@/components/elections/ElectionShell";
+import NomineeSearch from "@/components/elections/NomineeSearch";
+import {
+  BOARD_SERVICE_BENEFITS,
+  BOARD_SERVICE_CONSIDERATIONS,
+  BOARD_SERVICE_NEXT_STEP,
+} from "@/lib/elections/board-service";
 import { submitNominationAction } from "@/lib/actions/elections";
 
 export const dynamic = "force-dynamic";
@@ -46,10 +52,19 @@ export default async function NominatePage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ q?: string; nominee?: string; submitted?: string; error?: string }>;
+  searchParams: Promise<{ q?: string; nominee?: string; submitted?: string; error?: string; preview?: string }>;
 }) {
   const { slug } = await params;
-  const { q, nominee: nomineeId, submitted, error } = await searchParams;
+  const { q, nominee: nomineeId, submitted, error, preview } = await searchParams;
+  const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
+  const previewing = await isAdminPreview({ preview });
+
+  // Every link and form on this page has to carry the flag forward. Without
+  // this the first search dropped it, the page re-rendered under the ordinary
+  // guards, and the admin landed on "nominations are not open" — a preview
+  // that works until you use it is worse than none.
+  const keepPreview = (href: string) =>
+    previewing ? `${href}${href.includes("?") ? "&" : "?"}preview=1` : href;
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -95,7 +110,7 @@ export default async function NominatePage({
         </div>
         <div className="mt-6 flex gap-3">
           <Link
-            href={`/elections/${slug}/nominate`}
+            href={keepPreview(`/elections/${slug}/nominate`)}
             className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
           >
             Nominate someone else
@@ -109,7 +124,7 @@ export default async function NominatePage({
   // one; a person who administers two member stores has to say which.
   const actor = await resolveActor(auth.user.id, auth.organizations);
   const eligibleNominatorOrgs: { organizationId: string; name: string; contactId: string }[] = [];
-  for (const orgId of actor.adminOrganizationIds) {
+  for (const orgId of actor.staffOrganizationIds) {
     const verdict = await isOrganizationEligible(election.id, orgId);
     const contactId = actor.contactIdFor(orgId);
     if (verdict?.isEligible && contactId)
@@ -120,7 +135,7 @@ export default async function NominatePage({
       });
   }
 
-  if (!nominationsOpen(election) || election.status !== "nominating") {
+  if (!previewing && (!nominationsOpen(election) || election.status !== "nominating")) {
     return (
       <ElectionShell eyebrow={eyebrow} title="Nominations are not open">
         <Notice tone="info">
@@ -132,11 +147,21 @@ export default async function NominatePage({
     );
   }
 
+  if (previewing && eligibleNominatorOrgs.length === 0) {
+    // A stand-in so the form renders. Clearly named, and inert: the action
+    // re-derives the actor from the session and will refuse this id.
+    eligibleNominatorOrgs.push({
+      organizationId: "preview",
+      name: "[the member's institution]",
+      contactId: "preview",
+    });
+  }
+
   if (eligibleNominatorOrgs.length === 0) {
     // Distinguish "your store hasn't renewed" from "you're not an admin" —
     // the first is fixable today by the person reading this.
     const anyOrgVerdicts = await Promise.all(
-      actor.adminOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
+      actor.staffOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
     );
     const renewalBlocked = anyOrgVerdicts.find((v) => v?.reasonCode === "renewal_outstanding");
     // CSC staff land here too, and for them nothing is broken — the association's
@@ -144,7 +169,7 @@ export default async function NominatePage({
     // isn't recorded" to the Executive Director reads as a bug and would send
     // him looking for one.
     const isAssociationStaff =
-      auth.globalRole === "super_admin" && actor.adminOrganizationIds.length > 0;
+      auth.globalRole === "super_admin" && actor.staffOrganizationIds.length > 0;
 
     return (
       <ElectionShell
@@ -295,7 +320,7 @@ export default async function NominatePage({
               Submit nomination
             </button>
             <Link
-              href={`/elections/${slug}/nominate`}
+              href={keepPreview(`/elections/${slug}/nominate`)}
               className="text-sm text-gray-600 underline hover:text-gray-800"
             >
               Choose someone else
@@ -315,31 +340,96 @@ export default async function NominatePage({
       title="Nominate a director"
       subtitle={`${election.seatsAvailable} seats · nominations close ${formatDate(election.schedule.nominationsCloseAt)}`}
     >
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
+
       <p className="text-sm text-gray-600">
         Any employee of a member institution in good standing may stand for the board. You can
         nominate a colleague, someone at another institution, or yourself.
       </p>
 
-      <form method="get" className="mt-6 flex gap-2">
-        <input
-          type="search"
-          name="q"
-          defaultValue={q ?? ""}
-          placeholder="Search by name"
-          className="flex-1 rounded-lg border border-gray-300 px-3 py-2 text-sm"
-        />
-        <button
-          type="submit"
-          className="rounded-lg bg-[#2B2E33] px-4 py-2 text-sm font-medium text-white hover:bg-[#1a1d21]"
-        >
-          Search
-        </button>
-      </form>
+      {/* What is actually happening here.
+          This page used to open with the two sentences above and then a search
+          box — it said who MAY stand and how to find them, and nothing about
+          what standing involves or what happens next. Someone arriving from the
+          call email had no way to find out what they were being asked for
+          without asking a person. */}
+      <div className="mt-5 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+        <h2 className="text-sm font-semibold text-gray-900">What you are putting someone forward for</h2>
+        <dl className="mt-2 space-y-2 text-sm text-gray-600">
+          <div>
+            <dt className="font-medium text-gray-900">The seat</dt>
+            <dd>
+              One of {election.seatsAvailable} seats on the Campus Stores Canada Board of
+              Directors, for a two-year term beginning at the annual general meeting on{" "}
+              {formatDate(election.schedule.agmDate)}.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-gray-900">What a nomination needs</dt>
+            <dd>
+              Three things, and none of them happen automatically: the nominee has to accept and
+              write a short statement, their institution has to agree to their serving, and{" "}
+              {election.config.nominations.cosignersRequired} member institutions have to put
+              their names behind it — yours counts as one. A nomination missing any of these on{" "}
+              {formatDate(election.schedule.nominationsCloseAt)} does not go on the ballot.
+            </dd>
+          </div>
+          <div>
+            <dt className="font-medium text-gray-900">What happens after you submit</dt>
+            <dd>
+              The nominee gets an email asking them to accept — nothing is public until they do,
+              so nobody is named as a candidate without agreeing first. The nominating committee
+              then checks each nomination is complete. If more people stand than there are seats,
+              every member institution votes; if not, those nominated are acclaimed at the annual
+              general meeting.
+            </dd>
+          </div>
+        </dl>
+      </div>
+
+      {/* Why anyone would want this — CSC's own case, which until now lived in
+          a Word document in the AGM folder and reached nobody. Open by default:
+          it is the answer to the question the reader actually has, and hiding
+          it behind a toggle is how it stayed unread for seven years. */}
+      <details open className="mt-5 rounded-lg border border-gray-200 px-4 py-3">
+        <summary className="cursor-pointer text-sm font-semibold text-gray-900">
+          Why people stand for the board
+        </summary>
+
+        <dl className="mt-3 grid gap-x-6 gap-y-2 sm:grid-cols-2">
+          {BOARD_SERVICE_BENEFITS.map((b) => (
+            <div key={b.label} className="text-sm">
+              <dt className="font-medium text-gray-900">{b.label}</dt>
+              <dd className="text-gray-600">{b.detail}</dd>
+            </div>
+          ))}
+        </dl>
+
+        <div className="mt-4 border-t border-gray-100 pt-3">
+          <p className="text-sm font-medium text-gray-900">What it asks of you</p>
+          <dl className="mt-1.5 space-y-1.5">
+            {BOARD_SERVICE_CONSIDERATIONS.map((c) => (
+              <div key={c.label} className="text-sm">
+                <dt className="inline font-medium text-gray-900">{c.label} — </dt>
+                <dd className="inline text-gray-600">{c.detail}</dd>
+              </div>
+            ))}
+          </dl>
+          <p className="mt-3 text-sm text-gray-600">{BOARD_SERVICE_NEXT_STEP}</p>
+        </div>
+      </details>
+
+      <NomineeSearch
+        slug={slug}
+        initialQuery={q ?? ""}
+        initialResults={results}
+        previewing={previewing}
+      />
 
       {me && (
         <p className="mt-3 text-sm">
           <Link
-            href={`/elections/${slug}/nominate?nominee=${me}`}
+            href={keepPreview(`/elections/${slug}/nominate?nominee=${me}`)}
             className="text-[#B92026] underline hover:text-[#9c1b20]"
           >
             Nominate myself
@@ -356,25 +446,6 @@ export default async function NominatePage({
         </div>
       )}
 
-      {results.length > 0 && (
-        <ul className="mt-6 divide-y divide-gray-100 overflow-hidden rounded-lg border border-gray-200">
-          {results.map((r) => (
-            <li key={r.contactId}>
-              <Link
-                href={`/elections/${slug}/nominate?nominee=${r.contactId}`}
-                className="flex items-center justify-between gap-4 px-4 py-3 text-sm hover:bg-gray-50"
-              >
-                <span>
-                  <span className="font-medium text-gray-900">{r.name}</span>
-                  {r.roleTitle && <span className="text-gray-500"> · {r.roleTitle}</span>}
-                  <span className="block text-xs text-gray-500">{r.organizationName}</span>
-                </span>
-                <span className="text-xs text-gray-400">Choose</span>
-              </Link>
-            </li>
-          ))}
-        </ul>
-      )}
     </ElectionShell>
   );
 }

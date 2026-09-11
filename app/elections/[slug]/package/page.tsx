@@ -60,10 +60,15 @@ function Authored({ html }: { html: string }) {
 
 export default async function AgmPackagePage({
   params,
+  searchParams,
 }: {
   params: Promise<{ slug: string }>;
+  searchParams: Promise<{ preview?: string }>;
 }) {
   const { slug } = await params;
+  const { preview } = await searchParams;
+  const { isAdminPreview, PREVIEW_BANNER } = await import("@/lib/elections/preview");
+  const previewing = await isAdminPreview({ preview });
 
   const auth = await getServerAuthState();
   if (!auth.user)
@@ -83,7 +88,9 @@ export default async function AgmPackagePage({
   const { election } = pkg;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Annual General Meeting`;
 
-  if (pkg.blocked) {
+  // "You do not administer a member store" is the correct answer for CSC's own
+  // staff and the wrong one for a committee trying to see what members get.
+  if (pkg.blocked && !previewing) {
     return (
       <ElectionShell eyebrow={eyebrow} title="Your AGM package">
         <Notice tone="warning">{pkg.blocked}</Notice>
@@ -93,6 +100,7 @@ export default async function AgmPackagePage({
 
   return (
     <ElectionShell eyebrow={eyebrow} title="Your AGM package">
+      {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
       <p className="text-sm text-gray-700">
         The {election.cycleYear} annual general meeting is on{" "}
         <strong>{longDate(election.schedule.agmDate)}</strong>. Everything below is the material
