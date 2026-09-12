@@ -5,7 +5,8 @@ import LocalDate from "@/components/ui/LocalDate";
 import type { RenewalCallList, CallListEntry } from "@/lib/renewal/call-list";
 import {
   CONTACT_CHANNELS,
-  CONTACT_OUTCOMES,
+  RENEWAL_OUTCOMES,
+  BOOTH_OUTCOMES,
   CHANNEL_LABEL,
   OUTCOME_LABEL,
   type ContactChannel,
@@ -23,13 +24,21 @@ function money(cents: number): string {
 
 const OUTCOME_TONE: Record<ContactOutcome, string> = {
   renewing: "bg-green-50 text-green-800",
+  booking_booth: "bg-green-50 text-green-800",
   undecided: "bg-amber-50 text-amber-800",
   not_renewing: "bg-red-50 text-red-800",
+  not_exhibiting: "bg-red-50 text-red-800",
   no_response: "bg-gray-100 text-gray-600",
   other: "bg-gray-100 text-gray-600",
 };
 
 function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: number }) {
+  // Two different asks reach this list. A row that has not renewed is a renewal
+  // chase. A row that HAS renewed but holds no booth was assigned for the booth
+  // conversation instead — it still needs a button and a place to say how it
+  // went, or the assignment arrives with nowhere to land.
+  const boothAsk = entry.renewed && entry.hasBooth === false;
+  const outcomes = boothAsk ? BOOTH_OUTCOMES : RENEWAL_OUTCOMES;
   const [open, setOpen] = useState(false);
   const [channel, setChannel] = useState<ContactChannel>("call");
   const [outcome, setOutcome] = useState<ContactOutcome>("undecided");
@@ -99,7 +108,7 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
             </p>
           )}
         </div>
-        {!entry.renewed && (
+        {(!entry.renewed || boothAsk) && (
           <button
             type="button"
             onClick={() => setOpen((v) => !v)}
@@ -171,7 +180,7 @@ function Entry({ entry, renewalYear }: { entry: CallListEntry; renewalYear: numb
               className="text-xs rounded border border-gray-300 px-2 py-1 bg-white"
               aria-label="How it went"
             >
-              {CONTACT_OUTCOMES.map((o) => (
+              {outcomes.map((o) => (
                 <option key={o} value={o}>{OUTCOME_LABEL[o]}</option>
               ))}
             </select>

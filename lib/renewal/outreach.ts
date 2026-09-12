@@ -6,6 +6,8 @@ export const CONTACT_OUTCOMES = [
   "undecided",
   "not_renewing",
   "no_response",
+  "booking_booth",
+  "not_exhibiting",
   "other",
 ] as const;
 
@@ -25,8 +27,35 @@ export const OUTCOME_LABEL: Record<ContactOutcome, string> = {
   undecided: "Undecided",
   not_renewing: "Not renewing",
   no_response: "No response",
+  booking_booth: "Says they'll book a booth",
+  not_exhibiting: "Not exhibiting this year",
   other: "Other",
 };
+
+/**
+ * The board divides up two different asks, and each one gets the outcomes that
+ * are true sentences for it. Offering "Says they'll renew" against a partner
+ * who renewed in July invites somebody to pick the nearest wrong answer, and a
+ * wrong answer in the log outlives the call.
+ *
+ * undecided / no_response / other belong to both, so they appear in each list
+ * rather than being split.
+ */
+export const RENEWAL_OUTCOMES: ContactOutcome[] = [
+  "renewing",
+  "undecided",
+  "not_renewing",
+  "no_response",
+  "other",
+];
+
+export const BOOTH_OUTCOMES: ContactOutcome[] = [
+  "booking_booth",
+  "undecided",
+  "not_exhibiting",
+  "no_response",
+  "other",
+];
 
 export interface ContactLogEntry {
   id: string;

@@ -5,6 +5,7 @@ import { getExpectedAmountsByOrg } from "./expected-amounts";
 import { getOutreachByOrg, type OrgOutreach } from "./outreach";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import type { RenewalOrgType } from "./renewal-progress";
+import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
 
 const ORG_TYPES: RenewalOrgType[] = [ORG_TYPE.member, ORG_TYPE.vendorPartner];
 
@@ -230,4 +231,98 @@ export async function getBoardRenewalReport(
       contactedCount: all.reduce((n, t) => n + t.contactedCount, 0),
     },
   };
+}
+
+/** A partner who has paid for the year but holds no booth at the show on sale. */
+export interface BoothGapOrgRow {
+  organizationId: string;
+  name: string;
+  renewedAt: string | null;
+  assignedTo: string | null;
+  lastContactedAt: string | null;
+  lastOutcome: string | null;
+  contactCount: number;
+}
+
+/**
+ * Partners who have renewed and are still not in a booth.
+ *
+ * The other half of the same sales question, and the half nothing surfaced.
+ * A partner who has not renewed appears on the outstanding list already, where
+ * the "not yet in a booth" tag rides along on a call that is happening anyway.
+ * A partner who HAS renewed is off every list — nobody is calling them, so the
+ * booth gap stays invisible until the floor plan is finished and it is too late
+ * to sell them anything.
+ *
+ * ⚠️ Deliberately DISJOINT from the outstanding rows, not merely a filter over
+ * a wider set. renewal_assignments is unique on (organization_id, renewal_year),
+ * so an org can hold exactly one owner per cycle; if the same org could appear
+ * in both sections the two Assign controls would silently overwrite each other
+ * and one of the two calls would quietly go missing.
+ *
+ * ⚠️ LIVE, never snapshotted. Booths keep selling after the meeting, so this is
+ * resolved at render time beside the frozen figures rather than inside
+ * BoardRenewalReport — the same rule assignments already follow.
+ */
+export async function getBoothGapRows(renewalYear: number): Promise<BoothGapOrgRow[]> {
+  const holders = await getActiveConferenceBoothHolders();
+  // No conference on sale means there is no booth to miss, so there is no list
+  // — not an empty one, which would read as "everybody has a booth".
+  if (!holders) return [];
+
+  const db = createAdminClient();
+  const { data: orgs } = await db
+    .from("organizations")
+    .select("id, name")
+    // Population filter identical to getTypeReport() — the two sections must
+    // never disagree about who counts as a partner.
+    .eq("type", ORG_TYPE.vendorPartner)
+    .eq("is_test", false)
+    .not("membership_status", "in", "(canceled,applied)")
+    .is("archived_at", null);
+
+  const orgRows = orgs ?? [];
+  if (orgRows.length === 0) return [];
+
+  const { data: charged } = await db
+    .from("renewal_events")
+    .select("organization_id, created_at")
+    .eq("event_type", "charge_succeeded")
+    .eq("renewal_year", renewalYear)
+    .in("organization_id", orgRows.map((o) => o.id));
+
+  const renewedAtByOrg = new Map<string, string>();
+  for (const row of charged ?? []) {
+    const existing = renewedAtByOrg.get(row.organization_id);
+    if (!existing || row.created_at < existing) {
+      renewedAtByOrg.set(row.organization_id, row.created_at);
+    }
+  }
+
+  const boothHolders = new Set(holders.orgIds);
+  const gapOrgs = orgRows.filter(
+    (o) => renewedAtByOrg.has(o.id) && !boothHolders.has(o.id)
+  );
+  if (gapOrgs.length === 0) return [];
+
+  const outreachByOrg = await getOutreachByOrg(
+    db,
+    gapOrgs.map((o) => o.id),
+    renewalYear
+  );
+
+  return gapOrgs
+    .map((o) => {
+      const outreach = outreachByOrg.get(o.id);
+      return {
+        organizationId: o.id,
+        name: o.name,
+        renewedAt: renewedAtByOrg.get(o.id) ?? null,
+        assignedTo: outreach?.assignedTo ?? null,
+        lastContactedAt: outreach?.lastContact?.contactedAt ?? null,
+        lastOutcome: outreach?.lastContact?.outcome ?? null,
+        contactCount: outreach?.contactCount ?? 0,
+      };
+    })
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

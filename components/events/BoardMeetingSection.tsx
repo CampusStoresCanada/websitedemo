@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import DocumentDownloadLink from "@/components/admin/board/DocumentDownloadLink";
 import MeetingFinancialsTab from "@/components/admin/board/financials/MeetingFinancialsTab";
 import MeetingRenewalsTab from "@/components/events/MeetingRenewalsTab";
-import type { BoardRenewalReport } from "@/lib/renewal/board-report";
+import type { BoardRenewalReport, BoothGapOrgRow } from "@/lib/renewal/board-report";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import type { AssignableMember } from "@/lib/renewal/outreach";
 import { uploadBoardDocument } from "@/lib/actions/board-meeting-event";
@@ -64,6 +64,7 @@ interface Props {
   assignableMembers: AssignableMember[];
   assignmentsByOrg: Record<string, string>;
   boothHolderOrgIds: string[] | null;
+  boothGap: BoothGapOrgRow[];
   eventSlug: string;
   reportPeriod:    { start: string; end: string; label: string };
   isSA:            boolean;
@@ -446,6 +447,7 @@ export default function BoardMeetingSection({
   assignableMembers,
   assignmentsByOrg,
   boothHolderOrgIds,
+  boothGap,
   eventSlug,
   reportPeriod,
   isSA,
@@ -587,6 +589,7 @@ export default function BoardMeetingSection({
           assignableMembers={assignableMembers}
           assignmentsByOrg={assignmentsByOrg}
           boothHolderOrgIds={boothHolderOrgIds}
+          boothGap={boothGap}
         />
       )}
     </div>

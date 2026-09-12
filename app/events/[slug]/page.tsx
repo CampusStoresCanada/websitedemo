@@ -16,9 +16,10 @@ import { getBoardRenewalReport } from "@/lib/renewal/board-report";
 import { getRenewalSnapshot, getRenewalDelta } from "@/lib/renewal/snapshot";
 import { getAssignableBoardMembers, getAssignmentsByOrg } from "@/lib/renewal/outreach";
 import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
+import { getBoothGapRows } from "@/lib/renewal/board-report";
 import type { AssignableMember } from "@/lib/renewal/outreach";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
-import type { BoardRenewalReport } from "@/lib/renewal/board-report";
+import type { BoardRenewalReport, BoothGapOrgRow } from "@/lib/renewal/board-report";
 import { DateTimeRange } from "@/components/ui/LocalDate";
 
 export const revalidate = 30;
@@ -116,6 +117,7 @@ export default async function EventDetailPage({
     assignableMembers: AssignableMember[];
     assignmentsByOrg:  Record<string, string>;
     boothHolderOrgIds: string[] | null;
+    boothGap: BoothGapOrgRow[];
     reportPeriod:   { start: string; end: string; label: string };
   };
   let boardMeetingData: BoardMeetingData | null = null;
@@ -185,6 +187,7 @@ export default async function EventDetailPage({
         // selling after the meeting. Null when nothing is open for
         // registration, which hides the cue rather than tagging everyone.
         boothHolderOrgIds: renewalReport ? (await getActiveConferenceBoothHolders())?.orgIds ?? null : null,
+        boothGap: renewalReport ? await getBoothGapRows(renewalReport.renewalYear) : [],
         // Delta is computed against whichever figures are being shown — the
         // frozen ones if this meeting has a snapshot, otherwise live.
         renewalDelta:    renewalReport
@@ -404,6 +407,7 @@ export default async function EventDetailPage({
           assignableMembers={boardMeetingData.assignableMembers}
           assignmentsByOrg={boardMeetingData.assignmentsByOrg}
           boothHolderOrgIds={boardMeetingData.boothHolderOrgIds}
+          boothGap={boardMeetingData.boothGap}
           eventSlug={slug}
           reportPeriod={boardMeetingData.reportPeriod}
           isSA={isSA}

@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
 
 export interface RenewalActionItemSync {
   created: number;
@@ -35,7 +36,7 @@ export async function syncRenewalActionItems(params: {
   const db = createAdminClient();
   const callListPath = params.callListPath ?? "/admin/renewals";
 
-  const [{ data: assignments }, { data: charged }] = await Promise.all([
+  const [{ data: assignments }, { data: charged }, boothHolders] = await Promise.all([
     db
       .from("renewal_assignments")
       .select("organization_id, assigned_to")
@@ -46,16 +47,29 @@ export async function syncRenewalActionItems(params: {
       .select("organization_id")
       .eq("event_type", "charge_succeeded")
       .eq("renewal_year", params.renewalYear),
+    getActiveConferenceBoothHolders(),
   ]);
 
-  // An org that has already paid is not work. Counting it would send someone
-  // to chase a member who renewed last week.
+  // Two kinds of work now arrive through the same assignment table, and they
+  // are counted apart because they are different sentences to say on the phone.
+  //
+  // An org that has already paid is not a RENEWAL chase — counting it there
+  // would send someone after a member who renewed last week. But it can still
+  // be a BOOTH ask, and before this it fell through the gap entirely: the board
+  // assigned it, nothing was created, and the assignment looked handed out.
   const renewed = new Set((charged ?? []).map((r) => r.organization_id));
-  const countByAssignee = new Map<string, number>();
+  const holders = boothHolders ? new Set(boothHolders.orgIds) : null;
+  const renewalByAssignee = new Map<string, number>();
+  const boothByAssignee = new Map<string, number>();
   for (const a of assignments ?? []) {
-    if (!a.assigned_to || renewed.has(a.organization_id)) continue;
-    countByAssignee.set(a.assigned_to, (countByAssignee.get(a.assigned_to) ?? 0) + 1);
+    if (!a.assigned_to) continue;
+    if (!renewed.has(a.organization_id)) {
+      renewalByAssignee.set(a.assigned_to, (renewalByAssignee.get(a.assigned_to) ?? 0) + 1);
+    } else if (holders && !holders.has(a.organization_id)) {
+      boothByAssignee.set(a.assigned_to, (boothByAssignee.get(a.assigned_to) ?? 0) + 1);
+    }
   }
+  const assignees = new Set([...renewalByAssignee.keys(), ...boothByAssignee.keys()]);
 
   const { data: existing } = await db
     .from("board_action_items")
@@ -71,11 +85,36 @@ export async function syncRenewalActionItems(params: {
 
   const result: RenewalActionItemSync = { created: 0, updated: 0, closed: 0 };
 
-  for (const [assignee, count] of countByAssignee) {
-    const title = `Contact your ${count} assigned ${count === 1 ? "store" : "stores"} about renewal`;
+  const cycleLabel = `${params.renewalYear - 1}-${String(params.renewalYear).slice(2)}`;
+
+  for (const assignee of assignees) {
+    const renewalCount = renewalByAssignee.get(assignee) ?? 0;
+    const boothCount = boothByAssignee.get(assignee) ?? 0;
+    const total = renewalCount + boothCount;
+
+    // The renewal-only wording is left exactly as it was, so a re-run against a
+    // meeting that has no booth asks rewrites nothing and no director sees
+    // their open item churn for no reason.
+    const title =
+      boothCount === 0
+        ? `Contact your ${renewalCount} assigned ${renewalCount === 1 ? "store" : "stores"} about renewal`
+        : renewalCount === 0
+          ? `Ask your ${boothCount} assigned ${boothCount === 1 ? "partner" : "partners"} about a booth`
+          : `Contact your ${total} assigned organizations`;
+
+    const parts: string[] = [];
+    if (renewalCount > 0) {
+      parts.push(
+        `${renewalCount} ${renewalCount === 1 ? "organization has" : "organizations have"} not renewed for ${cycleLabel} yet.`
+      );
+    }
+    if (boothCount > 0) {
+      parts.push(
+        `${boothCount} ${boothCount === 1 ? "partner has" : "partners have"} renewed but ${boothCount === 1 ? "has" : "have"} not booked a booth for the conference now on sale.`
+      );
+    }
     const description =
-      `${count} ${count === 1 ? "organization has" : "organizations have"} not renewed for ` +
-      `${params.renewalYear - 1}-${String(params.renewalYear).slice(2)} yet. ` +
+      `${parts.join(" ")} ` +
       `Your list, with contact details and what was said last time: ${callListPath}`;
 
     const found = byAssignee.get(assignee);
@@ -105,14 +144,14 @@ export async function syncRenewalActionItems(params: {
   // Someone who no longer holds any outstanding org — reassigned, or their
   // stores all paid — should not keep an open item telling them otherwise.
   for (const [assignee, item] of byAssignee) {
-    if (countByAssignee.has(assignee)) continue;
+    if (assignees.has(assignee)) continue;
     if (item.status === "complete" || item.status === "dropped") continue;
     await db
       .from("board_action_items")
       .update({
         status: "dropped",
         dropped_at: new Date().toISOString(),
-        dropped_reason: "No outstanding renewals remain assigned to this person.",
+        dropped_reason: "No outstanding renewals or booth asks remain assigned to this person.",
       })
       .eq("id", item.id);
     result.closed++;

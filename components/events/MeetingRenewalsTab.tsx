@@ -2,12 +2,17 @@
 
 import { useState, useTransition } from "react";
 import LocalDate from "@/components/ui/LocalDate";
-import type { BoardRenewalReport, BoardRenewalTypeReport } from "@/lib/renewal/board-report";
+import type {
+  BoardRenewalReport,
+  BoardRenewalTypeReport,
+  BoothGapOrgRow,
+} from "@/lib/renewal/board-report";
 import type { RenewalOrgType } from "@/lib/renewal/renewal-progress";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import {
   CONTACT_CHANNELS,
-  CONTACT_OUTCOMES,
+  RENEWAL_OUTCOMES,
+  BOOTH_OUTCOMES,
   CHANNEL_LABEL,
   OUTCOME_LABEL,
   type ContactChannel,
@@ -41,6 +46,9 @@ interface Props {
    *  figure frozen into the minutes would go stale as a sales cue. Null when no
    *  conference is open for registration, which hides the cue entirely. */
   boothHolderOrgIds: string[] | null;
+  /** Partners who have paid for the year and still hold no booth. LIVE, like
+   *  the two above — see getBoothGapRows. */
+  boothGap: BoothGapOrgRow[];
 }
 
 /**
@@ -299,11 +307,16 @@ function LogContactForm({
   renewalYear,
   eventSlug,
   onDone,
+  outcomes = RENEWAL_OUTCOMES,
+  notePlaceholder = "What did they say? This is the part worth having next August.",
 }: {
   organizationId: string;
   renewalYear: number;
   eventSlug: string;
   onDone: () => void;
+  /** Which sentences are true for THIS ask — see RENEWAL_OUTCOMES/BOOTH_OUTCOMES. */
+  outcomes?: ContactOutcome[];
+  notePlaceholder?: string;
 }) {
   const [channel, setChannel] = useState<ContactChannel>("call");
   const [outcome, setOutcome] = useState<ContactOutcome>("undecided");
@@ -348,7 +361,7 @@ function LogContactForm({
           onChange={(e) => setOutcome(e.target.value as ContactOutcome)}
           className="text-xs rounded border border-gray-300 px-2 py-1 bg-white"
         >
-          {CONTACT_OUTCOMES.map((o) => (
+          {outcomes.map((o) => (
             <option key={o} value={o}>{OUTCOME_LABEL[o]}</option>
           ))}
         </select>
@@ -357,7 +370,7 @@ function LogContactForm({
         value={note}
         onChange={(e) => setNote(e.target.value)}
         rows={2}
-        placeholder="What did they say? This is the part worth having next August."
+        placeholder={notePlaceholder}
         className="w-full text-sm rounded border border-gray-300 px-2 py-1.5 bg-white"
       />
       {error && <p className="text-xs text-[#9C0006]">{error}</p>}
@@ -562,6 +575,121 @@ function TypePanel({
   );
 }
 
+/**
+ * The other half of the sales question.
+ *
+ * A partner who has not renewed already appears above, carrying the "not yet in
+ * a booth" tag, because the renewal call is happening anyway and the booth is
+ * the second sentence in it. A partner who HAS renewed is on no list at all —
+ * nothing is chasing them, so the gap stays invisible until the floor plan is
+ * full and there is nothing left to sell.
+ *
+ * Separate section rather than a filter on the list above, because the two are
+ * different work: one is money owed, this is money available.
+ */
+function BoothGapSection({
+  rows,
+  renewalYear,
+  eventSlug,
+  members,
+  assignmentsByOrg,
+}: {
+  rows: BoothGapOrgRow[];
+  renewalYear: number;
+  eventSlug: string;
+  members: AssignableMember[];
+  assignmentsByOrg: Record<string, string>;
+}) {
+  const [open, setOpen] = useState(false);
+  const [logging, setLogging] = useState<string | null>(null);
+  if (rows.length === 0) return null;
+
+  const assignedNow = rows.filter((r) => assignmentsByOrg[r.organizationId]).length;
+  const spokenTo = rows.filter((r) => r.lastContactedAt).length;
+
+  return (
+    <div className="mt-6 rounded-xl border border-blue-100 bg-blue-50/30 p-4">
+      <h3 className="font-semibold text-[#163D6D]">Renewed, not yet in a booth</h3>
+      <p className="text-xs text-gray-600 mt-1">
+        {rows.length} {rows.length === 1 ? "partner has" : "partners have"} paid for the year
+        and hold no booth at the conference now on sale. They are on no other call list.
+      </p>
+      <p className="text-xs text-gray-500 mt-1">
+        {spokenTo} of {rows.length} spoken to
+        {assignedNow > 0 && ` · ${assignedNow} assigned`}
+        {spokenTo === 0 && (
+          <span className="text-[#9C0006] font-medium"> — nobody has been asked yet</span>
+        )}
+      </p>
+
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="mt-2 inline-flex items-center gap-1 text-xs font-semibold text-[#EE2A2E] hover:underline"
+        aria-expanded={open}
+      >
+        {open ? "Hide" : "Show"} the {rows.length}
+        <svg
+          className={`w-3.5 h-3.5 transition-transform ${open ? "rotate-180" : ""}`}
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+        >
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+        </svg>
+      </button>
+
+      {open && (
+        <ul className="mt-3 divide-y divide-blue-100 border-t border-blue-100">
+          {rows.map((org) => (
+            <li key={org.organizationId} className="py-1.5 text-sm">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-gray-700 min-w-0 truncate">{org.name}</span>
+                <span className="flex items-center gap-2 shrink-0">
+                  {org.lastContactedAt ? (
+                    <span
+                      className="text-xs px-1.5 py-0.5 rounded bg-green-50 text-green-800"
+                      title={`${org.contactCount} contact${org.contactCount === 1 ? "" : "s"} logged`}
+                    >
+                      asked
+                    </span>
+                  ) : null}
+                  <AssignControl
+                    organizationId={org.organizationId}
+                    renewalYear={renewalYear}
+                    assignedTo={assignmentsByOrg[org.organizationId] ?? null}
+                    members={members}
+                    eventSlug={eventSlug}
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setLogging((v) => (v === org.organizationId ? null : org.organizationId))
+                    }
+                    className="text-xs font-semibold text-[#EE2A2E] hover:underline"
+                  >
+                    {logging === org.organizationId ? "Close" : "Log contact"}
+                  </button>
+                </span>
+              </div>
+              {logging === org.organizationId && (
+                <LogContactForm
+                  organizationId={org.organizationId}
+                  renewalYear={renewalYear}
+                  eventSlug={eventSlug}
+                  outcomes={BOOTH_OUTCOMES}
+                  notePlaceholder="What did they say about a booth?"
+                  onDone={() => setLogging(null)}
+                />
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function MeetingRenewalsTab({
   report,
   snapshot,
@@ -572,6 +700,7 @@ export default function MeetingRenewalsTab({
   assignableMembers,
   assignmentsByOrg,
   boothHolderOrgIds,
+  boothGap,
 }: Props) {
   // The frozen figures win wherever they exist. The live report stays the
   // fallback for a meeting nobody has frozen yet, and the source is stated in
@@ -672,6 +801,14 @@ export default function MeetingRenewalsTab({
           />
         ))}
       </div>
+
+      <BoothGapSection
+        rows={boothGap}
+        renewalYear={shown.renewalYear}
+        eventSlug={eventSlug}
+        members={assignableMembers}
+        assignmentsByOrg={assignmentsByOrg}
+      />
 
       <p className="text-xs text-gray-400 mt-4">
         Renewal is counted from the payment event, not invoice status — dues paid inside a
