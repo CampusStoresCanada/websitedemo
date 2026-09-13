@@ -10,9 +10,31 @@ import { createClient } from "@supabase/supabase-js";
 import { readFileSync, readdirSync } from "fs";
 import { join } from "path";
 
-const SUPABASE_URL = "https://kalosjtiwtnwsseitfys.supabase.co";
-const SUPABASE_ANON_KEY =
-  "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImthbG9zanRpd3Rud3NzZWl0ZnlzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NTk5MDI4NzIsImV4cCI6MjA3NTQ3ODg3Mn0.5o9KKSsP52FfKvOmAWhKTBqiu9Oaopis4_yV1U2CSyQ";
+// Nothing secret is hardcoded here, and nothing secret should be added.
+// An earlier version of this file carried the anon key and a super admin's
+// email and password as literals; the password was rotated on 2026-06-23, but
+// the literals stayed in this file and in git history, and this repository is
+// public. A credential committed once is public forever — rotating it fixes the
+// account, not the commit. So these are read from the environment, and the
+// script refuses to run rather than falling back to a baked-in default.
+const SUPABASE_URL = requireEnv("NEXT_PUBLIC_SUPABASE_URL");
+const SUPABASE_ANON_KEY = requireEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY");
+const UPLOAD_EMAIL = requireEnv("SUPABASE_UPLOAD_EMAIL");
+const UPLOAD_PASSWORD = requireEnv("SUPABASE_UPLOAD_PASSWORD");
+
+/** Fail loudly and immediately — a missing credential must never be a silent no-op. */
+function requireEnv(name) {
+  const value = process.env[name];
+  if (!value) {
+    console.error(
+      `Missing ${name}. Set it in .env.local (gitignored) or export it before running:\n` +
+        `  NEXT_PUBLIC_SUPABASE_URL, NEXT_PUBLIC_SUPABASE_ANON_KEY,\n` +
+        `  SUPABASE_UPLOAD_EMAIL, SUPABASE_UPLOAD_PASSWORD`
+    );
+    process.exit(1);
+  }
+  return value;
+}
 
 const IMAGE_DIR =
   "/Users/Work/Documents/csc-website/images-to-process/products/finished";
@@ -166,8 +188,8 @@ async function main() {
 
   // Sign in as super admin for storage upload permission
   const { error: authErr } = await supabase.auth.signInWithPassword({
-    email: "google@campusstores.ca",
-    password: "Mkpspxw8BA!vb3T",
+    email: UPLOAD_EMAIL,
+    password: UPLOAD_PASSWORD,
   });
   if (authErr) {
     console.error("Auth failed:", authErr.message);
