@@ -1763,7 +1763,7 @@ export async function getBallotState(
     }
   }
 
-  // Must agree with castBallot exactly. When these two disagreed the member saw
+  // Must agree with saveBallot exactly. When these two disagreed the member saw
   // a read-only ballot the server would have happily accepted, or worse the
   // reverse.
   const open = election.status === "balloting" && canOpenBallots(election.schedule, today()).open;
@@ -2007,7 +2007,7 @@ export async function sealElection(slug: string): Promise<Result<SealResult>> {
   // Refuse while voting is still open. Sealing mid-vote would silently discard
   // every ballot cast afterwards, because the linked rows are gone.
   //
-  // ⚠️ This MUST use the same predicate as castBallot. It used to ask whether
+  // ⚠️ This MUST use the same predicate as saveBallot. It used to ask whether
   // the phase was "balloting", which stopped being the same question the moment
   // voting could open ahead of the planned date: a ballot opened early sat in
   // phase "between_nominations_and_ballot", so the guard would have waved the
