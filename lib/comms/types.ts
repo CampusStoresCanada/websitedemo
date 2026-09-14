@@ -112,6 +112,13 @@ export type TemplateKey =
   // Post-AGM. The members elect at the meeting (Part V S3(e)), so this cannot
   // be sent before it — see lib/elections/documents/results-announcement.ts.
   | "election_results_announced"
+  // The candidates' own result, sent before the membership broadcast so nobody
+  // learns they were not elected from a mass email. ⛔ Neither carries vote
+  // counts: the announcement to members names the result and the turnout and
+  // never the tallies, and a candidate's own message is not where that gets
+  // relaxed. See getCandidateOutcomes.
+  | "election_result_elected"
+  | "election_result_not_elected"
   // AGM — By-Law Part VII notices, both date-bound
   | "agm_notice_of_meeting"
   | "agm_proxy_form"

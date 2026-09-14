@@ -3502,12 +3502,71 @@ export async function sendAgmPackage(
  * the same message that announces their re-election. Computed the same way
  * getAgmScript does: term-enders minus everyone the members just elected.
  */
+/**
+ * What each candidate is about to be told, separately from the membership.
+ *
+ * Until now the only message carrying the result went to every eligible
+ * institution's administrators. A candidate who was not elected therefore
+ * learned it from a broadcast addressed to the whole association — and, since
+ * every director is also an administrator of their own store, quite possibly
+ * in the same inbox as their colleagues. That is a bad way to hear it.
+ *
+ * ⛔ Carries no vote counts, in either direction. Part V S3(d) has the Chair
+ * announce who was elected, and the announcement to members names the result
+ * and the turnout but never the tallies. A candidate's own email is not the
+ * place that rule gets quietly relaxed — "you came fifth by four votes" is
+ * precisely the number the design refuses to publish.
+ */
+export interface CandidateOutcome {
+  nominationId: string;
+  contactId: string;
+  name: string;
+  organizationName: string;
+}
+
+export async function getCandidateOutcomes(
+  slug: string
+): Promise<{ elected: CandidateOutcome[]; notElected: CandidateOutcome[] } | null> {
+  const election = await getElection(slug);
+  if (!election) return null;
+
+  const standing = (await listNominations(slug)).filter(
+    (n) => n.status === "validated" && !n.withdrawnAt
+  );
+  const toOutcome = (n: (typeof standing)[number]): CandidateOutcome => ({
+    nominationId: n.id,
+    contactId: n.nomineeContactId,
+    name: n.nomineeName,
+    organizationName: n.organizationName,
+  });
+
+  // Acclaimed: everyone still standing took a seat, and there is no count to read.
+  if (election.outcome === "acclaimed") {
+    return { elected: standing.map(toOutcome), notElected: [] };
+  }
+
+  const counted = await countElection(slug);
+  if (!counted.ok) return null;
+
+  const byId = new Map(standing.map((n) => [n.id, n]));
+  const elected: CandidateOutcome[] = [];
+  const notElected: CandidateOutcome[] = [];
+  for (const result of counted.data.results) {
+    const nomination = byId.get(result.nominationId);
+    if (!nomination) continue;
+    (result.elected ? elected : notElected).push(toOutcome(nomination));
+  }
+  return { elected, notElected };
+}
+
 export async function getResultsAnnouncement(slug: string): Promise<
   | (ResultsAnnouncement & {
       election: Election;
       canSend: boolean;
       blockedReason: string | null;
       meetingHasHappened: boolean;
+      /** Whether the candidates already have their own result. */
+      candidatesTold: boolean;
       recipients: number;
     })
   | null
@@ -3572,6 +3631,9 @@ export async function getResultsAnnouncement(slug: string): Promise<
     ...announcement,
     election,
     meetingHasHappened,
+    candidatesTold: Boolean(
+      (election.config as unknown as { candidateResultsSentAt?: string })?.candidateResultsSentAt
+    ),
     canSend: blockedReason === null,
     blockedReason,
     recipients,
@@ -3586,10 +3648,72 @@ export async function getResultsAnnouncement(slug: string): Promise<
  * not proof, and a postponed meeting would otherwise announce an election that
  * has not happened.
  */
+/**
+ * Tell the candidates, before the membership hears it.
+ *
+ * Its own act rather than a step folded into the announcement, because a chair
+ * who wants to phone the people who were not elected before anything is sent
+ * should be able to — and because doing it in one button would make that
+ * impossible. `announceResults` refuses until this has happened or the chair
+ * confirms they did it another way, so the ordering is enforced without taking
+ * the human option away.
+ */
+export async function notifyCandidates(
+  slug: string,
+  sentByProfileId: string
+): Promise<Result<{ elected: number; notElected: number; sent: number; failed: number; problems: string[] }>> {
+  const db = createAdminClient();
+  const election = await getElection(slug);
+  if (!election) return fail("That election does not exist.");
+  if (election.status !== "certified")
+    return fail(
+      `The result is not certified — this election is "${election.status}". Nobody has been elected yet.`
+    );
+
+  const outcomes = await getCandidateOutcomes(slug);
+  if (!outcomes) return fail("The result could not be read.");
+  if (outcomes.elected.length === 0 && outcomes.notElected.length === 0)
+    return fail("There are no candidates to tell.");
+
+  const { data: existing } = await db
+    .from("elections")
+    .select("config")
+    .eq("id", election.id)
+    .single();
+  const cfg = (existing?.config as Record<string, unknown>) ?? {};
+  if (cfg.candidateResultsSentAt)
+    return fail(
+      `The candidates were told on ${String(cfg.candidateResultsSentAt).slice(0, 10)}. Sending again would tell each of them twice.`
+    );
+
+  const { notifyCandidateResults } = await import("./notify");
+  const summary = summarizeOutcomes(await notifyCandidateResults(election, outcomes));
+
+  await db
+    .from("elections")
+    .update({
+      config: JSON.parse(
+        JSON.stringify({
+          ...cfg,
+          candidateResultsSentAt: new Date().toISOString(),
+          candidateResultsSentBy: sentByProfileId,
+        })
+      ) as Json,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", election.id);
+
+  return ok({
+    elected: outcomes.elected.length,
+    notElected: outcomes.notElected.length,
+    ...summary,
+  });
+}
+
 export async function announceResults(
   slug: string,
   sentByProfileId: string,
-  opts: { confirmedMeetingHeld: boolean }
+  opts: { confirmedMeetingHeld: boolean; confirmedCandidatesTold?: boolean }
 ): Promise<Result<{ institutions: number; sent: number; failed: number; problems: string[] }>> {
   const db = createAdminClient();
   const state = await getResultsAnnouncement(slug);
@@ -3611,6 +3735,15 @@ export async function announceResults(
   if (cfg.resultsAnnouncedAt)
     return fail(
       `The result was already announced on ${String(cfg.resultsAnnouncedAt).slice(0, 10)}. Sending again would tell every member store twice.`
+    );
+
+  // Nobody should learn they were not elected from a broadcast to the whole
+  // association. Confirmable rather than absolute: a chair who has phoned them
+  // has done the thing this protects, and better than an email would.
+  if (!cfg.candidateResultsSentAt && !opts.confirmedCandidatesTold)
+    return fail(
+      `The candidates have not been told yet. Send them their own result first — or confirm you have told them ` +
+        `another way. Announcing first means anyone who was not elected finds out from a message addressed to every member store.`
     );
 
   const { verdicts } = await evaluateElectionEligibility(state.election.id);
@@ -3727,6 +3860,7 @@ export async function getElectionTimeline(
     proxyFormSentAt?: string;
     agmPackageSentAt?: string;
     resultsAnnouncedAt?: string;
+    candidateResultsSentAt?: string;
   };
 
   const notice = await getNoticeState(slug, onDate);
@@ -3757,6 +3891,7 @@ export async function getElectionTimeline(
       proxySentAt: cfg.proxyFormSentAt ?? null,
       packageSentAt: cfg.agmPackageSentAt ?? null,
       resultsAnnouncedAt: cfg.resultsAnnouncedAt ?? null,
+      candidateResultsSentAt: cfg.candidateResultsSentAt ?? null,
       certifiedAt: (cert?.certified_at as string) ?? null,
       sealed: ["sealed", "certified"].includes(election.status),
       noticeWindow: notice

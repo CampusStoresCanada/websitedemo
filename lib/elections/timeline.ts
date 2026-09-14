@@ -65,6 +65,8 @@ export interface TimelineFacts {
   proxySentAt: string | null;
   packageSentAt: string | null;
   resultsAnnouncedAt: string | null;
+  /** When the candidates were told their own result, ahead of the membership. */
+  candidateResultsSentAt: string | null;
   certifiedAt: string | null;
   /**
    * Whether the ballots are sealed. A boolean rather than a timestamp because
@@ -168,6 +170,7 @@ export function buildElectionTimeline(
     });
   } else {
     const circulated = day(facts.ballotsCirculatedAt);
+    const allIn = facts.electorate > 0 && facts.ballotsReturned >= facts.electorate;
     // The by-law's real constraint: the LAST day circulation may happen.
     const circulationDeadline = new Date(
       new Date(`${s.agmDate}T00:00:00Z`).getTime() -
@@ -186,7 +189,15 @@ export function buildElectionTimeline(
           ? "current"
           : "upcoming",
       detail: circulated
-        ? `Circulated ${circulated}. ${facts.ballotsReturned} of ${facts.electorate} institutions have voted.`
+        ? allIn
+          ? // Information, not a trigger. It unlocks nothing, and the wording has
+            // to stop anyone reading it as "voting is finished": eligibility is
+            // resolved live, so a store clearing its renewal tomorrow joins the
+            // electorate, and a returned ballot stays revisable until the close.
+            `Circulated ${circulated}. All ${facts.electorate} eligible institutions have returned a ballot. ` +
+            `Voting still runs to ${s.ballotsCloseAt} — institutions may revise their ballot until then, and a store that ` +
+            `becomes eligible before the close is entitled to vote.`
+          : `Circulated ${circulated}. ${facts.ballotsReturned} of ${facts.electorate} institutions have voted.`
         : facts.status === "balloting"
           ? `Ready now — the field was fixed when nominations closed. ${s.ballotsOpenAt} is the plan, not a gate: ` +
             `sending sooner only gives members longer to vote, and voting still closes ${s.ballotsCloseAt}. ` +
@@ -330,6 +341,31 @@ export function buildElectionTimeline(
         ? "The meeting has taken place."
         : "The members elect the board at this meeting.",
     action: null,
+  });
+
+  // 9 — The candidates, before the membership. A broadcast to every eligible
+  // institution is the worst way to learn you were not elected.
+  const candidatesTold = day(facts.candidateResultsSentAt);
+  stages.push({
+    key: "tell_candidates",
+    label: "Tell the candidates",
+    on: null,
+    windowLabel: null,
+    state: candidatesTold ? "done" : facts.certifiedAt && today >= s.agmDate ? "current" : "blocked",
+    detail: candidatesTold
+      ? `Told ${candidatesTold}.`
+      : "Each candidate hears their own result before the membership does — a separate message to those elected and those not. Neither carries vote counts.",
+    action: candidatesTold
+      ? null
+      : {
+          key: "notifyCandidates",
+          label: "Tell the candidates",
+          blockedBy: !facts.certifiedAt
+            ? "The result is not certified."
+            : today < s.agmDate
+              ? `Not until the meeting on ${s.agmDate}.`
+              : null,
+        },
   });
 
   // 9 — Announcing. Only after the meeting, because the meeting is what elects.

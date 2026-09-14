@@ -26,6 +26,7 @@ function facts(over: Partial<TimelineFacts> = {}): TimelineFacts {
     proxySentAt: null,
     packageSentAt: null,
     resultsAnnouncedAt: null,
+    candidateResultsSentAt: null,
     certifiedAt: null,
     sealed: false,
     noticeWindow: { opensOn: "2026-12-17", closesOn: "2026-12-31", proxyDueOn: "2026-12-22" },
@@ -52,6 +53,8 @@ describe("buildElectionTimeline — the spine", () => {
       "proxy_form",
       "agm_package",
       "agm",
+      // The candidates hear before the membership does.
+      "tell_candidates",
       "announce_result",
     ]);
   });

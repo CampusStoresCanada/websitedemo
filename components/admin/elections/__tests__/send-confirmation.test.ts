@@ -23,6 +23,19 @@ const MEMBERSHIP_WIDE_SENDS = [
   "sendAgmNotice",
   "sendProxyForm",
   "sendAgmPackage",
+  "notifyCandidates",
+];
+
+/**
+ * Sends that do NOT live on the cycle screen.
+ *
+ * The announcement is triggered from the audit screen, so the sweep that
+ * covered the timeline walked straight past it — it emailed every eligible
+ * institution on a single press for as long as the guard has existed. Any send
+ * on a page of its own has to be listed here or it gets the same blind spot.
+ */
+const SENDS_ON_OTHER_PAGES = [
+  { page: "app/admin/elections/[slug]/audit/page.tsx", what: "the result announcement" },
 ];
 
 describe("membership-wide sends are confirmed before they fire", () => {
@@ -44,5 +57,28 @@ describe("membership-wide sends are confirmed before they fire", () => {
     for (const key of MEMBERSHIP_WIDE_SENDS) {
       expect(actions).toContain(`${key}`);
     }
+  });
+});
+
+describe("sends that live off the cycle screen are confirmed too", () => {
+  for (const { page, what } of SENDS_ON_OTHER_PAGES) {
+    it(`arms ${what}`, () => {
+      const source = readFileSync(page, "utf8");
+      expect(source).toContain("ConfirmSubmitButton");
+      // A bare submit next to a send is the shape of the original defect.
+      expect(source).not.toMatch(/<button\s+type="submit"[^>]*>\s*Send to \{/);
+    });
+  }
+});
+
+describe("the candidates hear before the membership does", () => {
+  it("offers the confirmation the announcement gate can be satisfied with", () => {
+    const source = readFileSync("app/admin/elections/[slug]/audit/page.tsx", "utf8");
+    expect(source).toContain("confirmCandidatesTold");
+  });
+
+  it("refuses to announce until candidates are told or the chair says so", () => {
+    const service = readFileSync("lib/elections/service.ts", "utf8");
+    expect(service).toContain("!cfg.candidateResultsSentAt && !opts.confirmedCandidatesTold");
   });
 });

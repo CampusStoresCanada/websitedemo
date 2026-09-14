@@ -68,8 +68,13 @@ export default function ElectionTimeline({
    * map send nothing and keep their plain button.
    */
   sendCounts?: Record<string, { recipients: number | null; audience: string }>;
-  /** The message each step sends, keyed by stage key. Steps that send nothing are absent. */
-  stageMessages?: Record<string, ElectionMessage>;
+  /**
+   * The message each step sends, keyed by stage key. Steps that send nothing
+   * are absent; a step that sends more than one — telling the candidates is two
+   * messages saying opposite things — passes an array, so neither can be
+   * silently hidden by the other.
+   */
+  stageMessages?: Record<string, ElectionMessage | ElectionMessage[]>;
   /**
    * The member-facing page each step points at, keyed by stage key. Opened with
    * ?preview=1, which bypasses what the page DISPLAYS and nothing that writes —
@@ -123,12 +128,13 @@ export default function ElectionTimeline({
                   <p className="mt-0.5 text-xs text-gray-600">{stage.detail}</p>
                 )}
 
-                {stageMessages[stage.key] && (
-                  <StageMessagePreview
-                    message={stageMessages[stage.key]}
-                    testEmail={testEmail}
-                  />
-                )}
+                {stageMessages[stage.key] &&
+                  (Array.isArray(stageMessages[stage.key])
+                    ? (stageMessages[stage.key] as ElectionMessage[])
+                    : [stageMessages[stage.key] as ElectionMessage]
+                  ).map((m) => (
+                    <StageMessagePreview key={m.key} message={m} testEmail={testEmail} />
+                  ))}
 
                 {stagePages[stage.key]?.length ? (
                   <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
