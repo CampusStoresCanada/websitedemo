@@ -25,6 +25,7 @@ import {
   buildAgmNotice,
   buildAgmPackage,
   buildElectionResults,
+  buildCandidateResults,
   type PreparedMessages,
 } from "./notify";
 
@@ -133,6 +134,23 @@ export async function getElectionMessages(
     }),
   ]);
 
+  // The candidates' own messages, against a stand-in. Every real candidate only
+  // exists after certification, so without this the committee could preview
+  // every message in the cycle EXCEPT the two that land hardest — and the one
+  // that needs the most careful wording is the one nobody could read.
+  const standIn = [
+    {
+      nominationId: "preview",
+      contactId: "preview",
+      name: "[the candidate's name]",
+      organizationName: "[their institution]",
+    },
+  ];
+  const [electedMsg, notElectedMsg] = await Promise.all([
+    buildCandidateResults(election, { elected: standIn, notElected: [] }, "elected"),
+    buildCandidateResults(election, { elected: [], notElected: standIn }, "not_elected"),
+  ]);
+
   return Promise.all([
     describe(call, {
       key: "call",
@@ -164,6 +182,18 @@ export async function getElectionMessages(
       key: "agm_package",
       stage: "Members' AGM package",
       label: "AGM package is available",
+    }),
+    describe(electedMsg, {
+      key: "candidate_elected",
+      stage: "Tell the candidates",
+      label: "To a candidate who was elected",
+      note: "Goes before the membership announcement. Shown against a stand-in candidate.",
+    }),
+    describe(notElectedMsg, {
+      key: "candidate_not_elected",
+      stage: "Tell the candidates",
+      label: "To a candidate who was not elected",
+      note: "The one worth reading closely. Carries no vote counts. Shown against a stand-in candidate.",
     }),
     describe(results, {
       key: "results",

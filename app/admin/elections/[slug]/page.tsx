@@ -27,6 +27,7 @@ import {
   countOutstandingBallots,
   getAgmPackageState,
   getElectionTimeline,
+  getCandidateOutcomes,
 } from "@/lib/elections/service";
 import {
   requestWithdrawalAction,
@@ -34,6 +35,7 @@ import {
   sendAgmNoticeAction,
   sendProxyFormAction,
   chaseIncompleteAction,
+  notifyCandidatesAction,
   mintElectionActionItemsAction,
   closeNominationsAction,
   circulateBallotsAction,
@@ -136,6 +138,8 @@ export default async function ElectionReviewPage({
     proxy_form: "proxy_form",
     agm_package: "agm_package",
     results: "announce_result",
+    candidate_elected: "tell_candidates",
+    candidate_not_elected: "tell_candidates",
   };
 
   const { getElectionMessagesForSlug } = await import("@/lib/elections/messages");
@@ -145,10 +149,15 @@ export default async function ElectionReviewPage({
     getServerAuthState(),
   ]);
 
-  const stageMessages: Record<string, (typeof messages extends null ? never : NonNullable<typeof messages>)[number]> = {};
+  // A stage can carry more than one message — "tell the candidates" is two,
+  // and dropping either would hide the half somebody most needs to read.
+  const stageMessages: Record<
+    string,
+    (typeof messages extends null ? never : NonNullable<typeof messages>)[number][]
+  > = {};
   for (const m of messages ?? []) {
     const stageKey = MESSAGE_STAGES[m.key];
-    if (stageKey) stageMessages[stageKey] = m;
+    if (stageKey) (stageMessages[stageKey] ??= []).push(m);
   }
 
   const { election, eligibility, nominations, validated, incomplete, representation, projected, daysUntilNominationsClose } =
@@ -185,6 +194,14 @@ export default async function ElectionReviewPage({
     const r = await sendCallForNominationsAction(slug);
     redirect(
       `/admin/elections/${slug}${r.ok ? "?callSent=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
+  async function tellCandidates() {
+    "use server";
+    const r = await notifyCandidatesAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?candidatesTold=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
     );
   }
 
@@ -288,6 +305,14 @@ export default async function ElectionReviewPage({
   const closeReadiness = canCloseNominations(election.schedule, todayHere);
   const reminderPlan = planReminders(election.schedule, election.config);
   const agmPackage = await getAgmPackageState(slug);
+  // Only once certified — before that countElection refuses and there is no
+  // "elected" to count, so asking earlier would be a query that always fails.
+  const candidateOutcomes =
+    election.status === "certified" ? await getCandidateOutcomes(slug) : null;
+  const candidateCount = candidateOutcomes
+    ? candidateOutcomes.elected.length + candidateOutcomes.notElected.length
+    : null;
+
   const timeline = asOf
     ? disableActions((await getElectionTimeline(slug, asOf)) ?? [])
     : await getElectionTimeline(slug);
@@ -453,6 +478,13 @@ export default async function ElectionReviewPage({
               recipients: messages?.find((m) => m.key === "agm_package")?.recipientCount ?? null,
               audience: "member administrators",
             },
+            // Counted from the result itself, not from the electorate: these go
+            // to the people who stood, and the number is small enough that
+            // getting it wrong would be obvious to whoever presses the button.
+            notifyCandidates: {
+              recipients: candidateCount,
+              audience: "candidates, elected and not",
+            },
           }}
           actions={{
             sendCall,
@@ -463,6 +495,7 @@ export default async function ElectionReviewPage({
             sendAgmNotice: "agm-notice",
             sendProxyForm: sendProxy,
             sendAgmPackage: "agm-package",
+            notifyCandidates: tellCandidates,
           }}
         />
       )}

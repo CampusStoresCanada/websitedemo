@@ -15,6 +15,7 @@ import { notFound } from "next/navigation";
 import { redirect } from "next/navigation";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
 import { getAuditView, getResultsAnnouncement, listScrutineerCandidates } from "@/lib/elections/service";
+import ConfirmSubmitButton from "@/components/admin/elections/ConfirmSubmitButton";
 import {
   sealElectionAction,
   recordTieResolutionAction,
@@ -320,13 +321,28 @@ export default async function ElectionAuditPage({
                   </span>
                 </label>
               )}
-              <button
-                type="submit"
-                className="mt-3 rounded-lg bg-gray-900 px-4 py-2 text-sm font-medium text-white hover:bg-gray-800"
-              >
-                Send to {results.recipients} member institution
-                {results.recipients === 1 ? "" : "s"}
-              </button>
+              {!results.candidatesTold && (
+                <label className="mt-2 flex items-start gap-2 text-sm text-gray-700">
+                  <input type="checkbox" name="confirmCandidatesTold" value="1" className="mt-0.5" />
+                  <span>
+                    The candidates already know. Use &ldquo;Tell the candidates&rdquo; on the cycle
+                    screen, or tick this if you have told them yourself — anyone who was not elected
+                    should not learn it from a message addressed to every member store.
+                  </span>
+                </label>
+              )}
+
+              {/* ⚠️ This was the one membership-wide send the confirmation never
+                  reached — it lives on the audit screen rather than the
+                  timeline, so the sweep that covered the others walked straight
+                  past it. It emails every eligible institution in one press,
+                  which is exactly the shape of the send that went out by
+                  accident. */}
+              <ConfirmSubmitButton
+                label={`Send to ${results.recipients} member institution${results.recipients === 1 ? "" : "s"}`}
+                recipients={results.recipients}
+                audience="member institutions"
+              />
               <span className="ml-3 text-xs text-gray-500">Sends once.</span>
             </form>
           )}

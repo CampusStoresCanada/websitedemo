@@ -743,6 +743,27 @@ export async function sendAgmPackageAction(
  * meeting happened but not proof — a postponement would otherwise announce an
  * election that never took place — so the caller confirms.
  */
+/**
+ * Tell the candidates their own result, before the membership broadcast.
+ *
+ * Separate from announcing, so a chair can phone the people who were not
+ * elected first. announceResults will not run until this has happened or the
+ * chair confirms they did it another way.
+ */
+export async function notifyCandidatesAction(slug: string): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only an administrator can tell the candidates." };
+
+  const { notifyCandidates } = await import("@/lib/elections/service");
+  const result = await notifyCandidates(slug, auth.user.id);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/admin/elections/${slug}`);
+  return { ok: true };
+}
+
 export async function announceResultsAction(
   slug: string,
   formData: FormData
@@ -755,6 +776,7 @@ export async function announceResultsAction(
   const { announceResults } = await import("@/lib/elections/service");
   const result = await announceResults(slug, auth.user.id, {
     confirmedMeetingHeld: formData.get("confirmMeetingHeld") === "1",
+    confirmedCandidatesTold: formData.get("confirmCandidatesTold") === "1",
   });
 
   if (!result.ok) return { ok: false, error: result.error };

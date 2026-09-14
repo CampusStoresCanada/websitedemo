@@ -29,7 +29,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
-import type { Election } from "./service";
+import type { Election, CandidateOutcome } from "./service";
 import { boardServiceEmailHtml } from "./board-service";
 
 export interface NotifyOutcome {
@@ -812,4 +812,57 @@ export async function notifyElectionResults(
 ): Promise<NotifyOutcome[]> {
   const prepared = await buildElectionResults(election, organizationIds, announcement);
   return sendMany(prepared.templateKey, prepared.recipients);
+}
+
+/**
+ * The candidates' own result.
+ *
+ * Sent before the membership broadcast, not after it and not instead of it.
+ * The point is the unelected: a broadcast to every eligible institution is the
+ * worst way to find out, and every director is also an administrator of their
+ * own store, so the mass email lands beside their colleagues' copies.
+ *
+ * ⛔ No vote counts, in either message. Part V S3(d) has the Chair announce who
+ * was elected; the announcement to members carries the result and the turnout
+ * and never the tallies. `getCandidateOutcomes` does not even return the
+ * numbers, so this cannot leak them by accident.
+ *
+ * Two templates rather than one with a conditional, on the same reasoning as
+ * the renewal/partnership split: these two messages are saying opposite things
+ * to people in opposite situations, the wording will keep diverging, and a
+ * shared template is one careless edit from congratulating somebody who lost.
+ */
+export async function buildCandidateResults(
+  election: Election,
+  outcomes: { elected: CandidateOutcome[]; notElected: CandidateOutcome[] },
+  group: "elected" | "not_elected"
+): Promise<PreparedMessages> {
+  const list = group === "elected" ? outcomes.elected : outcomes.notElected;
+  const contacts = await Promise.all(list.map((c) => loadContact(c.contactId)));
+
+  return {
+    templateKey: group === "elected" ? "election_result_elected" : "election_result_not_elected",
+    recipients: list.map((candidate, i) => ({
+      to: contacts[i]?.email,
+      variables: {
+        candidate_name: contacts[i]?.name ?? candidate.name,
+        organization_name: candidate.organizationName,
+        cycle_year: election.cycleYear,
+        agm_date: formatDate(election.schedule.agmDate),
+      },
+    })),
+  };
+}
+
+export async function notifyCandidateResults(
+  election: Election,
+  outcomes: { elected: CandidateOutcome[]; notElected: CandidateOutcome[] }
+): Promise<NotifyOutcome[]> {
+  const results: NotifyOutcome[] = [];
+  for (const group of ["elected", "not_elected"] as const) {
+    const prepared = await buildCandidateResults(election, outcomes, group);
+    if (prepared.recipients.length === 0) continue;
+    results.push(...(await sendMany(prepared.templateKey, prepared.recipients)));
+  }
+  return results;
 }
