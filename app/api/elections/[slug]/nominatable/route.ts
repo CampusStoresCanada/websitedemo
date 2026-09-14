@@ -40,9 +40,15 @@ export async function GET(
   const isGlobalAdmin = auth.globalRole === "admin" || auth.globalRole === "super_admin";
 
   if (!isGlobalAdmin) {
+    // ⚠️ staff, NOT admins. This must match submitNominationAction, which
+    // checks staffOrganizationIds. It was written against the admin list before
+    // nominating widened to every member-store employee, which left staff able
+    // to open the form and submit it but refused the moment they typed a name —
+    // the search 403'd and the page fell back to a full reload, which is the
+    // behaviour the live search exists to replace.
     const actor = await resolveActor(auth.user.id, auth.organizations);
     const verdicts = await Promise.all(
-      actor.adminOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
+      actor.staffOrganizationIds.map((id) => isOrganizationEligible(election.id, id))
     );
     if (!verdicts.some((v) => v?.isEligible)) {
       return NextResponse.json({ error: "Not eligible to nominate." }, { status: 403 });
