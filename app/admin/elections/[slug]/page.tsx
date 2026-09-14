@@ -43,6 +43,7 @@ import {
   generateAgmAgendaAction,
 } from "@/lib/actions/elections";
 import { ELECTION_TASKS } from "@/lib/elections/action-items";
+import { asOfDate, disableActions } from "@/lib/elections/preview";
 import { canCloseNominations } from "@/lib/elections/schedule";
 import { planReminders } from "@/lib/elections/reminders";
 
@@ -100,6 +101,7 @@ export default async function ElectionReviewPage({
     uploaded?: string;
     packageSent?: string;
     agendaGenerated?: string;
+    asOf?: string;
   }>;
 }) {
   const { slug } = await params;
@@ -113,7 +115,13 @@ export default async function ElectionReviewPage({
     uploaded,
     packageSent,
     agendaGenerated,
+    asOf: asOfParam,
   } = await searchParams;
+
+  // Seeing a later stage without waiting for it. Read-only by construction —
+  // see disableActions, which is what keeps this from becoming a way to do
+  // early the things the by-law dates forbid.
+  const asOf = asOfDate({ asOf: asOfParam });
   const review = await getCommitteeReview(slug);
   if (!review) notFound();
   const noticeState = await getNoticeState(slug);
@@ -280,7 +288,9 @@ export default async function ElectionReviewPage({
   const closeReadiness = canCloseNominations(election.schedule, todayHere);
   const reminderPlan = planReminders(election.schedule, election.config);
   const agmPackage = await getAgmPackageState(slug);
-  const timeline = await getElectionTimeline(slug);
+  const timeline = asOf
+    ? disableActions((await getElectionTimeline(slug, asOf)) ?? [])
+    : await getElectionTimeline(slug);
 
   // How many institutions a "not yet voted" reminder would reach today. Only
   // computed while balloting: before then every eligible store is outstanding,
@@ -339,6 +349,56 @@ export default async function ElectionReviewPage({
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
           Ballot links are on their way. Delivery tracking is not recording anything yet, so
           treat this as &ldquo;attempted&rdquo; — ballots arriving is the reliable signal.
+        </div>
+      )}
+
+      {/* Look ahead without being able to act ahead. Actions are stripped in
+          disableActions before the timeline is rendered, so a date past a
+          deadline shows what unlocks without offering it. */}
+      <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3">
+        <form method="get" className="flex flex-wrap items-end gap-3 text-sm">
+          <label className="flex flex-col gap-1">
+            <span className="font-medium text-slate-700">See the cycle as of</span>
+            <input
+              type="date"
+              name="asOf"
+              defaultValue={asOf ?? ""}
+              className="rounded border border-slate-300 px-2 py-1"
+            />
+          </label>
+          <button
+            type="submit"
+            className="rounded bg-slate-800 px-3 py-1.5 text-white hover:bg-slate-700"
+          >
+            View that day
+          </button>
+          {asOf && (
+            <Link href={`/admin/elections/${slug}`} className="text-slate-600 underline">
+              Back to today
+            </Link>
+          )}
+          <span className="ml-auto flex flex-wrap gap-3 text-xs text-slate-500">
+            <Link href={`?asOf=${election.schedule.nominationsCloseAt}`} className="underline">
+              nominations close
+            </Link>
+            <Link href={`?asOf=${election.schedule.ballotsCloseAt}`} className="underline">
+              voting closes
+            </Link>
+            <Link href={`?asOf=${election.schedule.agmDate}`} className="underline">
+              the AGM
+            </Link>
+          </span>
+        </form>
+      </div>
+
+      {asOf && (
+        <div className="rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <strong>Showing {asOf}, not today.</strong> The calendar has moved and nothing
+          else — every stage still reflects what has actually happened, and no action can be
+          taken from this view. Dates the by-law fixes cannot be brought forward: closing
+          nominations early would cut short Part V S2(c)&rsquo;s window for additional
+          nominations, and sealing early would discard ballots from members who had until the
+          published date to vote.
         </div>
       )}
 

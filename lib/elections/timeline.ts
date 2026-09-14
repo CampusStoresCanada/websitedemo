@@ -28,6 +28,8 @@ export type StageState =
   /** Does not apply to this cycle. */
   | "not_applicable";
 
+import { BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM } from "./schedule";
+
 export interface TimelineStage {
   key: string;
   label: string;
@@ -166,6 +168,13 @@ export function buildElectionTimeline(
     });
   } else {
     const circulated = day(facts.ballotsCirculatedAt);
+    // The by-law's real constraint: the LAST day circulation may happen.
+    const circulationDeadline = new Date(
+      new Date(`${s.agmDate}T00:00:00Z`).getTime() -
+        BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM * 86_400_000
+    )
+      .toISOString()
+      .slice(0, 10);
     stages.push({
       key: "circulate_ballots",
       label: "Voting opens",
@@ -178,7 +187,11 @@ export function buildElectionTimeline(
           : "upcoming",
       detail: circulated
         ? `Circulated ${circulated}. ${facts.ballotsReturned} of ${facts.electorate} institutions have voted.`
-        : `Tells every eligible institution that voting is open.`,
+        : facts.status === "balloting"
+          ? `Ready now — the field was fixed when nominations closed. ${s.ballotsOpenAt} is the plan, not a gate: ` +
+            `sending sooner only gives members longer to vote, and voting still closes ${s.ballotsCloseAt}. ` +
+            `By-Law Part V S3(a) requires this by ${circulationDeadline}.`
+          : `Tells every eligible institution that voting is open.`,
       action:
         facts.status === "balloting" && !circulated
           ? { key: "circulateBallots", label: "Tell members voting is open", blockedBy: null }

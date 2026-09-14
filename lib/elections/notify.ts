@@ -428,7 +428,11 @@ export async function notifyNominationReady(
     organization_name: nomination.nomineeOrganizationName,
     nominations_close: formatDate(election.schedule.nominationsCloseAt),
     accept_url: `${appUrl()}/elections/accept/${nomination.acceptToken}`,
-    ballots_open: formatDate(election.schedule.ballotsOpenAt),
+    // A plan, not a promise. Voting may open as soon as nominations close and
+    // the field is fixed, so naming the scheduled date alone would be wrong on
+    // any cycle the committee moves on promptly — and wrong in the direction
+    // that makes a candidate think they have longer than they do.
+    ballots_open: `${formatDate(election.schedule.ballotsOpenAt)}, or earlier as decided by the Nominating Committee`,
   });
 }
 

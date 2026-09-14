@@ -35,7 +35,13 @@ import {
   type CosignatureStatus,
   type CandidateEligibility,
 } from "./nomination";
-import { deriveSchedule, phaseOn, canCloseNominations, type ElectionSchedule } from "./schedule";
+import {
+  deriveSchedule,
+  phaseOn,
+  canCloseNominations,
+  canOpenBallots,
+  type ElectionSchedule,
+} from "./schedule";
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
 import { buildAgmScript } from "./documents/agm-script";
 import { buildAgmPackage, type AgmPackage } from "./documents/agm-package";
@@ -90,7 +96,7 @@ function mintToken(): string {
 }
 
 /** Today in the association's timezone, as YYYY-MM-DD. */
-function today(timezone = "America/Edmonton"): string {
+export function today(timezone = "America/Edmonton"): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: timezone,
     year: "numeric",
@@ -1757,7 +1763,10 @@ export async function getBallotState(
     }
   }
 
-  const open = election.status === "balloting" && phaseOn(election.schedule, today()) === "balloting";
+  // Must agree with castBallot exactly. When these two disagreed the member saw
+  // a read-only ballot the server would have happily accepted, or worse the
+  // reverse.
+  const open = election.status === "balloting" && canOpenBallots(election.schedule, today()).open;
   const candidates = await getBallotCandidates(election);
   const chosen = eligible.find((o) => o.id === preferredOrganizationId) ?? eligible[0] ?? null;
 
@@ -1841,10 +1850,11 @@ export async function saveBallot(input: {
 
   if (election.status !== "balloting")
     return fail(`Voting is not open — this election is ${election.status}.`);
-  if (phaseOn(election.schedule, today()) !== "balloting")
-    return fail(
-      `Voting ran ${election.schedule.ballotsOpenAt} to ${election.schedule.ballotsCloseAt} and is now closed.`
-    );
+  // The field is fixed the moment nominations close, so voting is open from
+  // then until the published close — not from a derived open date that only
+  // ever delayed it. See canOpenBallots.
+  const votingWindow = canOpenBallots(election.schedule, today());
+  if (!votingWindow.open) return fail(votingWindow.reason);
 
   const actor = await resolveActor(input.profileId, input.organizations);
   if (!actor.adminOrganizationIds.includes(input.organizationId))
@@ -1996,7 +2006,13 @@ export async function sealElection(slug: string): Promise<Result<SealResult>> {
 
   // Refuse while voting is still open. Sealing mid-vote would silently discard
   // every ballot cast afterwards, because the linked rows are gone.
-  if (phaseOn(election.schedule, today()) === "balloting")
+  //
+  // ⚠️ This MUST use the same predicate as castBallot. It used to ask whether
+  // the phase was "balloting", which stopped being the same question the moment
+  // voting could open ahead of the planned date: a ballot opened early sat in
+  // phase "between_nominations_and_ballot", so the guard would have waved the
+  // seal through and destroyed every vote cast in the meantime.
+  if (canOpenBallots(election.schedule, today()).open)
     return fail(
       `Voting is still open until ${election.schedule.ballotsCloseAt}. Sealing now would discard every ballot cast between now and then.`
     );
@@ -2859,10 +2875,8 @@ export async function circulateBallots(
       `Ballots can only be circulated while the election is balloting — this one is "${election.status}".`
     );
 
-  if (phaseOn(election.schedule, today()) !== "balloting")
-    return fail(
-      `Voting runs ${election.schedule.ballotsOpenAt} to ${election.schedule.ballotsCloseAt}. There is no point sending members to a ballot that is not open.`
-    );
+  const window = canOpenBallots(election.schedule, today());
+  if (!window.open) return fail(window.reason);
 
   const candidates = await getBallotCandidates(election);
   if (candidates.length === 0)
@@ -3687,8 +3701,21 @@ export async function generateAgmAgenda(
   return ok({ meetingId: meeting.id as string, items: agenda.items.length, replaced: hadAgenda });
 }
 
-/** The cycle as a chronological spine, resolved from live state. */
-export async function getElectionTimeline(slug: string): Promise<TimelineStage[] | null> {
+/**
+ * The cycle as a chronological spine, resolved from live state.
+ *
+ * `onDate` re-reads that live state as it would stand on another day, so the
+ * committee can see what a stage looks like before living through it. It moves
+ * the calendar and nothing else: every stage is still resolved from what has
+ * actually happened, so a date preview can show that closing nominations
+ * becomes available on the 23rd, and can never show it already done.
+ *
+ * ⚠️ Callers passing a date MUST disable the actions — see `disableActions`.
+ */
+export async function getElectionTimeline(
+  slug: string,
+  onDate?: string
+): Promise<TimelineStage[] | null> {
   const db = createAdminClient();
   const election = await getElection(slug);
   if (!election) return null;
@@ -3702,7 +3729,7 @@ export async function getElectionTimeline(slug: string): Promise<TimelineStage[]
     resultsAnnouncedAt?: string;
   };
 
-  const notice = await getNoticeState(slug);
+  const notice = await getNoticeState(slug, onDate);
   const nominations = await listNominations(slug);
   const validated = nominations.filter((n) => n.completeness.complete).length;
   const { summary } = await evaluateElectionEligibility(election.id);
@@ -3745,6 +3772,6 @@ export async function getElectionTimeline(slug: string): Promise<TimelineStage[]
       ballotsReturned: ballotsReturned ?? 0,
       electorate: summary.eligible,
     },
-    today()
+    onDate ?? today()
   );
 }
