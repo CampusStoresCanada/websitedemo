@@ -19,6 +19,7 @@ const DIRECTION_LABELS: Record<ScanDirection, string> = {
 };
 
 const DESTINATION_LABELS: Record<ScanDestination, string> = {
+  me: "Their own account — what they owe, and what they can buy",
   org: "The organisation's page",
   circle: "Their community profile",
   capture: "Capture as a lead — asks them first",
