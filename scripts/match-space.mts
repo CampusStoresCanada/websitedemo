@@ -1364,9 +1364,36 @@ if (WRITE) {
     // a superseded one is the rollback target; a half-written run's edges are
     // neither — an unknown fraction of a ranking nobody should ever read.
   }
-  const prunable = ((runsByStatus ?? []) as { id: string }[])
+  /**
+   * ⛔ Only runs that STILL HOLD EDGES. Without this the per-night cap is spent
+   * re-visiting runs it already emptied.
+   *
+   * ⚠️ Measured over five nights: the backlog GREW 17 → 19 → 20 → 24 → 28 → 30 →
+   * 31 while the log reported "pruned 5 old run(s)" every time, and on 2026-09-10
+   * it reported "pruned 0 edges from 5 old run(s)" — five deletes that removed
+   * nothing. `prunable` was derived from run STATUS alone, so an emptied run
+   * stayed on the list forever and the five genuinely-full ones queued behind 24
+   * empties. Net effect: ~1 run reclaimed per night against 1 created, so the
+   * table never drained. 40 prunable runs, 24 already empty, 16 holding 142,899
+   * edges when this was found.
+   *
+   * One extra query a night, and it makes the cap mean what its comment claims.
+   */
+  // ⚠️ Asked per candidate with a HEAD count rather than by pulling every run_id:
+  // the table holds ~155,000 edge rows, and selecting them all to build a Set
+  // would move several MB across the wire nightly to answer a question about ~40
+  // ids. These are index-only counts and there are at most a few dozen.
+  const candidates = ((runsByStatus ?? []) as { id: string }[])
     .map((r) => r.id)
     .filter((id) => !keep.has(id));
+  const prunable: string[] = [];
+  for (const id of candidates) {
+    const { count } = await db
+      .from("match_edges")
+      .select("run_id", { count: "exact", head: true })
+      .eq("run_id", id);
+    if ((count ?? 0) > 0) prunable.push(id);
+  }
 
   /**
    * ⚠️ ONE RUN PER STATEMENT. Deleting twelve runs' edges in a single `.in()`
