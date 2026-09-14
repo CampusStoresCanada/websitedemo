@@ -93,3 +93,46 @@ export function sampleNomination(opts: {
     },
   };
 }
+
+/**
+ * Seeing a later stage of the cycle without waiting for it.
+ *
+ * Greg asked whether the cycle could be fast-forwarded when the outcome is
+ * already decided. Almost none of it can, and deliberately: every date the
+ * timeline refuses to jump is a right the by-law gives someone else. Closing
+ * nominations early takes away Part V S2(c)'s window for additional
+ * nominations; sealing early discards the ballots of members who had until the
+ * published date to vote; announcing early announces a result at a meeting
+ * that has not happened. The one genuine fast-forward — a slate no larger than
+ * the seats, acclaimed, the whole ballot phase dropped — is already in the
+ * timeline and removes four stages on its own.
+ *
+ * What was actually missing is the ability to LOOK. So the calendar moves and
+ * nothing else: the committee can see what October 23rd offers them without
+ * being able to do any of it eight weeks early.
+ *
+ * ⛔ Every action is stripped of its runnability here. Without this, a preview
+ * dated after the close would render a live "Close nominations" button —
+ * turning a viewing tool into a way to do the exact thing the dates forbid.
+ * The server actions refuse independently, but no one should ever get far
+ * enough to rely on that: this module already learned what one unguarded
+ * button costs.
+ */
+export const DATE_PREVIEW_BLOCK = "Date preview — actions are disabled.";
+
+export function asOfDate(searchParams: { asOf?: string } | undefined): string | null {
+  const raw = searchParams?.asOf;
+  if (!raw || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  // Rejects 2026-13-40 and friends, which would otherwise sort as a valid string.
+  const d = new Date(`${raw}T00:00:00Z`);
+  if (Number.isNaN(d.getTime()) || d.toISOString().slice(0, 10) !== raw) return null;
+  return raw;
+}
+
+export function disableActions<T extends { action: { blockedBy: string | null } | null }>(
+  stages: T[]
+): T[] {
+  return stages.map((stage) =>
+    stage.action ? { ...stage, action: { ...stage.action, blockedBy: DATE_PREVIEW_BLOCK } } : stage
+  );
+}

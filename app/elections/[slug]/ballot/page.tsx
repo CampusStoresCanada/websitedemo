@@ -17,7 +17,7 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { getServerAuthState } from "@/lib/auth/server";
-import { getBallotState } from "@/lib/elections/service";
+import { getBallotState, today } from "@/lib/elections/service";
 import { describeLastEdit } from "@/lib/elections/ballot";
 import { ElectionShell, Notice, SignInPrompt } from "@/components/elections/ElectionShell";
 import { saveBallotAction } from "@/lib/actions/elections";
@@ -111,9 +111,11 @@ export default async function BallotPage({
     return (
       <ElectionShell eyebrow={eyebrow} title="Voting is not open">
         <Notice tone="info">
-          Ballots for the {election.cycleYear} board run{" "}
-          {formatDate(election.schedule.ballotsOpenAt)} to{" "}
-          {formatDate(election.schedule.ballotsCloseAt)}.
+          {/* Never quote the planned open date as though it were a gate — voting
+              begins when nominations close, which can be well before it. */}
+          {today() >= election.schedule.ballotsCloseAt
+            ? `Voting for the ${election.cycleYear} board closed on ${formatDate(election.schedule.ballotsCloseAt)}.`
+            : `Voting for the ${election.cycleYear} board opens once nominations close on ${formatDate(election.schedule.nominationsCloseAt)}, and runs until ${formatDate(election.schedule.ballotsCloseAt)}.`}
         </Notice>
       </ElectionShell>
     );

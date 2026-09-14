@@ -159,3 +159,66 @@ export function canCloseNominations(
 
   return { ready: true, onTime: days === 0, daysLate: days };
 }
+
+/**
+ * By-Law Part V S3(a): ballots are circulated no less than 60 days before the
+ * AGM. A FLOOR on how much time members get, which makes it a CEILING on the
+ * date — the last day circulation may happen, never the first.
+ */
+export const BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM = 60;
+
+export type BallotOpenReadiness =
+  | { open: true; early: boolean; daysEarly: number; pastByLawDeadline: boolean }
+  | { open: false; reason: string };
+
+/**
+ * May the ballot be open today?
+ *
+ * `ballotsOpenAt` used to gate this, and read as a date voting was forbidden
+ * before. That was wrong in a way nobody noticed because the derived dates hid
+ * it: the by-law sets a LAST day to circulate (60 days out), not a first, and
+ * the 26 days between nominations closing and the derived open date were an
+ * allowance for the committee to build the ballot — a work estimate, not a
+ * right anybody holds. Nominations closing already fixes the field, so from
+ * that moment there is nothing left to wait for, and waiting only costs
+ * turnout.
+ *
+ * So the open date is now a PLAN rather than a gate. What actually gates voting:
+ *
+ *   - the field must be fixed — carried by `status === "balloting"`, which only
+ *     closeNominations sets, and only after validating every nomination;
+ *   - voting must not have closed. `ballotsCloseAt` IS a hard date, because
+ *     members were told when to vote by and a ballot arriving after it is a
+ *     vote taken away. Opening early never shortens that window; it only ever
+ *     lengthens it, which is why this direction is safe and the other is not.
+ *
+ * Circulating LATER than the by-law deadline is reported, not refused. A late
+ * ballot is a defect; refusing to send it turns that into no election at all.
+ */
+export function canOpenBallots(
+  schedule: ElectionSchedule,
+  onDate: string
+): BallotOpenReadiness {
+  if (onDate >= schedule.ballotsCloseAt) {
+    return {
+      open: false,
+      reason:
+        `Voting closed on ${schedule.ballotsCloseAt}. A ballot circulated now could not be returned in time, ` +
+        `so it would take the vote away rather than offer it.`,
+    };
+  }
+
+  const planned = parseISODate(schedule.ballotsOpenAt);
+  const today = parseISODate(onDate);
+  const days = Math.round((planned.getTime() - today.getTime()) / 86_400_000);
+  const deadline = toISODate(
+    minusDays(parseISODate(schedule.agmDate), BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM)
+  );
+
+  return {
+    open: true,
+    early: days > 0,
+    daysEarly: Math.max(0, days),
+    pastByLawDeadline: onDate > deadline,
+  };
+}
