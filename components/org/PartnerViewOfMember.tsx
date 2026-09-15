@@ -78,32 +78,23 @@ export default function PartnerViewOfMember({
                   What They Carry & Who Buys It
                 </h3>
 
-                {/* Category list always visible (teaser) */}
-                <div className="space-y-2 mb-4">
-                  {categoryBuyers.map((entry) => {
-                    const subcategories = entry.contact_subcategories
-                      ? Array.from(new Set(Object.values(entry.contact_subcategories).flat()))
-                      : [];
-                    return (
-                      <div key={entry.category}>
-                        <span className="px-3 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-full inline-block">
-                          {entry.category}
-                        </span>
-                        {subcategories.length > 0 && (
-                          <div className="ml-3 mt-1.5 flex flex-wrap gap-1.5">
-                            {subcategories.map((sub) => (
-                              <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">
-                                {sub}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
+                {/*
+                  One row per category: what they carry on the left, who buys
+                  it on the right.
 
-                {/* Buyer detail — partners only; contacts hidden in Staffing are excluded */}
+                  This used to be two passes over the same `categoryBuyers`
+                  array — a "teaser" list of every category with its
+                  subcategories, and then the whole list again beside the
+                  buyers. Anyone entitled to the buyer detail (every partner,
+                  and staff using View as Partner) read the category list
+                  twice with nothing added the second time.
+
+                  It does not need to be two lists, because ProtectedSection
+                  renders its children either way: it adds the banner and
+                  turns marked values into placeholders, so categories and
+                  subcategories stay visible to everyone while only the buyer
+                  names sit behind the partner gate.
+                */}
                 <ProtectedSection
                   requiredPermission="partner"
                   bannerMessage="Partner members can view buyer contacts for each product category."
@@ -112,15 +103,33 @@ export default function PartnerViewOfMember({
                 >
                   <div className="divide-y divide-gray-100 border border-gray-100 rounded-xl overflow-hidden">
                     {categoryBuyers.map((entry) => {
+                      const subcategories = entry.contact_subcategories
+                        ? Array.from(new Set(Object.values(entry.contact_subcategories).flat()))
+                        : [];
+                      // Contacts hidden in Staffing are excluded.
                       const buyers = entry.contact_ids
                         .map((id) => contactById[id])
                         .filter((b): b is VisibleContact => Boolean(b) && !(b?.hidden ?? false));
                       return (
-                        <div key={entry.category} className="flex items-start gap-4 px-4 py-3 bg-white">
-                          <span className="min-w-[160px] font-medium text-[#1A1A1A] text-sm">
-                            {entry.category}
-                          </span>
-                          <div className="flex flex-wrap gap-2">
+                        <div
+                          key={entry.category}
+                          className="flex flex-col gap-2 px-4 py-3 bg-white sm:flex-row sm:items-start sm:justify-between sm:gap-6"
+                        >
+                          <div className="min-w-0 sm:flex-1">
+                            <div className="font-medium text-[#1A1A1A] text-sm">
+                              {entry.category}
+                            </div>
+                            {subcategories.length > 0 && (
+                              <div className="mt-1.5 flex flex-wrap gap-1.5">
+                                {subcategories.map((sub) => (
+                                  <span key={sub} className="px-2 py-0.5 bg-gray-50 border border-gray-200 rounded-full text-xs text-gray-500">
+                                    {sub}
+                                  </span>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-2 sm:justify-end">
                             {buyers.length > 0 ? (
                               buyers.map((b) => (
                                 <span
