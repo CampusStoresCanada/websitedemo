@@ -4,6 +4,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { loadSeatHoldings } from "./seats";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { deriveAgenda } from "@/lib/conference/agenda";
+import { zonedWallTimeToUtcIso } from "@/lib/conference/tz";
 
 export type ConferenceScheduleViewerRole =
   | "admin"
@@ -107,15 +108,6 @@ function formatDayOnly(iso: string, timeZone: string): string {
     month: "short",
     day: "numeric",
   }).format(new Date(iso));
-}
-
-function parseTimeParts(time: string): { hour: number; minute: number; second: number } {
-  const [hourRaw, minuteRaw, secondRaw] = time.split(":");
-  return {
-    hour: Number(hourRaw ?? 0),
-    minute: Number(minuteRaw ?? 0),
-    second: Number(secondRaw ?? 0),
-  };
 }
 
 function sortScheduleItems(a: ConferenceScheduleItem, b: ConferenceScheduleItem): number {
@@ -299,18 +291,19 @@ export async function getConferenceScheduleTimeline(
         : null;
       const suite = suiteById.get(slot.suite_id);
 
-      const startParts = parseTimeParts(slot.start_time);
-      const endParts = parseTimeParts(slot.end_time);
+      /**
+       * `meeting_slots.start_time` is `time without time zone` — a Toronto wall
+       * clock, not an instant. It used to be stamped with Date.UTC() and then
+       * rendered in the conference zone, which moved every meeting by the whole
+       * UTC offset: a 09:30 meeting displayed as 04:30. Nothing caught it
+       * because no schedule row had ever reached this branch.
+       *
+       * Same converter the programme uses, so the two cannot drift apart again.
+       */
       const meetingDate = meetingDays[Math.max(0, Number(slot.day_number ?? 1) - 1)] ?? null;
-      const year = meetingDate ? Number(meetingDate.slice(0, 4)) : 1970;
-      const month = meetingDate ? Number(meetingDate.slice(5, 7)) - 1 : 0;
-      const day = meetingDate ? Number(meetingDate.slice(8, 10)) : Math.max(1, Math.min(28, Number(slot.day_number ?? 1)));
-      const startsAt = new Date(
-        Date.UTC(year, month, day, startParts.hour, startParts.minute, startParts.second)
-      ).toISOString();
-      const endsAt = new Date(
-        Date.UTC(year, month, day, endParts.hour, endParts.minute, endParts.second)
-      ).toISOString();
+      if (!meetingDate) continue; // no cadence day to hang it on — placing it would invent a date
+      const startsAt = zonedWallTimeToUtcIso(meetingDate, slot.start_time, timeZone);
+      const endsAt = zonedWallTimeToUtcIso(meetingDate, slot.end_time, timeZone);
 
       const assignment: ConferenceMeetingAssignment = {
         scheduleId: row.id,
@@ -336,14 +329,25 @@ export async function getConferenceScheduleTimeline(
         source: "meeting_assignment",
         itemType: "meeting",
         kind: "meeting",
-        title: assignment.exhibitorName,
+        /**
+         * Not the exhibitor's name — every renderer already prints "with
+         * {exhibitorName}" beside this, so carrying it here said the org twice
+         * and never said what the row was.
+         */
+        title: "Meeting",
         description: null,
         summary: null,
         startsAt,
         endsAt,
-        startsAtLocal: `Day ${assignment.dayNumber}, Slot ${assignment.slotNumber} (${assignment.startTime})`,
-        endsAtLocal: assignment.endTime,
-        dayKeyLocal: `day-${assignment.dayNumber}`,
+        /**
+         * A meeting belongs to the calendar day it happens on. It used to get a
+         * synthetic `day-1` key, which put it in a bucket of its own — rendered
+         * as a stray "DAY-1" heading after the last real day instead of sitting
+         * among that morning's sessions.
+         */
+        startsAtLocal: formatLocalDateTime(startsAt, timeZone),
+        endsAtLocal: formatLocalDateTime(endsAt, timeZone),
+        dayKeyLocal: meetingDate,
         locationLabel: assignment.suiteNumber ? `Suite ${assignment.suiteNumber}` : null,
         audienceMode: "target_roles",
         targetRoles: ["delegate", "exhibitor"],
