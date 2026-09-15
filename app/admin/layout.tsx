@@ -3,6 +3,7 @@ import { requireAdmin } from "@/lib/auth/guards";
 import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
+import PresentationBlock from "@/components/presentation/PresentationBlock";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -16,6 +17,15 @@ export default async function AdminLayout({
   const auth = await requireAdmin();
   if (!auth.ok) {
     redirect(auth.status === 401 ? "/login" : "/");
+  }
+
+  // Every page under here reads through createAdminClient(), so the visibility
+  // mask never sees them. Shut the whole area rather than let one of them paint
+  // live staff data onto a screen share. See components/presentation/.
+  if (auth.ctx.presentationMode) {
+    return (
+      <PresentationBlock level={auth.ctx.presentationMode} area="The admin area" />
+    );
   }
 
   // Conditions the sidebar cannot resolve itself — it is a client component,

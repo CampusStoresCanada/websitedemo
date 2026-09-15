@@ -3,6 +3,10 @@ import type { ViewerLevel } from "./defaults";
 import { isOrgAccessActive } from "@/lib/membership/status";
 import { resolveOrgLevel, resolveMembershipStatus } from "@/lib/auth/org-level";
 import { getProgramsConfig } from "@/lib/policy/engine";
+import {
+  applyPresentationMode,
+  type PresentationLevel,
+} from "@/lib/presentation/mode";
 
 /**
  * Context about who is viewing a page, used for visibility decisions.
@@ -83,6 +87,13 @@ export async function getViewerContext(): Promise<ViewerContext> {
     if (resolved) viewerLevel = resolved;
   }
 
+  // Last, so it clamps whatever the ladder above produced rather than racing
+  // it. Only ever lowers, and only for staff — see applyPresentationMode.
+  // Everything downstream of this line (the ~96 viewerLevel readers, the field
+  // mask, the org-page benchmarking gate) then masks server-side with no
+  // further knowledge that presentation mode exists.
+  viewerLevel = applyPresentationMode(viewerLevel, ctx.presentationMode);
+
   return {
     viewerLevel,
     userId: ctx.userId,
@@ -128,10 +139,32 @@ export async function getOrgPageViewerContext(slug: string): Promise<{
     (org?.membership_status as Parameters<typeof isOrgAccessActive>[0]) ?? null
   );
 
+  // Presentation mode suppresses the own-org elevation too. A staff account
+  // driving a screen share should see one level everywhere — the one named on
+  // the badge — and "everywhere except CSC's own page" is precisely the kind
+  // of exception someone discovers live, in front of the room.
+  const presenting = await getPresentationModeForViewer();
+
   const effectiveViewer =
-    org && viewer.viewerOrgIds.includes(org.id) && !isAlreadyCscAdmin && orgAccessActive
+    org &&
+    viewer.viewerOrgIds.includes(org.id) &&
+    !isAlreadyCscAdmin &&
+    orgAccessActive &&
+    !presenting
       ? { ...viewer, viewerLevel: "org_admin" as const }
       : viewer;
 
   return { viewer, effectiveViewer, org: org ?? null, orgAccessActive };
+}
+
+/**
+ * The presented audience for the current request, or null.
+ *
+ * Reads the memoized auth context rather than the database — same request, no
+ * extra query. Exported for the surfaces that gate on `globalRole` for display
+ * rather than on `viewerLevel`, which the mask cannot reach on their behalf.
+ */
+export async function getPresentationModeForViewer(): Promise<PresentationLevel | null> {
+  const ctx = await getOptionalAuthContext();
+  return ctx?.presentationMode ?? null;
 }

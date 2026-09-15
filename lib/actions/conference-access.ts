@@ -245,7 +245,13 @@ export async function loadContactConferenceObligations(
    * needs to know whether to chase, not what the allergy is. CSC staff running
    * the event do need the values — they are the ones telling the caterer.
    */
-  const canSeeValues = isGlobalAdmin(auth.ctx.globalRole);
+  // Gated on globalRole, not viewerLevel, so the visibility mask cannot lower
+  // it on a screen share — and what it unlocks is dietary restrictions and
+  // accessibility needs for named people, which is the single worst thing on
+  // this site to put in front of a room. Presentation mode is checked here by
+  // hand for that reason.
+  const canSeeValues =
+    isGlobalAdmin(auth.ctx.globalRole) && auth.ctx.presentationMode === null;
 
   const db = createAdminClient();
   // Everything this person may edit about themselves, not just what is

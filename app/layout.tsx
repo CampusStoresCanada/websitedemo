@@ -15,6 +15,8 @@ import { getServerAuthState } from "@/lib/auth/server";
 import OnboardingGate from "@/components/layout/OnboardingGate";
 import { getPlatformIdentity } from "@/lib/data";
 import { canPauseCircleBadge, isCircleBadgePaused } from "@/lib/circle/badge-preference";
+import PresentationIndicator from "@/components/presentation/PresentationIndicator";
+import { getPresentationModeForViewer } from "@/lib/visibility/viewer";
 
 export async function generateMetadata(): Promise<Metadata> {
   const identity = await getPlatformIdentity();
@@ -67,6 +69,11 @@ export default async function RootLayout({
 
   const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
 
+  // Resolved from the same memoized auth context the pages below mask against,
+  // so the bar cannot claim a level the content disagrees with. Null for every
+  // account that is not CSC staff, and for staff who have not turned it on.
+  const presentationLevel = await getPresentationModeForViewer();
+
   return (
     <html lang="en">
       <head>
@@ -111,6 +118,9 @@ export default async function RootLayout({
               <Suspense>
                 <BookmarkJumpHandler />
               </Suspense>
+              {presentationLevel ? (
+                <PresentationIndicator level={presentationLevel} />
+              ) : null}
             </OnboardingGate>
           </ToolkitProvider>
         </AuthProvider>

@@ -40,6 +40,13 @@ export interface UserProfile {
   global_role: GlobalRole;
   created_at: string;
   updated_at: string;
+  /**
+   * Per-account UI preferences (see 20260825180000_profiles_preferences).
+   * Optional here because this interface is hand-written and older than the
+   * column; readers narrow the bag themselves rather than typing every key.
+   * Keys: circle_badge_paused (bool), presentation_mode (member|partner|public).
+   */
+  preferences?: Record<string, unknown> | null;
 }
 
 export interface UserOrganization {

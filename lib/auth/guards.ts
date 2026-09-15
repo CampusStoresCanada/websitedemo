@@ -7,6 +7,10 @@ import { logAuditEventSafe } from "@/lib/ops/audit";
 import { CAPABILITY } from "@/lib/constants/capabilities";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import type { GlobalRole, UserOrganization, UserProfile } from "./types";
+import {
+  readPresentationMode,
+  type PresentationLevel,
+} from "@/lib/presentation/mode";
 
 type AppSupabase = SupabaseClient<Database>;
 
@@ -23,6 +27,16 @@ export interface AuthContext {
   capabilities: string[];
   orgAdminOrgIds: string[];
   activeOrgIds: string[];
+  /**
+   * The audience this staff account is presenting AS, or null when it is not.
+   *
+   * Display only — nothing in this file consults it, and no guard below may.
+   * It lowers what `getViewerContext` reports (lib/visibility/viewer.ts) so a
+   * screen share renders as a member/partner/visitor sees it, while every
+   * capability on this context stays exactly as it was. Null for anyone who
+   * is not admin/super_admin.
+   */
+  presentationMode: PresentationLevel | null;
 }
 
 export interface GuardFailure {
@@ -180,11 +194,15 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
     .filter((uo) => uo.role === "org_admin")
     .map((uo) => uo.organization_id);
 
+  // Free: the snapshot already selected profiles.* for this request.
+  const presentationMode = readPresentationMode(snapshot.profile, globalRole);
+
   return {
     supabase: client,
     userId: snapshot.userId,
     userEmail: snapshot.userEmail,
     globalRole,
+    presentationMode,
     isBenchmarkingReviewer,
     isBenchmarkingContentReviewer,
     capabilities: snapshot.capabilities,

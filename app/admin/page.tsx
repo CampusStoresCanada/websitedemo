@@ -12,6 +12,7 @@ import { visibleNavGroups } from "@/lib/admin/nav";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import PresentationModeCard from "@/components/presentation/PresentationModeCard";
 import SyncNowButton from "@/components/admin/board/SyncNowButton";
 import OneDriveSetupCard from "@/components/admin/board/OneDriveSetupCard";
 import { MembershipRenewalsWidget } from "@/components/admin/MembershipRenewalsWidget";
@@ -316,6 +317,10 @@ export default async function AdminConsolePage() {
   return (
     <main>
       <AdminPageHeader title="Admin Console" />
+
+      <div className="mb-8">
+        <PresentationModeCard />
+      </div>
 
       {/* ── Stat strip ─────────────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
