@@ -4,6 +4,7 @@ import { useState, useMemo } from "react";
 import Link from "next/link";
 import type { BenchmarkingWithOrg } from "@/lib/data";
 import { ProtectedSection, BlurredValue } from "@/components/ui/GreyBlur";
+import { useFigureRedaction } from "@/lib/presentation/figures";
 
 interface BenchmarkingComparisonProps {
   allBenchmarking: BenchmarkingWithOrg[];
@@ -193,12 +194,20 @@ export default function BenchmarkingComparison({
   );
 
   // Helper: quartile band cell bg for a given metric value
+  // A named league table of every store's margins. Nothing here is editable,
+  // so no opt-out flag to pass.
+  const figures = useFigureRedaction();
+
   const sBg = (
     values: number[],
     value: number | null | undefined,
     invert = false
   ): string => {
     if (value == null) return '';
+    // The quartile shading is MORE glanceable than the digits it sits behind —
+    // redacting the numbers and leaving the heatmap would still tell the room
+    // which named stores are in the bottom quartile. Both or neither.
+    if (figures.redacting) return '';
     return bandBg(getQuartileBand(values, value, invert));
   };
 
@@ -293,49 +302,49 @@ export default function BenchmarkingComparison({
                     {/* FTE */}
                     <td className={`px-3 py-2 text-gray-700 ${isCurrentOrg ? 'bg-blue-50' : ''}`}>
                       <BlurredValue placeholderWidth={6}>
-                        {row.enrollment_fte?.toLocaleString() || '—'}
+                        {figures.count(row.enrollment_fte?.toLocaleString()) || '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Total Sales */}
                     <td className={`px-3 py-2 font-medium ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.totalSales, row.totalSales)}`}>
                       <BlurredValue placeholderWidth={7}>
-                        {formatCurrency(row.totalSales)}
+                        {figures.currency(formatCurrency(row.totalSales))}
                       </BlurredValue>
                     </td>
 
                     {/* Online % */}
                     <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.onlinePct, row.onlinePct)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        {row.onlinePct != null ? `${row.onlinePct.toFixed(1)}%` : '—'}
+                        {row.onlinePct != null ? figures.percent(`${row.onlinePct.toFixed(1)}%`) : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Gross Margin % */}
                     <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.grossMargin, row.grossMargin)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        {row.grossMargin != null ? `${row.grossMargin.toFixed(1)}%` : '—'}
+                        {row.grossMargin != null ? figures.percent(`${row.grossMargin.toFixed(1)}%`) : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* HR % — inverted (lower is better) */}
                     <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.hrPct, row.hrPct, true)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        {row.hrPct != null ? `${row.hrPct.toFixed(1)}%` : '—'}
+                        {row.hrPct != null ? figures.percent(`${row.hrPct.toFixed(1)}%`) : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Net Margin % */}
                     <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.netMargin, row.netMargin)}`}>
                       <BlurredValue placeholderWidth={4}>
-                        {row.netMargin != null ? `${row.netMargin.toFixed(1)}%` : '—'}
+                        {row.netMargin != null ? figures.percent(`${row.netMargin.toFixed(1)}%`) : '—'}
                       </BlurredValue>
                     </td>
 
                     {/* Sales per Student */}
                     <td className={`px-3 py-2 ${isCurrentOrg ? 'bg-blue-50' : sBg(standoutMaps.salesPerStudent, row.salesPerStudent)}`}>
                       <BlurredValue placeholderWidth={5}>
-                        {row.salesPerStudent != null ? `$${Math.round(row.salesPerStudent).toLocaleString()}` : '—'}
+                        {row.salesPerStudent != null ? figures.currency(`$${Math.round(row.salesPerStudent).toLocaleString()}`) : '—'}
                       </BlurredValue>
                     </td>
                   </tr>

@@ -4,6 +4,7 @@ import type { Benchmarking } from "@/lib/types/db";
 import { ProtectedSection, BlurredValue } from "@/components/ui/GreyBlur";
 import { fieldProps, type EditableColumn } from "@/lib/editable-fields";
 import type { ManualEditMark } from "@/lib/benchmarking/manual-edit";
+import { useFigureRedaction } from "@/lib/presentation/figures";
 
 type BenchmarkingField = EditableColumn<"benchmarking">;
 
@@ -50,6 +51,12 @@ export default function BenchmarkingDetails({
       ? fieldProps("benchmarking", column, benchmarking.id, organizationId, rawValue)
       : undefined;
 
+  // A named store's whole P&L, legible at a glance to everyone on the call.
+  // Disabled in edit mode — never redact a figure someone is correcting.
+  const figures = useFigureRedaction(editable);
+  const money = (value: number | null | undefined) =>
+    figures.currency(formatCurrency(value));
+
   const amendedCount = Object.keys(manualEdits).length;
 
   return (
@@ -77,22 +84,22 @@ export default function BenchmarkingDetails({
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
           <MetricCard
             label="Total Sales"
-            value={formatCurrency(totalSales)}
+            value={money(totalSales)}
           />
           <MetricCard
             label="Net Profit"
-            value={formatCurrency(benchmarking.net_profit)}
+            value={money(benchmarking.net_profit)}
             highlight={benchmarking.net_profit !== null && benchmarking.net_profit < 0 ? 'negative' : 'positive'}
             editProps={edit("net_profit", benchmarking.net_profit)}
             mark={manualEdits.net_profit}
           />
           <MetricCard
             label="Sales/Sq Ft"
-            value={salesPerSqFt ? formatCurrency(salesPerSqFt) : 'N/A'}
+            value={salesPerSqFt ? money(salesPerSqFt) : 'N/A'}
           />
           <MetricCard
             label="Profit Margin"
-            value={profitMargin !== null ? `${profitMargin.toFixed(1)}%` : 'N/A'}
+            value={profitMargin !== null ? figures.percent(`${profitMargin.toFixed(1)}%`) : 'N/A'}
             highlight={profitMargin !== null && profitMargin < 0 ? 'negative' : undefined}
           />
         </div>
@@ -103,15 +110,15 @@ export default function BenchmarkingDetails({
             Sales Breakdown
           </h3>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-            <DataRow label="In-Store Sales" value={formatCurrency(benchmarking.total_gross_sales_instore)} editProps={edit("total_gross_sales_instore", benchmarking.total_gross_sales_instore)} mark={manualEdits.total_gross_sales_instore} />
-            <DataRow label="Online Sales" value={formatCurrency(benchmarking.total_online_sales)} editProps={edit("total_online_sales", benchmarking.total_online_sales)} mark={manualEdits.total_online_sales} />
-            <DataRow label="Course Supplies" value={formatCurrency(benchmarking.sales_course_supplies)} editProps={edit("sales_course_supplies", benchmarking.sales_course_supplies)} mark={manualEdits.sales_course_supplies} />
-            <DataRow label="Course Supplies (Online)" value={formatCurrency(benchmarking.sales_course_supplies_online)} editProps={edit("sales_course_supplies_online", benchmarking.sales_course_supplies_online)} mark={manualEdits.sales_course_supplies_online} />
-            <DataRow label="General Books" value={formatCurrency(benchmarking.sales_general_books)} editProps={edit("sales_general_books", benchmarking.sales_general_books)} mark={manualEdits.sales_general_books} />
-            <DataRow label="Technology" value={formatCurrency(benchmarking.sales_technology)} editProps={edit("sales_technology", benchmarking.sales_technology)} mark={manualEdits.sales_technology} />
-            <DataRow label="Stationery" value={formatCurrency(benchmarking.sales_stationary)} editProps={edit("sales_stationary", benchmarking.sales_stationary)} mark={manualEdits.sales_stationary} />
-            <DataRow label="Custom Merch" value={formatCurrency(benchmarking.sales_custom_merch)} editProps={edit("sales_custom_merch", benchmarking.sales_custom_merch)} mark={manualEdits.sales_custom_merch} />
-            <DataRow label="Food & Beverage" value={formatCurrency(benchmarking.sales_food_beverage)} editProps={edit("sales_food_beverage", benchmarking.sales_food_beverage)} mark={manualEdits.sales_food_beverage} />
+            <DataRow label="In-Store Sales" value={money(benchmarking.total_gross_sales_instore)} editProps={edit("total_gross_sales_instore", benchmarking.total_gross_sales_instore)} mark={manualEdits.total_gross_sales_instore} />
+            <DataRow label="Online Sales" value={money(benchmarking.total_online_sales)} editProps={edit("total_online_sales", benchmarking.total_online_sales)} mark={manualEdits.total_online_sales} />
+            <DataRow label="Course Supplies" value={money(benchmarking.sales_course_supplies)} editProps={edit("sales_course_supplies", benchmarking.sales_course_supplies)} mark={manualEdits.sales_course_supplies} />
+            <DataRow label="Course Supplies (Online)" value={money(benchmarking.sales_course_supplies_online)} editProps={edit("sales_course_supplies_online", benchmarking.sales_course_supplies_online)} mark={manualEdits.sales_course_supplies_online} />
+            <DataRow label="General Books" value={money(benchmarking.sales_general_books)} editProps={edit("sales_general_books", benchmarking.sales_general_books)} mark={manualEdits.sales_general_books} />
+            <DataRow label="Technology" value={money(benchmarking.sales_technology)} editProps={edit("sales_technology", benchmarking.sales_technology)} mark={manualEdits.sales_technology} />
+            <DataRow label="Stationery" value={money(benchmarking.sales_stationary)} editProps={edit("sales_stationary", benchmarking.sales_stationary)} mark={manualEdits.sales_stationary} />
+            <DataRow label="Custom Merch" value={money(benchmarking.sales_custom_merch)} editProps={edit("sales_custom_merch", benchmarking.sales_custom_merch)} mark={manualEdits.sales_custom_merch} />
+            <DataRow label="Food & Beverage" value={money(benchmarking.sales_food_beverage)} editProps={edit("sales_food_beverage", benchmarking.sales_food_beverage)} mark={manualEdits.sales_food_beverage} />
           </div>
         </div>
 
@@ -121,11 +128,11 @@ export default function BenchmarkingDetails({
             Expenses & Financials
           </h3>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
-            <DataRow label="Cost of Goods Sold" value={formatCurrency(benchmarking.total_cogs)} editProps={edit("total_cogs", benchmarking.total_cogs)} mark={manualEdits.total_cogs} />
-            <DataRow label="HR Expense" value={formatCurrency(benchmarking.expense_hr)} editProps={edit("expense_hr", benchmarking.expense_hr)} mark={manualEdits.expense_hr} />
-            <DataRow label="Rent & Maintenance" value={formatCurrency(benchmarking.expense_rent_maintenance)} editProps={edit("expense_rent_maintenance", benchmarking.expense_rent_maintenance)} mark={manualEdits.expense_rent_maintenance} />
-            <DataRow label="Marketing Spend" value={formatCurrency(benchmarking.marketing_spend)} editProps={edit("marketing_spend", benchmarking.marketing_spend)} mark={manualEdits.marketing_spend} />
-            <DataRow label="Central Funding" value={formatCurrency(benchmarking.central_funding)} editProps={edit("central_funding", benchmarking.central_funding)} mark={manualEdits.central_funding} />
+            <DataRow label="Cost of Goods Sold" value={money(benchmarking.total_cogs)} editProps={edit("total_cogs", benchmarking.total_cogs)} mark={manualEdits.total_cogs} />
+            <DataRow label="HR Expense" value={money(benchmarking.expense_hr)} editProps={edit("expense_hr", benchmarking.expense_hr)} mark={manualEdits.expense_hr} />
+            <DataRow label="Rent & Maintenance" value={money(benchmarking.expense_rent_maintenance)} editProps={edit("expense_rent_maintenance", benchmarking.expense_rent_maintenance)} mark={manualEdits.expense_rent_maintenance} />
+            <DataRow label="Marketing Spend" value={money(benchmarking.marketing_spend)} editProps={edit("marketing_spend", benchmarking.marketing_spend)} mark={manualEdits.marketing_spend} />
+            <DataRow label="Central Funding" value={money(benchmarking.central_funding)} editProps={edit("central_funding", benchmarking.central_funding)} mark={manualEdits.central_funding} />
           </div>
         </div>
 
@@ -139,7 +146,7 @@ export default function BenchmarkingDetails({
             <DataRow label="Part-Time FTE (Off-Peak)" value={benchmarking.parttime_fte_offpeak?.toString()} editProps={edit("parttime_fte_offpeak", benchmarking.parttime_fte_offpeak)} mark={manualEdits.parttime_fte_offpeak} />
             <DataRow label="Student FTE (Avg)" value={benchmarking.student_fte_average?.toString()} editProps={edit("student_fte_average", benchmarking.student_fte_average)} mark={manualEdits.student_fte_average} />
             <DataRow label="Total FTE" value={totalFTE.toFixed(1)} />
-            <DataRow label="Sales per FTE" value={salesPerFTE ? formatCurrency(salesPerFTE) : 'N/A'} />
+            <DataRow label="Sales per FTE" value={salesPerFTE ? money(salesPerFTE) : 'N/A'} />
             <DataRow label="Manager Years (Current)" value={benchmarking.manager_years_current_position?.toString()} editProps={edit("manager_years_current_position", benchmarking.manager_years_current_position)} mark={manualEdits.manager_years_current_position} />
             <DataRow label="Manager Years (Industry)" value={benchmarking.manager_years_in_industry?.toString()} editProps={edit("manager_years_in_industry", benchmarking.manager_years_in_industry)} mark={manualEdits.manager_years_in_industry} />
           </div>
@@ -152,8 +159,8 @@ export default function BenchmarkingDetails({
           </h3>
           <div className="grid grid-cols-2 gap-x-8 gap-y-2 text-sm">
             <DataRow label="Institution Type" value={benchmarking.institution_type} editProps={edit("institution_type", benchmarking.institution_type)} mark={manualEdits.institution_type} />
-            <DataRow label="Enrollment FTE" value={benchmarking.enrollment_fte?.toLocaleString()} editProps={edit("enrollment_fte", benchmarking.enrollment_fte)} mark={manualEdits.enrollment_fte} />
-            <DataRow label="Square Footage" value={benchmarking.total_square_footage?.toLocaleString()} editProps={edit("total_square_footage", benchmarking.total_square_footage)} mark={manualEdits.total_square_footage} />
+            <DataRow label="Enrollment FTE" value={figures.count(benchmarking.enrollment_fte?.toLocaleString())} editProps={edit("enrollment_fte", benchmarking.enrollment_fte)} mark={manualEdits.enrollment_fte} />
+            <DataRow label="Square Footage" value={figures.count(benchmarking.total_square_footage?.toLocaleString())} editProps={edit("total_square_footage", benchmarking.total_square_footage)} mark={manualEdits.total_square_footage} />
           </div>
         </div>
       </div>
