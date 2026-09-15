@@ -21,6 +21,7 @@ import type {
   UserProfile,
 } from "@/lib/auth/types";
 import type { MembershipProgramDef } from "@/lib/policy/types";
+import type { PresentationLevel } from "@/lib/presentation/mode";
 
 // Client-safe fallback matching lib/policy/engine.ts's server-only
 // defaultMembershipPrograms() — only used if this provider somehow mounts
@@ -68,6 +69,17 @@ interface AuthContextValue {
   isBenchmarkingContentReviewer: boolean;
   /** True if the viewer's own org is a CANCOLL member — grants visibility of CANCOLL status on partner profiles */
   isCancollMember: boolean;
+  /**
+   * The audience a CSC staff account is presenting AS, or null.
+   *
+   * ⛔ DISPLAY ONLY. Never gate a capability on this — `permissionState` is
+   * deliberately NOT lowered by presentation mode, because the whole point is
+   * that staff keep working while masked. Use it to suppress affordances that
+   * would misrepresent the audience being shown (a "View as Partner" toggle a
+   * real partner never has, a banner announcing admin access), not to decide
+   * who may do something. Server-seeded; see lib/presentation/mode.ts.
+   */
+  presentationMode: PresentationLevel | null;
   signOut: () => Promise<void>;
   refreshPermissions: () => Promise<void>;
   devOverride: PermissionState | null;
@@ -96,6 +108,7 @@ const AuthContext = createContext<AuthContextValue>({
   isBenchmarkingReviewer: false,
   isBenchmarkingContentReviewer: false,
   isCancollMember: false,
+  presentationMode: null,
   signOut: async () => {},
   refreshPermissions: async () => {},
   devOverride: null,
@@ -128,6 +141,7 @@ interface AuthProviderProps {
     isBenchmarkingReviewer: boolean;
     isBenchmarkingContentReviewer: boolean;
     isCancollMember?: boolean;
+    presentationMode?: PresentationLevel | null;
   } | null;
 }
 
@@ -245,6 +259,10 @@ export function AuthProvider({
   const [isCancollMember, setIsCancollMember] = useState<boolean>(
     initialAuth?.isCancollMember ?? false,
   );
+  // Pass-through rather than state: presentation mode changes only through the
+  // server action, which revalidates the layout root and reseeds initialAuth.
+  // Holding it in useState would let a stale copy survive that refresh.
+  const presentationMode = initialAuth?.presentationMode ?? null;
   const [isLoading, setIsLoading] = useState(initialAuth ? false : true);
   const [decryptionKey, setDecryptionKey] = useState<CryptoKey | null>(null);
   const [devOverride, setDevOverride] = useState<PermissionState | null>(null);
@@ -1072,6 +1090,7 @@ export function AuthProvider({
       isBenchmarkingReviewer,
       isBenchmarkingContentReviewer,
       isCancollMember,
+      presentationMode,
       signOut,
       refreshPermissions,
       devOverride,
@@ -1098,6 +1117,7 @@ export function AuthProvider({
       isBenchmarkingReviewer,
       isBenchmarkingContentReviewer,
       isCancollMember,
+      presentationMode,
       signOut,
       refreshPermissions,
       devOverride,

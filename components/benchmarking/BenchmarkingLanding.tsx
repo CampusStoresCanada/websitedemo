@@ -20,17 +20,15 @@ interface BenchmarkingLandingProps {
     fiscalYear: number;
     updatedAt: string | null;
   } | null;
-  /** True while this staff account is presenting as another audience. */
-  presenting?: boolean;
 }
 
 export default function BenchmarkingLanding({
   surveys,
   userOrgInfo,
   existingDraft,
-  presenting = false,
 }: BenchmarkingLandingProps) {
-  const { user, permissionState, organizations, isBenchmarkingReviewer } = useAuth();
+  const { user, permissionState, organizations, isBenchmarkingReviewer, presentationMode } =
+    useAuth();
 
   const isAdmin = permissionState === "admin" || permissionState === "super_admin";
   // Staff capability is intentionally NOT lowered by presentation mode — the
@@ -38,7 +36,7 @@ export default function BenchmarkingLanding({
   // announces that status and links into an area presentation mode has closed,
   // so it is suppressed: on a screen share it both contradicts the member view
   // being demonstrated and leads to an interstitial.
-  const hasAdminAccess = (isAdmin || isBenchmarkingReviewer) && !presenting;
+  const hasAdminAccess = (isAdmin || isBenchmarkingReviewer) && presentationMode === null;
   const activeSurvey = surveys.find((s) => s.status === "open");
   const latestSurvey = surveys[0];
 

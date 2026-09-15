@@ -36,6 +36,13 @@ export default async function RootLayout({
     getServerAuthState(),
     getPlatformIdentity(),
   ]);
+
+  // Resolved from the same memoized auth context the pages below mask against,
+  // so neither the indicator bar nor any client affordance can claim a level
+  // the server-rendered content disagrees with. Null for every account that is
+  // not CSC staff, and for staff who have not turned it on.
+  const presentationLevel = await getPresentationModeForViewer();
+
   const initialAuth = {
     user: serverAuth.user,
     profile: serverAuth.profile,
@@ -55,6 +62,9 @@ export default async function RootLayout({
     isCancollMember: serverAuth.organizations.some(
       (uo) => uo.organization?.is_cancoll_member === true,
     ),
+    // Display only. permissionState above is deliberately left at its real
+    // value so staff keep every edit right while presenting.
+    presentationMode: presentationLevel,
   };
 
   // Personal off-switch for the Circle badge poll. Seeded server-side so a
@@ -69,10 +79,6 @@ export default async function RootLayout({
 
   const serverHasOnboarding = serverAuth.user != null && serverAuth.organizations.length > 0;
 
-  // Resolved from the same memoized auth context the pages below mask against,
-  // so the bar cannot claim a level the content disagrees with. Null for every
-  // account that is not CSC staff, and for staff who have not turned it on.
-  const presentationLevel = await getPresentationModeForViewer();
 
   return (
     <html lang="en">

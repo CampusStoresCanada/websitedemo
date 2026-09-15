@@ -101,7 +101,6 @@ export default async function BenchmarkingPage() {
 
   return (
     <BenchmarkingLanding
-      presenting={auth?.presentationMode != null}
       surveys={surveys ?? []}
       userOrgInfo={userOrgInfo}
       existingDraft={existingDraft}

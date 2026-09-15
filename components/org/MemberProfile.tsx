@@ -146,7 +146,7 @@ export default function MemberProfile({
   const heldEntityById = new Map(assignableEntities.map((e) => [e.entityId, e]));
   const normalize = (value: string | null | undefined) => (value ?? "").trim().toLowerCase();
   const router = useRouter();
-  const { permissionState, organizations, user } = useAuth();
+  const { permissionState, organizations, user, presentationMode } = useAuth();
   const userEmail = user?.email?.toLowerCase() ?? null;
   // Members can click their own contact entry to edit visibility
   function isOwnContact(contact: VisibleContact): boolean {
@@ -264,8 +264,14 @@ export default function MemberProfile({
     editMode &&
     (canEditThisOrg || permissionState === "admin" || permissionState === "super_admin");
 
-  // Partners see procurement info instead of benchmarking
-  const isPartner = permissionState === "partner";
+  // Partners see procurement info instead of benchmarking.
+  //
+  // Presentation mode counts here, and `permissionState` deliberately does not
+  // move: a real partner has no choice of view, so a staff account presenting
+  // AS a partner must land on the partner view rather than be offered a toggle
+  // into it. Showing the toggle at all misrepresents the thing being
+  // demonstrated — it is a control the audience does not have.
+  const isPartner = permissionState === "partner" || presentationMode === "partner";
 
   // Check if user is org_admin for THIS specific organization (can edit procurement info)
   const isOrgAdminForThisOrg = organizations.some(
@@ -276,9 +282,14 @@ export default function MemberProfile({
     (uo) => uo.organization.id === organization.id
   );
 
-  // "View as Partner" toggle — org admins, admins, and super admins
+  // "View as Partner" toggle — org admins, admins, and super admins.
+  //
+  // Hidden entirely while presenting, at every audience: neither a partner nor
+  // a member nor a visitor has this control, so leaving it on screen would put
+  // a staff affordance in the middle of the view being shown. Capability is
+  // untouched — turning presentation mode off brings the toggle straight back.
   const isAdmin = permissionState === "admin" || permissionState === "super_admin";
-  const canViewAsPartner = isOrgAdminForThisOrg || isAdmin;
+  const canViewAsPartner = (isOrgAdminForThisOrg || isAdmin) && presentationMode === null;
   const [partnerViewMode, setPartnerViewMode] = useState(false);
 
   // ---------------------------------------------------------------------------
