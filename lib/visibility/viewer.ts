@@ -19,6 +19,12 @@ export interface ViewerContext {
   viewerOrgIds: string[];
   /** Organization IDs the viewer is an org_admin of */
   viewerOrgAdminIds: string[];
+  /**
+   * Does one of the viewer's own active orgs carry CANCOLL? Drives the
+   * reciprocal CANCOLL gate (see ./cancoll.ts) — it is NOT the same question as
+   * "is this viewer a CSC member".
+   */
+  viewerIsCancollMember: boolean;
 }
 
 /**
@@ -40,6 +46,7 @@ const ANONYMOUS_VIEWER: ViewerContext = {
   userEmail: null,
   viewerOrgIds: [],
   viewerOrgAdminIds: [],
+  viewerIsCancollMember: false,
 };
 
 /**
@@ -87,6 +94,25 @@ export async function getViewerContext(): Promise<ViewerContext> {
     if (resolved) viewerLevel = resolved;
   }
 
+  // Read off the same memoized identity snapshot the level derivation uses —
+  // guards.ts already selects is_cancoll_member on the viewer's orgs, so this
+  // costs no extra query.
+  //
+  // Deliberately NOT clamped by presentation mode below: this answers "is the
+  // viewer's own org CANCOLL", which is a fact about their organisation rather
+  // than a level they hold. A member presenting sees the reciprocal answer a
+  // member in their position really gets. (CSC's own org is not CANCOLL, so
+  // for staff this is false either way.)
+  const ownSnapshot = await getIdentitySnapshot();
+  const viewerIsCancollMember =
+    ownSnapshot.status === "resolved" && !ownSnapshot.orgsError
+      ? (ownSnapshot.organizations ?? []).some(
+          (uo) =>
+            uo.organization?.is_cancoll_member === true &&
+            ctx.activeOrgIds.includes(uo.organization_id)
+        )
+      : false;
+
   // Last, so it clamps whatever the ladder above produced rather than racing
   // it. Only ever lowers, and only for staff — see applyPresentationMode.
   // Everything downstream of this line (the ~96 viewerLevel readers, the field
@@ -100,6 +126,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
     userEmail: ctx.userEmail ?? null,
     viewerOrgIds: ctx.activeOrgIds,
     viewerOrgAdminIds: ctx.orgAdminOrgIds,
+    viewerIsCancollMember,
   };
 }
 

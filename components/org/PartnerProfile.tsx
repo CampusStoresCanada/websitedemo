@@ -32,7 +32,7 @@ import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procureme
 import PartnerLinksSection from "@/components/org/PartnerLinksSection";
 import type { ResolvedPartnerLink, PartnerLink } from "@/lib/partner-links";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
-import { CERTIFICATIONS, exhibitorCertification, newPartnerCertification } from "@/lib/certifications";
+import { CERTIFICATIONS, CANCOLL_CERT, exhibitorCertification, newPartnerCertification } from "@/lib/certifications";
 import { updateCertifications, updateCancollStatus } from "@/lib/actions/update-certifications";
 import { setContactHidden } from "@/lib/actions/user-management";
 import ContactEditModal from "@/components/org/ContactEditModal";
@@ -274,6 +274,7 @@ export default function PartnerProfile({
     Array.isArray(organization.certifications) ? (organization.certifications as string[]) : []
   );
   const [certSaving, setCertSaving] = useState(false);
+  const [certError, setCertError] = useState<string | null>(null);
 
   // Exhibitor is DERIVED from booth ownership, never stored in
   // organizations.certifications — so it's passed to CertificationBadges as an
@@ -333,13 +334,25 @@ export default function PartnerProfile({
   );
 
   const handleToggleCertification = async (name: string) => {
+    const previous = certifications;
     const next = certifications.includes(name)
       ? certifications.filter((c) => c !== name)
       : [...certifications, name];
     setCertifications(next);
     setCertSaving(true);
-    await updateCertifications(organization.id, next);
+    setCertError(null);
+    const result = await updateCertifications(organization.id, next);
     setCertSaving(false);
+
+    // The result used to be discarded. A rejected save therefore left the chip
+    // showing the state the user clicked while the database still held the old
+    // one — indistinguishable from a save that worked until the next reload,
+    // which is exactly how "it doesn't seem to be saving" gets reported. Roll
+    // the optimistic flip back and say what happened.
+    if (!result.success) {
+      setCertifications(previous);
+      setCertError(result.error ?? "Couldn't save that badge — try again.");
+    }
   };
 
   const handleCancollSave = async () => {
@@ -910,6 +923,9 @@ export default function PartnerProfile({
                 {(certSaving || cancollSaving) && (
                   <span className="text-[10px] text-gray-400">Saving…</span>
                 )}
+                {certError && !certSaving && (
+                  <span className="text-[10px] text-red-600" role="alert">{certError}</span>
+                )}
               </div>
 
               {editMode && (isOrgAdminForThisOrg || isAdmin) ? (
@@ -929,7 +945,7 @@ export default function PartnerProfile({
                             : "bg-white text-gray-500 border-gray-300 hover:border-gray-500"
                         }`}
                       >
-                        <img src={`/certifications/${cert.slug}.svg`} alt="" className="w-5 h-5 rounded-full" />
+                        <img src={`/certifications/${cert.filename ?? cert.slug + ".svg"}`} alt="" className="w-5 h-5 rounded-full" />
                         {cert.name}
                         {active && <span className="text-white/70">✓</span>}
                       </button>
@@ -972,11 +988,17 @@ export default function PartnerProfile({
                   )}
                 </div>
               ) : (
-                /* View mode */
+                /* View mode.
+                   showCancoll: the server already applied the reciprocal CANCOLL
+                   rule (lib/visibility/cancoll.ts) and stripped the name for
+                   anyone who doesn't qualify, so its presence in the array IS
+                   the permission. This used to re-decide it from viewerLevel,
+                   which asked "is a CSC member" rather than "is in the
+                   purchasing group". */
                 <CertificationBadges
                   certifications={certifications}
                   size="md"
-                  showCancoll={cancollMember && (viewerLevel === "member" || viewerLevel === "org_admin" || viewerLevel === "admin" || viewerLevel === "super_admin")}
+                  showCancoll={certifications.includes(CANCOLL_CERT.name)}
                   extraBadges={derivedBadges}
                 />
               )}

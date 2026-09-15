@@ -6,6 +6,7 @@ import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_ACCESS_ACTIVE_STATUSES } from "@/lib/
 import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { isVisibleTo } from "@/lib/contacts/visibility";
+import { parseOrgCategories } from "@/lib/publication/categories";
 
 /**
  * Export contacts for an org as CSV rows — exactly the contacts the caller can
@@ -376,6 +377,28 @@ export async function exportMemberBuyersCSV(): Promise<{
   }
   if (!partnerCategory) return { error: "No primary category set on your partner profile." };
 
+  // `primary_category` is a comma-joined selection of taxonomy terms, mixing
+  // departments and classes — "primary" is only the first element by
+  // convention. This used to compare the WHOLE string with `===` against a
+  // member's single category, so it matched only for partners carrying exactly
+  // one term: all 15 multi-category partners got "No members carry ..." and
+  // read it as a data gap rather than a parse bug.
+  //
+  // parseOrgCategories is the one reader for this column (lib/publication/
+  // categories.ts) — it applies the legacy ALIASES and infers a department from
+  // a class, so a partner who picked only "Audio & Video" still matches a store
+  // buying "Technology & Electronics". Do not hand-split this.
+  const parsedPartner = parseOrgCategories(partnerCategory);
+  const partnerTerms = new Set<string>([
+    ...parsedPartner.departments,
+    ...parsedPartner.classes,
+  ]);
+  if (partnerTerms.size === 0) {
+    return {
+      error: `Your profile's categories (${partnerCategory}) aren't in the current taxonomy, so they can't be matched to member buyers yet.`,
+    };
+  }
+
   // Fetch all active member orgs with procurement_info
   const { data: orgs, error: orgsError } = await db
     .from("organizations")
@@ -394,9 +417,10 @@ export async function exportMemberBuyersCSV(): Promise<{
   for (const org of (orgs ?? []) as any[]) {
     const pi = org.procurement_info as Record<string, unknown> | null;
     const buyers = Array.isArray(pi?.category_buyers) ? pi!.category_buyers as any[] : [];
-    const entry = buyers.find((b: any) => b.category === partnerCategory);
-    if (entry && Array.isArray(entry.contact_ids)) {
-      for (const id of entry.contact_ids) contactIdSet.add(String(id));
+    for (const entry of buyers.filter((b: any) => partnerTerms.has(String(b?.category)))) {
+      if (Array.isArray(entry.contact_ids)) {
+        for (const id of entry.contact_ids) contactIdSet.add(String(id));
+      }
     }
   }
 
@@ -426,10 +450,16 @@ export async function exportMemberBuyersCSV(): Promise<{
     return iso.slice(0, 3);
   };
 
-  // First pass: collect orgs that carry this category and identify those with no resolved buyer
-  type OrgEntry = { org: any; pi: Record<string, unknown>; entry: any; hasBuyer: boolean };
+  // First pass: collect every (member, matching category) pair, and note which
+  // of them have no resolved buyer.
+  //
+  // One row per PAIR, not per org. A store can name a different buyer for each
+  // category, so a partner carrying three of them would otherwise get whichever
+  // entry sorted first and silently lose the other two buyers — the same shape
+  // of omission as the string comparison this replaces.
+  type OrgEntry = { org: any; pi: Record<string, unknown>; entry: any; category: string; hasBuyer: boolean };
   const qualifying: OrgEntry[] = [];
-  const needsPrimaryContactOrgIds: string[] = [];
+  const needsPrimaryContactOrgIds = new Set<string>();
 
   for (const org of (orgs ?? []) as any[]) {
     const pi = org.procurement_info as Record<string, unknown> | null;
@@ -437,26 +467,29 @@ export async function exportMemberBuyersCSV(): Promise<{
     if (pi.show_categories === false) continue;
 
     const buyers = Array.isArray(pi.category_buyers) ? pi.category_buyers as any[] : [];
-    const entry = buyers.find((b: any) => b.category === partnerCategory);
-    if (!entry) continue; // doesn't carry this category
+    for (const entry of buyers) {
+      const category = String(entry?.category ?? "");
+      if (!partnerTerms.has(category)) continue; // store doesn't buy this category
 
-    const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
-    const hasBuyer = contactIds.some((id) => contactById.has(id));
+      const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
+      const hasBuyer = contactIds.some((id) => contactById.has(id));
 
-    qualifying.push({ org, pi, entry, hasBuyer });
-    if (!hasBuyer) needsPrimaryContactOrgIds.push(String(org.id));
+      qualifying.push({ org, pi, entry, category, hasBuyer });
+      if (!hasBuyer) needsPrimaryContactOrgIds.add(String(org.id));
+    }
   }
 
   // Fetch primary contacts for orgs that had no assigned buyer
   const primaryContactByOrgId = new Map<string, { name: string; roleTitle: string | null; email: string | null; phone: string | null }>();
-  if (needsPrimaryContactOrgIds.length > 0) {
+  if (needsPrimaryContactOrgIds.size > 0) {
+    const primaryOrgIds = Array.from(needsPrimaryContactOrgIds);
     const { data: primaryRows } = await db
       .from("contacts")
       .select("id, organization_id, name, role_title, work_email, email, work_phone_number, phone, hidden, directory_visibility")
-      .in("organization_id", needsPrimaryContactOrgIds)
+      .in("organization_id", primaryOrgIds)
       .eq("is_primary", true)
       .is("archived_at", null)
-      .limit(needsPrimaryContactOrgIds.length);
+      .limit(primaryOrgIds.length);
 
     for (const c of ((primaryRows ?? []) as any[]).filter((c) => isVisibleTo(c, "member"))) {
       const orgId = String(c.organization_id);
@@ -471,11 +504,14 @@ export async function exportMemberBuyersCSV(): Promise<{
     }
   }
 
+  // "Matching Category" is new: with a multi-category partner the buyer named
+  // in a row is the buyer FOR A PARTICULAR CATEGORY, and without the column the
+  // reader can't tell which — or why the same store appears twice.
   const rows: string[][] = [
-    ["Organization", "Province", "Institution Type", "Contact Type", "Buyer Name", "Buyer Role", "Buyer Email", "Buyer Phone", "Buying Window", "Vendor Preferences"],
+    ["Organization", "Province", "Institution Type", "Matching Category", "Contact Type", "Buyer Name", "Buyer Role", "Buyer Email", "Buyer Phone", "Buying Window", "Vendor Preferences"],
   ];
 
-  for (const { org, pi, entry, hasBuyer } of qualifying) {
+  for (const { org, pi, entry, category, hasBuyer } of qualifying) {
     // Resolve buyer contact
     const contactIds: string[] = Array.isArray(entry.contact_ids) ? entry.contact_ids.map(String) : [];
     let contactType = "Category Buyer";
@@ -522,6 +558,7 @@ export async function exportMemberBuyersCSV(): Promise<{
       org.name ?? "",
       org.province ?? "",
       instType,
+      category,
       contactType,
       buyerName,
       buyerRole,
@@ -532,10 +569,23 @@ export async function exportMemberBuyersCSV(): Promise<{
     ]);
   }
 
-  if (rows.length === 1) return { error: `No members carry ${partnerCategory} in their procurement profile yet.` };
+  // Report the TERMS that were actually matched on, not the raw column. The old
+  // message echoed the whole joined string, which made a parse bug look like a
+  // statement about the members' data.
+  if (rows.length === 1) {
+    return {
+      error: `No members have named a buyer for ${Array.from(partnerTerms).join(", ")} yet.`,
+    };
+  }
 
   const year = new Date().getFullYear();
-  const categorySlug = partnerCategory.toLowerCase().replace(/[^a-z0-9]+/g, "-");
+  // Name the file after the partner's lead department, not the whole joined
+  // selection — that produced filenames like
+  // `csc-technology-electronics-peripherals-accessories-audio-video-buyers-2026.csv`.
+  const categorySlug = (parsedPartner.departments[0] ?? partnerCategory)
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-|-$/g, "");
   const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
   return { csv, filename: `csc-${categorySlug}-buyers-${year}.csv` };
 }

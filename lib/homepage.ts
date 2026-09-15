@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getExhibitorStatusByOrg, type ExhibitorStatus } from "@/lib/conference/exhibitor-status";
 import type { TierIcon } from "@/lib/sponsorship/types";
 import { PUBLIC_LISTABLE_ORG_STATUSES } from "@/lib/membership/status";
+import { getViewerContext } from "@/lib/visibility/viewer";
+import { viewerMaySeeCancoll, gateCancoll } from "@/lib/visibility/cancoll";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -558,7 +560,43 @@ async function fetchMapOrgsWithBenchmarking(
     });
   }
 
-  const orgRecords = (orgResult.data ?? []).map((row) => normalizeMapOrg(row as Record<string, unknown>));
+  /**
+   * ⛔ Strip CANCOLL here too, not only on the org page.
+   *
+   * `gateCancoll` was applied in lib/visibility/data.ts — the getOrganizationForViewer
+   * path — which closed /org/[slug] and left THIS one open. Measured against a
+   * production build of that fix: /org/sharper-marketing went 1 → 0, and /partners
+   * stayed at 1, still shipping `"certifications":["CANCOLL","Buy Ontario"]` and
+   * `"isCancollMember":true` to an anonymous browser.
+   *
+   * ⚠️ The client render sites (MapExplore, DirectoryTable) already hide the BADGE,
+   * so nothing looked wrong on screen. The string was in the payload regardless,
+   * and `organizations.certifications` is publicly visible now — which is exactly
+   * the gap the server-side strip exists to close.
+   *
+   * ⚠️ Fails CLOSED. `getViewerContext` reads cookies and can throw outside a
+   * request (static generation), and the safe answer there is to strip: a public
+   * page rendered without a viewer must not be the one that leaks.
+   */
+  let maySeeCancoll = false;
+  try {
+    maySeeCancoll = viewerMaySeeCancoll(await getViewerContext());
+  } catch {
+    maySeeCancoll = false;
+  }
+  const orgRecords = (orgResult.data ?? [])
+    .map((row) => normalizeMapOrg(row as Record<string, unknown>))
+    .map((o) =>
+      maySeeCancoll
+        ? o
+        : {
+            ...o,
+            certifications: gateCancoll(o.certifications, false),
+            // ⛔ The boolean leaks the same fact as the string. Gating one and not
+            // the other just moves the disclosure to a different JSON key.
+            isCancollMember: false,
+          }
+    );
   return { orgRecords, benchByOrg };
 }
 
