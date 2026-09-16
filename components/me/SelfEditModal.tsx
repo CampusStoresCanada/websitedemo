@@ -120,14 +120,31 @@ function initProcurementState(contactId: string, info: ProcurementInfo | null): 
  */
 export const EDIT_CONFERENCE_HASH = "#edit-conference";
 
+/**
+ * The same one-click journey for procurement.
+ *
+ * Procurement is the thinnest data we hold — 14 of 79 member stores have filled
+ * in any of it — and it is also the most buried: three clicks deep behind a
+ * button whose label doesn't mention it. Asking 65 stores by email to "go add
+ * your procurement details" without a link that opens the tab is asking them to
+ * conduct a search. Same reasoning as the conference hash directly above.
+ */
+export const EDIT_PROCUREMENT_HASH = "#edit-procurement";
+
+const HASH_TABS: Record<string, "conference" | "procurement"> = {
+  [EDIT_CONFERENCE_HASH]: "conference",
+  [EDIT_PROCUREMENT_HASH]: "procurement",
+};
+
 export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfEditModalProps) {
   const [open, setOpen] = useState(false);
-  const [openToConference, setOpenToConference] = useState(false);
+  const [hashTab, setHashTab] = useState<"conference" | "procurement" | null>(null);
 
   useEffect(() => {
     const openFromHash = () => {
-      if (window.location.hash === EDIT_CONFERENCE_HASH) {
-        setOpenToConference(true);
+      const target = HASH_TABS[window.location.hash];
+      if (target) {
+        setHashTab(target);
         setOpen(true);
       }
     };
@@ -138,9 +155,9 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
 
   function closeAndClearHash() {
     setOpen(false);
-    setOpenToConference(false);
+    setHashTab(null);
     // Leave the address bar clean, or the same link cannot be used twice.
-    if (window.location.hash === EDIT_CONFERENCE_HASH) {
+    if (HASH_TABS[window.location.hash]) {
       window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search);
     }
   }
@@ -174,7 +191,7 @@ export default function SelfEditModal({ orgEditData: initialOrgEditData }: SelfE
       </button>
 
       {open && (
-        <SelfEditModalInner orgEditData={orgEditData} onClose={closeAndClearHash} onSaved={handleSaved} initialTab={openToConference ? "conference" : "details"} />
+        <SelfEditModalInner orgEditData={orgEditData} onClose={closeAndClearHash} onSaved={handleSaved} initialTab={hashTab ?? "details"} />
       )}
     </>
   );
@@ -187,7 +204,7 @@ function SelfEditModalInner({
   onSaved,
 }: {
   orgEditData: OrgEditData[];
-  initialTab?: "details" | "conference";
+  initialTab?: "details" | "procurement" | "conference";
   onClose: () => void;
   onSaved: (orgId: string, patch: { contact: ContactEditData; procurementInfo: ProcurementInfo | null }) => void;
 }) {

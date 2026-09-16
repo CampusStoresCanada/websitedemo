@@ -11,6 +11,9 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
+import { getProgramsConfig } from "@/lib/policy/engine";
+import { deriveGlobalPersona } from "./persona";
+import { STEPS_BY_PERSONA, type Persona } from "./steps";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 
 /**
@@ -22,6 +25,58 @@ import { STEP_SCHEDULE } from "./nudge-schedule";
  */
 const MAX_SENDS_PER_USER_PER_RUN = 1;
 
+/**
+ * Minimum quiet days between two nudges to the same person.
+ *
+ * The per-run cap above stops four emails landing in one morning, but on a
+ * daily cron it still permits one a day forever: a fresh journey has ~11
+ * scheduled steps whose sendAfterDays all fall inside the first three weeks, so
+ * they simply queue up and drain at one per day. That was tolerable when the
+ * only people enrolled had opted in by logging in. It is not tolerable for the
+ * 468 people who have never heard from us and are being enrolled cold — eleven
+ * consecutive days of mail from an unfamiliar sender is how a domain earns spam
+ * complaints, and this one is already carrying 42 hard bounces from August.
+ *
+ * Two days is the floor. It does not change the order or the content, only the
+ * pace: the arc still reads description → logo → hero → contacts, it just takes
+ * the time a person would actually give it.
+ */
+const MIN_DAYS_BETWEEN_SENDS_PER_USER = 2;
+
+/**
+ * How many people may be enrolled into a journey in one run.
+ *
+ * Enrolment is the moment someone's day-0 mail becomes due, so enrolling the
+ * whole backlog at once means sending it all at once: 567 people in a single
+ * 04:00 run, against a domain whose busiest recent day was about 110 and whose
+ * normal is 20–60. A tenfold spike of cold mail into .ca institutional
+ * mailboxes is how a sending domain gets filtered, and this one is already
+ * carrying 42 hard bounces backfilled in August.
+ *
+ * At 150 a run the backlog clears in four mornings, every one of them still
+ * ahead of the Town Hall, and the domain ramps instead of spiking. Once the
+ * backlog is gone this constant never binds again — steady-state enrolment is
+ * a handful of new accounts a week.
+ */
+const MAX_NEW_ENROLMENTS_PER_RUN = 150;
+
+/**
+ * Who gets enrolled first while the cap is biting.
+ *
+ * Org admins lead: they are the ones the Town Hall's own close asks to go and
+ * do something ("update your profile this week"), they are the only people who
+ * can act on the housekeeping half of the journey, and they are far fewer, so
+ * they clear in the first run. Member-role staff follow, and a store's admin
+ * having already been in for a couple of days is a better order than the
+ * reverse.
+ */
+const ENROLMENT_PRIORITY: Persona[] = [
+  "org_admin_member",
+  "org_admin_partner",
+  "member_member",
+  "member_partner",
+];
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for the DB rows we read
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,6 +85,8 @@ interface ProgressRow {
   id: string;
   user_id: string;
   step_key: string;
+  /** Already selected by the job's query; carried so the copy can vary by audience. */
+  persona: Persona | null;
   journey_started_at: string;
   sent_at: string | null;
   completed_at: string | null;
@@ -86,6 +143,34 @@ interface NudgeEmailOptions {
   orgProvince: string | null;
   stepKey: string;
   isReminder: boolean;
+  /**
+   * Who is reading. Most steps are shared by the store and vendor journeys and
+   * are written neutrally, but a few describe selling TO members and read as
+   * nonsense in a campus store's inbox — see `isSellingToMembers` below.
+   * Optional so the copy-preview harness can still render a step without
+   * naming an audience; absent behaves as the vendor copy, which is what every
+   * one of these steps said before this parameter existed.
+   */
+  persona?: Persona | null;
+}
+
+/**
+ * Is this reader a vendor selling into the network, rather than a campus store?
+ *
+ * Only two scheduled steps need to ask. `profile_featured_product` and
+ * `profile_links_docs` sit in BOTH org-admin journeys but were written entirely
+ * in a vendor's voice — "whatever you'd point at if someone walked up to your
+ * booth", "Members are looking for your range". Because `buildNudgeEmail`
+ * switched on `step_key` alone, a campus store admin got the vendor's email
+ * verbatim: University of Calgary received "What's the one thing you want
+ * members to see?" on 2026-09-11, day 7 of their journey.
+ *
+ * The fix is per-audience copy rather than dropping the steps from the store
+ * journey — a step that silently sends nothing is the exact failure recorded in
+ * nudge-schedule.ts, where four directory-critical steps sat unsent for months.
+ */
+function isSellingToMembers(persona: Persona | null | undefined): boolean {
+  return persona !== "org_admin_member" && persona !== "member_member";
 }
 
 /**
@@ -101,6 +186,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
   const base = appUrl();
   const orgUrl = `${base}/org/${orgSlug}`;
   const reminder = isReminder ? " (just a gentle nudge)" : "";
+  const sellsToMembers = isSellingToMembers(opts.persona);
 
   switch (stepKey) {
     case "profile_description":
@@ -201,6 +287,20 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
 
     case "profile_featured_product":
+      if (!sellsToMembers) {
+        return {
+          subject: isReminder
+            ? `Still nothing featured for ${orgName}`
+            : `What is ${orgName} known for?`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Pick one thing to lead with.",
+            body: `Your page has a Featured Product slot, and ${orgName}'s is empty. It's the first thing other stores and vendor partners see when they land on your page — your own branded line, something you make on campus, whatever you'd want the network to notice.<br><br>One item. A name and a sentence about it is plenty.`,
+            ctaText: "Feature a product",
+            ctaUrl: orgUrl,
+          }),
+        };
+      }
       return {
         subject: isReminder
           ? `Still nothing featured for ${orgName}`
@@ -215,6 +315,21 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
 
     case "profile_links_docs":
+      if (!sellsToMembers) {
+        return {
+          subject: isReminder
+            ? `${orgName}'s links — still missing`
+            : `Where should people go next from ${orgName}'s page?`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Point people to your own channels.",
+            body: `${orgName} doesn't have a store site or any documents linked yet. Vendor partners and other stores looking you up can see who you are, but not where to go next — your shop, your course-materials page, whatever you'd want them to open.<br><br>A link is enough. It doesn't have to be hosted here.`,
+            ctaText: "Add my links",
+            ctaUrl: orgUrl,
+            footnote: isReminder ? "A link is fine — no upload needed." : undefined,
+          }),
+        };
+      }
       return {
         subject: isReminder
           ? `${orgName}'s catalogue — still missing`
@@ -256,26 +371,34 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         }),
       };
 
+    // These two are the payoff steps, and until 2026-09-15 they sat at day 14 —
+    // behind every housekeeping chore, arriving after most readers had stopped
+    // opening. Now days 2 and 4. Written to send somebody looking for a specific
+    // person rather than to announce that a directory exists.
     case "network_members":
       return {
-        subject: `Meet the rest of the network`,
+        subject: sellsToMembers ? `The stores you should already know` : `Who else is doing your job`,
         html: nudgeHtml({
           firstName,
-          headline: "You've got peers across the country.",
-          body: `The Members directory has every campus store that's part of CSC. ${opts.orgProvince ? `${opts.orgProvince} alone has a handful of stores you'd probably recognize.` : "There are stores from coast to coast you'd probably recognize."} Worth a look — there are people in there you'll want to know.`,
-          ctaText: "See the Members directory",
+          headline: sellsToMembers ? "Fifty-two buyers, filterable." : "Somebody here has your job.",
+          body: sellsToMembers
+            ? `Every campus store on CSC, and you can narrow them the way you'd actually qualify them — by province, by size, by what they run, by what they're mandated to source.<br><br>${opts.orgProvince ? `${opts.orgProvince} alone has several you should know by name.` : "There are stores in every province."} They maintain these pages themselves, which is why this beats any list you could buy.`
+            : `Every campus store that's part of CSC, filtered how you'd want: size, province, POS, mandate, services.<br><br>${opts.orgProvince ? `${opts.orgProvince} alone has a handful you'd recognise.` : "Coast to coast, and you'd recognise plenty of them."} Find two or three whose store is genuinely like ${orgName} — that's the whole point. The comparison only means something when you picked who you're compared to.`,
+          ctaText: sellsToMembers ? "Browse the members" : "Find stores like yours",
           ctaUrl: `${base}/members`,
         }),
       };
 
     case "network_partners":
       return {
-        subject: `The vendors on CSC can see your profile`,
+        subject: sellsToMembers ? `Who else is in your category` : `Who you can actually buy from`,
         html: nudgeHtml({
           firstName,
-          headline: "This is who you're connected to.",
-          body: `The Partners directory is all the vendors and suppliers active on CSC. They can already see ${orgName}'s page. It's worth knowing who they are — and having a look at your own page through their eyes.`,
-          ctaText: "Browse Partners",
+          headline: sellsToMembers ? "The rest of the floor." : "Suppliers, filtered by what you need.",
+          body: sellsToMembers
+            ? `Every vendor and supplier active on CSC — including, usefully, the ones members put next to you when they're comparing. Worth knowing who's in your category and how they've described themselves.<br><br>Your own page is in there too. It's worth looking at it the way a member would.`
+            : `Every vendor and supplier on CSC, and you can filter them by category, by province, by the certifications you're required to ask for.<br><br>They can already see ${orgName}'s page — this is the other direction. Nobody buys their way up this list; what moves a partner is being chosen, being met, being recommended by someone like you.`,
+          ctaText: "Browse partners",
           ctaUrl: `${base}/partners`,
         }),
       };
@@ -317,6 +440,145 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           body: `The annual benchmarking survey is open. The more stores that participate, the more useful the data is for everyone — including you. ${isReminder ? "It's still open if you haven't had a chance yet." : "It doesn't take long, and the results are worth having."}`,
           ctaText: "Start the survey",
           ctaUrl: `${base}/benchmarking`,
+        }),
+      };
+
+    // ── The Town Hall set ────────────────────────────────────────────────────
+    // Seven step keys that have sat in the persona lists since they were
+    // written with no copy and no schedule entry, so they have never been sent
+    // to anyone. They are also, not coincidentally, the steps that differentiate
+    // the four personas from each other: strip them out and what remains is the
+    // profile-completion arc, which is why every journey read partner-shaped.
+    // Authored 2026-09-15 for the Sept 23 Town Hall lead-up.
+
+    case "toolkit_tour": {
+      // The door, and the only job it has is to send somebody looking for a
+      // person. Not a feature tour: the tools are worth nothing to a reader who
+      // has not yet met anyone through them, and "there's nothing for you to do
+      // here" — an earlier draft of the member-role copy — reads as "this isn't
+      // for you". Housekeeping comes at day 10+, once there is a reason to care.
+      const bodyByPersona: Record<string, string> = {
+        org_admin_member: `Fifty-two campus stores are in here, across ten provinces. You can go through them by size, by province, by what POS they run, by whether they're mandated the way you are — and find the two or three people whose job is genuinely the same as yours.<br><br>That's the part worth your morning. There's housekeeping on your page too, and it can wait; it's only worth doing once you've seen what it feeds.`,
+        org_admin_partner: `Fifty-two campus stores are in here — what they run, what they carry, who does the buying, which of them are actively looking. Go and find the ones you should already know.<br><br>Your own listing needs a look at some point too, and we'll come back to it. It matters because of who's on the other side of it, not for its own sake.`,
+        member_member: `Go and find your people. Fifty-two campus stores, ten provinces, and you can filter them down to the ones that are actually like yours — same size, same POS, same mandate, same headache you had last week.<br><br>Somebody in there has already solved the thing you're stuck on. That's the entire reason this exists.`,
+        member_partner: `Go and find your people. Fifty-two campus stores — who they are, what they carry, who does the buying, which of them have open RFPs right now.<br><br>It isn't a lead list. It's maintained by the stores themselves, which is why it's worth more than one.`,
+      };
+      const body = bodyByPersona[opts.persona ?? ""] ?? bodyByPersona.member_member;
+      return {
+        subject: isReminder ? `Still worth a look: who else is on here` : `Go find your people`,
+        html: nudgeHtml({
+          firstName,
+          headline: "You already have an account.",
+          body: `${body}<br><br>We built this, loaded everyone in, and never actually told you. That's on us, and this is the fix.`,
+          // Both sides land on the member directory: for a store it's peers, for
+          // a vendor it's the market. Same page, different reason to open it.
+          ctaText: sellsToMembers ? "Browse the members" : "Find stores like yours",
+          ctaUrl: `${base}/members`,
+          footnote: `Never signed in? About twenty seconds: go to ${base}/forgot-password, enter this address, and you'll get a six-digit code. No link to lose.`,
+        }),
+      };
+    }
+
+    case "view_org_page":
+      // Member-role only. The in-app callout for this step is about the Toolkit
+      // — the + button that follows you across every page on the network.
+      return {
+        subject: sellsToMembers ? `This is your company on the network` : `This site works a little differently`,
+        html: nudgeHtml({
+          firstName,
+          headline: sellsToMembers ? "This is what campus stores see." : "Everything lives in one button.",
+          body: sellsToMembers
+            ? `${orgName}'s page is what a campus store sees when they look you up — who you are, what you carry, who to call.<br><br>The + button at the bottom right is the Toolkit. It follows you onto every page on the network and is how you do anything: save something, ask about it, compare it, get in touch.`
+            : `Whatever you need is in the Toolkit — the + button at the bottom right. It follows you everywhere on the network rather than living on one screen, so the same actions are there whether you're looking at a supplier, a peer institution or an event.<br><br>Worth two minutes of poking at it. Nothing in there commits you to anything.`,
+          ctaText: sellsToMembers ? "See our page" : "Show me",
+          ctaUrl: orgUrl,
+        }),
+      };
+
+    case "public_contact_email":
+      // Org admins only. Deliberately blunt: this one is irreversible in print.
+      return {
+        subject: isReminder
+          ? `${orgName}'s public email — still unset`
+          : `Set ${orgName}'s public email`,
+        html: nudgeHtml({
+          firstName,
+          headline: "This one goes on paper.",
+          body: `${orgName} needs a public contact address — it's printed in the directory that ships to every member institution, and it's readable by anyone.<br><br>Use a shared inbox your team watches, never a personal address. Whoever owns it can't take it back once it's on paper, and people leave.`,
+          ctaText: "Set the public email",
+          ctaUrl: orgUrl,
+          footnote: isReminder ? "The directory goes to press this autumn — after that it's fixed for a year." : undefined,
+        }),
+      };
+
+    case "procurement":
+      // Two genuinely different asks. The admin sets the categories the store
+      // carries and assigns a buyer to each; each buyer then maintains their own
+      // assignments from /me. Same step key, opposite ends of the same job.
+      if (sellsToMembers) return null; // member-program personas only
+      return opts.persona === "org_admin_member"
+        ? {
+            subject: isReminder
+              ? `${orgName}'s procurement details — still empty`
+              : `Which categories, and who buys them`,
+            html: nudgeHtml({
+              firstName,
+              headline: "The thinnest data we hold.",
+              body: `Your org page has a Procurement section, and 14 of 79 member stores have filled in any of it. Everyone else is matched to partners on province and category alone, which is as coarse as it sounds.<br><br>Two parts: set which categories ${orgName} carries, then assign a buyer to each one. Those buyers can keep their own assignments current from their own account, so it isn't yours to maintain alone.<br><br>Five fields in total — categories and buyers, certifications you require, provinces you source from, services you run, and anything that doesn't fit. You control who sees each one.`,
+              ctaText: "Set up procurement",
+              ctaUrl: orgUrl,
+              footnote: "A declaration like this outweighs a click several times over, and February's curated meetings are matched on it.",
+            }),
+          }
+        : {
+            subject: isReminder
+              ? `Your buying categories — still unconfirmed`
+              : `You're the buyer for something`,
+            html: nudgeHtml({
+              firstName,
+              headline: "Nobody knows your categories better than you.",
+              body: `${orgName}'s admin can assign categories to the people who actually buy them. If that's you, you can manage your own assignments — nobody else has to do it on your behalf.<br><br>This is the most valuable thing you can tell the site about yourself, and it's also not permanent. What you buy this year isn't what you'll buy in three, and the weight we give it fades on its own. You're never held to an old answer.`,
+              ctaText: "Manage my categories",
+              ctaUrl: `${base}/me#edit-procurement`,
+            }),
+          };
+
+    case "my_suppliers":
+      // Downstream of procurement — renders empty without categories, which is
+      // why its schedule entry sits well after the procurement step's.
+      return {
+        subject: isReminder ? `Your supplier list is still waiting` : `The suppliers who actually serve stores like yours`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Matched to what you buy.",
+          body: `Once your categories are set, the site builds you a supplier list — vendors matched to what you actually buy rather than whoever markets hardest.<br><br>There's no SEO here, and a partner can't buy their way up your list. What moves them is what the community does: who gets picked when there's a real choice, who gets vouched for, who turns up.`,
+          ctaText: "See my suppliers",
+          ctaUrl: `${orgUrl}#my-suppliers`,
+          footnote: isReminder ? "If it looks thin, it's usually because your categories aren't set yet." : undefined,
+        }),
+      };
+
+    case "my_market":
+      return {
+        subject: isReminder ? `Your market, still worth a look` : `The member stores matched to what you sell`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Who's actually on the other side.",
+          body: `The member stores matched to ${orgName}'s categories — who they are, what they carry, which of them buy what you sell.<br><br>It isn't a lead list. It's maintained by the stores themselves, and what surfaces you to them is what people do: being chosen when there was a real choice, being met, being recommended. An opened email counts for a fraction of a genuine pick, and that's deliberate.`,
+          ctaText: "See my market",
+          ctaUrl: `${orgUrl}#your-market`,
+        }),
+      };
+
+    case "opening_rfp":
+      return {
+        subject: isReminder ? `Running an RFP this term?` : `When you're ready to buy`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Say what you need out loud.",
+          body: `When ${orgName} is running an RFP, you can post it here and the right vendors are notified automatically — matched off your categories rather than a distribution list you have to maintain.<br><br>It's the most direct version of the whole idea: you say what you need, and the people who can actually serve it find out.`,
+          ctaText: "See my RFPs",
+          ctaUrl: orgUrl,
         }),
       };
 
@@ -489,6 +751,167 @@ async function autoCompleteIfDone(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Enrolment
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Give every entitled member of a real org a journey, whether or not they have ever logged in.
+ *
+ * `user_onboarding_progress` rows were previously only ever written by
+ * `initJourney()`, which calls `requireAuthenticated()` — so a row existed only
+ * after that person signed in. This job then started from those rows, which made
+ * "has logged in" an unstated precondition for receiving any nudge at all. The
+ * effect was self-sealing: the nudges are the thing that brings a partner in, and
+ * the people who most needed them were the only ones who could never get one. As
+ * of 2026-09-11 that was 41 of 89 Vendor Partner org admins — Bookware among
+ * them, a paid partner who had heard nothing but a renewal notice.
+ *
+ * So enrolment resolves from `user_organizations` (a provisioned account, which
+ * every invited admin has) and the progress table goes back to being what its
+ * name says: a record of what we have sent, not a gate on who may be sent to.
+ *
+ * Idempotent by the same `(user_id, persona, step_key)` conflict key
+ * `initJourney()` upserts on, so a person who signs up in the app and a person
+ * enrolled here converge on one journey rather than two.
+ *
+ * `journey_started_at` is now, not the account's creation date: every step is
+ * scheduled as an offset from it, so backdating would make the whole arc
+ * instantly overdue and drip a months-old backlog one mail per day
+ * (MAX_SENDS_PER_USER_PER_RUN) at people who have never heard from us. Starting
+ * today gives them the arc as written — first nudge two days out.
+ */
+async function ensureJourneys(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  db: any,
+  result: NudgeJobResult,
+): Promise<void> {
+  const admin = createAdminClient();
+
+  // Two plain queries rather than an embed: user_organizations has no FK
+  // PostgREST can auto-detect to organizations here, the same reason
+  // lib/comms/audience.ts's resolveOrgAdmins splits its lookup in two.
+  // Both roles, not just org_admin: the four personas in steps.ts exist because
+  // a store employee and a vendor employee need to hear different things from
+  // each other and from their admins. Enrolling only admins would leave the
+  // largest two audiences (member_member, member_partner) exactly as invisible
+  // as the journey gate left everyone.
+  const [{ data: memberships, error: mErr }, programs] = await Promise.all([
+    admin
+      .from("user_organizations")
+      .select("user_id, organization_id, role")
+      .eq("status", "active"),
+    getProgramsConfig(),
+  ]);
+
+  if (mErr) {
+    result.errors.push(`enrolment: load org admins: ${mErr.message}`);
+    return;
+  }
+  const rows = (memberships ?? []) as Array<{ user_id: string; organization_id: string; role: string }>;
+  if (rows.length === 0) return;
+
+  const { data: orgs, error: oErr } = await admin
+    .from("organizations")
+    .select("id, type, is_test, archived_at, membership_status")
+    .in("id", [...new Set(rows.map((r) => r.organization_id))]);
+
+  if (oErr) {
+    result.errors.push(`enrolment: load orgs: ${oErr.message}`);
+    return;
+  }
+
+  type OrgFacts = {
+    id: string; type: string | null; is_test: boolean | null;
+    archived_at: string | null; membership_status: string | null;
+  };
+  const orgById = new Map<string, OrgFacts>();
+  for (const o of (orgs ?? []) as OrgFacts[]) orgById.set(o.id, o);
+
+  /**
+   * Entitlement, not just existence. `archived_at` only says the record was
+   * filed away; `membership_status` is what says whether these people are
+   * still ours to write to — the trap behind `active_organizations`, whose
+   * name promises the first and delivers the second.
+   *
+   * `grace` counts: the renewal is outstanding but access has not been cut,
+   * and an org mid-renewal is exactly who a "come back and use this" mail is
+   * for. `canceled` does not — 109 people sit under canceled orgs today, and
+   * inviting them to sign in would be inviting them into something they no
+   * longer have.
+   */
+  const ENTITLED = new Set(["active", "reactivated", "grace"]);
+
+  // A test org must never receive real mail, and an archived one is gone —
+  // same two exclusions resolveOrgAdmins applies before any campaign send.
+  const factsByUser = new Map<string, Array<{ orgType: string | null | undefined; role: string }>>();
+  for (const row of rows) {
+    const org = orgById.get(row.organization_id);
+    if (!org || org.is_test || org.archived_at) continue;
+    if (!ENTITLED.has(org.membership_status ?? "")) continue;
+    const arr = factsByUser.get(row.user_id) ?? [];
+    arr.push({ orgType: org.type, role: row.role });
+    factsByUser.set(row.user_id, arr);
+  }
+
+  // One persona per person, resolved by the same precedence initJourney() uses,
+  // so somebody who admins both a store and a vendor gets one journey and not two.
+  const personaByUser = new Map<string, Persona>();
+  for (const [userId, facts] of factsByUser) {
+    const persona = deriveGlobalPersona(facts, programs);
+    if (persona) personaByUser.set(userId, persona);
+  }
+  if (personaByUser.size === 0) return;
+
+  // Only people with no journey at all are candidates — everyone else is either
+  // mid-arc or finished, and re-upserting their rows every morning would be a
+  // few thousand writes a day to accomplish nothing.
+  const { data: existing, error: eErr } = await admin
+    .from("user_onboarding_progress")
+    .select("user_id")
+    .in("user_id", [...personaByUser.keys()]);
+
+  if (eErr) {
+    result.errors.push(`enrolment: load existing journeys: ${eErr.message}`);
+    return;
+  }
+  const enrolled = new Set((existing ?? []).map((r) => (r as { user_id: string }).user_id));
+
+  const candidates = [...personaByUser.entries()]
+    .filter(([userId]) => !enrolled.has(userId))
+    .sort(
+      ([, a], [, b]) => ENROLMENT_PRIORITY.indexOf(a) - ENROLMENT_PRIORITY.indexOf(b)
+    );
+
+  if (candidates.length === 0) return;
+
+  const batch = candidates.slice(0, MAX_NEW_ENROLMENTS_PER_RUN);
+  const now = new Date().toISOString();
+  const pending: Array<{ user_id: string; persona: Persona; step_key: string; journey_started_at: string }> = [];
+  for (const [userId, persona] of batch) {
+    for (const stepKey of STEPS_BY_PERSONA[persona]) {
+      pending.push({ user_id: userId, persona, step_key: stepKey, journey_started_at: now });
+    }
+  }
+
+  if (pending.length === 0) return;
+
+  const { error: upsertErr } = await db
+    .from("user_onboarding_progress")
+    .upsert(pending, { onConflict: "user_id,persona,step_key", ignoreDuplicates: true });
+
+  if (upsertErr) {
+    result.errors.push(`enrolment: upsert journeys: ${upsertErr.message}`);
+    return;
+  }
+
+  const remaining = candidates.length - batch.length;
+  result.log.push(
+    `enrolment: ${batch.length} enrolled (${pending.length} step rows)` +
+      (remaining > 0 ? `, ${remaining} waiting for a later run` : "")
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Main job
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -511,6 +934,11 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
     isBenchmarkingOpen(createAdminClient()),
   ]);
   result.log.push(`conditionals: conference=${conferenceActive}, benchmarking=${benchmarkingOpen}`);
+
+  // ── 1b. Enrol every org admin who doesn't have a journey yet ──────────────
+  // Runs before the fetch below so a first-time enrollee is picked up by the
+  // same pass, rather than waiting a day for the next one.
+  await ensureJourneys(db, result);
 
   // ── 2. Find all pending progress rows across all personas ────────────────
   const { data: pendingRows, error: fetchError } = await db
@@ -542,6 +970,25 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
 
   // ── 4. Fetch user context for all users in one pass ───────────────────────
   const userIds = Array.from(byUser.keys());
+
+  // When did each person last hear from this job at all? Read across ALL their
+  // rows, not just the pending ones above: a step that was sent and has since
+  // been auto-completed still occupied their inbox, and pacing is about the
+  // inbox rather than about the journey's state.
+  const lastTouchByUser = new Map<string, string>();
+  {
+    const { data: touches } = await createAdminClient()
+      .from("user_onboarding_progress")
+      .select("user_id, sent_at, last_reminder_sent_at")
+      .in("user_id", userIds);
+    for (const t of (touches ?? []) as Array<{ user_id: string; sent_at: string | null; last_reminder_sent_at: string | null }>) {
+      for (const stamp of [t.sent_at, t.last_reminder_sent_at]) {
+        if (!stamp) continue;
+        const current = lastTouchByUser.get(t.user_id);
+        if (!current || stamp > current) lastTouchByUser.set(t.user_id, stamp);
+      }
+    }
+  }
 
   // Auth emails
   const emailById = new Map(Object.entries(await lookupUserEmailsByIds(createAdminClient(), userIds)));
@@ -718,6 +1165,16 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         continue;
       }
 
+      // Quiet period since their last nudge — same reasoning as the cap, across
+      // runs rather than within one. Placed after auto-complete for the same
+      // reason: a paced user's data-satisfied steps should still close.
+      const lastTouch = lastTouchByUser.get(userId);
+      if (lastTouch && daysSince(lastTouch) < MIN_DAYS_BETWEEN_SENDS_PER_USER) {
+        result.skipped++;
+        result.log.push(`paced ${ctx.email} / ${row.step_key}: nudged ${daysSince(lastTouch).toFixed(1)}d ago`);
+        continue;
+      }
+
       // ── Build the email ──
       const emailContent = buildNudgeEmail({
         firstName: ctx.firstName,
@@ -726,6 +1183,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         orgProvince: ctx.orgProvince,
         stepKey: row.step_key,
         isReminder: shouldSendReminder,
+        persona: row.persona,
       });
 
       if (!emailContent) {
