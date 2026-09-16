@@ -12,6 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
 import { STEP_SCHEDULE } from "./nudge-schedule";
+import type { Persona } from "./steps";
 
 /**
  * Most one person hears from us in a single run. Journeys go back to 2026-05-26,
@@ -25,10 +26,16 @@ const MAX_SENDS_PER_USER_PER_RUN = 1;
 /**
  * Steps whose backing field exists only on a Vendor Partner page.
  *
- * `company_description`, `highlight_product_name`, `catalogue_url` and
- * `partner_links` are rendered and edited by PartnerProfile.tsx (and
- * PartnerLinksSection, which only PartnerProfile mounts). MemberProfile.tsx
- * carries none of them. They sit in ORG_ADMIN_MEMBER_STEPS anyway, so a campus
+ * `company_description`, `catalogue_url` and `partner_links` are rendered and
+ * edited by PartnerProfile.tsx (and PartnerLinksSection, which only
+ * PartnerProfile mounts). MemberProfile.tsx carries none of them.
+ *
+ * `profile_featured_product` was in this set for a day and should not have been.
+ * A campus store HAS a featured product — it is an image, `product_overlay_url`,
+ * anchored on the member page under this very step key — and 73 of 79 have
+ * already set one. The step was never unreachable; `autoCompleteIfDone` was
+ * reading the vendor column, so stores who had done it were told they hadn't.
+ * Fixed at the check rather than by silencing the mail. They sit in ORG_ADMIN_MEMBER_STEPS anyway, so a campus
  * store admin is mailed about a field that is not on their page, sent to their
  * org page to look for it, and then — because autoCompleteIfDone can never
  * observe a value that has no input — mailed a reminder about it.
@@ -48,7 +55,6 @@ const MAX_SENDS_PER_USER_PER_RUN = 1;
  */
 const PARTNER_PAGE_FIELD_STEPS = new Set([
   "profile_description",
-  "profile_featured_product",
   "profile_links_docs",
 ]);
 
@@ -63,6 +69,8 @@ interface ProgressRow {
   id: string;
   user_id: string;
   step_key: string;
+  /** Already in the SELECT below; carried so a step can address the right side. */
+  persona: Persona | null;
   journey_started_at: string;
   sent_at: string | null;
   completed_at: string | null;
@@ -121,6 +129,20 @@ interface NudgeEmailOptions {
   orgProvince: string | null;
   stepKey: string;
   isReminder: boolean;
+  /** Absent behaves as the vendor wording — what every step said before this. */
+  persona?: Persona | null;
+}
+
+/**
+ * Is the reader on the vendor side of the network?
+ *
+ * Needed by `profile_featured_product`, where the two programs keep the same
+ * idea in different columns: a partner names a product, a store shows one.
+ * Same distinction the org-type gate above makes, from the persona rather than
+ * the org row, because the copy is chosen before the org is in hand.
+ */
+function isVendorProgram(persona: Persona | null | undefined): boolean {
+  return persona === "org_admin_partner" || persona === "member_partner";
 }
 
 /**
@@ -236,6 +258,20 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
 
     case "profile_featured_product":
+      if (!isVendorProgram(opts.persona)) {
+        return {
+          subject: isReminder
+            ? `Still nothing on show for ${orgName}`
+            : `What would you put in the window?`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Show the network something you're proud of.",
+            body: `${orgName}'s page has a space for one product, front and centre over your hero image — and yours is empty.<br><br>It isn't a sales pitch. It's the thing you'd point at if another store walked in: your own branded line, something that only works on your campus, the item people come back for. Whatever best reflects the store.<br><br>One image is all it takes.`,
+            ctaText: "Put something on show",
+            ctaUrl: orgUrl,
+          }),
+        };
+      }
       return {
         subject: isReminder
           ? `Still nothing featured for ${orgName}`
@@ -610,13 +646,13 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, catalogue_url, partner_links, banner_url")
+    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url")
     .in("id", orgIds);
 
   type OrgRow = {
     id: string; name: string; slug: string; province: string | null; type: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
-    highlight_product_name: string | null;
+    highlight_product_name: string | null; product_overlay_url: string | null;
     catalogue_url: string | null; partner_links: unknown; banner_url: string | null;
   };
   const orgById = new Map<string, OrgRow>();
@@ -663,7 +699,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       hasHero: Boolean(org.hero_image_url),
       hasContacts: orgHasContacts.get(orgId) ?? false,
       hasContactPhotos: orgHasPhotos.get(orgId) ?? false,
-      hasFeaturedProduct: Boolean(org.highlight_product_name?.trim()),
+      // Two columns, one idea. Partners name a product (`highlight_product_name`,
+      // text, on PartnerProfile); stores show one (`product_overlay_url`, an
+      // image over the hero, on MemberProfile). Reading only the vendor column
+      // made this step permanently incomplete for 73 stores who had done it.
+      hasFeaturedProduct:
+        org.type === PARTNER_ORG_TYPE
+          ? Boolean(org.highlight_product_name?.trim())
+          : Boolean(org.product_overlay_url),
       hasCatalogueOrLinks:
         Boolean(org.catalogue_url?.trim()) ||
         (Array.isArray(org.partner_links) && org.partner_links.length > 0),
@@ -770,6 +813,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         orgProvince: ctx.orgProvince,
         stepKey: row.step_key,
         isReminder: shouldSendReminder,
+        persona: row.persona,
       });
 
       if (!emailContent) {
