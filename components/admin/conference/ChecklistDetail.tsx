@@ -317,7 +317,16 @@ function ChecklistMetaForm({
 }) {
   const [name, setName] = useState(checklist.name);
   const [description, setDescription] = useState(checklist.description ?? "");
-  const [scopeEntityId, setScopeEntityId] = useState(checklist.scope_entity_id ?? "");
+  /**
+   * One control, two kinds of answer. A value of `kind:booth` means "anyone
+   * holding a booth"; a bare uuid means that one entity. They are the same
+   * question at different grains, so splitting them into two selects would
+   * invite setting both and having to say which wins.
+   */
+  const storedKind = (checklist as { scope_entity_kind?: string | null }).scope_entity_kind ?? null;
+  const [scopeValue, setScopeValue] = useState(
+    storedKind ? `kind:${storedKind}` : (checklist.scope_entity_id ?? "")
+  );
   const [deadlineAt, setDeadlineAt] = useState(checklist.deadline_at.slice(0, 10));
   const [active, setActive] = useState(checklist.active);
   const [saving, setSaving] = useState(false);
@@ -335,7 +344,8 @@ function ChecklistMetaForm({
       id: checklist.id,
       name,
       description: description || null,
-      scopeEntityId: scopeEntityId || null,
+      scopeEntityId: scopeValue.startsWith("kind:") ? null : scopeValue || null,
+      scopeEntityKind: scopeValue.startsWith("kind:") ? scopeValue.slice(5) : null,
       deadlineAt: new Date(`${deadlineAt}T00:00:00`).toISOString(),
       active,
     });
@@ -364,10 +374,13 @@ function ChecklistMetaForm({
       <div className="grid grid-cols-2 gap-3 items-end">
         <div>
           <label className="block text-xs font-medium text-gray-700 mb-1">Scope</label>
-          <select value={scopeEntityId} onChange={(e) => setScopeEntityId(e.target.value)} className={inputClass}>
+          <select value={scopeValue} onChange={(e) => setScopeValue(e.target.value)} className={inputClass}>
             <option value="">All registered orgs</option>
             {Object.entries(entitiesByKind).map(([kind, items]) => (
               <optgroup key={kind} label={kind}>
+                {/* The whole class first — "any booth" is what a booth-services
+                    checklist means, and it is otherwise unsayable here. */}
+                <option value={`kind:${kind}`}>Anyone holding a {kind}</option>
                 {items.map((item) => (
                   <option key={item.id} value={item.id}>
                     {item.name}

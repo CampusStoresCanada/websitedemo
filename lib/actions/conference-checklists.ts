@@ -16,6 +16,13 @@ export type ChecklistInput = {
   description: string | null;
   scopeEntityId: string | null;
   /**
+   * Scope to a KIND of holding — "whoever has a booth" — rather than one
+   * particular entity. Booths are 60 separately numbered entities, so
+   * scopeEntityId could never express the Exhibitor checklist's real audience.
+   * Three-state like publicationId: `undefined` leaves it alone.
+   */
+  scopeEntityKind?: string | null;
+  /**
    * Target everyone listed in a publication instead of everyone who bought
    * something at the conference. Mutually exclusive with scopeEntityId — one
    * says "orgs holding this item", the other says "orgs printed in this book",
@@ -43,6 +50,7 @@ export async function saveChecklist(
   // silently wipe it on an unrelated edit — the Directory Listing checklist
   // would quietly revert from 123 organisations to the 30 who bought something.
   const managesPublication = input.publicationId !== undefined;
+  const managesEntityKind = input.scopeEntityKind !== undefined;
   const row = {
     conference_id: conferenceId,
     name: input.name.trim(),
@@ -50,6 +58,9 @@ export async function saveChecklist(
     // Publication scope wins and clears the entity scope: a checklist cannot
     // sensibly be "orgs holding booth 12" AND "everyone in the directory".
     scope_entity_id: input.publicationId ? null : input.scopeEntityId,
+    ...(managesEntityKind
+      ? { scope_entity_kind: input.publicationId ? null : input.scopeEntityKind }
+      : {}),
     ...(managesPublication ? { publication_id: input.publicationId } : {}),
     deadline_at: input.deadlineAt,
     active: input.active,

@@ -125,9 +125,24 @@ interface DueOrg {
  * A directory is a network artifact even when it ships inside a conference box.
  * Scoping the loop to buyers meant the loop could never maintain the book.
  */
-async function resolveScopedOrgs(
+/**
+ * The organisations a checklist is responsible for.
+ *
+ * Exported because the org page has to ask the same question. It used to
+ * answer it by not asking: `loadOrgTasks` rendered every active checklist to
+ * every org, so member stores were shown "Order power and AV from Encore" for
+ * a booth they do not have. Two surfaces, two different wrong answers — the
+ * fix is that there is only one place the question is answered.
+ */
+export async function resolveScopedOrgs(
   db: AdminClient,
-  checklist: { id: string; conference_id: string; scope_entity_id: string | null; publication_id?: string | null }
+  checklist: {
+    id: string;
+    conference_id: string;
+    scope_entity_id: string | null;
+    scope_entity_kind?: string | null;
+    publication_id?: string | null;
+  }
 ): Promise<string[]> {
   if (checklist.publication_id) {
     const { loadPublication } = await import("@/lib/publication/store");
@@ -154,6 +169,24 @@ async function resolveScopedOrgs(
     .not("organization_id", "is", null);
   if (checklist.scope_entity_id) {
     orgQuery = orgQuery.eq("entity_id", checklist.scope_entity_id);
+  }
+  /**
+   * A KIND of thing held, not a particular one — "whoever has a booth", which
+   * scope_entity_id cannot say because the booths are 60 separate entities.
+   *
+   * Resolved as two queries rather than an embedded join: an embed here reads
+   * as a seat/entity read to anyone skimming it, and a kind that matches no
+   * entity must return NOBODY rather than silently dropping the restriction.
+   */
+  if (checklist.scope_entity_kind) {
+    const { data: kindRows } = await db
+      .from("conference_entities")
+      .select("id")
+      .eq("conference_id", checklist.conference_id)
+      .eq("kind", checklist.scope_entity_kind);
+    const kindIds = (kindRows ?? []).map((r) => r.id);
+    if (kindIds.length === 0) return [];
+    orgQuery = orgQuery.in("entity_id", kindIds);
   }
   const { data: orgRows } = await orgQuery;
   return [...new Set((orgRows ?? []).map((r) => r.organization_id).filter((id): id is string => !!id))];
@@ -248,7 +281,10 @@ export async function buildChecklistDigest(
 
 async function findDueOrgs(
   db: AdminClient,
-  checklist: { id: string; conference_id: string; scope_entity_id: string | null; deadline_at: string; publication_id?: string | null }
+  checklist: {
+    id: string; conference_id: string; scope_entity_id: string | null;
+    scope_entity_kind?: string | null; deadline_at: string; publication_id?: string | null;
+  }
 ): Promise<DueOrg[]> {
   const { data: checkpoints } = await db
     .from("conference_checklist_checkpoints")
@@ -303,7 +339,7 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
 
   const { data: checklists, error: checklistsError } = await db
     .from("conference_checklists")
-    .select("id, conference_id, name, deadline_at, scope_entity_id, publication_id, publication:publications(title), conference:conference_instances(year, edition_code)")
+    .select("id, conference_id, name, deadline_at, scope_entity_id, scope_entity_kind, publication_id, publication:publications(title), conference:conference_instances(year, edition_code)")
     .eq("active", true);
   if (checklistsError) {
     result.errors.push(`Failed to load checklists: ${checklistsError.message}`);

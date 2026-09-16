@@ -3466,6 +3466,7 @@ export type Database = {
           name: string
           publication_id: string | null
           scope_entity_id: string | null
+          scope_entity_kind: string | null
           updated_at: string
         }
         Insert: {
@@ -3478,6 +3479,7 @@ export type Database = {
           name: string
           publication_id?: string | null
           scope_entity_id?: string | null
+          scope_entity_kind?: string | null
           updated_at?: string
         }
         Update: {
@@ -3490,6 +3492,7 @@ export type Database = {
           name?: string
           publication_id?: string | null
           scope_entity_id?: string | null
+          scope_entity_kind?: string | null
           updated_at?: string
         }
         Relationships: [

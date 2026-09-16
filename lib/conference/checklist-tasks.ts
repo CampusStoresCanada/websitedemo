@@ -290,11 +290,34 @@ export async function loadOrgTasks(
 ): Promise<PersonalTask[]> {
   let q = db
     .from("conference_checklists")
-    .select("id, deadline_at, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at, ask_from, hardens_because)")
+    .select("id, conference_id, deadline_at, scope_entity_id, scope_entity_kind, publication_id, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at, ask_from, hardens_because)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
   if (checklistId) q = q.eq("id", checklistId);
-  const { data: checklists } = await q;
+  const { data: allChecklists } = await q;
+
+  /**
+   * Only the checklists this org is actually responsible for.
+   *
+   * This used to render every active checklist to every org, which is how a
+   * member store ended up looking at "Order power and AV from Encore" and
+   * "Place your Stronco order" — booth services, for a booth they do not have.
+   *
+   * Through the same resolver the reminder emails use, deliberately: the two
+   * surfaces disagreeing is what produced the bug. If the scope is wrong it is
+   * now wrong in one place, and fixing it fixes both.
+   */
+  const { resolveScopedOrgs } = await import("./checklist-engine");
+  const checklists: NonNullable<typeof allChecklists> = [];
+  for (const cl of allChecklists ?? []) {
+    const scope = cl as unknown as {
+      id: string; conference_id: string;
+      scope_entity_id: string | null; scope_entity_kind: string | null;
+      publication_id: string | null;
+    };
+    const scopedOrgIds = await resolveScopedOrgs(db, scope);
+    if (scopedOrgIds.includes(organizationId)) checklists.push(cl);
+  }
 
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;

@@ -20,7 +20,7 @@ export default async function ConferenceChecklistsPage({
     db
       .from("conference_checklists")
       .select(
-        `id, name, description, scope_entity_id, publication_id, deadline_at, active, created_at,
+        `id, name, description, scope_entity_id, scope_entity_kind, publication_id, deadline_at, active, created_at,
          conference_checklist_tasks(audience, active),
          conference_checklist_checkpoints(id),
          conference_checklist_tasks(name, ask_from, active),
