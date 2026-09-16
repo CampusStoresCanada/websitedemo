@@ -22,6 +22,39 @@ import { STEP_SCHEDULE } from "./nudge-schedule";
  */
 const MAX_SENDS_PER_USER_PER_RUN = 1;
 
+/**
+ * Steps whose backing field exists only on a Vendor Partner page.
+ *
+ * `company_description`, `highlight_product_name`, `catalogue_url` and
+ * `partner_links` are rendered and edited by PartnerProfile.tsx (and
+ * PartnerLinksSection, which only PartnerProfile mounts). MemberProfile.tsx
+ * carries none of them. They sit in ORG_ADMIN_MEMBER_STEPS anyway, so a campus
+ * store admin is mailed about a field that is not on their page, sent to their
+ * org page to look for it, and then — because autoCompleteIfDone can never
+ * observe a value that has no input — mailed a reminder about it.
+ *
+ * The data says it plainly: 1 of 79 member orgs has a description (the one
+ * exception predates the current page), 0 have a featured product, 0 have
+ * links. Partners: 71, 47 and 46 of 83. As of 2026-09-16 that left 103 rows
+ * that can never complete — 84 of them already sent and holding a reminder.
+ *
+ * Gated on ORGANISATION TYPE rather than persona on purpose: one of those rows
+ * carries the legacy persona `org_admin`, which no longer appears in
+ * STEPS_BY_PERSONA and would slip past a persona check.
+ *
+ * This suppresses the SEND only. Rows are left pending rather than marked
+ * skipped, so if these fields are ever added to the member page the journey
+ * resumes by itself instead of needing a second migration to undo this one.
+ */
+const PARTNER_PAGE_FIELD_STEPS = new Set([
+  "profile_description",
+  "profile_featured_product",
+  "profile_links_docs",
+]);
+
+/** organizations.type for the vendor program — capitalised, as stored. */
+const PARTNER_ORG_TYPE = "Vendor Partner";
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Types for the DB rows we read
 // ─────────────────────────────────────────────────────────────────────────────
@@ -47,6 +80,8 @@ interface UserContext {
   orgName: string;
   orgSlug: string;
   orgProvince: string | null;
+  /** organizations.type — decides whether a field-backed step is reachable at all. */
+  orgType: string | null;
   hasDescription: boolean;
   hasLogo: boolean;
   hasHero: boolean;
@@ -575,11 +610,11 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, company_description, logo_url, hero_image_url, highlight_product_name, catalogue_url, partner_links, banner_url")
+    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, catalogue_url, partner_links, banner_url")
     .in("id", orgIds);
 
   type OrgRow = {
-    id: string; name: string; slug: string; province: string | null;
+    id: string; name: string; slug: string; province: string | null; type: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
     highlight_product_name: string | null;
     catalogue_url: string | null; partner_links: unknown; banner_url: string | null;
@@ -622,6 +657,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       orgName: org.name,
       orgSlug: org.slug,
       orgProvince: org.province,
+      orgType: org.type,
       hasDescription: Boolean(org.company_description?.trim()),
       hasLogo: Boolean(org.logo_url),
       hasHero: Boolean(org.hero_image_url),
@@ -669,6 +705,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       if (schedule.conditional === "benchmarking_open" && !benchmarkingOpen) {
         result.skipped++;
         result.log.push(`skip ${ctx.email} / ${row.step_key}: benchmarking not open`);
+        continue;
+      }
+
+      // Unreachable for this org type — the field has no input on their page,
+      // so the ask cannot be actioned and the step cannot ever complete.
+      if (PARTNER_PAGE_FIELD_STEPS.has(row.step_key) && ctx.orgType !== PARTNER_ORG_TYPE) {
+        result.skipped++;
+        result.log.push(`unreachable ${ctx.email} / ${row.step_key}: no such field on a ${ctx.orgType ?? "unknown"} page`);
         continue;
       }
 
