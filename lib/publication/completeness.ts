@@ -29,6 +29,8 @@
 import { hasListableCategories } from "./categories";
 
 /** Field keys the publication knows how to print. */
+import type { ListingStyle } from "./composition";
+
 export type PublicationFieldKey =
   | "logo"
   | "description"
@@ -36,7 +38,9 @@ export type PublicationFieldKey =
   | "contacts"
   | "featured_product"
   | "catalogue"
-  | "hero";
+  | "hero"
+  | "website"
+  | "org_phone";
 
 /**
  * `required` blocks a printable listing — without it the entry is a name and a
@@ -57,16 +61,60 @@ export type PublicationField = {
   step: string | null;
   /** Shown to a partner in the meter, and to staff in the gap report. */
   fixHint: string;
+  /**
+   * The listing styles that actually PRINT this field.
+   *
+   * Scoring ignored this and judged every org against the vendor listing, so
+   * all 80 member stores failed on `categories` and 79 on `description` —
+   * neither of which appears in a MemberListing, which carries name, location,
+   * institution type, FTE, website, phone and staff. A gap you cannot see in
+   * print is not a gap; it is 80 org pages telling their owner to fix
+   * something that was never going to be printed.
+   */
+  styles: ListingStyle[];
+  /**
+   * Why this field has no `step`, when it has none.
+   *
+   * The rule is that a gap must be closable by a nudge, or nobody closes it.
+   * Recording the reason keeps an ACCIDENTAL omission failing the coverage
+   * tests while letting a considered one through — the same bargain
+   * DELIBERATELY_UNSCHEDULED strikes for steps that carry no schedule.
+   */
+  unnudgedBecause?: string;
 };
 
+/**
+ * Member stores have no onboarding journey — the steps and the nudge cron are
+ * built around ORG_ADMIN_PARTNER_STEPS. So a member's directory gap can only be
+ * closed by the store noticing it on their own org page, or by staff. Both
+ * fields are `enhanced` accordingly: a MemberListing still prints without them.
+ */
+const NO_MEMBER_JOURNEY =
+  "Member stores have no onboarding journey; closed on the org page or by staff.";
+
+/**
+ * A logo is the one vendor-ish asset a MemberListing does carry: `assetsXml()`
+ * emits <Logo> for every style, and only the QR is style-gated. Checked in the
+ * renderer rather than assumed — the first pass here had logo as vendor-only,
+ * which would have hidden a real print gap from 14 of 80 member stores.
+ */
+/** Vendor listings: the full and compact blocks in the InDesign template. */
+const VENDOR: ListingStyle[] = ["full", "compact"];
+/** Everything — a field every listing style prints. */
+const ALL_STYLES: ListingStyle[] = ["full", "compact", "member"];
+
 export const PUBLICATION_FIELDS: PublicationField[] = [
-  { key: "logo",             label: "Logo",              tier: "required", step: "profile_logo",              fixHint: "Upload a logo — it prints beside your listing." },
-  { key: "description",      label: "Description",       tier: "required", step: "profile_description",       fixHint: "Describe what your company does, in a sentence or two." },
-  { key: "categories",       label: "Categories",        tier: "required", step: "profile_categories",        fixHint: "Set what you sell — it decides where you appear in the index." },
-  { key: "contacts",         label: "Contacts",          tier: "required", step: "contacts_sorted",           fixHint: "List at least one person members can reach." },
-  { key: "featured_product", label: "Featured product",  tier: "enhanced", step: "profile_featured_product",  fixHint: "Name the one product you want members to notice." },
-  { key: "catalogue",        label: "Catalogue or links",tier: "enhanced", step: "profile_links_docs",        fixHint: "Add a catalogue link so members can browse your range." },
-  { key: "hero",             label: "Hero image",        tier: "enhanced", step: "profile_hero",              fixHint: "Add a hero image for your profile page." },
+  { key: "logo",             label: "Logo",              tier: "required", step: "profile_logo",              fixHint: "Upload a logo — it prints beside your listing.", styles: ALL_STYLES },
+  { key: "description",      label: "Description",       tier: "required", step: "profile_description",       fixHint: "Describe what your company does, in a sentence or two.", styles: VENDOR },
+  { key: "categories",       label: "Categories",        tier: "required", step: "profile_categories",        fixHint: "Set what you sell — it decides where you appear in the index.", styles: VENDOR },
+  { key: "contacts",         label: "Contacts",          tier: "required", step: "contacts_sorted",           fixHint: "List at least one person members can reach.", styles: ALL_STYLES },
+  { key: "featured_product", label: "Featured product",  tier: "enhanced", step: "profile_featured_product",  fixHint: "Name the one product you want members to notice.", styles: VENDOR },
+  { key: "catalogue",        label: "Catalogue or links",tier: "enhanced", step: "profile_links_docs",        fixHint: "Add a catalogue link so members can browse your range.", styles: VENDOR },
+  { key: "hero",             label: "Hero image",        tier: "enhanced", step: "profile_hero",              fixHint: "Add a hero image for your profile page.", styles: VENDOR },
+  // Printed in a MemberListing and nowhere else, so they are scored for member
+  // stores only — a partner's reach details ride on their contacts block.
+  { key: "website",          label: "Website",           tier: "enhanced", step: null,                        fixHint: "Add your store's website — it prints in the member listing.", styles: ["member"], unnudgedBecause: NO_MEMBER_JOURNEY },
+  { key: "org_phone",        label: "Store phone",       tier: "enhanced", step: null,                        fixHint: "Add a store phone number — it prints in the member listing.", styles: ["member"], unnudgedBecause: NO_MEMBER_JOURNEY },
   // `background` (organizations.banner_url) was dropped 2026-08-20: empty for
   // all 78 partners, cut from the nudge schedule, and never printed — so it
   // would have sat permanently at 78/78 missing, dominating the gap report
@@ -168,12 +216,22 @@ export function isFieldFilled(key: PublicationFieldKey, org: OrgCompletenessSour
     case "featured_product": return text(org.highlight_product_name);
     case "catalogue":   return text(org.catalogue_url) || hasLinks(org.partner_links);
     case "hero":        return text(org.hero_image_url);
+    case "website":     return text(org.website);
+    case "org_phone":   return text(org.phone);
   }
 }
 
-/** Pure — no DB. Given one org row, say how printable it is. */
-export function computeOrgCompleteness(org: OrgCompletenessSource): OrgCompleteness {
-  const fields: FieldState[] = PUBLICATION_FIELDS.map((f) => ({
+/**
+ * Pure — no DB. Given one org row, say how printable it is.
+ *
+ * Scored against the fields that org's LISTING STYLE prints. Defaults to the
+ * vendor listing, which is what every existing caller means.
+ */
+export function computeOrgCompleteness(
+  org: OrgCompletenessSource,
+  style: ListingStyle = "full"
+): OrgCompleteness {
+  const fields: FieldState[] = PUBLICATION_FIELDS.filter((f) => f.styles.includes(style)).map((f) => ({
     key: f.key,
     label: f.label,
     tier: f.tier,

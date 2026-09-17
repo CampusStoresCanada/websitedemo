@@ -117,6 +117,19 @@ export type ListingStyle =
 export const styleShowsQr = (style: ListingStyle): boolean => style !== "member";
 
 /**
+ * Which listing block an organisation prints in.
+ *
+ * Mirrors the sections of the network directory: member stores get the
+ * MemberListing, everyone else a vendor listing. Here rather than in the
+ * completeness scorer, so "what gets printed" and "what we score" cannot come
+ * apart — scoring a member store against vendor fields is what made all 80 of
+ * them fail on categories that a MemberListing never emits.
+ */
+export function listingStyleForOrgType(orgType: string | null | undefined): ListingStyle {
+  return orgType === "Member" ? "member" : "full";
+}
+
+/**
  * Advertising slots, in the three sizes a directory actually sells.
  *
  * A slot with no `imageUrl` is NOT an error — it renders as a reserved, labelled

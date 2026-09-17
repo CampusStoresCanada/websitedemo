@@ -30,7 +30,7 @@ describe("nudge coverage for publication fields", () => {
   it("never lets a required field go unscheduled, deliberately or otherwise", () => {
     // Enhanced fields are droppable; a required one is what blocks print.
     const gaps = PUBLICATION_FIELDS
-      .filter((f) => f.tier === "required" && (!f.step || !STEP_SCHEDULE[f.step]))
+      .filter((f) => f.tier === "required" && !f.unnudgedBecause && (!f.step || !STEP_SCHEDULE[f.step]))
       .map((f) => f.key);
     expect(gaps).toEqual([]);
   });

@@ -115,7 +115,7 @@ describe("computeOrgCompleteness", () => {
 
 describe("summarizeCompleteness", () => {
   it("splits print-ready from blocked and ranks gaps worst-first", () => {
-    const s = summarizeCompleteness([blank, printable].map(computeOrgCompleteness));
+    const s = summarizeCompleteness([blank, printable].map((o) => computeOrgCompleteness(o)));
     expect(s.orgs).toBe(2);
     expect(s.printReady).toBe(1);
     expect(s.blocked).toBe(1);
@@ -124,7 +124,10 @@ describe("summarizeCompleteness", () => {
   });
 
   it("maps every field to the onboarding step that can close it", () => {
-    // The gap report and the nudge list must be the same question.
-    for (const f of PUBLICATION_FIELDS) expect(f.step).toBeTruthy();
+    // The gap report and the nudge list must be the same question. A field may
+    // have no step only if it says why — an accidental null still fails here.
+    for (const f of PUBLICATION_FIELDS) {
+      expect(f.step || f.unnudgedBecause, `${f.key} has neither a step nor a reason`).toBeTruthy();
+    }
   });
 });

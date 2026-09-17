@@ -16,6 +16,7 @@ import {
   type OrgCompleteness,
   type OrgCompletenessSource,
 } from "./completeness";
+import { listingStyleForOrgType } from "./composition";
 
 export type CompletenessScope = {
   /**
@@ -94,7 +95,12 @@ export async function loadDirectoryCompleteness(
   }
 
   return orgs
-    .map((o) => computeOrgCompleteness({ ...o, contactCount: contactCount.get(o.id) ?? 0 }))
+    .map((o) =>
+      computeOrgCompleteness(
+        { ...o, contactCount: contactCount.get(o.id) ?? 0 },
+        listingStyleForOrgType(o.type)
+      )
+    )
     .sort((a, b) => a.overallPct - b.overallPct || a.orgName.localeCompare(b.orgName));
 }
 
