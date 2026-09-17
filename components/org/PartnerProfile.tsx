@@ -900,14 +900,36 @@ export default function PartnerProfile({
             </ProtectedSection>
           )}
 
-          {/* Description */}
-          {organization.company_description && (
+          {/* Description
+              Shows for an editor even when empty. The Toolkit's inline editor
+              binds to the [data-field][data-entity-id] anchor below, so with
+              the old value-only gate there was nothing in the DOM to click and
+              a blank description could never be filled in from this page —
+              only onboarding and the partner application form could write it,
+              which left every partner who skipped onboarding stuck without
+              one. Same shape as the categories and certifications blocks. */}
+          {(organization.company_description || (editMode && canEditThisOrg)) && (
             <div className="mb-10" data-onboarding="profile_description">
               <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
                 Description
               </h3>
-              <p className="text-gray-600 leading-relaxed" data-flaggable data-field="organizations.company_description" data-entity-id={organization.id}>
-                {organization.company_description}
+              <p
+                className={
+                  organization.company_description
+                    ? "text-gray-600 leading-relaxed"
+                    : "text-gray-400 italic leading-relaxed cursor-pointer border border-dashed border-gray-300 rounded-lg px-3 py-2 hover:border-gray-500 hover:text-gray-600 transition-colors"
+                }
+                data-flaggable
+                data-field="organizations.company_description"
+                data-entity-id={organization.id}
+                // Seed the editor from the stored value, not the rendered text.
+                // The Toolkit reads data-raw-value first and falls back to
+                // textContent, so without this an empty slot opens the textarea
+                // pre-filled with the placeholder and a straight Save writes
+                // "Add a company description" in as the real description.
+                data-raw-value={organization.company_description ? undefined : ""}
+              >
+                {organization.company_description || "Add a company description"}
               </p>
             </div>
           )}
@@ -1428,14 +1450,26 @@ export default function PartnerProfile({
             </ProtectedSection>
           )}
 
-          {/* Description */}
-          {organization.company_description && (
+          {/* Description — see the note on the other layout's copy above. */}
+          {(organization.company_description || (editMode && canEditThisOrg)) && (
             <div className="mb-8">
               <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-3">
                 Description
               </h3>
-              <p className="text-gray-600 text-sm leading-relaxed" data-flaggable data-field="organizations.company_description" data-entity-id={organization.id}>
-                {organization.company_description}
+              <p
+                className={
+                  organization.company_description
+                    ? "text-gray-600 text-sm leading-relaxed"
+                    : "text-gray-400 text-sm italic leading-relaxed cursor-pointer border border-dashed border-gray-300 rounded-lg px-3 py-2 hover:border-gray-500 hover:text-gray-600 transition-colors"
+                }
+                data-flaggable
+                data-field="organizations.company_description"
+                data-entity-id={organization.id}
+                // See the note on the other layout's copy — keeps the
+                // placeholder out of the editor, and out of the database.
+                data-raw-value={organization.company_description ? undefined : ""}
+              >
+                {organization.company_description || "Add a company description"}
               </p>
             </div>
           )}
