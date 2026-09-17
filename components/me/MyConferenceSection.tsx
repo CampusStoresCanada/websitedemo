@@ -3,6 +3,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import AgendaView from "@/components/me/AgendaView";
 import { loadPersonAgenda } from "@/lib/conference/person-agenda";
+import { getSwapState } from "@/lib/actions/conference-swaps";
 
 /**
  * The attendee's own conference to-dos, on the page they already use.
@@ -40,6 +41,17 @@ export default async function MyConferenceSection() {
   // themselves. The agenda still lists them as outstanding.
   const agendaResult = await loadPersonAgenda(person.id, person.conference_id);
   const agenda = agendaResult.success ? agendaResult.data : null;
+
+  /**
+   * How many swaps are left, and whether the schedule is final — read here so
+   * the agenda can say "swaps are closed" instead of offering a button the
+   * server would refuse. Reading never consumes a swap; only requesting does.
+   */
+  const swapState =
+    agenda?.meetingSeatId && agenda.items.some((i) => i.reason === "meeting")
+      ? await getSwapState(person.conference_id, agenda.meetingSeatId)
+      : null;
+  const swap = swapState?.success ? swapState.data : null;
   const conference = person.conference_instances;
 
   // Nothing to show and nothing to link to is not a section, it is a heading.
@@ -72,6 +84,8 @@ export default async function MyConferenceSection() {
         <AgendaView
           agenda={agenda}
           mapHref={`/conference/${conference.year}/${conference.edition_code}/map`}
+          conferenceId={person.conference_id}
+          swap={swap}
         />
       )}
 

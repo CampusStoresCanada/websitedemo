@@ -43,8 +43,10 @@ const CONFERENCE = "7e650b08-51d1-4573-a332-7d6b6fbc50bd"; // 2027 / edition 99
 const POLICY_SET = "a0000000-0000-0000-0000-000000000001";
 const ORG_MEMBER = "f7b3fee0-339f-404a-b77d-ec95f40e8f89"; // Test Org (Member)
 const ORG_PARTNER = "1a5e240b-bf97-4534-93d5-b9b4cfe15bb3"; // Test Org (Partner)
+const ORG_OTHER = "032862cf-1b39-4911-93cc-e1fdc13df741"; // Test Org (Public Tier)
 const USER_MEMBER = "31cf8d02-1863-449a-b713-ba8c70161523"; // test.member@example.com
 const USER_PARTNER = "367f6285-da3d-478e-a8aa-455530e14754"; // test.partner@example.com
+const USER_OTHER = "677ce4be-3365-4ccd-81e1-80d4bc8cf118"; // test.public.tier@example.com
 const REG_DELEGATE = "a8fc5a0b-47a0-49df-aade-fd09ad5a034d"; // Full Conference Registration
 const REG_EXHIBITOR = "b5e5e2a7-e2c2-4cbf-add6-117b7ea76bce"; // Exhibitor Staff Registration
 
@@ -60,17 +62,28 @@ function die(step, error) {
   process.exit(1);
 }
 
-async function pickSlot() {
+/**
+ * Two slots, and they must be DIFFERENT slots.
+ *
+ * A swap alternative is an existing schedule row the delegate could move into:
+ * not the one being dropped, not one they are already in, not in a slot they
+ * are already occupied in, with room, and with an exhibitor they are not
+ * already meeting. A one-meeting fixture can therefore never offer an
+ * alternative — it would prove the button renders and nothing else.
+ */
+async function pickSlots() {
   const { data, error } = await db
     .from("meeting_slots")
     .select("id, day_number, slot_number, start_time, end_time")
     .eq("conference_id", CONFERENCE)
     .order("day_number")
-    .order("slot_number")
-    .limit(1);
-  die("pick meeting slot", error);
-  if (!data?.length) die("pick meeting slot", { message: "no meeting_slots for this conference" });
-  return data[0];
+    .order("slot_number");
+  die("pick meeting slots", error);
+  const byNumber = new Map();
+  for (const row of data ?? []) if (!byNumber.has(row.slot_number)) byNumber.set(row.slot_number, row);
+  const slots = [...byNumber.values()].slice(0, 2);
+  if (slots.length < 2) die("pick meeting slots", { message: "need two distinct slot numbers" });
+  return slots;
 }
 
 /** One side of the meeting: purchase → balance → person → named seat. */
@@ -150,8 +163,9 @@ async function up() {
   }
 
   console.log("Building fixture…");
-  const slot = await pickSlot();
-  console.log(`  slot: day ${slot.day_number} slot ${slot.slot_number} ${slot.start_time}-${slot.end_time}`);
+  const [slot, altSlot] = await pickSlots();
+  console.log(`  slot:     day ${slot.day_number} slot ${slot.slot_number} ${slot.start_time}-${slot.end_time}`);
+  console.log(`  alt slot: day ${altSlot.day_number} slot ${altSlot.slot_number} ${altSlot.start_time}-${altSlot.end_time}`);
 
   const delegate = await buildSide({
     label: "delegate",
@@ -169,6 +183,19 @@ async function up() {
     entityId: REG_EXHIBITOR,
     personKind: "exhibitor",
     displayName: "Fixture Exhibitor",
+  });
+
+  /**
+   * The exhibitor the delegate could move TO. A different org, because an
+   * alternative with an org they already meet is filtered out.
+   */
+  const alternate = await buildSide({
+    label: "alternate",
+    orgId: ORG_OTHER,
+    userId: USER_OTHER,
+    entityId: REG_EXHIBITOR,
+    personKind: "exhibitor",
+    displayName: "Fixture Alternate Exhibitor",
   });
 
   const runId = randomUUID();
@@ -207,8 +234,29 @@ async function up() {
     ).error
   );
 
+  /**
+   * Empty delegate list on purpose: the alternative has to have ROOM, and an
+   * open meeting is the simplest thing that does.
+   */
+  const altScheduleId = randomUUID();
+  die(
+    "alternate schedule",
+    (
+      await db.from("schedules").insert({
+        id: altScheduleId,
+        conference_id: CONFERENCE,
+        scheduler_run_id: runId,
+        meeting_slot_id: altSlot.id,
+        exhibitor_seat_id: alternate.seatId,
+        delegate_seat_ids: [],
+        status: "scheduled",
+      })
+    ).error
+  );
+
   console.log(`  run ${runId}`);
-  console.log(`  schedule ${scheduleId}`);
+  console.log(`  schedule ${scheduleId} (theirs)`);
+  console.log(`  schedule ${altScheduleId} (open, the swap target)`);
   console.log("\n✓ fixture up. Sign in as test.member@example.com and open /me");
 }
 

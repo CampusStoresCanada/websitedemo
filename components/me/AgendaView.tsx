@@ -1,5 +1,7 @@
 import Link from "next/link";
+import MeetingSwapControl from "@/components/me/MeetingSwapControl";
 import type { PersonAgenda } from "@/lib/conference/person-agenda";
+import type { SwapCapStatus } from "@/lib/scheduler/types";
 import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgency";
 
 /**
@@ -13,9 +15,14 @@ import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgenc
 export default function AgendaView({
   agenda,
   mapHref,
+  conferenceId,
+  swap,
 }: {
   agenda: PersonAgenda;
   mapHref: string;
+  conferenceId?: string;
+  /** Null when this person holds no meeting seat, so nothing is swappable. */
+  swap?: { capStatus: SwapCapStatus; frozen: boolean; freezeAt: string | null } | null;
 }) {
   /**
    * ⛔ NO EARLY RETURN ON AN EMPTY SCHEDULE. This used to bail here, which threw
@@ -31,6 +38,14 @@ export default function AgendaView({
 
   return (
     <div className="space-y-4">
+      {/* Said once, not on every meeting. A reader who wants to change something
+          needs to know it is closed before they go hunting for the control. */}
+      {swap?.frozen && (
+        <p className="rounded-lg border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600">
+          The meeting schedule is final, so meetings can no longer be swapped. If something
+          is genuinely wrong, conference staff can still help.
+        </p>
+      )}
       {agenda.deadlines.length > 0 && (
         // Before the days, because these are all due before the conference —
         // a timeline that starts now and ends when the doors open.
@@ -181,6 +196,23 @@ export default function AgendaView({
                       </Link>
                     );
                   })()}
+                  {/* Only under a meeting, and only while the schedule can
+                      still move. After the freeze the button is not disabled,
+                      it is absent, and the reason is stated once above. */}
+                  {item.reason === "meeting" &&
+                    item.meetingAssignment &&
+                    conferenceId &&
+                    agenda.meetingSeatId &&
+                    swap &&
+                    !swap.frozen && (
+                      <MeetingSwapControl
+                        conferenceId={conferenceId}
+                        delegateSeatId={agenda.meetingSeatId}
+                        scheduleId={item.meetingAssignment.scheduleId}
+                        exhibitorName={item.meetingAssignment.exhibitorName}
+                        remaining={swap.capStatus.remaining}
+                      />
+                    )}
                 </li>
               ))}
             </ul>

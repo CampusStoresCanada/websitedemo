@@ -175,6 +175,13 @@ export interface SwapAlternative {
   scheduleId: string;
   exhibitorSeatId: string;
   exhibitorOrganizationId: string;
+  /**
+   * Decorated by the ACTION for display, never produced by the solver and never
+   * persisted onto the request. The solver deals in ids; a name resolved at read
+   * time cannot go stale in a stored row, and the swap record stays exactly what
+   * the engine emitted.
+   */
+  exhibitorName?: string;
   score: number;
   scoreDeltaFromOriginal: number;
   scoreBreakdown: ScoreBreakdown;

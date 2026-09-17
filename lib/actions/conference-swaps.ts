@@ -154,6 +154,28 @@ async function getApprovedExtraSwaps(
   return (data ?? []).reduce((sum, row) => sum + row.requested_extra_swaps, 0);
 }
 
+/**
+ * Is the meeting schedule final?
+ *
+ * One reader, because the agenda has to say "swaps are closed" in exactly the
+ * cases the guard would refuse. A screen that offers a button the server will
+ * reject is worse than one that explains why the button is gone.
+ *
+ * Reads `schedule_freeze_at` — the same column the scheduler and the late-add
+ * path read — rather than a second date that could drift out of step.
+ */
+async function readScheduleFreeze(
+  conferenceId: string
+): Promise<{ frozen: boolean; freezeAt: string | null }> {
+  const { data } = await createAdminClient()
+    .from("conference_instances")
+    .select("schedule_freeze_at")
+    .eq("id", conferenceId)
+    .maybeSingle();
+  const freezeAt = (data as { schedule_freeze_at?: string | null } | null)?.schedule_freeze_at ?? null;
+  return { frozen: !!freezeAt && new Date(freezeAt) <= new Date(), freezeAt };
+}
+
 async function getSwapCapStatus(
   conferenceId: string,
   delegateSeatId: string,
@@ -209,6 +231,48 @@ function extractBreakdown(value: Json): ScoreBreakdown | null {
     blackout_penalty:
       typeof v.blackout_penalty === "number" ? (v.blackout_penalty as number) : 0,
   };
+}
+
+/**
+ * What the agenda needs to know before anyone clicks: how many swaps are left,
+ * and whether the schedule is final.
+ *
+ * Separate from requestSwap because ASKING must not consume anything. The swap
+ * cap counts requests in `requested` mode, so opening a screen that pre-flighted
+ * a request would spend a delegate's swap on looking.
+ */
+export async function getSwapState(
+  conferenceId: string,
+  delegateSeatId: string
+): Promise<
+  | ActionSuccess<{ capStatus: SwapCapStatus; frozen: boolean; freezeAt: string | null }>
+  | ActionFailure
+> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const adminClient = createAdminClient();
+  // Same seat lookup requestSwap authorizes against — one shape, so a seat that
+  // can be read here is exactly a seat that can be swapped there.
+  const candidates = await loadMeetingCandidates(adminClient, conferenceId);
+  const seat = candidates.seatById.get(delegateSeatId) ?? null;
+  if (!seat) {
+    return { success: false, error: "That delegate seat was not found in this conference." };
+  }
+  if (seat.holderUserId !== auth.ctx.userId && !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not authorized for this delegate." };
+  }
+
+  const { frozen, freezeAt } = await readScheduleFreeze(conferenceId);
+  const scheduling = await getSchedulingConfig();
+  const capStatus = await getSwapCapStatus(
+    conferenceId,
+    delegateSeatId,
+    scheduling.swap_count_mode ?? "requested",
+    scheduling.swap_cap
+  );
+
+  return { success: true, data: { capStatus, frozen, freezeAt } };
 }
 
 export async function requestSwap(
@@ -267,14 +331,8 @@ export async function requestSwap(
    * Reads the same `schedule_freeze_at` the scheduler does, rather than a second
    * date that could drift out of step with it.
    */
-  const { data: freezeRow } = await adminClient
-    .from("conference_instances")
-    .select("schedule_freeze_at")
-    .eq("id", conferenceId)
-    .maybeSingle();
-  const freezeAt = (freezeRow as { schedule_freeze_at?: string | null } | null)
-    ?.schedule_freeze_at;
-  if (freezeAt && new Date(freezeAt) <= new Date()) {
+  const { frozen, freezeAt } = await readScheduleFreeze(conferenceId);
+  if (frozen) {
     return {
       success: false,
       code: "SCHEDULE_FROZEN",
@@ -549,11 +607,31 @@ export async function requestSwap(
       },
     });
 
+    /**
+     * Names for the screen. An alternative is a meeting the delegate is NOT in,
+     * so their own agenda cannot name it — and the solver deliberately does not
+     * carry names. Resolved here, after persisting, so the stored record stays
+     * the engine's own output.
+     */
+    const altOrgIds = [...new Set(rankedAlternatives.map((a) => a.exhibitorOrganizationId).filter(Boolean))];
+    const altNameByOrg = new Map<string, string>();
+    if (altOrgIds.length > 0) {
+      const { data: orgRows } = await adminClient
+        .from("organizations")
+        .select("id, name")
+        .in("id", altOrgIds);
+      for (const o of orgRows ?? []) altNameByOrg.set(o.id, o.name);
+    }
+    const namedAlternatives = rankedAlternatives.map((a) => ({
+      ...a,
+      exhibitorName: altNameByOrg.get(a.exhibitorOrganizationId) ?? undefined,
+    }));
+
     return {
       success: true,
       data: {
         requestId: swapRequest.id,
-        alternatives: rankedAlternatives,
+        alternatives: namedAlternatives,
         capStatus: {
           ...capStatus,
           consumed:

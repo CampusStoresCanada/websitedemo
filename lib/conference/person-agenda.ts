@@ -100,6 +100,13 @@ export type PersonAgenda = {
   items: AgendaItem[];
   /** Day keys she has access to, in order — the spine of the view. */
   dayKeys: string[];
+  /**
+   * The registration seat her meetings hang off, or null if she holds none.
+   *
+   * Exposed because a swap is an act on a SEAT, and a meeting row carries every
+   * delegate in the room — the view cannot tell which of them is the reader.
+   */
+  meetingSeatId: string | null;
   /** Pairs that overlap in time. Rendered as a warning, never auto-resolved. */
   conflicts: Array<{ a: string; b: string }>;
   /** Outstanding only — a deadline you have met is not a deadline. */
@@ -332,6 +339,7 @@ export async function loadPersonAgenda(
       displayName: person.display_name,
       timeZone: timeline.timeZone,
       items,
+      meetingSeatId: meetingSeat?.seatId ?? null,
       dayKeys: [...new Set(items.map((i) => i.dayKeyLocal))].sort(),
       conflicts: clashes,
     },
