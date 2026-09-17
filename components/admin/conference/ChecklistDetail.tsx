@@ -426,6 +426,17 @@ function TaskForm({
   const [description, setDescription] = useState(task?.description ?? "");
   const [checkType, setCheckType] = useState<CheckType>((task?.check_type as CheckType) ?? "seat_assigned");
   const [checkEntityId, setCheckEntityId] = useState(task?.check_entity_id ?? "");
+  /**
+   * Who this task is for, when the check cannot work it out itself.
+   *
+   * `seat_assigned` reports done when the org holds nothing of that kind and
+   * `legal_document_accepted` resolves by tier — those need nothing here. A
+   * `self_reported` task has nothing to read, so "have you ordered power for
+   * your booth?" reaches a member store with no booth unless this says who.
+   */
+  const [scopeKind, setScopeKind] = useState(
+    (task as { scope_entity_kind?: string | null } | undefined)?.scope_entity_kind ?? ""
+  );
   const [active, setActive] = useState(task?.active ?? true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -444,6 +455,7 @@ function TaskForm({
       description,
       checkType,
       checkEntityId: checkEntityId || null,
+      scopeEntityKind: scopeKind || null,
       sortOrder: task?.sort_order ?? nextSortOrder,
       active,
     });
@@ -501,6 +513,15 @@ function TaskForm({
             </select>
           </div>
         )}
+        <div>
+          <label className="block text-xs font-medium text-gray-700 mb-1">Only ask orgs holding</label>
+          <select value={scopeKind} onChange={(e) => setScopeKind(e.target.value)} className={inputClass}>
+            <option value="">Anyone the checklist reaches</option>
+            {Object.keys(entitiesByKind).sort().map((kind) => (
+              <option key={kind} value={kind}>a {kind}</option>
+            ))}
+          </select>
+        </div>
       </div>
       <label className="flex items-center gap-2 text-sm text-gray-700">
         <input type="checkbox" checked={active} onChange={(e) => setActive(e.target.checked)} />

@@ -128,3 +128,66 @@ describe("the org page asks the same question the email does", () => {
     expect(tasks).toContain("scopedOrgIds.includes(organizationId)");
   });
 });
+
+/**
+ * The scope belongs on the TASK, because the checklist is mixed.
+ *
+ * Of the Exhibitor checklist's six org tasks only two are about having a booth.
+ * `seat_assigned` reports done when the org holds nothing of that kind and
+ * `legal_document_accepted` resolves documents by conference tier — they scope
+ * themselves. A `self_reported` task has nothing to read, so "have you ordered
+ * power for your booth?" reaches a member store unless the task says otherwise.
+ *
+ * Scoping the whole checklist instead would have stopped the 11 attending
+ * member stores being reminded to PAY, which is the opposite of the bug.
+ */
+describe("scoping a single task inside a mixed checklist", () => {
+  const CONF = "conf-1";
+  const db = fakeDb({
+    conference_entities: (f) => (f.kind === "booth" ? [{ id: "booth-101" }] : []),
+    entity_balances: (f) => {
+      const ids = (f.entity_id__in as string[] | undefined) ?? null;
+      const rows = [
+        { organization_id: "partner-with-booth", entity_id: "booth-101" },
+        { organization_id: "member-no-booth", entity_id: "registration-full" },
+      ];
+      return (ids ? rows.filter((r) => ids.includes(r.entity_id)) : rows).map((r) => ({
+        organization_id: r.organization_id,
+      }));
+    },
+  });
+
+  const TASKS = [
+    { id: "pay", scope_entity_kind: null },
+    { id: "legal", scope_entity_kind: null },
+    { id: "encore", scope_entity_kind: "booth" },
+    { id: "stronco", scope_entity_kind: "booth" },
+  ];
+
+  it("keeps the booth tasks for an org with a booth", async () => {
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const kept = await filterTasksToOrgScope(db as any, CONF, "partner-with-booth", TASKS);
+    expect(kept.map((t) => t.id)).toEqual(["pay", "legal", "encore", "stronco"]);
+  });
+
+  it("drops only the booth tasks for a member store with no booth", async () => {
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const kept = await filterTasksToOrgScope(db as any, CONF, "member-no-booth", TASKS);
+    // The point of the whole change: they still get asked to pay.
+    expect(kept.map((t) => t.id)).toEqual(["pay", "legal"]);
+  });
+
+  it("asks one question per kind, not one per task", async () => {
+    let entityQueries = 0;
+    const counting = fakeDb({
+      conference_entities: () => { entityQueries++; return [{ id: "booth-101" }]; },
+      entity_balances: () => [{ organization_id: "partner-with-booth" }],
+    });
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    await filterTasksToOrgScope(counting as any, CONF, "partner-with-booth", TASKS);
+    expect(entityQueries).toBe(1); // two booth tasks, one lookup
+  });
+});

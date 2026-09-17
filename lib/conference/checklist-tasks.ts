@@ -290,7 +290,7 @@ export async function loadOrgTasks(
 ): Promise<PersonalTask[]> {
   let q = db
     .from("conference_checklists")
-    .select("id, conference_id, deadline_at, scope_entity_id, scope_entity_kind, publication_id, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, deadline_at, ask_from, hardens_because)")
+    .select("id, conference_id, deadline_at, scope_entity_id, scope_entity_kind, publication_id, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_kind, deadline_at, ask_from, hardens_because)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
   if (checklistId) q = q.eq("id", checklistId);
@@ -322,9 +322,10 @@ export async function loadOrgTasks(
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;
     active: boolean; audience: string; check_type: string; check_entity_id: string | null;
+    scope_entity_kind: string | null;
     deadline_at: string | null; ask_from: string | null; hardens_because: string | null;
   };
-  const rows: { task: TaskRow; deadline: string | null }[] = [];
+  let rows: { task: TaskRow; deadline: string | null }[] = [];
   for (const cl of checklists ?? []) {
     const tasks = (cl as unknown as { conference_checklist_tasks: TaskRow[] }).conference_checklist_tasks ?? [];
     for (const task of tasks) {
@@ -339,6 +340,22 @@ export async function loadOrgTasks(
       });
     }
   }
+  if (rows.length === 0) return [];
+
+  /**
+   * And within a checklist, the tasks this org has any business being asked.
+   *
+   * The checklist reaches them; a particular task still may not. "Order power
+   * and AV from Encore" is a self-report, so nothing about it can notice the
+   * asker has no booth — unlike `seat_assigned`, which reports done when the
+   * org holds nothing of that kind.
+   */
+  const { filterTasksToOrgScope } = await import("./checklist-engine");
+  const scopedRows = await filterTasksToOrgScope(
+    db, conferenceId, organizationId, rows.map((r) => r.task)
+  );
+  const keep = new Set(scopedRows.map((t) => t.id));
+  rows = rows.filter((r) => keep.has(r.task.id));
   if (rows.length === 0) return [];
 
   // Supplier facts live on a `service`-kind entity the task points at.

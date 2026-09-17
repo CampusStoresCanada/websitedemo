@@ -99,6 +99,13 @@ export type ChecklistTaskInput = {
   description: string;
   checkType: CheckType;
   checkEntityId: string | null;
+  /**
+   * Restrict the task to orgs holding a kind of thing — "a booth". Three-state
+   * like the checklist's: `undefined` leaves it alone, `null` clears it.
+   * Needed because a `self_reported` check has nothing to read and so cannot
+   * notice that the org it is asking has no booth.
+   */
+  scopeEntityKind?: string | null;
   sortOrder: number;
   active: boolean;
 };
@@ -125,6 +132,7 @@ export async function saveChecklistTask(
     description: input.description.trim(),
     check_type: input.checkType,
     check_entity_id: ENTITY_SCOPED_CHECKS.has(input.checkType) ? input.checkEntityId : null,
+    ...(input.scopeEntityKind !== undefined ? { scope_entity_kind: input.scopeEntityKind } : {}),
     sort_order: input.sortOrder,
     active: input.active,
     updated_at: new Date().toISOString(),

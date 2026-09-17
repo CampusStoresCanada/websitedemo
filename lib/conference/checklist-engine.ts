@@ -192,6 +192,43 @@ export async function resolveScopedOrgs(
   return [...new Set((orgRows ?? []).map((r) => r.organization_id).filter((id): id is string => !!id))];
 }
 
+/**
+ * Drop the tasks this org has no business being asked.
+ *
+ * Most checks scope themselves — `seat_assigned` reports done when the org
+ * holds nothing of that kind, `legal_document_accepted` resolves documents by
+ * conference tier. A `self_reported` task cannot: there is nothing to read, so
+ * "have you ordered power for your booth?" is asked of a member store with no
+ * booth unless the task says who it is for.
+ *
+ * One query per distinct kind, not per task, and through resolveScopedOrgs so
+ * the org page and the reminder email keep answering this the same way.
+ */
+export async function filterTasksToOrgScope<
+  T extends { scope_entity_kind?: string | null }
+>(
+  db: AdminClient,
+  conferenceId: string,
+  organizationId: string,
+  tasks: T[]
+): Promise<T[]> {
+  const kinds = [...new Set(tasks.map((t) => t.scope_entity_kind).filter((k): k is string => !!k))];
+  if (kinds.length === 0) return tasks;
+
+  const holdsKind = new Map<string, boolean>();
+  for (const kind of kinds) {
+    const orgs = await resolveScopedOrgs(db, {
+      id: `task-scope:${kind}`,
+      conference_id: conferenceId,
+      scope_entity_id: null,
+      scope_entity_kind: kind,
+      publication_id: null,
+    });
+    holdsKind.set(kind, orgs.includes(organizationId));
+  }
+  return tasks.filter((t) => !t.scope_entity_kind || holdsKind.get(t.scope_entity_kind) === true);
+}
+
 export interface ChecklistDigest {
   orgName: string;
   openItems: { name: string; description: string; cta: { label: string; url: string } }[];
@@ -220,14 +257,18 @@ export async function buildChecklistDigest(
 
   const { data: tasks } = await db
     .from("conference_checklist_tasks")
-    .select("id, name, description, check_type, check_entity_id")
+    .select("id, name, description, check_type, check_entity_id, scope_entity_kind")
     .eq("checklist_id", checklist.id)
     .eq("active", true)
     .eq("audience", "org")
     .order("sort_order", { ascending: true });
 
+  const inScope = await filterTasksToOrgScope(
+    db, checklist.conference_id, organizationId, tasks ?? []
+  );
+
   const openItems: ChecklistDigest["openItems"] = [];
-  for (const task of tasks ?? []) {
+  for (const task of inScope) {
     const checkType = task.check_type as CheckType;
     const complete = await CHECKS[checkType]({
       db, organizationId, conferenceId: checklist.conference_id,
