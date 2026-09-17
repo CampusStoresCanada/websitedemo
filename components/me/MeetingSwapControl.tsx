@@ -40,6 +40,7 @@ export default function MeetingSwapControl({
   const [reason, setReason] = useState("");
   const [asked, setAsked] = useState(false);
   const [left, setLeft] = useState(remaining);
+  const [movedTo, setMovedTo] = useState<string | null>(null);
 
   function findOptions() {
     setError(null);
@@ -57,7 +58,7 @@ export default function MeetingSwapControl({
     });
   }
 
-  function choose(replacementScheduleId: string) {
+  function choose(replacementScheduleId: string, name: string) {
     if (!requestId) return;
     setError(null);
     startTransition(async () => {
@@ -66,10 +67,18 @@ export default function MeetingSwapControl({
         setError(res.error);
         return;
       }
-      setOpen(false);
       setAlternatives(null);
-      // The agenda is server-rendered, so the new meeting arrives on refresh
-      // rather than being patched in here. One source for what is scheduled.
+      /**
+       * Say so, and THEN refresh.
+       *
+       * The agenda is server-rendered, so the swapped meeting arrives on a
+       * refresh rather than being patched in here — one source for what is
+       * scheduled. But a refresh that has not landed yet looks identical to a
+       * click that did nothing: observed once, the old exhibitor was still on
+       * screen after a committed swap. The confirmation is what makes the
+       * difference visible, whether the row redraws this second or next.
+       */
+      setMovedTo(name);
       router.refresh();
     });
   }
@@ -115,7 +124,13 @@ export default function MeetingSwapControl({
         </button>
       </div>
 
-      {pending && !alternatives && (
+      {movedTo && (
+        <p className="mt-2 text-sm text-gray-900">
+          Done. You are now meeting {movedTo}. Your agenda below will catch up in a moment.
+        </p>
+      )}
+
+      {pending && !alternatives && !movedTo && (
         <p className="mt-2 text-sm text-gray-600">Looking for meetings you could take instead.</p>
       )}
 
@@ -178,7 +193,7 @@ export default function MeetingSwapControl({
                 </div>
                 <button
                   type="button"
-                  onClick={() => choose(alt.scheduleId)}
+                  onClick={() => choose(alt.scheduleId, alt.exhibitorName ?? "your new meeting")}
                   disabled={pending}
                   className="rounded-md border border-[#163D6D] px-3 py-1 text-xs font-medium text-[#163D6D] hover:bg-[#163D6D] hover:text-white disabled:opacity-50"
                 >
