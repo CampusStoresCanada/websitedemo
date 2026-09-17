@@ -86,7 +86,51 @@ export default function DirectoryOnboardingCallout({ page }: DirectoryOnboarding
 
   if (!active || subPhase === "done") return null;
 
-  const copy: Record<SubPhase, { heading: string; body: string }> = {
+  /**
+   * A campus store reads this directory differently from a vendor.
+   *
+   * ⛔ NO EM DASHES in anything a member reads. Nobody knows the shortcut for
+   * one, so it reads as machine-written and as though nobody spent the effort.
+   * Commas, full stops, or rewrite the sentence.
+   *
+   * ⛔ EVERGREEN. This fires for every store that ever joins, so no counts and
+   * no point-in-time facts. "52 stores" and "fourteen of seventy-nine have done
+   * it" were both in a draft of this: the first goes stale, the second goes
+   * stale AND shames the reader for being in the majority.
+   *
+   * A vendor is looking at their market. A store is looking for the two or
+   * three institutions running their platform, at their scale, who hit their
+   * problem first — and the same three filters that find those stores are what
+   * makes the store findable by everyone else. So the member copy ends on that
+   * rather than on "here is a profile": the payoff and the ask are the same
+   * fact seen from two sides.
+   *
+   * Scoped to page="members" and to org_admin_member ALONE. Not member_member:
+   * store staff do not own the benchmarking submission or the visibility
+   * settings, so the closing beat — "that's how they find you" — is an ask they
+   * cannot act on. That is the same defect visibility_intro has, and widening
+   * this predicate by one persona would reproduce it. The vendor wording is
+   * untouched for the same reason: a different job, not a different wording.
+   */
+  const isStoreAdmin = persona === "org_admin_member";
+
+  const storeCopy: Record<SubPhase, { heading: string; body: string }> = {
+    toggle: {
+      heading: "A community of your peers.",
+      body: "Map or list. The icon up top switches between them, and the list is where the narrowing happens.",
+    },
+    refine: {
+      heading: "Narrow it to the ones like you.",
+      body: "Scale and platform first. You want the store with your problem, not the biggest name on the list.",
+    },
+    institution: {
+      heading: "That's how they find you, too.",
+      body: "Open one and see who to call. These filters come from your benchmarking answers, so with nothing on file you only turn up under your province.",
+    },
+    done: { heading: "", body: "" },
+  };
+
+  const defaultCopy: Record<SubPhase, { heading: string; body: string }> = {
     toggle: {
       heading: "Two ways to explore",
       body: "Switch between the map and list views using the icon at the top. Try switching back and forth — then come back to the list to continue.",
@@ -101,6 +145,8 @@ export default function DirectoryOnboardingCallout({ page }: DirectoryOnboarding
     },
     done: { heading: "", body: "" },
   };
+
+  const copy = isStoreAdmin && page === "members" ? storeCopy : defaultCopy;
 
   const targetAttr = subPhase === "toggle" ? "view-toggle"
     : subPhase === "refine" ? "refine-button"
