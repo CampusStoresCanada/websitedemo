@@ -1,4 +1,5 @@
 import { ENTITY_SELECT, buildEntityGraph } from "@/lib/conference/entity-rows";
+import { resolveAccess } from "@/lib/conference/entity-commerce";
 import type { BuildEntity } from "@/lib/actions/conference-entities";
 
 /**
@@ -206,3 +207,33 @@ export async function loadSeatHoldings(
 
 /** The catalogue graph, for callers that also need to walk it (access, obligations). */
 export { buildEntityGraph, ENTITY_SELECT };
+
+/**
+ * Which of a person's seats do their MEETINGS hang off?
+ *
+ * Not simply their first registration. A person can hold more than one: a CSC
+ * staffer with a Staff Registration who is also named to a Full Conference
+ * Registration, a delegate who also holds a day pass. Picking the first one
+ * returned put a real account on a Staff Registration — a type that is
+ * `involved_in` no Meeting Block at all — so the schedule was queried for a
+ * seat that cannot have meetings, correctly returned none, and the agenda
+ * showed an attendee with a full programme and no meetings. No error anywhere.
+ *
+ * The graph already knows: the meeting seat is the registration whose access
+ * closure reaches an entity of kind `meeting`. Here rather than in each caller,
+ * because "which seat is this person's meeting seat" has one answer.
+ */
+export function pickMeetingSeat(
+  seats: SeatHolding[],
+  entitiesById: Map<string, BuildEntity>
+): SeatHolding | null {
+  const registrations = seats.filter((s) => s.entityKind === "registration");
+  const inMeetings = registrations.find((s) =>
+    [...resolveAccess(new Set([s.entityId]), entitiesById)].some(
+      (id) => entitiesById.get(id)?.kind === "meeting"
+    )
+  );
+  // None of their registrations is in the meetings — exhibitor staff on a
+  // booth-only type, or CSC staff. Fall back so nothing else shifts.
+  return inMeetings ?? registrations[0] ?? null;
+}

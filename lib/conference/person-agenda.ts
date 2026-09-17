@@ -1,7 +1,7 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
-import { loadSeatHoldings } from "@/lib/conference/seats";
+import { loadSeatHoldings, pickMeetingSeat } from "@/lib/conference/seats";
 import { offerRequiresOwnershipOfEntityIds } from "@/lib/conference/ownership-gate";
 import { resolveAccess } from "@/lib/conference/entity-commerce";
 import {
@@ -189,7 +189,22 @@ export async function loadPersonAgenda(
    * pipeline uses, and it survives a conference inventing a third kind of
    * attendee — which `person_kind` (eight writers, all disagreeing) does not.
    */
-  const meetingSeat = seats.find((s) => s.entityKind === "registration") ?? null;
+  /**
+   * The seat her MEETINGS hang off — which is not simply her first registration.
+   *
+   * A person can hold more than one: a CSC staffer with a Staff Registration who
+   * is also named to a Full Conference Registration, a delegate who also holds a
+   * day pass. `find` returned whichever came back first, and on a real account
+   * that was the Staff Registration — a type that is `involved_in` no Meeting
+   * Block at all. The timeline was then asked for meetings on a seat that cannot
+   * have any, so it correctly returned none and the agenda showed an attendee
+   * with a full schedule no meetings whatsoever. No error, nothing in a log.
+   *
+   * So ask the graph, which already knows: the meeting seat is the registration
+   * whose access closure reaches an entity of kind `meeting`. Same walk as the
+   * entitlement above, not a second rule about registration names.
+   */
+  const meetingSeat = pickMeetingSeat(seats, byId);
   const meetingSeatEntity = meetingSeat ? byId.get(meetingSeat.entityId) : null;
   const isExhibitingSeat = meetingSeatEntity
     ? offerRequiresOwnershipOfEntityIds(meetingSeatEntity.refs).some(

@@ -1,5 +1,7 @@
 "use server";
 
+import { revalidatePath } from "next/cache";
+
 import {
   isGlobalAdmin,
   requireAdmin,
@@ -331,7 +333,7 @@ export async function requestSwap(
    * Reads the same `schedule_freeze_at` the scheduler does, rather than a second
    * date that could drift out of step with it.
    */
-  const { frozen, freezeAt } = await readScheduleFreeze(conferenceId);
+  const { frozen } = await readScheduleFreeze(conferenceId);
   if (frozen) {
     return {
       success: false,
@@ -783,6 +785,21 @@ export async function commitSwap(
       replacementScheduleId,
     },
   });
+
+  /**
+   * The schedule just changed, so every surface showing it is now wrong.
+   *
+   * Without this the agenda kept naming the exhibitor the delegate had just
+   * left: the write succeeded, the page did not move, and a screen that looks
+   * unchanged after a click reads as a click that failed. The next thing
+   * somebody does about that is click again, and in `requested` count mode a
+   * second click spends a second swap on a swap they already made.
+   *
+   * Every other action in this codebase revalidates what it changed; this one
+   * never did, which is of a piece with swaps never having run.
+   */
+  revalidatePath("/me");
+  revalidatePath("/conference/[year]/[edition]/schedule", "page");
 
   return {
     success: true,
