@@ -2,7 +2,7 @@
 
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getServerAuthState } from "@/lib/auth/server";
-import { hasPermission } from "@/lib/auth/permissions";
+import { canEditOrganization } from "@/lib/auth/permissions";
 import { CERTIFICATION_NAMES, CANCOLL_CERT } from "@/lib/certifications";
 import { mirrorFieldsToMembership } from "@/lib/membership/mirror";
 
@@ -25,14 +25,21 @@ export async function updateCertifications(
     return { success: false, error: "Not authenticated" };
   }
 
-  const isAdmin = auth.globalRole === "admin" || auth.globalRole === "super_admin";
-  const isOrgAdmin =
-    hasPermission(auth.permissionState, "org_admin") &&
-    auth.organizations.some(
-      (uo) => uo.organization_id === orgId && uo.role === "org_admin" && uo.status === "active"
-    );
-
-  if (!isAdmin && !isOrgAdmin) {
+  // Same question every other org write asks: does this person administrate
+  // this org? `canEditOrganization` is that question — it reads the org LINK
+  // role, exactly like updateField's canManageOrganization.
+  //
+  // ⛔ This used to additionally require hasPermission(permissionState,
+  // "org_admin"), and that conjunct rejected every Vendor Partner org admin:
+  // derivePermissionState resolves them to "partner" (level 1, below
+  // org_admin's 3) because the partner program carries orgAdminElevates:
+  // false. Partners are the entire audience for these badges, and the toggle
+  // grid renders off the org link role, so the chips were live, the save was
+  // refused, and the optimistic flip rolled back — reported as "editing
+  // certifications just doesn't work" (GROSCHE, 2026-09-18). Every other
+  // field on the same page saved fine, because no other action consults
+  // permissionState. This was the only one that did.
+  if (!canEditOrganization(auth.globalRole, auth.organizations, orgId)) {
     return { success: false, error: "Insufficient permissions" };
   }
 
