@@ -1,4 +1,5 @@
 import { describe, expect, it, vi, beforeEach } from "vitest";
+import { readFileSync } from "node:fs";
 
 /**
  * ⛔ THE TRIGGER IS MOCKED, AND THAT IS NOT A CONVENIENCE.
@@ -45,13 +46,21 @@ type Seat = {
 
 let SEATS: Seat[] = [];
 
-/** Minimal db: only the two reads schedule-delivery makes. */
+/**
+ * Minimal db: the reads schedule-delivery makes. `schedules` is the run being
+ * announced, and the rows it returns are what the meeting and day counts are
+ * derived from — the numbers the email says out loud.
+ */
+let RUN_ROWS: Array<{ delegate_seat_ids: string[]; meeting_slots: { day_number: number } }> = [];
+
 function fakeDb(contacts: Array<{ id: string; email: string | null; first_name: string; last_name: string }>) {
   return {
     from(table: string) {
       return {
         select() {
-          return {
+          const chain = {
+            eq: () => chain,
+            neq: () => Promise.resolve({ data: RUN_ROWS }),
             in(_col: string, ids: string[]) {
               if (table === "contacts") {
                 return Promise.resolve({ data: contacts.filter((c) => ids.includes(c.id)) });
@@ -61,6 +70,7 @@ function fakeDb(contacts: Array<{ id: string; email: string | null; first_name: 
               });
             },
           };
+          return chain;
         },
       };
     },
@@ -157,5 +167,85 @@ describe("schedule delivery", () => {
     // Unassigned seats have no holder to email; asking for them would mean
     // resolving nulls and reporting phantom noEmail entries.
     expect(seatsSpy.mock.calls[0][1]).toMatchObject({ conferenceId: "conf", assigned: true });
+  });
+});
+
+/**
+ * The email says "You have N meetings scheduled across D days". Both numbers
+ * come from the run being announced, so the sentence cannot disagree with the
+ * schedule the link leads to.
+ *
+ * ⚠️ This shipped broken TWICE. The trigger passed `my_conference_url` and no
+ * counts at all, while the template reads `schedule_url`, `meeting_count` and
+ * `day_count`. An unknown variable renders as nothing and raises nothing, so
+ * the automation log said `sent` and the mail read "You have  meetings
+ * scheduled across  days" with a dead button. Only opening the inbox caught it.
+ */
+describe("the numbers the schedule email says out loud", () => {
+  beforeEach(() => {
+    triggerSpy.mockClear();
+    SEATS = [
+      { seatId: "seat-a", organizationId: "org-1", holderPersonId: "p-a", holderContactId: "c-a", holderName: "A" },
+      { seatId: "seat-b", organizationId: "org-1", holderPersonId: "p-b", holderContactId: "c-b", holderName: "B" },
+    ];
+    // A has three meetings across two days; B has one.
+    RUN_ROWS = [
+      { delegate_seat_ids: ["seat-a"], meeting_slots: { day_number: 1 } },
+      { delegate_seat_ids: ["seat-a"], meeting_slots: { day_number: 1 } },
+      { delegate_seat_ids: ["seat-a", "seat-b"], meeting_slots: { day_number: 2 } },
+    ];
+  });
+
+  const contacts = [
+    { id: "c-a", email: "a@example.test", first_name: "A", last_name: "One" },
+    { id: "c-b", email: "b@example.test", first_name: "B", last_name: "Two" },
+  ];
+
+  it("counts meetings and DISTINCT days per person, not per run", async () => {
+    await sendSchedulesForRun({
+      db: fakeDb(contacts), conferenceId: "conf-1", runId: "run-1",
+    });
+    const byName = new Map(
+      triggerSpy.mock.calls.map(([arg]) => [(arg as { attendeeName: string }).attendeeName, arg as Record<string, unknown>])
+    );
+    // Three meetings, but only two days — a person in two rooms on one morning
+    // has not been at the conference for three days.
+    expect(byName.get("A One")).toMatchObject({ meetingCount: 3, dayCount: 2 });
+    expect(byName.get("B Two")).toMatchObject({ meetingCount: 1, dayCount: 1 });
+  });
+
+  it("tells someone with no meetings that they have none, rather than nothing", async () => {
+    RUN_ROWS = [];
+    await sendSchedulesForRun({
+      db: fakeDb(contacts), conferenceId: "conf-1", runId: "run-1",
+    });
+    for (const [arg] of triggerSpy.mock.calls) {
+      expect(arg).toMatchObject({ meetingCount: 0, dayCount: 0 });
+    }
+  });
+});
+
+/**
+ * Source assertions, because the failure mode is silence: the template reads
+ * these three names and a mismatch renders empty rather than throwing.
+ */
+describe("the schedule email passes the variables the template reads", () => {
+  const src = readFileSync("lib/comms/conference-triggers.ts", "utf8");
+  const scheduleReady = src.slice(src.indexOf("triggerConferenceScheduleReady"));
+
+  it("passes schedule_url, meeting_count and day_count", () => {
+    for (const key of ["schedule_url:", "meeting_count:", "day_count:"]) {
+      expect(scheduleReady, `template reads ${key}`).toContain(key);
+    }
+  });
+
+  it("no longer passes my_conference_url, which the template never read", () => {
+    // The KEY, not the word — the comment above it explains the history and
+    // should keep saying the name that was wrong.
+    expect(scheduleReady).not.toContain("my_conference_url:");
+  });
+
+  it("links at the agenda's own anchor, not the checklist's", () => {
+    expect(scheduleReady).toContain("/me#my_schedule");
   });
 });

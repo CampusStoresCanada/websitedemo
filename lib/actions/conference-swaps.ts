@@ -799,7 +799,6 @@ export async function commitSwap(
    * never did, which is of a piece with swaps never having run.
    */
   revalidatePath("/me");
-  revalidatePath("/conference/[year]/[edition]/schedule", "page");
 
   return {
     success: true,

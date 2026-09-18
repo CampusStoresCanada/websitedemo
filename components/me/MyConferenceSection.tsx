@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import AgendaView from "@/components/me/AgendaView";
@@ -63,14 +62,12 @@ export default async function MyConferenceSection() {
         <h2 className="text-lg font-semibold text-gray-900">
           {conference?.name ?? "Conference"}
         </h2>
-        {conference && (
-          <Link
-            href={`/conference/${conference.year}/${conference.edition_code}/schedule`}
-            className="text-sm font-medium text-[#163D6D] hover:underline"
-          >
-            Your schedule &rarr;
-          </Link>
-        )}
+        {/*
+          The "Your schedule →" link is gone: it pointed at
+          /conference/[year]/[edition]/schedule, which now redirects straight
+          back to this section. A link that returns you to where you already are
+          is worse than no link.
+        */}
       </div>
 
       {/*

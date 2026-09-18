@@ -100,7 +100,9 @@ const eslintConfig = defineConfig([
       // ⚠️ Globbed with ** — a literal "[year]" is read as a glob character
       // class, so the bracketed route path silently matches nothing.
       "app/conference/**/register/page.tsx",
-      "app/conference/**/schedule/page.tsx",
+      // schedule/page.tsx is gone from this list because it no longer reads
+      // conference_registrations: it is a redirect to /me#my_schedule. The
+      // ratchet only goes one way — delete a line as you migrate it.
     ],
     rules: {
       // ⚠️ NOT "off" — that would also drop the getClaims rule in these files.

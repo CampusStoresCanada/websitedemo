@@ -84,6 +84,35 @@ export async function sendSchedulesForRun(params: {
     }
   }
 
+  /**
+   * How many meetings, across how many days — the two numbers the email says
+   * out loud. Counted from the run being announced rather than from anything
+   * the caller passes, so the sentence cannot disagree with the schedule.
+   *
+   * A `canceled` row is a meeting somebody swapped OUT of; counting it would
+   * tell a delegate they have one more meeting than they do.
+   */
+  const { data: runRows } = await db
+    .from("schedules")
+    .select("delegate_seat_ids, meeting_slots(day_number)")
+    .eq("conference_id", conferenceId)
+    .eq("scheduler_run_id", runId)
+    .neq("status", "canceled");
+
+  const meetingsBySeat = new Map<string, { meetings: number; days: Set<number> }>();
+  for (const row of (runRows ?? []) as Array<{
+    delegate_seat_ids: string[] | null;
+    meeting_slots: { day_number: number } | { day_number: number }[] | null;
+  }>) {
+    const slot = Array.isArray(row.meeting_slots) ? row.meeting_slots[0] : row.meeting_slots;
+    for (const seatId of row.delegate_seat_ids ?? []) {
+      const tally = meetingsBySeat.get(seatId) ?? { meetings: 0, days: new Set<number>() };
+      tally.meetings += 1;
+      if (typeof slot?.day_number === "number") tally.days.add(slot.day_number);
+      meetingsBySeat.set(seatId, tally);
+    }
+  }
+
   const orgNameById = new Map<string, string>();
   const orgIds = [...new Set(targets.map((s) => s.organizationId))];
   if (orgIds.length > 0) {
@@ -99,6 +128,7 @@ export async function sendSchedulesForRun(params: {
       continue;
     }
 
+    const tally = meetingsBySeat.get(seat.seatId);
     await triggerConferenceScheduleReady({
       db,
       conferenceId,
@@ -107,6 +137,8 @@ export async function sendSchedulesForRun(params: {
       attendeeName: contact?.name ?? seat.holderName ?? "there",
       attendeeEmail: email,
       orgName: orgNameById.get(seat.organizationId) ?? "your store",
+      meetingCount: tally?.meetings ?? 0,
+      dayCount: tally?.days.size ?? 0,
     });
     result.sent.push(seat.seatId);
   }

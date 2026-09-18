@@ -223,8 +223,14 @@ export async function triggerConferenceScheduleReady(params: {
   attendeeName: string;
   attendeeEmail: string;
   orgName: string;
+  /** Counted from the run being announced — see sendSchedulesForRun. */
+  meetingCount: number;
+  dayCount: number;
 }): Promise<void> {
-  const { db, conferenceId, runId, personKey, attendeeName, attendeeEmail, orgName } = params;
+  const {
+    db, conferenceId, runId, personKey, attendeeName, attendeeEmail, orgName,
+    meetingCount, dayCount,
+  } = params;
 
   const { data: conference, error } = await db
     .from("conference_instances")
@@ -265,11 +271,20 @@ export async function triggerConferenceScheduleReady(params: {
       conference_dates: formatConferenceDates(conference.start_date, conference.end_date),
       conference_location: conferenceLocation,
       /**
-       * ⚠️ Deliberately the live agenda, not a rendering of the schedule in the
-       * email. A late add can change what they are looking at; a link stays
-       * correct and a pasted table goes stale the moment anybody else arrives.
+       * ⚠️ These three names are what the TEMPLATE reads. It previously got
+       * `my_conference_url` and no counts at all, so the button rendered with an
+       * empty href and the body read "You have  meetings scheduled across
+       * days". An unknown variable renders as nothing and raises nothing, so the
+       * automation log said `sent` and the mail was useless — only opening the
+       * inbox or reading the template catches it.
+       *
+       * The link is deliberately the live agenda, not a rendering of the
+       * schedule. A late add or a swap changes what they are looking at; a link
+       * stays correct where a pasted table goes stale the moment anybody moves.
        */
-      my_conference_url: `${appUrl}/me#conference`,
+      meeting_count: String(meetingCount),
+      day_count: String(dayCount),
+      schedule_url: `${appUrl}/me#my_schedule`,
     },
   });
 }

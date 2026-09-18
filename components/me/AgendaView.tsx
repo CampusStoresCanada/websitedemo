@@ -139,6 +139,15 @@ export default function AgendaView({
         </p>
       )}
 
+      {/*
+        The agenda's own anchor, and it sits on the DAYS.
+        `#conference_checklist` named this block when it was only a checklist.
+        Placed above "Before you go" instead, a button that says "View My
+        Schedule" landed the reader ~900px short of any meeting, on a list of
+        deadlines — so the link kept its promise only if you scrolled.
+      */}
+      <div id="my_schedule" className="scroll-mt-20" />
+
       {agenda.dayKeys.map((dayKey) => {
         const dayItems = agenda.items.filter((i) => i.dayKeyLocal === dayKey);
         return (
