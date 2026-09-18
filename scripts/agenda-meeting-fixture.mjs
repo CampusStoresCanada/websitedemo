@@ -48,7 +48,16 @@ const USER_MEMBER = "31cf8d02-1863-449a-b713-ba8c70161523"; // test.member@examp
 const USER_PARTNER = "367f6285-da3d-478e-a8aa-455530e14754"; // test.partner@example.com
 const USER_OTHER = "677ce4be-3365-4ccd-81e1-80d4bc8cf118"; // test.public.tier@example.com
 const REG_DELEGATE = "a8fc5a0b-47a0-49df-aade-fd09ad5a034d"; // Full Conference Registration
-const REG_EXHIBITOR = "b5e5e2a7-e2c2-4cbf-add6-117b7ea76bce"; // Exhibitor Staff Registration
+/**
+ * ⚠️ CONNECTED Exhibitor Staff Registration, not plain "Exhibitor Staff
+ * Registration". Both require owning a booth, so both read as the exhibiting
+ * side — but only this one is `involved_in` the Meeting Blocks, and
+ * loadMeetingCandidates files a seat whose type reaches no `meeting` entity
+ * under notMatchable. On the plain type the fixture produced an exhibitor that
+ * no swap could ever offer, and the screen said "nothing free" — which is the
+ * correct answer to the wrong fixture.
+ */
+const REG_EXHIBITOR = "5396cdfe-87bb-46cf-915f-b6100e0f6b13"; // Connected Exhibitor Staff Registration
 
 /**
  * Every row this script writes carries this string somewhere findable, so
