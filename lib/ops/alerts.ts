@@ -69,6 +69,7 @@ const PERIODIC_RULE_KEYS = new Set([
   "board_roster_size_mismatch",
   "benchmarking_no_committee_lead",
   "match_run_stale",
+  "new_partner_announcement_unapproved",
 ]);
 const PERIODIC_RULE_KEY_PREFIXES = [
   "job_consecutive_failures:",
@@ -1801,6 +1802,69 @@ async function evaluateMatchRunStale(): Promise<CandidateAlert | null> {
   };
 }
 
+/**
+ * Helpful Ghost has written welcome posts nobody has approved.
+ *
+ * The drafter runs nightly and the publisher only ever picks up rows at
+ * `approved`, so an unapproved draft is not late — it is stopped. Nothing
+ * escalates on its own, and the only place the queue is visible is a screen
+ * somebody has to think to open. Measured 2026-09-17: three partners waiting,
+ * the oldest for a fortnight.
+ *
+ * A welcome that arrives two months after the partner joined is worse than
+ * none, so this is about the post going stale, not about a job failing.
+ *
+ * ⚠️ The message carries NO count and no names. An open alert's message is
+ * frozen at creation (see [[feedback_ops_alert_message_goes_stale]]), so "3
+ * waiting" would still say 3 when a fourth partner joined. The numbers live in
+ * `details`, and the screen is the source of truth.
+ */
+const ANNOUNCEMENT_APPROVAL_GRACE_DAYS = 7;
+
+export async function evaluateNewPartnerAnnouncementsWaiting(): Promise<CandidateAlert | null> {
+  const db = createAdminClient();
+  const cutoff = new Date(
+    Date.now() - ANNOUNCEMENT_APPROVAL_GRACE_DAYS * 24 * 60 * 60 * 1000
+  ).toISOString();
+
+  const { data, error } = await db
+    .from("ghost_announcements")
+    .select("id, organization_id, title, created_at")
+    .eq("kind", "new_partner")
+    .eq("status", "draft")
+    .lt("created_at", cutoff)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`Failed to evaluate new partner announcements: ${error.message}`);
+  }
+
+  const waiting = data ?? [];
+  if (waiting.length === 0) return null;
+
+  const oldestDays = Math.floor(
+    (Date.now() - new Date(waiting[0].created_at as string).getTime()) / (24 * 60 * 60 * 1000)
+  );
+
+  return {
+    ruleKey: "new_partner_announcement_unapproved",
+    // A welcome post nobody sends is an embarrassment, not an outage.
+    severity: oldestDays >= ANNOUNCEMENT_APPROVAL_GRACE_DAYS * 4 ? "critical" : "warning",
+    message:
+      "New partner announcements are drafted and waiting for approval in " +
+      "Admin \u2192 Comms \u2192 New Partners. Nothing posts to Circle until " +
+      "somebody approves them.",
+    details: {
+      // Frozen at creation, like the message — the screen is what to trust.
+      countAtDetection: waiting.length,
+      oldestDaysAtDetection: oldestDays,
+      graceDays: ANNOUNCEMENT_APPROVAL_GRACE_DAYS,
+      reviewPath: "/admin/comms/announcements",
+      titles: waiting.map((r) => r.title as string),
+    },
+  };
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -1827,6 +1891,7 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
     evaluateBoardVoteNotClosed(),
     evaluateBoardRosterSize(),
     evaluateMatchRunStale(),
+    evaluateNewPartnerAnnouncementsWaiting(),
   ]);
 
   // Flattened separately: every other check yields at most one candidate, but
