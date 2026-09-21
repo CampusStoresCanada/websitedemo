@@ -95,6 +95,26 @@ export const STEP_SCHEDULE: Record<string, StepSchedule> = {
     maxReminders: 1,
     channel: "email",
   },
+  /**
+   * The one ask on the member side that nothing else collects.
+   *
+   * Benchmarking owns 85 operational fields, so almost everything about a
+   * campus store arrives through that survey. procurement_info does not: it is
+   * how a store says which categories it carries and who owns each, and it is
+   * what getMemberSupplierData and match/profile.ts both read. Without it a
+   * store is matched on province alone and every buyer's supplier panel is
+   * empty.
+   *
+   * Day 5 puts it after the basics and well ahead of the network steps. The
+   * matching position in STEPS_BY_PERSONA is deliberate — the in-app callout
+   * walks that array, and the two channels disagreeing is its own bug.
+   */
+  procurement: {
+    sendAfterDays: 5,
+    reminderEveryDays: 9,
+    maxReminders: 1,
+    channel: "email",
+  },
   visibility_intro: {
     sendAfterDays: 10,
     reminderEveryDays: 11, // Day 21 if not done

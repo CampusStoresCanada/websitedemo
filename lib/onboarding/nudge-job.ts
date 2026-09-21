@@ -242,6 +242,56 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         }),
       };
 
+    /**
+     * Procurement, from the two ends it is actually filled in from.
+     *
+     * A store admin sets which categories the store carries and puts a name
+     * against each. A buyer claims the ones that are theirs — and that claim
+     * CREATES the category on the organisation if it is not there yet
+     * (SelfEditModal pushes a new category_buyers entry), so the record is
+     * assembled from the people who do the buying rather than guessed downward
+     * by one person.
+     *
+     * The payoff is per-person and immediate: getMemberSupplierData reads the
+     * caller's own contact id out of category_buyers and returns
+     * hasAssignments:false when there is nothing, which is why the panel on
+     * /me is empty for almost everybody. match/profile.ts reads the same
+     * field, plus preferred_certifications and sourcing_provinces.
+     *
+     * ⛔ No counts in this copy. It is evergreen and fires for every store
+     * that joins from here on.
+     */
+    case "procurement": {
+      if (isVendorProgram(opts.persona)) return null; // member-program step only
+      const isAdmin = opts.persona === "org_admin_member";
+      return isAdmin
+        ? {
+            subject: isReminder
+              ? `Still nobody named against ${orgName}'s categories`
+              : `Who buys what at ${orgName}?`,
+            html: nudgeHtml({
+              firstName,
+              headline: "Put a name against each category.",
+              body: `Your org page has a Procurement section: the categories ${orgName} carries, and who owns each one.<br><br>Setting it does two things. Vendors looking for the right person at your store find them instead of guessing, and every buyer you name gets their own supplier list built from their own categories rather than the store's.<br><br>You don't have to know it all. Name the ones you're sure of and leave the rest. Each buyer can add and adjust their own from their account, so it isn't a list you have to keep current by yourself.`,
+              ctaText: "Set up procurement",
+              ctaUrl: orgUrl,
+              footnote: "It's also what the curated meetings at the conference are matched on.",
+            }),
+          }
+        : {
+            subject: isReminder
+              ? `Your supplier list is still waiting on one thing`
+              : `What do you buy for ${orgName}?`,
+            html: nudgeHtml({
+              firstName,
+              headline: "Your own supplier list starts here.",
+              body: `On your account page, open Edit my info and tick the categories you buy for. The site builds you a supplier list out of them.<br><br>Yours, not the store's. If two of you buy different things, you each get a different list. And it keeps up with you: change what you tick and the list changes with it.<br><br>If a category you buy isn't there yet, add it. What you pick becomes part of ${orgName}'s record, which is how the store's list gets built in the first place.`,
+              ctaText: "Set my categories",
+              ctaUrl: `${base}/me`,
+            }),
+          };
+    }
+
     case "profile_categories":
       return {
         subject: isReminder
