@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createHmac, timingSafeEqual } from "crypto";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isProbablyARace } from "@/lib/comms/webhook-race";
 import { unsubscribeEmail, GLOBAL_SUPPRESSION_CATEGORY } from "@/lib/comms/suppressions";
 
 // ─────────────────────────────────────────────────────────────────
@@ -52,6 +53,8 @@ function verifySignature(
 // ─────────────────────────────────────────────────────────────────
 // Event handler
 // ─────────────────────────────────────────────────────────────────
+
+
 
 interface ResendWebhookPayload {
   type:
@@ -140,6 +143,12 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: lookupErr.message }, { status: 500 });
     }
     if (!delivery) {
+      if (isProbablyARace(payload.data?.created_at ?? payload.created_at)) {
+        return NextResponse.json(
+          { error: "delivery row not written yet", emailId },
+          { status: 503 }
+        );
+      }
       return NextResponse.json({ ok: true, skipped: "no matching delivery" });
     }
 
@@ -181,11 +190,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true });
   }
 
-  const { error } = await adminClient
+  const { data: updated, error } = await adminClient
     .from("message_deliveries")
     .update(updatePayload)
     .eq("provider_message_id", emailId)
-    .in("status", ["sent", "queued"]); // don't overwrite terminal states
+    .in("status", ["sent", "queued"]) // don't overwrite terminal states
+    .select("id");
+
+  // Zero rows is not a Postgres error, so this has to be checked explicitly —
+  // that silence is exactly how 400 delivered events were lost.
+  if (!error && (updated ?? []).length === 0 && isProbablyARace(payload.data?.created_at ?? payload.created_at)) {
+    return NextResponse.json(
+      { error: "delivery row not written yet", emailId },
+      { status: 503 }
+    );
+  }
 
   if (error) {
     console.error("[webhooks/resend] DB update failed:", error.message);
