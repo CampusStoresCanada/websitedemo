@@ -115,6 +115,17 @@ export const STEP_SCHEDULE: Record<string, StepSchedule> = {
     maxReminders: 1,
     channel: "email",
   },
+  /**
+   * The other half of procurement. Deliberately a week behind it (day 5), and
+   * the job additionally defers it until the reader is actually a named buyer
+   * — an empty supplier panel is a worse first impression than no email.
+   */
+  my_suppliers: {
+    sendAfterDays: 12,
+    reminderEveryDays: 14,
+    maxReminders: 1,
+    channel: "email",
+  },
   visibility_intro: {
     sendAfterDays: 10,
     reminderEveryDays: 11, // Day 21 if not done

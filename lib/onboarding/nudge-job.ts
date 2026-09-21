@@ -98,6 +98,15 @@ interface UserContext {
   hasFeaturedProduct: boolean;
   hasCatalogueOrLinks: boolean;
   hasBackground: boolean;
+  /**
+   * Is THIS person named against a buying category at their org?
+   *
+   * Per-person, not per-org: getMemberSupplierData reads the caller's own
+   * contact id out of category_buyers and returns hasAssignments:false when it
+   * is absent. So a store can have procurement filled in while this particular
+   * reader still opens an empty panel.
+   */
+  isNamedBuyer: boolean;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -261,6 +270,24 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
      * ⛔ No counts in this copy. It is evergreen and fires for every store
      * that joins from here on.
      */
+    /**
+     * The payoff for procurement, and only sent once there is one. The job
+     * defers this step until ctx.isNamedBuyer, so by the time this renders the
+     * reader has categories and the panel has something in it.
+     */
+    case "my_suppliers":
+      return {
+        subject: isReminder ? `Your supplier list, still waiting` : `Your suppliers are matched and waiting`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Built from what you buy.",
+          body: `You set your buying categories, so ${orgName} now has a supplier list put together for you: the vendors that match what you actually buy, rather than everyone in the directory.<br><br>It's yours rather than the store's. Somebody else at ${orgName} buying different things sees a different list. Change your categories and it changes with them.<br><br>Worth a look before you next go sourcing.`,
+          ctaText: "See my suppliers",
+          ctaUrl: `${base}/me`,
+          footnote: isReminder ? "The full list exports to a spreadsheet from the Toolkit." : undefined,
+        }),
+      };
+
     case "procurement": {
       if (isVendorProgram(opts.persona)) return null; // member-program step only
       const isAdmin = opts.persona === "org_admin_member";
@@ -696,13 +723,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url")
+    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
     .in("id", orgIds);
 
   type OrgRow = {
     id: string; name: string; slug: string; province: string | null; type: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
     highlight_product_name: string | null; product_overlay_url: string | null;
+    procurement_info: { category_buyers?: { contact_ids?: string[] }[] } | null;
     catalogue_url: string | null; partner_links: unknown; banner_url: string | null;
   };
   const orgById = new Map<string, OrgRow>();
@@ -711,14 +739,23 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Contact counts + photo check (per org)
   const { data: contacts } = await createAdminClient()
     .from("contacts")
-    .select("id, organization_id, profile_picture_url")
+    .select("id, organization_id, profile_picture_url, profile_id")
     .in("organization_id", orgIds);
 
   const orgHasContacts = new Map<string, boolean>();
   const orgHasPhotos = new Map<string, boolean>();
-  for (const c of (contacts ?? []) as { id: string; organization_id: string; profile_picture_url: string | null }[]) {
+  // Every contact row a person holds at an org, not one: 39 people hold two at
+  // a single org, and either could be the row named against a category.
+  const contactIdsByUserOrg = new Map<string, Set<string>>();
+  for (const c of (contacts ?? []) as { id: string; organization_id: string; profile_picture_url: string | null; profile_id: string | null }[]) {
     orgHasContacts.set(c.organization_id, true);
     if (c.profile_picture_url) orgHasPhotos.set(c.organization_id, true);
+    if (c.profile_id) {
+      const key = `${c.profile_id}:${c.organization_id}`;
+      const set = contactIdsByUserOrg.get(key) ?? new Set<string>();
+      set.add(c.id);
+      contactIdsByUserOrg.set(key, set);
+    }
   }
 
   // ── 5. Build UserContext per user ─────────────────────────────────────────
@@ -761,6 +798,13 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         Boolean(org.catalogue_url?.trim()) ||
         (Array.isArray(org.partner_links) && org.partner_links.length > 0),
       hasBackground: Boolean(org.banner_url?.trim()),
+      isNamedBuyer: (() => {
+        const mine = contactIdsByUserOrg.get(`${userId}:${orgId}`);
+        if (!mine || mine.size === 0) return false;
+        return (org.procurement_info?.category_buyers ?? []).some((entry) =>
+          (entry.contact_ids ?? []).some((id) => mine.has(id))
+        );
+      })(),
     });
   }
 
@@ -798,6 +842,20 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       if (schedule.conditional === "benchmarking_open" && !benchmarkingOpen) {
         result.skipped++;
         result.log.push(`skip ${ctx.email} / ${row.step_key}: benchmarking not open`);
+        continue;
+      }
+
+      // Nothing to look at yet. my_suppliers renders the vendors matched to
+      // THIS person's buying categories, and getMemberSupplierData returns
+      // hasAssignments:false when they have none — so the mail would land
+      // somebody on an empty panel and spend the one thing it had to spend.
+      //
+      // Skipped, not completed: they are one procurement save away from being
+      // a buyer, and the step should fire then. Leaving the row pending is
+      // what makes that happen on a later run.
+      if (row.step_key === "my_suppliers" && !ctx.isNamedBuyer) {
+        result.skipped++;
+        result.log.push(`deferred ${ctx.email} / my_suppliers: no buying categories yet`);
         continue;
       }
 
