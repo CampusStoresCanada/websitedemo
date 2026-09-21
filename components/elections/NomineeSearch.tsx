@@ -120,12 +120,16 @@ export default function NomineeSearch({
         {searching && <p className="mt-2 text-xs text-gray-500">Searching…</p>}
         {failed && (
           <p className="mt-2 text-xs text-amber-700">
-            Could not search just now — press Search to try the full page.
+            Could not search just now. Press Search to try the full page.
           </p>
         )}
         {!searching && !failed && touched.current && query.trim().length >= 2 && results.length === 0 && (
           <p className="mt-2 text-xs text-gray-500">
-            Nobody at a member institution matches “{query.trim()}”.
+            Nobody at a member institution matches “{query.trim()}”. Only people who work at a
+            member institution are listed here. Two groups are missing for different reasons:
+            institutions that have not completed their renewal do not appear until they do, and
+            CSC office staff do not appear at all, because standing for the board is open to
+            employees of member institutions rather than of the association.
           </p>
         )}
       </div>
