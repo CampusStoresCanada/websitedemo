@@ -257,12 +257,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       body: "Head to My Account to manage how you appear on the network — including your visibility in the directory and your procurement categories.",
       ctaLabel: "Go to My Account",
       targetPath: "/me",
-      // Deliberately NOT completesOnCta. Arriving at /me is not setting your
-      // categories, and closing the step on the click leaves somebody with an
-      // empty supplier panel and no reminder. updateProcurementInfo closes it
-      // server-side once this person is actually named in category_buyers —
-      // which is also the only place that question can be asked, since this
-      // component is not mounted on /me.
+      completesOnCta: true,
       guided: false,
     },
     procurement: {
