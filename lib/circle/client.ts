@@ -357,25 +357,35 @@ export class CircleAdminClient {
     await this.request<void>("DELETE", `/access_groups/${groupId}`);
   }
 
-  /** List members of an access group (paginated). */
-  async listAccessGroupMembers(
-    groupId: number
-  ): Promise<CircleMember[]> {
-    const members: CircleMember[] = [];
+  /**
+   * Community member IDs currently in an access group (paginated, 100/page).
+   *
+   * The rows this endpoint returns are *memberships*, not members: each has its
+   * own `id` (the membership row) alongside `community_member_id` (the person).
+   * Reading `id` here yields numbers that match no member anywhere, and the
+   * failure is silent — every diff against it reports "missing" and re-queues
+   * the whole roster. Only `community_member_id` is the person.
+   */
+  async listAccessGroupMemberIds(groupId: number): Promise<number[]> {
+    const ids: number[] = [];
     let page = 1;
     while (true) {
       const result = await this.request<{
-        records: CircleMember[];
+        records: { community_member_id: number }[];
         has_next_page: boolean;
       }>("GET", `/access_groups/${groupId}/community_members`, {
         params: { per_page: 100, page },
       });
       const records = result.records ?? [];
-      members.push(...records);
+      for (const row of records) {
+        if (typeof row.community_member_id === "number") {
+          ids.push(row.community_member_id);
+        }
+      }
       if (!result.has_next_page || records.length === 0) break;
       page++;
     }
-    return members;
+    return ids;
   }
 
   // ---- Posts (announcements feed) -----------------------------------------

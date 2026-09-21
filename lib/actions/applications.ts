@@ -39,6 +39,7 @@ import {
   upsertPersonContact,
 } from "@/lib/identity/lifecycle";
 import { enqueueCircleSync } from "@/lib/circle/sync";
+import { getAccessGroupIds } from "@/lib/circle/config";
 import { markVoteExecuted, withdrawVoteForApplication } from "@/lib/board/vote-service";
 import { extractDomain } from "@/lib/applications/duplicate-match";
 import { raiseAlertIfNotOpen, resolveAlertsByRuleKey } from "@/lib/ops/alerts";
@@ -1597,10 +1598,11 @@ export async function completeOnboarding(
 
       if (!contact?.email) return;
 
-      // Fetch org's Circle tag ID
+      // Fetch org's Circle tag ID + type (type decides which shared access
+      // group this contact belongs in)
       const { data: orgRow } = await db
         .from("organizations")
-        .select("circle_tag_id")
+        .select("circle_tag_id, type")
         .eq("id", orgId)
         .single();
 
@@ -1612,6 +1614,27 @@ export async function completeOnboarding(
         orgId,
         idempotencyKey: `onboarding-link-${contact.id}`,
       });
+
+      // Access group. The approved → active transition above queues this for
+      // the whole org, but only when the transition actually fires — an org
+      // already active when onboarding completes (a partner who paid first)
+      // took neither path, so its primary contact landed in Circle carrying
+      // the org tag and no group. Stable key, so the two paths can't
+      // double-queue when both apply.
+      const groupIds = getAccessGroupIds();
+      const isPartner = orgRow?.type?.toLowerCase().includes("partner") ?? false;
+      const groupId = isPartner ? groupIds.partner : groupIds.member;
+
+      if (groupId) {
+        await enqueueCircleSync({
+          operation: "add_to_access_group",
+          entityType: "contact",
+          entityId: contact.id,
+          payload: { groupId, email: contact.email },
+          orgId,
+          idempotencyKey: `onboarding-access-${contact.id}-${groupId}`,
+        });
+      }
 
       if (orgRow?.circle_tag_id) {
         await enqueueCircleSync({

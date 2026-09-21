@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { enqueueCircleSync } from "@/lib/circle/sync";
+import { getAccessGroupIds } from "@/lib/circle/config";
 import {
   ensureKnownPerson,
   ensurePersonForUser,
@@ -55,7 +56,7 @@ export async function provisionOrgLogin(params: {
   try {
     const { data: orgRow } = await adminClient
       .from("organizations")
-      .select("id, name, tenant_id, circle_tag_id")
+      .select("id, name, tenant_id, circle_tag_id, type")
       .eq("id", orgId)
       .maybeSingle();
 
@@ -107,6 +108,11 @@ export async function provisionOrgLogin(params: {
     const existingUser = await findUserByEmail(adminClient, normalizedEmail);
 
     let userId: string;
+    // The contact this login belongs to. Circle queue rows are keyed by
+    // contact — entity_id used to be handed the auth user id instead, which
+    // points at no contacts row at all, so every tool that joins on it (the
+    // ops panel, the access-group reconcile) saw an orphan.
+    let circleContactId: string | null = null;
 
     if (existingUser) {
       userId = existingUser.id;
@@ -121,6 +127,7 @@ export async function provisionOrgLogin(params: {
       // Now that this is a real write (not the old no-op), it should run
       // whenever we have a contact in hand, not just as an email-lookup fallback.
       const linkPersonId = ensuredPerson.personId ?? knownPersonId;
+      circleContactId = linkPersonId ?? null;
       if (linkPersonId) {
         await linkUserToPerson({ userId, personId: linkPersonId });
       }
@@ -196,6 +203,7 @@ export async function provisionOrgLogin(params: {
         fallbackEmail: normalizedEmail,
       });
       const linkPersonId = ensuredPerson.personId ?? knownPersonId;
+      circleContactId = linkPersonId ?? null;
       if (linkPersonId) {
         await linkUserToPerson({ userId, personId: linkPersonId });
       }
@@ -221,15 +229,48 @@ export async function provisionOrgLogin(params: {
       };
     }
 
-    // Circle sync: tag the new user with their org's tag
+    // ── Circle: link, then group, then tag ───────────────────────────────────
+    // This used to queue the tag alone. add_tag and add_to_access_group both
+    // address the member by email, so against someone Circle has never seen
+    // they 404 — which is what happened to every invite for a brand-new
+    // person. link_member is find-or-create and runs first for that reason;
+    // it is a no-op for anyone already linked. The access group was simply
+    // missing, so an invited user got their org tag and never the Members or
+    // Partners access that comes with it.
+    const circleEntityId = circleContactId ?? userId;
+
+    await enqueueCircleSync({
+      operation: "link_member",
+      entityType: "contact",
+      entityId: circleEntityId,
+      payload: { email: normalizedEmail, name: normalizedEmail },
+      orgId,
+      idempotencyKey: `invite-link:${circleEntityId}`,
+    });
+
+    const groupIds = getAccessGroupIds();
+    const isPartner = orgRow.type?.toLowerCase().includes("partner") ?? false;
+    const inviteGroupId = isPartner ? groupIds.partner : groupIds.member;
+
+    if (inviteGroupId) {
+      await enqueueCircleSync({
+        operation: "add_to_access_group",
+        entityType: "contact",
+        entityId: circleEntityId,
+        payload: { groupId: inviteGroupId, email: normalizedEmail },
+        orgId,
+        idempotencyKey: `invite-access:${circleEntityId}:${inviteGroupId}`,
+      });
+    }
+
     if (orgRow.circle_tag_id) {
       await enqueueCircleSync({
         operation: "add_tag",
         entityType: "contact",
-        entityId: userId,
+        entityId: circleEntityId,
         payload: { tagId: Number(orgRow.circle_tag_id), email: normalizedEmail },
         orgId,
-        idempotencyKey: `invite-tag:${userId}:${orgRow.circle_tag_id}`,
+        idempotencyKey: `invite-tag:${circleEntityId}:${orgRow.circle_tag_id}`,
       });
     }
 
