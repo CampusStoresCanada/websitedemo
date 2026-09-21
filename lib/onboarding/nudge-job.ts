@@ -24,6 +24,28 @@ import type { Persona } from "./steps";
 const MAX_SENDS_PER_USER_PER_RUN = 1;
 
 /**
+ * Quiet days a person gets after ANY CSC email before this job adds another.
+ *
+ * The cap above governs one run. It does nothing about consecutive runs, and
+ * it cannot see the rest of our sending at all — so on 2026-09-21 the Town
+ * Hall campaign reached 529 people at 15:15 and the nudge cron would have put
+ * a profile reminder in the same inboxes at 10:00 the next morning. Different
+ * calendar days, same reading session.
+ *
+ * Counts campaign deliveries as well as previous nudges, which is what makes
+ * one rule cover both problems: a campaign suppresses the next nudge, and a
+ * nudge suppresses the one after it. Measured on 2026-09-24's backlog, 40
+ * people have an overdue step and the median is a single email — but 8 of them
+ * would otherwise get five to seven consecutive mornings.
+ *
+ * ⚠️ It can only see what is written down. Campaigns leave message_deliveries
+ * rows and nudges leave sent_at on the progress row. Renewal and grace mail
+ * call sendTransactional directly and leave no trace, so they stay invisible
+ * here and can still land beside a nudge.
+ */
+const QUIET_DAYS_AFTER_ANY_EMAIL = 2;
+
+/**
  * Steps whose backing field exists only on a Vendor Partner page.
  *
  * `company_description`, `catalogue_url` and `partner_links` are rendered and
@@ -720,6 +742,40 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // ── 4. Fetch user context for all users in one pass ───────────────────────
   const userIds = Array.from(byUser.keys());
 
+  // When did each of these people last hear from us, by any route we record?
+  const lastEmailByUser = new Map<string, string>();
+  {
+    // Previous nudges — read across ALL their rows, not just the pending ones:
+    // a step that was sent and has since auto-completed still used up an inbox.
+    const { data: nudges } = await createAdminClient()
+      .from("user_onboarding_progress")
+      .select("user_id, sent_at, last_reminder_sent_at")
+      .in("user_id", userIds);
+    for (const n of (nudges ?? []) as Array<{ user_id: string; sent_at: string | null; last_reminder_sent_at: string | null }>) {
+      for (const stamp of [n.sent_at, n.last_reminder_sent_at]) {
+        if (!stamp) continue;
+        const seen = lastEmailByUser.get(n.user_id);
+        if (!seen || stamp > seen) lastEmailByUser.set(n.user_id, stamp);
+      }
+    }
+
+    // Campaign sends. message_recipients carries the user_id; the delivery row
+    // beside it carries when it actually went.
+    const { data: campaignSends } = await createAdminClient()
+      .from("message_recipients")
+      .select("user_id, message_deliveries(sent_at)")
+      .in("user_id", userIds);
+    for (const r of (campaignSends ?? []) as Array<{ user_id: string | null; message_deliveries: { sent_at: string | null }[] | { sent_at: string | null } | null }>) {
+      if (!r.user_id) continue;
+      const rows = Array.isArray(r.message_deliveries) ? r.message_deliveries : r.message_deliveries ? [r.message_deliveries] : [];
+      for (const d of rows) {
+        if (!d?.sent_at) continue;
+        const seen = lastEmailByUser.get(r.user_id);
+        if (!seen || d.sent_at > seen) lastEmailByUser.set(r.user_id, d.sent_at);
+      }
+    }
+  }
+
   // Auth emails
   const emailById = new Map(Object.entries(await lookupUserEmailsByIds(createAdminClient(), userIds)));
 
@@ -936,6 +992,17 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
 
       // Cap sends per user per run. Checked after auto-complete so a capped
       // user's remaining rows still get marked done when the data says so.
+      // Anything from us in the last couple of days wins over a nudge. Placed
+      // after auto-complete so a quiet person's satisfied steps still close.
+      const lastEmail = lastEmailByUser.get(userId);
+      if (lastEmail && daysSince(lastEmail) < QUIET_DAYS_AFTER_ANY_EMAIL) {
+        result.skipped++;
+        result.log.push(
+          `quiet ${ctx.email} / ${row.step_key}: heard from us ${daysSince(lastEmail).toFixed(1)}d ago`
+        );
+        continue;
+      }
+
       if (sentForUser >= MAX_SENDS_PER_USER_PER_RUN) {
         result.skipped++;
         result.log.push(`cap ${ctx.email} / ${row.step_key}: already nudged this run`);
