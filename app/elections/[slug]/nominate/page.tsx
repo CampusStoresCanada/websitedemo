@@ -456,8 +456,14 @@ export default async function NominatePage({
       {q && results.length === 0 && (
         <div className="mt-6">
           <Notice tone="info">
-            Nobody at an eligible member institution matches &ldquo;{q}&rdquo;. Note that people at
-            institutions which haven&apos;t completed their renewal don&apos;t appear here yet.
+            {/* Kept in step with the live-search empty state in NomineeSearch:
+                two readers hitting the same dead end should be told the same
+                thing, and the reason matters more than the fact. */}
+            Nobody at a member institution matches &ldquo;{q}&rdquo;. Only people who work at a
+            member institution are listed here. Two groups are missing for different reasons:
+            institutions that have not completed their renewal do not appear until they do, and
+            CSC office staff do not appear at all, because standing for the board is open to
+            employees of member institutions rather than of the association.
           </Notice>
         </div>
       )}
