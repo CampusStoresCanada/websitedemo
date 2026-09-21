@@ -419,6 +419,22 @@ export default async function NominatePage({
         </div>
       </details>
 
+      {/* The search used to appear with no explanation at all: a bare box under
+          a placeholder reading "Search by name", directly after the case for
+          standing. Readers could not tell whether they were searching for a
+          nominee, for a co-signer, or for their own record, and picking a name
+          felt like being thrown somewhere rather than moving to the next step.
+          Say what the box is for, and what happens when you use it. */}
+      <div className="mt-6">
+        <h2 className="text-sm font-semibold text-gray-900">Find the person you want to nominate</h2>
+        <p className="mt-1 text-sm text-gray-600">
+          Search for them by name. Anyone who works at a member institution can be nominated,
+          whether they work with you or at another member store. Choosing a name opens the
+          nomination form, where you fill in the rest and submit it. Nothing reaches the person
+          you pick until you do.
+        </p>
+      </div>
+
       <NomineeSearch
         slug={slug}
         initialQuery={q ?? ""}
