@@ -46,12 +46,12 @@ export const ORG_ADMIN_MEMBER_STEPS = [
   "profile_featured_product",
   "profile_links_docs",
   "contacts_sorted",
+  "procurement",
   "visibility_intro",
   "network_members",
   "network_partners",
   "events_discovery",
   "benchmarking_survey",
-  "procurement",
   "opening_rfp",
 ] as const;
 
@@ -89,8 +89,8 @@ export const MEMBER_MEMBER_STEPS = [
   "session_1_welcome",
   "view_org_page",
   "toolkit_tour",
-  "visibility_intro",
   "procurement",
+  "visibility_intro",
   "network_members",
   "network_partners",
   "events_discovery",
