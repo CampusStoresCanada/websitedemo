@@ -38,12 +38,15 @@ const MAX_SENDS_PER_USER_PER_RUN = 1;
  * people have an overdue step and the median is a single email — but 8 of them
  * would otherwise get five to seven consecutive mornings.
  *
- * ⚠️ It can only see what is written down. Campaigns leave message_deliveries
- * rows and nudges leave sent_at on the progress row. Renewal and grace mail
- * call sendTransactional directly and leave no trace, so they stay invisible
- * here and can still land beside a nudge.
+ * ⚠️ It can only see what is written down, and that is the whole mechanism:
+ * a batch run creates a campaign and leaves message_deliveries rows, a
+ * per-event receipt does not. So runs suppress nudges and receipts never do,
+ * without anything having to classify a message. Renewal, election and
+ * benchmarking mail call sendTransactional directly and leave no trace, so
+ * they are the gap — the fix is to route them through createCampaign the way
+ * lib/conference/checklist-engine.ts already does, not to tag them here.
  */
-const QUIET_DAYS_AFTER_ANY_EMAIL = 2;
+const QUIET_DAYS_AFTER_ANY_EMAIL = 1;
 
 /**
  * Steps whose backing field exists only on a Vendor Partner page.
