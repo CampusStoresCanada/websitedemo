@@ -23,7 +23,6 @@ export default async function CommitteePage() {
 
   if (!isLead && !admin) redirect("/benchmarking");
 
-  const nowIso = new Date().toISOString();
 
   // What can this person hand out, and until when?
   const delegable: Record<string, string | null> = {};
@@ -42,15 +41,19 @@ export default async function CommitteePage() {
   const canDelegateAny =
     admin || WORKSTREAMS.some((w) => delegable[w.capability] != null);
 
-  // Who currently holds each benchmarking capability
+  // Who currently holds each benchmarking capability.
+  //
+  // Columns are term_start/term_end/is_active. An earlier version filtered on
+  // starts_at, ends_at and revoked_at — none of which exist on this view — so
+  // the query errored, the error was discarded, and every workstream rendered
+  // "Nobody holds this" no matter who was appointed. is_active already means
+  // "term has started and has not ended", so it replaces all three filters.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: holders } = (await (createAdminClient() as any)
     .from("capability_contributions")
-    .select("subject_id, display_name, capability, reason, ends_at")
+    .select("subject_id, display_name, capability, reason, term_end")
     .like("capability", "benchmarking.%")
-    .is("revoked_at", null)
-    .lte("starts_at", nowIso)
-    .gt("ends_at", nowIso)
+    .eq("is_active", true)
     .order("display_name")) as { data: any[] | null };
 
   // ── Progress ──────────────────────────────────────────────────
@@ -131,7 +134,7 @@ export default async function CommitteePage() {
         name: (h.display_name as string) ?? "Unknown",
         capability: h.capability as string,
         reason: h.reason as string,
-        endsAt: h.ends_at as string,
+        endsAt: (h.term_end as string) ?? null,
       }))}
       progress={{
         reviewDone,

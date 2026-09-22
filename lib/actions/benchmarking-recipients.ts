@@ -172,6 +172,44 @@ export async function assignRegion(
 }
 
 /**
+ * Which stores go first.
+ *
+ * The beta cohort is the handful of stores that get the survey ahead of the
+ * rest, so a question that reads two ways is found by five people instead of
+ * fifty. `betaOnly` on the send path has always filtered on this flag, but
+ * nothing could ever set it — so the cohort was permanently empty and "send
+ * to the beta stores" was a button that mailed nobody.
+ *
+ * Admin-only, and deliberately not a rep right: choosing who absorbs the risk
+ * of a broken question is an office decision, not a regional one.
+ *
+ * Flipping this after a store has already been invited does not un-send
+ * anything. It only changes which cohort the NEXT send counts them in —
+ * planInvitations skips anyone already invited.
+ */
+export async function setRecipientBeta(input: {
+  recipientId: string;
+  isBeta: boolean;
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyAdmin();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("benchmarking_recipients")
+    .update({ is_beta: input.isBeta })
+    .eq("id", input.recipientId);
+
+  if (error) {
+    console.error("[recipients] setRecipientBeta failed:", error);
+    return { success: false, error: "Could not update the beta cohort" };
+  }
+
+  revalidatePath("/benchmarking/recipients");
+  return { success: true };
+}
+
+/**
  * A rep's answer on one store. "I don't know" is a first-class outcome — much
  * better than a guess, and it routes the store back to the office.
  */

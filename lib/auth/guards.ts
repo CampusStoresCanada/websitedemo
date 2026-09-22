@@ -3,6 +3,7 @@ import { cache } from "react";
 import { unstable_rethrow } from "next/navigation";
 import type { Database } from "@/lib/database.types";
 import { createClient } from "@/lib/supabase/server";
+import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 import { CAPABILITY } from "@/lib/constants/capabilities";
 import { getIntegrationConfig } from "@/lib/policy/engine";
@@ -178,10 +179,17 @@ async function loadAuthContext(supabase?: AppSupabase): Promise<AuthContext | nu
   // already use. There is no is_benchmarking_reviewer column; a previous
   // version of this line read one that was never created, so this was
   // permanently false and only global admins could ever review.
-  // Either capability lets you into the reviewer surfaces at all.
-  const isBenchmarkingReviewer =
-    snapshot.capabilities.includes(CAPABILITY.benchmarkingContentReview) ||
-    snapshot.capabilities.includes(CAPABILITY.benchmarkingQaVerify);
+  // Who may enter /benchmarking/admin at all.
+  //
+  // This used to include content_review, on the reasoning that both are
+  // "reviewers". The effect was that someone invited to check twelve question
+  // wordings could also open every member store's submission and rule on
+  // flagged figures — the precise widening the comment below swears off.
+  // A benchmarking invitation is a TASK, not committee membership: one
+  // capability opens one door and nothing else. Question review's door is
+  // /benchmarking/review, which is outside this shell, so content_review has
+  // no business here.
+  const isBenchmarkingReviewer = opensBenchmarkingAdmin(snapshot.capabilities);
   // Content review is the narrower right, and the question-review surfaces ask
   // it specifically: someone who verifies submitted figures is not thereby
   // entitled to rewrite the questions. Kept separate rather than folded into

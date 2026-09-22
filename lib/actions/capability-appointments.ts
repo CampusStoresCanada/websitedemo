@@ -35,6 +35,8 @@ import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 export interface AppointmentResult {
   success: boolean;
   error?: string;
+  /** The appointment saved, but the invitation email did not go out. */
+  inviteWarning?: string;
 }
 
 async function requireAdmin(): Promise<
@@ -73,6 +75,13 @@ export async function appointToCapability(input: {
   capability: string;
   reason: string;
   endsAt: string;
+  /**
+   * When the WORK is due, as a calendar date. Not the same as `endsAt`, which
+   * is how long they hold the capability: a reviewer can keep access until the
+   * survey closes and still be needed by next Tuesday. Omitted means the
+   * invitation names no deadline rather than inventing one.
+   */
+  dueDate?: string;
   bodyKey?: string;
 }): Promise<AppointmentResult> {
   const admin = await requireAdmin();
@@ -136,8 +145,33 @@ export async function appointToCapability(input: {
     return { success: false, error: "Could not save that appointment." };
   }
 
+  // Tell them. Appointing was silent in both directions until now: no email,
+  // and no link on any page the appointed person could actually open.
+  //
+  // Deliberately after the insert and deliberately unable to fail it. If the
+  // mail bounces, the appointment still stands and the person can still be
+  // told by hand; if it could throw here, a mail outage would start refusing
+  // appointments.
+  const { sendAppointmentInvitation } = await import(
+    "@/lib/benchmarking/appointment-invitation"
+  );
+  const invite = await sendAppointmentInvitation({
+    subjectId: input.subjectId,
+    capability: input.capability,
+    // The deadline for the WORK, which is not the end of the term. Someone can
+    // hold question review until the survey closes and still be needed by next
+    // Tuesday. Using term_end here once promised a reviewer they had until
+    // December for something due in a week.
+    dueDate: input.dueDate,
+  });
+
   revalidatePath("/admin/access");
-  return { success: true };
+  revalidatePath("/benchmarking/committee");
+  // Surfaced, not swallowed: "appointed but we could not reach them" is a
+  // thing the person appointing needs to know the moment it happens.
+  return invite.sent
+    ? { success: true }
+    : { success: true, inviteWarning: invite.reason ?? "Could not send the invitation email." };
 }
 
 /**

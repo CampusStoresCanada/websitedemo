@@ -98,6 +98,10 @@ export type TemplateKey =
   | "benchmarking_beta_invitation"
   | "benchmarking_reminder"
   | "benchmarking_submission_received"
+  // Sent to ONE person when they are appointed to a piece of committee work.
+  // Transactional: a direct consequence of a named act by the office, about
+  // that person's own role. See lib/benchmarking/appointment-invitation.ts.
+  | "benchmarking_committee_invitation"
   // Elections
   | "election_call_for_nominations"
   | "election_nomination_received"
