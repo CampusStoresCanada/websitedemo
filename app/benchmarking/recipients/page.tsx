@@ -5,6 +5,7 @@ import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import RegionAssignment from "@/components/benchmarking/recipients/RegionAssignment";
+import BetaCohort from "@/components/benchmarking/recipients/BetaCohort";
 
 export const metadata = {
   title: "Recipient Confirmation | Campus Stores Canada",
@@ -135,6 +136,8 @@ export default async function RecipientsPage() {
       province: org?.province ?? "",
       region: REGION_OF[org?.province ?? ""] ?? "Unknown",
       participatedLastYear: participated.has(r.organization_id),
+      isBeta: r.is_beta === true,
+      invited: r.invited_at != null,
       contacts: list.map((c) => ({
         id: c.id as string,
         name: (c.name as string) ?? "Unnamed",
@@ -223,6 +226,18 @@ export default async function RecipientsPage() {
             surveyId={survey.id}
             regions={regionRows}
             people={reps}
+          />
+          {/* Who goes first, before the thing that sends to them. A beta send
+              with an empty cohort is the failure this sits above. */}
+          <BetaCohort
+            stores={items.map((i) => ({
+              id: i.id,
+              orgName: i.orgName,
+              province: i.province,
+              isBeta: i.isBeta,
+              invited: i.invited,
+              participatedLastYear: i.participatedLastYear,
+            }))}
           />
           <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
         </div>

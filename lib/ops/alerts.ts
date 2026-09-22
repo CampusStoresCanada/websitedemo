@@ -1205,7 +1205,7 @@ async function evaluateBoardMeetingNotClosedOut(): Promise<CandidateAlert | null
  * A benchmarking survey is coming up and nobody holds the committee lead.
  *
  * This is the ED's cue. The lead is the person who then hands out question
- * review, QA verification and recipient confirmation — so until someone holds
+ * review, interpretation and recipient confirmation — so until someone holds
  * it, none of that work can start and nobody is chasing it. Fires from six
  * weeks before the survey opens, and auto-resolves the moment a lead is
  * appointed.

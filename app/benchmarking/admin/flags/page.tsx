@@ -1,7 +1,20 @@
+import { redirect } from "next/navigation";
+import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { createClient } from "@/lib/supabase/server";
 import DeltaFlagsTable from "@/components/benchmarking/admin/DeltaFlagsTable";
 
 export default async function FlagsPage() {
+  // Gated here and not only in the layout. A page that relies on its parent
+  // for authorisation is one refactor away from being wide open, and this one
+  // lists named member stores.
+  const auth = await requireAuthenticated();
+  if (!auth.ok) redirect("/login");
+  const { globalRole, capabilities } = auth.ctx;
+  if (!isGlobalAdmin(globalRole) && !opensBenchmarkingAdmin(capabilities)) {
+    redirect("/benchmarking");
+  }
+
   const supabase = await createClient();
 
   // Get latest survey fiscal year

@@ -12,7 +12,7 @@ import {
 import { createClient } from "@/lib/supabase/client";
 import { withTimeout } from "@/lib/auth/with-timeout";
 import { derivePermissionState } from "@/lib/auth/permissions";
-import { CAPABILITY } from "@/lib/constants/capabilities";
+import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import type { User } from "@supabase/supabase-js";
 import type {
   GlobalRole,
@@ -573,10 +573,14 @@ export function AuthProvider({
         ),
       );
       const holdsQaVerify = heldCapabilities.has("benchmarking.qa_verify");
+      // Matches isBenchmarkingReviewer in lib/auth/guards.ts. When the two
+      // disagreed, a content reviewer had server access to the admin shell
+      // with no link to it, and a lead had a link the server refused.
+      const opensAdminShell = opensBenchmarkingAdmin([...heldCapabilities]);
       const holdsContentReview = heldCapabilities.has(
         "benchmarking.content_review",
       );
-      setIsBenchmarkingReviewer(holdsQaVerify);
+      setIsBenchmarkingReviewer(opensAdminShell);
       setIsBenchmarkingContentReviewer(holdsContentReview);
       setIsCancollMember(hasCANCOLL);
       setRequiresReauth(false);
@@ -590,7 +594,7 @@ export function AuthProvider({
         permissionState: resolvedPermissionState,
         organizations: userOrgs,
         isSurveyParticipant: hasSurveyData,
-        isBenchmarkingReviewer: holdsQaVerify,
+        isBenchmarkingReviewer: opensAdminShell,
         isBenchmarkingContentReviewer: holdsContentReview,
         isCancollMember: hasCANCOLL,
       };

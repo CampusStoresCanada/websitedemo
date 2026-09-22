@@ -2,19 +2,20 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { CAPABILITIES } from "@/lib/auth/capability-names";
 
 const NAV_ITEMS = [
   {
     href: "/benchmarking/admin",
     label: "Dashboard",
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4",
-    adminOnly: true,
+    needs: "admin" as const,
   },
   {
     href: "/benchmarking/admin/submissions",
     label: "Submissions",
     icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
-    adminOnly: false,
+    needs: [CAPABILITIES.BENCHMARKING_QA_VERIFY, CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
   },
   {
     // Sits next to Flag Review because it is the other half of the same job:
@@ -23,42 +24,56 @@ const NAV_ITEMS = [
     href: "/benchmarking/admin/notes",
     label: "Explanations",
     icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
-    adminOnly: false,
+    needs: [CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
   },
   {
     href: "/benchmarking/admin/flags",
     label: "Flag Review",
     icon: "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",
-    adminOnly: false,
+    needs: [CAPABILITIES.BENCHMARKING_QA_VERIFY, CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
   },
   {
     href: "/benchmarking/admin/review",
     label: "Question Review",
     icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z M15 11l-3 3-1.5-1.5",
-    adminOnly: true,
+    needs: "admin" as const,
   },
   {
     href: "/benchmarking/admin/editor",
     label: "Survey Editor",
     icon: "M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z",
-    adminOnly: true,
+    needs: "admin" as const,
   },
   {
     href: "/benchmarking/admin/preview",
     label: "Survey Preview",
     icon: "M15 12a3 3 0 11-6 0 3 3 0 016 0z M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z",
-    adminOnly: false,
+    needs: "any" as const,
   },
 ];
 
 interface AdminSidebarProps {
   isAdmin: boolean;
+  /** Every capability the viewer holds right now. */
+  capabilities: string[];
 }
 
-export default function AdminSidebar({ isAdmin }: AdminSidebarProps) {
+export default function AdminSidebar({
+  isAdmin,
+  capabilities,
+}: AdminSidebarProps) {
   const pathname = usePathname();
 
-  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin);
+  // Show only what this person can actually open. A link that bounces you is
+  // worse than no link: it reads as broken software rather than as a boundary.
+  // "Explanations" was the standing example — visible to anyone in the shell,
+  // openable only by the committee lead.
+  const visibleItems = NAV_ITEMS.filter((item) => {
+    if (isAdmin) return true;
+    if (item.needs === "admin") return false;
+    if (item.needs === "any") return true;
+    return item.needs.some((c) => capabilities.includes(c));
+  });
 
   return (
     <nav className="w-52 flex-shrink-0">
