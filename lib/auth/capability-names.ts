@@ -33,3 +33,46 @@ export const CAPABILITIES = {
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
+
+/**
+ * The human name for each capability — one map, so a rename lands everywhere
+ * at once.
+ *
+ * These are the bare nouns. A surface that lists capabilities across domains
+ * (the grants board) composes its own "Benchmarking — " prefix; a surface
+ * already inside one domain (the committee console) does not need it. Two
+ * renderings of one vocabulary, rather than two vocabularies.
+ */
+export const CAPABILITY_LABELS: Record<Capability, string> = {
+  [CAPABILITIES.ELECTIONS_NOMINATING_REVIEW]: "Nominating committee",
+  [CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD]: "Committee lead",
+  [CAPABILITIES.BENCHMARKING_CONTENT_REVIEW]: "Question review",
+  [CAPABILITIES.BENCHMARKING_QA_VERIFY]: "Interpretation",
+  [CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM]: "Recipient confirmation",
+};
+
+/**
+ * May this person enter /benchmarking/admin at all?
+ *
+ * A benchmarking invitation is a TASK, not committee membership: one
+ * capability opens one door. Only Interpretation and the committee lead have
+ * pages inside the back office, so only they get in (global admins bypass this
+ * and are checked separately by each caller).
+ *
+ * Content review is deliberately absent. It used to be included, on the
+ * reasoning that both jobs are "review" — the effect was that someone invited
+ * to check twelve question wordings could also open every member store's
+ * submission and rule on flagged figures. Question review's door is
+ * /benchmarking/review, which is not in that shell.
+ *
+ * One function because the same rule is asked by the layout, by the two pages
+ * that gate themselves, by the server auth context and by the browser-side
+ * AuthProvider. When two of those disagreed, a content reviewer had real
+ * access with no link to it and the flag queue had no lock of its own.
+ */
+export function opensBenchmarkingAdmin(capabilities: readonly string[]): boolean {
+  return (
+    capabilities.includes(CAPABILITIES.BENCHMARKING_QA_VERIFY) ||
+    capabilities.includes(CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD)
+  );
+}

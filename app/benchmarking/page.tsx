@@ -1,5 +1,7 @@
 import BenchmarkingLanding from "@/components/benchmarking/BenchmarkingLanding";
 import { getOptionalAuthContext } from "@/lib/auth/guards";
+import { WORKSTREAMS } from "@/lib/benchmarking/committee-workstreams";
+import { CAPABILITIES } from "@/lib/auth/capability-names";
 
 export const metadata = {
   title: "Benchmarking | Campus Stores Canada",
@@ -12,7 +14,14 @@ export default async function BenchmarkingPage() {
   const userId = auth?.userId;
 
   if (!supabase) {
-    return <BenchmarkingLanding surveys={[]} userOrgInfo={null} existingDraft={null} />;
+    return (
+      <BenchmarkingLanding
+        surveys={[]}
+        userOrgInfo={null}
+        existingDraft={null}
+        tasks={[]}
+      />
+    );
   }
 
   // Fetch open/recent survey config
@@ -99,8 +108,40 @@ export default async function BenchmarkingPage() {
     }
   }
 
+  // What this person has been asked to do, and where it happens.
+  //
+  // Appointing someone used to be silent in both directions: no email, and
+  // nothing on any page they could reach. The only link to a workstream lived
+  // on the committee console, which the person doing the work cannot open.
+  // WORKSTREAMS already knows each capability's door, so this stays correct
+  // if a door moves.
+  const held = auth?.capabilities ?? [];
+  const tasks = [
+    ...WORKSTREAMS.filter((w) => held.includes(w.capability)).map((w) => ({
+      title: w.title,
+      summary: w.summary,
+      timeCommitment: w.timeCommitment,
+      window: w.window,
+      href: w.href,
+    })),
+    // Not a workstream: the lead's job is handing the others out.
+    ...(held.includes(CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD)
+      ? [
+          {
+            title: "Committee lead",
+            summary:
+              "Bring people in for each piece of work, and keep an eye on how it is going.",
+            timeCommitment: "A few minutes to appoint someone",
+            window: "Whenever the committee needs someone",
+            href: "/benchmarking/committee",
+          },
+        ]
+      : []),
+  ];
+
   return (
     <BenchmarkingLanding
+      tasks={tasks}
       surveys={surveys ?? []}
       userOrgInfo={userOrgInfo}
       existingDraft={existingDraft}

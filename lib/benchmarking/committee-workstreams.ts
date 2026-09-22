@@ -31,17 +31,21 @@ export const WORKSTREAMS: Workstream[] = [
     summary:
       "Check the questions that caused trouble last year, and write the examples.",
     whatYouDo:
-      "Work through twelve questions. For each, say whether the wording holds up, and if you can, write a worked example — “for us this is $X, which includes A and B but not C.” Made-up numbers are fine; it is the shape of the answer that matters.",
+      "Work through twelve questions. For each, say whether the wording holds up, and if you can, write a worked example — “for us this is $X, which includes A and B but not C.” Made-up numbers are fine; it is the shape of the answer that matters. Everyone reviewing looks at the same twelve, which is how a question that reads two ways gets caught. If several of you land on the same problem, we will get the reviewers together to settle it; otherwise there is no meeting to attend.",
     whyItMatters:
       "A definition can be read two ways. An example from someone doing your job cannot. Last year several stores reported combined sales where we expected a split, and nothing in the response told us which — every institution had to be sorted out by hand.",
-    timeCommitment: "About 30 minutes, plus one 90-minute call",
-    window: "September, call in the week of the 29th",
+    // The call is not promised. It happens only if the reviews disagree, and
+    // a firm "plus one 90-minute call" turns a 30-minute ask into a two-hour
+    // one in the reader's head — which is how you lose a volunteer who had
+    // the half hour to spare.
+    timeCommitment: "About 30 minutes",
+    window: "September, before the survey opens",
     href: "/benchmarking/review",
     doneWhen: "All twelve questions have a verdict from at least two reviewers",
   },
   {
     capability: CAPABILITIES.BENCHMARKING_QA_VERIFY,
-    title: "QA verification",
+    title: "Interpretation",
     summary: "Decide whether flagged numbers are real, a typo, or unusable.",
     whatYouDo:
       "As submissions arrive, the system flags anything unusual — a figure that jumped sharply, a margin outside the plausible range. You look at each one and pick: accept, follow up, or exclude. The store's own explanation is already attached, so most answer themselves.",

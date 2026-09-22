@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { CAPABILITY_LABELS } from "@/lib/auth/capability-names";
 import {
   appointToCapability,
   endAppointment,
@@ -25,13 +26,14 @@ interface Row {
   isActive: boolean;
 }
 
-const CAPABILITY_LABEL: Record<string, string> = {
-  "benchmarking.committee_lead": "Benchmarking — committee lead",
-  "benchmarking.content_review": "Benchmarking — question review",
-  "benchmarking.qa_verify": "Benchmarking — QA verification",
-  "benchmarking.recipient_confirm": "Benchmarking — recipient confirmation",
-  "elections.nominating_review": "Elections — nominating committee",
-};
+// Cross-domain board, so each label carries its domain. The nouns come from
+// CAPABILITY_LABELS — this only decides how they are dressed for this screen.
+const CAPABILITY_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(CAPABILITY_LABELS).map(([capability, noun]) => [
+    capability,
+    `${capability.startsWith("elections.") ? "Elections" : "Benchmarking"} — ${noun.toLowerCase()}`,
+  ]),
+);
 
 // Mountain time — every stored timestamp is UTC.
 const MTN = "America/Edmonton";
@@ -162,7 +164,11 @@ export default function AccessGrantsBoard({
                 const left = daysLeft(r.endsAt);
                 return (
                   <div
-                    key={r.id || `${r.subjectId}-${r.startsAt}`}
+                    // The view's grain is (assignment × capability): the
+                    // Secretary's one assignment carries four benchmarking
+                    // capabilities, so assignment_id alone collides and React
+                    // drops rows off this board.
+                    key={`${r.id || r.subjectId}-${r.capability}`}
                     className="flex items-start justify-between gap-4 p-4 bg-white border border-gray-200 rounded-lg"
                   >
                     <div className="min-w-0">

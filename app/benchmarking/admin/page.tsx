@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
-import { GOVERNANCE_ROLE } from "@/lib/constants/capabilities";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { requireAdmin } from "@/lib/auth/guards";
 import SurveyManagementCard from "@/components/benchmarking/admin/SurveyManagementCard";
 import ResponseRateCard from "@/components/benchmarking/admin/ResponseRateCard";
-import ReviewerManagement from "@/components/benchmarking/admin/ReviewerManagement";
+import { createAdminClient } from "@/lib/supabase/admin";
+import CommitteeCard from "@/components/benchmarking/admin/CommitteeCard";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -65,23 +65,33 @@ export default async function BenchmarkingAdminPage() {
     pendingFlagCount = count ?? 0;
   }
 
-  // Fetch current reviewers — from the role assignment, not a profile flag.
-  // The previous query filtered on profiles.is_benchmarking_reviewer, a column
-  // that does not exist; it discarded the error and rendered an empty list.
-  const today = new Date().toISOString().slice(0, 10);
+  // Who holds a benchmarking capability right now.
+  //
+  // Read with the admin client on purpose. The previous version queried
+  // governance_role_assignments through the session client — and those tables
+  // have RLS enabled with no policies at all, so it came back empty with
+  // error:null and rendered "no reviewers" no matter who was appointed.
+  //
+  // capability_contributions is the canonical answer to "who holds what": it
+  // already resolves ex officio holders and appointed ones through the same
+  // view, which a query on one role_key never did.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const { data: reviewerAssignments } = (await (supabase as any)
-    .from("governance_role_assignments")
-    .select("person_profile_id, profiles:person_profile_id(id, display_name, global_role)")
-    .eq("role_key", GOVERNANCE_ROLE.benchmarkingReviewer)
-    .lte("term_start", today)
-    .or(`term_end.is.null,term_end.gt.${today}`)) as { data: any[] | null };
+  const { data: holderRows } = (await (createAdminClient() as any)
+    .from("capability_contributions")
+    .select("subject_id, display_name, capability, appointable")
+    .like("capability", "benchmarking.%")
+    .eq("is_active", true)
+    .order("display_name")) as { data: any[] | null };
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const reviewers = (reviewerAssignments ?? [])
-    .map((a: any) => a.profiles)
-    .filter(Boolean)
-    .sort((a: any, b: any) => (a.display_name ?? "").localeCompare(b.display_name ?? ""));
+  const holders = (holderRows ?? []).map((h: any) => ({
+    subjectId: h.subject_id as string,
+    name: (h.display_name as string) ?? "Unknown",
+    capability: h.capability as string,
+    // appointable:false means they hold it by office (the Secretary carries
+    // all four). Worth marking, so nobody goes looking for a Remove button.
+    exOfficio: h.appointable === false,
+  }));
 
   return (
     <div>
@@ -137,6 +147,15 @@ export default async function BenchmarkingAdminPage() {
                   )}
                 </Link>
                 <Link
+                  href="/benchmarking/recipients"
+                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+                >
+                  <span className="text-sm font-medium text-gray-700">
+                    Recipients &amp; beta stores
+                  </span>
+                  <span className="text-xs text-gray-400">who gets it, and who goes first</span>
+                </Link>
+                <Link
                   href="/benchmarking/admin/preview"
                   className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
                 >
@@ -150,16 +169,7 @@ export default async function BenchmarkingAdminPage() {
           </div>
         )}
 
-        {/* Reviewer Management — admin only */}
-        <ReviewerManagement
-          currentReviewers={
-            (reviewers ?? []).map((r) => ({
-              id: r.id,
-              displayName: r.display_name ?? "Unknown",
-              globalRole: r.global_role,
-            }))
-          }
-        />
+        <CommitteeCard holders={holders} />
       </div>
     </div>
   );
