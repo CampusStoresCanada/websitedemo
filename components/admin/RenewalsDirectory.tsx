@@ -2,12 +2,17 @@
 
 import { useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import type { RenewalDirectoryOrgType, RenewalDirectoryRow } from "@/lib/renewal/renewal-directory";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
+import { reviveMembership } from "@/lib/actions/renewal";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
 import { RenewalPauseControl, formatPauseDate } from "@/components/admin/RenewalPauseControl";
+
+/** Synthetic tab key. Not an org type — see the `tabs` comment below. */
+const LAPSED_TAB = "__lapsed";
 
 const INK = "#16345a";
 const RED = "#e72a28";
@@ -154,12 +159,118 @@ function OrgAdminLink({
 // Row
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Undo a cancellation, for a former member whose paid coverage is still
+ * running. Only shows on the rows where that is true, which is the shape of a
+ * cancellation that should not have happened rather than a member who left.
+ * reviveMembership enforces the same rule server-side.
+ *
+ * The reason is captured inline rather than through window.prompt: it lands in
+ * the membership audit log, which is the only record of why a status was
+ * reversed, so it deserves a real field someone can read back before pressing.
+ */
+function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const todayISO = new Date().toISOString().split("T")[0];
+  const coverageInForce =
+    !!row.membershipExpiresAt && row.membershipExpiresAt.split("T")[0] >= todayISO;
+
+  if (row.membershipStatus !== "canceled" || !coverageInForce) return null;
+
+  async function handleSubmit(e: React.MouseEvent) {
+    e.stopPropagation();
+    if (!reason.trim()) {
+      setError("A reason is required");
+      return;
+    }
+
+    setError(null);
+    setLoading(true);
+    const result = await reviveMembership(row.id, reason.trim());
+    setLoading(false);
+
+    if (!result.success) {
+      setError(result.error ?? "Failed to restore");
+      return;
+    }
+    setOpen(false);
+    setReason("");
+    router.refresh();
+  }
+
+  if (!open) {
+    return (
+      <button
+        type="button"
+        onClick={(e) => {
+          e.stopPropagation();
+          setOpen(true);
+        }}
+        title="Restore this membership to active"
+        className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 text-[11.5px] font-medium hover:bg-gray-50"
+        style={{ color: INK }}
+      >
+        Restore
+      </button>
+    );
+  }
+
+  return (
+    <div className="shrink-0 flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+      <div className="flex items-center gap-1.5">
+        <input
+          type="text"
+          autoFocus
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Reason for restoring (required)"
+          className="w-48 rounded-md border border-gray-300 px-2 py-1 text-[11.5px] focus:outline-none focus:ring-2 focus:ring-[#16345a]/20"
+          style={{ color: INK }}
+        />
+        <button
+          type="button"
+          onClick={handleSubmit}
+          disabled={loading}
+          className="rounded-md px-2 py-1 text-[11.5px] font-medium text-white disabled:opacity-50"
+          style={{ background: INK }}
+        >
+          {loading ? "Restoring..." : "Confirm"}
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            setOpen(false);
+            setReason("");
+            setError(null);
+          }}
+          className="px-1.5 py-1 text-[11.5px] text-gray-500 hover:text-gray-700"
+        >
+          Cancel
+        </button>
+      </div>
+      {error && (
+        <p className="text-[11px]" style={{ color: RED }}>
+          {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 function DirectoryRow({
   row,
   onOpenDM,
+  showType,
 }: {
   row: RenewalDirectoryRow;
   onOpenDM: (roomUuid: string, label: string) => void;
+  /** Lapsed is the one tab that mixes org types, so the rows have to say which. */
+  showType?: boolean;
 }) {
   const meta = row.membershipStatus ? STATUS_META[row.membershipStatus as OrgMembershipStatus] : null;
 
@@ -175,8 +286,13 @@ function DirectoryRow({
       </div>
 
       <div className="flex-1 min-w-0">
-        <div className="font-medium text-[15.5px] leading-tight" style={{ color: INK }}>
-          {row.name}
+        <div className="font-medium text-[15.5px] leading-tight flex items-center gap-2" style={{ color: INK }}>
+          <span className="truncate">{row.name}</span>
+          {showType && (
+            <span className="shrink-0 rounded px-1.5 py-0.5 text-[10.5px] font-medium uppercase tracking-wide bg-gray-100 text-gray-600">
+              {row.type}
+            </span>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <OrgAdminLink row={row} onOpenDM={onOpenDM} />
@@ -214,6 +330,8 @@ function DirectoryRow({
       ) : (
         <span className="inline-block w-7 h-7 shrink-0" />
       )}
+
+      <RestoreButton row={row} />
 
       <Link
         href={`/org/${row.slug}`}
@@ -293,8 +411,16 @@ export function RenewalsDirectory({
   rows: RenewalDirectoryRow[];
   programs: MembershipProgramDef[];
 }) {
+  // Lapsed members are a cohort, not an org type: every one of them is still
+  // `type = "Member"`. They get their own tab because the job is different —
+  // the other tabs are a renewal worklist for people who are still members,
+  // this one is win-back — and because burying former members inside the
+  // Members tab is how they went unseen in the first place.
   const tabs = useMemo(
-    () => programs.map((p) => ({ type: p.orgTypeValue, label: pluralLabel(p.label) })),
+    () => [
+      ...programs.map((p) => ({ type: p.orgTypeValue, label: pluralLabel(p.label) })),
+      { type: LAPSED_TAB, label: "Lapsed" },
+    ],
     [programs]
   );
 
@@ -313,13 +439,21 @@ export function RenewalsDirectory({
       tabs.map((t) => [t.type, 0])
     );
     for (const r of rows) {
-      if (r.type in c) c[r.type]++;
+      // A canceled org counts once, under Lapsed, never under its org type.
+      if (r.membershipStatus === "canceled") {
+        c[LAPSED_TAB]++;
+      } else if (r.type in c) {
+        c[r.type]++;
+      }
     }
     return c;
   }, [rows, tabs]);
 
   const visible = useMemo(() => {
-    let list = rows.filter((r) => r.type === activeType);
+    let list =
+      activeType === LAPSED_TAB
+        ? rows.filter((r) => r.membershipStatus === "canceled")
+        : rows.filter((r) => r.type === activeType && r.membershipStatus !== "canceled");
 
     if (search) {
       const q = search.toLowerCase();
@@ -340,6 +474,7 @@ export function RenewalsDirectory({
     return list;
   }, [rows, activeType, search, statusFilter, sort]);
 
+
   function toggleStatus(status: string) {
     setStatusFilter((prev) => {
       const next = new Set(prev);
@@ -349,10 +484,17 @@ export function RenewalsDirectory({
     });
   }
 
+  // Mirrors the cohort split in `visible` — on the Lapsed tab the only status
+  // present is "canceled", and a type-scoped check would leave Refine empty.
   const statusesInTab = useMemo(() => {
     const set = new Set<string>();
     for (const r of rows) {
-      if (r.type === activeType && r.membershipStatus) set.add(r.membershipStatus);
+      if (!r.membershipStatus) continue;
+      const inTab =
+        activeType === LAPSED_TAB
+          ? r.membershipStatus === "canceled"
+          : r.type === activeType && r.membershipStatus !== "canceled";
+      if (inTab) set.add(r.membershipStatus);
     }
     return set;
   }, [rows, activeType]);
@@ -447,7 +589,12 @@ export function RenewalsDirectory({
 
       <div className="flex flex-col gap-1.5">
         {visible.map((row) => (
-          <DirectoryRow key={row.id} row={row} onOpenDM={(roomUuid, label) => setDm({ roomUuid, label })} />
+          <DirectoryRow
+            key={row.id}
+            row={row}
+            onOpenDM={(roomUuid, label) => setDm({ roomUuid, label })}
+            showType={activeType === LAPSED_TAB}
+          />
         ))}
         {visible.length === 0 && (
           <p className="text-center py-10 text-gray-400 text-sm">No organizations match your filters.</p>

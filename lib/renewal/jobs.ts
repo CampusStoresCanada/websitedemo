@@ -347,6 +347,26 @@ export async function renewalReminderRun(): Promise<JobResult> {
           .maybeSingle();
         if (suppressedInvoice) return;
 
+        // The member already told us not to bill them for THIS cycle.
+        //
+        // optOutOfRenewal records an opt_out event against the renewal year it
+        // applies to, which for a member whose coverage was still in force is
+        // the cycle starting after their term ends — not the term they were
+        // sitting in when they clicked. Honouring that event here is what makes
+        // "opt out of renewal" mean what it says: no invoice, no chase, and no
+        // cancellation of coverage they already paid for. Without this read the
+        // opt-out only had teeth because the old code cancelled the org
+        // outright, which is exactly the behaviour being removed.
+        const { data: optedOut } = await db
+          .from("renewal_events")
+          .select("id")
+          .eq("organization_id", org.id)
+          .eq("renewal_year", renewalYear)
+          .eq("event_type", "opt_out")
+          .limit(1)
+          .maybeSingle();
+        if (optedOut) return;
+
         // An org that already paid through this renewal year or beyond
         // (e.g. bridged multiple cycles at once via `bridgeFrom` in
         // renewal-activation.ts, covering a future conference) shouldn't
