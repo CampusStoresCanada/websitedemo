@@ -425,8 +425,30 @@ export async function processRefund(
   }
 
   // 3. Process Stripe refund
+  //
+  // No payment intent means there is no Stripe payment to reverse. That is the
+  // NORMAL case here, not an edge case: CSC collects most dues by cheque and
+  // EFT, and those invoices are marked paid out of band in Stripe, so they
+  // carry amount_paid = 0 and no charge. 91 of 100 paid invoices looked like
+  // this when Langara College was refunded in 2026-09.
+  //
+  // This used to fall through the `if` and still run step 4, stamping the
+  // invoice refunded_full for the full amount. The result was a $551.25 refund
+  // that existed only in our database: no money moved, Stripe still showed the
+  // invoice paid, and step 5 was skipped too, so QuickBooks kept the income
+  // with nothing to reverse it. Returning an out-of-band payment is a manual
+  // finance action, so say so and change nothing.
+  if (!invoice.stripe_payment_intent_id) {
+    return {
+      success: false,
+      error:
+        "This invoice was paid out of band (cheque/EFT), so there is no Stripe payment to refund. " +
+        "Return the funds through the original channel and post a credit memo in QuickBooks.",
+    };
+  }
+
   let stripeRefundId: string | null = null;
-  if (invoice.stripe_payment_intent_id) {
+  {
     try {
       const refund = await stripe.refunds.create({
         payment_intent: invoice.stripe_payment_intent_id,

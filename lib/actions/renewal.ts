@@ -3,12 +3,13 @@
 import { requireAuthenticated, canManageOrganization, isGlobalAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
-import { createProgramInvoice, finalizeAndSendInvoice, processRefund } from "@/lib/stripe/billing";
+import { createProgramInvoice, finalizeAndSendInvoice } from "@/lib/stripe/billing";
 import { stripe } from "@/lib/stripe/client";
 import { computeNewExpiresAt } from "@/lib/membership/renewal-activation";
 import { getActivePolicySet } from "@/lib/policy/engine";
 import { sendTransactional } from "@/lib/comms/send";
 import { resolveRenewalRecipients } from "@/lib/renewal/jobs";
+import { resolveOptOutScope } from "@/lib/renewal/opt-out-scope";
 import type { Json } from "@/lib/database.types";
 
 // ─────────────────────────────────────────────────────────────────
@@ -16,14 +17,20 @@ import type { Json } from "@/lib/database.types";
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Allows an org admin (or global admin) to opt the organization
- * out of its upcoming renewal. This:
+ * Allows an org admin (or global admin) to decline the organization's NEXT
+ * renewal. It never touches coverage they have already paid for.
  *
- * 1. Records an opt_out event in renewal_events
- * 2. Voids any pending renewal invoice (local + Stripe)
- * 3. If the current period was already paid and within refund window,
- *    processes a refund
- * 4. Transitions org to "canceled" via state machine
+ * With coverage still in force (membership_expires_at in the future):
+ *   1. Records an opt_out event against the cycle that begins when the
+ *      current term ends
+ *   2. Leaves status, invoices and money exactly as they are
+ *
+ * With no coverage left (expired, or in grace having never paid):
+ *   1. Voids any unpaid invoice for that cycle (local + Stripe)
+ *   2. Records the opt_out event
+ *   3. Transitions org to "canceled" via state machine
+ *
+ * Neither path issues a refund. See the note in the body.
  *
  * The caller must be an org_admin for the given organization or a
  * global admin / super_admin.
@@ -65,10 +72,17 @@ export async function optOutOfRenewal(
     };
   }
 
-  // ── Determine renewal year ────────────────────────────────────
+  // ── Which cycle is the member opting out of? ──────────────────
+  // The rule itself lives in lib/renewal/opt-out-scope.ts, with the Langara
+  // case that forced it. Short version: an opt-out declines the NEXT thing we
+  // would bill for, and never touches coverage already paid for.
   const now = new Date();
-  const renewalYear =
-    now.getMonth() >= 8 ? now.getFullYear() + 1 : now.getFullYear();
+  const todayISO = now.toISOString().split("T")[0];
+  const { coverageInForce, renewalYear } = resolveOptOutScope(
+    org.membership_expires_at,
+    todayISO
+  );
+  const expiresAt = org.membership_expires_at?.split("T")[0] ?? null;
 
   // ── Check for duplicate opt-out this year ─────────────────────
   const { data: existing } = await db
@@ -86,21 +100,21 @@ export async function optOutOfRenewal(
     };
   }
 
-  // ── Find and void any pending renewal invoice ─────────────────
-  // Look for invoices for this org with status in (invoiced, pending_settlement, draft)
-  const { data: pendingInvoices } = await db
-    .from("invoices")
-    .select("id, status, stripe_invoice_id, paid_at, total_cents")
-    .eq("organization_id", orgId)
-    .in("status", ["invoiced", "pending_settlement", "draft"])
-    .order("created_at", { ascending: false });
-
+  // ── Void only invoices for the cycle being opted out of ───────
+  // A member with coverage still in force keeps every invoice they have —
+  // including the paid one funding the current term. Only an unpaid invoice
+  // for the cycle we are being told not to bill gets voided.
   let voidedInvoiceId: string | null = null;
-  let refundedInvoiceId: string | null = null;
 
-  if (pendingInvoices && pendingInvoices.length > 0) {
-    for (const inv of pendingInvoices) {
-      // Void the local invoice
+  if (!coverageInForce) {
+    const { data: pendingInvoices } = await db
+      .from("invoices")
+      .select("id, status, stripe_invoice_id, paid_at, total_cents")
+      .eq("organization_id", orgId)
+      .in("status", ["invoiced", "pending_settlement", "draft"])
+      .order("created_at", { ascending: false });
+
+    for (const inv of pendingInvoices ?? []) {
       await db
         .from("invoices")
         .update({
@@ -133,29 +147,12 @@ export async function optOutOfRenewal(
     }
   }
 
-  // ── Check if there's a paid invoice eligible for refund ───────
-  // If the org is still within the current billing period and the
-  // invoice was recently paid, try to refund it.
-  const { data: paidInvoices } = await db
-    .from("invoices")
-    .select("id, paid_at, total_cents")
-    .eq("organization_id", orgId)
-    .eq("status", "paid")
-    .order("paid_at", { ascending: false })
-    .limit(1);
-
-  if (paidInvoices && paidInvoices.length > 0) {
-    const latestPaid = paidInvoices[0];
-    // Attempt refund — processRefund validates the refund window internally
-    const refundResult = await processRefund(
-      latestPaid.id,
-      `Opt-out: ${reason}`
-    );
-    if (refundResult.success) {
-      refundedInvoiceId = latestPaid.id;
-    }
-    // If refund fails (outside window), that's fine — just void unpaid invoices
-  }
+  // No refund is issued here, by design. Returning money is a deliberate
+  // finance decision with an accounting entry behind it, not a side effect of
+  // a member setting a preference. The old code called processRefund() from
+  // this path; for Langara that marked a $551.25 invoice refunded_full while
+  // moving no money and writing nothing to QuickBooks, because the payment had
+  // arrived out of band and there was no Stripe charge to reverse.
 
   // ── Record opt-out event ──────────────────────────────────────
   await db.from("renewal_events").insert({
@@ -168,26 +165,33 @@ export async function optOutOfRenewal(
         reason,
         actor_id: ctx.userId,
         voided_invoice_id: voidedInvoiceId,
-        refunded_invoice_id: refundedInvoiceId,
+        refunded_invoice_id: null,
         from_status: org.membership_status,
+        coverage_in_force: coverageInForce,
+        coverage_through: expiresAt,
       })
     ) as Json,
   });
 
-  // ── Transition to canceled ────────────────────────────────────
-  const transitionResult = await transitionMembershipState(
-    orgId,
-    "canceled",
-    "user",
-    ctx.userId,
-    `Opt-out: ${reason}`
-  );
+  // ── Transition only when there is no coverage left ────────────
+  // An in-force member stays exactly as they are. The opt_out event above is
+  // the whole record, and renewalReminderRun reads it to skip them when the
+  // cycle they declined comes around.
+  if (!coverageInForce) {
+    const transitionResult = await transitionMembershipState(
+      orgId,
+      "canceled",
+      "user",
+      ctx.userId,
+      `Opt-out: ${reason}`
+    );
 
-  if (!transitionResult.success) {
-    return {
-      success: false,
-      error: `Opt-out recorded but state transition failed: ${transitionResult.error}`,
-    };
+    if (!transitionResult.success) {
+      return {
+        success: false,
+        error: `Opt-out recorded but state transition failed: ${transitionResult.error}`,
+      };
+    }
   }
 
   const optOutRecipients = await resolveRenewalRecipients(db, org.id, org.email);
@@ -202,6 +206,97 @@ export async function optOutOfRenewal(
         effective_date: org.membership_expires_at?.split("T")[0] ?? "",
       },
     });
+  }
+
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
+// Undo a cancellation
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Puts a canceled organization back to active. For correcting a cancellation
+ * that should not have happened, nothing else.
+ *
+ * This exists because there was no way to undo one. `canceled -> active` has
+ * always been a legal transition (lib/membership/types.ts) but every caller of
+ * transitionMembershipState was a cron, the Stripe webhook, or the application
+ * flow, so a mistaken cancellation could only be corrected by writing to
+ * `organizations` directly, which skips the audit row. Langara College
+ * (2026-09) is the case: an opt-out cancelled a paid, in-force membership, and
+ * putting it right needed an audited path that did not exist.
+ *
+ * Deliberately NOT a re-enrolment tool. It refuses an org with no coverage
+ * left, because someone who genuinely lapsed rejoins by being invoiced and
+ * paying, and that payment already flips them canceled -> active through the
+ * webhook. Reviving an expired org here would only park them in `active` for
+ * the grace cron to knock straight back out, with no money behind it.
+ *
+ * Global admins only. An org's own admin cannot un-cancel themselves.
+ */
+export async function reviveMembership(
+  orgId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const { ctx } = auth;
+  if (!isGlobalAdmin(ctx.globalRole)) {
+    return { success: false, error: "Only a global admin can revive a membership" };
+  }
+
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) {
+    // The audit row is the whole point. A blank reason makes a corrected
+    // record indistinguishable from an unexplained one later.
+    return { success: false, error: "A reason is required" };
+  }
+
+  const db = createAdminClient();
+
+  const { data: org, error: orgErr } = await db
+    .from("organizations")
+    .select("id, name, membership_status, membership_expires_at")
+    .eq("id", orgId)
+    .single();
+
+  if (orgErr || !org) {
+    return { success: false, error: "Organization not found" };
+  }
+
+  if (org.membership_status !== "canceled") {
+    return {
+      success: false,
+      error: `Only a canceled organization can be revived. This one is "${org.membership_status}".`,
+    };
+  }
+
+  const todayISO = new Date().toISOString().split("T")[0];
+  const expiresAt = org.membership_expires_at?.split("T")[0] ?? null;
+  if (!expiresAt || expiresAt < todayISO) {
+    return {
+      success: false,
+      error:
+        "This organization has no paid coverage left, so there is nothing to restore. " +
+        "Invoice them and let the payment reactivate the membership.",
+    };
+  }
+
+  const transitionResult = await transitionMembershipState(
+    orgId,
+    "active",
+    "admin",
+    ctx.userId,
+    trimmedReason,
+    { revived_from: "canceled", coverage_through: expiresAt }
+  );
+
+  if (!transitionResult.success) {
+    return { success: false, error: transitionResult.error };
   }
 
   return { success: true };

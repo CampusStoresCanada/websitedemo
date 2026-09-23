@@ -125,7 +125,16 @@ export async function getRenewalDirectory(): Promise<RenewalDirectory> {
       // Filled in once programs resolves — see below. Left broad here since
       // this destructure runs concurrently with getProgramsConfig().
       .eq("is_test", false)
-      .not("membership_status", "in", "(canceled,applied)")
+      // `canceled` is included on purpose. Lapsed members are the people most
+      // worth a phone call, and excluding them here meant no admin screen in
+      // the product could see a former member at all — you could not tell who
+      // had left, when, or who to ring. The directory hides them by default
+      // (see RenewalsDirectory's initial statusFilter) so the renewals
+      // workflow is unchanged until someone asks for them.
+      //
+      // `applied` stays out: an applicant has never been a member, so they
+      // belong to /admin/applications, not to a renewal directory.
+      .not("membership_status", "in", "(applied)")
       .is("archived_at", null)
       .order("name"),
     getBillingConfig(),

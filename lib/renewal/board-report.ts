@@ -3,11 +3,22 @@ import { getPartnershipRateCents } from "@/lib/stripe/billing";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { getExpectedAmountsByOrg } from "./expected-amounts";
 import { getOutreachByOrg, type OrgOutreach } from "./outreach";
+import { getBillingConfig } from "@/lib/policy/engine";
+import { evaluateBucketPrice } from "@/lib/membership/pricing-core";
 import { ORG_TYPE } from "@/lib/constants/org-types";
 import type { RenewalOrgType } from "./renewal-progress";
 import { getActiveConferenceBoothHolders } from "@/lib/conference/exhibitor-status";
+import { LAPSED_COHORT as LAPSED } from "./cohorts";
+import type { BoardRenewalCohort } from "./cohorts";
 
 const ORG_TYPES: RenewalOrgType[] = [ORG_TYPE.member, ORG_TYPE.vendorPartner];
+
+// Cohort identity lives in ./cohorts, a leaf module, so "use client"
+// components can import LAPSED_COHORT without dragging this file's Supabase and
+// Stripe imports into the browser bundle. Re-exported here for callers that
+// already reach for board-report.
+export { LAPSED_COHORT } from "./cohorts";
+export type { BoardRenewalCohort } from "./cohorts";
 
 /** One organization's standing in the cycle, named so the board can act on it. */
 export interface BoardRenewalOrgRow {
@@ -24,7 +35,7 @@ export interface BoardRenewalOrgRow {
 }
 
 export interface BoardRenewalTypeReport {
-  orgType: RenewalOrgType;
+  orgType: BoardRenewalCohort;
   populationCount: number;
   renewedCount: number;
   totalExpectedCents: number;
@@ -43,7 +54,7 @@ export interface BoardRenewalReport {
   renewalYear: number;
   cycleLabel: string;
   generatedAt: string;
-  types: Record<RenewalOrgType, BoardRenewalTypeReport>;
+  types: Record<BoardRenewalCohort, BoardRenewalTypeReport>;
   totals: {
     populationCount: number;
     renewedCount: number;
@@ -100,25 +111,33 @@ export async function resolveBoardRenewalWindow(
 
 async function getTypeReport(
   db: ReturnType<typeof createAdminClient>,
-  orgType: RenewalOrgType,
+  cohort: BoardRenewalCohort,
   renewalYear: number
 ): Promise<BoardRenewalTypeReport> {
-  // Population filter is deliberately identical to getTypeProgress() in
-  // renewal-progress.ts — the board tab and the /admin widget must never
-  // disagree about who is in the denominator.
-  const { data: orgs } = await db
+  const isLapsed = cohort === LAPSED;
+
+  // Renewing cohorts: population filter is deliberately identical to
+  // getTypeProgress() in renewal-progress.ts — the board tab and the /admin
+  // widget must never disagree about who is in the denominator.
+  //
+  // Lapsed: the exact complement, former member stores only. `applied` stays
+  // out of both — an applicant has never been a member, so they are neither
+  // renewing nor winnable back.
+  const query = db
     .from("organizations")
-    .select("id, name")
-    .eq("type", orgType)
+    .select("id, name, fte")
     .eq("is_test", false)
-    .not("membership_status", "in", "(canceled,applied)")
     .is("archived_at", null);
+
+  const { data: orgs } = isLapsed
+    ? await query.eq("type", ORG_TYPE.member).eq("membership_status", "canceled")
+    : await query.eq("type", cohort).not("membership_status", "in", "(canceled,applied)");
 
   const orgRows = orgs ?? [];
   const orgIds = orgRows.map((o) => o.id);
 
   const empty: BoardRenewalTypeReport = {
-    orgType,
+    orgType: cohort,
     populationCount: 0,
     renewedCount: 0,
     totalExpectedCents: 0,
@@ -160,12 +179,31 @@ async function getTypeReport(
   // an estimate. Member dues are FTE-tiered with no cheap equivalent, but every
   // active Member already carries an invoice_generated event.
   const partnerFallbackCents =
-    orgType === ORG_TYPE.vendorPartner ? await getPartnershipRateCents() : 0;
+    cohort === ORG_TYPE.vendorPartner ? await getPartnershipRateCents() : 0;
 
-  const report: BoardRenewalTypeReport = { ...empty, orgType, populationCount: orgRows.length };
+  // A lapsed store has no invoice for this cycle, so there is nothing for
+  // getExpectedAmountsByOrg to find. Price it off the FTE tiers instead — the
+  // same table the renewals directory shows — so the board can see what the
+  // conversation is worth.
+  //
+  // ⛔ An org with no FTE on file is reported as 0, not as the bottom tier.
+  // Guessing would put a number the board might act on next to a store whose
+  // size nobody has ever recorded. The UI renders 0 as "not priced".
+  // Only FTE_BUCKETS is priceable this cheaply; under any other pricing mode
+  // the board sees "not priced" rather than a number from the wrong model.
+  const billing = isLapsed ? await getBillingConfig() : null;
+  const bucketMode = billing?.pricing_mode === "FTE_BUCKETS" ? "FTE_BUCKETS" : null;
+  const tierPriceCents = (fte: number | null): number => {
+    if (!billing || !bucketMode || fte === null || fte === undefined) return 0;
+    return evaluateBucketPrice(fte, billing.membership_tiers, bucketMode).amountCents;
+  };
+
+  const report: BoardRenewalTypeReport = { ...empty, orgType: cohort, populationCount: orgRows.length };
 
   for (const org of orgRows) {
-    const expectedCents = expectedByOrg.get(org.id) ?? partnerFallbackCents;
+    const expectedCents = isLapsed
+      ? tierPriceCents(org.fte === null ? null : Number(org.fte))
+      : expectedByOrg.get(org.id) ?? partnerFallbackCents;
     const renewedAt = renewedAtByOrg.get(org.id) ?? null;
 
     report.totalExpectedCents += expectedCents;
@@ -206,15 +244,22 @@ export async function getBoardRenewalReport(
   if (!window) return null;
 
   const db = createAdminClient();
-  const [memberReport, partnerReport] = await Promise.all(
-    ORG_TYPES.map((orgType) => getTypeReport(db, orgType, window.renewalYear))
-  );
+  const [memberReport, partnerReport, lapsedReport] = await Promise.all([
+    ...ORG_TYPES.map((orgType) => getTypeReport(db, orgType, window.renewalYear)),
+    getTypeReport(db, LAPSED, window.renewalYear),
+  ]);
 
   const types = {
     [ORG_TYPE.member]: memberReport,
     [ORG_TYPE.vendorPartner]: partnerReport,
-  } as Record<RenewalOrgType, BoardRenewalTypeReport>;
+    [LAPSED]: lapsedReport,
+  } as Record<BoardRenewalCohort, BoardRenewalTypeReport>;
 
+  // ⛔ Lapsed is deliberately NOT in `totals`. The totals answer "how is this
+  // cycle's renewal going", and folding former members into the denominator
+  // would drop the renewal rate by a third overnight while nothing about the
+  // cycle had changed. Its own counts live on the cohort; a win-back that pays
+  // shows up as `renewedCount` there.
   const all = [memberReport, partnerReport];
   return {
     renewalYear: window.renewalYear,

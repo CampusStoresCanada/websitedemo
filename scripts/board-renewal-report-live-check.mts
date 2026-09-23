@@ -16,7 +16,7 @@ try {
   /* env may already be set */
 }
 
-const { getBoardRenewalReport, resolveBoardRenewalWindow } = await import(
+const { getBoardRenewalReport, resolveBoardRenewalWindow, LAPSED_COHORT } = await import(
   "../lib/renewal/board-report"
 );
 const { getRenewalProgressData } = await import("../lib/renewal/renewal-progress");
@@ -93,6 +93,9 @@ if (!widget) {
   console.log("  ⚠ widget returned null (outside the operational season) — skipping comparison");
 } else {
   for (const key of Object.keys(report.types) as (keyof typeof report.types)[]) {
+    // The Lapsed cohort has no counterpart in the widget on purpose — it is
+    // former members, not this cycle's renewal population. Nothing to compare.
+    if (key === LAPSED_COHORT) continue;
     const b = report.types[key];
     const w = widget.types[key];
     check(`${key}: population matches widget`, b.populationCount === w.populationCount,
