@@ -45,7 +45,14 @@ export const ALLOWED_TRANSITIONS: Record<OrgMembershipStatus, OrgMembershipStatu
   // admin/webhook-initiated settlement: the self-serve renewal gate in
   // lib/actions/renewal.ts keeps its own renewableStatuses list, which still
   // excludes `canceled`, so a deliberate opt-out cannot un-cancel itself.
-  canceled:    ['active'],
+  //
+  // canceled → grace is how staff bring a returning member back BEFORE any
+  // money arrives (reviveMembershipToGrace). It restores access, starts the
+  // normal grace clock, and lets the existing Renew Now path bill them —
+  // `grace` is already in renewableStatuses and in ACCESS_ACTIVE_STATUSES, so
+  // nothing downstream needed widening. Global admins only; self-serve still
+  // cannot reach it.
+  canceled:    ['active', 'grace'],
 }
 
 /** Status metadata for UI rendering. */

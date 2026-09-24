@@ -7,7 +7,7 @@ import type { RenewalDirectoryOrgType, RenewalDirectoryRow } from "@/lib/renewal
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import { STATUS_META, type OrgMembershipStatus } from "@/lib/membership/types";
 import { getConferenceReceiptUrl } from "@/lib/actions/conference-commerce";
-import { reviveMembership } from "@/lib/actions/renewal";
+import { reviveMembership, reviveMembershipToGrace } from "@/lib/actions/renewal";
 import { CircleDMPanel } from "@/components/circle/CircleDMPanel";
 import { RenewalPauseControl, formatPauseDate } from "@/components/admin/RenewalPauseControl";
 
@@ -160,27 +160,37 @@ function OrgAdminLink({
 // ─────────────────────────────────────────────────────────────────
 
 /**
- * Undo a cancellation, for a former member whose paid coverage is still
- * running. Only shows on the rows where that is true, which is the shape of a
- * cancellation that should not have happened rather than a member who left.
- * reviveMembership enforces the same rule server-side.
+ * A small control that captures a required reason inline and then runs one
+ * action against this row.
  *
- * The reason is captured inline rather than through window.prompt: it lands in
- * the membership audit log, which is the only record of why a status was
- * reversed, so it deserves a real field someone can read back before pressing.
+ * The reason goes in a real field rather than a window.prompt because it lands
+ * in the membership state log, which is the only record of why a status was
+ * reversed — and for a revive, the only record of why an org that had left is
+ * back holding access it has not paid for. It deserves something you can
+ * re-read before pressing.
+ *
+ * Shared by both cancellation remedies below: the same interaction with a
+ * different consequence, so one component with props rather than two
+ * near-identical ones that drift.
  */
-function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
+function InlineReasonAction({
+  label,
+  busyLabel,
+  placeholder,
+  title,
+  submit,
+}: {
+  label: string;
+  busyLabel: string;
+  placeholder: string;
+  title: string;
+  submit: (reason: string) => Promise<{ success: boolean; error?: string }>;
+}) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-
-  const todayISO = new Date().toISOString().split("T")[0];
-  const coverageInForce =
-    !!row.membershipExpiresAt && row.membershipExpiresAt.split("T")[0] >= todayISO;
-
-  if (row.membershipStatus !== "canceled" || !coverageInForce) return null;
 
   async function handleSubmit(e: React.MouseEvent) {
     e.stopPropagation();
@@ -191,11 +201,11 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
 
     setError(null);
     setLoading(true);
-    const result = await reviveMembership(row.id, reason.trim());
+    const result = await submit(reason.trim());
     setLoading(false);
 
     if (!result.success) {
-      setError(result.error ?? "Failed to restore");
+      setError(result.error ?? `Failed to ${label.toLowerCase()}`);
       return;
     }
     setOpen(false);
@@ -211,11 +221,11 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
           e.stopPropagation();
           setOpen(true);
         }}
-        title="Restore this membership to active"
+        title={title}
         className="shrink-0 rounded-md border border-gray-300 bg-white px-2 py-1 text-[11.5px] font-medium hover:bg-gray-50"
         style={{ color: INK }}
       >
-        Restore
+        {label}
       </button>
     );
   }
@@ -228,7 +238,7 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
           autoFocus
           value={reason}
           onChange={(e) => setReason(e.target.value)}
-          placeholder="Reason for restoring (required)"
+          placeholder={placeholder}
           className="w-48 rounded-md border border-gray-300 px-2 py-1 text-[11.5px] focus:outline-none focus:ring-2 focus:ring-[#16345a]/20"
           style={{ color: INK }}
         />
@@ -239,7 +249,7 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
           className="rounded-md px-2 py-1 text-[11.5px] font-medium text-white disabled:opacity-50"
           style={{ background: INK }}
         >
-          {loading ? "Restoring..." : "Confirm"}
+          {loading ? busyLabel : "Confirm"}
         </button>
         <button
           type="button"
@@ -261,6 +271,60 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
     </div>
   );
 }
+
+/**
+ * True when this cancelled row's paid coverage is still running — the shape of
+ * a cancellation that should not have happened, rather than a member who left.
+ * The two remedies below key off it in opposite directions, so exactly one can
+ * ever show on a given row.
+ */
+function hasCoverageInForce(row: RenewalDirectoryRow): boolean {
+  const todayISO = new Date().toISOString().split("T")[0];
+  return !!row.membershipExpiresAt && row.membershipExpiresAt.split("T")[0] >= todayISO;
+}
+
+/**
+ * Undo a cancellation for a former member whose paid coverage is still
+ * running. Straight back to active — they are paid up, so there is no clock to
+ * start. reviveMembership enforces the same rule server-side.
+ */
+function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
+  if (row.membershipStatus !== "canceled" || !hasCoverageInForce(row)) return null;
+
+  return (
+    <InlineReasonAction
+      label="Restore"
+      busyLabel="Restoring..."
+      placeholder="Reason for restoring (required)"
+      title="Restore this membership to active"
+      submit={(reason) => reviveMembership(row.id, reason)}
+    />
+  );
+}
+
+/**
+ * Bring a lapsed member back with no coverage left. They go to `grace`, not
+ * active: access and admin management return, the normal grace clock starts,
+ * and Renew Now then bills them like any other renewal. Payment lifts them to
+ * active from there.
+ *
+ * Shows on exactly the rows Restore refuses, so a cancelled org always has one
+ * remedy offered and never both.
+ */
+function ReviveToGraceButton({ row }: { row: RenewalDirectoryRow }) {
+  if (row.membershipStatus !== "canceled" || hasCoverageInForce(row)) return null;
+
+  return (
+    <InlineReasonAction
+      label="Revive"
+      busyLabel="Reviving..."
+      placeholder="Reason for reviving (required)"
+      title="Bring this lapsed member back into grace so they can be billed and regain access"
+      submit={(reason) => reviveMembershipToGrace(row.id, reason)}
+    />
+  );
+}
+
 
 function DirectoryRow({
   row,
@@ -332,6 +396,7 @@ function DirectoryRow({
       )}
 
       <RestoreButton row={row} />
+      <ReviveToGraceButton row={row} />
 
       <Link
         href={`/org/${row.slug}`}

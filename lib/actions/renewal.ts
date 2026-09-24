@@ -303,6 +303,113 @@ export async function reviveMembership(
 }
 
 // ─────────────────────────────────────────────────────────────────
+// Revive a lapsed member into grace
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Put a canceled organization back into `grace` — the move for a former
+ * member who is rejoining, made before any money has arrived.
+ *
+ * reviveMembership above is the other half of the pair and deliberately
+ * refuses this case: it only un-does a cancellation that should not have
+ * happened, for an org whose paid coverage is still running. An org with no
+ * coverage left has nothing to restore, and parking it in `active` unpaid
+ * would be a lie the grace cron cannot even see (it filters
+ * `membership_expires_at is not null`, so a long-lapsed org would sit there
+ * unbilled and unpoliced indefinitely).
+ *
+ * `grace` is the honest state for "back in, not yet paid", and every
+ * downstream consumer already understands it, which is why this needed one
+ * new transition and nothing else:
+ *
+ *   - ACCESS_ACTIVE_STATUSES (lib/contacts/login-policy.ts) contains grace, so
+ *     portal and Circle access come back — and, importantly, a successor org
+ *     admin becomes appointable. That gate is what made an admin handover at a
+ *     lapsed org impossible: appointing one requires an active membership,
+ *     while the outgoing admin could not be demoted either, because
+ *     changeOrgUserRole refuses to remove the last one.
+ *   - renewableStatuses in renewMembershipNow contains grace, so the ordinary
+ *     Renew Now button raises the invoice. No separate admin billing path, and
+ *     the amount and coverage dates come from the same place as every other
+ *     renewal.
+ *   - The grace job (lib/renewal/jobs.ts) keys off grace_period_started_at,
+ *     which the RPC sets on entry, so the normal grace → locked clock runs
+ *     even with no expiry on file.
+ *   - settlePaidInvoiceMembership lifts grace → active when they pay.
+ *
+ * Global admins only, reason required — the state log is the only record of
+ * why an org that had left is back, and `grace` hands real access to someone
+ * who has not paid yet.
+ */
+export async function reviveMembershipToGrace(
+  orgId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const { ctx } = auth;
+  if (!isGlobalAdmin(ctx.globalRole)) {
+    return { success: false, error: "Only a global admin can revive a membership" };
+  }
+
+  const trimmedReason = reason.trim();
+  if (!trimmedReason) {
+    return { success: false, error: "A reason is required" };
+  }
+
+  const db = createAdminClient();
+
+  const { data: org, error: orgErr } = await db
+    .from("organizations")
+    .select("id, name, membership_status, membership_expires_at")
+    .eq("id", orgId)
+    .single();
+
+  if (orgErr || !org) {
+    return { success: false, error: "Organization not found" };
+  }
+
+  if (org.membership_status !== "canceled") {
+    return {
+      success: false,
+      error: `Only a canceled organization can be revived. This one is "${org.membership_status}".`,
+    };
+  }
+
+  // Coverage still in force is reviveMembership's case, not this one. Starting
+  // a grace clock on a member who has already paid through a future date would
+  // put them on a countdown to `locked` that their own money should have
+  // prevented.
+  const todayISO = new Date().toISOString().split("T")[0];
+  const expiresAt = org.membership_expires_at?.split("T")[0] ?? null;
+  if (expiresAt && expiresAt >= todayISO) {
+    return {
+      success: false,
+      error:
+        "This organization still has paid coverage, so it should be restored to active rather than put into grace.",
+    };
+  }
+
+  const transitionResult = await transitionMembershipState(
+    orgId,
+    "grace",
+    "admin",
+    ctx.userId,
+    trimmedReason,
+    { revived_from: "canceled", had_coverage_through: expiresAt }
+  );
+
+  if (!transitionResult.success) {
+    return { success: false, error: transitionResult.error };
+  }
+
+  return { success: true };
+}
+
+// ─────────────────────────────────────────────────────────────────
 // Renew Now (self-serve, on demand)
 // ─────────────────────────────────────────────────────────────────
 
