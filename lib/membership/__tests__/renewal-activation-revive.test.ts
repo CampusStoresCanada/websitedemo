@@ -183,9 +183,30 @@ describe("canceled is no longer a dead end", () => {
     expect(ALLOWED_TRANSITIONS.canceled).toContain("active");
   });
 
-  it("still allows nothing else out of canceled", () => {
-    // Widening this is a real decision, not a typo — a canceled org must not
-    // be able to slide into grace or locked without an explicit payment.
-    expect(ALLOWED_TRANSITIONS.canceled).toEqual(["active"]);
+  it("allows canceled → grace, but only as a deliberate admin act", () => {
+    // This guard used to assert exactly ["active"], on the grounds that "a
+    // canceled org must not be able to slide into grace or locked without an
+    // explicit payment." That intent is intact and still worth guarding — the
+    // concern was an IMPLICIT path, and there is none: `grace` is reachable
+    // only through reviveMembershipToGrace, which is global-admin-only,
+    // requires a written reason that lands in membership_state_log, refuses
+    // any org that is not `canceled`, and refuses one whose paid coverage is
+    // still in force. No cron, webhook or self-serve route asks for it —
+    // renewableStatuses still excludes `canceled` entirely.
+    //
+    // Widened deliberately (2026-09-24) because payment-first was the wrong
+    // shape for a returning member: staff need them back in the system,
+    // holding access and on the grace clock, before money arrives — and
+    // because appointing a successor org admin requires a non-lapsed
+    // membership, so payment-first made an admin handover at a lapsed org
+    // impossible.
+    expect(ALLOWED_TRANSITIONS.canceled).toEqual(["active", "grace"]);
+  });
+
+  it("still cannot reach locked from canceled", () => {
+    // The other half of the original guard, unchanged: `locked` is the
+    // access-lock state the grace clock arrives at on its own. Reaching it
+    // directly from `canceled` would skip the clock entirely.
+    expect(ALLOWED_TRANSITIONS.canceled).not.toContain("locked");
   });
 });
