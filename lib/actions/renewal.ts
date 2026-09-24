@@ -344,7 +344,7 @@ export async function reviveMembership(
 export async function reviveMembershipToGrace(
   orgId: string,
   reason: string
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{ success: boolean; error?: string; invoiceUrl?: string }> {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
     return { success: false, error: auth.error };
@@ -372,10 +372,19 @@ export async function reviveMembershipToGrace(
     return { success: false, error: "Organization not found" };
   }
 
-  if (org.membership_status !== "canceled") {
+  // `grace` is accepted as well as `canceled`, so this is re-runnable. The
+  // first version only moved the org and left billing to the Renew Now card —
+  // which turned out to be unreachable afterwards. That card needs
+  // `renewalWindowOpen || !isOrgAccessActive(status)`, and once an org sits in
+  // grace BOTH are false outside the 30-day reminder window: grace counts as
+  // access-active, and an org with no expiry counts down to the next shared
+  // cycle start, ~11 months out. So reviving hid the only button that could
+  // bill them. Orgs stranded that way still need a way out, and re-clicking is
+  // it — the billing step below is idempotent.
+  if (org.membership_status !== "canceled" && org.membership_status !== "grace") {
     return {
       success: false,
-      error: `Only a canceled organization can be revived. This one is "${org.membership_status}".`,
+      error: `Only a canceled or lapsed organization can be revived. This one is "${org.membership_status}".`,
     };
   }
 
@@ -393,20 +402,128 @@ export async function reviveMembershipToGrace(
     };
   }
 
-  const transitionResult = await transitionMembershipState(
-    orgId,
-    "grace",
-    "admin",
-    ctx.userId,
-    trimmedReason,
-    { revived_from: "canceled", had_coverage_through: expiresAt }
-  );
+  // Move them first. It is the cheap, reversible half, and an invoice raised
+  // against a still-`canceled` org would be the misleading order.
+  if (org.membership_status === "canceled") {
+    const transitionResult = await transitionMembershipState(
+      orgId,
+      "grace",
+      "admin",
+      ctx.userId,
+      trimmedReason,
+      { revived_from: "canceled", had_coverage_through: expiresAt }
+    );
 
-  if (!transitionResult.success) {
-    return { success: false, error: transitionResult.error };
+    if (!transitionResult.success) {
+      return { success: false, error: transitionResult.error };
+    }
   }
 
-  return { success: true };
+  // Then bill them. Reviving without an invoice is the state that stranded
+  // Mohawk College and Saint Mary's: in grace, on a 30-day clock to `locked`,
+  // with nothing asking them for money and no screen able to. The reminder
+  // cron cannot rescue them either — it reads only `active`/`reactivated`
+  // orgs (lib/renewal/jobs.ts), so a grace org is never swept up.
+  const invoiceResult = await issueRenewalInvoice({
+    db,
+    orgId,
+    currentExpiresAt: org.membership_expires_at ?? null,
+    actorId: ctx.userId,
+    reason: trimmedReason,
+  });
+
+  if (!invoiceResult.success) {
+    // The move already happened and is correct on its own. Say so, rather than
+    // implying nothing ran — otherwise the next click looks like a retry of
+    // something that never started.
+    return {
+      success: false,
+      error: `Moved to grace, but the invoice failed: ${invoiceResult.error ?? "unknown error"}. Click again to retry billing.`,
+    };
+  }
+
+  return { success: true, invoiceUrl: invoiceResult.invoiceUrl };
+}
+
+/**
+ * Raise, finalize and send this organization's renewal invoice, and record the
+ * `invoice_generated` event against the cycle it covers.
+ *
+ * The same path the renewal cron and Renew Now use (createProgramInvoice plus
+ * computeNewExpiresAt's cycle-anchored period), so the amount and the coverage
+ * dates are identical however the invoice was triggered.
+ *
+ * Idempotent: an unpaid invoice already on the org is reused rather than
+ * duplicated, so re-clicking Revive after a partial failure finishes the job
+ * instead of double-billing.
+ *
+ * Not exported, so it is not a server action.
+ */
+async function issueRenewalInvoice(params: {
+  db: ReturnType<typeof createAdminClient>;
+  orgId: string;
+  currentExpiresAt: string | null;
+  actorId: string | null;
+  reason: string;
+}): Promise<{ success: boolean; error?: string; invoiceUrl?: string }> {
+  const { db, orgId, currentExpiresAt, actorId, reason } = params;
+
+  try {
+    const { data: existingInvoice } = await db
+      .from("invoices")
+      .select("id, stripe_invoice_id, status")
+      .eq("organization_id", orgId)
+      .in("status", ["draft", "invoiced", "pending_settlement"])
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    let stripeInvoiceId: string | null;
+
+    if (existingInvoice) {
+      stripeInvoiceId = existingInvoice.stripe_invoice_id;
+      if (existingInvoice.status === "draft" && stripeInvoiceId) {
+        await finalizeAndSendInvoice(existingInvoice.id);
+      }
+    } else {
+      const { billingPeriodStart, billingPeriodEnd } =
+        await computeNewExpiresAt(currentExpiresAt);
+
+      const invoice = await createProgramInvoice(orgId, {
+        billingPeriodStart,
+        billingPeriodEnd,
+        policySetId: (await getActivePolicySet())?.id,
+      });
+
+      await finalizeAndSendInvoice(invoice.id);
+      stripeInvoiceId = invoice.stripe_invoice_id;
+
+      await db.from("renewal_events").insert({
+        organization_id: orgId,
+        renewal_year: new Date(billingPeriodEnd).getFullYear(),
+        event_type: "invoice_generated" as const,
+        invoice_id: invoice.id,
+        metadata: JSON.parse(
+          JSON.stringify({
+            billing_period_start: billingPeriodStart,
+            billing_period_end: billingPeriodEnd,
+            triggered_by: "admin_revive",
+            actor_id: actorId,
+            reason,
+          })
+        ) as Json,
+      });
+    }
+
+    if (!stripeInvoiceId) {
+      return { success: false, error: "Invoice created but not linked to Stripe" };
+    }
+
+    const stripeInvoice = await stripe.invoices.retrieve(stripeInvoiceId);
+    return { success: true, invoiceUrl: stripeInvoice.hosted_invoice_url ?? undefined };
+  } catch (err) {
+    return { success: false, error: err instanceof Error ? err.message : "Unknown error" };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────
