@@ -106,6 +106,13 @@ export type ChecklistTaskInput = {
    * notice that the org it is asking has no booth.
    */
   scopeEntityKind?: string | null;
+  /**
+   * Restrict to orgs holding one NAMED thing, rather than a class of them.
+   * "Ship your Hot Products Care Package" cannot be scoped by kind: that is an
+   * `item`, and so are the folding tables bundled with every booth.
+   * Three-state like the others — `undefined` leaves it alone.
+   */
+  scopeEntityId?: string | null;
   sortOrder: number;
   active: boolean;
 };
@@ -133,6 +140,7 @@ export async function saveChecklistTask(
     check_type: input.checkType,
     check_entity_id: ENTITY_SCOPED_CHECKS.has(input.checkType) ? input.checkEntityId : null,
     ...(input.scopeEntityKind !== undefined ? { scope_entity_kind: input.scopeEntityKind } : {}),
+    ...(input.scopeEntityId !== undefined ? { scope_entity_id: input.scopeEntityId } : {}),
     sort_order: input.sortOrder,
     active: input.active,
     updated_at: new Date().toISOString(),

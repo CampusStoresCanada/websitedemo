@@ -290,7 +290,7 @@ export async function loadOrgTasks(
 ): Promise<PersonalTask[]> {
   let q = db
     .from("conference_checklists")
-    .select("id, conference_id, deadline_at, scope_entity_id, scope_entity_kind, publication_id, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_kind, deadline_at, ask_from, hardens_because)")
+    .select("id, conference_id, deadline_at, scope_entity_id, scope_entity_kind, publication_id, conference_checklist_tasks(id, name, description, sort_order, active, audience, check_type, check_entity_id, scope_entity_kind, scope_entity_id, deadline_at, ask_from, hardens_because)")
     .eq("conference_id", conferenceId)
     .eq("active", true);
   if (checklistId) q = q.eq("id", checklistId);
@@ -322,7 +322,7 @@ export async function loadOrgTasks(
   type TaskRow = {
     id: string; name: string; description: string; sort_order: number;
     active: boolean; audience: string; check_type: string; check_entity_id: string | null;
-    scope_entity_kind: string | null;
+    scope_entity_kind: string | null; scope_entity_id: string | null;
     deadline_at: string | null; ask_from: string | null; hardens_because: string | null;
   };
   let rows: { task: TaskRow; deadline: string | null }[] = [];

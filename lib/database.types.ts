@@ -3403,6 +3403,7 @@ export type Database = {
           hardens_because: string | null
           id: string
           name: string
+          scope_entity_id: string | null
           scope_entity_kind: string | null
           sort_order: number
           updated_at: string
@@ -3420,6 +3421,7 @@ export type Database = {
           hardens_because?: string | null
           id?: string
           name: string
+          scope_entity_id?: string | null
           scope_entity_kind?: string | null
           sort_order?: number
           updated_at?: string
@@ -3437,6 +3439,7 @@ export type Database = {
           hardens_because?: string | null
           id?: string
           name?: string
+          scope_entity_id?: string | null
           scope_entity_kind?: string | null
           sort_order?: number
           updated_at?: string

@@ -191,3 +191,78 @@ describe("scoping a single task inside a mixed checklist", () => {
     expect(entityQueries).toBe(1); // two booth tasks, one lookup
   });
 });
+
+/**
+ * One NAMED thing, not a class of them.
+ *
+ * "Ship your Hot Products Care Package" cannot be scoped by kind: that entity
+ * is an `item`, and so are the folding tables and chairs bundled with every
+ * booth. Scoping by kind would ask every exhibitor to ship a care package they
+ * never bought — the same failure the kind column was added to fix, one grain
+ * finer.
+ *
+ * A balance is a balance, so a Connected Exhibitor granted one by booth 600's
+ * `includes` ref is scoped in by exactly the read that finds a buyer.
+ */
+describe("scoping a task to one named entity", () => {
+  const CONF = "conf-1";
+  const CARE = "care-package";
+
+  function dbHolding(entityIds: string[]) {
+    return fakeDb({
+      conference_entities: () => [],
+      entity_balances: (f) => {
+        const asked = (f.entity_id__in as string[] | undefined) ?? [];
+        return entityIds.filter((id) => asked.includes(id)).map((id) => ({ entity_id: id }));
+      },
+    });
+  }
+
+  const TASKS = [
+    { id: "pay", scope_entity_kind: null, scope_entity_id: null },
+    { id: "ship-box", scope_entity_kind: null, scope_entity_id: CARE },
+  ];
+
+  it("keeps the task for an org that holds the thing", async () => {
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const kept = await filterTasksToOrgScope(dbHolding([CARE]) as any, CONF, "buyer", TASKS);
+    expect(kept.map((t) => t.id)).toEqual(["pay", "ship-box"]);
+  });
+
+  it("drops it for an exhibitor who holds other items but not this one", async () => {
+    // Folding tables and chairs are `item` too — kind alone would have asked them.
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const kept = await filterTasksToOrgScope(dbHolding(["folding-chair"]) as any, CONF, "exhibitor", TASKS);
+    expect(kept.map((t) => t.id)).toEqual(["pay"]);
+  });
+
+  it("leaves an unscoped task alone", async () => {
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    const kept = await filterTasksToOrgScope(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      dbHolding([]) as any, CONF, "anyone",
+      [{ id: "pay", scope_entity_kind: null, scope_entity_id: null }]
+    );
+    expect(kept.map((t) => t.id)).toEqual(["pay"]);
+  });
+
+  it("asks once for every scoped entity, not once per task", async () => {
+    let balanceQueries = 0;
+    const counting = fakeDb({
+      conference_entities: () => [],
+      entity_balances: () => { balanceQueries++; return [{ entity_id: CARE }]; },
+    });
+    const { filterTasksToOrgScope } = await import("../checklist-engine");
+    await filterTasksToOrgScope(
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      counting as any, CONF, "buyer",
+      [
+        { id: "a", scope_entity_kind: null, scope_entity_id: CARE },
+        { id: "b", scope_entity_kind: null, scope_entity_id: CARE },
+      ]
+    );
+    expect(balanceQueries).toBe(1);
+  });
+});

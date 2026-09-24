@@ -205,7 +205,7 @@ export async function resolveScopedOrgs(
  * the org page and the reminder email keep answering this the same way.
  */
 export async function filterTasksToOrgScope<
-  T extends { scope_entity_kind?: string | null }
+  T extends { scope_entity_kind?: string | null; scope_entity_id?: string | null }
 >(
   db: AdminClient,
   conferenceId: string,
@@ -213,7 +213,8 @@ export async function filterTasksToOrgScope<
   tasks: T[]
 ): Promise<T[]> {
   const kinds = [...new Set(tasks.map((t) => t.scope_entity_kind).filter((k): k is string => !!k))];
-  if (kinds.length === 0) return tasks;
+  const entityIds = [...new Set(tasks.map((t) => t.scope_entity_id).filter((id): id is string => !!id))];
+  if (kinds.length === 0 && entityIds.length === 0) return tasks;
 
   const holdsKind = new Map<string, boolean>();
   for (const kind of kinds) {
@@ -226,7 +227,38 @@ export async function filterTasksToOrgScope<
     });
     holdsKind.set(kind, orgs.includes(organizationId));
   }
-  return tasks.filter((t) => !t.scope_entity_kind || holdsKind.get(t.scope_entity_kind) === true);
+
+  /**
+   * Holdings of ONE named thing, rather than a class of them.
+   *
+   * "Ship your Hot Products Care Package" cannot be scoped by kind: that
+   * entity is an `item`, and so are the folding tables and chairs bundled with
+   * every booth, so a kind scope would ask every exhibitor to ship a care
+   * package they never bought.
+   *
+   * One query covering every scoped entity, not one per task. A balance is a
+   * balance whether the org paid for it or a booth's `includes` granted it, so
+   * a Connected Exhibitor is scoped in by the same read as a buyer.
+   */
+  const holdsEntity = new Set<string>();
+  if (entityIds.length > 0) {
+    const { data } = await db
+      .from("entity_balances")
+      .select("entity_id")
+      .eq("conference_id", conferenceId)
+      .eq("organization_id", organizationId)
+      .in("entity_id", entityIds);
+    for (const row of data ?? []) {
+      if (row.entity_id) holdsEntity.add(row.entity_id as string);
+    }
+  }
+
+  // Both restrictions are AND-ed: a task may name a kind, a thing, or both.
+  return tasks.filter(
+    (t) =>
+      (!t.scope_entity_kind || holdsKind.get(t.scope_entity_kind) === true) &&
+      (!t.scope_entity_id || holdsEntity.has(t.scope_entity_id))
+  );
 }
 
 export interface ChecklistDigest {
@@ -257,7 +289,7 @@ export async function buildChecklistDigest(
 
   const { data: tasks } = await db
     .from("conference_checklist_tasks")
-    .select("id, name, description, check_type, check_entity_id, scope_entity_kind")
+    .select("id, name, description, check_type, check_entity_id, scope_entity_kind, scope_entity_id")
     .eq("checklist_id", checklist.id)
     .eq("active", true)
     .eq("audience", "org")

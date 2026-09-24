@@ -434,6 +434,10 @@ function TaskForm({
    * `self_reported` task has nothing to read, so "have you ordered power for
    * your booth?" reaches a member store with no booth unless this says who.
    */
+  /** One named thing, when a whole kind is too broad. */
+  const [scopeEntityId, setScopeEntityId] = useState(
+    (task as { scope_entity_id?: string | null } | undefined)?.scope_entity_id ?? ""
+  );
   const [scopeKind, setScopeKind] = useState(
     (task as { scope_entity_kind?: string | null } | undefined)?.scope_entity_kind ?? ""
   );
@@ -456,6 +460,7 @@ function TaskForm({
       checkType,
       checkEntityId: checkEntityId || null,
       scopeEntityKind: scopeKind || null,
+      scopeEntityId: scopeEntityId || null,
       sortOrder: task?.sort_order ?? nextSortOrder,
       active,
     });
@@ -519,6 +524,20 @@ function TaskForm({
             <option value="">Anyone the checklist reaches</option>
             {Object.keys(entitiesByKind).sort().map((kind) => (
               <option key={kind} value={kind}>a {kind}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          {/* Narrower than a kind: the exact thing. Both may be set; they AND. */}
+          <label className="block text-xs font-medium text-gray-700 mb-1">…or holding specifically</label>
+          <select value={scopeEntityId} onChange={(e) => setScopeEntityId(e.target.value)} className={inputClass}>
+            <option value="">No particular item</option>
+            {Object.entries(entitiesByKind).map(([kind, items]) => (
+              <optgroup key={kind} label={kind}>
+                {items.map((item) => (
+                  <option key={item.id} value={item.id}>{item.name}</option>
+                ))}
+              </optgroup>
             ))}
           </select>
         </div>
