@@ -184,13 +184,14 @@ function InlineReasonAction({
   busyLabel: string;
   placeholder: string;
   title: string;
-  submit: (reason: string) => Promise<{ success: boolean; error?: string }>;
+  submit: (reason: string) => Promise<{ success: boolean; error?: string; invoiceUrl?: string }>;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
 
   async function handleSubmit(e: React.MouseEvent) {
     e.stopPropagation();
@@ -208,9 +209,33 @@ function InlineReasonAction({
       setError(result.error ?? `Failed to ${label.toLowerCase()}`);
       return;
     }
+
+    // Keep the invoice link on screen — it is the thing staff need in hand,
+    // and router.refresh() would wipe it.
+    if (result.invoiceUrl) {
+      setInvoiceUrl(result.invoiceUrl);
+      router.refresh();
+      return;
+    }
+
     setOpen(false);
     setReason("");
     router.refresh();
+  }
+
+  if (invoiceUrl) {
+    return (
+      <a
+        href={invoiceUrl}
+        target="_blank"
+        rel="noopener noreferrer"
+        onClick={(e) => e.stopPropagation()}
+        className="shrink-0 text-[11.5px] font-medium underline"
+        style={{ color: INK }}
+      >
+        Invoice sent — open
+      </a>
+    );
   }
 
   if (!open) {
@@ -312,14 +337,21 @@ function RestoreButton({ row }: { row: RenewalDirectoryRow }) {
  * remedy offered and never both.
  */
 function ReviveToGraceButton({ row }: { row: RenewalDirectoryRow }) {
-  if (row.membershipStatus !== "canceled" || hasCoverageInForce(row)) return null;
+  if (hasCoverageInForce(row)) return null;
+
+  // Cancelled rows are the ordinary case. Grace rows with no invoice at all
+  // are the stranded ones: revived by the first version of this button, which
+  // moved them without billing and in doing so hid the Renew Now card that
+  // could have. Offering it here is how they get finished.
+  const isStrandedInGrace = row.membershipStatus === "grace" && row.invoiceStatus === null;
+  if (row.membershipStatus !== "canceled" && !isStrandedInGrace) return null;
 
   return (
     <InlineReasonAction
-      label="Revive"
+      label="Revive & bill"
       busyLabel="Reviving..."
       placeholder="Reason for reviving (required)"
-      title="Bring this lapsed member back into grace so they can be billed and regain access"
+      title="Put this lapsed member into grace, raise their renewal invoice and send it"
       submit={(reason) => reviveMembershipToGrace(row.id, reason)}
     />
   );
