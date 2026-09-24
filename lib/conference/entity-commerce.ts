@@ -364,6 +364,11 @@ export function nonMemberDayPassToOffer(pass: NonMemberDayPass): ConferenceOffer
     remaining: null,
     soldOut: false,
     includes: [],
+    /**
+     * A non-member day pass IS the standalone case — it is sold to somebody who
+     * holds nothing else at the conference, which is the whole point of it.
+     */
+    standalone: true,
     accessSummary: pass.accessSummary,
   };
 }

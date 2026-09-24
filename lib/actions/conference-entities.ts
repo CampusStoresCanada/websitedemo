@@ -6,7 +6,7 @@ import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements,
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
-import { availability, canBuy, priceForTier } from "@/lib/conference/entity-pricing";
+import { availability, canBuy, eligibleTiers, priceForTier } from "@/lib/conference/entity-pricing";
 import { accessibleThings, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
@@ -396,6 +396,20 @@ export type ConferenceOffer = {
   includes: Grant[];
   /** Persuasive summary of the same access graph — "all meals," not each one by name. */
   accessSummary: AccessSummary;
+  /**
+   * Can this be bought on its own, by an org with nothing else at the
+   * conference?
+   *
+   * TWO conditions, and both are deliberate:
+   *  - no `requires_ownership_of`, so there is no prerequisite to hold first;
+   *  - an explicit `who` audience, so somebody DECIDED who may buy it.
+   *
+   * The second is the guard. Without it, the test would be "has no
+   * prerequisite", and any future offer marked for sale with neither a
+   * prerequisite nor an audience would appear on every partner's profile
+   * because nobody said it should not. Opting in has to be an act.
+   */
+  standalone: boolean;
 };
 
 /**
@@ -475,6 +489,7 @@ export async function listConferenceOffers(
     .map((offer) => {
       const elig = canBuy(offer, buyerTier, byId);
       const avail = availability(offer, soldByOffer.get(offer.id) ?? 0);
+      const refs = effectiveRefs(offer, byId);
       return {
         id: offer.id,
         name: offer.name,
@@ -486,6 +501,9 @@ export async function listConferenceOffers(
         soldOut: avail.soldOut,
         includes: offerGrants(offer.id, byId),
         accessSummary: summarizeAccess(offer.id, byId),
+        standalone:
+          offerRequiresOwnershipOfEntityIds(refs).length === 0 &&
+          eligibleTiers(offer, byId).length > 0,
       };
     })
     .sort((a, b) => Number(b.eligible) - Number(a.eligible) || a.name.localeCompare(b.name));

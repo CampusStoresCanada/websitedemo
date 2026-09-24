@@ -1,8 +1,8 @@
 import { headers } from "next/headers";
 import { notFound } from "next/navigation";
-import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
 import { isBot, recordDirectoryScan } from "@/lib/publication/scan-tracking";
 import { recordAct } from "@/lib/signals/inbox";
+import { getOrgPageViewerContext } from "@/lib/visibility/viewer";
 import { getOrganizationForViewer } from "@/lib/visibility/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
@@ -32,12 +32,10 @@ import { listConferenceOffers, type ConferenceOffer, type EntityKind } from "@/l
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { getRenewalConfig } from "@/lib/policy/engine";
 import { nextCycleStartOnOrAfter } from "@/lib/membership/renewal-activation";
-import { isOrgAccessActive } from "@/lib/membership/status";
 import {
   getManualEditMarks,
   surveyYearIsPublished,
 } from "@/lib/benchmarking/manual-edit";
-import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 type OrgConferenceAttendanceRow = {
   id: string;
@@ -113,10 +111,7 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
   // Resolves the viewer AND the "own org" elevation. Shared with the toolkit's
   // Contacts CSV export, which has to land on the same answer as this page or
   // the downloaded file contradicts the screen it came from.
-  // ⚠️ `org` is bound as `orgIdRow` for the badge-scan block below, which predates
-  // this helper and reads id/public_code off it. The helper selects exactly those
-  // three columns, so this is the same row the inline version fetched.
-  const { viewer, effectiveViewer, orgAccessActive, org: orgIdRow } =
+  const { viewer, effectiveViewer, org: orgIdRow, orgAccessActive } =
     await getOrgPageViewerContext(slug);
 
   const { organization, contacts, brandColors, benchmarking, allBenchmarking, benchmarkingWithheldReason } =
@@ -361,6 +356,34 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       .filter((e) => e.start < now)
       .sort((a, b) => b.start - a.start);
     currentConferenceId = upcoming[0]?.id ?? latestPast[0]?.id ?? ids[0] ?? null;
+
+    /**
+     * A partner who is NOT coming to the conference still has things to buy.
+     *
+     * Every id above comes from something the org already holds — attendance or
+     * an entity_balance. So an org with nothing resolved to null, the whole
+     * block below was skipped, and they saw no storefront at all. That is
+     * exactly the population the Hot Products Care Package is sold to: partners
+     * who want their product in every member's hands without exhibiting.
+     *
+     * Falling back to the open conference opens a door, so what comes through
+     * it is narrowed to `standalone` offers below — never the full storefront.
+     */
+    const participatesInCurrent = currentConferenceId !== null;
+    if (!currentConferenceId) {
+      const { data: openConf } = await createAdminClient()
+        .from("conference_instances")
+        .select("id, status, start_date")
+        .in("status", SALES_OPEN_STATUSES as unknown as string[])
+        .order("start_date", { ascending: true })
+        .limit(1)
+        .maybeSingle();
+      if (openConf?.id) {
+        currentConferenceId = openConf.id as string;
+        if (openConf.status) statusById.set(currentConferenceId, openConf.status as string);
+      }
+    }
+
     currentConferenceIsPublic = Boolean(
       currentConferenceId &&
         (SALES_OPEN_STATUSES as readonly string[]).includes(statusById.get(currentConferenceId) ?? "draft")
@@ -436,6 +459,20 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       buyableExtras = (offersResult.success ? offersResult.data : []).filter(
         (o) => o.eligible && !["booth", "membership_renewal"].includes(o.kind)
       );
+
+      /**
+       * An org with nothing at this conference sees only what was deliberately
+       * made buyable on its own — no prerequisite AND a declared audience.
+       *
+       * The ownership gate already hides most of the catalog from them (both
+       * staff registrations need a booth, both socials need a registration), so
+       * today this changes nothing. That is the point: it must keep being true
+       * when somebody marks the next offer for sale without thinking about a
+       * profile page they have never seen.
+       */
+      if (!participatesInCurrent) {
+        buyableExtras = buyableExtras.filter((o) => o.standalone);
+      }
     }
   }
 
