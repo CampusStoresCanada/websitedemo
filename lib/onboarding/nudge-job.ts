@@ -335,6 +335,29 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         }),
       };
 
+    /**
+     * The Toolkit. Copy is member_member only for now: the other three
+     * personas fall through to null and keep being skipped, exactly as they
+     * were before this step was scheduled. Writing theirs is what removes
+     * their entry from UNWRITTEN in lib/publication/__tests__.
+     */
+    case "toolkit_tour": {
+      if (opts.persona !== "member_member") return null;
+      return {
+        subject: isReminder
+          ? `The Toolkit is still there whenever you need it`
+          : `Fix what's wrong from the page it's wrong on`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Every page carries its own tools.",
+          body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>From it you can flag anything that looks wrong, ask what something on a page means, share a page with a colleague, pull the data behind it, or edit your own.<br><br>Flagging is the one that earns its keep. If something about ${orgName} is off, or about a partner you buy from, you can say so on the page itself instead of working out who to email.`,
+          ctaText: "Open the Toolkit",
+          ctaUrl: `${base}/me`,
+          footnote: "It works the same on every page, including the ones that aren't yours.",
+        }),
+      };
+    }
+
     case "procurement": {
       if (isVendorProgram(opts.persona)) return null; // member-program step only
       const isAdmin = opts.persona === "org_admin_member";
