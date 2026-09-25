@@ -57,7 +57,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   org_admin_member: {
     public_contact_email: {
       heading: "Set your store's public email",
-      body: "A PUBLIC RECORD for your organisation — printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
+      body: "A PUBLIC RECORD for your organisation, printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
       ctaLabel: "Show me",
       targetAttr: "public_contact_email",
       completionTrigger: { table: "organizations", column: "email" },
@@ -104,7 +104,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     contacts_sorted: {
       heading: "Are your people right?",
-      body: "Let's make sure the right staff are listed — and that their info is current.",
+      body: "Let's make sure the right staff are listed, and that their info is current.",
       ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: [
@@ -120,13 +120,13 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You decide who's visible",
-      body: "Anyone on your staff list can be hidden from the community — without being removed. Let's try it.",
+      body: "Anyone on your staff list can be hidden from the community without being removed. Let's try it.",
       ctaLabel: "Show me",
       targetAttr: "contacts_section",
       completionTrigger: { table: "contacts", column: "hidden" },
       guided: true,
       fieldHeading: "Open your Toolkit and click Edit",
-      fieldBody: "Then click any person — you'll see an eye icon next to their name. That's their visibility toggle.",
+      fieldBody: "Then click any person. You'll see an eye icon next to their name. That's their visibility toggle.",
     },
     network_partners: {
       heading: "See what's stocked for you",
@@ -138,7 +138,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     network_members: {
       heading: "You're not alone out there",
-      body: "See how other campus stores show up — and find peers who might share your challenges.",
+      body: "See how other campus stores show up, and find peers who might share your challenges.",
       ctaLabel: "See the directory",
       targetPath: "/members",
       completesOnCta: false, // completion happens on the /members page via DirectoryOnboardingCallout
@@ -162,7 +162,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     procurement: {
       heading: "Set up your store's procurement",
-      body: "Scroll down to your Procurement section and set which categories you carry — then assign buyers to each one. Each buyer can also manage their own assignments from their My Account.",
+      body: "Scroll down to your Procurement section and set which categories you carry, then assign buyers to each one. Each buyer can also manage their own assignments from their My Account.",
       ctaLabel: "Show me",
       targetAttr: "procurement_section",
       completionTrigger: { table: "organizations", column: "procurement_info" },
@@ -186,7 +186,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   org_admin_partner: {
     public_contact_email: {
       heading: "Set your company's public email",
-      body: "A PUBLIC RECORD for your company — printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
+      body: "A PUBLIC RECORD for your company, printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
       ctaLabel: "Show me",
       targetAttr: "public_contact_email",
       completionTrigger: { table: "organizations", column: "email" },
@@ -233,7 +233,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     profile_categories: {
       heading: "Tell members what you sell",
-      body: "Open Edit and set your categories. Members filter by these when they're looking for suppliers — be specific.",
+      body: "Open Edit and set your categories. Members filter by these when they're looking for suppliers, so be specific.",
       ctaLabel: "Take me there",
       targetAttr: "profile_categories",
       completionTrigger: { table: "organizations", column: "primary_category" },
@@ -261,7 +261,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       completionTrigger: { table: "contacts", column: "hidden" },
       guided: true,
       fieldHeading: "Open your Toolkit and click Edit",
-      fieldBody: "Then click any person — the eye icon toggles their visibility. Try it on someone.",
+      fieldBody: "Then click any person. The eye icon toggles their visibility. Try it on someone.",
     },
     network_members: {
       heading: "Meet your market",
@@ -273,7 +273,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     network_partners: {
       heading: "See who else is here",
-      body: "Browse the full partner directory — useful context for understanding the competitive landscape.",
+      body: "Browse the full partner directory. Useful context for understanding the competitive landscape.",
       ctaLabel: "Browse partners",
       targetPath: "/partners",
       completesOnCta: true,
@@ -293,7 +293,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   member_member: {
     view_org_page: {
       heading: "This website works a little differently",
-      body: "Everything you need is in the Toolkit — that + button at the bottom right. It follows you everywhere on the network.",
+      body: "Everything you need is in the Toolkit, that + button at the bottom right. It follows you everywhere on the network.",
       ctaLabel: "Show me",
       guided: true,
       fieldHeading: "There it is",
@@ -332,7 +332,7 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     visibility_intro: {
       heading: "You control your own visibility",
-      body: "Head to My Account to manage how you appear on the network — including your visibility in the directory and your procurement categories.",
+      body: "Head to My Account to manage how you appear on the network, including your visibility in the directory and your procurement categories.",
       ctaLabel: "Go to My Account",
       targetPath: "/me",
       // Deliberately NOT completesOnCta. Arriving at /me is not setting your
