@@ -29,6 +29,23 @@ export type StepSchedule = {
  * which is exactly how four directory-critical steps went unsent for months.
  */
 export const STEP_SCHEDULE: Record<string, StepSchedule> = {
+  /**
+   * The Toolkit is the one step every persona needs and none of them were ever
+   * told about: it is in CORE_STEPS_BY_PERSONA for all four, so nobody's
+   * onboarding can read as complete without it, and it had no entry here, so
+   * it had sent 0 emails across 113 pending rows as of 2026-09-24.
+   *
+   * Day 2, ahead of every field ask, because it is the step that explains how
+   * the other asks get actioned. Copy exists for member_member only; the other
+   * three personas return null from buildNudgeEmail and keep skipping until
+   * theirs is written. See UNWRITTEN in lib/publication/__tests__.
+   */
+  toolkit_tour: {
+    sendAfterDays: 2,
+    reminderEveryDays: 12, // Day 14 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
   profile_description: {
     sendAfterDays: 2,
     reminderEveryDays: 5, // Day 7 if not done
