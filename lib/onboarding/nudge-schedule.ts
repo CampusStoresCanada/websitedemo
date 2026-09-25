@@ -30,6 +30,21 @@ export type StepSchedule = {
  */
 export const STEP_SCHEDULE: Record<string, StepSchedule> = {
   /**
+   * The org's public address. A core step for both admin personas, in their
+   * journeys since June, and it had never sent one email: 100 rows, 0 sends,
+   * with all 57 partner orgs still at zero completions as of 2026-09-25.
+   *
+   * Day 1, ahead of everything: it is the only field on the page that gets
+   * printed, and the directory deadline is what makes a late answer useless
+   * rather than merely late.
+   */
+  public_contact_email: {
+    sendAfterDays: 1,
+    reminderEveryDays: 10, // Day 11 if not done
+    maxReminders: 1,
+    channel: "email",
+  },
+  /**
    * The Toolkit is the one step every persona needs and none of them were ever
    * told about: it is in CORE_STEPS_BY_PERSONA for all four, so nobody's
    * onboarding can read as complete without it, and it had no entry here, so
