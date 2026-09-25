@@ -137,6 +137,8 @@ interface UserContext {
   orgProvince: string | null;
   /** organizations.type — decides whether a field-backed step is reachable at all. */
   orgType: string | null;
+  /** organizations.email — the printed, public address public_contact_email asks for. */
+  hasPublicEmail: boolean;
   hasDescription: boolean;
   hasLogo: boolean;
   hasHero: boolean;
@@ -341,6 +343,28 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
      * were before this step was scheduled. Writing theirs is what removes
      * their entry from UNWRITTEN in lib/publication/__tests__.
      */
+    /**
+     * The one field on the page that gets printed. The in-app callout already
+     * carries the warning about shared inboxes; this says the same thing to
+     * the people who never open the page.
+     */
+    case "public_contact_email": {
+      if (opts.persona !== "org_admin_member" && opts.persona !== "org_admin_partner") return null;
+      const wantsYou = opts.persona === "org_admin_partner" ? "Campus stores" : "Vendors and other stores";
+      return {
+        subject: isReminder
+          ? `${orgName} still has no public address on file`
+          : `Which address should we print for ${orgName}?`,
+        html: nudgeHtml({
+          firstName,
+          headline: "One address, printed and public.",
+          body: `${orgName}'s public contact email sits on your page for anyone to read, and it is the one that goes into the printed directory.<br><br>Use a shared inbox your team watches rather than a personal address. Once it is printed it cannot be taken back, and whoever owns it today may not be the person answering next year.<br><br>${wantsYou} will use it to reach you.`,
+          ctaText: "Set the public address",
+          ctaUrl: orgUrl,
+        }),
+      };
+    }
+
     case "toolkit_tour": {
       // Org admins reach this having already been walked through one tool:
       // public_contact_email's guided flow opens the Toolkit, pulses Edit and
@@ -650,6 +674,17 @@ async function autoCompleteIfDone(
   const now = new Date().toISOString();
 
   switch (row.step_key) {
+    // 76 of the 89 orgs with this step open already had an address on file
+    // when it was first scheduled (2026-09-25). Without this they would each
+    // have been emailed asking for something they had already given.
+    case "public_contact_email":
+      if (ctx.hasPublicEmail) {
+        await db.from("user_onboarding_progress")
+          .update({ completed_at: now, updated_at: now })
+          .eq("id", row.id);
+        return true;
+      }
+      break;
     case "profile_description":
       if (ctx.hasDescription) {
         await db.from("user_onboarding_progress")
@@ -854,11 +889,12 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, type, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
+    .select("id, name, slug, province, type, email, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
     .in("id", orgIds);
 
   type OrgRow = {
     id: string; name: string; slug: string; province: string | null; type: string | null;
+    email: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
     highlight_product_name: string | null; product_overlay_url: string | null;
     procurement_info: { category_buyers?: { contact_ids?: string[] }[] } | null;
@@ -912,6 +948,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       orgSlug: org.slug,
       orgProvince: org.province,
       orgType: org.type,
+      hasPublicEmail: Boolean(org.email?.trim()),
       hasDescription: Boolean(org.company_description?.trim()),
       hasLogo: Boolean(org.logo_url),
       hasHero: Boolean(org.hero_image_url),

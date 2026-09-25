@@ -91,16 +91,14 @@ describe("nudge coverage across every persona", () => {
    * Delete a line by writing that persona's copy in buildNudgeEmail.
    */
   const UNWRITTEN = new Set<string>([
-    "org_admin_member/public_contact_email",
     "org_admin_member/opening_rfp",
-    "org_admin_partner/public_contact_email",
     "member_partner/view_org_page",
     "member_partner/toolkit_tour",
     "member_partner/my_market",
   ]);
 
   /** Lower this as UNWRITTEN shrinks. It must never go up. */
-  const UNWRITTEN_CEILING = 6;
+  const UNWRITTEN_CEILING = 4;
 
   const silentReason = (persona: string, step: string) =>
     DELIBERATELY_SILENT[`${persona}/${step}`] ?? DELIBERATELY_SILENT[`*/${step}`];
