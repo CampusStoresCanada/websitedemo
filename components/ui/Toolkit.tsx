@@ -491,7 +491,10 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       <div className="fixed bottom-8 right-8 z-40 flex flex-col-reverse items-center gap-2 w-12 print:hidden">
         {/* Tool buttons (shown when expanded) */}
         {isExpanded && !flagMode && !editMode && !explainMode && !shareMode && !bookmarkMode && (
-          <div className="absolute bottom-14 right-0 flex flex-col items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200">
+          <div
+            data-toolkit-open
+            className="absolute bottom-14 right-0 flex flex-col items-center gap-2 animate-in fade-in slide-in-from-bottom-2 duration-200"
+          >
             {/* Bookmark */}
             <ToolButton
               icon={<BookmarkIcon filled={isCurrentPageBookmarked} />}
