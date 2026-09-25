@@ -174,6 +174,49 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
 /** Set of all editable field names (fast lookups) */
 const ALLOWED_FIELDS = new Set(Object.keys(FIELD_REGISTRY));
 
+/**
+ * The definition for a question this survey declares but FIELD_REGISTRY does
+ * not — i.e. one added through the editor, whose column was minted by
+ * addSurveyQuestion().
+ *
+ * Only reached when the registry misses, so the ordinary save path costs
+ * nothing extra. Returns undefined when the field is in no section of the
+ * survey this row belongs to, which is what keeps the allowlist an allowlist:
+ * the survey has to have asked the question.
+ */
+async function resolveConfiguredFieldDef(
+  benchmarkingId: string,
+  field: string,
+): Promise<FieldDef | undefined> {
+  const db = createAdminClient();
+  const { data: row } = await db
+    .from("benchmarking")
+    .select("fiscal_year")
+    .eq("id", benchmarkingId)
+    .maybeSingle();
+  if (!row) return undefined;
+
+  const { data: survey } = await db
+    .from("benchmarking_surveys")
+    .select("field_config")
+    .eq("fiscal_year", row.fiscal_year as number)
+    .maybeSingle();
+  if (!survey) return undefined;
+
+  const { getFieldConfig } = await import("@/lib/benchmarking/default-field-config");
+  const config = getFieldConfig(survey);
+  for (const section of config.sections ?? []) {
+    const match = (section.fields ?? []).find((f) => f.name === field);
+    if (match) {
+      return {
+        type: match.type,
+        ...(match.options ? { options: match.options } : {}),
+      } as FieldDef;
+    }
+  }
+  return undefined;
+}
+
 /** Fields that ONLY the system / workflow transitions can write */
 const SYSTEM_ONLY_FIELDS = new Set([
   "id",
@@ -204,9 +247,16 @@ interface ValidationResult {
 
 function validateFieldValue(
   field: string,
-  value: string | number | boolean | string[] | null
+  value: string | number | boolean | string[] | null,
+  /**
+   * For a question added through the survey editor. FIELD_REGISTRY is a
+   * hardcoded literal, so a newly minted column is not in it and validation
+   * would reject it as "Unknown field" — which is what made adding a question
+   * impossible without a deploy. The survey's own config carries the type.
+   */
+  defOverride?: FieldDef,
 ): ValidationResult {
-  const def = FIELD_REGISTRY[field];
+  const def = defOverride ?? FIELD_REGISTRY[field];
   if (!def) {
     return { valid: false, cleanValue: null, error: `Unknown field: ${field}` };
   }
@@ -494,14 +544,28 @@ export async function saveBenchmarkingField(
   value: string | number | boolean | string[] | null
 ): Promise<SaveFieldResult> {
   try {
-    // 1. Allowlist check
-    if (!ALLOWED_FIELDS.has(field) || SYSTEM_ONLY_FIELDS.has(field)) {
-      console.error(`[SECURITY] Blocked write to disallowed field: ${field}`);
+    // 1. Allowlist check.
+    //
+    // FIELD_REGISTRY is a hardcoded literal, so a question added through the
+    // survey editor is not in it and used to be refused here — the question
+    // rendered, accepted an answer, and failed on save. A field the SURVEY
+    // declares is equally allowed; SYSTEM_ONLY_FIELDS stays an absolute deny so
+    // nobody can mint a column named submitted_at and write their own.
+    if (SYSTEM_ONLY_FIELDS.has(field)) {
+      console.error(`[SECURITY] Blocked write to system field: ${field}`);
       return { success: false, error: "This field cannot be edited" };
+    }
+    let customDef: FieldDef | undefined;
+    if (!ALLOWED_FIELDS.has(field)) {
+      customDef = await resolveConfiguredFieldDef(benchmarkingId, field);
+      if (!customDef) {
+        console.error(`[SECURITY] Blocked write to disallowed field: ${field}`);
+        return { success: false, error: "This field cannot be edited" };
+      }
     }
 
     // 2. Validate the value
-    const validation = validateFieldValue(field, value);
+    const validation = validateFieldValue(field, value, customDef);
     if (!validation.valid) {
       return { success: false, error: validation.error };
     }

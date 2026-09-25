@@ -6,6 +6,13 @@ import type { Json } from "@/lib/database.types";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 import { promoteBenchmarkingToOrganizationCurrentState } from "@/lib/benchmarking/promotion";
+import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
+import type { FieldType } from "@/lib/benchmarking/default-field-config";
+import {
+  addColumnSql,
+  validateNewQuestion,
+  ADD_QUESTION_MESSAGE,
+} from "@/lib/benchmarking/add-question";
 
 // ─────────────────────────────────────────────────────────────────
 // Auth Guards
@@ -282,6 +289,117 @@ export async function reviewDeltaFlag(
 /**
  * Save a field_config to a survey. Validates basic structure.
  */
+/**
+ * Add a question to a survey — mint the column, then put it in the config.
+ *
+ * The editor could edit, reorder, move and hide questions but never create one,
+ * which is why a wording problem needing a question SPLIT could only be fixed by
+ * a developer. Everything required was already here except this:
+ *
+ *   storage   public.exec_sql — SECURITY DEFINER, refuses anything that is not
+ *             ALTER TABLE ... ADD COLUMN. Built for this, never once called.
+ *   rendering DynamicSurveySection already renders whatever the config holds.
+ *   writes    ALLOWED_FIELDS came off the hardcoded FIELD_REGISTRY, so a new
+ *             field was rejected as "This field cannot be edited". It now falls
+ *             back to the survey's own config — see resolveFieldDef().
+ *
+ * Column first, config second. The other order gives you a question that
+ * renders, accepts an answer and fails on save, which reads as data loss to
+ * whoever is filling it in.
+ */
+export async function addSurveyQuestion(input: {
+  surveyId: string;
+  sectionId: string;
+  name: string;
+  label: string;
+  type: FieldType;
+  helpText?: string;
+  required?: boolean;
+  options?: string[];
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await verifyAdminAccess();
+  if (!auth.authorized || !auth.supabase)
+    return { success: false, error: auth.error };
+
+  const { data: survey } = await auth.supabase
+    .from("benchmarking_surveys")
+    .select("id, status, field_config")
+    .eq("id", input.surveyId)
+    .single();
+
+  if (!survey) return { success: false, error: "Survey not found" };
+
+  // A question added mid-cycle is a question half the stores have already gone
+  // past. The column is harmless; the silent inconsistency is not.
+  if (survey.status !== "draft") {
+    return {
+      success: false,
+      error:
+        `This survey is ${survey.status}. Questions can only be added while it is in draft — ` +
+        `adding one now leaves every store that has already filed with a blank nobody asked them.`,
+    };
+  }
+
+  const config = getFieldConfig(survey);
+  const problem = validateNewQuestion({
+    name: input.name,
+    type: input.type,
+    sectionId: input.sectionId,
+    config,
+  });
+  if (problem) return { success: false, error: ADD_QUESTION_MESSAGE[problem] };
+
+  // 1. Mint the column. IF NOT EXISTS, so a retry after a half-failure is safe.
+  const { error: ddlError } = await auth.supabase.rpc("exec_sql", {
+    sql: addColumnSql(input.name, input.type),
+  });
+  if (ddlError) {
+    console.error("[benchmarking-admin] addSurveyQuestion DDL:", ddlError);
+    return { success: false, error: "Could not create the column for that question." };
+  }
+
+  // 2. Append it to the section, at the end.
+  const next: SurveyFieldConfig = {
+    sections: config.sections.map((sec) =>
+      sec.id !== input.sectionId
+        ? sec
+        : {
+            ...sec,
+            fields: [
+              ...sec.fields,
+              {
+                name: input.name,
+                label: input.label,
+                type: input.type,
+                order: sec.fields.reduce((m, f) => Math.max(m, f.order), 0) + 1,
+                visible: true,
+                ...(input.required ? { required: true } : {}),
+                ...(input.helpText ? { helpText: input.helpText } : {}),
+                ...(input.options?.length ? { options: input.options } : {}),
+              },
+            ],
+          },
+    ),
+  };
+
+  const { error } = await auth.supabase
+    .from("benchmarking_surveys")
+    .update({ field_config: next as unknown as Json })
+    .eq("id", input.surveyId);
+
+  if (error) {
+    console.error("[benchmarking-admin] addSurveyQuestion config:", error);
+    // The column exists and the config does not. Say so — a retry is safe
+    // (IF NOT EXISTS), and a silent failure here is the confusing one.
+    return {
+      success: false,
+      error: "The column was created but the survey did not save. Try adding it again.",
+    };
+  }
+
+  return { success: true };
+}
+
 export async function saveFieldConfig(
   surveyId: string,
   config: SurveyFieldConfig,
