@@ -170,7 +170,11 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
     },
     opening_rfp: {
       heading: "Ready to run an RFP?",
-      body: "Use the Export tool in the Toolkit to post an RFP and notify the right vendors automatically.",
+      // Was "Use the Export tool in the Toolkit to post an RFP". There is no
+      // RFP entry point in the Toolkit and never has been: RFPs are posted
+      // from the Open RFPs section on the org's own page, which is what
+      // targetAttr already scrolls to.
+      body: "Post what you need in the Open RFPs section below. Every vendor working in those categories gets notified.",
       ctaLabel: "See my RFPs",
       targetAttr: "rfps_section",
       completesOnCta: true,
