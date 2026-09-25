@@ -255,20 +255,19 @@ export default async function BenchmarkingSurveyPage({
     .maybeSingle()) as { data: any };
 
   /*
-    An admin looking at another store's survey must not leave a mark on it.
+    Staff acting as a store get the REAL page — intro, form, every control.
 
-    Creating the draft row here would stamp `respondent_user_id` with the admin
-    and add the store to the drafts count on /benchmarking/admin — which reads
-    as "this store has started", from nothing but someone having looked. Every
-    consequential reader excludes draft rows, so the damage is confined to that
-    count and the respondent stamp, and both are still wrong.
+    This was a read-only preview that returned before `?start=1` was read, so
+    "Start the survey" looped back to the title page and the questions were
+    unreachable. A super admin who cannot open the thing is not a safer super
+    admin, just a blind one.
 
-    So preview is read-only, and starting a submission on a store's behalf stays
-    an explicit act with its own button below.
+    ⚠️ It therefore creates the store's draft row, same as any respondent, which
+    stamps respondent_user_id and puts them in the drafts count on
+    /benchmarking/admin. That is a visible artifact of looking; the banner below
+    says whose record you are in.
   */
-  const previewOnly = isActingAsOther && !currentRow;
-
-  if (!currentRow && !previewOnly) {
+  if (!currentRow) {
     // Create a new draft row
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: newRow, error: insertError } = (await (db as any)
@@ -297,55 +296,6 @@ export default async function BenchmarkingSurveyPage({
 
   // The config that renders the form, and that the intro measures its counts from.
   const fieldConfig = getFieldConfig(activeSurvey);
-
-  /*
-    Preview: everything below this point reads or writes a submission row, and in
-    preview there is none. Rendering the intro is the whole point — it is the
-    page nobody at CSC could reach — so it is served here and the rest is skipped
-    rather than guarded query by query.
-
-    Deliberately NOT offered: a button to start a submission for this store. That
-    stamps a respondent and puts the store in the drafts count, and whether CSC
-    files on a member's behalf is a decision about the programme, not a
-    convenience this page should quietly grant itself.
-  */
-  if (previewOnly) {
-    const { data: chairRow } = await db
-      .from("site_content")
-      .select("title, body")
-      .eq("section", "benchmarking_intro_chair")
-      .eq("is_active", true)
-      .maybeSingle();
-
-    return (
-      <div>
-        <div className="mx-auto max-w-3xl px-4 pt-8">
-          <AdminOrgSwitcher
-            orgs={adminOrgOptions}
-            selectedOrgId={organization.id}
-            basePath="/benchmarking/survey"
-            label="open the survey as"
-          />
-          <p className="mt-2 text-xs text-gray-500">
-            Read-only. {organization.name} has not started a {activeSurvey.fiscal_year}{" "}
-            submission, so there is nothing here to save and nothing you do is recorded
-            against them. This is the page their staff see first.
-          </p>
-        </div>
-        <SurveyIntro
-          fiscalYear={activeSurvey.fiscal_year}
-          organizationName={organization.name}
-          fieldConfig={fieldConfig}
-          benchmarkingId=""
-          disclosureLevel="full"
-          closesOn={formatDeadline(activeSurvey.closes_at)}
-          chairNote={chairRow ?? null}
-          onBeginHref={`/benchmarking/survey?start=1&org=${organization.id}`}
-          readOnlyMessage={`Preview — ${organization.name} has no ${activeSurvey.fiscal_year} submission yet, so this choice cannot be saved.`}
-        />
-      </div>
-    );
-  }
 
   // 6. Fetch prior year data (for reference values and delta flags)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
