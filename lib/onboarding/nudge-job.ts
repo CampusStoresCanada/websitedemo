@@ -209,6 +209,17 @@ function isVendorProgram(persona: Persona | null | undefined): boolean {
 }
 
 /**
+ * A plain member, not an org admin.
+ *
+ * They cannot edit the org page and do not control the organisation's
+ * visibility. Copy that says "you control all of it" is addressed to the
+ * wrong person, and visibility_intro said exactly that to 31 of them.
+ */
+function isPlainMember(persona: Persona | null | undefined): boolean {
+  return persona === "member_member" || persona === "member_partner";
+}
+
+/**
  * Exported so the copy can be rendered and read before it goes out. These are
  * unsolicited emails to real partners; the body is the product, and reviewing
  * it in a browser beats reading template literals in a diff.
@@ -258,7 +269,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "A hero image goes a long way.",
-          body: `A hero image at the top of ${orgName}'s page makes it look like you own the space — because you do. It can be a photo of your store, your campus, your team. Anything that says "this is us."`,
+          body: `A hero image at the top of ${orgName}'s page makes it look like you own the space — because you do. It can be a photo of ${isVendorProgram(opts.persona) ? "your premises, your product, your team" : "your store, your campus, your team"}. Anything that says "this is us."`,
           ctaText: "Add a hero image",
           ctaUrl: orgUrl,
           footnote: isReminder ? "Still worth doing when you get a moment." : undefined,
@@ -574,6 +585,21 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
 
     case "visibility_intro":
+      // A plain member controls their OWN listing on contacts, not the org's.
+      // The org-admin copy below tells them they control all of it and points
+      // at the org page, which they cannot edit.
+      if (isPlainMember(opts.persona)) {
+        return {
+          subject: isReminder ? `You still choose who can see you` : `You choose who can see you`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Your listing is yours, not your organisation's.",
+            body: `Whether you show up in the CSC directory is your own setting, on your account page. You can be visible to everyone, visible only inside the network, or not listed at all.<br><br>It is separate from ${orgName}'s own listing. Your organisation decides what it shows; you decide what shows about you.<br><br>Appearing in the printed directory is a separate choice again, and it stays off unless you turn it on.`,
+            ctaText: "Manage how I appear",
+            ctaUrl: `${base}/me`,
+          }),
+        };
+      }
       return {
         subject: `Did you know you control what vendor partners see?`,
         html: nudgeHtml({
@@ -587,6 +613,21 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
 
     case "network_members":
+      // To a vendor the Members directory is the buy side, not a peer group.
+      // The shared copy below says "you've got peers across the country",
+      // which is true for a store and wrong for the people selling to them.
+      if (isVendorProgram(opts.persona)) {
+        return {
+          subject: isReminder ? `The stores that might buy from you` : `This is who buys what you sell`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Your market, one directory.",
+            body: `The Members directory is every campus store in CSC.${opts.orgProvince ? ` ${opts.orgProvince} alone has more of them than most people expect.` : ""} These are the buyers for what ${orgName} sells.<br><br>Worth knowing who they are, and who to talk to at each one where they have named somebody.`,
+            ctaText: "Browse the directory",
+            ctaUrl: `${base}/members`,
+          }),
+        };
+      }
       return {
         subject: `Meet the rest of the network`,
         html: nudgeHtml({
@@ -629,7 +670,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "There are events relevant to you.",
-          body: `The CSC events calendar has sessions relevant to your store, your region, and your role. ${opts.orgProvince ? `If you're in ${opts.orgProvince}, there's likely something in your area.` : "Scroll through and see what's coming up near you."} Some of these you can add to your calendar right from the platform.`,
+          body: `The CSC events calendar has sessions relevant to ${isVendorProgram(opts.persona) ? "your company" : "your store"}, your region, and your role. ${opts.orgProvince ? `If you're in ${opts.orgProvince}, there's likely something in your area.` : "Scroll through and see what's coming up near you."} Some of these you can add to your calendar right from the platform.`,
           ctaText: "Browse events",
           ctaUrl: `${base}/events`,
           footnote: isReminder ? "Worth bookmarking the ones relevant to your team." : undefined,
