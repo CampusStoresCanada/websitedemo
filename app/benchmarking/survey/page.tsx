@@ -372,6 +372,9 @@ export default async function BenchmarkingSurveyPage({
         }
         closesOn={formatDeadline(activeSurvey.closes_at)}
         chairNote={chairRow ?? null}
+        termsAcknowledged={Boolean(
+          (currentRow as { terms_acknowledged_at?: string | null }).terms_acknowledged_at,
+        )}
         onBeginHref={
           isActingAsOther
             ? `/benchmarking/survey?start=1&org=${organization.id}`

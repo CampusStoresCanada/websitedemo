@@ -854,6 +854,56 @@ export async function saveDeltaFlag(
  * does, a change is always allowed, which is the permissive direction and the
  * right one to be wrong in.
  */
+/**
+ * The respondent confirming they understand what they get back for what they give.
+ *
+ * Distinct from disclosure_level, which records WHICH rung they picked. This
+ * records that they were told the ladder first — that contributing aggregate-only
+ * means aggregate results rather than named peer detail, and that not filing
+ * means no results at all. A consent recorded without that is a click, not an
+ * understanding.
+ *
+ * Reversible while the year is open, same as the choice it accompanies.
+ */
+export async function setTermsAcknowledged(
+  benchmarkingId: string,
+  acknowledged: boolean,
+): Promise<SaveFieldResult> {
+  try {
+    const auth = await verifyBenchmarkingAccess(benchmarkingId, false);
+    if (!auth.authorized || !auth.row || !auth.userId) {
+      return { success: false, error: auth.error };
+    }
+
+    const { sealStateForBenchmarking, sealMessage } = await import(
+      "@/lib/benchmarking/seal"
+    );
+    const seal = await sealStateForBenchmarking(benchmarkingId);
+    if (seal?.sealed) {
+      return { success: false, error: sealMessage(seal) ?? "That year is closed." };
+    }
+
+    const supabase = createAdminClient();
+    const { error } = await supabase
+      .from("benchmarking")
+      .update({
+        terms_acknowledged_at: acknowledged ? new Date().toISOString() : null,
+        terms_acknowledged_by: acknowledged ? auth.userId : null,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", benchmarkingId);
+
+    if (error) {
+      console.error("[benchmarking] setTermsAcknowledged:", error);
+      return { success: false, error: "Could not save that." };
+    }
+    return { success: true };
+  } catch (e) {
+    console.error("[benchmarking] setTermsAcknowledged:", e);
+    return { success: false, error: "Could not save that." };
+  }
+}
+
 export async function setDisclosureLevel(
   benchmarkingId: string,
   level: "full" | "aggregate_only"

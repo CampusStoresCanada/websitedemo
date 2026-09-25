@@ -5,7 +5,10 @@ import {
   confidentialityPoints,
   DELIVERABLES,
   WHAT_TO_GATHER,
+  SECTION_NOTES,
+  RESULTS_LADDER,
 } from "@/lib/benchmarking/intro-facts";
+import TermsAcknowledgement from "@/components/benchmarking/TermsAcknowledgement";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import type { DisclosureLevel } from "@/lib/benchmarking/disclosure";
 
@@ -36,6 +39,7 @@ export default function SurveyIntro({
   closesOn,
   chairNote,
   onBeginHref,
+  termsAcknowledged,
   readOnlyMessage,
 }: {
   fiscalYear: number;
@@ -47,6 +51,8 @@ export default function SurveyIntro({
   /** Editable by the benchmarking committee chair via site_content. */
   chairNote: { title: string | null; body: string | null } | null;
   onBeginHref: string;
+  /** Has the respondent confirmed they understand the ladder? */
+  termsAcknowledged: boolean;
   /**
    * Set when this page is being LOOKED at rather than filled in — an admin
    * previewing a store that has not started. Reuses DisclosureChoice's existing
@@ -84,7 +90,23 @@ export default function SurveyIntro({
           You do not have to finish in one sitting. Answers save as you type, and you can
           leave and come back{closesOn ? ` any time before ${closesOn}` : ""}.
         </p>
-        <h3 className="mt-4 text-xs font-medium uppercase tracking-wide text-gray-500">
+        <h3 className="mt-5 text-xs font-medium uppercase tracking-wide text-gray-500">
+          What each section covers
+        </h3>
+        <dl className="mt-2 space-y-3">
+          {scope.sections_detail.map((sec, i) => (
+            <div key={sec.id}>
+              <dt className="text-sm font-medium text-gray-900">
+                {i + 1}. {sec.title}
+              </dt>
+              {SECTION_NOTES[sec.id] && (
+                <dd className="mt-0.5 text-sm text-gray-600">{SECTION_NOTES[sec.id]}</dd>
+              )}
+            </div>
+          ))}
+        </dl>
+
+        <h3 className="mt-5 text-xs font-medium uppercase tracking-wide text-gray-500">
           What to have to hand
         </h3>
         <ul className="mt-2 space-y-1">
@@ -166,6 +188,30 @@ export default function SurveyIntro({
         </section>
       )}
 
+      {/* ── What you get back for what you give ──────────────────────── */}
+      <section className="mt-6 rounded-xl border border-gray-200 bg-white p-5">
+        <h2 className="text-base font-semibold text-gray-900">
+          What you get back depends on what you contribute
+        </h2>
+        <p className="mt-2 text-sm text-gray-700">
+          Worth reading before the choice below, because it is the part stores are most
+          often surprised by later.
+        </p>
+        <ul className="mt-4 space-y-4">
+          {RESULTS_LADDER.map((rung) => (
+            <li key={rung.who} className="border-l-2 border-gray-200 pl-4">
+              <div className="flex flex-wrap items-baseline gap-2">
+                <span className="text-sm font-medium text-gray-900">{rung.who}</span>
+                <span className="text-xs font-medium uppercase tracking-wide text-[#163D6D]">
+                  {rung.gets}
+                </span>
+              </div>
+              <p className="mt-1 text-sm text-gray-700">{rung.detail}</p>
+            </li>
+          ))}
+        </ul>
+      </section>
+
       {/* ── The choice ───────────────────────────────────────────────── */}
       <div className="mt-6">
         <DisclosureChoice
@@ -179,17 +225,13 @@ export default function SurveyIntro({
         </p>
       </div>
 
-      <div className="mt-8 flex flex-wrap items-center gap-4">
-        <Link
-          href={onBeginHref}
-          className="rounded-lg bg-[#163D6D] px-5 py-2.5 text-sm font-medium text-white"
-        >
-          Start the survey
-        </Link>
-        <Link href="/benchmarking/worksheet" className="text-sm text-gray-600 underline">
-          Print a blank copy to gather on paper first
-        </Link>
-      </div>
+      <TermsAcknowledgement
+        benchmarkingId={benchmarkingId}
+        initialAcknowledged={termsAcknowledged}
+        startHref={onBeginHref}
+        disabledMessage={readOnlyMessage ?? null}
+      />
+
     </div>
   );
 }

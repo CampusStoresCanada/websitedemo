@@ -21,6 +21,8 @@ export interface SurveyScope {
   /** Fields needing a figure off the year-end statements. */
   financialFields: number;
   sectionTitles: string[];
+  /** id + title per section, so the intro can pair each with its note. */
+  sections_detail: { id: string; title: string }[];
 }
 
 /** Measured from the config that renders, so it cannot drift from the form. */
@@ -32,8 +34,69 @@ export function surveyScope(config = DEFAULT_FIELD_CONFIG): SurveyScope {
     fields: fields.length,
     financialFields: fields.filter((f) => f.type === "currency").length,
     sectionTitles: sections.map((s) => s.title),
+    sections_detail: sections.map((s) => ({ id: s.id, title: s.title })),
   };
 }
+
+
+/**
+ * What each section is actually asking for, and why.
+ *
+ * The intro used to say "8 sections, 99 questions" and stop, which tells a
+ * store the size of the job and nothing about its shape. Someone deciding
+ * whether to start needs to know which of these they can answer off a printout
+ * and which need a colleague.
+ *
+ * Keyed by section id from the field config, so a section added without a note
+ * shows its title alone rather than silently disappearing.
+ */
+export const SECTION_NOTES: Record<string, string> = {
+  institution_profile:
+    "Who you are and who compiled the figures, plus enrolment FTE and square footage. The FTE you report here is the number that sets your CSC rate for the year ahead, so it is worth getting from the registrar rather than memory.",
+  sales_revenue:
+    "Gross sales for the year, split in-store and online. The split is what drives every online-share comparison, so an estimate here shows up in four places later.",
+  financial_metrics:
+    "Cost of goods, payroll, rent and net profit. These are the figures that build margin and expense ratios, and they are the ones stores most often want a peer group for.",
+  staffing:
+    "Headcount as full-time equivalent, including students. Part-time converted to FTE, not counted as bodies, or your staffing cost per FTE will not compare to anyone.",
+  course_materials:
+    "Course materials revenue by category, each with its online portion. The longest section, and the one where a POS export saves the most time.",
+  general_merchandise:
+    "Everything that is not course materials: apparel, gifts, technology, supplies, food. Categories follow the NACS taxonomy so the cuts line up year to year.",
+  technology_systems:
+    "Your POS and e-commerce platforms by name. No figures. It is here because 'what do stores like us run' is one of the most asked questions on the member forum.",
+  store_operations:
+    "Hours, services offered, shrink, and the newer KPIs. Several of these are optional and marked so.",
+};
+
+/**
+ * What you get back for what you give — the ladder, said plainly.
+ *
+ * It is enforced by resultsTierFor(), and a store should be told it BEFORE
+ * choosing rather than discovering it when the results arrive thinner than
+ * expected. The page previously described the choice as being about naming
+ * alone, which understates what aggregate-only costs.
+ */
+export const RESULTS_LADDER = [
+  {
+    who: "Stores that do not take part",
+    gets: "Nothing",
+    detail:
+      "No medians, no counts, no distributions. The exchange is not a public resource, and a store contributing none of its own figures does not receive the group's.",
+  },
+  {
+    who: "Stores that contribute without being named",
+    gets: "Aggregate results",
+    detail:
+      "Your figures count toward every median, count and distribution, and you see those same aggregates. You do not see other stores as named rows, because naming works both ways.",
+  },
+  {
+    who: "Stores that contribute and agree to be named",
+    gets: "Full results",
+    detail:
+      "Everything above, plus named peer rows for the other stores that also agreed. This is what most stores choose and what makes the report worth reading.",
+  },
+] as const;
 
 /**
  * What a store needs in front of them before starting.
