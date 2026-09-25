@@ -133,7 +133,7 @@ export default function DirectoryOnboardingCallout({ page }: DirectoryOnboarding
   const defaultCopy: Record<SubPhase, { heading: string; body: string }> = {
     toggle: {
       heading: "Two ways to explore",
-      body: "Switch between the map and list views using the icon at the top. Try switching back and forth — then come back to the list to continue.",
+      body: "Switch between the map and list views using the icon at the top. Try switching back and forth, then come back to the list to continue.",
     },
     refine: {
       heading: "Narrow it down",
@@ -141,7 +141,7 @@ export default function DirectoryOnboardingCallout({ page }: DirectoryOnboarding
     },
     institution: {
       heading: "Dive into one",
-      body: "Click any institution in the list to see their full profile — contacts, categories, and more.",
+      body: "Click any institution in the list to see their full profile: contacts, categories, and more.",
     },
     done: { heading: "", body: "" },
   };

@@ -243,12 +243,12 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
     case "profile_description":
       return {
         subject: isReminder
-          ? `${orgName}'s description — still worth a look`
+          ? `${orgName}'s description is still worth a look`
           : `Your description is the first thing they read`,
         html: nudgeHtml({
           firstName,
           headline: "First impressions happen fast.",
-          body: `Your organization description is the first thing members and vendor partners read when they land on ${orgName}'s page. Does it still say what you want it to say?<br><br>It only takes a minute to update — click the pencil icon on any field when you're on your org page.`,
+          body: `Your organization description is the first thing members and vendor partners read when they land on ${orgName}'s page. Does it still say what you want it to say?<br><br>It only takes a minute to update. Click the pencil icon on any field when you're on your org page.`,
           ctaText: "Go to my org page",
           ctaUrl: orgUrl,
           footnote: isReminder ? `You got a nudge about this a few days ago${reminder}.` : undefined,
@@ -259,7 +259,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       return {
         subject: isReminder
           ? `${orgName} still needs a logo`
-          : `Your logo — is it on here?`,
+          : `Is your logo on here?`,
         html: nudgeHtml({
           firstName,
           headline: "A face to the name.",
@@ -275,7 +275,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "A hero image goes a long way.",
-          body: `A hero image at the top of ${orgName}'s page makes it look like you own the space — because you do. It can be a photo of ${isVendorProgram(opts.persona) ? "your premises, your product, your team" : "your store, your campus, your team"}. Anything that says "this is us."`,
+          body: `A hero image at the top of ${orgName}'s page makes it look like you own the space, because you do. It can be a photo of ${isVendorProgram(opts.persona) ? "your premises, your product, your team" : "your store, your campus, your team"}. Anything that says "this is us."`,
           ctaText: "Add a hero image",
           ctaUrl: orgUrl,
           footnote: isReminder ? "Still worth doing when you get a moment." : undefined,
@@ -291,7 +291,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           body: `When vendor partners want to reach ${orgName}, they look at your contacts page. When members want to know who runs what, they look at your contacts page. Make sure the right people are listed, in the right order, with accurate roles.`,
           ctaText: "Review my contacts",
           ctaUrl: orgUrl,
-          footnote: isReminder ? "This one's quick — worth doing today." : undefined,
+          footnote: isReminder ? "This one's quick, and worth doing today." : undefined,
         }),
       };
 
@@ -304,19 +304,19 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           body: `The contacts members reach out to most are the ones with photos. It's a small thing that makes a real difference. If your key contacts don't have profile photos yet, it's worth uploading them.`,
           ctaText: "Update contact photos",
           ctaUrl: orgUrl,
-          footnote: isReminder ? `Still no photos on some contacts at ${orgName} — quick one when you have a spare minute.` : undefined,
+          footnote: isReminder ? `Still no photos on some contacts at ${orgName}. Quick one when you have a spare minute.` : undefined,
         }),
       };
 
     case "conference_delegates":
       return {
         subject: isReminder
-          ? `Conference delegates — any updates for ${orgName}?`
+          ? `Any delegate updates for ${orgName}?`
           : `Have you sorted delegates for the conference?`,
         html: nudgeHtml({
           firstName,
           headline: "Conference time is coming.",
-          body: `Have you sorted who's going from ${orgName}? Getting your delegates confirmed early means smoother logistics on our end — and yours. You can manage this right on your org page.`,
+          body: `Have you sorted who's going from ${orgName}? Getting your delegates confirmed early means smoother logistics on our end, and yours. You can manage this right on your org page.`,
           ctaText: "Sort my delegates",
           ctaUrl: orgUrl,
         }),
@@ -521,15 +521,15 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
     case "profile_categories":
       return {
         subject: isReminder
-          ? `${orgName}'s categories — worth a second look`
+          ? `${orgName}'s categories are worth a second look`
           : `Did we get ${orgName}'s categories right?`,
         html: nudgeHtml({
           firstName,
           headline: "We guessed. You'd know better.",
-          body: `Your categories decide where ${orgName} turns up when a member goes looking for a supplier. We set them from what we knew when we built your profile — an educated guess at best, and nobody here sells what you sell.<br><br>Worth a look to correct them. Be specific: it's better to appear in three categories you genuinely serve than a dozen you don't.`,
+          body: `Your categories decide where ${orgName} turns up when a member goes looking for a supplier. We set them from what we knew when we built your profile. An educated guess at best, and nobody here sells what you sell.<br><br>Worth a look to correct them. Be specific: it's better to appear in three categories you genuinely serve than a dozen you don't.`,
           ctaText: "Check my categories",
           ctaUrl: orgUrl,
-          footnote: isReminder ? "Takes about a minute — and it's the field members search on." : undefined,
+          footnote: isReminder ? "Takes about a minute, and it's the field members search on." : undefined,
         }),
       };
 
@@ -542,7 +542,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           html: nudgeHtml({
             firstName,
             headline: "Show the network something you're proud of.",
-            body: `${orgName}'s page has a space for one product, front and centre over your hero image — and yours is empty.<br><br>It isn't a sales pitch. It's the thing you'd point at if another store walked in: your own branded line, something that only works on your campus, the item people come back for. Whatever best reflects the store.<br><br>One image is all it takes.`,
+            body: `${orgName}'s page has a space for one product, front and centre over your hero image, and yours is empty.<br><br>It isn't a sales pitch. It's the thing you'd point at if another store walked in: your own branded line, something that only works on your campus, the item people come back for. Whatever best reflects the store.<br><br>One image is all it takes.`,
             ctaText: "Put something on show",
             ctaUrl: orgUrl,
           }),
@@ -555,7 +555,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "Pick one product to lead with.",
-          body: `Your profile has a Featured Product slot, and ${orgName}'s is empty. It's the thing members see first when they land on your page — a new line, a seasonal item, whatever you'd point at if someone walked up to your booth.<br><br>One product. A name and a sentence about it is plenty.`,
+          body: `Your profile has a Featured Product slot, and ${orgName}'s is empty. It's the thing members see first when they land on your page: a new line, a seasonal item, whatever you'd point at if someone walked up to your booth.<br><br>One product. A name and a sentence about it is plenty.`,
           ctaText: "Feature a product",
           ctaUrl: orgUrl,
         }),
@@ -564,15 +564,15 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
     case "profile_links_docs":
       return {
         subject: isReminder
-          ? `${orgName}'s catalogue — still missing`
+          ? `${orgName}'s catalogue is still missing`
           : `Get your catalogue in front of members`,
         html: nudgeHtml({
           firstName,
           headline: "Members are looking for your range.",
-          body: `${orgName} doesn't have a catalogue or price list linked yet. Members browsing the directory can see who you are, but not what you carry — and that's usually the next thing they want.<br><br>A link to your catalogue is enough. It doesn't have to be hosted here.`,
+          body: `${orgName} doesn't have a catalogue or price list linked yet. Members browsing the directory can see who you are, but not what you carry, and that's usually the next thing they want.<br><br>A link to your catalogue is enough. It doesn't have to be hosted here.`,
           ctaText: "Add my catalogue",
           ctaUrl: orgUrl,
-          footnote: isReminder ? "A link is fine — no upload needed." : undefined,
+          footnote: isReminder ? "A link is fine. No upload needed." : undefined,
         }),
       };
 
@@ -584,7 +584,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "One last touch.",
-          body: `${orgName}'s profile page has a background image slot that's still empty. It sits behind your hero and logo and is the difference between a page that looks filled in and one that looks unfinished.<br><br>Purely cosmetic — but it's the last thing on the list.`,
+          body: `${orgName}'s profile page has a background image slot that's still empty. It sits behind your hero and logo and is the difference between a page that looks filled in and one that looks unfinished.<br><br>Purely cosmetic, but it's the last thing on the list.`,
           ctaText: "Add a background",
           ctaUrl: orgUrl,
         }),
@@ -639,7 +639,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "You've got peers across the country.",
-          body: `The Members directory has every campus store that's part of CSC. ${opts.orgProvince ? `${opts.orgProvince} alone has a handful of stores you'd probably recognize.` : "There are stores from coast to coast you'd probably recognize."} Worth a look — there are people in there you'll want to know.`,
+          body: `The Members directory has every campus store that's part of CSC. ${opts.orgProvince ? `${opts.orgProvince} alone has a handful of stores you'd probably recognize.` : "There are stores from coast to coast you'd probably recognize."} Worth a look. There are people in there you'll want to know.`,
           ctaText: "See the Members directory",
           ctaUrl: `${base}/members`,
         }),
@@ -651,7 +651,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "This is who you're connected to.",
-          body: `The Partners directory is all the vendors and suppliers active on CSC. They can already see ${orgName}'s page. It's worth knowing who they are — and having a look at your own page through their eyes.`,
+          body: `The Partners directory is all the vendors and suppliers active on CSC. They can already see ${orgName}'s page. It's worth knowing who they are, and having a look at your own page through their eyes.`,
           ctaText: "Browse Partners",
           ctaUrl: `${base}/partners`,
         }),
@@ -659,14 +659,14 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
 
     case "network_member_space":
       return {
-        subject: `Member Space — same you, same platform`,
+        subject: `Member Space: same you, same platform`,
         html: nudgeHtml({
           firstName,
           headline: "One login. One platform.",
-          body: `Member Space isn't a separate app. Same login you're already using. It's the community layer — discussions, announcements, resources — all connected to the same profile and permissions you have here. Worth exploring if you haven't already.`,
+          body: `Member Space isn't a separate app. Same login you're already using. It's the community layer, with discussions, announcements and resources, all connected to the same profile and permissions you have here. Worth exploring if you haven't already.`,
           ctaText: "Open Member Space",
           ctaUrl: `${base}/members-space`,
-          footnote: isReminder ? "Still the same login — no new password needed." : undefined,
+          footnote: isReminder ? "Still the same login. No new password needed." : undefined,
         }),
       };
 
@@ -686,12 +686,12 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
     case "benchmarking_survey":
       return {
         subject: isReminder
-          ? `Benchmarking survey — still open`
+          ? `The benchmarking survey is still open`
           : `The benchmarking survey is open`,
         html: nudgeHtml({
           firstName,
           headline: "Your peers are already in.",
-          body: `The annual benchmarking survey is open. The more stores that participate, the more useful the data is for everyone — including you. ${isReminder ? "It's still open if you haven't had a chance yet." : "It doesn't take long, and the results are worth having."}`,
+          body: `The annual benchmarking survey is open. The more stores that participate, the more useful the data is for everyone, including you. ${isReminder ? "It's still open if you haven't had a chance yet." : "It doesn't take long, and the results are worth having."}`,
           ctaText: "Start the survey",
           ctaUrl: `${base}/benchmarking`,
         }),
