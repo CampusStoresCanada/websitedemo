@@ -27,7 +27,7 @@ function getCopy(persona: Persona, orgName: string | null): PersonaCopy {
         body: [
           `You're managing ${org} presence on the CSC network.`,
           "That means you decide what your members see, what vendor partners see, and what the public knows about your institution.",
-          "You have the tools to change any of it — right now, from any page, without emailing anyone.",
+          "You have the tools to change any of it, right now, from any page, without emailing anyone.",
         ],
         ctaPrimary: "Show me my org page",
         ctaSecondary: "I'll explore on my own",
@@ -37,8 +37,8 @@ function getCopy(persona: Persona, orgName: string | null): PersonaCopy {
       return {
         body: [
           `You're managing ${org} presence on the CSC network.`,
-          "That means you decide what member stores see when they look you up — your catalogue, your contacts, your categories.",
-          "You have the tools to shape all of it — right now, from any page.",
+          "That means you decide what member stores see when they look you up: your catalogue, your contacts, your categories.",
+          "You have the tools to shape all of it, right now, from any page.",
         ],
         ctaPrimary: "Show me my org page",
         ctaSecondary: "I'll explore on my own",
@@ -51,7 +51,7 @@ function getCopy(persona: Persona, orgName: string | null): PersonaCopy {
             ? `You're part of ${orgName}'s team on the CSC network.`
             : "You're now on the CSC network.",
           "This is where campus stores across Canada connect, find suppliers, and stay ahead of the industry.",
-          "Your profile is already here — and so is your market.",
+          "Your profile is already here, and so is your market.",
         ],
         ctaPrimary: "Show me around",
         ctaSecondary: "I'll find my way",
@@ -63,7 +63,7 @@ function getCopy(persona: Persona, orgName: string | null): PersonaCopy {
           orgName
             ? `You're part of ${orgName}'s team on the CSC network.`
             : "You're now on the CSC network.",
-          "This is where campus stores come to find vendors. Your company's profile is here — and so are the buyers.",
+          "This is where campus stores come to find vendors. Your company's profile is here, and so are the buyers.",
           "Let's make sure they can find the right person.",
         ],
         ctaPrimary: "Show me around",

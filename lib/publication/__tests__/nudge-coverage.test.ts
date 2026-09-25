@@ -237,3 +237,37 @@ describe("nudge copy addresses the persona it is sent to", () => {
     expect([...new Set(bad)]).toEqual([]);
   });
 });
+
+/**
+ * No em dashes in anything a member or partner reads.
+ *
+ * Nobody knows the keyboard shortcut for one, so its presence reads as
+ * machine-written and as though nobody cared enough to put effort in. Fine in
+ * comments and in conversation; never in copy addressed to the association.
+ *
+ * Swept 2026-09-25: 32 in the callout configs and email bodies, plus six more
+ * in reminder SUBJECT lines that a grep for `subject:.*—` had missed, because
+ * the dash sits on the ternary's continuation line rather than beside the key.
+ * That near-miss is why this renders the email instead of reading the source.
+ */
+describe("member-facing copy carries no em dashes", () => {
+  it("renders every persona, every step, both variants, clean", async () => {
+    const { buildNudgeEmail } = await import("@/lib/onboarding/nudge-job");
+    const offenders: string[] = [];
+    for (const persona of PERSONAS) {
+      for (const step of STEPS_BY_PERSONA[persona as Persona]) {
+        if (!STEP_SCHEDULE[step]) continue;
+        for (const isReminder of [false, true]) {
+          const built = buildNudgeEmail({
+            firstName: "Dana", orgName: "Test Org", orgSlug: "test-org",
+            orgProvince: "Alberta", stepKey: step, isReminder, persona: persona as Persona,
+          });
+          if (!built) continue;
+          if (built.subject.includes("\u2014")) offenders.push(`${persona}/${step} subject`);
+          if (built.html.includes("\u2014")) offenders.push(`${persona}/${step} body`);
+        }
+      }
+    }
+    expect([...new Set(offenders)]).toEqual([]);
+  });
+});
