@@ -138,8 +138,8 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
       const { tool } = (e as CustomEvent<{ tool: string }>).detail;
       setOnboardingHighlight(tool);
     }
-    window.addEventListener("csc:onboarding:highlight-edit", onHighlightTool);
-    return () => window.removeEventListener("csc:onboarding:highlight-edit", onHighlightTool);
+    window.addEventListener("csc:onboarding:highlight-tool", onHighlightTool);
+    return () => window.removeEventListener("csc:onboarding:highlight-tool", onHighlightTool);
   }, []);
 
   // Review mode — activated when ?review_token= is present in the URL
@@ -497,6 +497,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               icon={<BookmarkIcon filled={isCurrentPageBookmarked} />}
               label={isCurrentPageBookmarked ? "Manage bookmarks" : "Bookmark"}
               onClick={() => handleToolClick("bookmark")}
+              highlighted={onboardingHighlight === "bookmark"}
             />
 
             {/* Export */}
@@ -504,6 +505,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               icon={<ExportIcon />}
               label="Export"
               onClick={() => handleToolClick("export")}
+              highlighted={onboardingHighlight === "export"}
             />
 
             {/* Share */}
@@ -511,6 +513,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               icon={<ShareIcon />}
               label="Share"
               onClick={() => handleToolClick("share")}
+              highlighted={onboardingHighlight === "share"}
             />
 
             {/* Explain */}
@@ -518,6 +521,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               icon={<ExplainIcon />}
               label="Explain"
               onClick={() => handleToolClick("explain")}
+              highlighted={onboardingHighlight === "explain"}
             />
 
             {/*
@@ -555,6 +559,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
                 icon={<CalendarPlusIcon />}
                 label="Create Event"
                 onClick={() => handleToolClick("create_event")}
+              highlighted={onboardingHighlight === "create_event"}
               />
             )}
 
@@ -563,6 +568,7 @@ export default function Toolkit({ googleMapsApiKey = null }: { googleMapsApiKey?
               icon={<FlagIcon />}
               label="Flag"
               onClick={() => handleToolClick("flag")}
+              highlighted={onboardingHighlight === "flag"}
             />
           </div>
         )}
@@ -2497,6 +2503,13 @@ function BookmarkModal({
     setBookmarks((prev) => [bookmark, ...prev]);
     onBookmarkChange(true);
     setSaved(true);
+    // Same signal the profile editors emit, so the onboarding callout can
+    // close toolkit_tour on an actual save rather than on a "Got it" click.
+    // There is no bookmarks column being written here; the table/column pair
+    // is the event's addressing scheme, not a claim about the schema.
+    window.dispatchEvent(new CustomEvent("csc:field-updated", {
+      detail: { table: "bookmarks", column: "created" },
+    }));
     setSaving(false);
   };
 
