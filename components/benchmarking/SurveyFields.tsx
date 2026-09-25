@@ -130,9 +130,28 @@ export function CurrencyField({
 } & SurveySectionProps) {
   const currentValue = formData[field];
   const priorValue = priorYearData?.[field];
+
+  /*
+    Last year's number goes in the BOX as well as beside it.
+
+    It used to live only in the grey reference to the right, which meant every
+    store retyped 45 figures it had already given us to confirm most of them had
+    not changed. Now it starts in the field, focus selects the whole thing, so
+    typing over it costs one keystroke more than typing into an empty box.
+
+    ⛔ A carried value is NOT an answer until a person has been in the field.
+    Prefilling and saving on blur would let someone tab through the section and
+    file last year's figures as this year's — indistinguishable afterwards from
+    a store that checked every line. So `carried` gates the save in handleBlur,
+    and the field says "carried from FY…" until it is confirmed.
+  */
+  const carriedFrom =
+    currentValue == null && priorValue != null ? String(priorValue) : null;
+  const [carried, setCarried] = useState(carriedFrom != null);
   const [localValue, setLocalValue] = useState(
-    currentValue != null ? String(currentValue) : ""
+    currentValue != null ? String(currentValue) : (carriedFrom ?? "")
   );
+  const [touched, setTouched] = useState(false);
   const [showDeltaAlert, setShowDeltaAlert] = useState(false);
   const [deltaExplanation, setDeltaExplanation] = useState("");
   const [formatWarning, setFormatWarning] = useState<string | null>(null);
@@ -140,6 +159,10 @@ export function CurrencyField({
   const existingFlag = deltaFlags.find((f) => f.field_name === field);
 
   const handleBlur = useCallback(() => {
+    // A carried figure the respondent never touched is not their answer. Leave
+    // it showing, leave it unsaved, and let them come back to it.
+    if (carried && !touched) return;
+
     // 1. Client-side format check
     const warning = checkCurrencyFormat(localValue);
     if (warning) {
@@ -179,7 +202,7 @@ export function CurrencyField({
       }
     }
     setShowDeltaAlert(false);
-  }, [field, localValue, onFieldChange, priorValue]);
+  }, [field, localValue, onFieldChange, priorValue, carried, touched]);
 
   return (
     <div className="mb-4">
@@ -201,17 +224,46 @@ export function CurrencyField({
               type="text"
               inputMode="decimal"
               value={localValue}
+              /*
+                Select the whole carried figure so typing replaces it outright.
+                Deferred a frame on purpose: calling select() directly in onFocus
+                loses to the caret placement the browser does after focus — from
+                a click's mouseup, and from programmatic focus too. Measured:
+                selectionStart/End came back 7/7 on a 7-character value.
+              */
+              onFocus={(e) => {
+                const el = e.currentTarget;
+                requestAnimationFrame(() => el.select());
+              }}
               onChange={(e) => {
                 setLocalValue(e.target.value);
+                setTouched(true);
+                setCarried(false);
                 setFormatWarning(null); // Clear warning on type
               }}
               onBlur={handleBlur}
               disabled={isReadOnly}
               className={`w-full pl-7 pr-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
                 formatWarning ? "border-amber-400" : "border-gray-300"
-              }`}
+              } ${carried ? "text-gray-400 italic" : ""}`}
               placeholder="0.00"
             />
+            {carried && (
+              <button
+                type="button"
+                // Confirming is an act, so it is a button rather than a blur.
+                // One click says "yes, same as last year" and it becomes theirs.
+                onClick={() => {
+                  setTouched(true);
+                  setCarried(false);
+                  onFieldChange(field, parseCurrencyInput(localValue));
+                }}
+                className="mt-1 text-xs text-[#163D6D] underline"
+              >
+                Carried from FY{Number(formData.fiscal_year) - 1} — confirm it is
+                unchanged
+              </button>
+            )}
           </div>
           {formatWarning && (
             <p className="text-xs text-amber-600 mt-1 flex items-center gap-1">
@@ -294,8 +346,15 @@ export function NumberField({
 } & Omit<SurveySectionProps, "onDeltaFlag" | "deltaFlags">) {
   const currentValue = formData[field];
   const priorValue = priorYearData?.[field];
+
+  // Same carried-value rule as CurrencyField: last year's number starts in the
+  // box, focus selects it, and it is not saved until a person has been here.
+  const carriedFrom =
+    currentValue == null && priorValue != null ? String(priorValue) : null;
+  const [carried, setCarried] = useState(carriedFrom != null);
+  const [touched, setTouched] = useState(false);
   const [localValue, setLocalValue] = useState(
-    currentValue != null ? String(currentValue) : ""
+    currentValue != null ? String(currentValue) : (carriedFrom ?? "")
   );
   const [formatWarning, setFormatWarning] = useState<string | null>(null);
 
@@ -306,6 +365,7 @@ export function NumberField({
   const [ambiguousRawValue, setAmbiguousRawValue] = useState<number | null>(null);
 
   const handleBlur = useCallback(() => {
+    if (carried && !touched) return; // carried, untouched — not their answer yet
     setFormatWarning(null);
 
     if (isPercentageField) {
@@ -389,8 +449,14 @@ export function NumberField({
             type="number"
             inputMode="decimal"
             value={localValue}
+            onFocus={(e) => {
+              const el = e.currentTarget;
+              requestAnimationFrame(() => el.select());
+            }}
             onChange={(e) => {
               setLocalValue(e.target.value);
+              setTouched(true);
+              setCarried(false);
               setFormatWarning(null);
               setShowPercentPrompt(false);
             }}
@@ -399,9 +465,24 @@ export function NumberField({
             disabled={isReadOnly}
             className={`w-full px-3 py-2 border rounded-lg focus:ring-2 focus:ring-[#EE2A2E] focus:border-transparent disabled:bg-gray-50 disabled:text-gray-500 text-sm ${
               formatWarning ? "border-amber-400" : "border-gray-300"
-            }`}
+            } ${carried ? "text-gray-400 italic" : ""}`}
             placeholder="0"
           />
+          {carried && (
+            <button
+              type="button"
+              onClick={() => {
+                setTouched(true);
+                setCarried(false);
+                const n = Number(localValue);
+                onFieldChange(field, Number.isFinite(n) ? n : null);
+              }}
+              className="mt-1 text-xs text-[#163D6D] underline"
+            >
+              Carried from FY{Number(formData.fiscal_year) - 1} — confirm it is
+              unchanged
+            </button>
+          )}
           {suffix && (
             <span className="absolute inset-y-0 right-0 pr-3 flex items-center text-gray-400 text-xs">
               {suffix}
