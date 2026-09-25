@@ -481,7 +481,10 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           headline: "Every page carries its own tools.",
           body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>From it you can flag anything that looks wrong, ask what something on a page means, share a page with a colleague, pull the data behind it, or bookmark whatever you want to find again.<br><br>Flagging is the one that earns its keep. If something about ${orgName} is off, or about a partner you buy from, you can say so on the page itself instead of working out who to email.`,
           ctaText: "Open the Toolkit",
-          ctaUrl: `${base}/me`,
+          // orgUrl, not /me. The guided tour lives in OrgOnboardingCallout,
+          // which mounts only on /org/[slug] for your own org. Sending them
+          // to /me promises a walkthrough and delivers a static page.
+          ctaUrl: orgUrl,
           footnote: "It works the same on every page, including the ones that aren't yours.",
         }),
       };
