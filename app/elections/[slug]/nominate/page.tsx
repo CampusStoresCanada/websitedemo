@@ -82,36 +82,97 @@ export default async function NominatePage({
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
 
   if (submitted) {
+    /*
+     * ⚠️ This screen used to be written entirely in the third person, for the
+     * case where you nominated somebody else. A self-nominee was told two
+     * things that were false about their own nomination: that their
+     * institution's signature was already on it — it is not, because a nominee
+     * cannot co-sign themselves, so they need two OTHER institutions rather
+     * than one — and that "the nominee" and "their institution" still had to
+     * act, which is them and their own store. Someone who self-nominated read
+     * "Recorded" and reasonably concluded they were finished.
+     *
+     * `submitted` carries the accept token, so the real nomination can be read
+     * rather than guessed at.
+     */
+    const { getNominationByToken } = await import("@/lib/elections/service");
+    const justSubmitted = await getNominationByToken(submitted);
+    const actorNow = await resolveActor(auth.user.id, auth.organizations);
+    const selfNominated = justSubmitted
+      ? actorNow.contactIds.includes(justSubmitted.nomination.nomineeContactId)
+      : false;
+    const stillNeeded = justSubmitted?.nomination.cosignatures.required ?? 2;
+
     return (
       <ElectionShell eyebrow={eyebrow} title="Nomination submitted">
         <Notice tone="success">
-          <strong>Recorded.</strong> Your institution&apos;s signature is on it.
+          {selfNominated ? (
+            <>
+              <strong>Recorded.</strong> You have put your own name forward.
+            </>
+          ) : (
+            <>
+              <strong>Recorded.</strong> Your institution&apos;s signature is on it.
+            </>
+          )}
         </Notice>
         <div className="mt-6 space-y-3 text-sm text-gray-700">
           <p className="font-medium text-gray-900">It is not finished yet. Three things still have to happen:</p>
-          <ol className="list-decimal space-y-2 pl-5">
-            <li>
-              <strong>The nominee accepts</strong>, and writes their biography and candidate
-              statement. We have emailed them a link.
-            </li>
-            <li>
-              <strong>Their institution grants permission</strong> for them to serve if elected.
-              The by-laws require this separately from the nominee&apos;s own acceptance.
-            </li>
-            <li>
-              <strong>The institutions you asked co-sign.</strong> They have each been sent a link.
-            </li>
-          </ol>
+          {selfNominated ? (
+            <ol className="list-decimal space-y-2 pl-5">
+              <li>
+                <strong>You accept.</strong> Putting your name forward and agreeing to stand are
+                two separate steps, and the second one is still outstanding. You also write your
+                biography and candidate statement there.
+              </li>
+              <li>
+                <strong>Your institution grants permission</strong> for you to serve if elected.
+                By-Law Part V requires this separately from your own acceptance. If you administer
+                your institution you can give it yourself, on the same page.
+              </li>
+              <li>
+                <strong>{stillNeeded} other member institutions co-sign.</strong> You cannot
+                co-sign your own nomination, so your own institution does not count towards this.
+                Everyone you asked has been sent a link.
+              </li>
+            </ol>
+          ) : (
+            <ol className="list-decimal space-y-2 pl-5">
+              <li>
+                <strong>The nominee accepts</strong>, and writes their biography and candidate
+                statement. We have emailed them a link.
+              </li>
+              <li>
+                <strong>Their institution grants permission</strong> for them to serve if elected.
+                The by-laws require this separately from the nominee&apos;s own acceptance.
+              </li>
+              <li>
+                <strong>The institutions you asked co-sign.</strong> They have each been sent a link.
+              </li>
+            </ol>
+          )}
           <p>
             All three must be done by <strong>{formatDate(election.schedule.nominationsCloseAt)}</strong>.
             A nomination that is short of any of them on that date does not go on the ballot, so it is
             worth a nudge if you don&apos;t see movement.
           </p>
         </div>
-        <div className="mt-6 flex gap-3">
+        <div className="mt-6 flex flex-wrap gap-3">
+          {selfNominated && (
+            <Link
+              href={keepPreview(`/elections/accept/${submitted}`)}
+              className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
+            >
+              Accept and write your statement
+            </Link>
+          )}
           <Link
             href={keepPreview(`/elections/${slug}/nominate`)}
-            className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
+            className={
+              selfNominated
+                ? "rounded-lg border border-gray-300 px-5 py-2.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                : "rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
+            }
           >
             Nominate someone else
           </Link>
