@@ -129,7 +129,7 @@ export default function ToolkitTourModal({ onDone, persona }: ToolkitTourModalPr
               disabled={completing}
               className="w-full py-3 bg-[#EE2A2E] hover:bg-[#D92327] text-white text-sm font-semibold rounded-xl transition-colors disabled:opacity-60"
             >
-              {completing ? "One moment…" : "Got it — I'm ready to explore"}
+              {completing ? "One moment…" : "Got it, I'm ready to explore"}
             </button>
           </div>
         </div>
