@@ -170,3 +170,70 @@ describe("nudge coverage across every persona", () => {
     expect(blank).toEqual([]);
   });
 });
+
+/**
+ * Who the copy thinks it is talking to.
+ *
+ * Coverage above asks whether a step sends at all. This asks whether what it
+ * sends is addressed to the right person, which is the other half of the same
+ * bug: the member journey began as a copy of the partner one, so a step could
+ * be live for a persona and still be written for somebody else.
+ *
+ * Found by this check on 2026-09-25, all shipped and sending:
+ *   visibility_intro told 31 plain members "a lot of org admins don't realise"
+ *     and "you control all of it", pointing at an org page they cannot edit
+ *   events_discovery offered 69 vendor-side people sessions for "your store"
+ *   profile_hero suggested a partner photograph "your store, your campus"
+ *   network_members told vendors the campus stores they sell to were "peers"
+ *
+ * Phrase matching is a blunt instrument and only catches what it knows about.
+ * It is here because these four were invisible for months, not because it can
+ * prove the copy is right.
+ */
+describe("nudge copy addresses the persona it is sent to", () => {
+  const ADMIN_VOICE = /org admins|you control all of it|your org page/i;
+  const STORE_VOICE = /\byour store\b|\byour campus\b/i;
+  const PEER_VOICE = /you've got peers/i;
+
+  it("never speaks to a plain member as though they ran the organisation", async () => {
+    const { buildNudgeEmail } = await import("@/lib/onboarding/nudge-job");
+    const bad: string[] = [];
+    for (const persona of ["member_member", "member_partner"] as Persona[]) {
+      for (const step of STEPS_BY_PERSONA[persona]) {
+        if (!STEP_SCHEDULE[step]) continue;
+        for (const isReminder of [false, true]) {
+          const built = buildNudgeEmail({
+            firstName: "Dana", orgName: "Test Org", orgSlug: "test-org",
+            orgProvince: "Alberta", stepKey: step, isReminder, persona,
+          });
+          if (built && ADMIN_VOICE.test(`${built.subject} ${built.html}`)) {
+            bad.push(`${persona}/${step}${isReminder ? " (reminder)" : ""}`);
+          }
+        }
+      }
+    }
+    expect([...new Set(bad)]).toEqual([]);
+  });
+
+  it("never calls a vendor a campus store", async () => {
+    const { buildNudgeEmail } = await import("@/lib/onboarding/nudge-job");
+    const bad: string[] = [];
+    for (const persona of ["org_admin_partner", "member_partner"] as Persona[]) {
+      for (const step of STEPS_BY_PERSONA[persona]) {
+        if (!STEP_SCHEDULE[step]) continue;
+        for (const isReminder of [false, true]) {
+          const built = buildNudgeEmail({
+            firstName: "Dana", orgName: "Test Org", orgSlug: "test-org",
+            orgProvince: "Alberta", stepKey: step, isReminder, persona,
+          });
+          if (!built) continue;
+          const text = `${built.subject} ${built.html}`;
+          if (STORE_VOICE.test(text) || PEER_VOICE.test(text)) {
+            bad.push(`${persona}/${step}${isReminder ? " (reminder)" : ""}`);
+          }
+        }
+      }
+    }
+    expect([...new Set(bad)]).toEqual([]);
+  });
+});
