@@ -169,6 +169,18 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   total_course_sections:   { type: "integer", min: 0, max: 50000 },
   adoptions_by_deadline:   { type: "integer", min: 0, max: 50000 },
   adoption_deadline_window:{ type: "select", options: ["2 weeks before term", "4 weeks before term", "6 weeks before term", "8+ weeks before term", "Other"] },
+
+  // ── How the IA/EA programme runs (Store Operations) ──
+  //
+  // Registered rather than left to resolveConfiguredFieldDef, which exists for
+  // questions added through the editor. These ship in DEFAULT_FIELD_CONFIG, so
+  // they belong here and save without the extra config lookup.
+  ia_ea_program_type:      { type: "select", options: ["Inclusive Access", "Equitable Access", "Both", "Neither", "Other"] },
+  ia_ea_program_type_other:{ type: "text", maxLength: 200 },
+  ia_ea_enrolment_model:   { type: "select", options: ["Opt-in", "Opt-out", "Other"] },
+  ia_ea_enrolment_model_other: { type: "text", maxLength: 200 },
+  ia_ea_collection_model:  { type: "select", options: ["We collect the sales", "It flows through student fees", "Other"] },
+  ia_ea_collection_model_other:{ type: "text", maxLength: 200 },
 };
 
 /** Set of all editable field names (fast lookups) */

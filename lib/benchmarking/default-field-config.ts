@@ -1387,29 +1387,96 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           showIf: { field: "tracks_adoptions", value: true },
         },
         /*
-          The third IA/EA question, and the one that was missing.
+          How the IA/EA programme runs — the third question, from Shannon
+          Blackadder, and the one that was missing.
 
-          The other two are amounts: what the programme is worth outside the
-          store (Sales Revenue) and how much course materials it moves (Course
-          Materials). Neither tells you how the thing actually RUNS, which is
-          what everyone asking about IA wants to know and what made the other
-          two so hard to read in isolation.
+          The other two IA/EA questions are amounts: what the programme is worth
+          outside the store (Sales Revenue) and how much course materials it
+          moves (Course Materials). Neither says how the thing OPERATES, which is
+          what everyone actually asks about — and its absence is part of why the
+          other two read as duplicates of each other.
 
-          Free text on purpose. A pick-list would compare better, but we do not
-          yet know what the models are — that is the question. This year it tells
-          us; next year's committee can turn the answers into options.
+          Three pick-lists, not a free-text box. I drafted this as prose first;
+          Shannon had already specified it as three closed questions, and she is
+          right: "who bills the student" has three real answers, not infinite
+          ones. Each carries an Other with an explain field, so a model we have
+          not thought of is captured rather than forced into the nearest box —
+          and the Other answers are next year's options.
         */
         {
-          name: "ia_ea_operating_model",
-          label: "How does your IA/EA programme run?",
-          type: "text_long",
+          name: "ia_ea_program_type",
+          label: "Do you run an Inclusive Access or Equitable Access programme?",
+          type: "select",
           helpText:
-            "In your own words: who bills the student, how the store is paid, whether students can opt out and how, and which parts you handle versus the institution. Leave blank if you do not run an Inclusive Access or Equitable Access programme.",
-          reviewerNote:
-            "New for 2026, from Shannon Blackadder — the other two IA/EA questions are amounts, and neither says how the programme operates. Free text because we do not know the models well enough to list them; the point of year one is to find out. Is the prompt specific enough that two stores running the same model describe it recognisably?",
+            "If you run neither, say so and skip the two questions below.",
           order: 16,
           visible: true,
           group: "Inclusive Access / Equitable Access",
+          options: [
+            "Inclusive Access",
+            "Equitable Access",
+            "Both",
+            "Neither",
+            "Other",
+          ],
+          reviewerNote:
+            "New for 2026, specified by Shannon Blackadder. Is 'Both' a real case, or does offering it invite a store to pick it when they mean one programme with two names?",
+        },
+        {
+          name: "ia_ea_program_type_other",
+          label: "Tell us what you run",
+          type: "text",
+          order: 16.1,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
+          indent: true,
+          showIf: { field: "ia_ea_program_type", value: "Other" },
+        },
+        {
+          name: "ia_ea_enrolment_model",
+          label: "Is it opt-in or opt-out?",
+          type: "select",
+          helpText:
+            "Whether a student is in the programme by default, or has to choose it.",
+          order: 17,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
+          options: ["Opt-in", "Opt-out", "Other"],
+        },
+        {
+          name: "ia_ea_enrolment_model_other",
+          label: "Describe how students join or leave",
+          type: "text",
+          order: 17.1,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
+          indent: true,
+          showIf: { field: "ia_ea_enrolment_model", value: "Other" },
+        },
+        {
+          name: "ia_ea_collection_model",
+          label: "Do you collect the sales, or do they flow through student fees?",
+          type: "select",
+          helpText:
+            "Who takes the student's money. This is about the mechanism, not the amount — the amount is in Sales Revenue.",
+          order: 18,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
+          options: [
+            "We collect the sales",
+            "It flows through student fees",
+            "Other",
+          ],
+        },
+        {
+          name: "ia_ea_collection_model_other",
+          label: "Describe how the money reaches you",
+          type: "text",
+          order: 18.1,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
+          indent: true,
+          showIf: { field: "ia_ea_collection_model", value: "Other" },
         },
       ],
     },
