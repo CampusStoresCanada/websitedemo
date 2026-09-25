@@ -75,6 +75,7 @@ const PERIODIC_RULE_KEY_PREFIXES = [
   "job_consecutive_failures:",
   "db_access_drift:",
   "over_exposed_relation:",
+  "checklist_unreachable:",
 ];
 
 function isPeriodicRuleKey(ruleKey: string): boolean {
@@ -1865,6 +1866,91 @@ export async function evaluateNewPartnerAnnouncementsWaiting(): Promise<Candidat
   };
 }
 
+/**
+ * A checklist that can never reach anyone in time.
+ *
+ * Reminders fire at CHECKPOINTS, and a checkpoint is expressed as days before
+ * the CHECKLIST's deadline — not the task's. Two ways that silently produces a
+ * checklist nobody hears from, both of which look like a working checklist from
+ * every screen in the admin:
+ *
+ *  1. No checkpoints at all. The checklist is active, has tasks, renders on the
+ *     org page, and sends nothing, ever. Measured 2026-09-24: two of the three
+ *     active checklists on CSC 2027 were in this state.
+ *  2. A task that hardens BEFORE the first checkpoint fires. The Hot Products
+ *     Care Package must arrive 20 November; the Exhibitor checklist's first
+ *     reminder goes out 27 November. Put the task there and it is first
+ *     mentioned a week after it was already too late — every year.
+ *
+ * One candidate per checklist rather than one summary: an open alert's message
+ * is frozen at creation (see [[feedback_ops_alert_message_goes_stale]]), so a
+ * second checklist breaking later would never be mentioned anywhere.
+ */
+export async function evaluateChecklistReachability(): Promise<CandidateAlert[]> {
+  const db = createAdminClient();
+
+  const { data: checklists, error } = await db
+    .from("conference_checklists")
+    .select(
+      "id, name, deadline_at, conference_id, " +
+        "conference_checklist_checkpoints(days_before_deadline), " +
+        "conference_checklist_tasks(name, deadline_at, active)"
+    )
+    .eq("active", true);
+
+  if (error) throw new Error(`Failed to evaluate checklist reachability: ${error.message}`);
+
+  const out: CandidateAlert[] = [];
+  for (const row of checklists ?? []) {
+    const cl = row as unknown as {
+      id: string; name: string; deadline_at: string; conference_id: string;
+      conference_checklist_checkpoints: Array<{ days_before_deadline: number }> | null;
+      conference_checklist_tasks: Array<{ name: string; deadline_at: string | null; active: boolean }> | null;
+    };
+    const checkpoints = cl.conference_checklist_checkpoints ?? [];
+    const tasks = (cl.conference_checklist_tasks ?? []).filter((t) => t.active);
+    if (tasks.length === 0) continue; // nothing to remind about is not a fault
+
+    if (checkpoints.length === 0) {
+      out.push({
+        ruleKey: `checklist_unreachable:${cl.id}`,
+        severity: "warning",
+        message:
+          `The "${cl.name}" checklist is active and has tasks, but no checkpoints — ` +
+          "so it never sends a reminder to anyone. Add checkpoints, or deactivate it.",
+        details: { checklistId: cl.id, reason: "no_checkpoints", activeTasks: tasks.length },
+      });
+      continue;
+    }
+
+    // The earliest a reminder can go out: the furthest-back checkpoint.
+    const widest = Math.max(...checkpoints.map((c) => c.days_before_deadline));
+    const firstReminder = new Date(cl.deadline_at);
+    firstReminder.setUTCDate(firstReminder.getUTCDate() - widest);
+
+    const tooLate = tasks.filter(
+      (t) => t.deadline_at !== null && new Date(t.deadline_at) < firstReminder
+    );
+    if (tooLate.length === 0) continue;
+
+    out.push({
+      ruleKey: `checklist_unreachable:${cl.id}`,
+      severity: "warning",
+      message:
+        `On the "${cl.name}" checklist, a task hardens before the first reminder goes out, ` +
+        "so nobody is told about it until it is already too late. Move it to a checklist " +
+        "that closes sooner, or widen this one's earliest checkpoint.",
+      details: {
+        checklistId: cl.id,
+        reason: "task_hardens_before_first_reminder",
+        firstReminderAt: firstReminder.toISOString().slice(0, 10),
+        tasks: tooLate.map((t) => ({ name: t.name, hardensOn: t.deadline_at })),
+      },
+    });
+  }
+  return out;
+}
+
 async function evaluateCandidates(): Promise<CandidateAlert[]> {
   const checks = await Promise.all([
     evaluateConsecutiveRenewalFailures(),
@@ -1896,11 +1982,13 @@ async function evaluateCandidates(): Promise<CandidateAlert[]> {
 
   // Flattened separately: every other check yields at most one candidate, but
   // access drift yields one per affected table.
+  const reachabilityChecks = await evaluateChecklistReachability();
   const driftChecks = await evaluateDbAccessDrift();
   const exposureChecks = await evaluateOverExposedRelations();
 
   return [
     ...checks.filter((item): item is CandidateAlert => Boolean(item)),
+    ...reachabilityChecks,
     ...driftChecks,
     ...exposureChecks,
   ];
