@@ -390,6 +390,23 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       guided: false,
       completesOnCta: true,
     },
+    /**
+     * Same swing as the other three personas. A vendor employee has no Edit
+     * (not an org admin), so Bookmark is both the safe demo and the one that
+     * teaches the gesture Flag and Explain share — and Flag is what they will
+     * actually need when their listing is wrong.
+     */
+    toolkit_tour: {
+      heading: "Now use one",
+      body: "Tap Bookmark, then click anything on the page.",
+      ctaLabel: "Show me",
+      guided: true,
+      fieldHeading: "Open your Toolkit",
+      fieldBody: "Tap the + button, then tap Bookmark.",
+      highlightFabInShowField: true,
+      highlightTool: "bookmark",
+      completionTrigger: { table: "bookmarks", column: "created" },
+    },
     visibility_intro: {
       heading: "You control your own visibility",
       body: "Head to My Account to manage how you appear when member stores search for contacts at your company.",

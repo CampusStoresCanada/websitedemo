@@ -139,6 +139,11 @@ interface UserContext {
   orgType: string | null;
   /** organizations.email — the printed, public address public_contact_email asks for. */
   hasPublicEmail: boolean;
+  /**
+   * Does the org carry categories? getPartnerMarketData returns an empty
+   * market without them, so my_market would land somebody on nothing.
+   */
+  hasOrgCategories: boolean;
   hasDescription: boolean;
   hasLogo: boolean;
   hasHero: boolean;
@@ -365,6 +370,27 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       };
     }
 
+    /**
+     * The mirror of my_suppliers: a partner's buyers rather than a member's
+     * suppliers. Both read the same match engine in opposite directions.
+     * Payoff-only — there is nothing to fill in, which is the point.
+     */
+    case "my_market": {
+      if (opts.persona !== "member_partner") return null;
+      return {
+        subject: isReminder
+          ? `${orgName}'s market is still sitting there`
+          : `The campus stores matched to ${orgName}`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Your market, already built.",
+          body: `${orgName}'s page has a Your Market section: the campus stores whose buying categories line up with yours.<br><br>It is built from the categories on your profile, so it sharpens as those get more specific. Where a store has named who buys what, you get the person rather than the switchboard.<br><br>Nothing to fill in. It is already there.`,
+          ctaText: "See my market",
+          ctaUrl: `${orgUrl}#your-market`,
+        }),
+      };
+    }
+
     case "toolkit_tour": {
       // Org admins reach this having already been walked through one tool:
       // public_contact_email's guided flow opens the Toolkit, pulses Edit and
@@ -383,6 +409,23 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
             ctaText: "Open the Toolkit",
             ctaUrl: orgUrl,
             footnote: "It works the same on every page, including the ones that aren't yours.",
+          }),
+        };
+      }
+      // A vendor employee is not an org admin, so the thing to do about a
+      // wrong listing is flag it, not edit it. That makes this one email
+      // rather than two: view_org_page's ask rides along here.
+      if (opts.persona === "member_partner") {
+        return {
+          subject: isReminder
+            ? `Your Toolkit works on ${orgName}'s page too`
+            : `What do campus stores see when they look up ${orgName}?`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Every page carries its own tools.",
+            body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>Start with ${orgName}'s own page, which is what campus stores see when they look you up. If something on it is wrong, say so from the page itself rather than working out who to email.<br><br>The same tools work everywhere: ask what something means, share a page with a colleague, pull the data behind it, or bookmark anything worth finding again.`,
+            ctaText: "See your company page",
+            ctaUrl: orgUrl,
           }),
         };
       }
@@ -889,12 +932,13 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, type, email, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
+    .select("id, name, slug, province, type, email, primary_category, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
     .in("id", orgIds);
 
   type OrgRow = {
     id: string; name: string; slug: string; province: string | null; type: string | null;
     email: string | null;
+    primary_category: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
     highlight_product_name: string | null; product_overlay_url: string | null;
     procurement_info: { category_buyers?: { contact_ids?: string[] }[] } | null;
@@ -949,6 +993,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       orgProvince: org.province,
       orgType: org.type,
       hasPublicEmail: Boolean(org.email?.trim()),
+      hasOrgCategories: Boolean(org.primary_category?.trim()),
       hasDescription: Boolean(org.company_description?.trim()),
       hasLogo: Boolean(org.logo_url),
       hasHero: Boolean(org.hero_image_url),
@@ -1021,6 +1066,17 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       // Skipped, not completed: they are one procurement save away from being
       // a buyer, and the step should fire then. Leaving the row pending is
       // what makes that happen on a later run.
+      // Same shape as my_suppliers below: getPartnerMarketData returns an
+      // empty market when the org has no categories, so the mail would spend
+      // its one ask landing somebody on a blank panel. Skipped, not completed
+      // — profile_categories is the step that unblocks it, and this should
+      // fire once it lands.
+      if (row.step_key === "my_market" && !ctx.hasOrgCategories) {
+        result.skipped++;
+        result.log.push(`deferred ${ctx.email} / my_market: org has no categories yet`);
+        continue;
+      }
+
       if (row.step_key === "my_suppliers" && !ctx.isNamedBuyer) {
         result.skipped++;
         result.log.push(`deferred ${ctx.email} / my_suppliers: no buying categories yet`);
