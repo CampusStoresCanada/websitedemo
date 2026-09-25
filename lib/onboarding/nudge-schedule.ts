@@ -158,6 +158,18 @@ export const STEP_SCHEDULE: Record<string, StepSchedule> = {
     maxReminders: 1,
     channel: "email",
   },
+  /**
+   * The partner-side mirror of my_suppliers, and same cadence: both read the
+   * same match engine in opposite directions, so there is no reason for a
+   * vendor to hear about their buyers on a different day than a store hears
+   * about its suppliers.
+   */
+  my_market: {
+    sendAfterDays: 12,
+    reminderEveryDays: null,
+    maxReminders: 0,
+    channel: "email",
+  },
   visibility_intro: {
     sendAfterDays: 10,
     reminderEveryDays: 11, // Day 21 if not done
