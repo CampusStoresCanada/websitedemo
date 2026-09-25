@@ -278,12 +278,14 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
      * "Got it, I'm ready to explore", which measured reading.
      */
     toolkit_tour: {
-      heading: "Try one of them",
-      body: "Tap the + button, then tap Bookmark.",
+      heading: "Now use one",
+      body: "Tap Bookmark, then click anything on the page.",
       ctaLabel: "Show me",
       guided: true,
-      fieldHeading: "Now click anything on the page",
-      fieldBody: "Whatever you pick gets saved to your account, and you can come back to it from there.",
+      // Only reached when the Toolkit is shut — handleCta checks the DOM and
+      // skips straight to the pulse when it is already open.
+      fieldHeading: "Open your Toolkit",
+      fieldBody: "Tap the + button, then tap Bookmark.",
       highlightFabInShowField: true,
       highlightTool: "bookmark",
       completionTrigger: { table: "bookmarks", column: "created" },
@@ -653,6 +655,19 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         el.classList.add("ring-2", "ring-[#EE2A2E]", "ring-offset-4", "rounded", "animate-pulse");
         fieldHighlightRef.current = el;
       }
+    }
+
+    // A tool step needs the Toolkit open before pulsing a button inside it,
+    // and whether it already is depends on how the reader got here. Coming
+    // straight off view_org_page it is open, because that step closes on the
+    // FAB tap; on a fresh page load it is shut. Ask the DOM rather than
+    // guessing in config — pulsing the FAB when it has already become the
+    // close button tells somebody to shut the thing they just opened, and
+    // pulsing a tool inside a collapsed Toolkit pulses nothing at all.
+    if (config.guided && config.highlightTool) {
+      const alreadyOpen = !!document.querySelector("[data-toolkit-open]");
+      setPhase(alreadyOpen ? "highlight-tool" : "show-field");
+      return;
     }
 
     if (config.guided) {
