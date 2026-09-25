@@ -89,8 +89,11 @@ export default async function AcceptNominationPage({
   const isNominee = !nomination.nomineeProfileId || nomination.nomineeProfileId === auth.user.id;
 
   const actor = await resolveActor(auth.user.id, auth.organizations);
+  // The nominee is NOT excluded. Where they administer their own institution
+  // they are the store's authority, and 40 of the 50 eligible institutions have
+  // only one administrator — so excluding them left those nominations with
+  // nobody able to grant permission at all. See grantStorePermission.
   const canGrantStorePermission =
-    !isNominee &&
     actor.adminOrganizationIds.includes(nomination.nomineeOrganizationId) &&
     !nomination.storePermissionGrantedAt;
 
@@ -170,16 +173,30 @@ export default async function AcceptNominationPage({
       {canGrantStorePermission && (
         <div className="mb-6 space-y-3">
           <Notice tone="warning">
-            <strong>Your institution&apos;s permission is needed.</strong> The by-laws require{" "}
-            {nomination.nomineeName}&apos;s member store to permit them to serve if elected. This is
-            separate from their own acceptance — they cannot grant it themselves.
+            {isNominee ? (
+              <>
+                <strong>Your institution&apos;s permission is still needed.</strong> By-Law Part V
+                requires {nomination.organizationName} to permit you to serve if elected, which is a
+                separate decision from your own acceptance. You administer{" "}
+                {nomination.organizationName}, so you can give it here. It is recorded as your own
+                decision and the nominating committee sees who granted it.
+              </>
+            ) : (
+              <>
+                <strong>Your institution&apos;s permission is needed.</strong> By-Law Part V requires{" "}
+                {nomination.nomineeName}&apos;s member store to permit them to serve if elected. It
+                is a separate decision from their own acceptance to stand.
+              </>
+            )}
           </Notice>
           <form action={grantPermission}>
             <button
               type="submit"
               className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
             >
-              Grant {nomination.organizationName}&apos;s permission
+              {isNominee
+                ? `Grant ${nomination.organizationName}'s permission to serve`
+                : `Grant ${nomination.organizationName}'s permission`}
             </button>
           </form>
         </div>

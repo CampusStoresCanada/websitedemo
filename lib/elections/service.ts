@@ -390,6 +390,13 @@ export interface NominationView {
   candidateAcceptedAt: string | null;
   candidateDeclinedAt: string | null;
   storePermissionGrantedAt: string | null;
+  /**
+   * The nominee granted their own institution's permission, which they may do
+   * where they administer it. Permitted, and shown rather than smoothed over:
+   * the committee reviewing a slate should be able to tell a store's own
+   * sign-off from a nominee's.
+   */
+  storePermissionSelfGranted: boolean;
   withdrawnAt: string | null;
   withdrawalRequestedAt: string | null;
   acceptToken: string;
@@ -407,7 +414,7 @@ async function hydrateNomination(
   const { data: n } = await db
     .from("nominations")
     .select(
-      "id, election_id, status, source, nominee_contact_id, nominee_profile_id, nominee_organization_id, bio, platform, candidate_accepted_at, candidate_declined_at, store_permission_granted_at, withdrawn_at, withdrawal_requested_at, accept_token, contacts!nominations_nominee_contact_id_fkey(first_name, last_name), organizations!nominations_nominee_organization_id_fkey(name)"
+      "id, election_id, status, source, nominee_contact_id, nominee_profile_id, nominee_organization_id, bio, platform, candidate_accepted_at, candidate_declined_at, store_permission_granted_at, store_permission_granted_by_contact_id, withdrawn_at, withdrawal_requested_at, accept_token, contacts!nominations_nominee_contact_id_fkey(first_name, last_name), organizations!nominations_nominee_organization_id_fkey(name)"
     )
     .eq("id", nominationId)
     .maybeSingle();
@@ -500,6 +507,9 @@ async function hydrateNomination(
     candidateAcceptedAt: n.candidate_accepted_at as string | null,
     candidateDeclinedAt: n.candidate_declined_at as string | null,
     storePermissionGrantedAt: n.store_permission_granted_at as string | null,
+    storePermissionSelfGranted:
+      !!n.store_permission_granted_by_contact_id &&
+      n.store_permission_granted_by_contact_id === n.nominee_contact_id,
     withdrawnAt: n.withdrawn_at as string | null,
     withdrawalRequestedAt: n.withdrawal_requested_at as string | null,
     acceptToken: n.accept_token as string,
@@ -805,8 +815,23 @@ export async function grantStorePermission(
 
   if (!grantorOrganizationIds.includes(n.nominee_organization_id as string))
     return fail("Only an administrator of the nominee's own institution can grant this permission.");
-  if (n.nominee_contact_id === grantedByContactId)
-    return fail("A nominee cannot grant their own institution's permission to serve.");
+
+  // A nominee who administers their own institution MAY grant it. By-Law Part V
+  // S2(d) requires the store to permit them to serve; it does not require a
+  // second person to be the one who says so, and the refusal that used to sit
+  // here was ours rather than the by-law's.
+  //
+  // It had to go because it did not merely inconvenience people, it made
+  // nominations impossible: 40 of the 50 eligible institutions have exactly one
+  // administrator, and that administrator is usually the store manager — the
+  // very person most likely to stand. For them there was nobody left to ask.
+  // The alternative reading also inverts the authority it claims to protect,
+  // since requiring someone else means requiring a subordinate to authorise
+  // their own manager.
+  //
+  // ⚠️ Who granted it is recorded either way, so a self-grant stays VISIBLE to
+  // the committee rather than passing as a colleague's sign-off. Removing the
+  // refusal is not the same as hiding that it happened.
 
   const { data: electionRow } = await db
     .from("elections")
