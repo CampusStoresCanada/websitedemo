@@ -6,6 +6,7 @@ import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
 import { getTaskCta } from "./checklist-cta";
 import { CHECKS, evaluateChecklistTaskCheck } from "./checklist-checks";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
+import { deriveCheckpointOffsets } from "./checklist-cadence";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -352,6 +353,44 @@ export async function buildChecklistDigest(
   };
 }
 
+/**
+ * Make sure this checklist has the checkpoints its tasks imply.
+ *
+ * Idempotent and self-healing: it inserts only the offsets that are missing,
+ * so adding a task with an earlier deadline widens the schedule on the next
+ * run and nothing a human typed is removed. An existing hand-authored offset
+ * is left exactly where it is — this adds reach, it never takes it away.
+ */
+async function ensureDerivedCheckpoints(
+  db: AdminClient,
+  checklist: { id: string; deadline_at: string }
+): Promise<void> {
+  const [{ data: tasks }, { data: existing }] = await Promise.all([
+    db
+      .from("conference_checklist_tasks")
+      .select("deadline_at")
+      .eq("checklist_id", checklist.id)
+      .eq("active", true)
+      .not("deadline_at", "is", null)
+      .order("deadline_at", { ascending: true })
+      .limit(1),
+    db
+      .from("conference_checklist_checkpoints")
+      .select("days_before_deadline")
+      .eq("checklist_id", checklist.id),
+  ]);
+
+  const earliest = tasks?.[0]?.deadline_at ? new Date(tasks[0].deadline_at as string) : null;
+  const wanted = deriveCheckpointOffsets(new Date(checklist.deadline_at), earliest);
+  const have = new Set((existing ?? []).map((c) => c.days_before_deadline as number));
+  const missing = wanted.filter((d) => !have.has(d));
+  if (missing.length === 0) return;
+
+  await db.from("conference_checklist_checkpoints").insert(
+    missing.map((days_before_deadline) => ({ checklist_id: checklist.id, days_before_deadline }))
+  );
+}
+
 async function findDueOrgs(
   db: AdminClient,
   checklist: {
@@ -359,6 +398,9 @@ async function findDueOrgs(
     scope_entity_kind?: string | null; deadline_at: string; publication_id?: string | null;
   }
 ): Promise<DueOrg[]> {
+  // Derived, not typed in. See lib/conference/checklist-cadence.ts.
+  await ensureDerivedCheckpoints(db, checklist);
+
   const { data: checkpoints } = await db
     .from("conference_checklist_checkpoints")
     .select("id, days_before_deadline")
@@ -398,6 +440,15 @@ export interface ChecklistRunResult {
   checklistsProcessed: number;
   orgsReminded: number;
   errors: string[];
+  /**
+   * Who WOULD be written to, and about what. Present on a dry run only.
+   *
+   * Reminders are the one thing here that reaches people outside CSC, and
+   * deriving the cadence means a checklist that has been silent for months can
+   * start sending on the next tick. A run that cannot be inspected before it
+   * goes is a run nobody can be accountable for.
+   */
+  preview?: Array<{ organization: string; recipients: string[]; items: string[] }>;
 }
 
 /**
@@ -406,9 +457,13 @@ export interface ChecklistRunResult {
  * "Send Reminders Now" button and the daily cron route — same code path,
  * so what's tested manually is exactly what runs unattended.
  */
-export async function runChecklistReminders(): Promise<ChecklistRunResult> {
+export async function runChecklistReminders(
+  options: { dryRun?: boolean } = {}
+): Promise<ChecklistRunResult> {
+  const dryRun = options.dryRun === true;
   const db = createAdminClient();
   const result: ChecklistRunResult = { checklistsProcessed: 0, orgsReminded: 0, errors: [] };
+  if (dryRun) result.preview = [];
 
   const { data: checklists, error: checklistsError } = await db
     .from("conference_checklists")
@@ -437,7 +492,7 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
     conferenceYear: number;
     orgName: string;
     /** Each carries its OWN framing, so a lone reminder still reads specifically. */
-    sections: { checklistName: string; openItemsHtml: string; introLine: string }[];
+    sections: { checklistName: string; openItemsHtml: string; introLine: string; itemNames: string[] }[];
     /** Only publication-scoped checklists contribute the consent note. */
     consentNote: string;
     log: { checklist_id: string; checkpoint_id: string; organization_id: string }[];
@@ -479,6 +534,8 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
           checklistName: checklist.name,
           openItemsHtml: digest.variables.open_items_html,
           introLine: framing.intro_line,
+          // For the dry run: what this org is actually being asked, by name.
+          itemNames: digest.openItems.map((i) => i.name),
         });
         // Carried once even if several checklists would supply it.
         if (!existing.consentNote && framing.consent_note) existing.consentNote = framing.consent_note;
@@ -543,6 +600,23 @@ export async function runChecklistReminders(): Promise<ChecklistRunResult> {
       });
     }
     sentLog.push(...pending.log);
+  }
+
+  if (dryRun) {
+    // Everything above this line is read-only: scope resolution, the checks,
+    // the digest. Stopping here reports exactly what the real run would do
+    // without a campaign, a send, or a log row that would suppress it later.
+    for (const [, pending] of pendingByOrg) {
+      result.preview!.push({
+        organization: pending.orgName,
+        recipients: recipients
+          .filter((r) => r.variableOverrides?.org_name === pending.orgName)
+          .map((r) => r.email),
+        items: pending.sections.flatMap((sec) => sec.itemNames),
+      });
+    }
+    result.orgsReminded = pendingByOrg.size;
+    return result;
   }
 
   if (recipients.length === 0) return result;
