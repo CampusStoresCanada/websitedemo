@@ -36,6 +36,7 @@ export default function SurveyIntro({
   closesOn,
   chairNote,
   onBeginHref,
+  readOnlyMessage,
 }: {
   fiscalYear: number;
   organizationName: string;
@@ -46,6 +47,12 @@ export default function SurveyIntro({
   /** Editable by the benchmarking committee chair via site_content. */
   chairNote: { title: string | null; body: string | null } | null;
   onBeginHref: string;
+  /**
+   * Set when this page is being LOOKED at rather than filled in — an admin
+   * previewing a store that has not started. Reuses DisclosureChoice's existing
+   * disable path rather than adding a second way to switch the control off.
+   */
+  readOnlyMessage?: string | null;
 }) {
   const scope = surveyScope(fieldConfig);
   const points = confidentialityPoints();
@@ -160,7 +167,11 @@ export default function SurveyIntro({
 
       {/* ── The choice ───────────────────────────────────────────────── */}
       <div className="mt-6">
-        <DisclosureChoice benchmarkingId={benchmarkingId} initialLevel={disclosureLevel} />
+        <DisclosureChoice
+          benchmarkingId={benchmarkingId}
+          initialLevel={disclosureLevel}
+          sealedMessage={readOnlyMessage ?? null}
+        />
         <p className="mt-2 text-xs text-gray-500">
           You can change this at any point while this year&apos;s survey is open — it stays
           on your submission as you work.

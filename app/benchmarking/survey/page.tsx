@@ -8,6 +8,7 @@ import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
 import RespondentNotes from "@/components/benchmarking/RespondentNotes";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -17,13 +18,19 @@ export const metadata = {
 export default async function BenchmarkingSurveyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string }>;
+  searchParams: Promise<{ start?: string; org?: string }>;
 }) {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
     redirect("/login");
   }
   const { supabase, userId, globalRole } = auth.ctx;
+
+  // Read once, up here: `?org=` decides WHICH store this page is about, so it
+  // has to be known before the org is resolved rather than at render time.
+  const params = await searchParams;
+  const skipIntro = params?.start === "1";
+  const requestedOrgId = params?.org ?? null;
 
   // 2. Get user profile and org
   const isAdmin = isGlobalAdmin(globalRole);
@@ -70,17 +77,19 @@ export default async function BenchmarkingSurveyPage({
     redirect("/benchmarking");
   }
 
-  const organization = memberOrgLink?.organization as unknown as {
+  type SurveyOrg = {
     id: string;
     name: string;
     slug: string;
     type: string;
     province: string;
-  } | null;
+  };
 
-  if (!organization) {
-    redirect("/benchmarking");
-  }
+  const ownOrg = (memberOrgLink?.organization as unknown as SurveyOrg | undefined) ?? null;
+
+  // Service role from here on. Access is settled above, and both the roster
+  // read and the draft row need to see past RLS.
+  const db = createAdminClient();
 
   // 4. Check active survey
   //
@@ -116,6 +125,100 @@ export default async function BenchmarkingSurveyPage({
     redirect("/benchmarking");
   }
 
+  /*
+    Why a global admin could not open this page at all.
+
+    The filter above reads `org.type === "Member" && (role === "org_admin" ||
+    isAdmin)`. `isAdmin` relaxes WHICH ROLE is needed at a member store; it does
+    nothing about the requirement to be attached to one. Every CSC staffer is
+    linked to the Staff org, so the list came back empty and the guard below
+    bounced them to the landing page — the admin_preview branch in
+    resolveSurveyAccess() was unreachable for exactly the people it was for.
+
+    The fix is not to guess a store for them. Landing an admin on whichever row
+    the database returned first is the same bug the sort() above exists to
+    prevent, one level up. So: `?org=` names the store, and the roster is
+    offered when it is absent — the pattern /org/billing and the conference cart
+    already use.
+  */
+  let adminOrgOptions: { id: string; name: string }[] = [];
+  let actingAsOrg: SurveyOrg | null = null;
+
+  if (isAdmin) {
+    /*
+      The roster is THIS survey's recipient list, not every Member org.
+
+      `type = "Member" AND archived_at IS NULL` returns 80 stores, of which 25
+      are cancelled and 4 in grace — `archived_at` is not membership, and a
+      picker offering a cancelled store to file a survey it was never sent is a
+      trap I would have built. benchmarking_recipients already holds the
+      programme's own answer: 52 orgs for FY2026. Read that instead of
+      re-deriving who counts as a member.
+    */
+    const { data: recipientRows } = await db
+      .from("benchmarking_recipients")
+      .select("organization:organizations(id, name, slug, type, province)")
+      .eq("survey_id", activeSurvey.id);
+
+    let roster = (recipientRows ?? [])
+      .map((r) => (r as { organization: unknown }).organization as SurveyOrg | null)
+      .filter((o): o is SurveyOrg => Boolean(o));
+
+    // A survey whose recipient list has not been built yet — the state between
+    // creating it and sending invitations. Fall back to paid-up member stores so
+    // the picker is never empty, and say which list this is.
+    if (roster.length === 0) {
+      const { data: memberOrgs } = await db
+        .from("organizations")
+        .select("id, name, slug, type, province")
+        .eq("type", "Member")
+        .in("membership_status", ["active", "grace"])
+        .is("archived_at", null)
+        .order("name");
+      roster = (memberOrgs ?? []) as unknown as SurveyOrg[];
+    }
+
+    roster.sort((a, b) => a.name.localeCompare(b.name));
+    adminOrgOptions = roster.map((o) => ({ id: o.id, name: o.name }));
+
+    if (requestedOrgId) {
+      actingAsOrg = roster.find((o) => o.id === requestedOrgId) ?? null;
+    }
+  }
+
+  // A deliberate `?org=` wins over the admin's own membership, so an admin who
+  // does happen to run a store can still look at someone else's.
+  const organization: SurveyOrg | null = actingAsOrg ?? ownOrg;
+
+  // An admin acting as a store they do not belong to is LOOKING, not filing.
+  // It governs whether this page may create a row — see the draft step below.
+  const isActingAsOther = Boolean(actingAsOrg && actingAsOrg.id !== ownOrg?.id);
+
+  if (!organization) {
+    // An admin with no store of their own gets the roster rather than a bounce.
+    if (isAdmin && adminOrgOptions.length > 0) {
+      return (
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <h1 className="text-2xl font-bold text-gray-900">Benchmarking survey</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            You are not attached to a member store, so pick the one whose survey you
+            want to open. Choosing a store shows you exactly what its staff see.
+          </p>
+          <div className="mt-5">
+            <AdminOrgSwitcher
+              orgs={adminOrgOptions}
+              selectedOrgId={null}
+              basePath="/benchmarking/survey"
+              label="open the survey as"
+            />
+          </div>
+        </div>
+      );
+    }
+    redirect("/benchmarking");
+  }
+
+
   const access = await resolveSurveyAccess({
     surveyId: activeSurvey.id,
     surveyStatus: activeSurvey.status,
@@ -138,7 +241,7 @@ export default async function BenchmarkingSurveyPage({
   //
   // Safe because access is already decided above: resolveSurveyAccess() has
   // said this org may file, and the row created is scoped to that org.
-  const db = createAdminClient();
+  // (`db` is created during org resolution, which also needs the service role.)
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let { data: currentRow } = (await (db as any)
@@ -151,7 +254,21 @@ export default async function BenchmarkingSurveyPage({
     // the destructure — so real failures hide among the noise.
     .maybeSingle()) as { data: any };
 
-  if (!currentRow) {
+  /*
+    An admin looking at another store's survey must not leave a mark on it.
+
+    Creating the draft row here would stamp `respondent_user_id` with the admin
+    and add the store to the drafts count on /benchmarking/admin — which reads
+    as "this store has started", from nothing but someone having looked. Every
+    consequential reader excludes draft rows, so the damage is confined to that
+    count and the respondent stamp, and both are still wrong.
+
+    So preview is read-only, and starting a submission on a store's behalf stays
+    an explicit act with its own button below.
+  */
+  const previewOnly = isActingAsOther && !currentRow;
+
+  if (!currentRow && !previewOnly) {
     // Create a new draft row
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: newRow, error: insertError } = (await (db as any)
@@ -176,6 +293,58 @@ export default async function BenchmarkingSurveyPage({
     }
 
     currentRow = newRow;
+  }
+
+  // The config that renders the form, and that the intro measures its counts from.
+  const fieldConfig = getFieldConfig(activeSurvey);
+
+  /*
+    Preview: everything below this point reads or writes a submission row, and in
+    preview there is none. Rendering the intro is the whole point — it is the
+    page nobody at CSC could reach — so it is served here and the rest is skipped
+    rather than guarded query by query.
+
+    Deliberately NOT offered: a button to start a submission for this store. That
+    stamps a respondent and puts the store in the drafts count, and whether CSC
+    files on a member's behalf is a decision about the programme, not a
+    convenience this page should quietly grant itself.
+  */
+  if (previewOnly) {
+    const { data: chairRow } = await db
+      .from("site_content")
+      .select("title, body")
+      .eq("section", "benchmarking_intro_chair")
+      .eq("is_active", true)
+      .maybeSingle();
+
+    return (
+      <div>
+        <div className="mx-auto max-w-3xl px-4 pt-8">
+          <AdminOrgSwitcher
+            orgs={adminOrgOptions}
+            selectedOrgId={organization.id}
+            basePath="/benchmarking/survey"
+            label="open the survey as"
+          />
+          <p className="mt-2 text-xs text-gray-500">
+            Read-only. {organization.name} has not started a {activeSurvey.fiscal_year}{" "}
+            submission, so there is nothing here to save and nothing you do is recorded
+            against them. This is the page their staff see first.
+          </p>
+        </div>
+        <SurveyIntro
+          fiscalYear={activeSurvey.fiscal_year}
+          organizationName={organization.name}
+          fieldConfig={fieldConfig}
+          benchmarkingId=""
+          disclosureLevel="full"
+          closesOn={formatDeadline(activeSurvey.closes_at)}
+          chairNote={chairRow ?? null}
+          onBeginHref={`/benchmarking/survey?start=1&org=${organization.id}`}
+          readOnlyMessage={`Preview — ${organization.name} has no ${activeSurvey.fiscal_year} submission yet, so this choice cannot be saved.`}
+        />
+      </div>
+    );
   }
 
   // 6. Fetch prior year data (for reference values and delta flags)
@@ -222,22 +391,15 @@ export default async function BenchmarkingSurveyPage({
   const sealState = await isYearSealed(activeSurvey.fiscal_year);
   const sealedMessage = sealMessage(sealState);
 
-  // 8. Get the field config for this survey (or DEFAULT if null)
-  const fieldConfig = getFieldConfig(activeSurvey);
-
   // 9. The opening page, shown until the store has made its disclosure choice.
   //
   // Gated on disclosure_level_set_at rather than on whether any answer exists,
   // because the question this page asks is the consent one — a store that has
   // typed figures but never decided how they may be used has not been asked
-  // properly. `?start=1` lets someone who wants the form immediately past it,
-  // and the intro stays reachable from the form afterwards, because the choice
-  // must remain changeable for the whole cycle.
-  const params = await searchParams;
+  // properly. `?start=1` lets someone who wants the form immediately past it.
   const hasChosen = Boolean(
     (currentRow as { disclosure_level_set_at?: string | null }).disclosure_level_set_at,
   );
-  const skipIntro = params?.start === "1";
 
   if (!hasChosen && !skipIntro) {
     const { data: chairRow } = await db
@@ -260,13 +422,36 @@ export default async function BenchmarkingSurveyPage({
         }
         closesOn={formatDeadline(activeSurvey.closes_at)}
         chairNote={chairRow ?? null}
-        onBeginHref="/benchmarking/survey?start=1"
+        onBeginHref={
+          isActingAsOther
+            ? `/benchmarking/survey?start=1&org=${organization.id}`
+            : "/benchmarking/survey?start=1"
+        }
       />
     );
   }
 
   return (
     <div className="max-w-5xl mx-auto px-4 py-8">
+      {/*
+        Whose figures am I looking at? An admin editing a live submission on a
+        page that looks identical to their own is how you type into the wrong
+        store. The banner names it and switches away.
+      */}
+      {isActingAsOther && (
+        <div className="mb-6">
+          <AdminOrgSwitcher
+            orgs={adminOrgOptions}
+            selectedOrgId={organization.id}
+            basePath="/benchmarking/survey"
+            label="open the survey as"
+          />
+          <p className="mt-2 text-xs text-amber-800">
+            This is {organization.name}&apos;s live submission. Anything you change here
+            is saved to their record.
+          </p>
+        </div>
+      )}
       <BenchmarkingSurveyForm
         benchmarkingId={currentRow!.id}
         fiscalYear={activeSurvey.fiscal_year}

@@ -10,21 +10,28 @@ import { useRouter } from "next/navigation";
  * this is the missing UI to actually reach it. Native <select> instead of a
  * custom combobox — this is an internal admin tool, not the member storefront,
  * and browsers already support type-ahead jump in a long <select>.
+ *
+ * `label` exists because this is no longer only a commerce control — /org/billing
+ * and the benchmarking survey both drive it, and "shop as" is wrong on both. The
+ * default keeps every existing caller rendering exactly as it did.
  */
 export default function AdminOrgSwitcher({
   orgs,
   selectedOrgId,
   basePath,
+  label = "shop as",
 }: {
   orgs: { id: string; name: string }[];
   selectedOrgId: string | null;
   basePath: string;
+  /** What the admin is about to do as this org, e.g. "file as". */
+  label?: string;
 }) {
   const router = useRouter();
 
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-      <span className="font-medium">Admin: shop as</span>
+      <span className="font-medium">Admin: {label}</span>
       <select
         value={selectedOrgId ?? ""}
         onChange={(e) => router.push(`${basePath}?org=${e.target.value}`)}
