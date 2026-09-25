@@ -271,3 +271,40 @@ describe("member-facing copy carries no em dashes", () => {
     expect([...new Set(offenders)]).toEqual([]);
   });
 });
+
+/**
+ * An email that promises a walkthrough has to land where the walkthrough runs.
+ *
+ * OrgOnboardingCallout mounts on /org/[slug] and only for your own org.
+ * DirectoryOnboardingCallout mounts on /members. Nothing mounts on /me,
+ * /partners, /events or /benchmarking, so a guided step whose email points at
+ * one of those sends the reader to a static page and the pulse never happens.
+ *
+ * toolkit_tour/member_member did exactly that: the copy said "Open the
+ * Toolkit", the CTA went to /me, and the FAB-then-Bookmark sequence it was
+ * describing only exists on the org page.
+ *
+ * Steps whose ask genuinely lives on /me — procurement's categories,
+ * visibility_intro's directory setting, my_suppliers' list — are right to
+ * point there. The rule is about promising a guided sequence, not about /me.
+ */
+describe("guided steps land where the guide runs", () => {
+  it("sends every persona's toolkit_tour to the org page", async () => {
+    const { buildNudgeEmail } = await import("@/lib/onboarding/nudge-job");
+    const wrong: string[] = [];
+    for (const persona of PERSONAS) {
+      if (!STEPS_BY_PERSONA[persona as Persona].includes("toolkit_tour")) continue;
+      const built = buildNudgeEmail({
+        firstName: "Dana", orgName: "Test Org", orgSlug: "test-org",
+        orgProvince: "Alberta", stepKey: "toolkit_tour", isReminder: false,
+        persona: persona as Persona,
+      });
+      if (!built) continue;
+      // The primary CTA is the only styled anchor nudgeHtml emits.
+      const href = built.html.match(/<a href="([^"]+)"[^>]*background-color/)?.[1]
+        ?? built.html.match(/<a href="([^"]+)"/)?.[1] ?? "";
+      if (!href.includes("/org/")) wrong.push(`${persona} -> ${href}`);
+    }
+    expect(wrong).toEqual([]);
+  });
+});
