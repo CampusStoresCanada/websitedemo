@@ -32,8 +32,17 @@ interface StepConfig {
   completesOnEditMode?: boolean;
   /** In show-field phase, pulse the Toolkit FAB button to draw attention */
   highlightFabInShowField?: boolean;
-  /** Complete the step when the user taps the Toolkit FAB (instead of transitioning to highlight-edit) */
+  /** Complete the step when the user taps the Toolkit FAB (instead of transitioning to highlight-tool) */
   completesOnFabClick?: boolean;
+  /**
+   * Which Toolkit button to pulse in the highlight-tool phase. The Toolkit has
+   * always read this off the event and held any tool id; until 2026-09-25 only
+   * its Edit button checked the value, so the guided tour could only ever point
+   * at Edit. Defaults to "edit" to keep every existing step behaving as it did.
+   * Valid ids are handleToolClick's: bookmark, export, share, explain, edit,
+   * create_event, flag.
+   */
+  highlightTool?: string;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -252,6 +261,33 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       highlightFabInShowField: true,
       completesOnFabClick: true,
     },
+    /**
+     * Beats 3 and 4 of one arc. view_org_page above is beats 1 and 2: it
+     * points at the FAB and closes when they tap it, so by the time this
+     * surfaces the Toolkit is a thing they have already opened.
+     *
+     * Bookmark is the tool to put in their hand because it is the only one
+     * with no outward side effect that still does something real. Flag,
+     * Explain and Share all reach a person, and demoing those would mean
+     * messaging somebody about nothing. It also teaches the grammar of five
+     * of the seven tools at once: bookmarkMode, flagMode, explainMode,
+     * shareMode and editMode all put the page into pick-an-element and wait
+     * for a click. Swing one, and the rest are the same motion.
+     *
+     * Closes on the save, not on a button. The old modal closed on
+     * "Got it, I'm ready to explore", which measured reading.
+     */
+    toolkit_tour: {
+      heading: "Try one of them",
+      body: "Tap the + button, then tap Bookmark.",
+      ctaLabel: "Show me",
+      guided: true,
+      fieldHeading: "Now click anything on the page",
+      fieldBody: "Whatever you pick gets saved to your account, and you can come back to it from there.",
+      highlightFabInShowField: true,
+      highlightTool: "bookmark",
+      completionTrigger: { table: "bookmarks", column: "created" },
+    },
     visibility_intro: {
       heading: "You control your own visibility",
       body: "Head to My Account to manage how you appear on the network — including your visibility in the directory and your procurement categories.",
@@ -383,7 +419,7 @@ function deriveLocalPersona(
 // Phase machine (unchanged from original)
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Phase = "intro" | "show-field" | "highlight-edit" | "highlight-field" | "done";
+type Phase = "intro" | "show-field" | "highlight-tool" | "highlight-field" | "done";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Component
@@ -416,8 +452,10 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       const configs = CONFIGS[persona!];
 
       for (const stepKey of steps) {
-        // toolkit_tour is handled by the tour modal, not the callout bubble
-        if (stepKey === "toolkit_tour") {
+        // toolkit_tour falls back to the static list modal only where no
+        // guided config exists. A persona with a config gets the real thing:
+        // open the Toolkit, use a tool, step closes on the action.
+        if (stepKey === "toolkit_tour" && !configs[stepKey]) {
           const result = await getOnboardingStep(stepKey as any, persona!);
           if (cancelled) return;
           if (result.success && (!result.step || !result.step.completed_at)) {
@@ -449,7 +487,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading, user?.id, isOwnOrgPage, persona, refreshTick]);
 
-  // Phase: show-field → FAB click or showFieldTrigger → highlight-edit (or complete)
+  // Phase: show-field → FAB click or showFieldTrigger → highlight-tool (or complete)
   useEffect(() => {
     if (phase !== "show-field" || !activeStep || !persona) return;
     const config = CONFIGS[persona][activeStep];
@@ -472,7 +510,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         if (config?.completesOnFabClick) {
           void markComplete();
         } else {
-          setPhase("highlight-edit");
+          setPhase("highlight-tool");
         }
       }
     }
@@ -482,7 +520,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
       if (!config?.showFieldTrigger) return;
       const { table, column } = (e as CustomEvent<{ table: string; column: string }>).detail;
       if (table === config.showFieldTrigger.table && column === config.showFieldTrigger.column) {
-        setPhase("highlight-edit");
+        setPhase("highlight-tool");
       }
     }
     window.addEventListener("csc:field-updated", onFieldUpdated);
@@ -496,12 +534,16 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     };
   }, [phase, activeStep, persona]);
 
-  // Phase: highlight-edit → pulse Edit button, wait for edit mode
+  // Phase: highlight-tool → pulse the configured Toolkit button, wait for it to engage
   useEffect(() => {
-    if (phase !== "highlight-edit" || !activeStep || !persona) return;
+    if (phase !== "highlight-tool" || !activeStep || !persona) return;
     const config = CONFIGS[persona][activeStep];
 
-    window.dispatchEvent(new CustomEvent("csc:onboarding:highlight-edit", { detail: { tool: "edit" } }));
+    window.dispatchEvent(
+      new CustomEvent("csc:onboarding:highlight-tool", {
+        detail: { tool: config?.highlightTool ?? "edit" },
+      })
+    );
 
     function onEditMode(e: Event) {
       if (!(e as CustomEvent<{ active: boolean }>).detail.active) return;

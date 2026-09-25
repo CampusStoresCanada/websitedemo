@@ -81,7 +81,8 @@ describe("nudge coverage across every persona", () => {
     "*/profile_background":
       "Purely cosmetic and empty for every partner. Cut 2026-08-20; copy and auto-complete remain.",
     "member_member/view_org_page":
-      "Its in-app copy points at the Toolkit, which is toolkit_tour's ask. One ask, not two. " +
+      "Beats 1 and 2 of the Toolkit arc, in app only: it points at the + button and closes when " +
+      "they tap it, and toolkit_tour picks up from there. Emailing both would be asking twice. " +
       "Not true of member_partner, where the step genuinely means 'this is your company on the network'.",
   };
 
