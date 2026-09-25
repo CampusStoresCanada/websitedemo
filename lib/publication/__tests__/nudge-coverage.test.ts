@@ -92,13 +92,17 @@ describe("nudge coverage across every persona", () => {
   /**
    * Known gaps. Each line is a persona that reaches a step and is told nothing.
    * Delete a line by writing that persona's copy in buildNudgeEmail.
+   *
+   * Empty as of 2026-09-25: every step in every persona's journey either sends
+   * or is recorded above with a reason. The ceiling stays at 0 so a new silent
+   * step has to be classified deliberately rather than discovered in production
+   * months later, which is how the five that started this were found.
    */
   const UNWRITTEN = new Set<string>([
-    "org_admin_member/opening_rfp",
   ]);
 
   /** Lower this as UNWRITTEN shrinks. It must never go up. */
-  const UNWRITTEN_CEILING = 1;
+  const UNWRITTEN_CEILING = 0;
 
   const silentReason = (persona: string, step: string) =>
     DELIBERATELY_SILENT[`${persona}/${step}`] ?? DELIBERATELY_SILENT[`*/${step}`];
