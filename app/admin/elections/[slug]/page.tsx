@@ -798,6 +798,18 @@ export default async function ElectionReviewPage({
                     </ul>
                   )}
 
+                  {/* Permitted, and on the record for the same reason directors
+                      co-signing is: most eligible institutions have a single
+                      administrator, so a nominee granting their own store's
+                      permission is ordinary rather than suspicious. The
+                      committee should still be able to see which it was. */}
+                  {n.storePermissionSelfGranted && (
+                    <p className="mt-2 text-xs text-gray-500">
+                      Permission to serve was granted by the nominee, who administers{" "}
+                      {n.organizationName}.
+                    </p>
+                  )}
+
                   {/* Directors co-signing is permitted — every CSC director is
                       also an org admin — but it belongs on the record. */}
                   {n.cosignatures.signedByDirectors.length > 0 && (

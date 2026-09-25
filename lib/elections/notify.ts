@@ -384,16 +384,21 @@ export async function notifyStorePermission(
   );
 
   if (admins.length === 0) {
-    // The nominee is the only administrator at their own store, so nobody there
-    // can grant permission. Not an error to swallow — the committee has to know,
-    // because this nomination cannot complete on its own.
+    // Nobody ELSE administers the nominee's store. That used to be a dead end,
+    // and it was the common case rather than the rare one — most eligible
+    // institutions have a single administrator, usually the store manager.
+    //
+    // It is no longer blocking: a nominee who administers their own institution
+    // grants permission on their own accept page, which they already have a
+    // link to. Reported rather than sent, because nothing was emailed and the
+    // committee should be able to see WHY this one looks different.
     return [
       {
         template: "election_store_permission_request",
         to: "",
         sent: false,
         error:
-          "No other administrator at the nominee's institution can grant permission to serve. Someone else there needs an account, or the Executive Director has to record it.",
+          "Nobody else administers the nominee's institution, so no request was sent. They grant their own institution's permission on their nomination page, and the record shows they granted it themselves.",
       },
     ];
   }

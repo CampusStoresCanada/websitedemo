@@ -71,6 +71,7 @@ export function sampleNomination(opts: {
     candidateAcceptedAt: null,
     candidateDeclinedAt: null,
     storePermissionGrantedAt: null,
+    storePermissionSelfGranted: false,
     withdrawnAt: null,
     withdrawalRequestedAt: null,
     acceptToken: "preview",
