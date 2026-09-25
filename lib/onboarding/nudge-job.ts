@@ -137,8 +137,14 @@ interface UserContext {
   orgProvince: string | null;
   /** organizations.type — decides whether a field-backed step is reachable at all. */
   orgType: string | null;
-  /** organizations.email — the printed, public address public_contact_email asks for. */
-  hasPublicEmail: boolean;
+  /**
+   * Has the org AFFIRMED its public contact, not merely got a value in the
+   * column? publishablePublicContact gates print on the affirmation and
+   * ignores the value without it, and update-field sets the affirmation only
+   * when somebody edits the contact through the UI. 75 of 89 orgs carry an
+   * address that arrived some other way and will never print until they do.
+   */
+  hasConfirmedPublicContact: boolean;
   /**
    * Does the org carry categories? getPartnerMarketData returns an empty
    * market without them, so my_market would land somebody on nothing.
@@ -370,11 +376,11 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
       return {
         subject: isReminder
           ? `${orgName} still has no public address on file`
-          : `Which address should we print for ${orgName}?`,
+          : `Which address should ${orgName} give out?`,
         html: nudgeHtml({
           firstName,
           headline: "One address, printed and public.",
-          body: `${orgName}'s public contact email sits on your page for anyone to read, and it is the one that goes into the printed directory.<br><br>Use a shared inbox your team watches rather than a personal address. Once it is printed it cannot be taken back, and whoever owns it today may not be the person answering next year.<br><br>${wantsYou} will use it to reach you.`,
+          body: `${orgName}'s public contact email sits on your page for anyone to read, and it is the one that goes into the printed directory once your listing is confirmed.<br><br>There may be one on file already. Open it, check it is still the address you want giving out, and save it. Saving is what marks it confirmed.<br><br>Use a shared inbox your team watches rather than a personal address. Whoever owns it today may not be the person answering next year.<br><br>${wantsYou} will use it to reach you.`,
           ctaText: "Set the public address",
           ctaUrl: orgUrl,
         }),
@@ -473,7 +479,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "Every page carries its own tools.",
-          body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>From it you can flag anything that looks wrong, ask what something on a page means, share a page with a colleague, pull the data behind it, or edit your own.<br><br>Flagging is the one that earns its keep. If something about ${orgName} is off, or about a partner you buy from, you can say so on the page itself instead of working out who to email.`,
+          body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>From it you can flag anything that looks wrong, ask what something on a page means, share a page with a colleague, pull the data behind it, or bookmark whatever you want to find again.<br><br>Flagging is the one that earns its keep. If something about ${orgName} is off, or about a partner you buy from, you can say so on the page itself instead of working out who to email.`,
           ctaText: "Open the Toolkit",
           ctaUrl: `${base}/me`,
           footnote: "It works the same on every page, including the ones that aren't yours.",
@@ -594,7 +600,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
           html: nudgeHtml({
             firstName,
             headline: "Your listing is yours, not your organisation's.",
-            body: `Whether you show up in the CSC directory is your own setting, on your account page. You can be visible to everyone, visible only inside the network, or not listed at all.<br><br>It is separate from ${orgName}'s own listing. Your organisation decides what it shows; you decide what shows about you.<br><br>Appearing in the printed directory is a separate choice again, and it stays off unless you turn it on.`,
+            body: `Whether you show up in the CSC directory is your own setting, on your account page. You can be visible to everyone, visible only inside the network, or not listed at all.<br><br>It is separate from ${orgName}'s own listing. Your organisation decides what it shows; you decide what shows about you.<br><br>Worth knowing before you pick: the first two both put you in the printed directory as well. Only "nobody" keeps you out of print.`,
             ctaText: "Manage how I appear",
             ctaUrl: `${base}/me`,
           }),
@@ -783,11 +789,13 @@ async function autoCompleteIfDone(
   const now = new Date().toISOString();
 
   switch (row.step_key) {
-    // 76 of the 89 orgs with this step open already had an address on file
-    // when it was first scheduled (2026-09-25). Without this they would each
-    // have been emailed asking for something they had already given.
+    // Gated on the affirmation, matching publishablePublicContact, and NOT on
+    // the address being present. Keying it on the value would have closed this
+    // step for the 75 orgs whose address is on file but unconfirmed — which is
+    // precisely the set whose address does not print, and the prompt to edit is
+    // what sets the affirmation in the first place.
     case "public_contact_email":
-      if (ctx.hasPublicEmail) {
+      if (ctx.hasConfirmedPublicContact) {
         await db.from("user_onboarding_progress")
           .update({ completed_at: now, updated_at: now })
           .eq("id", row.id);
@@ -998,12 +1006,13 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Org data
   const { data: orgs } = await createAdminClient()
     .from("organizations")
-    .select("id, name, slug, province, type, email, primary_category, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
+    .select("id, name, slug, province, type, email, public_contact_confirmed_at, primary_category, company_description, logo_url, hero_image_url, highlight_product_name, product_overlay_url, catalogue_url, partner_links, banner_url, procurement_info")
     .in("id", orgIds);
 
   type OrgRow = {
     id: string; name: string; slug: string; province: string | null; type: string | null;
     email: string | null;
+    public_contact_confirmed_at: string | null;
     primary_category: string | null;
     company_description: string | null; logo_url: string | null; hero_image_url: string | null;
     highlight_product_name: string | null; product_overlay_url: string | null;
@@ -1058,7 +1067,7 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       orgSlug: org.slug,
       orgProvince: org.province,
       orgType: org.type,
-      hasPublicEmail: Boolean(org.email?.trim()),
+      hasConfirmedPublicContact: Boolean(org.public_contact_confirmed_at),
       hasOrgCategories: Boolean(org.primary_category?.trim()),
       hasDescription: Boolean(org.company_description?.trim()),
       hasLogo: Boolean(org.logo_url),
