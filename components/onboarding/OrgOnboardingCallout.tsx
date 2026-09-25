@@ -65,6 +65,24 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       fieldHeading: "Now open your Toolkit",
       fieldBody: "Tap the + button at the bottom right to open it.",
     },
+    /**
+     * Beat two for an org admin. public_contact_email above has already
+     * walked them through the Toolkit once and pulsed Edit, so this points
+     * at a tool they have not used. Bookmark has no outward side effect and
+     * teaches the pick-an-element grammar shared by Flag, Explain and Share.
+     */
+    toolkit_tour: {
+      heading: "There are more of them",
+      body: "Tap Bookmark, then click anything on the page.",
+      ctaLabel: "Show me",
+      guided: true,
+      // Only reached when the Toolkit is shut — handleCta checks the DOM.
+      fieldHeading: "Open your Toolkit",
+      fieldBody: "Tap the + button, then tap Bookmark.",
+      highlightFabInShowField: true,
+      highlightTool: "bookmark",
+      completionTrigger: { table: "bookmarks", column: "created" },
+    },
     profile_logo: {
       heading: "Add your store's logo",
       body: "Open Edit and click your logo area to upload. A clean horizontal logo works best.",
@@ -171,6 +189,24 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
       guided: true,
       fieldHeading: "Now open your Toolkit",
       fieldBody: "Tap the + button at the bottom right to open it.",
+    },
+    /**
+     * Beat two for an org admin. public_contact_email above has already
+     * walked them through the Toolkit once and pulsed Edit, so this points
+     * at a tool they have not used. Bookmark has no outward side effect and
+     * teaches the pick-an-element grammar shared by Flag, Explain and Share.
+     */
+    toolkit_tour: {
+      heading: "There are more of them",
+      body: "Tap Bookmark, then click anything on the page.",
+      ctaLabel: "Show me",
+      guided: true,
+      // Only reached when the Toolkit is shut — handleCta checks the DOM.
+      fieldHeading: "Open your Toolkit",
+      fieldBody: "Tap the + button, then tap Bookmark.",
+      highlightFabInShowField: true,
+      highlightTool: "bookmark",
+      completionTrigger: { table: "bookmarks", column: "created" },
     },
     profile_logo: {
       heading: "Add your company logo",
@@ -615,7 +651,10 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
     setPhase("done");
     setActiveStep(null);
     // Toolkit tour fires after the first guided edit for org admins
-    if (completingStep === "public_contact_email") {
+    // The tour modal is the fallback for personas with no guided toolkit_tour
+    // config. Where one exists, findActiveStep surfaces it as the next step
+    // instead, and showing the modal here would fire both.
+    if (completingStep === "public_contact_email" && !CONFIGS[persona]?.toolkit_tour) {
       setShowTour(true);
     } else {
       setRefreshTick((t) => t + 1);
