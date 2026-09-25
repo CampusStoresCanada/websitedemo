@@ -170,6 +170,22 @@ export const STEP_SCHEDULE: Record<string, StepSchedule> = {
     maxReminders: 0,
     channel: "email",
   },
+  /**
+   * Last, and a different animal from everything above it: not a gap in the
+   * record but a capability nobody had been told about. 41 rows, 0 sends,
+   * 0 completions as of 2026-09-25 — the step sat at the end of the journey
+   * where nobody ever reached it.
+   *
+   * No reminder. Running an RFP is a thing you do when you need something,
+   * not a field you are behind on, and chasing somebody about it would read
+   * as nagging them to buy.
+   */
+  opening_rfp: {
+    sendAfterDays: 14,
+    reminderEveryDays: null,
+    maxReminders: 0,
+    channel: "email",
+  },
   visibility_intro: {
     sendAfterDays: 10,
     reminderEveryDays: 11, // Day 21 if not done

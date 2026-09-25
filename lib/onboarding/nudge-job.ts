@@ -375,6 +375,31 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
      * suppliers. Both read the same match engine in opposite directions.
      * Payoff-only — there is nothing to fill in, which is the point.
      */
+    /**
+     * The one step that is not about filling something in. notifyMatchingPartners
+     * fans an RFP out to every vendor whose primary_category matches one of its
+     * subcategories, by Circle DM where it can and email otherwise — so the
+     * pitch is that the store stops going looking.
+     *
+     * Member program only: the RFPs section renders behind !isPartner, and the
+     * step is only in ORG_ADMIN_MEMBER_STEPS, so no org-type guard is needed.
+     */
+    case "opening_rfp": {
+      if (opts.persona !== "org_admin_member") return null;
+      return {
+        subject: isReminder
+          ? `${orgName} has not run an RFP yet`
+          : `Need something? Let the vendors come to you.`,
+        html: nudgeHtml({
+          firstName,
+          headline: "Post what you need. The right vendors hear about it.",
+          body: `${orgName}'s page has an Open RFPs section. Say what you are looking for, pick the categories it falls under, and every vendor on the network working in those categories is notified.<br><br>You do not have to know who they are or go looking for them. The more specific the categories, the better the people who answer.<br><br>You set the closing date, so it is not open ended.`,
+          ctaText: "Post an RFP",
+          ctaUrl: orgUrl,
+        }),
+      };
+    }
+
     case "my_market": {
       if (opts.persona !== "member_partner") return null;
       return {
