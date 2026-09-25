@@ -382,12 +382,17 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         // Non-Retail Revenue group
         {
           name: "ia_revenue",
-          label: "IA/EA revenue booked outside the bookstore",
+          label: "IA/EA Revenue",
           type: "currency",
           order: 4,
           visible: true,
+          // Karin Stonehouse's wording, from question review. Six of seven
+          // reviewers passed the original; she was the one who flagged it and
+          // she wrote the replacement. I had rewritten this field myself before
+          // reading the reviews — over text the committee had already cleared.
+          // Theirs wins.
           helpText:
-            "Money from your Inclusive Access or Equitable Access programme that the institution collects directly — student fees, registrar billing, anything charged to the student account — where the store never handles the transaction. Leave blank if you do not run an IA/EA programme, or if all of yours runs through the store.",
+            "Revenue from any Inclusive Access or similar course material programs in which charges are collected through institutional billing mechanisms (e.g., registration, student accounts, tuition, or ancillary fees) rather than through retail sales. Leave blank if no such program exists.",
           reviewerNote:
             "This field did not exist in 2025. One college runs a $16M IA programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages.\\n\\nRewritten 2026-09: it used to end by pointing at the course materials breakdown, and that line was the single biggest source of confusion in review — people read the cross-reference as 'these are the same number seen twice' and either double-counted or left one blank. This question is about WHERE the money is booked. The one in Course Materials is about WHAT the programme contains. Does this stand on its own without the reader needing to hold the other one in their head?",
           group: "Non-Retail Revenue",
@@ -765,10 +770,15 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "cm_inclusive_access_total",
-          label: "IA/EA — course materials value (Total)",
+          label: "IA/EA (Total)",
           type: "currency",
+          // Named like its siblings — Print — New, Rentals, Digital — because
+          // that is what it is: one more channel in this list. Reviewers read it
+          // as a question about revenue booking, or as asking for everything
+          // EXCEPT books, and both misreadings come from it not looking like the
+          // rest of the list it sits in.
           helpText:
-            "Of your Inclusive Access or Equitable Access programme, how much is course materials. Product value only: leave out anything bundled into the same charge that is not course materials — lab kits, clickers, apparel, supplies — those belong in General Merchandise. Leave blank if you do not run an IA/EA programme.",
+            "Course materials supplied through your Inclusive Access or Equitable Access programme. One more channel in this list — the same question asked of print, rentals and digital, asked of IA/EA. Course materials only: general merchandise bundled into the programme goes in General Merchandise. Leave blank if you do not run one.",
           reviewerNote:
             "Rewritten 2026-09. This used to say it was 'the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAMME CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
           order: 11,
@@ -777,10 +787,11 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "cm_inclusive_access_online",
-          label: "IA/EA — course materials value (Online)",
+          label: "IA/EA (Online)",
           type: "currency",
-          helpText:
-            "Of the line above, how much was delivered through your web store.",
+          // Worded exactly like the other (Online) lines in this list, for the
+          // same reason the label is: it is one more channel, not a special case.
+          helpText: "The portion of the line above sold through your web store.",
           order: 12,
           visible: true,
           group: "Inclusive Access / Equitable Access",
@@ -1374,6 +1385,31 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           group: "New KPI Fields",
           indent: true,
           showIf: { field: "tracks_adoptions", value: true },
+        },
+        /*
+          The third IA/EA question, and the one that was missing.
+
+          The other two are amounts: what the programme is worth outside the
+          store (Sales Revenue) and how much course materials it moves (Course
+          Materials). Neither tells you how the thing actually RUNS, which is
+          what everyone asking about IA wants to know and what made the other
+          two so hard to read in isolation.
+
+          Free text on purpose. A pick-list would compare better, but we do not
+          yet know what the models are — that is the question. This year it tells
+          us; next year's committee can turn the answers into options.
+        */
+        {
+          name: "ia_ea_operating_model",
+          label: "How does your IA/EA programme run?",
+          type: "text_long",
+          helpText:
+            "In your own words: who bills the student, how the store is paid, whether students can opt out and how, and which parts you handle versus the institution. Leave blank if you do not run an Inclusive Access or Equitable Access programme.",
+          reviewerNote:
+            "New for 2026, from Shannon Blackadder — the other two IA/EA questions are amounts, and neither says how the programme operates. Free text because we do not know the models well enough to list them; the point of year one is to find out. Is the prompt specific enough that two stores running the same model describe it recognisably?",
+          order: 16,
+          visible: true,
+          group: "Inclusive Access / Equitable Access",
         },
       ],
     },
