@@ -67,7 +67,7 @@ export default function SurveySection5(props: SurveySectionProps) {
         </div>
         <p className="text-xs text-gray-500 mt-2">
           Note: The Inclusive Access line here captures retail-channel IA revenue. If your IA program
-          generates non-retail revenue (e.g., courseware-as-fee), report that in Section 2.
+          generates non-retail revenue (e.g., course-materials-as-fee), report that in Section 2.
         </p>
       </div>
     </div>

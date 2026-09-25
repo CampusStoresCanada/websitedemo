@@ -51,7 +51,7 @@ export default function SurveySection2(props: SurveySectionProps) {
         </h3>
 
         <CurrencyField
-          label="Inclusive Access / Courseware-as-Fee Revenue"
+          label="Inclusive Access / Course-Materials-as-Fee Revenue"
           field="ia_revenue"
           helpText="Revenue from IA or equitable access programs that bypasses the retail channel"
           {...props}

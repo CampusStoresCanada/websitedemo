@@ -348,7 +348,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "In-Store Retail Sales",
           type: "currency",
           helpText:
-            "Revenue from walk-in purchases at all physical locations, for the fiscal year. Do NOT include online sales, Inclusive Access, or any courseware billed as a student fee. If your reporting gives you one combined sales figure, split it here rather than entering the total in one box.",
+            "Revenue from walk-in purchases at all physical locations, for the fiscal year. Do NOT include online sales, Inclusive Access, or any course materials billed as a student fee. If your reporting gives you one combined sales figure, split it here rather than entering the total in one box.",
           reviewerNote:
             "THE BIG ONE. In 2025 some stores put their whole sales figure here and others split it across this and Online, and nothing in the response told us which. Every institution had to be classified by hand, and where we guessed wrong the numbers were wrong. Does the wording now make it impossible to enter a combined total here?",
           order: 1,
@@ -360,7 +360,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Online Retail Sales",
           type: "currency",
           helpText:
-            "Revenue from your web store, for the fiscal year. Include every online order regardless of how it was fulfilled, including orders picked up in store. Do NOT include Inclusive Access or courseware billed as a student fee.",
+            "Revenue from your web store, for the fiscal year. Include every online order regardless of how it was fulfilled, including orders picked up in store. Do NOT include Inclusive Access or course materials billed as a student fee.",
           reviewerNote:
             "Other half of the 2025 sales-column problem. Also unclear in 2025 whether an online order collected in store counted as online or in-store — stores split both ways. Does the wording settle that?",
           order: 2,
@@ -382,7 +382,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         // Non-Retail Revenue group
         {
           name: "ia_revenue",
-          label: "Inclusive Access / Courseware-as-Fee Revenue",
+          label: "Inclusive Access / Course-Materials-as-Fee Revenue",
           type: "currency",
           order: 4,
           visible: true,
@@ -706,23 +706,23 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "cm_custom_courseware_total",
-          label: "Custom Courseware (Total)",
+          label: "Custom Course Materials (Total)",
           type: "currency",
           helpText:
             "Custom-published or institution-specific course materials, total across all channels.",
           order: 5,
           visible: true,
-          group: "Custom Courseware",
+          group: "Custom Course Materials",
         },
         {
           name: "cm_custom_courseware_online",
-          label: "Custom Courseware (Online)",
+          label: "Custom Course Materials (Online)",
           type: "currency",
           helpText:
             "The portion of the line above sold through your web store.",
           order: 6,
           visible: true,
-          group: "Custom Courseware",
+          group: "Custom Course Materials",
         },
         {
           name: "cm_rentals_total",
@@ -774,7 +774,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 11,
           visible: true,
           group: "Inclusive Access",
-          note: "Captures retail-channel IA revenue. If your IA program generates non-retail revenue (e.g., courseware-as-fee), report that in Section 2.",
+          note: "Captures retail-channel IA revenue. If your IA program generates non-retail revenue (e.g., course-materials-as-fee), report that in Section 2.",
         },
         {
           name: "cm_inclusive_access_online",
