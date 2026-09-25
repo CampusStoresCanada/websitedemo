@@ -17,6 +17,8 @@ interface SaveFieldResult {
   /** When a value was auto-corrected (e.g. rounded to cents, or a comma-separated
    *  string split into an array), return the canonical value */
   correctedValue?: string | number | boolean | string[] | null;
+  /** Submit only: figures filled from last year because they were left as-is. */
+  carriedForward?: string[];
 }
 
 type FieldType =
@@ -676,6 +678,69 @@ export async function saveBenchmarkingFields(
 // Server Action: Submit survey (draft → submitted)
 // ─────────────────────────────────────────────────────────────────
 
+/**
+ * Fill every still-empty figure from the same figure last year.
+ *
+ * The prefilled boxes a respondent never touched are exactly the columns that
+ * are NULL now and non-NULL in the prior year, so this reproduces what the form
+ * was showing them without needing the form to tell us.
+ *
+ * Only numeric answers carry. Text, selects and multiselects do not: "same as
+ * last year" is a meaningful claim about a figure and a guess about a sentence.
+ *
+ * Returns the field names it filled, for the confirmation.
+ */
+async function carryForwardUnanswered(
+  supabase: ReturnType<typeof createAdminClient>,
+  benchmarkingId: string,
+): Promise<string[]> {
+  const { data: row } = await supabase
+    .from("benchmarking")
+    .select("*")
+    .eq("id", benchmarkingId)
+    .maybeSingle();
+  if (!row) return [];
+
+  const current = row as Record<string, unknown>;
+  const { data: prior } = await supabase
+    .from("benchmarking")
+    .select("*")
+    .eq("organization_id", current.organization_id as string)
+    .eq("fiscal_year", (current.fiscal_year as number) - 1)
+    .neq("status", "draft")
+    .maybeSingle();
+  if (!prior) return [];
+
+  const priorRow = prior as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  const filled: string[] = [];
+
+  for (const [name, def] of Object.entries(FIELD_REGISTRY)) {
+    if (SYSTEM_ONLY_FIELDS.has(name)) continue;
+    // Figures only — see above.
+    if (!["currency", "number", "integer", "percentage"].includes(def.type)) continue;
+    if (current[name] !== null && current[name] !== undefined) continue;
+    const was = priorRow[name];
+    if (was === null || was === undefined) continue;
+    patch[name] = was;
+    filled.push(name);
+  }
+
+  if (filled.length === 0) return [];
+
+  const { error } = await supabase
+    .from("benchmarking")
+    .update(patch)
+    .eq("id", benchmarkingId);
+  if (error) {
+    // Do not fail the submission over this. A missing carry-forward is a blank
+    // the committee will chase; a failed submit on the deadline is worse.
+    console.warn("[submitBenchmarkingSurvey] carry-forward failed:", error.message);
+    return [];
+  }
+  return filled;
+}
+
 export async function submitBenchmarkingSurvey(
   benchmarkingId: string
 ): Promise<SaveFieldResult> {
@@ -688,6 +753,28 @@ export async function submitBenchmarkingSurvey(
     // organizations.fte sync below, which RLS blocks for `authenticated` too.
     const supabase = createAdminClient();
     const userId = auth.userId;
+
+    /*
+      Carry-forward at submission.
+
+      While filling in, a field showing last year's figure untouched is NOT an
+      answer — tabbing past it must not write anything, or a skim reads as a
+      store that checked every line. At submission that flips: reaching the end
+      and leaving a carried figure alone is the store saying it has not changed.
+      If the answer is right it is just right, and nobody should have to retype
+      45 unchanged numbers to say so.
+
+      Done server-side rather than by the form, so it does not depend on which
+      sections were ever rendered. It only fills a column that is NULL from the
+      same column last year, so a figure the store typed — including one it
+      cleared to zero — is never touched.
+
+      ⚠️ It cannot tell a deliberate blank from an unvisited one. A store that
+      clears a field meaning "we no longer have this" gets last year's value
+      back. carriedForward is returned so the confirmation can name what was
+      carried, which is the only honest way to run this.
+    */
+    const carriedForward = await carryForwardUnanswered(supabase, benchmarkingId);
 
     const { data: submitted, error: updateError } = await supabase
       .from("benchmarking")
@@ -751,7 +838,7 @@ export async function submitBenchmarkingSurvey(
       }
     }
 
-    return { success: true };
+    return { success: true, carriedForward };
   } catch (err) {
     console.error("Error submitting survey:", err);
     return { success: false, error: "An unexpected error occurred" };

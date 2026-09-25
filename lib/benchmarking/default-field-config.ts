@@ -225,10 +225,26 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "enrollment_fte",
           label: "FTE Enrolment",
           type: "number",
+          /*
+            Settled by the ED, 2026-09-25, after question review deadlocked.
+
+            Two reviewers gave opposite instructions: Shane said combine all
+            campuses, LuAnne said the opposite and gave the reason — Memorial is
+            ~14,000 FTE across Marine Institute and Grenfell, each with its own
+            bookstore and separate reporting lines, so a store serving 1,500
+            reporting 14,000 is simply wrong. Karin and Shannon separately asked
+            undergrad or undergrad plus grad.
+
+            Three axes, one answer each: scope is the market YOUR store serves,
+            population is everybody, and the formula only matters if the
+            institution does not already publish an FTE. That last part is the
+            point of the whole thing — every institution already reports a
+            number to its province. We want that number, not a better one.
+          */
           helpText:
-            "Full-time-equivalent student enrolment for the current year, for the whole institution. Take it from your institutional fact book or registrar rather than estimating. This is the denominator for every per-student figure in your report.",
+            "The students your store serves. If your institution has several campuses and yours is the only store, count all of them. If it has several bookstores and yours is one of them, count only the students your store serves.\n\nFull-time equivalent, undergraduate and graduate, full-year registration, whatever that means at your institution. This is the number your institution reports to your provincial or territorial government, so take it from there rather than working it out yourself.\n\nIf your institution only publishes a headcount, convert it: one part-time student counts as three fifths of a full-time student. Round up to the nearest whole student at the end of the calculation, not at each step.",
           reviewerNote:
-            "Used as the denominator for every per-student figure in the report, so an error here distorts a lot. In 2025 it was unclear whether to give the whole institution or just the campus the store serves. Multi-campus stores especially — what would you enter?",
+            "Rewritten 2026-09-25 from the ED's ruling, replacing 'for the whole institution' which is what Shane and LuAnne disagreed about. The 3/5 conversion is LuAnne's, and it is deliberately the fallback rather than the method: if your institution already reports an FTE we want theirs, inconsistencies and all, because that is the number they are measured on. Does the multi-store case read clearly to a store that is one of several?",
           order: 5,
           visible: true,
           required: true,

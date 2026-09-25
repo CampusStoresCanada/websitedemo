@@ -212,7 +212,7 @@ export function CurrencyField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <div className="flex items-start gap-3">
         <div className="flex-1">
@@ -441,7 +441,7 @@ export function NumberField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <div className="flex items-start gap-3">
         <div className="flex-1 relative">
@@ -584,7 +584,7 @@ export function TextField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <input
         type="text"
@@ -648,7 +648,7 @@ export function TextLongField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <textarea
         value={localValue}
@@ -705,7 +705,7 @@ export function SelectField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <select
         value={currentValue}
@@ -751,7 +751,7 @@ export function BooleanField({
         {tooltip && <FieldTooltip text={tooltip} />}
       </label>
       {helpText && (
-        <p className="text-xs text-gray-500 mb-1">{helpText}</p>
+        <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">{helpText}</p>
       )}
       <div className="flex gap-3">
         <button
