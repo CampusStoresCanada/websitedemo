@@ -9,6 +9,10 @@ import {
 } from "@/lib/benchmarking/comparison";
 import ComparisonView from "@/components/benchmarking/ComparisonView";
 import { getSizeBands, resolveSizeBand } from "@/lib/benchmarking/size-band";
+import {
+  resultsTierFor,
+  NOT_PARTICIPATING_REASON,
+} from "@/lib/benchmarking/org-page-visibility";
 
 export const metadata = {
   title: "How you compare | Campus Stores Canada",
@@ -90,7 +94,40 @@ export default async function BenchmarkingComparePage() {
     .not("status", "eq", "draft");
 
   const rows = (rowsRaw ?? []) as unknown as BenchmarkingRow[];
-  const youFiled = rows.some((r) => r.organization_id === organization.id);
+
+  /*
+    The ladder, read from the one place that derives it.
+
+    This page used to decide for itself: `youFiled` drove an amber note reading
+    "You can still see how the group looks", and then rendered every cut anyway.
+    A store contributing nothing received the group's medians — the opposite of
+    the exchange, and flatly contrary to the rule that non-participants get no
+    results.
+
+    Entitlement is for THIS displayed year, not the newest year the store ever
+    filed: FY2026 results are bought by filing FY2026.
+  */
+  const ownRow = rows.find((r) => r.organization_id === organization.id);
+  const tier = resultsTierFor({
+    filed: Boolean(ownRow),
+    disclosureLevel: (ownRow as { disclosure_level?: string | null } | undefined)
+      ?.disclosure_level ?? null,
+  });
+
+  // Staff need the truth to run the programme; that is not a disclosure decision.
+  if (tier === "none" && !isAdmin) {
+    return (
+      <ComparisonView
+        organizationName={organization.name}
+        fiscalYear={fiscalYear}
+        cuts={[]}
+        youFiled={false}
+        withheldReason={NOT_PARTICIPATING_REASON}
+      />
+    );
+  }
+
+  const youFiled = Boolean(ownRow);
 
   const { data: orgRows } = await db
     .from("organizations")

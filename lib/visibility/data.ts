@@ -212,45 +212,53 @@ export async function getOrganizationForViewer(
     visibleBenchmarking = null;
   }
 
-  // Reciprocity and disclosure, decided before anything is serialised. The
-  // aggregate set (allBenchmarking) is deliberately still returned when detail
-  // is withheld: the point is that a store counts toward the middle either way,
-  // so the comparison should remain readable.
   let benchmarkingWithheldReason: string | null = null;
 
-  // Checked before anything else: the peer set is for members of the exchange.
-  // This path reads with the service role, so RLS is not a backstop here and
-  // an ungated peer set is a public financial disclosure.
-  if (
-    !mayReceivePeerSet(
-      viewer.viewerLevel,
-      viewer.viewerOrgIds ?? [],
-      viewer.viewerIsMemberStore === true,
-    )
-  ) {
+  /*
+    The peer set is gated and projected UNCONDITIONALLY, before anything else
+    touches it. Both of those used to happen inside `if (visibleBenchmarking)`,
+    which is a different question — it asks whether THIS page's store has a
+    visible row, not what the VIEWER is entitled to. A store that had switched
+    show_in_benchmarking off nulled that variable and skipped the projection
+    entirely, handing out whole unprojected rows for everyone else.
+
+    This path reads with the service role, so RLS is not a backstop and an
+    ungated peer set is a financial disclosure.
+  */
+  const viewerInExchange = mayReceivePeerSet(
+    viewer.viewerLevel,
+    viewer.viewerOrgIds ?? [],
+    viewer.viewerIsMemberStore === true,
+  );
+
+  const standing = viewerInExchange
+    ? await loadViewerBenchmarkingStanding(viewer.viewerOrgIds ?? [])
+    : { filed: false, disclosureLevel: null as string | null };
+
+  const decision = resolveOrgPageBenchmarking({
+    targetDisclosureLevel: (visibleBenchmarking as { disclosure_level?: string | null } | null)
+      ?.disclosure_level,
+    viewerFiled: standing.filed,
+    viewerDisclosureLevel: standing.disclosureLevel,
+    isOwnOrg: (viewer.viewerOrgIds ?? []).includes(targetOrgId),
+    isStaff: isStaffViewer,
+  });
+
+  if (!viewerInExchange || decision.show === "none") {
+    // Nothing. A non-participant does not receive the group's figures, and
+    // neither does an account outside the exchange.
     visibleAllBenchmarking = [];
     visibleBenchmarking = null;
-  }
-
-  if (visibleBenchmarking) {
-    const standing = await loadViewerBenchmarkingStanding(viewer.viewerOrgIds ?? []);
-    const decision = resolveOrgPageBenchmarking({
-      targetDisclosureLevel: (visibleBenchmarking as { disclosure_level?: string | null })
-        .disclosure_level,
-      viewerFiled: standing.filed,
-      viewerDisclosureLevel: standing.disclosureLevel,
-      isOwnOrg: (viewer.viewerOrgIds ?? []).includes(targetOrgId),
-      isStaff: isStaffViewer,
-    });
+    if (viewerInExchange && decision.show === "none") {
+      benchmarkingWithheldReason = decision.reason;
+    }
+  } else {
     if (decision.show === "aggregate") {
       visibleBenchmarking = null;
       benchmarkingWithheldReason = decision.reason;
     }
 
-    // The peer table is a NAMED league table of every store, not an aggregate,
-    // and it was shipping whole benchmarking rows for all of them. Project it
-    // under the same rules: only the fields that render, and names only for a
-    // viewer entitled to them.
+    // Only the fields that render, and names only for a viewer entitled to them.
     visibleAllBenchmarking = projectPeerRows(
       visibleAllBenchmarking as unknown as Parameters<typeof projectPeerRows>[0],
       {
@@ -258,24 +266,37 @@ export async function getOrganizationForViewer(
         viewerOrgIds: viewer.viewerOrgIds ?? [],
       },
     ) as unknown as typeof visibleAllBenchmarking;
-  }
 
-  if (viewer.viewerLevel !== "admin" && viewer.viewerLevel !== "super_admin") {
-    // Filter opted-out orgs from the comparison set
-    try {
-      const adminClient = createAdminClient();
-      const { data: optedOut } = await adminClient
-        .from("organizations")
-        .select("id")
-        .eq("show_in_benchmarking", false);
-      if (optedOut && optedOut.length > 0) {
-        const optedOutIds = new Set(optedOut.map((o) => o.id));
-        visibleAllBenchmarking = raw.allBenchmarking.filter(
-          (b) => !optedOutIds.has((b.organization as { id: string }).id)
-        );
+    /*
+      Stores that asked to be left out of the comparison entirely.
+
+      ⚠️ This filtered `raw.allBenchmarking` — the ungated, unprojected source —
+      and reassigned it over everything above. One org has the flag set, so the
+      branch was live for every non-admin viewer, and it put 39 named stores'
+      complete benchmarking rows into the payload of a logged-out page. Filter
+      the PROJECTED array, by organization_id, because a projected row's
+      `organization` is null whenever the viewer may not see the name.
+    */
+    if (!isStaffViewer) {
+      try {
+        const adminClient = createAdminClient();
+        const { data: optedOut } = await adminClient
+          .from("organizations")
+          .select("id")
+          .eq("show_in_benchmarking", false);
+        if (optedOut && optedOut.length > 0) {
+          const optedOutIds = new Set(optedOut.map((o) => o.id));
+          visibleAllBenchmarking = (
+            visibleAllBenchmarking as unknown as { organization_id: string }[]
+          ).filter(
+            (b) => !optedOutIds.has(b.organization_id),
+          ) as unknown as typeof visibleAllBenchmarking;
+        }
+      } catch {
+        // Withhold rather than fall back to an unfiltered list: the previous
+        // comment called this non-critical, and it is the opposite.
+        visibleAllBenchmarking = [];
       }
-    } catch {
-      // Non-critical — fall back to unfiltered list
     }
   }
 

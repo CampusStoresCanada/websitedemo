@@ -25,7 +25,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export type BenchmarkingVisibility =
   | { show: "detail" }
-  | { show: "aggregate"; reason: string };
+  | { show: "aggregate"; reason: string }
+  | { show: "none"; reason: string };
 
 export interface OrgPageVisibilityInput {
   /** The store being looked at. */
@@ -42,6 +43,11 @@ export interface OrgPageVisibilityInput {
 
 const AGGREGATE_ONLY = "aggregate_only";
 
+/** Said the same way wherever a non-participant is turned away. */
+export const NOT_PARTICIPATING_REASON =
+  "Results are exchanged between the stores that take part. File this year's " +
+  "survey and your comparisons open up.";
+
 /**
  * Pure so the rule can be read and tested without a database — this decides
  * what leaves the server, so it should not be buried in a query.
@@ -53,13 +59,16 @@ export function resolveOrgPageBenchmarking(
   // truth to do the job. Neither is a disclosure decision.
   if (input.isOwnOrg || input.isStaff) return { show: "detail" };
 
-  if (!input.viewerFiled) {
-    return {
-      show: "aggregate",
-      reason:
-        "Detailed figures are shared between stores that take part. Complete this " +
-        "year's survey and this fills in.",
-    };
+  // The viewer's own rung on the ladder. Derived by resultsTierFor(), never here
+  // — this function used to answer it inline and the compare page answered it
+  // again, differently.
+  const tier = resultsTierFor({
+    filed: input.viewerFiled,
+    disclosureLevel: input.viewerDisclosureLevel ?? null,
+  });
+
+  if (tier === "none") {
+    return { show: "none", reason: NOT_PARTICIPATING_REASON };
   }
 
   if (input.targetDisclosureLevel === AGGREGATE_ONLY) {
@@ -71,7 +80,7 @@ export function resolveOrgPageBenchmarking(
     };
   }
 
-  if (input.viewerDisclosureLevel === AGGREGATE_ONLY) {
+  if (tier === "aggregate") {
     return {
       show: "aggregate",
       reason:
@@ -94,21 +103,59 @@ export function resolveOrgPageBenchmarking(
  */
 export async function loadViewerBenchmarkingStanding(
   viewerOrgIds: string[],
-): Promise<{ filed: boolean; disclosureLevel: string | null }> {
+  /**
+   * The year whose results are being shown. Entitlement is per year: FY2026
+   * results are bought by filing FY2026, and a store that filed in 2025 and
+   * skipped 2026 is a non-participant in 2026. Omit to take the newest year
+   * they have filed, which is what the org page does when no year is in play.
+   */
+  fiscalYear?: number | null,
+): Promise<ViewerStanding> {
   if (viewerOrgIds.length === 0) return { filed: false, disclosureLevel: null };
 
   const db = createAdminClient();
-  const { data } = await db
+  let q = db
     .from("benchmarking")
     .select("disclosure_level, fiscal_year")
     .in("organization_id", viewerOrgIds)
-    .neq("status", "draft")
-    .order("fiscal_year", { ascending: false })
-    .limit(1);
+    .neq("status", "draft");
+
+  if (typeof fiscalYear === "number") q = q.eq("fiscal_year", fiscalYear);
+
+  const { data } = await q.order("fiscal_year", { ascending: false }).limit(1);
 
   const row = data?.[0];
   if (!row) return { filed: false, disclosureLevel: null };
   return { filed: true, disclosureLevel: (row.disclosure_level as string) ?? null };
+}
+
+export interface ViewerStanding {
+  filed: boolean;
+  disclosureLevel: string | null;
+}
+
+/** What a viewer is entitled to get back. */
+export type ResultsTier = "none" | "aggregate" | "full";
+
+/**
+ * The ladder, in ONE place.
+ *
+ *   did not file            → none      (not a median, not a count)
+ *   filed as aggregate_only → aggregate
+ *   filed as full           → full
+ *
+ * It lives here because the two surfaces that answer this question — the org
+ * page and /benchmarking/compare — had each derived it independently, and both
+ * had settled on the same wrong floor: a non-participant was shown the group's
+ * figures with a note inviting them to take part. The compare page said it out
+ * loud, "You can still see how the group looks."
+ *
+ * ⛔ Anything that decides how much of the results someone gets calls this. A
+ * third derivation is the bug, not a new feature.
+ */
+export function resultsTierFor(standing: ViewerStanding): ResultsTier {
+  if (!standing.filed) return "none";
+  return standing.disclosureLevel === AGGREGATE_ONLY ? "aggregate" : "full";
 }
 
 /**

@@ -3,6 +3,7 @@ import {
   resolveOrgPageBenchmarking,
   projectPeerRows,
   mayReceivePeerSet,
+  resultsTierFor,
 } from "../org-page-visibility";
 
 /**
@@ -19,15 +20,42 @@ const base = {
   isStaff: false,
 };
 
+describe("the results ladder", () => {
+  // What you get back is what you put in. One derivation, consumed by the org
+  // page and /benchmarking/compare — both of which used to answer it themselves
+  // and both of which had the bottom rung wrong in the same way.
+  it("gives a non-participant nothing", () => {
+    expect(resultsTierFor({ filed: false, disclosureLevel: null })).toBe("none");
+    // Having filed in some OTHER year is not participation in this one; the
+    // caller passes the standing for the year being shown.
+    expect(resultsTierFor({ filed: false, disclosureLevel: "full" })).toBe("none");
+  });
+
+  it("gives an aggregate contributor aggregate results", () => {
+    expect(resultsTierFor({ filed: true, disclosureLevel: "aggregate_only" })).toBe(
+      "aggregate",
+    );
+  });
+
+  it("gives a full participant full results", () => {
+    expect(resultsTierFor({ filed: true, disclosureLevel: "full" })).toBe("full");
+    // An unset level on a filed row is the column default, which is full.
+    expect(resultsTierFor({ filed: true, disclosureLevel: null })).toBe("full");
+  });
+});
+
 describe("reciprocity", () => {
-  it("withholds detail from a member who has not filed", () => {
+  it("gives a member who has not filed NOTHING — not even the aggregate", () => {
+    // The ladder: no filing → nothing, aggregate_only → aggregate, full → full.
+    // This used to return "aggregate", which handed the group's figures to
+    // stores contributing none of their own.
     const r = resolveOrgPageBenchmarking({ ...base, viewerFiled: false });
-    expect(r.show).toBe("aggregate");
+    expect(r.show).toBe("none");
   });
 
   it("says how to fix it rather than just refusing", () => {
     const r = resolveOrgPageBenchmarking({ ...base, viewerFiled: false });
-    expect(r.show === "aggregate" && r.reason).toMatch(/Complete this year's survey/);
+    expect(r.show === "none" && r.reason).toMatch(/File this year's survey/);
   });
 
   it("shows detail to a member who filed", () => {
@@ -81,10 +109,10 @@ describe("failing closed", () => {
     expect(resolveOrgPageBenchmarking({ ...base, targetDisclosureLevel: null }).show).toBe("detail");
   });
 
-  it("withholds when the viewer has no org at all", () => {
+  it("withholds everything when the viewer has no org at all", () => {
     expect(
       resolveOrgPageBenchmarking({ ...base, viewerFiled: false, viewerDisclosureLevel: null }).show,
-    ).toBe("aggregate");
+    ).toBe("none");
   });
 });
 

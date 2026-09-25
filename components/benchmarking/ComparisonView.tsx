@@ -32,11 +32,14 @@ export default function ComparisonView({
   fiscalYear,
   cuts,
   youFiled,
+  withheldReason,
 }: {
   organizationName: string;
   fiscalYear: number | null;
   cuts: ComparisonCut[];
   youFiled: boolean;
+  /** Set when the viewer gets no results at all — see resultsTierFor(). */
+  withheldReason?: string | null;
 }) {
   if (!fiscalYear) {
     return (
@@ -56,14 +59,19 @@ export default function ComparisonView({
         {organizationName} · FY{fiscalYear}
       </p>
 
-      {!youFiled && (
+      {/*
+        Nothing, not a thinner version of the page. The old copy here said "You
+        can still see how the group looks" and then rendered every cut, which
+        handed the group's medians to a store contributing none of its own.
+      */}
+      {withheldReason && (
         <p className="mt-4 rounded-lg bg-amber-50 p-4 text-sm text-amber-900">
-          You did not file in FY{fiscalYear}, so there is nothing of yours to place against
-          these figures. You can still see how the group looks.{" "}
+          You did not file in FY{fiscalYear}, so there are no comparisons to show.{" "}
+          {withheldReason}{" "}
           <Link href="/benchmarking" className="font-medium underline">
             Take part this year
-          </Link>{" "}
-          and this page fills in.
+          </Link>
+          .
         </p>
       )}
 

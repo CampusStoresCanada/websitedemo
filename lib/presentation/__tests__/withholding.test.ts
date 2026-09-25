@@ -107,9 +107,12 @@ describe("presentation mode actually withholds", () => {
     });
 
     it("withholds them the moment the mode is on", () => {
+      // "none" rather than "aggregate": the fixture's viewer has filed nothing,
+      // and a non-participant now gets no results at all. Still the thing this
+      // test is for — the staff bypass is gone the moment the mode is on.
       for (const audience of ["member", "partner", "public"] as const) {
         const decision = asStaff(applyPresentationMode(STAFF, audience));
-        expect(decision.show).toBe("aggregate");
+        expect(decision.show).toBe("none");
       }
     });
   });
