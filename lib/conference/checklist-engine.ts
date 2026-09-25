@@ -6,7 +6,7 @@ import { CHECK_TYPES, type CheckType } from "./checklist-check-types";
 import { getTaskCta } from "./checklist-cta";
 import { CHECKS, evaluateChecklistTaskCheck } from "./checklist-checks";
 import { formatDayMonth } from "@/lib/time/supabase-timestamp";
-import { deriveCheckpointOffsets } from "./checklist-cadence";
+import { checklistEmailSuppressed, deriveCheckpointOffsets } from "./checklist-cadence";
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
@@ -600,6 +600,20 @@ export async function runChecklistReminders(
       });
     }
     sentLog.push(...pending.log);
+  }
+
+  /**
+   * The off-switch, checked where the send happens rather than at the caller.
+   * A suppressed run still computes everything and still reports it — what it
+   * does not do is write to anyone, or log a send that would stop the real one
+   * later.
+   */
+  if (checklistEmailSuppressed()) {
+    result.errors.push(
+      "CHECKLIST_SUPPRESS_EMAIL=1 — computed the run and sent nothing."
+    );
+    result.orgsReminded = 0;
+    return result;
   }
 
   if (dryRun) {

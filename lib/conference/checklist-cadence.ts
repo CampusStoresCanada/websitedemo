@@ -23,6 +23,8 @@
  * an earlier deadline widens the schedule on the next run by itself.
  */
 
+import { isBusinessDay } from "@/lib/board/vote-schedule";
+
 /**
  * Days before the anchor that a reminder goes out.
  *
@@ -32,6 +34,39 @@
  * wherever somebody remembered to type it.
  */
 export const STANDARD_CADENCE_DAYS = [45, 21, 7] as const;
+
+/**
+ * Off-switch, the same shape elections uses.
+ *
+ * `ELECTIONS_SUPPRESS_EMAIL=1` exists because "did not email 40 campus stores"
+ * is not a property to leave to configuration. Checklist reminders reach a
+ * wider list than elections do, and deriving the cadence means a checklist
+ * silent for months can start sending on the next tick.
+ */
+export function checklistEmailSuppressed(): boolean {
+  return process.env.CHECKLIST_SUPPRESS_EMAIL === "1";
+}
+
+/**
+ * Reminders land on a working day, the way board votes already do.
+ *
+ * Adopted from lib/board/vote-schedule.ts rather than reimplemented — it
+ * already knows the national holidays and observes the ones that fall on a
+ * weekend. A derived offset is a DATE once it meets the deadline, and a
+ * conference cadence runs straight through late December: the Exhibitor
+ * checklist's middle reminder falls on 21 December and its last on 4 January.
+ *
+ * Shifted EARLIER, never later. A reminder is about something that hardens on
+ * a date, so arriving before a weekend is useful and arriving after it is not.
+ */
+function shiftToBusinessDay(date: Date): Date {
+  const out = new Date(date);
+  for (let i = 0; i < 7; i++) {
+    if (isBusinessDay(out.getUTCFullYear(), out.getUTCMonth() + 1, out.getUTCDate())) return out;
+    out.setUTCDate(out.getUTCDate() - 1);
+  }
+  return out;
+}
 
 /** Whole days between two calendar dates, positive when `later` is later. */
 function daysBetween(earlier: Date, later: Date): number {
@@ -61,7 +96,14 @@ export function deriveCheckpointOffsets(
       ? daysBetween(earliestTaskDeadline, checklistDeadline)
       : 0;
 
-  return STANDARD_CADENCE_DAYS.map((d) => d + anchorShift)
+  return STANDARD_CADENCE_DAYS.map((d) => {
+    // Turn the offset into the day it actually lands on, move it off a weekend
+    // or holiday, then turn it back — so the stored offset already encodes a
+    // working day and the due query needs to know nothing about calendars.
+    const raw = new Date(checklistDeadline);
+    raw.setUTCDate(raw.getUTCDate() - (d + anchorShift));
+    return daysBetween(shiftToBusinessDay(raw), checklistDeadline);
+  })
     // A checklist already inside its own window still gets its full cadence;
     // findDueOrgs treats every past offset as due and sends the most overdue
     // unlogged one, so nobody receives a backlog burst from a wide offset.
