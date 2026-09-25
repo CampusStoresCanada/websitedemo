@@ -82,8 +82,11 @@ describe("nudge coverage across every persona", () => {
       "Purely cosmetic and empty for every partner. Cut 2026-08-20; copy and auto-complete remain.",
     "member_member/view_org_page":
       "Beats 1 and 2 of the Toolkit arc, in app only: it points at the + button and closes when " +
-      "they tap it, and toolkit_tour picks up from there. Emailing both would be asking twice. " +
-      "Not true of member_partner, where the step genuinely means 'this is your company on the network'.",
+      "they tap it, and toolkit_tour picks up from there. Emailing both would be asking twice.",
+    "member_partner/view_org_page":
+      "In app only. It means 'this is what campus stores see', and a vendor employee is not an " +
+      "org admin, so the action when something is wrong is to flag it — a Toolkit tool. That ask " +
+      "rides along in toolkit_tour's email rather than being sent twice.",
   };
 
   /**
@@ -92,13 +95,10 @@ describe("nudge coverage across every persona", () => {
    */
   const UNWRITTEN = new Set<string>([
     "org_admin_member/opening_rfp",
-    "member_partner/view_org_page",
-    "member_partner/toolkit_tour",
-    "member_partner/my_market",
   ]);
 
   /** Lower this as UNWRITTEN shrinks. It must never go up. */
-  const UNWRITTEN_CEILING = 4;
+  const UNWRITTEN_CEILING = 1;
 
   const silentReason = (persona: string, step: string) =>
     DELIBERATELY_SILENT[`${persona}/${step}`] ?? DELIBERATELY_SILENT[`*/${step}`];
