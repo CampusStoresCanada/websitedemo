@@ -342,6 +342,26 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
      * their entry from UNWRITTEN in lib/publication/__tests__.
      */
     case "toolkit_tour": {
+      // Org admins reach this having already been walked through one tool:
+      // public_contact_email's guided flow opens the Toolkit, pulses Edit and
+      // waits for the field. So theirs names Edit as something they have done
+      // and points at a tool they have not.
+      if (opts.persona === "org_admin_member" || opts.persona === "org_admin_partner") {
+        const isPartner = opts.persona === "org_admin_partner";
+        return {
+          subject: isReminder
+            ? `Your Toolkit is on every page, not just ${orgName}'s`
+            : `The + button is how you fix your own page`,
+          html: nudgeHtml({
+            firstName,
+            headline: "Every page carries its own tools.",
+            body: `Your Toolkit sits behind the + button at the bottom right, and it follows you to every page on the network.<br><br>On ${orgName}'s pages it is how you edit${isPartner ? ": correct what campus stores see when they look you up" : ""}. On everybody else's it is how you flag something wrong, ask what a field means, share a page, or pull the data behind it.<br><br>Try Bookmark first. Tap it, click anything on the page, and it is saved to your account.`,
+            ctaText: "Open the Toolkit",
+            ctaUrl: orgUrl,
+            footnote: "It works the same on every page, including the ones that aren't yours.",
+          }),
+        };
+      }
       if (opts.persona !== "member_member") return null;
       return {
         subject: isReminder
