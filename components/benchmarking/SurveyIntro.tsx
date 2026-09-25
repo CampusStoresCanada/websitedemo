@@ -121,9 +121,10 @@ export default function SurveyIntro({
         </dl>
         <p className="mt-4 text-sm text-gray-600">
           Inside CSC, your submission is seen by the staff who run the survey and by the
-          benchmarking committee reviewing it for errors. It is never shared with vendor
-          partners, and it is never published with your store named unless you choose that
-          below.
+          benchmarking committee reviewing it for errors. That is the whole list. It does
+          not go to vendor partners in any form, it is not used in CSC marketing or
+          sponsor material, and it is never published with your store named unless you
+          choose that below.
         </p>
       </section>
 

@@ -193,9 +193,24 @@ export function projectPeerRows<T extends PeerRowInput>(
 export function mayReceivePeerSet(
   viewerLevel: string | null | undefined,
   viewerOrgIds: string[],
+  viewerIsMemberStore: boolean,
 ): boolean {
   if (viewerLevel === "admin" || viewerLevel === "super_admin") return true;
-  // Membership in the exchange is what buys the peer set — an account with no
-  // active organisation is a visitor with a login, not a member store.
+
+  /*
+    Membership in the EXCHANGE, not merely in an organisation.
+
+    This used to read `viewerOrgIds.length > 0 && viewerLevel !== "public"`,
+    which is satisfied by any logged-in account attached to any org. 295
+    accounts across 123 Vendor Partner orgs clear that bar, and a partner
+    opening any member store's page received the whole financial peer table —
+    sales, COGS, net profit and payroll for every filing store — while the
+    survey's own trust page promised "it is never shared with vendor partners".
+
+    Nothing leaves the participating group without consent, aggregates included.
+    So the question is whether the viewer's own org is a member store.
+  */
+  if (!viewerIsMemberStore) return false;
+
   return viewerOrgIds.length > 0 && viewerLevel !== "public";
 }

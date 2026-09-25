@@ -147,29 +147,42 @@ describe("who is inside the exchange at all", () => {
   it("gives a logged-out visitor nothing", () => {
     // The regression this exists to prevent: 39 stores' net profit, cost of
     // goods and payroll served as unattributed rows on a public page.
-    expect(mayReceivePeerSet("public", [])).toBe(false);
-    expect(mayReceivePeerSet(null, [])).toBe(false);
-    expect(mayReceivePeerSet(undefined, [])).toBe(false);
+    expect(mayReceivePeerSet("public", [], false)).toBe(false);
+    expect(mayReceivePeerSet(null, [], false)).toBe(false);
+    expect(mayReceivePeerSet(undefined, [], false)).toBe(false);
   });
 
   it("gives an account with no organisation nothing", () => {
     // A login is not membership.
-    expect(mayReceivePeerSet("member", [])).toBe(false);
+    expect(mayReceivePeerSet("member", [], false)).toBe(false);
+  });
+
+  it("gives a VENDOR PARTNER nothing, however logged in they are", () => {
+    // The second regression, and the one the survey's own trust page had
+    // already promised against: "it does not go to vendor partners in any
+    // form". 295 accounts across 123 partner orgs were clearing the old gate
+    // — an org id and a non-public level — and receiving the full financial
+    // peer table for every filing store.
+    //
+    // A partner is attached to an org, is not public, and is not in the
+    // exchange. That third fact is the only one that separates them.
+    expect(mayReceivePeerSet("partner", ["partner-org-1"], false)).toBe(false);
+    expect(mayReceivePeerSet("org_admin", ["partner-org-1"], false)).toBe(false);
   });
 
   it("admits a member store", () => {
-    expect(mayReceivePeerSet("member", ["org-1"])).toBe(true);
-    expect(mayReceivePeerSet("org_admin", ["org-1"])).toBe(true);
+    expect(mayReceivePeerSet("member", ["org-1"], true)).toBe(true);
+    expect(mayReceivePeerSet("org_admin", ["org-1"], true)).toBe(true);
   });
 
   it("admits staff, who have no org of their own", () => {
-    expect(mayReceivePeerSet("super_admin", [])).toBe(true);
-    expect(mayReceivePeerSet("admin", [])).toBe(true);
+    expect(mayReceivePeerSet("super_admin", [], false)).toBe(true);
+    expect(mayReceivePeerSet("admin", [], false)).toBe(true);
   });
 
-  it("never admits public even with an org attached", () => {
+  it("never admits public even with a member org attached", () => {
     // Belt and braces: viewerLevel is downgraded to public when an org's
     // access has lapsed, and a lapsed member is outside the exchange.
-    expect(mayReceivePeerSet("public", ["org-1"])).toBe(false);
+    expect(mayReceivePeerSet("public", ["org-1"], true)).toBe(false);
   });
 });

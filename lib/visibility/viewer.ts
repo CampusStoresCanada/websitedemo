@@ -25,6 +25,15 @@ export interface ViewerContext {
    * "is this viewer a CSC member".
    */
   viewerIsCancollMember: boolean;
+  /**
+   * Is one of the viewer's own active orgs a MEMBER STORE — are they inside the
+   * benchmarking exchange?
+   *
+   * Explicitly NOT "does this viewer have a login and an organisation". 295
+   * accounts across 123 Vendor Partner orgs satisfy that and not one of them is
+   * in the exchange, which is how partners came to be receiving the peer set.
+   */
+  viewerIsMemberStore: boolean;
 }
 
 /**
@@ -47,6 +56,7 @@ const ANONYMOUS_VIEWER: ViewerContext = {
   viewerOrgIds: [],
   viewerOrgAdminIds: [],
   viewerIsCancollMember: false,
+  viewerIsMemberStore: false,
 };
 
 /**
@@ -113,6 +123,16 @@ export async function getViewerContext(): Promise<ViewerContext> {
         )
       : false;
 
+  // Same snapshot, same zero extra queries. `organizations.type` is capitalized.
+  const viewerIsMemberStore =
+    ownSnapshot.status === "resolved" && !ownSnapshot.orgsError
+      ? (ownSnapshot.organizations ?? []).some(
+          (uo) =>
+            uo.organization?.type === "Member" &&
+            ctx.activeOrgIds.includes(uo.organization_id)
+        )
+      : false;
+
   // Last, so it clamps whatever the ladder above produced rather than racing
   // it. Only ever lowers, and only for staff — see applyPresentationMode.
   // Everything downstream of this line (the ~96 viewerLevel readers, the field
@@ -127,6 +147,7 @@ export async function getViewerContext(): Promise<ViewerContext> {
     viewerOrgIds: ctx.activeOrgIds,
     viewerOrgAdminIds: ctx.orgAdminOrgIds,
     viewerIsCancollMember,
+    viewerIsMemberStore,
   };
 }
 

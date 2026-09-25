@@ -221,7 +221,13 @@ export async function getOrganizationForViewer(
   // Checked before anything else: the peer set is for members of the exchange.
   // This path reads with the service role, so RLS is not a backstop here and
   // an ungated peer set is a public financial disclosure.
-  if (!mayReceivePeerSet(viewer.viewerLevel, viewer.viewerOrgIds ?? [])) {
+  if (
+    !mayReceivePeerSet(
+      viewer.viewerLevel,
+      viewer.viewerOrgIds ?? [],
+      viewer.viewerIsMemberStore === true,
+    )
+  ) {
     visibleAllBenchmarking = [];
     visibleBenchmarking = null;
   }

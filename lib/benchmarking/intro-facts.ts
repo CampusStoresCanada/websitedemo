@@ -57,6 +57,7 @@ export const WHAT_TO_GATHER = [
  *
  * Each maps to something enforced in code, named here so a reviewer can check
  * the claim rather than take it:
+ *   nothing public   → mayReceivePeerSet() in lib/benchmarking/org-page-visibility.ts
  *   reciprocity      → lib/benchmarking/org-page-visibility.ts
  *   minimum group    → lib/benchmarking/disclosure.ts (MIN_CUT_SIZE)
  *   aggregate-only   → disclosure_level on the submission
@@ -65,10 +66,13 @@ export const WHAT_TO_GATHER = [
 export function confidentialityPoints(minCutSize = MIN_CUT_SIZE) {
   return [
     {
-      heading: "Only participating stores see the results",
+      heading: "Nothing is published outside the stores that take part",
       body:
-        "Detailed figures are exchanged between stores that take part. A member who " +
-        "has not filed sees the group's shape, never another store's numbers.",
+        "Not a median, not a count, not a range. No figure from this survey goes on " +
+        "the public site, to vendor partners, or into anything CSC circulates " +
+        "without the consent of the stores it came from. Aggregates are not an " +
+        "exception to that — an average of you and your peers is still your " +
+        "information.",
     },
     {
       heading: `No group smaller than ${minCutSize} stores is ever shown`,
