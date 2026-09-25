@@ -41,10 +41,36 @@ export default function BenchmarkingSurveyForm({
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
     [fieldConfig]
   );
+  /** Field names the server filled from last year at submission. */
+  const [carriedForward, setCarriedForward] = useState<string[]>([]);
+
   const sections = useMemo(
     () => [...config.sections].sort((a, b) => a.order - b.order),
     [config]
   );
+
+  /**
+   * The carried figures, as labels under their section headings.
+   *
+   * The server returns column names, which mean nothing to the person reading
+   * the confirmation — "cm_print_new_total" is not a thing anybody recognises
+   * as the number they just filed. Resolve them against the same config that
+   * rendered the form, and drop any that no longer appear in it rather than
+   * printing a raw column name.
+   */
+  const carriedForwardBySection = useMemo(() => {
+    if (carriedForward.length === 0) return [];
+    const wanted = new Set(carriedForward);
+    return sections
+      .map((section) => ({
+        section: section.title,
+        labels: section.fields
+          .filter((f) => wanted.has(f.name))
+          .sort((a, b) => a.order - b.order)
+          .map((f) => f.label),
+      }))
+      .filter((g) => g.labels.length > 0);
+  }, [carriedForward, sections]);
 
   const [activeSection, setActiveSection] = useState(0); // index into sections array
   const [formData, setFormData] = useState<Record<string, unknown>>(
@@ -164,6 +190,11 @@ export default function BenchmarkingSurveyForm({
 
     const result = await submitBenchmarkingSurvey(benchmarkingId);
     if (result.success) {
+      // Figures the store left as last year's. Named rather than applied
+      // silently — carry-forward cannot tell a deliberate blank from an
+      // unvisited box, so the store gets to see which ones it filled and amend
+      // if one of them was meant to be empty.
+      setCarriedForward(result.carriedForward ?? []);
       setFormData((prev) => ({ ...prev, status: "submitted" }));
     } else {
       setSubmitError(result.error || "Failed to submit survey");
@@ -251,6 +282,38 @@ export default function BenchmarkingSurveyForm({
                 {isSubmitting ? "..." : "Amend Submission"}
               </button>
             </div>
+
+            {/*
+              What we filled in on their behalf, said out loud.
+
+              Carry-forward cannot distinguish a box left alone because nothing
+              changed from one left alone because it was never opened, and a
+              store that cleared a figure deliberately gets last year's back.
+              Listing them by label, grouped by section, is what makes that
+              recoverable: they can see it, and Amend is right there.
+            */}
+            {carriedForward.length > 0 && (
+              <div className="mt-3 border-t border-green-200 pt-3">
+                <p className="text-sm text-green-900">
+                  {carriedForward.length === 1
+                    ? "One figure was carried forward unchanged from FY"
+                    : `${carriedForward.length} figures were carried forward unchanged from FY`}
+                  {fiscalYear - 1}, because you left them as they were:
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {carriedForwardBySection.map(({ section, labels }) => (
+                    <li key={section} className="text-sm text-green-800">
+                      <span className="font-medium">{section}:</span>{" "}
+                      {labels.join(", ")}
+                    </li>
+                  ))}
+                </ul>
+                <p className="mt-2 text-xs text-green-700">
+                  If any of those should be blank or different this year, choose
+                  Amend Submission and correct them.
+                </p>
+              </div>
+            )}
           </div>
         )}
       </div>
