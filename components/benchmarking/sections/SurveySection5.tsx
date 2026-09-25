@@ -13,7 +13,7 @@ const CM_CATEGORIES = [
   { label: "Custom Courseware", totalField: "cm_custom_courseware_total", onlineField: "cm_custom_courseware_online" },
   { label: "Rentals", totalField: "cm_rentals_total", onlineField: "cm_rentals_online" },
   { label: "Digital / E-Content", totalField: "cm_digital_total", onlineField: "cm_digital_online" },
-  { label: "Inclusive Access", totalField: "cm_inclusive_access_total", onlineField: "cm_inclusive_access_online" },
+  { label: "IA/EA — course materials value", totalField: "cm_inclusive_access_total", onlineField: "cm_inclusive_access_online" },
   { label: "Course Packs", totalField: "cm_course_packs_total", onlineField: "cm_course_packs_online" },
   { label: "Other", totalField: "cm_other_total", onlineField: "cm_other_online" },
 ];
@@ -65,10 +65,13 @@ export default function SurveySection5(props: SurveySectionProps) {
           <CalculatedField label="Total Course Materials Revenue" value={totalCM} />
           <CalculatedField label="Total Course Materials Online" value={totalCMOnline} />
         </div>
-        <p className="text-xs text-gray-500 mt-2">
-          Note: The Inclusive Access line here captures retail-channel IA revenue. If your IA program
-          generates non-retail revenue (e.g., course-materials-as-fee), report that in Section 2.
-        </p>
+        {/*
+          The old note here pointed back at Section 2 and told the reader the
+          two IA lines were the same programme seen twice. They are not: that
+          one asks where the money is booked, this one asks what the programme
+          contains. The cross-reference was the single biggest source of
+          confusion in question review, so it is gone rather than reworded.
+        */}
       </div>
     </div>
   );

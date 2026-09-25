@@ -6,6 +6,7 @@ import type { Json } from "@/lib/database.types";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 import { promoteBenchmarkingToOrganizationCurrentState } from "@/lib/benchmarking/promotion";
+import { createAdminClient } from "@/lib/supabase/admin";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import type { FieldType } from "@/lib/benchmarking/default-field-config";
 import {
@@ -350,7 +351,16 @@ export async function addSurveyQuestion(input: {
   if (problem) return { success: false, error: ADD_QUESTION_MESSAGE[problem] };
 
   // 1. Mint the column. IF NOT EXISTS, so a retry after a half-failure is safe.
-  const { error: ddlError } = await auth.supabase.rpc("exec_sql", {
+  //
+  // Service role, not the session client: EXECUTE on exec_sql is granted to
+  // service_role and postgres only, and deliberately NOT to `authenticated` —
+  // otherwise every logged-in account could mint columns on the benchmarking
+  // table. Calling it through the session client returns "permission denied for
+  // function exec_sql", which is the grant working, not a bug in it.
+  //
+  // Safe because verifyAdminAccess() above has already established this is a
+  // CSC admin, and addColumnSql refuses any name outside ^[a-z][a-z0-9_]{2,54}$.
+  const { error: ddlError } = await createAdminClient().rpc("exec_sql", {
     sql: addColumnSql(input.name, input.type),
   });
   if (ddlError) {

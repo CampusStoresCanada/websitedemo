@@ -12,12 +12,15 @@ import {
   saveFieldConfig,
   resetFieldConfig,
 } from "@/lib/actions/benchmarking-admin";
+import AddQuestion from "./AddQuestion";
 
 interface SurveyEditorProps {
   surveyId: string;
   surveyTitle: string;
   fiscalYear: number;
   initialConfig: SurveyFieldConfig;
+  /** draft / open / closed — adding a question is draft-only. */
+  surveyStatus: string;
 }
 
 export default function SurveyEditor({
@@ -25,10 +28,21 @@ export default function SurveyEditor({
   surveyTitle,
   fiscalYear,
   initialConfig,
+  surveyStatus,
 }: SurveyEditorProps) {
   const [config, setConfig] = useState<SurveyFieldConfig>(
     JSON.parse(JSON.stringify(initialConfig)),
   );
+
+  /*
+    Pending edits, compared against what was loaded.
+    Adding a question reloads the page — it has to, because the column now
+    exists and this component is holding a config that does not know about it —
+    so anything unsaved here would be thrown away. AddQuestion refuses while
+    this is true rather than discovering it afterwards.
+  */
+  const hasUnsavedChanges =
+    JSON.stringify(config) !== JSON.stringify(initialConfig);
   const [activeSectionIdx, setActiveSectionIdx] = useState(0);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{
@@ -355,6 +369,21 @@ export default function SurveyEditor({
                       isLast={fieldIdx === activeSection.fields.length - 1}
                     />
                   ))}
+              </div>
+
+              {/*
+                The only control in this editor that changes the DATABASE.
+                Everything above edits field_config and lands on Save; this mints
+                a column the moment it is submitted, so it saves itself.
+              */}
+              <div className="p-4 pt-0">
+                <AddQuestion
+                  surveyId={surveyId}
+                  sectionId={activeSection.id}
+                  sectionTitle={activeSection.title}
+                  surveyStatus={surveyStatus}
+                  hasUnsavedChanges={hasUnsavedChanges}
+                />
               </div>
             </div>
           )}

@@ -1,4 +1,7 @@
-import "server-only";
+// Deliberately NOT "server-only": everything here is pure — name validation and
+// string building — and it is the part most worth testing, since the column-name
+// regex is the only thing between the editor and arbitrary DDL inside the ADD
+// COLUMN clause. Executing the SQL stays in the server action.
 import type { FieldType, SurveyFieldConfig } from "./default-field-config";
 
 /**

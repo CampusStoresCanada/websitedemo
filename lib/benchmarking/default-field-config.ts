@@ -348,7 +348,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "In-Store Retail Sales",
           type: "currency",
           helpText:
-            "Revenue from walk-in purchases at all physical locations, for the fiscal year. Do NOT include online sales, Inclusive Access, or any course materials billed as a student fee. If your reporting gives you one combined sales figure, split it here rather than entering the total in one box.",
+            "Revenue from walk-in purchases at all physical locations, for the fiscal year. Do NOT include online sales, IA/EA, or any course materials billed as a student fee. If your reporting gives you one combined sales figure, split it here rather than entering the total in one box.",
           reviewerNote:
             "THE BIG ONE. In 2025 some stores put their whole sales figure here and others split it across this and Online, and nothing in the response told us which. Every institution had to be classified by hand, and where we guessed wrong the numbers were wrong. Does the wording now make it impossible to enter a combined total here?",
           order: 1,
@@ -360,7 +360,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Online Retail Sales",
           type: "currency",
           helpText:
-            "Revenue from your web store, for the fiscal year. Include every online order regardless of how it was fulfilled, including orders picked up in store. Do NOT include Inclusive Access or course materials billed as a student fee.",
+            "Revenue from your web store, for the fiscal year. Include every online order regardless of how it was fulfilled, including orders picked up in store. Do NOT include IA/EA or course materials billed as a student fee.",
           reviewerNote:
             "Other half of the 2025 sales-column problem. Also unclear in 2025 whether an online order collected in store counted as online or in-store — stores split both ways. Does the wording settle that?",
           order: 2,
@@ -382,14 +382,14 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         // Non-Retail Revenue group
         {
           name: "ia_revenue",
-          label: "Inclusive Access / Course-Materials-as-Fee Revenue",
+          label: "IA/EA revenue booked outside the bookstore",
           type: "currency",
           order: 4,
           visible: true,
           helpText:
-            "Revenue from course materials bundled into student fees through the registrar or a similar institutional mechanism. This is not retail: it flows through course registration, not your till. Leave blank if you do not run an Inclusive Access or equitable access programme.",
+            "Money from your Inclusive Access or Equitable Access programme that the institution collects directly — student fees, registrar billing, anything charged to the student account — where the store never handles the transaction. Leave blank if you do not run an IA/EA programme, or if all of yours runs through the store.",
           reviewerNote:
-            "This field did not exist in 2025. One college runs a $16M Inclusive Access programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages. Is this description clear enough that an IA store knows this is where their money goes, and a non-IA store knows to leave it blank?",
+            "This field did not exist in 2025. One college runs a $16M IA programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages.\\n\\nRewritten 2026-09: it used to end by pointing at the course materials breakdown, and that line was the single biggest source of confusion in review — people read the cross-reference as 'these are the same number seen twice' and either double-counted or left one blank. This question is about WHERE the money is booked. The one in Course Materials is about WHAT the programme contains. Does this stand on its own without the reader needing to hold the other one in their head?",
           group: "Non-Retail Revenue",
           indent: true,
         },
@@ -424,7 +424,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Total Revenue",
           type: "currency",
           helpText:
-            "Retail plus Inclusive Access plus other non-retail. This is the figure used for gross margin, net margin, HR percentage and every per-student and per-square-foot comparison in your report.",
+            "Retail plus IA/EA plus other non-retail. This is the figure used for gross margin, net margin, HR percentage and every per-student and per-square-foot comparison in your report.",
           order: 7,
           visible: true,
           calculated: {
@@ -439,7 +439,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Online %",
           type: "percentage",
           helpText:
-            "Online as a share of retail revenue only. Inclusive Access is excluded, so stores with and without an IA programme stay comparable.",
+            "Online as a share of retail revenue only. IA/EA is excluded, so stores with and without an IA/EA programme stay comparable.",
           order: 8,
           visible: true,
           calculated: {
@@ -765,26 +765,25 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "cm_inclusive_access_total",
-          label: "Inclusive Access (Total)",
+          label: "IA/EA — course materials value (Total)",
           type: "currency",
           helpText:
-            "The course materials value inside your Inclusive Access programme. This is the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates. Leave blank if you do not run one.",
+            "Of your Inclusive Access or Equitable Access programme, how much is course materials. Product value only: leave out anything bundled into the same charge that is not course materials — lab kits, clickers, apparel, supplies — those belong in General Merchandise. Leave blank if you do not run an IA/EA programme.",
           reviewerNote:
-            "Sits alongside the IA revenue field in Sales Revenue and the two are easy to confuse. One is the revenue stream, the other is the product mix inside it. Does the wording make them feel complementary rather than duplicated?",
+            "Rewritten 2026-09. This used to say it was 'the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAMME CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
           order: 11,
           visible: true,
-          group: "Inclusive Access",
-          note: "Captures retail-channel IA revenue. If your IA program generates non-retail revenue (e.g., course-materials-as-fee), report that in Section 2.",
+          group: "Inclusive Access / Equitable Access",
         },
         {
           name: "cm_inclusive_access_online",
-          label: "Inclusive Access (Online)",
+          label: "IA/EA — course materials value (Online)",
           type: "currency",
           helpText:
-            "The portion of the line above delivered through your web store rather than the registrar.",
+            "Of the line above, how much was delivered through your web store.",
           order: 12,
           visible: true,
-          group: "Inclusive Access",
+          group: "Inclusive Access / Equitable Access",
         },
         {
           name: "cm_course_packs_total",

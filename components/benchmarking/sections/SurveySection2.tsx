@@ -51,9 +51,9 @@ export default function SurveySection2(props: SurveySectionProps) {
         </h3>
 
         <CurrencyField
-          label="Inclusive Access / Course-Materials-as-Fee Revenue"
+          label="IA/EA revenue booked outside the bookstore"
           field="ia_revenue"
-          helpText="Revenue from IA or equitable access programs that bypasses the retail channel"
+          helpText="Money from your Inclusive Access or Equitable Access programme that the institution collects directly, where the store never handles the transaction"
           {...props}
         />
 

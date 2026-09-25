@@ -40,6 +40,7 @@ export default async function SurveyEditorPage({
       surveyTitle={survey.title}
       fiscalYear={survey.fiscal_year}
       initialConfig={fieldConfig}
+      surveyStatus={survey.status ?? "draft"}
     />
   );
 }
