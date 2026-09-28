@@ -631,24 +631,42 @@ export async function saveReminderScheduleAction(
   const audiences = formData.getAll("audience").map(String);
   const policies = formData.getAll("onNonWorkingDay").map(String);
 
+  // ⚠️ The form carries ONE phase's steps. Saving them as the whole list would
+  // delete the other phase's — two panels on one screen, each quietly wiping
+  // the other. The submitted phase is replaced and the rest is carried
+  // forward.
+  const phase: "nominations" | "ballot" =
+    formData.get("phase") === "nominations" ? "nominations" : "ballot";
+  const AUDIENCES = ["everyone", "not_yet_voted", "has_not_nominated"] as const;
+  type Audience = (typeof AUDIENCES)[number];
+  const fallback: Audience = phase === "nominations" ? "has_not_nominated" : "not_yet_voted";
+
   const steps = labels
     .map((label, i) => ({
+      phase,
       label: label.trim(),
       daysBeforeClose: Number(days[i] ?? ""),
-      audience: (audiences[i] === "everyone" ? "everyone" : "not_yet_voted") as
-        | "everyone"
-        | "not_yet_voted",
+      audience: (AUDIENCES as readonly string[]).includes(audiences[i])
+        ? (audiences[i] as Audience)
+        : fallback,
       onNonWorkingDay: (["move_earlier", "move_later", "send_anyway"].includes(policies[i])
         ? policies[i]
         : "move_earlier") as "move_earlier" | "move_later" | "send_anyway",
     }))
     .filter((s) => s.label !== "" && Number.isFinite(s.daysBeforeClose));
 
+  const { getElection } = await import("@/lib/elections/service");
+  const election = await getElection(slug);
+  if (!election) return { ok: false, error: "That election does not exist." };
+  const otherPhase = election.config.reminders.steps.filter(
+    (s) => (s.phase ?? "ballot") !== phase
+  );
+
   const { saveReminderSchedule } = await import("@/lib/elections/service");
   const result = await saveReminderSchedule(slug, {
     enabled: formData.get("enabled") === "1",
     minimumGapDays: Number(formData.get("minimumGapDays") ?? 2),
-    steps,
+    steps: [...otherPhase, ...steps],
   });
 
   if (!result.ok) return { ok: false, error: result.error };

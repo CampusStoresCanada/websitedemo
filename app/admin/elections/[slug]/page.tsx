@@ -135,6 +135,7 @@ export default async function ElectionReviewPage({
     call: "call_for_nominations",
     ballots_open: "circulate_ballots",
     ballot_reminder: "ballots_close",
+    nomination_reminder: "nominations_close",
     agm_notice: "agm_notice",
     proxy_form: "proxy_form",
     agm_package: "agm_package",
@@ -304,7 +305,14 @@ export default async function ElectionReviewPage({
   }).format(new Date());
 
   const closeReadiness = canCloseNominations(election.schedule, todayHere);
-  const reminderPlan = planReminders(election.schedule, election.config);
+  const reminderPlan = planReminders(election.schedule, election.config, "ballot");
+  // The nomination window had no reminder at all: the call refuses to send
+  // twice and the chase only reaches nominations that already exist.
+  const nominationReminderPlan = planReminders(
+    election.schedule,
+    election.config,
+    "nominations"
+  );
   const agmPackage = await getAgmPackageState(slug);
   // Only once certified — before that countElection refuses and there is no
   // "elected" to count, so asking earlier would be a query that always fails.
@@ -679,6 +687,15 @@ export default async function ElectionReviewPage({
         />
         </div>
       )}
+
+      <ReminderSchedulePanel
+        plan={nominationReminderPlan}
+        minimumGapDays={election.config.reminders.minimumGapDays}
+        save={saveReminders}
+        error={reminderError}
+        saved={Boolean(remindersSaved)}
+        outstandingCount={null}
+      />
 
       <ReminderSchedulePanel
         plan={reminderPlan}

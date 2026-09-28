@@ -12,7 +12,7 @@
  */
 import { NextRequest, NextResponse } from "next/server";
 import { ensureElectionKickoff } from "@/lib/elections/cycle";
-import { runDueBallotReminders } from "@/lib/elections/service";
+import { runDueBallotReminders, runDueNominationReminders } from "@/lib/elections/service";
 
 export const dynamic = "force-dynamic";
 
@@ -39,7 +39,19 @@ export async function GET(req: NextRequest) {
       console.error("[cron/elections-kickoff] ballot reminders failed:", err);
     }
 
-    return NextResponse.json({ ...result, reminders });
+    // Nomination reminders ride the same tick, in their own try/catch for the
+    // same reason. They can never both fire for one election: the ballot steps
+    // require status "balloting" and these require "nominating".
+    let nominationReminders: Awaited<ReturnType<typeof runDueNominationReminders>> = [];
+    try {
+      nominationReminders = await runDueNominationReminders();
+      if (nominationReminders.length > 0)
+        console.log("[cron/elections-kickoff] nomination reminders", nominationReminders);
+    } catch (err) {
+      console.error("[cron/elections-kickoff] nomination reminders failed:", err);
+    }
+
+    return NextResponse.json({ ...result, reminders, nominationReminders });
   } catch (err) {
     console.error("[cron/elections-kickoff] failed:", err);
     return NextResponse.json(

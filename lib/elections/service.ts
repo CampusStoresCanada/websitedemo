@@ -43,6 +43,7 @@ import {
   type ElectionSchedule,
 } from "./schedule";
 import { planReminders, reminderDueOn, type ReminderPlan } from "./reminders";
+import type { ReminderPhase } from "./config";
 import { buildAgmScript } from "./documents/agm-script";
 import { buildAgmPackage, type AgmPackage } from "./documents/agm-package";
 import {
@@ -74,6 +75,7 @@ import {
   notifyCosigners,
   notifyStorePermission,
   notifyNominationReady,
+  notifyNominationReminder,
   notifyNominationIncomplete,
   notifyCallForNominations,
   notifyBallotsOpen,
@@ -3061,9 +3063,14 @@ export async function saveReminderSchedule(
     },
   };
 
-  const plan = planReminders(election.schedule, candidate);
-  if (plan.problems.length > 0) {
-    return fail(`That schedule will not run: ${plan.problems.join(" ")}`);
+  // BOTH phases. planReminders filters by phase, so validating only the ballot
+  // plan would let a broken nomination step save silently — it would simply not
+  // appear in the plan being checked.
+  const plan = planReminders(election.schedule, candidate, "ballot");
+  const nominationPlan = planReminders(election.schedule, candidate, "nominations");
+  const problems = [...plan.problems, ...nominationPlan.problems];
+  if (problems.length > 0) {
+    return fail(`That schedule will not run: ${problems.join(" ")}`);
   }
 
   const { data: existing } = await db
@@ -3090,10 +3097,13 @@ export async function saveReminderSchedule(
 }
 
 /** The dated plan for this election, for the admin screen and the cron. */
-export async function getReminderPlan(slug: string): Promise<ReminderPlan | null> {
+export async function getReminderPlan(
+  slug: string,
+  phase: ReminderPhase = "ballot"
+): Promise<ReminderPlan | null> {
   const election = await getElection(slug);
   if (!election) return null;
-  return planReminders(election.schedule, election.config);
+  return planReminders(election.schedule, election.config, phase);
 }
 
 /**
@@ -3128,6 +3138,107 @@ export async function countOutstandingBallots(slug: string): Promise<number | nu
  * Idempotent within a day: the step's label and date are recorded on the
  * election config, so a cron that runs twice does not mail the electorate twice.
  */
+/**
+ * The nomination nudge due today, if any.
+ *
+ * Mirrors runDueBallotReminders deliberately — same exact-date match, same
+ * per-step send log, same refusal to catch up a missed day, because a reminder
+ * that misstates the deadline is worse than one that never went.
+ *
+ * ⛔ Runs only while an election is `nominating`. Once nominations close there
+ * is nothing left to nudge, and a step that somehow lands afterwards would be
+ * telling people to do something the software will refuse.
+ */
+export async function runDueNominationReminders(
+  onDate?: string
+): Promise<
+  { slug: string; label: string; institutions: number; sent: number; failed: number }[]
+> {
+  const db = createAdminClient();
+  const today_ = onDate ?? today();
+  const fired: {
+    slug: string;
+    label: string;
+    institutions: number;
+    sent: number;
+    failed: number;
+  }[] = [];
+
+  const { data: live } = await db.from("elections").select("slug").eq("status", "nominating");
+
+  for (const row of live ?? []) {
+    const slug = row.slug as string;
+    const election = await getElection(slug);
+    if (!election) continue;
+
+    const plan = planReminders(election.schedule, election.config, "nominations");
+    const due = reminderDueOn(plan, today_);
+    if (!due) continue;
+
+    const sentLog =
+      ((election.config as unknown as { remindersSent?: Record<string, string> })
+        .remindersSent ?? {}) as Record<string, string>;
+    const key = `${due.sendOn}:${due.label}`;
+    if (sentLog[key]) continue;
+
+    const { verdicts } = await evaluateElectionEligibility(election.id);
+    let targets = verdicts.filter((v) => v.isEligible).map((v) => v.organizationId);
+
+    if (due.audience === "has_not_nominated") {
+      // An institution has "put somebody forward" if a live nomination names
+      // one of its people. Withdrawn and declined nominations do not count —
+      // that store is back to having nobody standing, which is exactly who
+      // this step is for.
+      const { data: standing } = await db
+        .from("nominations")
+        .select("nominee_organization_id, withdrawn_at, candidate_declined_at")
+        .eq("election_id", election.id);
+      const covered = new Set(
+        (standing ?? [])
+          .filter((n) => !n.withdrawn_at && !n.candidate_declined_at)
+          .map((n) => n.nominee_organization_id as string)
+      );
+      targets = targets.filter((id) => !covered.has(id));
+    }
+
+    if (targets.length === 0) continue;
+
+    const outcomes = await notifyNominationReminder(election, targets, {
+      onlyThoseWhoHaveNotNominated: due.audience === "has_not_nominated",
+    });
+    const summary = summarizeOutcomes(outcomes);
+
+    const { data: existing } = await db
+      .from("elections")
+      .select("config")
+      .eq("id", election.id)
+      .single();
+
+    await db
+      .from("elections")
+      .update({
+        config: JSON.parse(
+          JSON.stringify({
+            ...((existing?.config as Record<string, unknown>) ?? {}),
+            remindersSent: { ...sentLog, [key]: new Date().toISOString() },
+          })
+        ) as Json,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", election.id);
+
+    fired.push({
+      slug,
+      label: due.label,
+      institutions: targets.length,
+      sent: summary.sent,
+      failed: summary.failed,
+    });
+  }
+
+  return fired;
+}
+
 export async function runDueBallotReminders(
   onDate?: string
 ): Promise<

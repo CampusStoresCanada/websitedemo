@@ -871,3 +871,55 @@ export async function notifyCandidateResults(
   }
   return results;
 }
+
+/**
+ * The nomination nudge, during the window.
+ *
+ * One template for both scheduled steps: they differ in who they address, not
+ * in what they say, so the opening line is a variable rather than a second
+ * template. That is the opposite call from the elected/not-elected pair, and
+ * for the opposite reason — those two say contradictory things to people in
+ * contradictory situations, where these two say the same thing to a wider or
+ * narrower room.
+ */
+export async function buildNominationReminder(
+  election: Election,
+  organizationIds: string[],
+  opts: { onlyThoseWhoHaveNotNominated: boolean }
+): Promise<PreparedMessages> {
+  const perOrg = await Promise.all(
+    organizationIds.map(async (orgId) => {
+      const [admins, organizationName] = await Promise.all([
+        loadMemberStaffContacts(orgId),
+        loadOrgName(orgId),
+      ]);
+      return admins.map((admin) => ({ admin, organizationName }));
+    })
+  );
+
+  return {
+    templateKey: "election_nomination_reminder",
+    recipients: perOrg.flat().map(({ admin, organizationName }) => ({
+      to: admin.email,
+      variables: {
+        contact_name: admin.name,
+        organization_name: organizationName,
+        cycle_year: election.cycleYear,
+        nominations_close: formatDate(election.schedule.nominationsCloseAt),
+        nominate_url: `${appUrl()}/elections/${election.slug}/nominate`,
+        standing_line: opts.onlyThoseWhoHaveNotNominated
+          ? `Nominations for the Campus Stores Canada Board of Directors are still open, and nobody at ${organizationName} has been put forward yet. This is a nudge rather than a last call, because there is still time to do it properly.`
+          : `Nominations for the Campus Stores Canada Board of Directors are open, and close soon. If you have already put someone forward, thank you, and you can ignore the rest of this.`,
+      },
+    })),
+  };
+}
+
+export async function notifyNominationReminder(
+  election: Election,
+  organizationIds: string[],
+  opts: { onlyThoseWhoHaveNotNominated: boolean }
+): Promise<NotifyOutcome[]> {
+  const prepared = await buildNominationReminder(election, organizationIds, opts);
+  return sendMany(prepared.templateKey, prepared.recipients);
+}

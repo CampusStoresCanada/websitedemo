@@ -26,6 +26,7 @@ import {
   buildAgmPackage,
   buildElectionResults,
   buildCandidateResults,
+  buildNominationReminder,
   type PreparedMessages,
 } from "./notify";
 
@@ -146,6 +147,10 @@ export async function getElectionMessages(
       organizationName: "[their institution]",
     },
   ];
+  const [nominationNudge] = await Promise.all([
+    buildNominationReminder(election, orgs, { onlyThoseWhoHaveNotNominated: true }),
+  ]);
+
   const [electedMsg, notElectedMsg] = await Promise.all([
     buildCandidateResults(election, { elected: standIn, notElected: [] }, "elected"),
     buildCandidateResults(election, { elected: [], notElected: standIn }, "not_elected"),
@@ -182,6 +187,12 @@ export async function getElectionMessages(
       key: "agm_package",
       stage: "Members' AGM package",
       label: "AGM package is available",
+    }),
+    describe(nominationNudge, {
+      key: "nomination_reminder",
+      stage: "Nominations close",
+      label: "Nomination reminder",
+      note: "Scheduled during the window, from the nomination reminder steps. Shown as the later step sees it, addressed to institutions that have put nobody forward.",
     }),
     describe(electedMsg, {
       key: "candidate_elected",
