@@ -21,6 +21,7 @@ import ReminderSchedulePanel from "@/components/admin/elections/ReminderSchedule
 import AgmPackagePanel from "@/components/admin/elections/AgmPackagePanel";
 import ElectionTimeline from "@/components/admin/elections/ElectionTimeline";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
+import DirectorTermsEditor from "@/components/admin/elections/DirectorTermsEditor";
 import {
   getCommitteeReview,
   getNoticeState,
@@ -307,6 +308,19 @@ export default async function ElectionReviewPage({
   const agmPackage = await getAgmPackageState(slug);
   // Only once certified — before that countElection refuses and there is no
   // "elected" to count, so asking earlier would be a query that always fails.
+  // The service history behind the term-limit check, per nominee. Loaded here
+  // rather than inside the row so the editor can render what is already on
+  // record instead of only offering to add to it.
+  const { listDirectorTerms } = await import("@/lib/elections/service");
+  const termsByNomination = Object.fromEntries(
+    await Promise.all(
+      nominations.map(async (n) => [
+        n.id,
+        await listDirectorTerms(election.bodyId, n.nomineeProfileId, n.nomineeContactId),
+      ])
+    )
+  ) as Record<string, Awaited<ReturnType<typeof listDirectorTerms>>>;
+
   const candidateOutcomes =
     election.status === "certified" ? await getCandidateOutcomes(slug) : null;
   const candidateCount = candidateOutcomes
@@ -797,6 +811,20 @@ export default async function ElectionReviewPage({
                       ))}
                     </ul>
                   )}
+
+                  {/* The one item on that list nobody could act on. The term
+                      limit refuses to guess from missing history, which is
+                      right, and until now it left a flag with nothing to
+                      press. */}
+                  <DirectorTermsEditor
+                    bodyId={election.bodyId}
+                    personContactId={n.nomineeContactId}
+                    personProfileId={n.nomineeProfileId}
+                    organizationId={n.nomineeOrganizationId}
+                    personName={n.nomineeName}
+                    terms={termsByNomination[n.id] ?? []}
+                    revalidate={`/admin/elections/${slug}`}
+                  />
 
                   {/* Permitted, and on the record for the same reason directors
                       co-signing is: most eligible institutions have a single
