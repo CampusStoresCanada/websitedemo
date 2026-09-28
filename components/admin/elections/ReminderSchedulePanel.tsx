@@ -16,6 +16,7 @@
  * exactly where the question occurs.
  */
 
+import type { ReminderPhase } from "@/lib/elections/config";
 import type { PlannedReminder, ReminderPlan } from "@/lib/elections/reminders";
 
 function longDate(iso: string): string {
@@ -67,7 +68,7 @@ function Timeline({ plan }: { plan: ReminderPlan }) {
           .map((step) => {
             const offset = Math.min(
               100,
-              Math.max(0, (daysBetween(plan.ballotsOpenAt, step.sendOn) / span) * 100)
+              Math.max(0, (daysBetween(plan.windowOpensAt, step.sendOn) / span) * 100)
             );
             return (
               <div
@@ -92,8 +93,11 @@ function Timeline({ plan }: { plan: ReminderPlan }) {
           })}
       </div>
       <div className="flex justify-between text-xs text-gray-500">
-        <span>Voting opens {shortDate(plan.ballotsOpenAt)}</span>
-        <span>Closes {shortDate(plan.ballotsCloseAt)}</span>
+        <span>
+          {plan.phase === "nominations" ? "Nominations open" : "Voting opens"}{" "}
+          {shortDate(plan.windowOpensAt)}
+        </span>
+        <span>Closes {shortDate(plan.windowClosesAt)}</span>
       </div>
     </div>
   );
@@ -104,11 +108,14 @@ function StepCard({
   index,
   windowDays,
   outstandingCount,
+  phase,
 }: {
   step: PlannedReminder | null;
   index: number;
   windowDays: number;
   outstandingCount: number | null;
+  /** Decides which audiences this step can even name. */
+  phase: ReminderPhase;
 }) {
   const isNew = step === null;
 
@@ -169,13 +176,23 @@ function StepCard({
           className="w-16 rounded-md border border-gray-300 px-2 py-1 text-sm"
         />
         <span>days before close, to</span>
+        {/* The audiences differ by phase, and offering the wrong ones is not a
+            cosmetic problem: "stores that haven't voted" during nominations
+            would silently target the entire electorate, since nobody has voted
+            yet. Each phase names only what it can mean. */}
         <select
           name="audience"
-          defaultValue={step?.audience ?? "not_yet_voted"}
+          defaultValue={
+            step?.audience ?? (phase === "nominations" ? "has_not_nominated" : "not_yet_voted")
+          }
           aria-label={`Reminder ${index + 1} audience`}
           className="rounded-md border border-gray-300 px-2 py-1 text-sm"
         >
-          <option value="not_yet_voted">stores that haven&apos;t voted</option>
+          {phase === "nominations" ? (
+            <option value="has_not_nominated">stores that haven&apos;t nominated anyone</option>
+          ) : (
+            <option value="not_yet_voted">stores that haven&apos;t voted</option>
+          )}
           <option value="everyone">every eligible store</option>
         </select>
         <span>· if that&apos;s a weekend or holiday,</span>
@@ -211,11 +228,16 @@ export default function ReminderSchedulePanel({
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
-      <h2 className="text-sm font-semibold text-gray-900">Ballot reminders</h2>
+      <h2 className="text-sm font-semibold text-gray-900">
+        {plan.phase === "nominations" ? "Nomination reminders" : "Ballot reminders"}
+      </h2>
       <p className="mt-1 text-sm text-gray-600">
-        Voting is open for {plan.windowDays} days, from {longDate(plan.ballotsOpenAt)} to{" "}
-        {longDate(plan.ballotsCloseAt)}. Reminders are counted back from the close, so they move
+        {plan.phase === "nominations" ? "Nominations are open" : "Voting is open"} for{" "}
+        {plan.windowDays} days, from {longDate(plan.windowOpensAt)} to{" "}
+        {longDate(plan.windowClosesAt)}. Reminders are counted back from the close, so they move
         with the AGM if its date changes.
+        {plan.phase === "nominations" &&
+          " A nomination needs two other institutions to co-sign before the close, so these run earlier than the ballot ones and stop sooner."}
       </p>
 
       <Timeline plan={plan} />
@@ -242,6 +264,9 @@ export default function ReminderSchedulePanel({
       )}
 
       <form action={save} className="mt-4 space-y-3">
+        {/* Tells the action which phase these steps belong to, so saving one
+            panel carries the other's steps forward instead of deleting them. */}
+        <input type="hidden" name="phase" value={plan.phase} />
         <label className="flex items-center gap-2 text-sm text-gray-800">
           <input type="checkbox" name="enabled" value="1" defaultChecked={plan.enabled} />
           Send these automatically
@@ -255,6 +280,7 @@ export default function ReminderSchedulePanel({
               index={i}
               windowDays={plan.windowDays}
               outstandingCount={outstandingCount}
+              phase={plan.phase}
             />
           ))}
           <StepCard
@@ -262,6 +288,7 @@ export default function ReminderSchedulePanel({
             index={plan.steps.length}
             windowDays={plan.windowDays}
             outstandingCount={outstandingCount}
+            phase={plan.phase}
           />
         </div>
 

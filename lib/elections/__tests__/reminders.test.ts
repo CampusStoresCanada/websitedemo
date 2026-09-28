@@ -27,8 +27,8 @@ describe("planReminders — the shipped defaults", () => {
     expect(plan.problems).toEqual([]);
     for (const step of plan.steps) {
       expect(step.problem).toBeNull();
-      expect(step.sendOn >= plan.ballotsOpenAt).toBe(true);
-      expect(step.sendOn <= plan.ballotsCloseAt).toBe(true);
+      expect(step.sendOn >= plan.windowOpensAt).toBe(true);
+      expect(step.sendOn <= plan.windowClosesAt).toBe(true);
     }
   });
 
@@ -130,9 +130,9 @@ describe("reminderDueOn", () => {
 describe("remindersPast", () => {
   it("reports the steps already behind us", () => {
     const plan = planReminders(schedule, CSC_ELECTIONS_CONFIG);
-    const past = remindersPast(plan, plan.ballotsCloseAt);
+    const past = remindersPast(plan, plan.windowClosesAt);
     expect(past.length).toBe(plan.steps.length);
-    expect(remindersPast(plan, plan.ballotsOpenAt)).toEqual([]);
+    expect(remindersPast(plan, plan.windowOpensAt)).toEqual([]);
   });
 });
 

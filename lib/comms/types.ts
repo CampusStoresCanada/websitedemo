@@ -109,6 +109,10 @@ export type TemplateKey =
   | "election_store_permission_request"
   | "election_nomination_ready"
   | "election_nomination_incomplete"
+  // The scheduled nudge during the nomination window. The call itself refuses
+  // to send twice, and the chase only reaches nominations that already exist,
+  // so without this the open window had no reminder at all.
+  | "election_nomination_reminder"
   // Balloting. The ballot is never in the email — these drive members back to
   // the site, where the session identifies them. See lib/elections/notify.ts.
   | "election_ballots_open"

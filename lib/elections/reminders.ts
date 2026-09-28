@@ -19,7 +19,12 @@
  * Pure. No database, no clock of its own.
  */
 
-import type { ElectionsConfig, NonWorkingDayPolicy, ReminderStep } from "./config";
+import type {
+  ElectionsConfig,
+  NonWorkingDayPolicy,
+  ReminderPhase,
+  ReminderStep,
+} from "./config";
 import type { ElectionSchedule } from "./schedule";
 import { isBusinessDay, nationalHolidays } from "@/lib/board/vote-schedule";
 
@@ -98,8 +103,12 @@ export interface PlannedReminder extends ReminderStep {
 
 export interface ReminderPlan {
   enabled: boolean;
-  ballotsOpenAt: string;
-  ballotsCloseAt: string;
+  /** Which deadline these steps count back from. */
+  phase: ReminderPhase;
+  /** When the phase opens — nominations open, or voting opens. */
+  windowOpensAt: string;
+  /** The deadline the steps count back from. */
+  windowClosesAt: string;
   windowDays: number;
   steps: PlannedReminder[];
   /** Problems that make the whole plan unsafe to run. */
@@ -108,28 +117,40 @@ export interface ReminderPlan {
   notes: string[];
 }
 
+/**
+ * `phase` selects both which steps are planned and which window they sit in.
+ * Steps written before phases existed carry none and are treated as ballot
+ * steps, which is what they were.
+ */
 export function planReminders(
   schedule: ElectionSchedule,
-  config: ElectionsConfig
+  config: ElectionsConfig,
+  phase: ReminderPhase = "ballot"
 ): ReminderPlan {
   const { enabled, steps, minimumGapDays } = config.reminders;
-  const windowDays = daysBetween(schedule.ballotsOpenAt, schedule.ballotsCloseAt);
+  const opensAt =
+    phase === "nominations" ? schedule.nominationsOpenAt : schedule.ballotsOpenAt;
+  const closesAt =
+    phase === "nominations" ? schedule.nominationsCloseAt : schedule.ballotsCloseAt;
+  const windowDays = daysBetween(opensAt, closesAt);
 
   const planned: PlannedReminder[] = steps
+    .filter((step) => (step.phase ?? "ballot") === phase)
     .map((step) => {
       const policy = step.onNonWorkingDay ?? "move_earlier";
-      const ideal = shiftDays(schedule.ballotsCloseAt, -step.daysBeforeClose);
+      const ideal = shiftDays(closesAt, -step.daysBeforeClose);
       const { sendOn, movedFrom } = resolveWorkingDay(ideal, policy);
       const movedBecause = movedFrom ? describeNonWorkingDay(movedFrom) : null;
       const deliberate = policy === "send_anyway" && !isWorkingDay(sendOn);
 
       let problem: string | null = null;
-      if (sendOn < schedule.ballotsOpenAt) {
+      const opensVerb = phase === "nominations" ? "nominations open" : "voting opens";
+      if (sendOn < opensAt) {
         problem =
-          `Lands ${sendOn}, before voting opens on ${schedule.ballotsOpenAt}. ` +
+          `Lands ${sendOn}, before ${opensVerb} on ${opensAt}. ` +
           `The window is only ${windowDays} days, so this step can be at most ${windowDays} days before close.`;
-      } else if (sendOn > schedule.ballotsCloseAt) {
-        problem = `Lands ${sendOn}, after voting has closed.`;
+      } else if (sendOn > closesAt) {
+        problem = `Lands ${sendOn}, after ${phase === "nominations" ? "nominations have" : "voting has"} closed.`;
       } else if (movedFrom === null && !isWorkingDay(sendOn) && policy !== "send_anyway") {
         problem = `${sendOn} is ${describeNonWorkingDay(sendOn)} and there is no working day within a week to move it to.`;
       }
@@ -137,12 +158,15 @@ export function planReminders(
       const audience =
         step.audience === "not_yet_voted"
           ? "institutions with no ballot on file"
-          : "every eligible institution";
+          : step.audience === "has_not_nominated"
+            ? "institutions that have put nobody forward"
+            : "every eligible institution";
 
+      const closeNoun = phase === "nominations" ? "nominations close" : "voting closes";
       const when =
         step.daysBeforeClose === 0
-          ? "the day voting closes"
-          : `${step.daysBeforeClose} day${step.daysBeforeClose === 1 ? "" : "s"} before voting closes`;
+          ? `the day ${closeNoun}`
+          : `${step.daysBeforeClose} day${step.daysBeforeClose === 1 ? "" : "s"} before ${closeNoun}`;
 
       return {
         ...step,
@@ -196,8 +220,9 @@ export function planReminders(
 
   return {
     enabled,
-    ballotsOpenAt: schedule.ballotsOpenAt,
-    ballotsCloseAt: schedule.ballotsCloseAt,
+    phase,
+    windowOpensAt: opensAt,
+    windowClosesAt: closesAt,
     windowDays,
     steps: planned,
     problems,

@@ -43,12 +43,27 @@ export type TieResolution =
  */
 export type NonWorkingDayPolicy = "move_earlier" | "move_later" | "send_anyway";
 
+export type ReminderPhase = "nominations" | "ballot";
+
 export interface ReminderStep {
-  /** Days before ballots close. 0 is the closing day itself. */
+  /**
+   * Which deadline this step counts back from.
+   *
+   * Nominations and the ballot are different problems, not the same one twice.
+   * Voting is ONE person doing ONE thing, so a nudge the day before close is
+   * useful. A nomination needs four parties — the nominee accepts, their store
+   * permits it, and two other institutions co-sign — so a last-day reminder
+   * arrives too late to be acted on and reads as a taunt. Keep the nomination
+   * series earlier and shorter.
+   *
+   * Defaults to "ballot", which is what every step meant before this existed.
+   */
+  phase?: ReminderPhase;
+  /** Days before the phase's close. 0 is the closing day itself. */
   daysBeforeClose: number;
   /** Shown to the admin, and used in the send log. */
   label: string;
-  audience: "not_yet_voted" | "everyone";
+  audience: "not_yet_voted" | "everyone" | "has_not_nominated";
   /**
    * What to do when the computed date is a weekend or a national holiday.
    *
@@ -303,9 +318,22 @@ export const CSC_ELECTIONS_CONFIG: ElectionsConfig = {
   reminders: {
     enabled: true,
     steps: [
-      { daysBeforeClose: 12, label: "Halfway nudge", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
-      { daysBeforeClose: 5, label: "Final week", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
-      { daysBeforeClose: 1, label: "Last chance", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+      // Nominations. Two steps, not three, and the last one ten days out —
+      // a nomination needs two other institutions to act before the close, so
+      // there is no honest "last chance tomorrow" for it.
+      //
+      // ⚠️ Ten rather than the obvious fourteen because of where fourteen
+      // lands: in 2027 the close is 2026-10-23, and fourteen days before is
+      // Friday 2026-10-09, immediately ahead of Thanksgiving on the Monday.
+      // That Friday IS a working day, so the weekend rule does not fire and
+      // the plan looks clean while campus stores read it the following
+      // Tuesday. Ten days lands on that Tuesday deliberately.
+      { phase: "nominations", daysBeforeClose: 21, label: "Nominations are open", audience: "everyone", onNonWorkingDay: "move_earlier" },
+      { phase: "nominations", daysBeforeClose: 10, label: "Two weeks to nominate", audience: "has_not_nominated", onNonWorkingDay: "move_earlier" },
+      // The ballot. One person, one click, so a final-day nudge is fair.
+      { phase: "ballot", daysBeforeClose: 12, label: "Halfway nudge", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+      { phase: "ballot", daysBeforeClose: 5, label: "Final week", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
+      { phase: "ballot", daysBeforeClose: 1, label: "Last chance", audience: "not_yet_voted", onNonWorkingDay: "move_earlier" },
     ],
     minimumGapDays: 2,
   },
