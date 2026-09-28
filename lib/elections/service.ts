@@ -346,6 +346,57 @@ export async function isOrganizationEligible(
  * vacancy) are excluded — that exclusion is a recorded judgement, not something
  * inferred from the dates.
  */
+export interface DirectorTerm {
+  id: string;
+  termStart: string;
+  /** EXCLUSIVE. A term running through 2027 ends 2028-01-01, not 2027-12-31. */
+  termEnd: string | null;
+  countsTowardCap: boolean;
+  organizationName: string | null;
+  notes: string | null;
+  /**
+   * The "checked, never served" marker: a zero-length row that makes an absence
+   * of service explicit. Without it, no history and no service are the same
+   * thing to a reader, and every first-time nominee stays unverifiable forever.
+   */
+  isNoServiceMarker: boolean;
+}
+
+/** Every recorded director term for one person on one body, oldest first. */
+export async function listDirectorTerms(
+  bodyId: string,
+  personProfileId: string | null,
+  personContactId: string | null
+): Promise<DirectorTerm[]> {
+  if (!personProfileId && !personContactId) return [];
+  const db = createAdminClient();
+
+  let query = db
+    .from("governance_role_assignments")
+    .select("id, term_start, term_end, counts_toward_cap, notes, organizations(name)")
+    .eq("body_id", bodyId)
+    .eq("role_key", "director");
+
+  query = personProfileId
+    ? query.eq("person_profile_id", personProfileId)
+    : query.eq("person_contact_id", personContactId!);
+
+  const { data } = await query.order("term_start", { ascending: true });
+  return (data ?? []).map((row) => {
+    const org = row.organizations as { name?: string } | null;
+    return {
+      id: row.id as string,
+      termStart: row.term_start as string,
+      termEnd: (row.term_end as string) ?? null,
+      countsTowardCap: row.counts_toward_cap as boolean,
+      organizationName: org?.name ?? null,
+      notes: (row.notes as string) ?? null,
+      isNoServiceMarker:
+        !row.counts_toward_cap && !!row.term_end && row.term_end === row.term_start,
+    };
+  });
+}
+
 export async function countConsecutiveTerms(
   bodyId: string,
   personProfileId: string | null,
