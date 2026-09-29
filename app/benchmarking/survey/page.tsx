@@ -380,6 +380,12 @@ export default async function BenchmarkingSurveyPage({
             ? `/benchmarking/survey?start=1&org=${organization.id}`
             : "/benchmarking/survey?start=1"
         }
+        // Same store, or staff print one store's worksheet while filling another's.
+        worksheetHref={
+          isActingAsOther
+            ? `/benchmarking/worksheet?org=${organization.id}`
+            : "/benchmarking/worksheet"
+        }
       />
     );
   }

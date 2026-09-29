@@ -4,6 +4,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { buildWorksheet, type PriorRow } from "@/lib/benchmarking/worksheet";
 import WorksheetSheet from "@/components/benchmarking/WorksheetSheet";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
+import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
 
 export const metadata = {
   title: "Benchmarking worksheet | Campus Stores Canada",
@@ -23,7 +25,12 @@ export const metadata = {
  * the survey: you see your store, and an admin previewing sees whichever store
  * they resolve to. Never anyone else's.
  */
-export default async function BenchmarkingWorksheetPage() {
+export default async function BenchmarkingWorksheetPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ org?: string }>;
+}) {
+  const params = await searchParams;
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect("/login");
 
@@ -37,28 +44,8 @@ export default async function BenchmarkingWorksheetPage() {
     .eq("user_id", userId)
     .eq("status", "active")) as { data: any[] | null };
 
-  // Same ordering as the survey page: a person can hold roles at more than one
-  // store, and they must land on the same one here as they do there — a
-  // worksheet for a different store than the form is worse than no worksheet.
-  const memberOrgLink = (userOrgs ?? [])
-    .filter((uo) => {
-      const org = uo.organization as { type?: string } | null;
-      return org?.type === "Member" && (uo.role === "org_admin" || isAdmin);
-    })
-    .sort((a, b) => {
-      const adminFirst = Number(b.role === "org_admin") - Number(a.role === "org_admin");
-      if (adminFirst !== 0) return adminFirst;
-      const an = (a.organization as { name?: string } | null)?.name ?? "";
-      const bn = (b.organization as { name?: string } | null)?.name ?? "";
-      return an.localeCompare(bn);
-    })[0];
-
-  const organization = memberOrgLink?.organization as { id: string; name: string } | null;
-  if (!organization) redirect("/benchmarking");
-
   // Read with the service role behind the guard above: the worksheet needs the
-  // newest survey regardless of status, including `draft`, which is exactly
-  // what a session client is not allowed to see.
+  // newest survey regardless of status, including `draft`.
   const db = createAdminClient();
 
   const { data: survey } = await db
@@ -69,6 +56,46 @@ export default async function BenchmarkingWorksheetPage() {
     .maybeSingle();
 
   if (!survey) redirect("/benchmarking");
+
+  /*
+    Same store the survey resolves to, by the same function.
+
+    This page used to resolve the org itself, with the filter that put `isAdmin`
+    on the role clause instead of the attachment one — so a CSC staffer, who is
+    linked to the Staff org, resolved to nothing and was bounced to the landing
+    page. Clicking "gather on paper first" from the survey did nothing at all.
+  */
+  const { organization, adminOrgOptions, isActingAsOther } = await resolveActingOrg({
+    userOrgs: userOrgs ?? [],
+    isAdmin,
+    requestedOrgId: params?.org ?? null,
+    surveyId: survey.id,
+  });
+
+  if (!organization) {
+    if (isAdmin && adminOrgOptions.length > 0) {
+      return (
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <h1 className="text-2xl font-bold text-gray-900">Gathering worksheet</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Pick the store whose worksheet you want. It carries that store&apos;s own
+            figures from previous years, so it is only useful once you have chosen one.
+          </p>
+          <div className="mt-5">
+            <AdminOrgSwitcher
+              orgs={adminOrgOptions}
+              selectedOrgId={null}
+              basePath="/benchmarking/worksheet"
+              label="print the worksheet for"
+            />
+          </div>
+        </div>
+      );
+    }
+    redirect("/benchmarking");
+  }
+
+  // (survey already loaded above)
 
   // Every prior year we hold for THIS store. Scoped by organization_id, never
   // by anything the reader supplies.

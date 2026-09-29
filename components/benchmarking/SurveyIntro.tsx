@@ -39,6 +39,7 @@ export default function SurveyIntro({
   closesOn,
   chairNote,
   onBeginHref,
+  worksheetHref,
   termsAcknowledged,
   readOnlyMessage,
 }: {
@@ -51,6 +52,8 @@ export default function SurveyIntro({
   /** Editable by the benchmarking committee chair via site_content. */
   chairNote: { title: string | null; body: string | null } | null;
   onBeginHref: string;
+  /** Worksheet for the SAME store, carrying ?org= when staff are acting. */
+  worksheetHref: string;
   /** Has the respondent confirmed they understand the ladder? */
   termsAcknowledged: boolean;
   /**
@@ -229,6 +232,7 @@ export default function SurveyIntro({
         benchmarkingId={benchmarkingId}
         initialAcknowledged={termsAcknowledged}
         startHref={onBeginHref}
+        worksheetHref={worksheetHref}
         disabledMessage={readOnlyMessage ?? null}
       />
 

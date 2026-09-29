@@ -20,11 +20,15 @@ export default function TermsAcknowledgement({
   benchmarkingId,
   initialAcknowledged,
   startHref,
+  worksheetHref,
   disabledMessage,
 }: {
   benchmarkingId: string;
   initialAcknowledged: boolean;
   startHref: string;
+  /** Carries ?org= when staff are acting as a store, so the worksheet
+   *  resolves to the SAME store the form does. */
+  worksheetHref: string;
   /** Set when the year is sealed — the control is a statement, not a choice. */
   disabledMessage?: string | null;
 }) {
@@ -90,8 +94,13 @@ export default function TermsAcknowledgement({
             Start the survey
           </span>
         )}
-        <Link href="/benchmarking/worksheet" className="text-sm text-gray-600 underline">
-          Print a blank copy to gather on paper first
+        <Link href={worksheetHref} className="text-sm text-gray-600 underline">
+          {/*
+            Not "blank". It carries your own figures from previous years, which
+            is the whole reason it is worth printing — you are checking what
+            changed, not transcribing from nothing.
+          */}
+          Print a worksheet with your previous figures
         </Link>
       </div>
     </div>
