@@ -412,7 +412,20 @@ export function NumberField({
       }
       onFieldChange(field, num);
     }
-  }, [field, localValue, onFieldChange, isPercentageField]);
+    /*
+      ⛔ carried and touched MUST be in here.
+
+      Without them this callback closes over the values it had on first render —
+      carried:true, touched:false — so the guard at the top returned on every
+      blur and a carried figure could never be overwritten. The box showed the
+      new number, the form said "Last saved", and nothing was written.
+
+      It cost a real walk to find: filling the Square Footage Breakdown wrote
+      only "Other", which was the one field Camosun had left blank last year and
+      therefore the only one not carried. CurrencyField had the deps right; this
+      one did not, which is why the money fields looked fine.
+    */
+  }, [field, localValue, onFieldChange, isPercentageField, carried, touched]);
 
   // Handle the percentage ambiguity resolution
   const resolvePercentAmbiguity = useCallback(

@@ -262,18 +262,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 6,
           visible: true,
         },
-        {
-          name: "total_square_footage",
-          label: "Total Store Space",
-          type: "number",
-          helpText:
-            "Every square foot your store occupies, across all locations: selling floor, stockrooms, receiving, offices, off-site storage you pay for. Everything. Break it apart below, and the parts should add up to this number.",
-          reviewerNote:
-            "In 2025 the parts did not always add up to the whole, and we could not tell whether storage and office were meant to be inside this number. Is it clear now?",
-          order: 7,
-          visible: true,
-          suffix: "sq ft",
-        },
+
         {
           name: "operations_mandate",
           label: "Operating Mandate",
@@ -365,6 +354,17 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           suffix: "sq ft",
           group: "Square Footage Breakdown",
           indent: true,
+        },
+        {
+          name: "total_square_footage",
+          label: "Total Store Space",
+          type: "number",
+          helpText:
+            "Everything above, added up. We work it out from your breakdown rather than asking twice — asking for both is how a total and its parts end up disagreeing.",
+          order: 15,
+          visible: true,
+          group: "Square Footage Breakdown",
+          calculated: { formula: "total_square_footage", format: "number" },
         },
       ],
     },
@@ -1530,6 +1530,19 @@ export function evaluateFormula(
     typeof formData[field] === "number" ? (formData[field] as number) : 0;
 
   switch (formulaName) {
+    /*
+      Total store space is the sum of its parts, not a fifth number to type.
+
+      It was asked AND broken down, which invites the two to disagree — and the
+      old help text made that certain by saying "do not include office and
+      storage" above a breakdown containing office and storage. Now the parts
+      are the question and this is the arithmetic.
+    */
+    case "total_square_footage":
+      return (
+        num("sqft_salesfloor") + num("sqft_storage") + num("sqft_office") + num("sqft_other")
+      );
+
     case "total_retail_revenue":
       return num("total_gross_sales_instore") + num("total_online_sales");
 

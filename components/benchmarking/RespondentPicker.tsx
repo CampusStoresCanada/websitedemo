@@ -168,7 +168,7 @@ export default function RespondentPicker({
             type="checkbox"
             className="mt-0.5"
             checked={grantAccess}
-            disabled={isReadOnly || saving || !chosen?.hasLogin}
+            disabled={isReadOnly || saving}
             onChange={(e) => {
               setGrantAccess(e.target.checked);
               void save({ grant: e.target.checked });
@@ -176,18 +176,12 @@ export default function RespondentPicker({
           />
           <span className="text-sm text-gray-800">
             Let them sign in and complete this survey
-            {!chosen?.hasLogin && (
-              <span className="block text-xs text-gray-500">
-                {chosen?.name} does not have a login yet, so there is nothing to give
-                access to. Ask CSC to set one up.
-              </span>
-            )}
-            {chosen?.hasLogin && (
-              <span className="block text-xs text-gray-500">
-                This survey only. It does not let them manage your store&apos;s users,
-                billing or listing.
-              </span>
-            )}
+            <span className="block text-xs text-gray-500">
+              This survey only. It does not let them manage your store&apos;s users,
+              billing or listing.
+              {!chosen?.hasLogin &&
+                ` ${chosen?.name ?? "They"} has no login yet, so we will send them one.`}
+            </span>
           </span>
         </label>
       )}

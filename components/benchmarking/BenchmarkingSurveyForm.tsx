@@ -89,7 +89,19 @@ export default function BenchmarkingSurveyForm({
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  /*
+    One pending save PER FIELD, not one for the whole form.
+
+    This was a single shared timeout, cleared on every change — so a second
+    field edited within the 800ms window cancelled the first field's save
+    outright. Filling in the Square Footage Breakdown by tabbing wrote only the
+    last box; the other three looked saved on screen, said "Last saved", and
+    were never sent. Found by typing four numbers and reading the row back.
+
+    Keyed by field name, so each debounces against itself and none of them can
+    cancel another.
+  */
+  const saveTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
   const isSubmitted = formData.status === "submitted";
   const isReadOnly = isSubmitted;
@@ -102,13 +114,13 @@ export default function BenchmarkingSurveyForm({
 
       if (isReadOnly) return;
 
-      // Debounce the save
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
+      // Debounce this field against itself.
+      const pending = saveTimersRef.current.get(field);
+      if (pending) clearTimeout(pending);
 
       setSaveStatus("saving");
-      saveTimeoutRef.current = setTimeout(async () => {
+      const timer = setTimeout(async () => {
+        saveTimersRef.current.delete(field);
         const result = await saveBenchmarkingField(benchmarkingId, field, value);
         if (result.success) {
           setSaveStatus("saved");
@@ -129,6 +141,7 @@ export default function BenchmarkingSurveyForm({
           setTimeout(() => setSaveError(null), 8000);
         }
       }, 800);
+      saveTimersRef.current.set(field, timer);
     },
     [benchmarkingId, isReadOnly]
   );
@@ -221,12 +234,12 @@ export default function BenchmarkingSurveyForm({
     setIsSubmitting(false);
   };
 
-  // Cleanup timeout on unmount
+  // Cleanup every pending save on unmount.
   useEffect(() => {
+    const timers = saveTimersRef.current;
     return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
+      for (const t of timers.values()) clearTimeout(t);
+      timers.clear();
     };
   }, []);
 

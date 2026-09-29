@@ -173,6 +173,41 @@ export async function setRespondent(input: {
 
   if (!contactId) return { success: false, error: "Pick a person, or add a new one." };
 
+  /*
+    Giving access to someone with no login means making them one.
+
+    A contact is a record of a person; it is not an account. Before this, adding
+    a colleague and ticking "let them complete this survey" produced a contact
+    who could not sign in, and the checkbox disabled itself with "ask CSC to set
+    one up" — a dead end at exactly the moment the store was trying to delegate.
+
+    inviteExistingContact() already does this properly (it provisions through
+    provisionOrgLogin and respects the org's login policy), so it is called
+    rather than reimplemented. Role "member", never org_admin: the delegation
+    that matters is the one below, scoped to this submission.
+  */
+  if (input.grantAccess) {
+    const { data: needsLogin } = await db
+      .from("contacts")
+      .select("profile_id")
+      .eq("id", contactId)
+      .maybeSingle();
+
+    if (needsLogin && !needsLogin.profile_id) {
+      const { inviteExistingContact } = await import("@/lib/actions/user-management");
+      const invited = await inviteExistingContact(
+        row.organization_id as string,
+        contactId,
+        "member",
+      );
+      if (!invited.success) {
+        // The contact and the respondent record are still worth keeping — say
+        // what failed rather than losing the rest of the change.
+        console.warn("[benchmarking] could not provision login:", invited.error);
+      }
+    }
+  }
+
   const { data: contact } = await db
     .from("contacts")
     .select("id, name, first_name, last_name, email, work_email, role_title, phone, work_phone_number, profile_id")
