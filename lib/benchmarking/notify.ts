@@ -135,7 +135,7 @@ interface RecipientRow {
   is_beta: boolean;
   invited_at: string | null;
   reminder_count: number;
-  organizations: { name: string } | null;
+  organizations: { name: string; is_test?: boolean | null } | null;
   contacts: { name: string | null; first_name: string | null; email: string | null; work_email: string | null } | null;
 }
 
@@ -177,7 +177,7 @@ async function loadRecipients(
   let q = db
     .from("benchmarking_recipients")
     .select(
-      "id, organization_id, contact_id, is_beta, invited_at, reminder_count, organizations(name), contacts(name, first_name, email, work_email)",
+      "id, organization_id, contact_id, is_beta, invited_at, reminder_count, organizations(name, is_test), contacts(name, first_name, email, work_email)",
     )
     .eq("survey_id", surveyId);
 
@@ -185,7 +185,20 @@ async function loadRecipients(
   if (filter.uninvitedOnly) q = q.is("invited_at", null);
 
   const { data } = await q;
-  return (data as unknown as RecipientRow[]) ?? [];
+  const rows = (data as unknown as RecipientRow[]) ?? [];
+
+  /*
+    Test organisations are on the recipient list so they can be picked and
+    filed — walking the real survey end to end is the only way to check the
+    wrappings, the wording and the buttons, and doing it against a real member
+    store puts a receipt in a real person's inbox and their FTE through the
+    pricing sync.
+
+    They must never be MAILED, though, and that is enforced here rather than at
+    each call site: this function feeds the invitation, every reminder, the
+    closing notice and the submission receipt. One filter covers all of them.
+  */
+  return rows.filter((r) => r.organizations?.is_test !== true);
 }
 
 /** Organization ids that have already filed for this fiscal year. */

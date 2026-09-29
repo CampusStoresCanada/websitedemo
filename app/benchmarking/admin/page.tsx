@@ -28,11 +28,42 @@ export default async function BenchmarkingAdminPage() {
   let responseRate = { totalMemberOrgs: 0, drafts: 0, submitted: 0, verified: 0 };
 
   if (latestSurvey) {
-    // Count active member orgs
-    const { count: totalOrgs } = await supabase
-      .from("organizations")
-      .select("id", { count: "exact", head: true })
-      .eq("type", "Member");
+    /*
+      The denominator is who we ASKED, not every row that has ever been a
+      member.
+
+      This counted `type = "Member"` and nothing else: 81 organisations, of which
+      25 are cancelled, one is archived and one is a test org. A response rate
+      against 81 is not a low response rate, it is a wrong one — and it made the
+      board report look like a failure before a single store had been invited.
+
+      benchmarking_recipients is the list CSC built and sent to, 52 for FY2026:
+      48 active plus 4 in grace, who are members mid-renewal and were invited
+      like everyone else. Test orgs sit on that list so staff can walk the real
+      survey, so they come out of the count here.
+
+      Falls back to paid-up member orgs only when the recipient list has not
+      been built yet — between creating a survey and inviting anyone, there is
+      genuinely no better answer than "the stores we would invite".
+    */
+    const { count: invitedCount } = await supabase
+      .from("benchmarking_recipients")
+      .select("id, organizations!inner(is_test)", { count: "exact", head: true })
+      .eq("survey_id", latestSurvey.id)
+      .not("organizations.is_test", "is", true);
+
+    let totalOrgs = invitedCount ?? 0;
+
+    if (totalOrgs === 0) {
+      const { count: eligible } = await supabase
+        .from("organizations")
+        .select("id", { count: "exact", head: true })
+        .eq("type", "Member")
+        .in("membership_status", ["active", "grace"])
+        .is("archived_at", null)
+        .not("is_test", "is", true);
+      totalOrgs = eligible ?? 0;
+    }
 
     // Count submissions by status for this fiscal year
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
