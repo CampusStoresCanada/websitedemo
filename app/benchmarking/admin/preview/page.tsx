@@ -1,28 +1,65 @@
-import { createClient } from "@/lib/supabase/server";
-import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
-import SurveyPreview from "@/components/benchmarking/admin/SurveyPreview";
+import { redirect } from "next/navigation";
+import { createAdminClient } from "@/lib/supabase/admin";
 
+export const metadata = { title: "Preview Survey | Benchmarking Admin" };
+
+/**
+ * "Preview the survey" means opening the survey.
+ *
+ * This used to render SurveyPreview — a third rendering of the questions that
+ * was neither the editor nor the form. It read the field config and drew its
+ * own approximation with a "Fill Sample Data" button, so it could show you the
+ * questions existed but not whether the thing WORKS: not the title page, not
+ * the consent, not carried values, not saving, not the deadline, not a single
+ * real control. A preview that cannot be wrong about the survey is not telling
+ * you anything about the survey.
+ *
+ * So it is gone, and this redirects into the real one as the test store. Every
+ * count on the dashboard excludes test orgs and loadRecipients() refuses to
+ * mail them, so the genuine article can be walked end to end without putting a
+ * draft against a member store or a receipt in anyone's inbox.
+ */
 export default async function PreviewPage() {
-  const supabase = await createClient();
+  const db = createAdminClient();
 
-  // Get the latest survey's field_config for preview
-  const { data: latestSurvey } = await supabase
-    .from("benchmarking_surveys")
-    .select("*")
-    .order("fiscal_year", { ascending: false })
+  const { data: testOrg } = await db
+    .from("organizations")
+    .select("id")
+    .eq("type", "Member")
+    .eq("is_test", true)
+    .is("archived_at", null)
+    .order("name")
     .limit(1)
-    .single();
+    .maybeSingle();
 
-  const fieldConfig = latestSurvey ? getFieldConfig(latestSurvey) : null;
+  if (!testOrg) {
+    // No test store configured. The picker is the next best thing — it at least
+    // lands on the real survey rather than an imitation of it.
+    redirect("/benchmarking/survey");
+  }
 
-  return (
-    <div>
-      <h1 className="text-2xl font-bold text-gray-900 mb-2">Survey Preview</h1>
-      <p className="text-sm text-gray-500 mb-6">
-        Preview all sections and their questions. Use &ldquo;Fill Sample Data&rdquo; to see
-        realistic values.
-      </p>
-      <SurveyPreview fieldConfig={fieldConfig} />
-    </div>
-  );
+  /*
+    Start the walk at the beginning.
+
+    The title page shows until the store has made its disclosure choice, which
+    is right for a member and wrong for a preview: tick the acknowledgement once
+    and the intro, the consent and the results ladder are invisible from then
+    on, which are exactly the parts most worth previewing.
+
+    Clearing the two consent stamps is enough to bring it back, and it leaves
+    any figures already typed alone. Test store only — this would be tampering
+    with a submission anywhere else.
+  */
+  await db
+    .from("benchmarking")
+    .update({
+      disclosure_level_set_at: null,
+      disclosure_level_set_by: null,
+      terms_acknowledged_at: null,
+      terms_acknowledged_by: null,
+    })
+    .eq("organization_id", testOrg.id)
+    .eq("status", "draft");
+
+  redirect(`/benchmarking/survey?org=${testOrg.id}`);
 }

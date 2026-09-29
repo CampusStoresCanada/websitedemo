@@ -190,9 +190,10 @@ export default async function BenchmarkingAdminPage() {
                   className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
                 >
                   <span className="text-sm font-medium text-gray-700">
-                    Preview Survey
+                    Walk the survey
                   </span>
-                  <span className="text-xs text-gray-400">8 sections</span>
+                  {/* Says what it does now: the real form, as the test store. */}
+                  <span className="text-xs text-gray-400">as the test store</span>
                 </Link>
               </div>
             </div>
