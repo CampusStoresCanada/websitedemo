@@ -126,15 +126,19 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
       title: "Institution Profile",
       order: 1,
       fields: [
-        // Ordered 0.x so they lead the section: a reviewer's first question in
-        // November is "who do I ring about this", and it should be the first
-        // thing the store tells us, not the last.
+        /*
+          visible:false — these four are now driven by RespondentPicker, which
+          renders above the section. They stay in the config and in
+          FIELD_REGISTRY because they are still the RECORD of who was named at
+          the time, written by setRespondent() and read by reviewers in
+          November. What changed is that nobody retypes them.
+        */
         {
           name: "respondent_name",
           label: "Who compiled these figures",
           type: "text",
           order: 0.1,
-          visible: true,
+          visible: false,
           required: true,
           group: "Who to contact about this submission",
           helpText:
@@ -145,7 +149,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Their job title",
           type: "text",
           order: 0.2,
-          visible: true,
+          visible: false,
           group: "Who to contact about this submission",
           helpText: "How they would introduce themselves. It tells a reviewer whether to ask about the POS export or the P&L.",
         },
@@ -154,7 +158,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Their email",
           type: "text",
           order: 0.3,
-          visible: true,
+          visible: false,
           required: true,
           group: "Who to contact about this submission",
           helpText: "Where a question about these figures should go.",
@@ -164,7 +168,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Their phone",
           type: "text",
           order: 0.4,
-          visible: true,
+          visible: false,
           group: "Who to contact about this submission",
           helpText:
             "Most flags are settled in a two-minute call rather than a thread. A direct line or extension saves a reviewer going through the switchboard.",

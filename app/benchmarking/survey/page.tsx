@@ -121,6 +121,7 @@ export default async function BenchmarkingSurveyPage({
   const acting = await resolveActingOrg({
     userOrgs: userOrgs ?? [],
     isAdmin,
+    viewerProfileId: userId,
     requestedOrgId,
     surveyId: activeSurvey.id,
     pinToTestStore: isPreview,
@@ -235,6 +236,10 @@ export default async function BenchmarkingSurveyPage({
 
   // The config that renders the form, and that the intro measures its counts from.
   const fieldConfig = getFieldConfig(activeSurvey);
+
+  // The store's known people, for the "who is filling this in" picker.
+  const { loadStoreContacts } = await import("@/lib/actions/benchmarking-respondent");
+  const { contacts: storeContacts } = await loadStoreContacts(organization.id);
 
   // 6. Fetch prior year data (for reference values and delta flags)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -364,6 +369,7 @@ export default async function BenchmarkingSurveyPage({
         deltaFlags={deltaFlags ?? []}
         surveyClosesAt={activeSurvey.closes_at}
         fieldConfig={fieldConfig}
+        storeContacts={storeContacts}
       />
 
       {/* Anything a reviewer has written about this store, awaiting their yes. */}

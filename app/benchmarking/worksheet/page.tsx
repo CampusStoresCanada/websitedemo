@@ -68,6 +68,7 @@ export default async function BenchmarkingWorksheetPage({
   const { organization, adminOrgOptions, isActingAsOther } = await resolveActingOrg({
     userOrgs: userOrgs ?? [],
     isAdmin,
+    viewerProfileId: userId,
     requestedOrgId: params?.org ?? null,
     surveyId: survey.id,
     // Printing the worksheet from a pinned preview stays on the test store.

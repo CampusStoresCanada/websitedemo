@@ -52,6 +52,8 @@ export async function resolveActingOrg(input: {
   isAdmin: boolean;
   requestedOrgId: string | null;
   surveyId: string | null;
+  /** The signed-in user, so a delegated respondent can be let in. */
+  viewerProfileId?: string | null;
   /**
    * Preview mode: pin to the test store and ignore ?org= entirely.
    *
@@ -116,7 +118,38 @@ export async function resolveActingOrg(input: {
       })[0]?.organization as ActingOrg | undefined) ?? null;
 
   if (!isAdmin) {
-    return { organization: ownOrg, adminOrgOptions: [], isActingAsOther: false };
+    if (ownOrg) {
+      return { organization: ownOrg, adminOrgOptions: [], isActingAsOther: false };
+    }
+
+    /*
+      Delegated: the store admin handed this survey to a colleague and ticked
+      "give them access". They are not an org_admin — deliberately, because
+      filling in one survey should not carry the right to manage the store's
+      users and billing forever — so nothing above resolves a store for them.
+
+      Scoped to the submission that names them, and only while it is open.
+    */
+    if (input.viewerProfileId) {
+      const db = createAdminClient();
+      const { data: delegated } = await db
+        .from("benchmarking")
+        .select("organization:organizations(id, name, slug, type, province)")
+        .eq("respondent_delegate_profile_id", input.viewerProfileId)
+        .neq("status", "submitted")
+        .order("fiscal_year", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+
+      const org = (delegated as { organization?: unknown } | null)?.organization as
+        | ActingOrg
+        | null;
+      if (org) {
+        return { organization: org, adminOrgOptions: [], isActingAsOther: false };
+      }
+    }
+
+    return { organization: null, adminOrgOptions: [], isActingAsOther: false };
   }
 
   const db = createAdminClient();
