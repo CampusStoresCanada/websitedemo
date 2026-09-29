@@ -15,6 +15,9 @@ function row(id: string, over: Partial<BenchmarkingRow> = {}): BenchmarkingRow {
     total_online_sales: 0,
     enrollment_fte: 10_000,
     total_square_footage: 5_000,
+    // sales per square foot divides by the SELLING floor, not the whole
+    // footprint — total_square_footage now means everything the store occupies.
+    sqft_salesfloor: 4_000,
     fulltime_employees: 10,
     ...over,
   };
@@ -216,7 +219,7 @@ describe("missing inputs", () => {
       row("me"),
       row("b"),
       row("c"),
-      row("d", { total_square_footage: null }),
+      row("d", { sqft_salesfloor: null }),
     ];
     const cut = buildCut({
       key: "type",

@@ -263,7 +263,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Total Store Space",
           type: "number",
           helpText:
-            "Retail floor space across all locations combined. If you break it down below, the parts should add up to this number.",
+            "Every square foot your store occupies, across all locations: selling floor, stockrooms, receiving, offices, off-site storage you pay for. Everything. Break it apart below, and the parts should add up to this number.",
           reviewerNote:
             "In 2025 the parts did not always add up to the whole, and we could not tell whether storage and office were meant to be inside this number. Is it clear now?",
           order: 7,
@@ -292,13 +292,27 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           visible: true,
         },
         {
-          name: "fiscal_year_end_date",
-          label: "Fiscal Year End Date",
-          type: "text",
+          name: "fiscal_year_end_month",
+          label: "Fiscal Year End — Month",
+          type: "select",
+          helpText:
+            "The month your fiscal year closes. Asked as two lists rather than a text box, because free text gives us \"Apr 30\", \"04/30\" and \"April 30th\" for the same date — and pairing consecutive year-ends is exactly what inventory turns and GMROI depend on.",
           order: 10,
           visible: true,
-          placeholder: "MM/DD (e.g., 03/31)",
-          helpText: "Month and day your fiscal year ends",
+          options: [
+            "January", "February", "March", "April", "May", "June",
+            "July", "August", "September", "October", "November", "December",
+          ],
+        },
+        {
+          name: "fiscal_year_end_day",
+          label: "Fiscal Year End — Day",
+          type: "select",
+          helpText: "The day of that month.",
+          order: 10.1,
+          visible: true,
+          indent: true,
+          options: Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")),
         },
         // Square Footage Breakdown group
         {
@@ -341,7 +355,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Other",
           type: "number",
           helpText:
-            "Anything not covered above. Sales floor, storage, office and other should total your overall store space.",
+            "Anything not covered above. Sales floor, storage, office and other should add up to Total Store Space.",
           order: 14,
           visible: true,
           suffix: "sq ft",

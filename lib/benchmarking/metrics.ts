@@ -42,6 +42,8 @@ export interface MetricSourceRow {
   expense_hr?: unknown;
   enrollment_fte?: unknown;
   total_square_footage?: unknown;
+  /** The selling floor. sales_per_sqft divides by THIS, not the total. */
+  sqft_salesfloor?: unknown;
   sales_course_materials?: unknown;
   total_transaction_count?: unknown;
   adoptions_by_deadline?: unknown;
@@ -169,7 +171,21 @@ export function computeMetrics(
     // includes non-retail streams would shrink as a store diversifies.
     online_pct: pct(online, retail),
     sales_per_fte: div(total, fte),
-    sales_per_sqft: div(total, num(row.total_square_footage)),
+    /*
+      Divided by the SELLING floor, not the whole footprint.
+
+      total_square_footage now means everything the store occupies — stockroom,
+      offices, receiving — because that is the question stores were actually
+      answering and because the parts below it have to sum to something. Sales
+      per square foot of warehouse is not a retail figure. LuAnne Kelly made
+      exactly this point in question review: "Sales comparisons should be based
+      on retail space whereas the total space occupied would be good for
+      comparison school to school. We have a significant warehouse."
+
+      Safe to switch: sqft_salesfloor is populated for 38 of the 39 FY2025 rows,
+      the same coverage as total_square_footage, and never exceeds it.
+    */
+    sales_per_sqft: div(total, num(row.sqft_salesfloor)),
     cm_sales_per_fte: div(num(row.sales_course_materials), fte),
     avg_transaction_value: div(total, num(row.total_transaction_count)),
     adoption_completion_rate: tracks
