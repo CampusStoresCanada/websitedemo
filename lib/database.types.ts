@@ -859,6 +859,9 @@ export type Database = {
           physical_inventory_schedule: string[] | null
           pos_runs_inventory: boolean | null
           pos_system: string | null
+          respondent_contact_id: string | null
+          respondent_delegate_profile_id: string | null
+          respondent_delegated_at: string | null
           respondent_email: string | null
           respondent_name: string | null
           respondent_phone: string | null
@@ -987,6 +990,9 @@ export type Database = {
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
           pos_system?: string | null
+          respondent_contact_id?: string | null
+          respondent_delegate_profile_id?: string | null
+          respondent_delegated_at?: string | null
           respondent_email?: string | null
           respondent_name?: string | null
           respondent_phone?: string | null
@@ -1115,6 +1121,9 @@ export type Database = {
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
           pos_system?: string | null
+          respondent_contact_id?: string | null
+          respondent_delegate_profile_id?: string | null
+          respondent_delegated_at?: string | null
           respondent_email?: string | null
           respondent_name?: string | null
           respondent_phone?: string | null
@@ -1195,6 +1204,41 @@ export type Database = {
             columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_respondent_contact_id_fkey"
+            columns: ["respondent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_respondent_contact_id_fkey"
+            columns: ["respondent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_respondent_contact_id_fkey"
+            columns: ["respondent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_respondent_contact_id_fkey"
+            columns: ["respondent_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_respondent_delegate_profile_id_fkey"
+            columns: ["respondent_delegate_profile_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -1292,6 +1336,85 @@ export type Database = {
             columns: ["survey_id"]
             isOneToOne: false
             referencedRelation: "benchmarking_surveys"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_location_other_spaces: {
+        Row: {
+          created_at: string
+          description: string
+          id: string
+          location_id: string
+          position: number
+          sqft: number | null
+        }
+        Insert: {
+          created_at?: string
+          description: string
+          id?: string
+          location_id: string
+          position?: number
+          sqft?: number | null
+        }
+        Update: {
+          created_at?: string
+          description?: string
+          id?: string
+          location_id?: string
+          position?: number
+          sqft?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_location_other_spaces_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_locations: {
+        Row: {
+          benchmarking_id: string
+          created_at: string
+          id: string
+          name: string
+          position: number
+          sqft_office: number | null
+          sqft_salesfloor: number | null
+          sqft_storage: number | null
+          updated_at: string
+        }
+        Insert: {
+          benchmarking_id: string
+          created_at?: string
+          id?: string
+          name: string
+          position?: number
+          sqft_office?: number | null
+          sqft_salesfloor?: number | null
+          sqft_storage?: number | null
+          updated_at?: string
+        }
+        Update: {
+          benchmarking_id?: string
+          created_at?: string
+          id?: string
+          name?: string
+          position?: number
+          sqft_office?: number | null
+          sqft_salesfloor?: number | null
+          sqft_storage?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_locations_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
             referencedColumns: ["id"]
           },
         ]

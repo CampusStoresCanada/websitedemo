@@ -189,7 +189,7 @@ export async function setRespondent(input: {
   if (input.grantAccess) {
     const { data: needsLogin } = await db
       .from("contacts")
-      .select("profile_id")
+      .select("profile_id, email, work_email")
       .eq("id", contactId)
       .maybeSingle();
 
@@ -200,6 +200,43 @@ export async function setRespondent(input: {
         contactId,
         "member",
       );
+
+      /*
+        ⛔ Do NOT assume the contact row we passed in came back linked.
+
+        provisionOrgLogin links whatever contact ensurePersonForUser resolves,
+        which can be a SIBLING row for the same person — this org has several
+        duplicate contacts, and linking one of them leaves ours with a null
+        profile_id. Reading it back and finding nothing would silently skip the
+        delegate stamp, so the colleague we just invited would be able to sign
+        in and still not reach the survey. The grant would look like it worked.
+
+        The email is the stable key inside one organisation, so resolve through
+        that and copy the profile onto our row if a sibling got it.
+      */
+      if (invited.success) {
+        const email =
+          ((needsLogin as { work_email?: string | null; email?: string | null })
+            .work_email ?? null) ?? null;
+        const { data: sameEmail } = await db
+          .from("contacts")
+          .select("id, profile_id, email, work_email")
+          .eq("organization_id", row.organization_id as string)
+          .not("profile_id", "is", null);
+
+        const match = (sameEmail ?? []).find((c) => {
+          const e = ((c.work_email as string | null) ?? (c.email as string | null) ?? "").toLowerCase();
+          return e && e === (email ?? "").toLowerCase();
+        });
+
+        if (match?.profile_id && match.id !== contactId) {
+          await db
+            .from("contacts")
+            .update({ profile_id: match.profile_id })
+            .eq("id", contactId);
+        }
+      }
+
       if (!invited.success) {
         // The contact and the respondent record are still worth keeping — say
         // what failed rather than losing the rest of the change.

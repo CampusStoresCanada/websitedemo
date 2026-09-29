@@ -260,7 +260,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Count every physical location you operate, including satellite and seasonal shops. Do not count your web store.",
           order: 6,
-          visible: true,
+          visible: false,
         },
 
         {
@@ -315,7 +315,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Space customers can walk in. Exclude stockrooms, offices and receiving.",
           order: 11,
-          visible: true,
+          visible: false,
           suffix: "sq ft",
           group: "Square Footage Breakdown",
           indent: true,
@@ -327,7 +327,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Stockrooms, receiving and any off-site storage you pay for.",
           order: 12,
-          visible: true,
+          visible: false,
           suffix: "sq ft",
           group: "Square Footage Breakdown",
           indent: true,
@@ -338,7 +338,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "number",
           helpText: "Staff offices and back-office workspace.",
           order: 13,
-          visible: true,
+          visible: false,
           suffix: "sq ft",
           group: "Square Footage Breakdown",
           indent: true,
@@ -350,7 +350,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Anything not covered above. Sales floor, storage, office and other should add up to Total Store Space.",
           order: 14,
-          visible: true,
+          visible: false,
           suffix: "sq ft",
           group: "Square Footage Breakdown",
           indent: true,
@@ -362,7 +362,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Everything above, added up. We work it out from your breakdown rather than asking twice — asking for both is how a total and its parts end up disagreeing.",
           order: 15,
-          visible: true,
+          visible: false,
           group: "Square Footage Breakdown",
           calculated: { formula: "total_square_footage", format: "number" },
         },

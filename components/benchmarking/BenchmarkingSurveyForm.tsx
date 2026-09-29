@@ -13,6 +13,8 @@ import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config"
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 import DynamicSurveySection from "./DynamicSurveySection";
 import RespondentPicker from "./RespondentPicker";
+import LocationsEditor from "./LocationsEditor";
+import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
 import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { parseUTC } from "@/lib/utils";
 
@@ -28,6 +30,8 @@ interface BenchmarkingSurveyFormProps {
   fieldConfig?: SurveyFieldConfig | null;
   /** The store's known people, for the "who is filling this in" picker. */
   storeContacts?: StoreContact[];
+  /** Per-location square footage — see LocationsEditor. */
+  locations?: SurveyLocation[];
 }
 
 export default function BenchmarkingSurveyForm({
@@ -41,6 +45,7 @@ export default function BenchmarkingSurveyForm({
   surveyClosesAt,
   fieldConfig,
   storeContacts = [],
+  locations = [],
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -396,6 +401,13 @@ export default function BenchmarkingSurveyForm({
               sectionConfig={sections[activeSection]}
               {...sectionProps}
             />
+            {sections[activeSection]?.id === "institution_profile" && (
+              <LocationsEditor
+                benchmarkingId={benchmarkingId}
+                initialLocations={locations}
+                isReadOnly={isReadOnly}
+              />
+            )}
           </>
         )}
       </div>

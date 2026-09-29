@@ -241,6 +241,9 @@ export default async function BenchmarkingSurveyPage({
   const { loadStoreContacts } = await import("@/lib/actions/benchmarking-respondent");
   const { contacts: storeContacts } = await loadStoreContacts(organization.id);
 
+  const { loadLocations } = await import("@/lib/actions/benchmarking-locations");
+  const locations = await loadLocations(currentRow!.id);
+
   // 6. Fetch prior year data (for reference values and delta flags)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: priorYearRow } = (await (supabase as any)
@@ -370,6 +373,7 @@ export default async function BenchmarkingSurveyPage({
         surveyClosesAt={activeSurvey.closes_at}
         fieldConfig={fieldConfig}
         storeContacts={storeContacts}
+        locations={locations}
       />
 
       {/* Anything a reviewer has written about this store, awaiting their yes. */}
