@@ -44,6 +44,8 @@ export interface MetricSourceRow {
   total_square_footage?: unknown;
   /** The selling floor. sales_per_sqft divides by THIS, not the total. */
   sqft_salesfloor?: unknown;
+  sqft_storage?: unknown;
+  sqft_office?: unknown;
   sales_course_materials?: unknown;
   total_transaction_count?: unknown;
   adoptions_by_deadline?: unknown;
@@ -62,6 +64,10 @@ export interface ComputedMetrics {
   online_pct: number | null;
   sales_per_fte: number | null;
   sales_per_sqft: number | null;
+  /** Same revenue, the other three denominators — see computeMetrics. */
+  sales_per_sqft_total: number | null;
+  sales_per_sqft_storage: number | null;
+  sales_per_sqft_office: number | null;
   cm_sales_per_fte: number | null;
   avg_transaction_value: number | null;
   adoption_completion_rate: number | null;
@@ -172,20 +178,26 @@ export function computeMetrics(
     online_pct: pct(online, retail),
     sales_per_fte: div(total, fte),
     /*
-      Divided by the SELLING floor, not the whole footprint.
+      Four denominators, not one.
 
-      total_square_footage now means everything the store occupies — stockroom,
-      offices, receiving — because that is the question stores were actually
-      answering and because the parts below it have to sum to something. Sales
-      per square foot of warehouse is not a retail figure. LuAnne Kelly made
-      exactly this point in question review: "Sales comparisons should be based
-      on retail space whereas the total space occupied would be good for
-      comparison school to school. We have a significant warehouse."
+      "Sales per square foot" is a different question depending on which square
+      feet you mean, and all four are worth comparing: the retail floor says how
+      hard the selling space works, the warehouse says how much stock backs each
+      selling foot, the office says how much overhead the operation carries, and
+      the total says how much space the institution gives the store per dollar.
 
-      Safe to switch: sqft_salesfloor is populated for 38 of the 39 FY2025 rows,
-      the same coverage as total_square_footage, and never exceeds it.
+      None of it is extra work for a store. They already give us the four
+      components in the Square Footage Breakdown, so this is arithmetic we do,
+      not arithmetic we ask for. A store that fills in only the total still gets
+      the total figure and nulls for the rest.
+
+      sales_per_sqft keeps its name and its retail meaning so nothing downstream
+      silently changes under it.
     */
     sales_per_sqft: div(total, num(row.sqft_salesfloor)),
+    sales_per_sqft_total: div(total, num(row.total_square_footage)),
+    sales_per_sqft_storage: div(total, num(row.sqft_storage)),
+    sales_per_sqft_office: div(total, num(row.sqft_office)),
     cm_sales_per_fte: div(num(row.sales_course_materials), fte),
     avg_transaction_value: div(total, num(row.total_transaction_count)),
     adoption_completion_rate: tracks

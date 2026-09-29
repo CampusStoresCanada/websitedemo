@@ -138,12 +138,39 @@ export const METRICS: MetricDef[] = [
     compute: of("sales_per_fte"),
     hint: "Total revenue divided by FTE enrolment — the comparison that survives a size difference.",
   },
+  /*
+    Four denominators, because "per square foot" is four different questions and
+    a store comparing itself wants to pick which one. All of it is arithmetic on
+    figures they already gave us in the Square Footage Breakdown — nothing extra
+    is asked.
+  */
   {
     key: "revenue_per_sqft",
-    label: "Revenue per square foot",
+    label: "Revenue per square foot — selling floor",
     format: "currency",
     compute: of("sales_per_sqft"),
-    hint: "How hard the floor space works.",
+    hint: "How hard the selling space works. The retail comparison.",
+  },
+  {
+    key: "revenue_per_sqft_total",
+    label: "Revenue per square foot — total footprint",
+    format: "currency",
+    compute: of("sales_per_sqft_total"),
+    hint: "Against everything you occupy, selling floor to warehouse. How much space the institution gives the store per dollar it returns.",
+  },
+  {
+    key: "revenue_per_sqft_storage",
+    label: "Revenue per square foot — storage",
+    format: "currency",
+    compute: of("sales_per_sqft_storage"),
+    hint: "How much stockroom backs each dollar. A low figure is a store carrying more warehouse than its sales need.",
+  },
+  {
+    key: "revenue_per_sqft_office",
+    label: "Revenue per square foot — office",
+    format: "currency",
+    compute: of("sales_per_sqft_office"),
+    hint: "Administrative space against revenue.",
   },
   {
     key: "gross_margin_pct",

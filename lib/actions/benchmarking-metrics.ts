@@ -78,6 +78,9 @@ const COMPARE_FIELDS: (keyof ComputedMetrics)[] = [
   "online_pct",
   "sales_per_fte",
   "sales_per_sqft",
+  "sales_per_sqft_total",
+  "sales_per_sqft_storage",
+  "sales_per_sqft_office",
   "cm_sales_per_fte",
 ];
 

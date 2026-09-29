@@ -825,10 +825,18 @@ export type Database = {
           expense_rent_maintenance: number | null
           fiscal_year: number
           fiscal_year_end_date: string | null
+          fiscal_year_end_day: string | null
+          fiscal_year_end_month: string | null
           fulltime_employees: number | null
           fye_inventory_value: number | null
           has_webstore: boolean | null
           hours_vary_seasonally: boolean | null
+          ia_ea_collection_model: string | null
+          ia_ea_collection_model_other: string | null
+          ia_ea_enrolment_model: string | null
+          ia_ea_enrolment_model_other: string | null
+          ia_ea_program_type: string | null
+          ia_ea_program_type_other: string | null
           ia_revenue: number | null
           id: string
           institution_type: string | null
@@ -894,6 +902,8 @@ export type Database = {
           submitted_at: string | null
           sunday_hours_close: string | null
           sunday_hours_open: string | null
+          terms_acknowledged_at: string | null
+          terms_acknowledged_by: string | null
           textbooks_online_only: boolean | null
           total_cogs: number | null
           total_course_sections: number | null
@@ -943,10 +953,18 @@ export type Database = {
           expense_rent_maintenance?: number | null
           fiscal_year: number
           fiscal_year_end_date?: string | null
+          fiscal_year_end_day?: string | null
+          fiscal_year_end_month?: string | null
           fulltime_employees?: number | null
           fye_inventory_value?: number | null
           has_webstore?: boolean | null
           hours_vary_seasonally?: boolean | null
+          ia_ea_collection_model?: string | null
+          ia_ea_collection_model_other?: string | null
+          ia_ea_enrolment_model?: string | null
+          ia_ea_enrolment_model_other?: string | null
+          ia_ea_program_type?: string | null
+          ia_ea_program_type_other?: string | null
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
@@ -1012,6 +1030,8 @@ export type Database = {
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null
+          terms_acknowledged_at?: string | null
+          terms_acknowledged_by?: string | null
           textbooks_online_only?: boolean | null
           total_cogs?: number | null
           total_course_sections?: number | null
@@ -1061,10 +1081,18 @@ export type Database = {
           expense_rent_maintenance?: number | null
           fiscal_year?: number
           fiscal_year_end_date?: string | null
+          fiscal_year_end_day?: string | null
+          fiscal_year_end_month?: string | null
           fulltime_employees?: number | null
           fye_inventory_value?: number | null
           has_webstore?: boolean | null
           hours_vary_seasonally?: boolean | null
+          ia_ea_collection_model?: string | null
+          ia_ea_collection_model_other?: string | null
+          ia_ea_enrolment_model?: string | null
+          ia_ea_enrolment_model_other?: string | null
+          ia_ea_program_type?: string | null
+          ia_ea_program_type_other?: string | null
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
@@ -1130,6 +1158,8 @@ export type Database = {
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null
+          terms_acknowledged_at?: string | null
+          terms_acknowledged_by?: string | null
           textbooks_online_only?: boolean | null
           total_cogs?: number | null
           total_course_sections?: number | null
@@ -1170,6 +1200,13 @@ export type Database = {
           {
             foreignKeyName: "benchmarking_respondent_user_id_fkey"
             columns: ["respondent_user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_terms_acknowledged_by_fkey"
+            columns: ["terms_acknowledged_by"]
             isOneToOne: false
             referencedRelation: "profiles"
             referencedColumns: ["id"]
@@ -2805,6 +2842,9 @@ export type Database = {
           region: string | null
           sales_per_fte: number | null
           sales_per_sqft: number | null
+          sales_per_sqft_office: number | null
+          sales_per_sqft_storage: number | null
+          sales_per_sqft_total: number | null
           sales_tier: string | null
           size_tier: string | null
           total_retail_revenue: number | null
@@ -2836,6 +2876,9 @@ export type Database = {
           region?: string | null
           sales_per_fte?: number | null
           sales_per_sqft?: number | null
+          sales_per_sqft_office?: number | null
+          sales_per_sqft_storage?: number | null
+          sales_per_sqft_total?: number | null
           sales_tier?: string | null
           size_tier?: string | null
           total_retail_revenue?: number | null
@@ -2867,6 +2910,9 @@ export type Database = {
           region?: string | null
           sales_per_fte?: number | null
           sales_per_sqft?: number | null
+          sales_per_sqft_office?: number | null
+          sales_per_sqft_storage?: number | null
+          sales_per_sqft_total?: number | null
           sales_tier?: string | null
           size_tier?: string | null
           total_retail_revenue?: number | null
@@ -3459,6 +3505,13 @@ export type Database = {
             referencedRelation: "conference_checklists"
             referencedColumns: ["id"]
           },
+          {
+            foreignKeyName: "conference_checklist_tasks_scope_entity_id_fkey"
+            columns: ["scope_entity_id"]
+            isOneToOne: false
+            referencedRelation: "conference_entities"
+            referencedColumns: ["id"]
+          },
         ]
       }
       conference_checklists: {
@@ -3785,6 +3838,7 @@ export type Database = {
           qbo_tax_code_ref: string | null
           registration_close_at: string | null
           registration_open_at: string | null
+          schedule_freeze_at: string | null
           start_date: string | null
           status: string
           stripe_tax_rate_id: string | null
@@ -3826,6 +3880,7 @@ export type Database = {
           qbo_tax_code_ref?: string | null
           registration_close_at?: string | null
           registration_open_at?: string | null
+          schedule_freeze_at?: string | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -3867,6 +3922,7 @@ export type Database = {
           qbo_tax_code_ref?: string | null
           registration_close_at?: string | null
           registration_open_at?: string | null
+          schedule_freeze_at?: string | null
           start_date?: string | null
           status?: string
           stripe_tax_rate_id?: string | null
@@ -9129,6 +9185,8 @@ export type Database = {
           action_link_url: string | null
           archived_at: string | null
           banner_url: string | null
+          behaviour_keywords: string[] | null
+          behaviour_keywords_updated_at: string | null
           canceled_at: string | null
           cancoll_tier: string | null
           catalogue: string | null
@@ -9242,6 +9300,8 @@ export type Database = {
           action_link_url?: string | null
           archived_at?: string | null
           banner_url?: string | null
+          behaviour_keywords?: string[] | null
+          behaviour_keywords_updated_at?: string | null
           canceled_at?: string | null
           cancoll_tier?: string | null
           catalogue?: string | null
@@ -9355,6 +9415,8 @@ export type Database = {
           action_link_url?: string | null
           archived_at?: string | null
           banner_url?: string | null
+          behaviour_keywords?: string[] | null
+          behaviour_keywords_updated_at?: string | null
           canceled_at?: string | null
           cancoll_tier?: string | null
           catalogue?: string | null
@@ -14009,6 +14071,8 @@ export type Database = {
           action_link_url: string | null
           archived_at: string | null
           banner_url: string | null
+          behaviour_keywords: string[] | null
+          behaviour_keywords_updated_at: string | null
           canceled_at: string | null
           cancoll_tier: string | null
           catalogue: string | null
@@ -14087,6 +14151,10 @@ export type Database = {
           qbo_invoice_id: string | null
           qbo_updated_at: string | null
           quickbooks_customer_id: string | null
+          renewal_notifications_paused_until: string | null
+          renewal_pause_reason: string | null
+          renewal_pause_set_at: string | null
+          renewal_pause_set_by: string | null
           send_next_email: boolean | null
           show_brand_colors: boolean
           show_contacts: boolean
