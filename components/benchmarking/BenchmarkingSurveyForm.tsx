@@ -406,6 +406,14 @@ export default function BenchmarkingSurveyForm({
                 benchmarkingId={benchmarkingId}
                 initialLocations={locations}
                 isReadOnly={isReadOnly}
+                // Saved through the ordinary field path, so it debounces,
+                // validates and reports errors like every other answer.
+                statedCount={
+                  typeof formData.num_store_locations === "number"
+                    ? (formData.num_store_locations as number)
+                    : null
+                }
+                onStatedCountChange={(n) => handleFieldChange("num_store_locations", n)}
               />
             )}
           </>

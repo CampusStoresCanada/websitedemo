@@ -148,7 +148,16 @@ async function rollUp(benchmarkingId: string): Promise<void> {
       sqft_office: office,
       sqft_other: other,
       total_square_footage: total,
-      num_store_locations: (locations ?? []).length || null,
+      /*
+        ⛔ num_store_locations is NOT written here.
+
+        It is the store's own answer to "how many do you operate", and the
+        editor compares it against how many have actually been described so it
+        can say "you said 3, you have described 1". Overwriting it with the
+        count of rows would make that check compare a number to itself and
+        always agree — which is exactly the kind of validation that looks like
+        it is working and never fires.
+      */
       updated_at: new Date().toISOString(),
     })
     .eq("id", benchmarkingId);

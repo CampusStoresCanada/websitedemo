@@ -44,10 +44,15 @@ export default function LocationsEditor({
   benchmarkingId,
   initialLocations,
   isReadOnly,
+  statedCount,
+  onStatedCountChange,
 }: {
   benchmarkingId: string;
   initialLocations: SurveyLocation[];
   isReadOnly: boolean;
+  /** The store's own answer to "how many do you operate". */
+  statedCount: number | null;
+  onStatedCountChange: (n: number | null) => void;
 }) {
   const [locations, setLocations] = useState<SurveyLocation[]>(initialLocations);
   const [newName, setNewName] = useState("");
@@ -86,12 +91,59 @@ export default function LocationsEditor({
 
   return (
     <div className="mb-6">
-      <h3 className="text-sm font-medium text-gray-900">Your space, by location</h3>
-      <p className="mt-1 text-xs text-gray-600">
-        One entry per location you operate, including satellite and seasonal shops. Do not
-        count your web store. Location names are for your own results only and appear on no
-        public page, so call them whatever you call them internally.
+      <h3 className="text-sm font-medium text-gray-900">Your locations and their space</h3>
+
+      {/*
+        The count is asked FIRST and kept as its own answer.
+
+        I had derived it from the number of rows, which deleted the question
+        entirely — the section then had nothing that said "how many locations do
+        you operate" and the editor sat at the bottom where nobody looked. It
+        also made the cross-check below compare a number to itself.
+      */}
+      <div className="mt-3 max-w-xs">
+        <label className="block text-xs font-medium text-gray-700">
+          How many locations do you operate?
+        </label>
+        <p className="text-[11px] leading-snug text-gray-500">
+          Every physical location, including satellite and seasonal shops. Do not count
+          your web store.
+        </p>
+        <input
+          type="number"
+          min={0}
+          value={statedCount ?? ""}
+          disabled={isReadOnly}
+          onFocus={(e) => {
+            const el = e.currentTarget;
+            requestAnimationFrame(() => el.select());
+          }}
+          onChange={(e) =>
+            onStatedCountChange(e.target.value === "" ? null : Number(e.target.value))
+          }
+          className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+        />
+      </div>
+
+      <p className="mt-4 text-xs text-gray-600">
+        Now describe each one. Names are for your own results only and appear on no public
+        page, so call them whatever you call them internally.
       </p>
+
+      {/*
+        Says what is missing rather than silently accepting a mismatch — a store
+        that says 3 and describes 1 has under-reported its floor space, and
+        every per-square-foot comparison it gets back would be wrong.
+      */}
+      {statedCount !== null && statedCount !== locations.length && (
+        <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
+          You said {statedCount} location{statedCount === 1 ? "" : "s"} and have described{" "}
+          {locations.length}.{" "}
+          {statedCount > locations.length
+            ? "Add the rest below, or change the number above."
+            : "Remove the extra ones, or change the number above."}
+        </p>
+      )}
 
       <div className="mt-4 space-y-4">
         {locations.map((loc) => (
