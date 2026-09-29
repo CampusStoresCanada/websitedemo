@@ -61,5 +61,7 @@ export default async function PreviewPage() {
     .eq("organization_id", testOrg.id)
     .eq("status", "draft");
 
-  redirect(`/benchmarking/survey?org=${testOrg.id}`);
+  // preview=1 pins the resolution to the test store — ?org= is ignored from
+  // here on, so no amount of clicking lands on a real store's submission.
+  redirect(`/benchmarking/survey?org=${testOrg.id}&preview=1`);
 }

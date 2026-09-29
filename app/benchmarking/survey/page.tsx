@@ -9,6 +9,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
 import RespondentNotes from "@/components/benchmarking/RespondentNotes";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
+import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -18,7 +19,7 @@ export const metadata = {
 export default async function BenchmarkingSurveyPage({
   searchParams,
 }: {
-  searchParams: Promise<{ start?: string; org?: string }>;
+  searchParams: Promise<{ start?: string; org?: string; preview?: string }>;
 }) {
   const auth = await requireAuthenticated();
   if (!auth.ok) {
@@ -31,6 +32,8 @@ export default async function BenchmarkingSurveyPage({
   const params = await searchParams;
   const skipIntro = params?.start === "1";
   const requestedOrgId = params?.org ?? null;
+  // Arrived via "Walk the survey" — pinned to the test store, see resolveActingOrg.
+  const isPreview = params?.preview === "1";
 
   // 2. Get user profile and org
   const isAdmin = isGlobalAdmin(globalRole);
@@ -49,34 +52,9 @@ export default async function BenchmarkingSurveyPage({
     .eq("user_id", userId)
     .eq("status", "active")) as { data: any[] | null };
 
-  // A person can hold roles at more than one member store — someone who moved
-  // institutions, or covers two campuses. .find() returned whichever row the
-  // database happened to hand back first, which meant they could be filing
-  // against the wrong store without ever being told.
-  //
-  // Prefer the store where they are actually org_admin, then fall back to
-  // name order so the same person lands on the same store every time rather
-  // than a different one per request.
-  const memberOrgLinks = (userOrgs ?? [])
-    .filter((uo) => {
-      const org = uo.organization as unknown as { type: string } | null;
-      return org?.type === "Member" && (uo.role === "org_admin" || isAdmin);
-    })
-    .sort((a, b) => {
-      const adminFirst =
-        Number(b.role === "org_admin") - Number(a.role === "org_admin");
-      if (adminFirst !== 0) return adminFirst;
-      const an = (a.organization as { name?: string } | null)?.name ?? "";
-      const bn = (b.organization as { name?: string } | null)?.name ?? "";
-      return an.localeCompare(bn);
-    });
-
-  const memberOrgLink = memberOrgLinks[0];
-
-  if (!memberOrgLink && !isAdmin) {
-    redirect("/benchmarking");
-  }
-
+  // Ordering, the ?org= pin and the admin roster all live in resolveActingOrg()
+  // now — the worksheet and /benchmarking/compare answer the same question and
+  // had each grown their own copy of this, with the same bug in all three.
   type SurveyOrg = {
     id: string;
     name: string;
@@ -85,7 +63,6 @@ export default async function BenchmarkingSurveyPage({
     province: string;
   };
 
-  const ownOrg = (memberOrgLink?.organization as unknown as SurveyOrg | undefined) ?? null;
 
   // Service role from here on. Access is settled above, and both the roster
   // read and the draft row need to see past RLS.
@@ -141,58 +118,20 @@ export default async function BenchmarkingSurveyPage({
     offered when it is absent — the pattern /org/billing and the conference cart
     already use.
   */
-  let adminOrgOptions: { id: string; name: string }[] = [];
-  let actingAsOrg: SurveyOrg | null = null;
+  const acting = await resolveActingOrg({
+    userOrgs: userOrgs ?? [],
+    isAdmin,
+    requestedOrgId,
+    surveyId: activeSurvey.id,
+    pinToTestStore: isPreview,
+  });
 
-  if (isAdmin) {
-    /*
-      The roster is THIS survey's recipient list, not every Member org.
-
-      `type = "Member" AND archived_at IS NULL` returns 80 stores, of which 25
-      are cancelled and 4 in grace — `archived_at` is not membership, and a
-      picker offering a cancelled store to file a survey it was never sent is a
-      trap I would have built. benchmarking_recipients already holds the
-      programme's own answer: 52 orgs for FY2026. Read that instead of
-      re-deriving who counts as a member.
-    */
-    const { data: recipientRows } = await db
-      .from("benchmarking_recipients")
-      .select("organization:organizations(id, name, slug, type, province)")
-      .eq("survey_id", activeSurvey.id);
-
-    let roster = (recipientRows ?? [])
-      .map((r) => (r as { organization: unknown }).organization as SurveyOrg | null)
-      .filter((o): o is SurveyOrg => Boolean(o));
-
-    // A survey whose recipient list has not been built yet — the state between
-    // creating it and sending invitations. Fall back to paid-up member stores so
-    // the picker is never empty, and say which list this is.
-    if (roster.length === 0) {
-      const { data: memberOrgs } = await db
-        .from("organizations")
-        .select("id, name, slug, type, province")
-        .eq("type", "Member")
-        .in("membership_status", ["active", "grace"])
-        .is("archived_at", null)
-        .order("name");
-      roster = (memberOrgs ?? []) as unknown as SurveyOrg[];
-    }
-
-    roster.sort((a, b) => a.name.localeCompare(b.name));
-    adminOrgOptions = roster.map((o) => ({ id: o.id, name: o.name }));
-
-    if (requestedOrgId) {
-      actingAsOrg = roster.find((o) => o.id === requestedOrgId) ?? null;
-    }
-  }
-
-  // A deliberate `?org=` wins over the admin's own membership, so an admin who
-  // does happen to run a store can still look at someone else's.
-  const organization: SurveyOrg | null = actingAsOrg ?? ownOrg;
+  const adminOrgOptions = acting.adminOrgOptions;
+  const organization = acting.organization as SurveyOrg | null;
 
   // An admin acting as a store they do not belong to is LOOKING, not filing.
   // It governs whether this page may create a row — see the draft step below.
-  const isActingAsOther = Boolean(actingAsOrg && actingAsOrg.id !== ownOrg?.id);
+  const isActingAsOther = acting.isActingAsOther;
 
   if (!organization) {
     // An admin with no store of their own gets the roster rather than a bounce.
@@ -376,15 +315,19 @@ export default async function BenchmarkingSurveyPage({
           (currentRow as { terms_acknowledged_at?: string | null }).terms_acknowledged_at,
         )}
         onBeginHref={
-          isActingAsOther
-            ? `/benchmarking/survey?start=1&org=${organization.id}`
-            : "/benchmarking/survey?start=1"
+          isPreview
+            ? `/benchmarking/survey?start=1&org=${organization.id}&preview=1`
+            : isActingAsOther
+              ? `/benchmarking/survey?start=1&org=${organization.id}`
+              : "/benchmarking/survey?start=1"
         }
         // Same store, or staff print one store's worksheet while filling another's.
         worksheetHref={
-          isActingAsOther
-            ? `/benchmarking/worksheet?org=${organization.id}`
-            : "/benchmarking/worksheet"
+          isPreview
+            ? "/benchmarking/worksheet?preview=1"
+            : isActingAsOther
+              ? `/benchmarking/worksheet?org=${organization.id}`
+              : "/benchmarking/worksheet"
         }
       />
     );

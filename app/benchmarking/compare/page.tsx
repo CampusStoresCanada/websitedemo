@@ -8,6 +8,8 @@ import {
   type ComparisonCut,
 } from "@/lib/benchmarking/comparison";
 import ComparisonView from "@/components/benchmarking/ComparisonView";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
+import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
 import { getSizeBands, resolveSizeBand } from "@/lib/benchmarking/size-band";
 import {
   resultsTierFor,
@@ -31,7 +33,12 @@ export const metadata = {
  * this autumn that is 2025, and a comparison page that shows nothing until
  * December is a page nobody learns to use.
  */
-export default async function BenchmarkingComparePage() {
+export default async function BenchmarkingComparePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ org?: string }>;
+}) {
+  const params = await searchParams;
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect("/login");
 
@@ -45,25 +52,52 @@ export default async function BenchmarkingComparePage() {
     .eq("user_id", userId)
     .eq("status", "active")) as { data: any[] | null };
 
-  // Same ordering as the survey and the worksheet, so one person who
-  // administers two stores lands on the same one everywhere.
-  const link = (userOrgs ?? [])
-    .filter((uo) => {
-      const org = uo.organization as { type?: string } | null;
-      return org?.type === "Member" && (uo.role === "org_admin" || isAdmin);
-    })
-    .sort((a, b) => {
-      const adminFirst = Number(b.role === "org_admin") - Number(a.role === "org_admin");
-      if (adminFirst !== 0) return adminFirst;
-      return ((a.organization as any)?.name ?? "").localeCompare(
-        (b.organization as any)?.name ?? "",
-      );
-    })[0];
+  /*
+    Same question, same function. This page carried its own copy of the org
+    resolution with `isAdmin` on the role clause instead of the attachment one,
+    so a CSC staffer resolved to nothing and was bounced to /benchmarking —
+    the third page today with that exact bug.
+  */
+  const { data: latestSurveyRow } = await createAdminClient()
+    .from("benchmarking_surveys")
+    .select("id")
+    .order("fiscal_year", { ascending: false })
+    .limit(1)
+    .maybeSingle();
 
-  const organization = link?.organization as
+  const acting = await resolveActingOrg({
+    userOrgs: userOrgs ?? [],
+    isAdmin,
+    requestedOrgId: params?.org ?? null,
+    surveyId: (latestSurveyRow?.id as string) ?? null,
+  });
+
+  const organization = acting.organization as
     | { id: string; name: string; province: string; fte: number | null }
-    | undefined;
-  if (!organization) redirect("/benchmarking");
+    | null;
+
+  if (!organization) {
+    if (isAdmin && acting.adminOrgOptions.length > 0) {
+      return (
+        <div className="mx-auto max-w-3xl px-4 py-10">
+          <h1 className="text-2xl font-bold text-gray-900">How you compare</h1>
+          <p className="mt-2 text-sm text-gray-600">
+            Pick the store whose comparisons you want to see. This page places one
+            store against its peers, so it needs to know which one.
+          </p>
+          <div className="mt-5">
+            <AdminOrgSwitcher
+              orgs={acting.adminOrgOptions}
+              selectedOrgId={null}
+              basePath="/benchmarking/compare"
+              label="compare as"
+            />
+          </div>
+        </div>
+      );
+    }
+    redirect("/benchmarking");
+  }
 
   const db = createAdminClient();
 

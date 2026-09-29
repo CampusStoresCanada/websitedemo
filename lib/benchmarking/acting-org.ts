@@ -52,8 +52,47 @@ export async function resolveActingOrg(input: {
   isAdmin: boolean;
   requestedOrgId: string | null;
   surveyId: string | null;
+  /**
+   * Preview mode: pin to the test store and ignore ?org= entirely.
+   *
+   * Walking the survey is how staff check the wording and the controls, and it
+   * WRITES — a draft row, a respondent stamp, a disclosure choice, and on
+   * submit an FTE sync and a receipt to the store's contact. Doing that against
+   * a real member store is how a $0 draft ended up on MacEwan and how someone
+   * could put a submission receipt in a bookseller's inbox for a survey that is
+   * not open.
+   *
+   * So preview does not offer a choice. Opening another store's live submission
+   * is still possible and still supported — it is just not what "preview" does.
+   */
+  pinToTestStore?: boolean;
 }): Promise<OrgResolution> {
   const { userOrgs, isAdmin, requestedOrgId, surveyId } = input;
+
+  if (input.pinToTestStore && isAdmin) {
+    const db = createAdminClient();
+    const { data: testOrg } = await db
+      .from("organizations")
+      .select("id, name, slug, type, province")
+      .eq("type", "Member")
+      .eq("is_test", true)
+      .is("archived_at", null)
+      .order("name")
+      .limit(1)
+      .maybeSingle();
+
+    if (testOrg) {
+      return {
+        organization: testOrg as unknown as ActingOrg,
+        // No switcher in preview: the whole point is that it cannot wander
+        // into a real store's submission.
+        adminOrgOptions: [],
+        isActingAsOther: true,
+      };
+    }
+    // No test store configured — fall through rather than silently previewing
+    // against a real one.
+  }
 
   /*
     A person can hold roles at more than one member store — someone who moved

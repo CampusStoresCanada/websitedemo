@@ -28,7 +28,7 @@ export const metadata = {
 export default async function BenchmarkingWorksheetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; preview?: string }>;
 }) {
   const params = await searchParams;
   const auth = await requireAuthenticated();
@@ -70,6 +70,8 @@ export default async function BenchmarkingWorksheetPage({
     isAdmin,
     requestedOrgId: params?.org ?? null,
     surveyId: survey.id,
+    // Printing the worksheet from a pinned preview stays on the test store.
+    pinToTestStore: params?.preview === "1",
   });
 
   if (!organization) {
