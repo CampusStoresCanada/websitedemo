@@ -14,6 +14,11 @@ import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 import DynamicSurveySection from "./DynamicSurveySection";
 import RespondentPicker from "./RespondentPicker";
 import LocationsEditor from "./LocationsEditor";
+import KeyDatesEditor from "./KeyDatesEditor";
+import ServicesJourney from "./ServicesJourney";
+import LogoConfirm from "./LogoConfirm";
+import type { KeyDate } from "@/lib/actions/benchmarking-profile";
+import type { ServiceStatus } from "@/lib/benchmarking/key-dates";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
 import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
 import { parseUTC } from "@/lib/utils";
@@ -32,6 +37,9 @@ interface BenchmarkingSurveyFormProps {
   storeContacts?: StoreContact[];
   /** Per-location square footage — see LocationsEditor. */
   locations?: SurveyLocation[];
+  /** Section 1 answers that live on the organisation, not the submission. */
+  keyDates?: KeyDate[];
+  logos?: { logoUrl: string | null; logoHorizontalUrl: string | null; confirmedAt: string | null };
 }
 
 export default function BenchmarkingSurveyForm({
@@ -46,6 +54,8 @@ export default function BenchmarkingSurveyForm({
   fieldConfig,
   storeContacts = [],
   locations = [],
+  keyDates = [],
+  logos,
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -407,6 +417,32 @@ export default function BenchmarkingSurveyForm({
                 initialLocations={locations}
                 isReadOnly={isReadOnly}
               />
+            )}
+            {sections[activeSection]?.id === "institution_profile" && (
+              <>
+                <KeyDatesEditor
+                  benchmarkingId={benchmarkingId}
+                  initialDates={keyDates}
+                  isReadOnly={isReadOnly}
+                  isSemesterBased={formData.is_semester_based === true}
+                />
+                <ServicesJourney
+                  benchmarkingId={benchmarkingId}
+                  initialStatus={
+                    (formData.service_status as Record<string, ServiceStatus> | null) ?? {}
+                  }
+                  isReadOnly={isReadOnly}
+                />
+                {logos && (
+                  <LogoConfirm
+                    benchmarkingId={benchmarkingId}
+                    logoUrl={logos.logoUrl}
+                    logoHorizontalUrl={logos.logoHorizontalUrl}
+                    confirmedAt={logos.confirmedAt}
+                    isReadOnly={isReadOnly}
+                  />
+                )}
+              </>
             )}
           </>
         )}

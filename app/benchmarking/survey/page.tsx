@@ -244,6 +244,16 @@ export default async function BenchmarkingSurveyPage({
   const { loadLocations } = await import("@/lib/actions/benchmarking-locations");
   const locations = await loadLocations(currentRow!.id);
 
+  // Section 1 answers that live on the organisation, not the submission.
+  const { loadKeyDates } = await import("@/lib/actions/benchmarking-profile");
+  const keyDates = await loadKeyDates(organization.id);
+
+  const { data: orgLogos } = await db
+    .from("organizations")
+    .select("logo_url, logo_horizontal_url, logo_confirmed_at")
+    .eq("id", organization.id)
+    .maybeSingle();
+
   // 6. Fetch prior year data (for reference values and delta flags)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: priorYearRow } = (await (supabase as any)
@@ -374,6 +384,12 @@ export default async function BenchmarkingSurveyPage({
         fieldConfig={fieldConfig}
         storeContacts={storeContacts}
         locations={locations}
+        keyDates={keyDates}
+        logos={{
+          logoUrl: (orgLogos?.logo_url as string | null) ?? null,
+          logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,
+          confirmedAt: (orgLogos?.logo_confirmed_at as string | null) ?? null,
+        }}
       />
 
       {/* Anything a reviewer has written about this store, awaiting their yes. */}

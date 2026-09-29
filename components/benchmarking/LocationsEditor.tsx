@@ -10,6 +10,7 @@ import {
   type SurveyLocation,
 } from "@/lib/actions/benchmarking-locations";
 import { LOCATION_KINDS, type LocationKind } from "@/lib/benchmarking/location-kinds";
+import { DAYS } from "@/lib/benchmarking/key-dates";
 
 /**
  * Square footage, per location.
@@ -75,6 +76,8 @@ export default function LocationsEditor({
         name: newName.trim(),
         kind: null,
         kindOther: null,
+        hours: null,
+        hoursVarySeasonally: null,
         salesFloor: null,
         storage: null,
         office: null,
@@ -208,6 +211,74 @@ export default function LocationsEditor({
                 />
               )}
             </fieldset>
+
+            {/*
+              Hours belong to the LOCATION, not the store. They used to be three
+              store-level pairs, which asked a store with a main shop and a
+              seasonal kiosk for one set of hours describing neither. Asked for
+              permanent locations only — a pop-up's opening times are a fact
+              about a few weeks, not about the year.
+            */}
+            {loc.kind === "Permanent" && (
+              <div className="mt-3 rounded border border-gray-100 bg-gray-50 p-3">
+                <p className="text-xs font-medium text-gray-700">Opening hours</p>
+                <p className="text-[11px] text-gray-500">
+                  Leave a day blank if you are closed.
+                </p>
+                <div className="mt-2 space-y-1.5">
+                  {DAYS.map((day) => {
+                    const h = loc.hours?.[day] ?? null;
+                    return (
+                      <div key={day} className="flex items-center gap-2">
+                        <span className="w-24 text-xs capitalize text-gray-600">{day}</span>
+                        {(["open", "close"] as const).map((edge) => (
+                          <input
+                            key={edge}
+                            type="time"
+                            value={h?.[edge] ?? ""}
+                            disabled={isReadOnly}
+                            aria-label={`${day} ${edge}`}
+                            onChange={(e) => {
+                              const next = {
+                                ...(loc.hours ?? {}),
+                                [day]: e.target.value
+                                  ? { open: h?.open ?? "", close: h?.close ?? "", [edge]: e.target.value }
+                                  : null,
+                              };
+                              patch(loc.id, (l) => ({ ...l, hours: next }));
+                            }}
+                            onBlur={() =>
+                              void updateLocation({
+                                benchmarkingId,
+                                locationId: loc.id,
+                                hours: loc.hours ?? null,
+                              })
+                            }
+                            className="rounded border border-gray-300 px-2 py-1 text-xs"
+                          />
+                        ))}
+                      </div>
+                    );
+                  })}
+                </div>
+                <label className="mt-2 flex items-center gap-2 text-xs text-gray-700">
+                  <input
+                    type="checkbox"
+                    checked={loc.hoursVarySeasonally ?? false}
+                    disabled={isReadOnly}
+                    onChange={(e) => {
+                      patch(loc.id, (l) => ({ ...l, hoursVarySeasonally: e.target.checked }));
+                      void updateLocation({
+                        benchmarkingId,
+                        locationId: loc.id,
+                        hoursVarySeasonally: e.target.checked,
+                      });
+                    }}
+                  />
+                  These are term-time hours; they change outside term
+                </label>
+              </div>
+            )}
 
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {SPACE_FIELDS.map((f) => (

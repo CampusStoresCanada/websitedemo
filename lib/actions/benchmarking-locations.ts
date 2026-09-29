@@ -28,12 +28,16 @@ export interface OtherSpace {
 // This file is "use server" and may only export async functions — a const here
 // type-checks, passes every test, and 500s the survey page at runtime.
 import type { LocationKind } from "@/lib/benchmarking/location-kinds";
+import type { LocationHours } from "@/lib/benchmarking/key-dates";
 
 export interface SurveyLocation {
   id: string;
   name: string;
   kind: LocationKind | null;
   kindOther: string | null;
+  /** Permanent locations only — a seasonal pop-up's hours describe nothing. */
+  hours: LocationHours | null;
+  hoursVarySeasonally: boolean | null;
   salesFloor: number | null;
   storage: number | null;
   office: number | null;
@@ -48,7 +52,7 @@ export async function loadLocations(benchmarkingId: string): Promise<SurveyLocat
   const { data } = await db
     .from("benchmarking_locations")
     .select(
-      "id, name, kind, kind_other, sqft_salesfloor, sqft_storage, sqft_office, position, benchmarking_location_other_spaces(id, description, sqft, position)",
+      "id, name, kind, kind_other, hours, hours_vary_seasonally, sqft_salesfloor, sqft_storage, sqft_office, position, benchmarking_location_other_spaces(id, description, sqft, position)",
     )
     .eq("benchmarking_id", benchmarkingId)
     .order("position");
@@ -58,6 +62,8 @@ export async function loadLocations(benchmarkingId: string): Promise<SurveyLocat
     name: (l.name as string) ?? "",
     kind: ((l.kind as string | null) ?? null) as LocationKind | null,
     kindOther: (l.kind_other as string | null) ?? null,
+    hours: ((l.hours as LocationHours | null) ?? null),
+    hoursVarySeasonally: (l.hours_vary_seasonally as boolean | null) ?? null,
     salesFloor: (l.sqft_salesfloor as number | null) ?? null,
     storage: (l.sqft_storage as number | null) ?? null,
     office: (l.sqft_office as number | null) ?? null,
@@ -203,6 +209,8 @@ export async function updateLocation(input: {
   name?: string;
   kind?: LocationKind | null;
   kindOther?: string | null;
+  hours?: LocationHours | null;
+  hoursVarySeasonally?: boolean | null;
   salesFloor?: number | null;
   storage?: number | null;
   office?: number | null;
@@ -214,6 +222,9 @@ export async function updateLocation(input: {
   if (input.name !== undefined) patch.name = input.name.trim();
   if (input.kind !== undefined) patch.kind = input.kind;
   if (input.kindOther !== undefined) patch.kind_other = input.kindOther?.trim() || null;
+  if (input.hours !== undefined) patch.hours = input.hours;
+  if (input.hoursVarySeasonally !== undefined)
+    patch.hours_vary_seasonally = input.hoursVarySeasonally;
   if (input.salesFloor !== undefined) patch.sqft_salesfloor = input.salesFloor;
   if (input.storage !== undefined) patch.sqft_storage = input.storage;
   if (input.office !== undefined) patch.sqft_office = input.office;

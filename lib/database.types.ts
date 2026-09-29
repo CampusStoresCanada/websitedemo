@@ -819,6 +819,7 @@ export type Database = {
           disclosure_level: string
           disclosure_level_set_at: string | null
           disclosure_level_set_by: string | null
+          does_book_buyback: boolean | null
           ebook_delivery_system: string | null
           enrollment_fte: number | null
           expense_hr: number | null
@@ -840,6 +841,8 @@ export type Database = {
           ia_revenue: number | null
           id: string
           institution_type: string | null
+          inventory_count_style: string | null
+          inventory_count_style_other: string | null
           is_semester_based: boolean | null
           lms_system: string | null
           manager_years_current_position: number | null
@@ -884,6 +887,7 @@ export type Database = {
           sales_technology: number | null
           saturday_hours_close: string | null
           saturday_hours_open: string | null
+          service_status: Json | null
           services_offered: string[] | null
           shopping_services: string[] | null
           shrink_general_merch: number | null
@@ -950,6 +954,7 @@ export type Database = {
           disclosure_level?: string
           disclosure_level_set_at?: string | null
           disclosure_level_set_by?: string | null
+          does_book_buyback?: boolean | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
           expense_hr?: number | null
@@ -971,6 +976,8 @@ export type Database = {
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
+          inventory_count_style?: string | null
+          inventory_count_style_other?: string | null
           is_semester_based?: boolean | null
           lms_system?: string | null
           manager_years_current_position?: number | null
@@ -1015,6 +1022,7 @@ export type Database = {
           sales_technology?: number | null
           saturday_hours_close?: string | null
           saturday_hours_open?: string | null
+          service_status?: Json | null
           services_offered?: string[] | null
           shopping_services?: string[] | null
           shrink_general_merch?: number | null
@@ -1081,6 +1089,7 @@ export type Database = {
           disclosure_level?: string
           disclosure_level_set_at?: string | null
           disclosure_level_set_by?: string | null
+          does_book_buyback?: boolean | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
           expense_hr?: number | null
@@ -1102,6 +1111,8 @@ export type Database = {
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
+          inventory_count_style?: string | null
+          inventory_count_style_other?: string | null
           is_semester_based?: boolean | null
           lms_system?: string | null
           manager_years_current_position?: number | null
@@ -1146,6 +1157,7 @@ export type Database = {
           sales_technology?: number | null
           saturday_hours_close?: string | null
           saturday_hours_open?: string | null
+          service_status?: Json | null
           services_offered?: string[] | null
           shopping_services?: string[] | null
           shrink_general_merch?: number | null
@@ -1379,6 +1391,8 @@ export type Database = {
         Row: {
           benchmarking_id: string
           created_at: string
+          hours: Json | null
+          hours_vary_seasonally: boolean | null
           id: string
           kind: string | null
           kind_other: string | null
@@ -1392,6 +1406,8 @@ export type Database = {
         Insert: {
           benchmarking_id: string
           created_at?: string
+          hours?: Json | null
+          hours_vary_seasonally?: boolean | null
           id?: string
           kind?: string | null
           kind_other?: string | null
@@ -1405,6 +1421,8 @@ export type Database = {
         Update: {
           benchmarking_id?: string
           created_at?: string
+          hours?: Json | null
+          hours_vary_seasonally?: boolean | null
           id?: string
           kind?: string | null
           kind_other?: string | null
@@ -9271,6 +9289,60 @@ export type Database = {
           },
         ]
       }
+      organization_key_dates: {
+        Row: {
+          academic_year: number | null
+          created_at: string
+          ends_on: string | null
+          id: string
+          kind: string
+          label: string
+          occurs_on: string | null
+          organization_id: string
+          position: number
+          updated_at: string
+        }
+        Insert: {
+          academic_year?: number | null
+          created_at?: string
+          ends_on?: string | null
+          id?: string
+          kind: string
+          label: string
+          occurs_on?: string | null
+          organization_id: string
+          position?: number
+          updated_at?: string
+        }
+        Update: {
+          academic_year?: number | null
+          created_at?: string
+          ends_on?: string | null
+          id?: string
+          kind?: string
+          label?: string
+          occurs_on?: string | null
+          organization_id?: string
+          position?: number
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "organization_key_dates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organization_key_dates_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       organization_tags: {
         Row: {
           organization_id: string
@@ -9356,6 +9428,8 @@ export type Database = {
           last_synced_qbo_at: string | null
           latitude: number | null
           locked_at: string | null
+          logo_confirmed_at: string | null
+          logo_confirmed_by: string | null
           logo_horizontal_url: string | null
           logo_url: string | null
           longitude: number | null
@@ -9471,6 +9545,8 @@ export type Database = {
           last_synced_qbo_at?: string | null
           latitude?: number | null
           locked_at?: string | null
+          logo_confirmed_at?: string | null
+          logo_confirmed_by?: string | null
           logo_horizontal_url?: string | null
           logo_url?: string | null
           longitude?: number | null
@@ -9586,6 +9662,8 @@ export type Database = {
           last_synced_qbo_at?: string | null
           latitude?: number | null
           locked_at?: string | null
+          logo_confirmed_at?: string | null
+          logo_confirmed_by?: string | null
           logo_horizontal_url?: string | null
           logo_url?: string | null
           longitude?: number | null
@@ -9660,6 +9738,13 @@ export type Database = {
             columns: ["created_by"]
             isOneToOne: false
             referencedRelation: "users"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "organizations_logo_confirmed_by_fkey"
+            columns: ["logo_confirmed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
             referencedColumns: ["id"]
           },
           {
@@ -14242,6 +14327,8 @@ export type Database = {
           last_synced_qbo_at: string | null
           latitude: number | null
           locked_at: string | null
+          logo_confirmed_at: string | null
+          logo_confirmed_by: string | null
           logo_horizontal_url: string | null
           logo_url: string | null
           longitude: number | null
