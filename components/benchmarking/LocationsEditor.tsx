@@ -9,6 +9,7 @@ import {
   removeOtherSpace,
   type SurveyLocation,
 } from "@/lib/actions/benchmarking-locations";
+import { LOCATION_KINDS, type LocationKind } from "@/lib/benchmarking/location-kinds";
 
 /**
  * Square footage, per location.
@@ -44,15 +45,10 @@ export default function LocationsEditor({
   benchmarkingId,
   initialLocations,
   isReadOnly,
-  statedCount,
-  onStatedCountChange,
 }: {
   benchmarkingId: string;
   initialLocations: SurveyLocation[];
   isReadOnly: boolean;
-  /** The store's own answer to "how many do you operate". */
-  statedCount: number | null;
-  onStatedCountChange: (n: number | null) => void;
 }) {
   const [locations, setLocations] = useState<SurveyLocation[]>(initialLocations);
   const [newName, setNewName] = useState("");
@@ -74,7 +70,16 @@ export default function LocationsEditor({
     }
     setLocations((prev) => [
       ...prev,
-      { id: res.id!, name: newName.trim(), salesFloor: null, storage: null, office: null, otherSpaces: [] },
+      {
+        id: res.id!,
+        name: newName.trim(),
+        kind: null,
+        kindOther: null,
+        salesFloor: null,
+        storage: null,
+        office: null,
+        otherSpaces: [],
+      },
     ]);
     setNewName("");
   }
@@ -93,57 +98,24 @@ export default function LocationsEditor({
     <div className="mb-6">
       <h3 className="text-sm font-medium text-gray-900">Your locations and their space</h3>
 
-      {/*
-        The count is asked FIRST and kept as its own answer.
-
-        I had derived it from the number of rows, which deleted the question
-        entirely — the section then had nothing that said "how many locations do
-        you operate" and the editor sat at the bottom where nobody looked. It
-        also made the cross-check below compare a number to itself.
-      */}
-      <div className="mt-3 max-w-xs">
-        <label className="block text-xs font-medium text-gray-700">
-          How many locations do you operate?
-        </label>
-        <p className="text-[11px] leading-snug text-gray-500">
-          Every physical location, including satellite and seasonal shops. Do not count
-          your web store.
-        </p>
-        <input
-          type="number"
-          min={0}
-          value={statedCount ?? ""}
-          disabled={isReadOnly}
-          onFocus={(e) => {
-            const el = e.currentTarget;
-            requestAnimationFrame(() => el.select());
-          }}
-          onChange={(e) =>
-            onStatedCountChange(e.target.value === "" ? null : Number(e.target.value))
-          }
-          className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-        />
-      </div>
-
-      <p className="mt-4 text-xs text-gray-600">
-        Now describe each one. Names are for your own results only and appear on no public
-        page, so call them whatever you call them internally.
+      <p className="mt-1 text-xs text-gray-600">
+        One entry per physical location you operate, including satellite and seasonal
+        shops. Do not count your web store. Names are for your own results only and appear
+        on no public page, so call them whatever you call them internally.
       </p>
 
       {/*
-        Says what is missing rather than silently accepting a mismatch — a store
-        that says 3 and describes 1 has under-reported its floor space, and
-        every per-square-foot comparison it gets back would be wrong.
+        Counted, not declared. This was briefly a "how many do you operate?" box
+        with a cross-check against the rows, which only earned its keep while
+        this block was buried and easy to miss. Describing them IS the question
+        now, so asking for the number as well asks twice for one fact — and the
+        answer worth having is the one backed by a described location.
       */}
-      {statedCount !== null && statedCount !== locations.length && (
-        <p className="mt-2 rounded bg-amber-50 p-2 text-xs text-amber-900">
-          You said {statedCount} location{statedCount === 1 ? "" : "s"} and have described{" "}
-          {locations.length}.{" "}
-          {statedCount > locations.length
-            ? "Add the rest below, or change the number above."
-            : "Remove the extra ones, or change the number above."}
-        </p>
-      )}
+      <p className="mt-2 text-sm text-gray-800">
+        {locations.length === 0
+          ? "No locations described yet."
+          : `${locations.length} location${locations.length === 1 ? "" : "s"} described.`}
+      </p>
 
       <div className="mt-4 space-y-4">
         {locations.map((loc) => (
@@ -176,6 +148,47 @@ export default function LocationsEditor({
                 >
                   Remove
                 </button>
+              )}
+            </div>
+
+            <div className="mt-3 max-w-xs">
+              <label className="block text-xs font-medium text-gray-700">
+                What kind of location is this?
+              </label>
+              <select
+                value={loc.kind ?? ""}
+                disabled={isReadOnly}
+                onChange={(e) => {
+                  const kind = (e.target.value || null) as LocationKind | null;
+                  patch(loc.id, (l) => ({ ...l, kind }));
+                  void updateLocation({ benchmarkingId, locationId: loc.id, kind });
+                }}
+                className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
+              >
+                <option value="">Choose…</option>
+                {LOCATION_KINDS.map((k) => (
+                  <option key={k} value={k}>
+                    {k}
+                  </option>
+                ))}
+              </select>
+
+              {loc.kind === "Other" && (
+                <input
+                  type="text"
+                  value={loc.kindOther ?? ""}
+                  disabled={isReadOnly}
+                  placeholder="Describe it"
+                  onChange={(e) => patch(loc.id, (l) => ({ ...l, kindOther: e.target.value }))}
+                  onBlur={(e) =>
+                    void updateLocation({
+                      benchmarkingId,
+                      locationId: loc.id,
+                      kindOther: e.target.value,
+                    })
+                  }
+                  className="mt-2 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                />
               )}
             </div>
 

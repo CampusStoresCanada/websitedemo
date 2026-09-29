@@ -1380,6 +1380,8 @@ export type Database = {
           benchmarking_id: string
           created_at: string
           id: string
+          kind: string | null
+          kind_other: string | null
           name: string
           position: number
           sqft_office: number | null
@@ -1391,6 +1393,8 @@ export type Database = {
           benchmarking_id: string
           created_at?: string
           id?: string
+          kind?: string | null
+          kind_other?: string | null
           name: string
           position?: number
           sqft_office?: number | null
@@ -1402,6 +1406,8 @@ export type Database = {
           benchmarking_id?: string
           created_at?: string
           id?: string
+          kind?: string | null
+          kind_other?: string | null
           name?: string
           position?: number
           sqft_office?: number | null

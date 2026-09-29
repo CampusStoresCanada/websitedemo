@@ -24,9 +24,16 @@ export interface OtherSpace {
   sqft: number | null;
 }
 
+// ⛔ LocationKind and LOCATION_KINDS live in lib/benchmarking/location-kinds.ts.
+// This file is "use server" and may only export async functions — a const here
+// type-checks, passes every test, and 500s the survey page at runtime.
+import type { LocationKind } from "@/lib/benchmarking/location-kinds";
+
 export interface SurveyLocation {
   id: string;
   name: string;
+  kind: LocationKind | null;
+  kindOther: string | null;
   salesFloor: number | null;
   storage: number | null;
   office: number | null;
@@ -41,7 +48,7 @@ export async function loadLocations(benchmarkingId: string): Promise<SurveyLocat
   const { data } = await db
     .from("benchmarking_locations")
     .select(
-      "id, name, sqft_salesfloor, sqft_storage, sqft_office, position, benchmarking_location_other_spaces(id, description, sqft, position)",
+      "id, name, kind, kind_other, sqft_salesfloor, sqft_storage, sqft_office, position, benchmarking_location_other_spaces(id, description, sqft, position)",
     )
     .eq("benchmarking_id", benchmarkingId)
     .order("position");
@@ -49,6 +56,8 @@ export async function loadLocations(benchmarkingId: string): Promise<SurveyLocat
   return (data ?? []).map((l) => ({
     id: l.id as string,
     name: (l.name as string) ?? "",
+    kind: ((l.kind as string | null) ?? null) as LocationKind | null,
+    kindOther: (l.kind_other as string | null) ?? null,
     salesFloor: (l.sqft_salesfloor as number | null) ?? null,
     storage: (l.sqft_storage as number | null) ?? null,
     office: (l.sqft_office as number | null) ?? null,
@@ -149,15 +158,15 @@ async function rollUp(benchmarkingId: string): Promise<void> {
       sqft_other: other,
       total_square_footage: total,
       /*
-        ⛔ num_store_locations is NOT written here.
+        Counted, not declared.
 
-        It is the store's own answer to "how many do you operate", and the
-        editor compares it against how many have actually been described so it
-        can say "you said 3, you have described 1". Overwriting it with the
-        count of rows would make that check compare a number to itself and
-        always agree — which is exactly the kind of validation that looks like
-        it is working and never fires.
+        This was briefly a question the store answered, with a cross-check
+        against the rows. That only earned its keep while the locations block
+        was buried and easy to miss; now that describing them IS the section,
+        stating a number as well is asking twice for the same fact — and the
+        answer that matters is the one backed by a described location.
       */
+      num_store_locations: (locations ?? []).length || null,
       updated_at: new Date().toISOString(),
     })
     .eq("id", benchmarkingId);
@@ -192,6 +201,8 @@ export async function updateLocation(input: {
   benchmarkingId: string;
   locationId: string;
   name?: string;
+  kind?: LocationKind | null;
+  kindOther?: string | null;
   salesFloor?: number | null;
   storage?: number | null;
   office?: number | null;
@@ -201,6 +212,8 @@ export async function updateLocation(input: {
 
   const patch: Record<string, unknown> = { updated_at: new Date().toISOString() };
   if (input.name !== undefined) patch.name = input.name.trim();
+  if (input.kind !== undefined) patch.kind = input.kind;
+  if (input.kindOther !== undefined) patch.kind_other = input.kindOther?.trim() || null;
   if (input.salesFloor !== undefined) patch.sqft_salesfloor = input.salesFloor;
   if (input.storage !== undefined) patch.sqft_storage = input.storage;
   if (input.office !== undefined) patch.sqft_office = input.office;
