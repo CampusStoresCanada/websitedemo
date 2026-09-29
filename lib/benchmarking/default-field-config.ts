@@ -428,7 +428,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           reviewerNote:
             "THE BIG ONE. In 2025 some stores put their whole sales figure here and others split it across this and Online, and nothing in the response told us which. Every institution had to be classified by hand, and where we guessed wrong the numbers were wrong. Does the wording now make it impossible to enter a combined total here?",
           order: 1,
-          visible: true,
+          visible: false,
           required: true,
         },
         {
@@ -440,7 +440,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           reviewerNote:
             "Other half of the 2025 sales-column problem. Also unclear in 2025 whether an online order collected in store counted as online or in-store — stores split both ways. Does the wording settle that?",
           order: 2,
-          visible: true,
+          visible: false,
           required: true,
         },
         {
@@ -752,7 +752,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "New print textbooks and required course texts, total across all channels.",
           order: 1,
-          visible: true,
+          visible: false,
           group: "Print — New",
         },
         {
@@ -762,7 +762,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 2,
-          visible: true,
+          visible: false,
           group: "Print — New",
         },
         {
@@ -772,7 +772,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Used print textbooks, including buyback resale, total across all channels.",
           order: 3,
-          visible: true,
+          visible: false,
           group: "Print — Used",
         },
         {
@@ -782,7 +782,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 4,
-          visible: true,
+          visible: false,
           group: "Print — Used",
         },
         {
@@ -792,7 +792,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Custom-published or institution-specific course materials, total across all channels.",
           order: 5,
-          visible: true,
+          visible: false,
           group: "Custom Course Materials",
         },
         {
@@ -802,7 +802,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 6,
-          visible: true,
+          visible: false,
           group: "Custom Course Materials",
         },
         {
@@ -811,7 +811,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Textbook rental revenue, total across all channels.",
           order: 7,
-          visible: true,
+          visible: false,
           group: "Rentals",
         },
         {
@@ -821,7 +821,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 8,
-          visible: true,
+          visible: false,
           group: "Rentals",
         },
         {
@@ -831,7 +831,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Digital textbooks, e-books and access codes sold as retail transactions, total across all channels.",
           order: 9,
-          visible: true,
+          visible: false,
           group: "Digital / E-Content",
         },
         {
@@ -841,7 +841,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 10,
-          visible: true,
+          visible: false,
           group: "Digital / E-Content",
         },
         {
@@ -858,7 +858,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           reviewerNote:
             "Rewritten 2026-09. This used to say it was 'the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAMME CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
           order: 11,
-          visible: true,
+          visible: false,
           group: "Inclusive Access / Equitable Access",
         },
         {
@@ -869,7 +869,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           // same reason the label is: it is one more channel, not a special case.
           helpText: "The portion of the line above sold through your web store.",
           order: 12,
-          visible: true,
+          visible: false,
           group: "Inclusive Access / Equitable Access",
         },
         {
@@ -878,7 +878,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Coursepacks and readers, total across all channels.",
           order: 13,
-          visible: true,
+          visible: false,
           group: "Course Packs",
         },
         {
@@ -888,7 +888,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 14,
-          visible: true,
+          visible: false,
           group: "Course Packs",
         },
         {
@@ -897,7 +897,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Course materials that do not fit the categories above.",
           order: 15,
-          visible: true,
+          visible: false,
           group: "Other",
         },
         {
@@ -907,7 +907,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 16,
-          visible: true,
+          visible: false,
           group: "Other",
         },
         // Calculated totals
@@ -953,7 +953,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Lab coats, art supplies, safety equipment, calculators and anything else required by a course syllabus.",
           order: 1,
-          visible: true,
+          visible: false,
         },
         {
           name: "sales_course_supplies_online",
@@ -962,7 +962,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "The portion of the line above sold through your web store.",
           order: 2,
-          visible: true,
+          visible: false,
         },
         // Product Categories group
         {
@@ -971,7 +971,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Trade and general-interest books. Not course texts.",
           order: 3,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -982,7 +982,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Computers, tablets, peripherals, accessories and software sold at retail.",
           order: 4,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -993,7 +993,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Notebooks, pens, paper and general office supplies not required by a syllabus.",
           order: 5,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -1004,7 +1004,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "All clothing and wearables. The imprinted and non-imprinted lines below should add up to this.",
           order: 6,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -1014,7 +1014,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Apparel carrying your institution's name, crest or logo.",
           order: 7,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: 2,
         },
@@ -1024,7 +1024,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Apparel without institutional branding.",
           order: 8,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: 2,
         },
@@ -1035,7 +1035,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "All gifts and drinkware. The two lines below should add up to this.",
           order: 9,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -1045,7 +1045,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Gifts and drinkware carrying institutional branding.",
           order: 10,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: 2,
         },
@@ -1055,7 +1055,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Gifts and drinkware without institutional branding.",
           order: 11,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: 2,
         },
@@ -1066,7 +1066,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Institution-branded merchandise that is not apparel, gifts or drinkware — pennants, decals, regalia and the like.",
           order: 12,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },
@@ -1077,7 +1077,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Food, drink and confectionery, including any cafe you operate.",
           order: 13,
-          visible: true,
+          visible: false,
           group: "Product Categories",
           indent: true,
         },

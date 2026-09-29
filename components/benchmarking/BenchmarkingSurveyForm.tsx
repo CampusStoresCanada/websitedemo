@@ -17,6 +17,8 @@ import LocationsEditor from "./LocationsEditor";
 import KeyDatesEditor from "./KeyDatesEditor";
 import ServicesJourney from "./ServicesJourney";
 import LogoConfirm from "./LogoConfirm";
+import CategorySales from "./CategorySales";
+import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type { KeyDate } from "@/lib/actions/benchmarking-profile";
 import type { ServiceStatus } from "@/lib/benchmarking/key-dates";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
@@ -40,6 +42,9 @@ interface BenchmarkingSurveyFormProps {
   /** Section 1 answers that live on the organisation, not the submission. */
   keyDates?: KeyDate[];
   logos?: { logoUrl: string | null; logoHorizontalUrl: string | null; confirmedAt: string | null };
+  /** §2 and §3, both category-driven. */
+  gmCategories?: SurveyCategory[];
+  cmCategories?: SurveyCategory[];
 }
 
 export default function BenchmarkingSurveyForm({
@@ -56,6 +61,8 @@ export default function BenchmarkingSurveyForm({
   locations = [],
   keyDates = [],
   logos,
+  gmCategories = [],
+  cmCategories = [],
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -411,6 +418,27 @@ export default function BenchmarkingSurveyForm({
               sectionConfig={sections[activeSection]}
               {...sectionProps}
             />
+            {/* §2 and §3 are category-driven: the store says what it carries. */}
+            {sections[activeSection]?.id === "general_merchandise" && (
+              <CategorySales
+                benchmarkingId={benchmarkingId}
+                scope="general_merchandise"
+                initialCategories={gmCategories}
+                locations={locations}
+                contacts={storeContacts}
+                isReadOnly={isReadOnly}
+              />
+            )}
+            {sections[activeSection]?.id === "course_materials" && (
+              <CategorySales
+                benchmarkingId={benchmarkingId}
+                scope="course_materials"
+                initialCategories={cmCategories}
+                locations={locations}
+                contacts={storeContacts}
+                isReadOnly={isReadOnly}
+              />
+            )}
             {sections[activeSection]?.id === "institution_profile" && (
               <LocationsEditor
                 benchmarkingId={benchmarkingId}

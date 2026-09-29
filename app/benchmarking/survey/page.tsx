@@ -245,6 +245,12 @@ export default async function BenchmarkingSurveyPage({
   const locations = await loadLocations(currentRow!.id);
 
   // Section 1 answers that live on the organisation, not the submission.
+  const { loadCategories } = await import("@/lib/actions/benchmarking-categories");
+  const [gmCategories, cmCategories] = await Promise.all([
+    loadCategories(currentRow!.id, "general_merchandise"),
+    loadCategories(currentRow!.id, "course_materials"),
+  ]);
+
   const { loadKeyDates } = await import("@/lib/actions/benchmarking-profile");
   const keyDates = await loadKeyDates(organization.id);
 
@@ -385,6 +391,8 @@ export default async function BenchmarkingSurveyPage({
         storeContacts={storeContacts}
         locations={locations}
         keyDates={keyDates}
+        gmCategories={gmCategories}
+        cmCategories={cmCategories}
         logos={{
           logoUrl: (orgLogos?.logo_url as string | null) ?? null,
           logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,

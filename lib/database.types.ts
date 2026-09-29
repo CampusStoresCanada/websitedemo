@@ -1276,6 +1276,145 @@ export type Database = {
           },
         ]
       }
+      benchmarking_categories: {
+        Row: {
+          benchmarking_id: string
+          buyer_contact_ids: string[]
+          created_at: string
+          department: string
+          id: string
+          position: number
+          scope: string
+          split_by_subcategory: boolean
+          updated_at: string
+        }
+        Insert: {
+          benchmarking_id: string
+          buyer_contact_ids?: string[]
+          created_at?: string
+          department: string
+          id?: string
+          position?: number
+          scope: string
+          split_by_subcategory?: boolean
+          updated_at?: string
+        }
+        Update: {
+          benchmarking_id?: string
+          buyer_contact_ids?: string[]
+          created_at?: string
+          department?: string
+          id?: string
+          position?: number
+          scope?: string
+          split_by_subcategory?: boolean
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_categories_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_category_lines: {
+        Row: {
+          category_id: string
+          created_at: string
+          gross_margin_pct: number | null
+          id: string
+          inventory_close: number | null
+          inventory_open: number | null
+          online_sales: number | null
+          position: number
+          retail_sales: number | null
+          subcategory: string | null
+          units_available: number | null
+          units_sold: number | null
+          updated_at: string
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          gross_margin_pct?: number | null
+          id?: string
+          inventory_close?: number | null
+          inventory_open?: number | null
+          online_sales?: number | null
+          position?: number
+          retail_sales?: number | null
+          subcategory?: string | null
+          units_available?: number | null
+          units_sold?: number | null
+          updated_at?: string
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          gross_margin_pct?: number | null
+          id?: string
+          inventory_close?: number | null
+          inventory_open?: number | null
+          online_sales?: number | null
+          position?: number
+          retail_sales?: number | null
+          subcategory?: string | null
+          units_available?: number | null
+          units_sold?: number | null
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_category_lines_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_categories"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_category_locations: {
+        Row: {
+          category_id: string
+          created_at: string
+          id: string
+          location_id: string
+          sqft: number | null
+        }
+        Insert: {
+          category_id: string
+          created_at?: string
+          id?: string
+          location_id: string
+          sqft?: number | null
+        }
+        Update: {
+          category_id?: string
+          created_at?: string
+          id?: string
+          location_id?: string
+          sqft?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_category_locations_category_id_fkey"
+            columns: ["category_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_categories"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_category_locations_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking_locations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_field_reviews: {
         Row: {
           comment: string | null
