@@ -29,48 +29,47 @@ export default async function BenchmarkingAdminPage() {
 
   if (latestSurvey) {
     /*
-      The denominator is who we ASKED, not every row that has ever been a
-      member.
+      Active member stores, counted live on every render.
 
-      This counted `type = "Member"` and nothing else: 81 organisations, of which
-      25 are cancelled, one is archived and one is a test org. A response rate
-      against 81 is not a low response rate, it is a wrong one — and it made the
-      board report look like a failure before a single store had been invited.
+      This used to count `type = "Member"` and nothing else: 81 organisations,
+      of which 25 are cancelled, one is archived and one is a test org. A
+      response rate against 81 is not a low response rate, it is a wrong one,
+      and it would have gone to the board looking like a failure before a single
+      store had been invited.
 
-      benchmarking_recipients is the list CSC built and sent to, 52 for FY2026:
-      48 active plus 4 in grace, who are members mid-renewal and were invited
-      like everyone else. Test orgs sit on that list so staff can walk the real
-      survey, so they come out of the count here.
-
-      Falls back to paid-up member orgs only when the recipient list has not
-      been built yet — between creating a survey and inviting anyone, there is
-      genuinely no better answer than "the stores we would invite".
+      Deliberately NOT the recipient list, and deliberately not counting grace.
+      Grace is a state that resolves — those stores either renew or lapse — and
+      it resolves before the survey goes out, so freezing a denominator that
+      includes them bakes in a number that is wrong by the time anyone reads it.
+      Counting live means the figure follows the membership as it settles.
     */
-    const { count: invitedCount } = await supabase
-      .from("benchmarking_recipients")
-      .select("id, organizations!inner(is_test)", { count: "exact", head: true })
-      .eq("survey_id", latestSurvey.id)
-      .not("organizations.is_test", "is", true);
+    const { count: activeMembers } = await supabase
+      .from("organizations")
+      .select("id", { count: "exact", head: true })
+      .eq("type", "Member")
+      .eq("membership_status", "active")
+      .is("archived_at", null)
+      .not("is_test", "is", true);
 
-    let totalOrgs = invitedCount ?? 0;
+    const totalOrgs = activeMembers ?? 0;
 
-    if (totalOrgs === 0) {
-      const { count: eligible } = await supabase
-        .from("organizations")
-        .select("id", { count: "exact", head: true })
-        .eq("type", "Member")
-        .in("membership_status", ["active", "grace"])
-        .is("archived_at", null)
-        .not("is_test", "is", true);
-      totalOrgs = eligible ?? 0;
-    }
-
-    // Count submissions by status for this fiscal year
+    /*
+      The numerator has to exclude the same stores the denominator does, or a
+      staff member walking the survey as Test Org (Member) shows up as a
+      submission against a denominator that never counted them — 1/50 from a
+      store that does not exist. Same reason cancelled and archived orgs come
+      out: a submission from a store outside the active roster is not part of
+      this year's response.
+    */
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const { data: submissions } = (await (supabase as any)
       .from("benchmarking")
-      .select("status, verified_by")
-      .eq("fiscal_year", latestSurvey.fiscal_year)) as { data: any[] | null };
+      .select("status, verified_by, organizations!inner(type, membership_status, archived_at, is_test)")
+      .eq("fiscal_year", latestSurvey.fiscal_year)
+      .eq("organizations.type", "Member")
+      .eq("organizations.membership_status", "active")
+      .is("organizations.archived_at", null)
+      .not("organizations.is_test", "is", true)) as { data: any[] | null };
 
     const drafts = submissions?.filter((s) => s.status === "draft").length ?? 0;
     const submitted = submissions?.filter((s) => s.status === "submitted").length ?? 0;
