@@ -57,9 +57,7 @@ export default function DynamicSurveySection({
                 {block.groupName}
               </h3>
               <div className="space-y-0">
-                {block.fields.map((field) => (
-                  <FieldRenderer key={field.name} field={field} {...props} />
-                ))}
+                <FieldList fields={block.fields} {...props} />
               </div>
             </div>
           );
@@ -68,9 +66,7 @@ export default function DynamicSurveySection({
         // Ungrouped fields
         return (
           <div key={`ungrouped-${blockIdx}`}>
-            {block.fields.map((field) => (
-              <FieldRenderer key={field.name} field={field} {...props} />
-            ))}
+            <FieldList fields={block.fields} {...props} />
           </div>
         );
       })}
@@ -405,6 +401,63 @@ function FieldRenderer({
 type FieldBlock =
   | { type: "ungrouped"; fields: FieldConfig[] }
   | { type: "group"; groupName: string; fields: FieldConfig[] };
+
+/**
+ * Lay out a list of fields, keeping same-`row` fields on one line.
+ *
+ * A fiscal year end is ONE question that happens to need two controls; giving
+ * each its own full-width row made "Smarch 32" look like two unrelated
+ * questions. Consecutive fields sharing a `row` value are collected and drawn
+ * side by side under a single caption.
+ */
+function FieldList({
+  fields,
+  ...props
+}: { fields: FieldConfig[] } & SurveySectionProps) {
+  const out: React.ReactNode[] = [];
+  let i = 0;
+
+  while (i < fields.length) {
+    const field = fields[i];
+    if (!field.row) {
+      out.push(<FieldRenderer key={field.name} field={field} {...props} />);
+      i += 1;
+      continue;
+    }
+
+    const row = field.row;
+    const members: FieldConfig[] = [];
+    while (i < fields.length && fields[i].row === row) {
+      members.push(fields[i]);
+      i += 1;
+    }
+
+    const lead = members[0];
+    out.push(
+      <div key={`row-${row}`} className="mb-4">
+        {lead.rowLabel && (
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            {lead.rowLabel}
+          </label>
+        )}
+        {lead.rowHelpText && (
+          <p className="text-xs text-gray-500 mb-1 whitespace-pre-line">
+            {lead.rowHelpText}
+          </p>
+        )}
+        <div className="flex flex-wrap gap-3">
+          {members.map((m) => (
+            <div key={m.name} className="min-w-[8rem] flex-1">
+              <FieldRenderer field={m} {...props} />
+            </div>
+          ))}
+        </div>
+      </div>,
+    );
+  }
+
+  return <>{out}</>;
+}
 
 function groupFields(fields: FieldConfig[]): FieldBlock[] {
   const blocks: FieldBlock[] = [];

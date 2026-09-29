@@ -41,6 +41,18 @@ export interface FieldConfig {
   options?: string[];
   /** Visual group heading this field belongs to */
   group?: string;
+  /**
+   * Fields sharing a `row` value render side by side on one line.
+   *
+   * Exists because a fiscal year end is one question — "Smarch 32" should not
+   * occupy two full-width rows of a form just because it takes two controls to
+   * answer. Set `rowLabel` on the first field of the row to caption the pair.
+   */
+  row?: string;
+  /** Caption for the whole row. Only read from the first field in it. */
+  rowLabel?: string;
+  /** Help text for the whole row, read from the first field in it. */
+  rowHelpText?: string;
   /** Indent level: true = 1 level, or a number for deeper nesting */
   indent?: boolean | number;
   /** Conditional visibility — hide unless another field has a specific value */
@@ -286,10 +298,13 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "fiscal_year_end_month",
-          label: "Fiscal Year End — Month",
+          label: "Month",
           type: "select",
-          helpText:
-            "The month your fiscal year closes. Asked as two lists rather than a text box, because free text gives us \"Apr 30\", \"04/30\" and \"April 30th\" for the same date — and pairing consecutive year-ends is exactly what inventory turns and GMROI depend on.",
+          // One question, two controls, one line. See `row` on FieldConfig.
+          row: "fiscal_year_end",
+          rowLabel: "Fiscal Year End",
+          rowHelpText:
+            "The day your fiscal year closes. Asked as two lists rather than a text box, because free text gives us \"Apr 30\", \"04/30\" and \"April 30th\" for the same date — and pairing consecutive year-ends is exactly what inventory turns and GMROI depend on.",
           order: 10,
           visible: true,
           options: [
@@ -299,12 +314,11 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "fiscal_year_end_day",
-          label: "Fiscal Year End — Day",
+          label: "Day",
           type: "select",
-          helpText: "The day of that month.",
+          row: "fiscal_year_end",
           order: 10.1,
           visible: true,
-          indent: true,
           options: Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")),
         },
         // Square Footage Breakdown group
