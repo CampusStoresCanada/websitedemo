@@ -151,27 +151,44 @@ export default function LocationsEditor({
               )}
             </div>
 
-            <div className="mt-3 max-w-xs">
-              <label className="block text-xs font-medium text-gray-700">
+            {/*
+              Radios, not a dropdown: each option needs its explanation beside
+              it, and a <select> can only show labels. Three options is well
+              within the range where showing them all beats hiding them.
+            */}
+            <fieldset className="mt-3">
+              <legend className="text-xs font-medium text-gray-700">
                 What kind of location is this?
-              </label>
-              <select
-                value={loc.kind ?? ""}
-                disabled={isReadOnly}
-                onChange={(e) => {
-                  const kind = (e.target.value || null) as LocationKind | null;
-                  patch(loc.id, (l) => ({ ...l, kind }));
-                  void updateLocation({ benchmarkingId, locationId: loc.id, kind });
-                }}
-                className="mt-1 w-full rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
-              >
-                <option value="">Choose…</option>
+              </legend>
+              <div className="mt-1 space-y-1.5">
                 {LOCATION_KINDS.map((k) => (
-                  <option key={k} value={k}>
-                    {k}
-                  </option>
+                  <label key={k.value} className="flex cursor-pointer gap-2">
+                    <input
+                      type="radio"
+                      name={`kind-${loc.id}`}
+                      className="mt-0.5"
+                      checked={loc.kind === k.value}
+                      disabled={isReadOnly}
+                      onChange={() => {
+                        patch(loc.id, (l) => ({ ...l, kind: k.value }));
+                        void updateLocation({
+                          benchmarkingId,
+                          locationId: loc.id,
+                          kind: k.value,
+                        });
+                      }}
+                    />
+                    <span>
+                      <span className="block text-xs font-medium text-gray-800">
+                        {k.label}
+                      </span>
+                      <span className="block text-[11px] leading-snug text-gray-500">
+                        {k.help}
+                      </span>
+                    </span>
+                  </label>
                 ))}
-              </select>
+              </div>
 
               {loc.kind === "Other" && (
                 <input
@@ -187,10 +204,10 @@ export default function LocationsEditor({
                       kindOther: e.target.value,
                     })
                   }
-                  className="mt-2 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                  className="mt-2 w-full max-w-sm rounded border border-gray-300 px-2 py-1.5 text-sm"
                 />
               )}
-            </div>
+            </fieldset>
 
             <div className="mt-3 grid gap-3 md:grid-cols-3">
               {SPACE_FIELDS.map((f) => (
