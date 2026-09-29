@@ -65,6 +65,16 @@ export const SECTION_NOTES: Record<string, string> = {
     "Everything that is not course materials: apparel, gifts, technology, supplies, food. Categories follow the NACS taxonomy so the cuts line up year to year.",
   technology_systems:
     "Your POS and e-commerce platforms by name. No figures. It is here because 'what do stores like us run' is one of the most asked questions on the member forum.",
+  other_income:
+    "Money booked through the store that is not merchandise — printing, lockers, transit passes, gown rental, institutional funding. The services you already told us you run are listed for you.",
+  campus_contributions:
+    "What the store gives back: student discounts, rent and commissions to the institution, scholarships, donations, bad debt. For most stores this is the number a vice-president asks for and nobody can produce.",
+  expenses:
+    "Operating costs on named lines, so the same expense lands in the same place at every store. Shrinkage is asked in dollars, not as a percentage, because a percentage cannot be reconciled to a statement.",
+  review_financials:
+    "Nothing new to answer. Everything you have entered, shown as one income statement, with every line traceable back to the answer it came from.",
+  inclusive_access:
+    "What you run, whether students opt in or out, who operates it, and who collects the money. If the institution collects it, you decide whether it counts toward your comparison.",
   store_operations:
     "Hours, services offered, shrink, and the newer KPIs. Several of these are optional and marked so.",
 };

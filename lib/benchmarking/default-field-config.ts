@@ -399,6 +399,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "total_square_footage",
+          reviewerNote:
+            "In 2025 the parts did not always add up to the whole, and we could not tell whether storage and office were meant to be inside this number. Is it clear now?",
           label: "Total Store Space",
           type: "number",
           helpText:
@@ -408,342 +410,210 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           group: "Square Footage Breakdown",
           calculated: { formula: "total_square_footage", format: "number" },
         },
+        {
+          /*
+            Who else on or beside campus sells what you sell. Two stores with
+            the same enrolment are not in the same market if one of them has a
+            Chapters across the road.
+          */
+          name: "competing_stores_count",
+          label: "How many other stores compete with you for this business?",
+          type: "integer",
+          helpText:
+            "On campus or close enough that a student would walk there instead. Count each store, not each chain.",
+          order: 60,
+          visible: true,
+          group: "Your market",
+        },
+        {
+          name: "competing_stores_notes",
+          label: "Who are they?",
+          type: "text",
+          helpText:
+            "Names, or just what they are — a student union shop, a campus convenience store, a chain bookstore nearby.",
+          order: 61,
+          visible: true,
+          indent: true,
+          group: "Your market",
+        },
       ],
     },
 
     // ═══════════════════════════════════════════════════════════
-    // Section 2: Sales Revenue
+    // Section 2: General Merchandise
     // ═══════════════════════════════════════════════════════════
     {
-      id: "sales_revenue",
-      title: "Sales Revenue",
+      id: "general_merchandise",
+      title: "General Merchandise",
+      description: "The categories you carry, in the same words the rest of the association uses. Say which ones you sell, break any of them into subcategories if that is how you run them, and leave the rest alone. Merchandise income that fits none of these belongs in Other Income.",
       order: 2,
       fields: [
         {
-          name: "total_gross_sales_instore",
-          label: "In-Store Retail Sales",
+          name: "sales_course_supplies",
+          label: "Course-Required Supplies (Total)",
           type: "currency",
           helpText:
-            "Revenue from walk-in purchases at all physical locations, for the fiscal year. Do NOT include online sales, IA/EA, or any course materials billed as a student fee. If your reporting gives you one combined sales figure, split it here rather than entering the total in one box.",
-          reviewerNote:
-            "THE BIG ONE. In 2025 some stores put their whole sales figure here and others split it across this and Online, and nothing in the response told us which. Every institution had to be classified by hand, and where we guessed wrong the numbers were wrong. Does the wording now make it impossible to enter a combined total here?",
+            "Lab coats, art supplies, safety equipment, calculators and anything else required by a course syllabus.",
           order: 1,
           visible: false,
-          required: true,
+        },
+        {
+          name: "sales_course_supplies_online",
+          label: "Course-Required Supplies (Online)",
+          type: "currency",
+          helpText:
+            "The portion of the line above sold through your web store.",
+          order: 2,
+          visible: false,
+        },
+        // Product Categories group
+        {
+          name: "sales_general_books",
+          label: "General / Trade Books",
+          type: "currency",
+          helpText: "Trade and general-interest books. Not course texts.",
+          order: 3,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_technology",
+          label: "Technology",
+          type: "currency",
+          helpText:
+            "Computers, tablets, peripherals, accessories and software sold at retail.",
+          order: 4,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_stationary",
+          label: "Stationery",
+          type: "currency",
+          helpText:
+            "Notebooks, pens, paper and general office supplies not required by a syllabus.",
+          order: 5,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_apparel",
+          label: "Apparel (Total)",
+          type: "currency",
+          helpText:
+            "All clothing and wearables. The imprinted and non-imprinted lines below should add up to this.",
+          order: 6,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_apparel_imprint",
+          label: "Imprinted",
+          type: "currency",
+          helpText: "Apparel carrying your institution's name, crest or logo.",
+          order: 7,
+          visible: false,
+          group: "Product Categories",
+          indent: 2,
+        },
+        {
+          name: "sales_apparel_non_imprint",
+          label: "Non-Imprinted",
+          type: "currency",
+          helpText: "Apparel without institutional branding.",
+          order: 8,
+          visible: false,
+          group: "Product Categories",
+          indent: 2,
+        },
+        {
+          name: "sales_gifts_drinkware",
+          label: "Gifts & Drinkware (Total)",
+          type: "currency",
+          helpText:
+            "All gifts and drinkware. The two lines below should add up to this.",
+          order: 9,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_gifts_imprint",
+          label: "Imprinted",
+          type: "currency",
+          helpText: "Gifts and drinkware carrying institutional branding.",
+          order: 10,
+          visible: false,
+          group: "Product Categories",
+          indent: 2,
+        },
+        {
+          name: "sales_gifts_non_imprint",
+          label: "Non-Imprinted",
+          type: "currency",
+          helpText: "Gifts and drinkware without institutional branding.",
+          order: 11,
+          visible: false,
+          group: "Product Categories",
+          indent: 2,
+        },
+        {
+          name: "sales_custom_merch",
+          label: "Custom / Licensed Merchandise",
+          type: "currency",
+          helpText:
+            "Institution-branded merchandise that is not apparel, gifts or drinkware — pennants, decals, regalia and the like.",
+          order: 12,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "sales_food_beverage",
+          label: "Food & Beverage",
+          type: "currency",
+          helpText:
+            "Food, drink and confectionery, including any cafe you operate.",
+          order: 13,
+          visible: false,
+          group: "Product Categories",
+          indent: true,
+        },
+        {
+          name: "total_gross_sales_instore",
+          reviewerNote:
+            "THE BIG ONE. In 2025 some stores put their whole sales figure here and others split it across this and Online, and nothing in the response told us which. Every institution had to be classified by hand, and where we guessed wrong the numbers were wrong. Does the wording now make it impossible to enter a combined total here?",
+          label: "Total in-store sales",
+          type: "currency",
+          helpText: "Superseded by the category lines above, which add up to this.",
+          order: 900,
+          visible: false,
         },
         {
           name: "total_online_sales",
-          label: "Online Retail Sales",
-          type: "currency",
-          helpText:
-            "Revenue from your web store, for the fiscal year. Include every online order regardless of how it was fulfilled, including orders picked up in store. Do NOT include IA/EA or course materials billed as a student fee.",
           reviewerNote:
-            "Other half of the 2025 sales-column problem. Also unclear in 2025 whether an online order collected in store counted as online or in-store — stores split both ways. Does the wording settle that?",
-          order: 2,
+            "Other half of the 2025 sales-column problem. Also unclear in 2025 whether an online order collected in store counted as online or in-store \u2014 stores split both ways. Does the wording settle that?",
+          label: "Total online sales",
+          type: "currency",
+          helpText: "Superseded by the Online column on each category line.",
+          order: 901,
           visible: false,
-          required: true,
-        },
-        {
-          name: "_calc_total_retail",
-          label: "Total Retail Revenue",
-          type: "currency",
-          helpText: "In-store plus online. Calculated for you.",
-          order: 3,
-          visible: true,
-          calculated: {
-            formula: "total_retail_revenue",
-            format: "currency",
-          },
-        },
-        // Non-Retail Revenue group
-        {
-          name: "ia_revenue",
-          label: "IA/EA Revenue",
-          type: "currency",
-          order: 4,
-          visible: true,
-          // Karin Stonehouse's wording, from question review. Six of seven
-          // reviewers passed the original; she was the one who flagged it and
-          // she wrote the replacement. I had rewritten this field myself before
-          // reading the reviews — over text the committee had already cleared.
-          // Theirs wins.
-          helpText:
-            "Revenue from any Inclusive Access or similar course material programs in which charges are collected through institutional billing mechanisms (e.g., registration, student accounts, tuition, or ancillary fees) rather than through retail sales. Leave blank if no such program exists.",
-          reviewerNote:
-            "This field did not exist in 2025. One college runs a $16M IA programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages.\\n\\nRewritten 2026-09: it used to end by pointing at the course materials breakdown, and that line was the single biggest source of confusion in review — people read the cross-reference as 'these are the same number seen twice' and either double-counted or left one blank. This question is about WHERE the money is booked. The one in Course Materials is about WHAT the programme contains. Does this stand on its own without the reader needing to hold the other one in their head?",
-          group: "Non-Retail Revenue",
-          indent: true,
-        },
-        {
-          name: "other_non_retail_revenue",
-          label: "Other Non-Retail Revenue",
-          type: "currency",
-          order: 5,
-          visible: true,
-          helpText:
-            "Any other revenue that runs through the store's books but is not a retail transaction — departmental chargebacks, institutional service fees, commissions. Do not include central funding or subsidy, which has its own field below.",
-          reviewerNote:
-            "New for 2026. Meant to catch revenue that runs through the store's books but is not a retail sale. Risk is that it becomes a dumping ground, or that stores put central funding here instead of in its own field. Is the boundary clear?",
-          group: "Non-Retail Revenue",
-          indent: true,
-        },
-        {
-          name: "other_non_retail_description",
-          label: "Description of Other Non-Retail Revenue",
-          type: "text",
-          helpText:
-            "If you entered an amount above, say in a line or two where it comes from.",
-          order: 6,
-          visible: true,
-          placeholder: "Describe the source(s) of non-retail revenue",
-          group: "Non-Retail Revenue",
-          indent: true,
-        },
-        // Calculated totals
-        {
-          name: "_calc_total_revenue",
-          label: "Total Revenue",
-          type: "currency",
-          helpText:
-            "Retail plus IA/EA plus other non-retail. This is the figure used for gross margin, net margin, HR percentage and every per-student and per-square-foot comparison in your report.",
-          order: 7,
-          visible: true,
-          calculated: {
-            formula: "total_revenue",
-            format: "currency",
-          },
-          group: "Calculated Totals",
-          indent: true,
-        },
-        {
-          name: "_calc_online_pct",
-          label: "Online %",
-          type: "percentage",
-          helpText:
-            "Online as a share of retail revenue only. IA/EA is excluded, so stores with and without an IA/EA programme stay comparable.",
-          order: 8,
-          visible: true,
-          calculated: {
-            formula: "online_percentage",
-            format: "percentage",
-          },
-          group: "Calculated Totals",
-          indent: true,
         },
       ],
     },
 
     // ═══════════════════════════════════════════════════════════
-    // Section 3: Financial Metrics
-    // ═══════════════════════════════════════════════════════════
-    {
-      id: "financial_metrics",
-      title: "Financial Metrics",
-      order: 3,
-      fields: [
-        {
-          name: "total_cogs",
-          label: "Cost of Goods Sold (COGS)",
-          type: "currency",
-          helpText:
-            "Cost of goods sold for the fiscal year, all product categories. This is the store's cost of product — not the institution's budget for the store, and not your total operating expenses.",
-          reviewerNote:
-            "In 2025 several stores reported figures that looked like institutional budgets rather than store cost of goods, and the form gave us no way to tell. Does the wording now rule that out?",
-          order: 1,
-          visible: true,
-          required: true,
-        },
-        {
-          name: "expense_hr",
-          label: "HR Expense (Salaries, Wages, Benefits)",
-          type: "currency",
-          helpText:
-            "All staff costs: salaries, wages, benefits and payroll taxes, for full-time, part-time and student employees. If your institution carries some of these centrally and does not charge them back to you, report only what hits your books, and say so in the notes.",
-          reviewerNote:
-            "Some institutions carry staff costs centrally and never charge them to the store, so 2025 HR figures were not comparable — a store showing very low HR might be well run or might simply not be billed. Does the wording get us the right number, or at least a note explaining which?",
-          order: 2,
-          visible: true,
-          required: true,
-        },
-        {
-          name: "expense_rent_maintenance",
-          label: "Rent & Occupancy",
-          type: "currency",
-          helpText:
-            "Rent, maintenance, utilities and other occupancy costs. If your institution does not charge the store rent, enter 0 rather than leaving this blank — 0 and blank mean different things to us.",
-          reviewerNote:
-            "In 2025 we could not tell a store that pays no rent from a store that skipped the question. Both arrived as blank. Does asking for an explicit 0 fix that, and will people actually do it?",
-          order: 3,
-          visible: true,
-        },
-        {
-          name: "net_profit",
-          label: "Net Profit / (Loss)",
-          type: "currency",
-          order: 4,
-          visible: true,
-          required: true,
-          helpText: "Enter negative values for losses",
-          reviewerNote:
-            "Some 2025 figures appeared to include revenue from outside the store. Is it clear this is the store's bottom line only, and that losses go in as negatives?",
-        },
-        {
-          name: "marketing_spend",
-          label: "Marketing & Promotions",
-          type: "currency",
-          helpText:
-            "Advertising, promotions, sponsorships, printed materials and paid social, for the fiscal year.",
-          order: 5,
-          visible: true,
-        },
-        {
-          name: "central_funding",
-          label: "Central Funding / Subsidy",
-          type: "currency",
-          order: 6,
-          visible: true,
-          helpText:
-            "Funding received from the institution to support store operations",
-        },
-        // Calculated metrics
-        {
-          name: "_calc_gross_margin",
-          label: "Gross Margin $",
-          type: "currency",
-          helpText:
-            "Total revenue less cost of goods sold. Calculated for you.",
-          order: 7,
-          visible: true,
-          calculated: { formula: "gross_margin", format: "currency" },
-          group: "Calculated Metrics",
-          indent: true,
-        },
-        {
-          name: "_calc_gross_margin_pct",
-          label: "Gross Margin %",
-          type: "percentage",
-          helpText:
-            "Gross margin as a share of total revenue. Most campus stores land between 20% and 35%. If yours falls outside that, it is worth a second look before you submit — usually it means revenue and COGS are being measured on different bases.",
-          order: 8,
-          visible: true,
-          calculated: { formula: "gross_margin_pct", format: "percentage" },
-          group: "Calculated Metrics",
-          indent: true,
-          warnings: [
-            {
-              condition: "gross_margin_low",
-              message: "Gross margin below 10% — please verify COGS.",
-            },
-            {
-              condition: "gross_margin_high",
-              message: "Gross margin above 60% — please verify COGS.",
-            },
-          ],
-        },
-        {
-          name: "_calc_net_margin_pct",
-          label: "Net Margin %",
-          type: "percentage",
-          helpText: "Net profit as a share of total revenue.",
-          order: 9,
-          visible: true,
-          calculated: { formula: "net_margin_pct", format: "percentage" },
-          group: "Calculated Metrics",
-          indent: true,
-        },
-        {
-          name: "_calc_hr_pct",
-          label: "HR % of Revenue",
-          type: "percentage",
-          helpText:
-            "HR expense as a share of total revenue. This is a cost measure, so in your report a lower figure ranks better.",
-          order: 10,
-          visible: true,
-          calculated: { formula: "hr_pct_of_revenue", format: "percentage" },
-          group: "Calculated Metrics",
-          indent: true,
-          warnings: [
-            {
-              condition: "hr_exceeds_revenue",
-              message: "HR expense exceeds total revenue.",
-            },
-          ],
-        },
-      ],
-    },
-
-    // ═══════════════════════════════════════════════════════════
-    // Section 4: Staffing
-    // ═══════════════════════════════════════════════════════════
-    {
-      id: "staffing",
-      title: "Staffing",
-      order: 4,
-      fields: [
-        {
-          name: "fulltime_employees",
-          label: "Full-Time Employees",
-          type: "number",
-          helpText:
-            "Headcount of full-time positions, not FTE. Count filled positions, not budgeted ones.",
-          order: 1,
-          visible: true,
-          required: true,
-        },
-        {
-          name: "parttime_fte_offpeak",
-          label: "Part-Time FTE (Off-Peak)",
-          type: "number",
-          order: 2,
-          visible: true,
-          helpText: "Part-time staff expressed as FTE during off-peak",
-        },
-        {
-          name: "student_fte_average",
-          label: "Student FTE (Average)",
-          type: "number",
-          helpText:
-            "Student employees converted to full-time equivalent, averaged across the year. Use the same conversion as above.",
-          order: 3,
-          visible: true,
-        },
-        // Manager Experience group
-        {
-          name: "manager_years_current_position",
-          label: "Years in Current Position",
-          type: "number",
-          helpText:
-            "How long the current store manager or director has held this role at your institution.",
-          order: 4,
-          visible: true,
-          suffix: "years",
-          group: "Manager Experience",
-          indent: true,
-        },
-        {
-          name: "manager_years_in_industry",
-          label: "Years in Industry",
-          type: "number",
-          helpText:
-            "Total years the current manager has worked in campus retail, at any institution.",
-          order: 5,
-          visible: true,
-          suffix: "years",
-          group: "Manager Experience",
-          indent: true,
-        },
-      ],
-    },
-
-    // ═══════════════════════════════════════════════════════════
-    // Section 5: Course Materials Breakdown
+    // Section 3: Course Materials
     // ═══════════════════════════════════════════════════════════
     {
       id: "course_materials",
-      title: "Course Materials Breakdown",
-      description:
-        "Break down your course materials revenue by category. For each category, report Total Revenue and the Online Portion.",
-      order: 5,
+      title: "Course Materials",
+      description: "Course materials on the same category lines as everything else. The questions below are the ones that only make sense for course materials.",
+      order: 3,
       fields: [
         {
           name: "cm_print_new_total",
@@ -910,7 +780,15 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           visible: false,
           group: "Other",
         },
-        // Calculated totals
+        /*
+          Retired with the category rebuild, not deleted.
+
+          These add up the old cm_* columns, which nothing writes any more — so
+          they rendered a permanent "$0" at the top of the section while the
+          real figures sat in the category grid below. A total that is always
+          zero is worse than no total: it tells a store the form is broken at
+          the exact moment we are asking it to trust the form.
+        */
         {
           name: "_calc_total_cm",
           label: "Total Course Materials Revenue",
@@ -918,7 +796,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "Sum of the category totals above. This should not exceed your total revenue.",
           order: 17,
-          visible: true,
+          visible: false,
           calculated: { formula: "total_course_materials", format: "currency" },
           group: "Totals",
         },
@@ -928,583 +806,740 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           helpText: "Sum of the online sub-columns above.",
           order: 18,
-          visible: true,
+          visible: false,
           calculated: {
             formula: "total_course_materials_online",
             format: "currency",
           },
           group: "Totals",
         },
+        {
+          /*
+            Physical only, and said so out loud. Digital and IA have no
+            sell-through in any sense that compares to a shelf of print — a
+            single number covering both is the kind of figure nobody trusts and
+            everybody quotes.
+          */
+          name: "cm_sell_through_pct",
+          label: "Sell-through on physical course materials",
+          type: "percentage",
+          helpText:
+            "Of the physical course materials you brought in for the year, the share that sold before you returned or wrote off the rest. Print only — digital and Inclusive Access are asked separately.",
+          order: 500,
+          visible: true,
+          suffix: "%",
+          group: "How the year ran",
+        },
+        {
+          name: "total_transaction_count",
+          label: "Total transactions",
+          type: "integer",
+          helpText:
+            "Across every till and the webstore. With sales, this gives an average basket — the figure most stores ask us for first.",
+          order: 510,
+          visible: true,
+          group: "How the year ran",
+        },
+        {
+          name: "tracks_adoptions",
+          label: "Do you track faculty adoptions?",
+          type: "boolean",
+          order: 520,
+          visible: true,
+          group: "Adoptions",
+        },
+        {
+          name: "total_course_sections",
+          label: "Course sections needing materials",
+          type: "integer",
+          order: 521,
+          visible: true,
+          indent: true,
+          showIf: { field: "tracks_adoptions", value: true },
+          group: "Adoptions",
+        },
+        {
+          name: "adoptions_by_deadline",
+          label: "Of those, adoptions received by your deadline",
+          type: "integer",
+          order: 522,
+          visible: true,
+          indent: true,
+          showIf: { field: "tracks_adoptions", value: true },
+          group: "Adoptions",
+        },
+        {
+          name: "adoption_deadline_window",
+          label: "How far ahead is your deadline?",
+          type: "select",
+          options: [
+            "More than 12 weeks before term",
+            "8 to 12 weeks before term",
+            "4 to 8 weeks before term",
+            "Less than 4 weeks before term",
+            "We do not set one",
+          ],
+          order: 523,
+          visible: true,
+          indent: true,
+          showIf: { field: "tracks_adoptions", value: true },
+          group: "Adoptions",
+        },
       ],
     },
 
     // ═══════════════════════════════════════════════════════════
-    // Section 6: General Merchandise
+    // Section 4: Other Income
     // ═══════════════════════════════════════════════════════════
     {
-      id: "general_merchandise",
-      title: "General Merchandise",
+      id: "other_income",
+      title: "Other Income",
+      description:
+        "Money booked through your store that is not merchandise. The services you told us you offer are listed for you. Anything the institution collects on your behalf is asked in Inclusive & Equitable Access instead, because it is not your revenue in the ordinary sense.",
+      order: 4,
+      fields: [
+        {
+          name: "central_funding",
+          label: "Funding from the institution",
+          type: "currency",
+          helpText:
+            "An operating subsidy, a covered deficit, or any other money the institution gives the store that is not payment for goods. Not a grant you spent on a specific project.",
+          order: 1,
+          visible: true,
+        },
+        {
+          name: "ia_revenue",
+          reviewerNote:
+            "This field did not exist in 2025. One college runs a $16M Inclusive Access programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages. Is this description clear enough that an IA store knows this is where their money goes, and a non-IA store knows to leave it blank?",
+          label: "Inclusive Access revenue",
+          type: "currency",
+          helpText:
+            "Superseded by Inclusive & Equitable Access, which asks who collected the money before asking how much.",
+          order: 900,
+          visible: false,
+        },
+        {
+          name: "other_non_retail_revenue",
+          reviewerNote:
+            "New for 2026. Meant to catch revenue that runs through the store's books but is not a retail sale. Risk is that it becomes a dumping ground, or that stores put central funding here instead of in its own field. Is the boundary clear?",
+          label: "Other non-retail revenue",
+          type: "currency",
+          helpText: "Superseded by the income lines you name yourself above.",
+          order: 901,
+          visible: false,
+        },
+        {
+          name: "other_non_retail_description",
+          label: "Describe that revenue",
+          type: "text",
+          order: 902,
+          visible: false,
+        },
+      ],
+    },
+
+    // ═══════════════════════════════════════════════════════════
+    // Section 5: Campus Contributions
+    // ═══════════════════════════════════════════════════════════
+    {
+      id: "campus_contributions",
+      title: "Campus Contributions",
+      order: 5,
+      fields: [
+        {
+          name: "contrib_discounts",
+          label: "Discounts given to students",
+          type: "currency",
+          order: 1,
+          visible: true,
+          helpText: "Everything you took off the shelf price for a student over the year. The single largest way most stores subsidise their campus.",
+        },
+        {
+          name: "contrib_rent_to_institution",
+          label: "Rent paid to the institution",
+          type: "currency",
+          order: 2,
+          visible: true,
+          helpText: "What you pay your own university or college for the space you occupy.",
+        },
+        {
+          name: "contrib_commissions",
+          label: "Commissions paid to the institution",
+          type: "currency",
+          order: 3,
+          visible: true,
+          helpText: "A share of sales handed back, however it is described in your agreement.",
+        },
+        {
+          name: "contrib_donations",
+          label: "Donations",
+          type: "currency",
+          order: 4,
+          visible: true,
+          helpText: "Cash and goods given to campus groups, events and causes.",
+        },
+        {
+          name: "contrib_scholarships",
+          label: "Scholarships and bursaries",
+          type: "currency",
+          order: 5,
+          visible: true,
+          helpText: "Funded by the store, whether awarded in your name or the institution's.",
+        },
+        {
+          name: "contrib_bad_debt",
+          label: "Bad debt written off",
+          type: "currency",
+          order: 6,
+          visible: true,
+          helpText: "Departmental and student accounts you carried and never collected.",
+        },
+        {
+          name: "contrib_rebates",
+          label: "Rebates returned",
+          type: "currency",
+          order: 7,
+          visible: true,
+          helpText: "Money handed back to the institution or to students at year end.",
+        },
+        {
+          name: "expense_university_admin",
+          label: "University administrative charge",
+          type: "currency",
+          order: 8,
+          visible: true,
+          helpText: "What the institution charges you for central services. It also appears in Expenses \u2014 entered once, counted once.",
+        },
+        {
+          name: "contrib_other_agreements",
+          label: "Other campus agreements and sponsorships",
+          type: "currency",
+          order: 9,
+          visible: true,
+          helpText: "Anything else you fund that is not covered above.",
+        },
+        {
+          name: "contrib_local_marketing",
+          label: "Spent on local marketing",
+          type: "currency",
+          order: 10,
+          visible: true,
+          helpText: "Advertising bought locally, including with campus media.",
+        },
+        {
+          /*
+            Asked in Staffing instead, where the other wage lines are, and read
+            from there into the contribution total. Two fields for one figure
+            meant a store could answer both and have them disagree.
+          */
+          name: "contrib_student_wages",
+          label: "Paid in student wages",
+          type: "currency",
+          order: 11,
+          visible: false,
+          helpText:
+            "Answered in Staffing, with the other wage lines, and counted toward your campus contribution from there.",
+        },
+      ],
+    },
+
+    // ═══════════════════════════════════════════════════════════
+    // Section 6: Staffing
+    // ═══════════════════════════════════════════════════════════
+    {
+      id: "staffing",
+      title: "Staffing",
+      description: "Headcount, what it costs, and how much campus retail experience is on the floor. The wage lines here add up to the salaries figure in Expenses.",
       order: 6,
       fields: [
         {
-          name: "sales_course_supplies",
-          label: "Course-Required Supplies (Total)",
-          type: "currency",
+          name: "fulltime_employees",
+          label: "Full-Time Employees",
+          type: "number",
           helpText:
-            "Lab coats, art supplies, safety equipment, calculators and anything else required by a course syllabus.",
+            "Headcount of full-time positions, not FTE. Count filled positions, not budgeted ones.",
           order: 1,
-          visible: false,
+          visible: true,
+          required: true,
+          group: "Headcount",
         },
         {
-          name: "sales_course_supplies_online",
-          label: "Course-Required Supplies (Online)",
-          type: "currency",
-          helpText:
-            "The portion of the line above sold through your web store.",
+          name: "parttime_fte_offpeak",
+          label: "Part-Time FTE (Off-Peak)",
+          type: "number",
           order: 2,
-          visible: false,
-        },
-        // Product Categories group
-        {
-          name: "sales_general_books",
-          label: "General / Trade Books",
-          type: "currency",
-          helpText: "Trade and general-interest books. Not course texts.",
-          order: 3,
-          visible: false,
-          group: "Product Categories",
-          indent: true,
+          visible: true,
+          helpText: "Part-time staff expressed as FTE during off-peak",
+          group: "Headcount",
         },
         {
-          name: "sales_technology",
-          label: "Technology",
-          type: "currency",
+          name: "student_fte_average",
+          label: "Student FTE (Average)",
+          type: "number",
           helpText:
-            "Computers, tablets, peripherals, accessories and software sold at retail.",
+            "Student employees converted to full-time equivalent, averaged across the year. Use the same conversion as above.",
+          order: 3,
+          visible: true,
+          group: "Headcount",
+        },
+        // Manager Experience group
+        {
+          name: "manager_years_current_position",
+          label: "Years in Current Position",
+          type: "number",
+          helpText:
+            "How long the current store manager or director has held this role at your institution.",
           order: 4,
           visible: false,
-          group: "Product Categories",
+          suffix: "years",
+          group: "Manager Experience",
           indent: true,
         },
         {
-          name: "sales_stationary",
-          label: "Stationery",
-          type: "currency",
+          name: "manager_years_in_industry",
+          label: "Years in Industry",
+          type: "number",
           helpText:
-            "Notebooks, pens, paper and general office supplies not required by a syllabus.",
+            "Total years the current manager has worked in campus retail, at any institution.",
           order: 5,
           visible: false,
-          group: "Product Categories",
+          suffix: "years",
+          group: "Manager Experience",
           indent: true,
         },
         {
-          name: "sales_apparel",
-          label: "Apparel (Total)",
-          type: "currency",
+          name: "seasonal_employees",
+          label: "Seasonal employees at peak",
+          type: "number",
           helpText:
-            "All clothing and wearables. The imprinted and non-imprinted lines below should add up to this.",
-          order: 6,
-          visible: false,
-          group: "Product Categories",
-          indent: true,
+            "People you take on for rush and let go afterwards, counted at your busiest week.",
+          order: 4,
+          visible: true,
+          group: "Headcount",
         },
         {
-          name: "sales_apparel_imprint",
-          label: "Imprinted",
+          name: "wages_full_time",
+          label: "Full-time wages and benefits",
           type: "currency",
-          helpText: "Apparel carrying your institution's name, crest or logo.",
-          order: 7,
-          visible: false,
-          group: "Product Categories",
-          indent: 2,
-        },
-        {
-          name: "sales_apparel_non_imprint",
-          label: "Non-Imprinted",
-          type: "currency",
-          helpText: "Apparel without institutional branding.",
-          order: 8,
-          visible: false,
-          group: "Product Categories",
-          indent: 2,
-        },
-        {
-          name: "sales_gifts_drinkware",
-          label: "Gifts & Drinkware (Total)",
-          type: "currency",
-          helpText:
-            "All gifts and drinkware. The two lines below should add up to this.",
-          order: 9,
-          visible: false,
-          group: "Product Categories",
-          indent: true,
-        },
-        {
-          name: "sales_gifts_imprint",
-          label: "Imprinted",
-          type: "currency",
-          helpText: "Gifts and drinkware carrying institutional branding.",
           order: 10,
-          visible: false,
-          group: "Product Categories",
-          indent: 2,
+          visible: true,
+          group: "What it costs",
         },
         {
-          name: "sales_gifts_non_imprint",
-          label: "Non-Imprinted",
+          name: "wages_part_time",
+          label: "Part-time wages and benefits",
           type: "currency",
-          helpText: "Gifts and drinkware without institutional branding.",
           order: 11,
-          visible: false,
-          group: "Product Categories",
-          indent: 2,
+          visible: true,
+          group: "What it costs",
         },
         {
-          name: "sales_custom_merch",
-          label: "Custom / Licensed Merchandise",
+          name: "wages_seasonal",
+          label: "Seasonal wages and benefits",
           type: "currency",
-          helpText:
-            "Institution-branded merchandise that is not apparel, gifts or drinkware — pennants, decals, regalia and the like.",
           order: 12,
-          visible: false,
-          group: "Product Categories",
-          indent: true,
+          visible: true,
+          group: "What it costs",
         },
         {
-          name: "sales_food_beverage",
-          label: "Food & Beverage",
+          name: "wages_student",
+          label: "Student wages and benefits",
           type: "currency",
           helpText:
-            "Food, drink and confectionery, including any cafe you operate.",
+            "Counted toward your campus contribution as well, because employing students is one. Entered here only — Campus Contributions reads this figure rather than asking again.",
           order: 13,
-          visible: false,
-          group: "Product Categories",
-          indent: true,
+          visible: true,
+          group: "What it costs",
         },
       ],
     },
 
     // ═══════════════════════════════════════════════════════════
-    // Section 7: Technology & Systems
+    // Section 7: Expenses
+    // ═══════════════════════════════════════════════════════════
+    {
+      id: "expenses",
+      title: "Expenses",
+      order: 7,
+      fields: [
+        {
+          name: "expense_hr",
+          reviewerNote:
+            "Some institutions carry staff costs centrally and never charge them to the store, so 2025 HR figures were not comparable \u2014 a store showing very low HR might be well run or might simply not be billed. Does the wording get us the right number, or at least a note explaining which?",
+          label: "Salaries, wages and benefits",
+          type: "currency",
+          order: 1,
+          visible: true,
+          helpText:
+            "All staff costs including payroll taxes and benefits, as it appears on your statements. The wage lines in Staffing break this same total down by employment type, so the two should agree.",
+        },
+        {
+          name: "expense_rent_maintenance",
+          reviewerNote:
+            "In 2025 we could not tell a store that pays no rent from a store that skipped the question. Both arrived as blank. Does asking for an explicit 0 fix that, and will people actually do it?",
+          label: "Rent, maintenance and repairs",
+          type: "currency",
+          order: 2,
+          visible: true,
+        },
+        {
+          name: "expense_utilities",
+          label: "Utilities",
+          type: "currency",
+          order: 3,
+          visible: true,
+        },
+        {
+          name: "expense_advertising",
+          label: "Advertising and promotion",
+          type: "currency",
+          order: 4,
+          visible: true,
+        },
+        {
+          name: "expense_telephone",
+          label: "Telephone and communications",
+          type: "currency",
+          order: 5,
+          visible: true,
+        },
+        {
+          name: "expense_store_supplies",
+          label: "Store and business supplies",
+          type: "currency",
+          order: 6,
+          visible: true,
+        },
+        {
+          name: "expense_it",
+          label: "Information technology",
+          type: "currency",
+          order: 7,
+          visible: true,
+          helpText: "Systems, licences and support. Your POS sits here.",
+        },
+        {
+          name: "expense_postage",
+          label: "Postage and shipping",
+          type: "currency",
+          order: 8,
+          visible: true,
+          helpText: "In and out.",
+        },
+        {
+          name: "expense_depreciation",
+          label: "Depreciation and amortization",
+          type: "currency",
+          order: 9,
+          visible: true,
+        },
+        {
+          name: "expense_professional_services",
+          label: "Professional services",
+          type: "currency",
+          order: 10,
+          visible: true,
+          helpText: "Audit, legal, consulting.",
+        },
+        {
+          name: "expense_education_travel",
+          label: "Education and travel",
+          type: "currency",
+          order: 11,
+          visible: true,
+          helpText: "Conferences, training, and getting people there.",
+        },
+        {
+          name: "expense_insurance",
+          label: "Business insurance",
+          type: "currency",
+          order: 12,
+          visible: true,
+        },
+        {
+          name: "expense_card_fees",
+          label: "Credit and debit card fees",
+          type: "currency",
+          order: 13,
+          visible: true,
+          helpText: "Often the largest line a store forgets.",
+        },
+        {
+          name: "marketing_spend",
+          label: "Total marketing spend",
+          type: "currency",
+          order: 14,
+          visible: true,
+        },
+        {
+          name: "shrink_at_cost",
+          label: "Shrinkage at cost",
+          type: "currency",
+          order: 20,
+          visible: true,
+          helpText: "In dollars, not a percentage \u2014 a percentage cannot be reconciled to your P&L. Positive if shrink increased your cost of sales.",
+          group: "Shrinkage",
+        },
+        {
+          name: "shrink_at_retail",
+          label: "Shrinkage at retail",
+          type: "currency",
+          order: 21,
+          visible: true,
+          helpText: "The same loss valued at the price you would have sold it for.",
+          group: "Shrinkage",
+        },
+        {
+          name: "shrink_textbooks",
+          label: "Textbook shrink",
+          type: "percentage",
+          helpText:
+            "Superseded by shrinkage in dollars, which reconciles to your books. A percentage does not.",
+          order: 900,
+          visible: false,
+        },
+        {
+          name: "shrink_general_merch",
+          label: "General merchandise shrink",
+          type: "percentage",
+          helpText: "Superseded by shrinkage in dollars.",
+          order: 901,
+          visible: false,
+        },
+        {
+          name: "fye_inventory_value",
+          label: "Year-end inventory value",
+          type: "currency",
+          helpText:
+            "Superseded by the closing inventory you give per category, which adds up to this.",
+          order: 902,
+          visible: false,
+        },
+      ],
+    },
+
+    // ═══════════════════════════════════════════════════════════
+    // Section 8: Review
+    // ═══════════════════════════════════════════════════════════
+    {
+      id: "review_financials",
+      title: "Review",
+      description:
+        "Everything you have entered, as one statement. Nothing here is typed in — every line is built from your answers, so hover a line to see where it came from, or click it to go back and change it.",
+      order: 8,
+      fields: [
+        {
+          name: "total_cogs",
+          reviewerNote:
+            "In 2025 several stores reported figures that looked like institutional budgets rather than store cost of goods, and the form gave us no way to tell. Does the wording now rule that out?",
+          label: "Total cost of goods sold",
+          type: "currency",
+          helpText:
+            "Derived from the gross margin you gave each category. Asking for it separately invited the two figures to disagree.",
+          order: 900,
+          visible: false,
+        },
+        {
+          name: "net_profit",
+          reviewerNote:
+            "Some 2025 figures appeared to include revenue from outside the store. Is it clear this is the store's bottom line only, and that losses go in as negatives?",
+          label: "Net profit",
+          type: "currency",
+          helpText: "Derived: gross margin less operating expenses.",
+          order: 901,
+          visible: false,
+        },
+      ],
+    },
+
+    // ═══════════════════════════════════════════════════════════
+    // Section 9: Technology & Systems
     // ═══════════════════════════════════════════════════════════
     {
       id: "technology_systems",
       title: "Technology & Systems",
-      order: 7,
+      description: "Picked from lists rather than typed. Free text gave us NetSuite and Oracle NetSuite as two systems, and Prism three ways — which made a question about what the sector runs on unanswerable.",
+      order: 9,
       fields: [
         {
           name: "pos_system",
-          label: "POS System",
-          type: "text",
-          helpText:
-            "The point-of-sale system you run day to day. Choose Other and tell us if yours is not listed.",
+          label: "Point of sale",
+          type: "select",
           order: 1,
           visible: true,
-          placeholder: "e.g., MBS, Bookware, Ratex, Square",
+          helpText: "Picked from a list rather than typed, because free text gave us Netsuite and Oracle Netsuite, Prism and PrismRBS and PrismPOS as four different systems.",
+          options: ["Bookware (Carleton Technologies)", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Waterloo Information Systems (WISL)", "Ratex", "Built in house", "Other"],
+        },
+        {
+          name: "pos_system_other",
+          label: "Which one?",
+          type: "text",
+          order: 1.1,
+          visible: true,
+          indent: true,
+          showIf: { field: "pos_system", value: "Other" },
         },
         {
           name: "ebook_delivery_system",
-          label: "eBook Delivery System",
-          type: "text",
-          helpText:
-            "The platform students use to access digital course materials you sell.",
+          label: "eBook delivery",
+          type: "select",
           order: 2,
           visible: true,
-          placeholder: "e.g., VitalSource, RedShelf, Direct from publisher",
+          options: ["CEI", "VitalSource", "Kivuto", "Built in house", "Other"],
+        },
+        {
+          name: "ebook_delivery_system_other",
+          label: "Which one?",
+          type: "text",
+          order: 2.1,
+          visible: true,
+          indent: true,
+          showIf: { field: "ebook_delivery_system", value: "Other" },
         },
         {
           name: "student_info_system",
-          label: "Student Information System",
-          type: "text",
-          helpText:
-            "Your institution's SIS — the system of record for registration and course sections.",
+          label: "Student information system",
+          type: "select",
           order: 3,
           visible: true,
-          placeholder: "e.g., Banner, PeopleSoft",
+          options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution", "Other"],
+        },
+        {
+          name: "student_info_system_other",
+          label: "Which one?",
+          type: "text",
+          order: 3.1,
+          visible: true,
+          indent: true,
+          showIf: { field: "student_info_system", value: "Other" },
         },
         {
           name: "lms_system",
-          label: "LMS (Learning Management System)",
-          type: "text",
-          helpText: "The learning management system your institution runs.",
+          label: "Learning management system",
+          type: "select",
           order: 4,
           visible: true,
-          placeholder: "e.g., Blackboard, Canvas, Moodle, D2L",
+          options: ["D2L / Brightspace", "Moodle", "Canvas", "Blackboard", "LEA", "Other"],
+        },
+        {
+          name: "lms_system_other",
+          label: "Which one?",
+          type: "text",
+          order: 4.1,
+          visible: true,
+          indent: true,
+          showIf: { field: "lms_system", value: "Other" },
         },
         {
           name: "payment_options",
-          label: "Payment & Loyalty Programs",
+          label: "How can a customer pay?",
           type: "multiselect",
-          order: 5,
-          visible: true,
           options: [
-            "Gift Cards",
-            "Accept Campus Card",
-            "Loyalty / Frequent Shopper Program",
+            "Cash",
+            "Debit",
+            "Credit",
+            "Student account",
+            "Departmental charge",
+            "Financial aid or bursary",
+            "Campus card",
+            "Tap to pay on mobile",
+            "Buy now, pay later",
+            "Gift card",
           ],
-          helpText:
-            "Programs your store runs or accepts — not card brands. Everyone takes Visa; this asks what else you offer. In 2025 this was worded as \"payment methods accepted\" and several stores listed Debit and Mastercard, which is not what the question is for.",
+          order: 20,
+          visible: true,
+          group: "Payments",
         },
-        // Social Media & Marketing group
+        {
+          name: "store_in_stores",
+          label: "Do you run a store inside another store?",
+          type: "text",
+          helpText:
+            "A branded shop within your space, or your shop inside somebody else's. Name it if so.",
+          order: 30,
+          visible: true,
+          group: "Channels",
+        },
         {
           name: "social_media_platforms",
-          label: "Social Media Platforms",
+          label: "Where are you posting?",
           type: "multiselect",
-          order: 6,
-          visible: true,
-          // Ordered by how many stores actually use each, and spelled the way
-          // the 2025 data already spells them — "Twitter (X)", not "X (Twitter)".
-          // A new spelling of an existing value silently splits the answer.
           options: [
             "Instagram",
             "Facebook",
             "TikTok",
-            "Twitter (X)",
-            "Threads",
+            "X",
+            "LinkedIn",
             "YouTube",
-            "BlueSky",
+            "Snapchat",
+            "Threads",
+            "Reddit",
+            "Discord",
           ],
-          helpText:
-            "Tick every platform your store posts to itself. Not the institution's central accounts — only the ones you run.",
-          group: "Social Media & Marketing",
-          indent: true,
+          order: 40,
+          visible: true,
+          group: "Social",
         },
         {
           name: "social_media_frequency",
-          label: "Posting Frequency",
+          label: "How often?",
           type: "select",
-          helpText: "How often your store posts, on average across the year.",
-          order: 7,
-          visible: true,
           options: [
+            "Several times a day",
             "Daily",
-            "Several times a week",
+            "A few times a week",
             "Weekly",
-            "Monthly",
-            "Rarely",
-            "Never",
+            "A few times a month",
+            "Less than monthly",
           ],
-          group: "Social Media & Marketing",
+          order: 41,
+          visible: true,
           indent: true,
+          group: "Social",
         },
         {
           name: "social_media_run_by",
-          label: "Social Media Managed By",
+          label: "Who runs it?",
           type: "select",
-          helpText: "Who actually writes and posts. Choose the closest match.",
-          order: 8,
-          visible: true,
           options: [
-            "In-house",
-            "Outsourced",
-            "Mix of in-house and outsourced",
-            "N/A",
+            "Store staff, as part of their job",
+            "A student employee",
+            "A dedicated marketing person",
+            "The institution's marketing department",
+            "An agency",
+            "Nobody in particular",
           ],
-          group: "Social Media & Marketing",
-          indent: true,
-        },
-        // Services & Operations group
-        {
-          name: "services_offered",
-          label: "Services Offered",
-          type: "multiselect",
-          order: 9,
-          visible: false,
-          options: [
-            "Sponsorships",
-            "Transit or Parking Pass Sales",
-            "Locker Sales",
-            "Print / Photocopy Service",
-            "Campus Card Services",
-            "Post Office",
-            "Student Mail Services",
-            "Campus Mail",
-          ],
-          helpText:
-            "Non-retail services your store runs on behalf of the campus. Tick what applies and add anything else you do — this list came from what stores reported last year, not from a rulebook.",
-          group: "Services & Operations",
-          indent: true,
-        },
-        {
-          name: "shopping_services",
-          label: "Shopping Services",
-          type: "multiselect",
-          options: [
-            "In-Store Pick-up",
-            "Ship from Store",
-            "Order on Web",
-            "Custom Orders",
-            "Return to Store",
-            "Special Orders",
-            "Customer Service Kiosk",
-            "Graduation Regalia",
-            "Residence Delivery",
-            "Locker Pick-up",
-            "Competitive Price Guarantee",
-            "Personal Shopper",
-          ],
-          helpText:
-            "Services around the buying experience itself. Tick what applies and add anything else — this list came from what stores reported last year.",
-          order: 10,
+          order: 42,
           visible: true,
-          group: "Services & Operations",
           indent: true,
-        },
-        {
-          name: "store_in_stores",
-          label: "Store-in-Stores",
-          type: "text",
-          helpText:
-            "Branded concessions or partner shops operating inside your footprint.",
-          order: 11,
-          visible: true,
-          placeholder: "e.g., Spirit Shop, Tech Hub, Starbucks",
-          group: "Services & Operations",
-          indent: true,
-        },
-        {
-          name: "physical_inventory_schedule",
-          label: "Physical Inventory Schedule",
-          type: "text",
-          helpText:
-            "How often you count stock. Choose every option that applies if different categories are counted on different cycles.",
-          order: 12,
-          visible: true,
-          placeholder: "e.g., Annual, Bi-annual, Cycle counts",
-          group: "Services & Operations",
-          indent: true,
+          group: "Social",
         },
       ],
     },
 
     // ═══════════════════════════════════════════════════════════
-    // Section 8: Store Operations & New KPIs
+    // Section 10: Inclusive & Equitable Access
     // ═══════════════════════════════════════════════════════════
     {
-      id: "store_operations",
-      title: "Store Operations & New KPIs",
-      order: 8,
+      id: "inclusive_access",
+      title: "Inclusive & Equitable Access",
+      order: 10,
       fields: [
-        // Store Hours group
-        {
-          name: "weekday_hours_open",
-          label: "Weekday Open",
-          type: "text",
-          helpText: "Your usual weekday opening time outside rush periods.",
-          order: 1,
-          visible: false,
-          placeholder: "9:00 AM",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "weekday_hours_close",
-          label: "Weekday Close",
-          type: "text",
-          helpText: "Your usual weekday closing time outside rush periods.",
-          order: 2,
-          visible: false,
-          placeholder: "5:00 PM",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "saturday_hours_open",
-          label: "Saturday Open",
-          type: "text",
-          helpText: "Leave blank if you do not open on Saturdays.",
-          order: 3,
-          visible: false,
-          placeholder: "Closed",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "saturday_hours_close",
-          label: "Saturday Close",
-          type: "text",
-          helpText: "Leave blank if you do not open on Saturdays.",
-          order: 4,
-          visible: false,
-          placeholder: "Closed",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "sunday_hours_open",
-          label: "Sunday Open",
-          type: "text",
-          helpText: "Leave blank if you do not open on Sundays.",
-          order: 5,
-          visible: false,
-          placeholder: "Closed",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "sunday_hours_close",
-          label: "Sunday Close",
-          type: "text",
-          helpText: "Leave blank if you do not open on Sundays.",
-          order: 6,
-          visible: false,
-          placeholder: "Closed",
-          group: "Store Hours",
-          indent: true,
-        },
-        {
-          name: "hours_vary_seasonally",
-          label: "Do your hours vary seasonally?",
-          type: "boolean",
-          helpText:
-            "Yes if you extend or reduce hours around rush, exams or the summer.",
-          order: 7,
-          visible: false,
-        },
-        // Shrinkage group
-        {
-          name: "shrink_textbooks",
-          label: "Textbooks Shrink %",
-          type: "percentage",
-          helpText:
-            "Shrinkage on course materials as a percentage of course materials sales, from your most recent count.",
-          order: 8,
-          visible: true,
-          suffix: "%",
-          group: "Shrinkage",
-          indent: true,
-        },
-        {
-          name: "shrink_general_merch",
-          label: "General Merchandise Shrink %",
-          type: "percentage",
-          helpText:
-            "Shrinkage on general merchandise as a percentage of general merchandise sales, from your most recent count.",
-          order: 9,
-          visible: true,
-          suffix: "%",
-          group: "Shrinkage",
-          indent: true,
-        },
-        // New KPI Fields group
-        {
-          name: "fye_inventory_value",
-          label: "Fiscal Year-End Inventory Value (at cost)",
-          type: "currency",
-          order: 10,
-          visible: true,
-          helpText:
-            "Inventory on hand at fiscal year-end, valued at cost. Used to calculate GMROI and inventory turns.",
-          group: "New KPI Fields",
-          indent: true,
-          note: "These fields are new for FY2026. They help us build more granular benchmarks for inventory efficiency and adoption management.",
-        },
-        {
-          name: "total_transaction_count",
-          label: "Total Transaction Count",
-          type: "integer",
-          order: 11,
-          visible: true,
-          helpText:
-            "Total number of sales transactions (in-store + online) for the year. Used to calculate average transaction value.",
-          group: "New KPI Fields",
-          indent: true,
-        },
-        {
-          name: "tracks_adoptions",
-          label: "Does your store track textbook adoptions?",
-          type: "boolean",
-          helpText:
-            "Whether your store records how many course sections submit adoption information by your deadline. If you do not track this yet, answer No and skip the next two questions — we expect a lot of Nos this year.",
-          order: 12,
-          visible: true,
-          group: "New KPI Fields",
-          indent: true,
-        },
-        {
-          name: "total_course_sections",
-          label: "Total Course Sections",
-          type: "integer",
-          order: 13,
-          visible: true,
-          helpText: "Total number of course sections at your institution",
-          group: "New KPI Fields",
-          indent: true,
-          showIf: { field: "tracks_adoptions", value: true },
-        },
-        {
-          name: "adoptions_by_deadline",
-          label: "Adoptions Received by Deadline",
-          type: "integer",
-          order: 14,
-          visible: true,
-          helpText: "Number of adoptions received before your deadline",
-          group: "New KPI Fields",
-          indent: true,
-          showIf: { field: "tracks_adoptions", value: true },
-        },
-        {
-          name: "adoption_deadline_window",
-          label: "Adoption Deadline Window",
-          type: "select",
-          helpText:
-            "How far ahead of the term your adoption deadline falls. We are asking because deadlines vary widely, and knowing yours is what lets us compare completion rates fairly.",
-          order: 15,
-          visible: true,
-          options: [
-            "2 weeks before term",
-            "4 weeks before term",
-            "6 weeks before term",
-            "8+ weeks before term",
-            "Other",
-          ],
-          group: "New KPI Fields",
-          indent: true,
-          showIf: { field: "tracks_adoptions", value: true },
-        },
-        /*
-          How the IA/EA programme runs — the third question, from Shannon
-          Blackadder, and the one that was missing.
-
-          The other two IA/EA questions are amounts: what the programme is worth
-          outside the store (Sales Revenue) and how much course materials it
-          moves (Course Materials). Neither says how the thing OPERATES, which is
-          what everyone actually asks about — and its absence is part of why the
-          other two read as duplicates of each other.
-
-          Three pick-lists, not a free-text box. I drafted this as prose first;
-          Shannon had already specified it as three closed questions, and she is
-          right: "who bills the student" has three real answers, not infinite
-          ones. Each carries an Other with an explain field, so a model we have
-          not thought of is captured rather than forced into the nearest box —
-          and the Other answers are next year's options.
-        */
         {
           name: "ia_ea_program_type",
           label: "Do you run an Inclusive Access or Equitable Access programme?",
           type: "select",
-          helpText:
-            "If you run neither, say so and skip the two questions below.",
-          order: 16,
+          order: 1,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
-          options: [
-            "Inclusive Access",
-            "Equitable Access",
-            "Both",
-            "Neither",
-            "Other",
-          ],
-          reviewerNote:
-            "New for 2026, specified by Shannon Blackadder. Is 'Both' a real case, or does offering it invite a store to pick it when they mean one programme with two names?",
+          options: ["Inclusive Access", "Equitable Access", "Both", "Neither", "Other"],
+          helpText: "If you run neither, nothing else in this section applies.",
         },
         {
           name: "ia_ea_program_type_other",
           label: "Tell us what you run",
           type: "text",
-          order: 16.1,
+          order: 1.1,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
           indent: true,
           showIf: { field: "ia_ea_program_type", value: "Other" },
         },
@@ -1512,47 +1547,96 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "ia_ea_enrolment_model",
           label: "Is it opt-in or opt-out?",
           type: "select",
-          helpText:
-            "Whether a student is in the programme by default, or has to choose it.",
-          order: 17,
+          order: 2,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
           options: ["Opt-in", "Opt-out", "Other"],
+          helpText: "Whether a student is in the programme by default, or has to choose it.",
         },
         {
           name: "ia_ea_enrolment_model_other",
           label: "Describe how students join or leave",
           type: "text",
-          order: 17.1,
+          order: 2.1,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
           indent: true,
           showIf: { field: "ia_ea_enrolment_model", value: "Other" },
+        },
+        {
+          name: "ia_ea_operated_by",
+          label: "Who runs it?",
+          type: "select",
+          order: 3,
+          visible: true,
+          options: ["The institution", "In house", "Other"],
+        },
+        {
+          name: "ia_ea_operated_by_other",
+          label: "Who?",
+          type: "text",
+          order: 3.1,
+          visible: true,
+          indent: true,
+          showIf: { field: "ia_ea_operated_by", value: "Other" },
+        },
+        {
+          name: "ia_ea_software",
+          label: "What software delivers it?",
+          type: "text",
+          order: 4,
+          visible: true,
+          helpText: "The platform students actually receive their materials through.",
         },
         {
           name: "ia_ea_collection_model",
           label: "Do you collect the sales, or do they flow through student fees?",
           type: "select",
-          helpText:
-            "Who takes the student's money. This is about the mechanism, not the amount — the amount is in Sales Revenue.",
-          order: 18,
+          order: 5,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
-          options: [
-            "We collect the sales",
-            "It flows through student fees",
-            "Other",
-          ],
+          options: ["We collect the sales", "It flows through student fees", "Other"],
+          helpText: "Who takes the student's money. This is about the mechanism, not the amount.",
         },
         {
           name: "ia_ea_collection_model_other",
           label: "Describe how the money reaches you",
           type: "text",
-          order: 18.1,
+          order: 5.1,
           visible: true,
-          group: "Inclusive Access / Equitable Access",
           indent: true,
           showIf: { field: "ia_ea_collection_model", value: "Other" },
+        },
+        {
+          name: "ia_ea_institution_amount",
+          label: "How much did the institution collect?",
+          type: "currency",
+          order: 6,
+          visible: true,
+          helpText: "The programme's value where the money never came through your books. Asked here because it is not your revenue in any ordinary sense, and your other sections deliberately exclude it.",
+          showIf: { field: "ia_ea_collection_model", value: "It flows through student fees" },
+        },
+        {
+          name: "ia_ea_count_as_revenue",
+          label: "For comparison, should we count this as part of your revenue?",
+          type: "boolean",
+          order: 7,
+          visible: true,
+          helpText: "Your call, not ours. Counting it shows the scale of what you handle; leaving it out compares your books with everyone else's. We will use whichever you choose and say which we used.",
+          showIf: { field: "ia_ea_collection_model", value: "It flows through student fees" },
+        },
+        {
+          /*
+            Asked here, in the section that already establishes what the
+            programme is — three sections away from the sales figures, because
+            the two numbers are about different things and stores kept reading
+            them as the same question asked twice.
+          */
+          name: "ia_ea_booked_outside_pct",
+          label: "How much of the programme is booked through something that is not the bookstore?",
+          type: "percentage",
+          helpText:
+            "By value. If every title flows through your system, this is zero. If the institution buys direct from a publisher for some courses, that share belongs here.",
+          order: 8,
+          visible: true,
+          suffix: "%",
         },
       ],
     },

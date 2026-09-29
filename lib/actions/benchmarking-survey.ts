@@ -146,10 +146,10 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   sales_food_beverage:          { type: "currency", min: 0 },
 
   // ── Section 7: Technology & Systems ──
-  pos_system:              { type: "text" },
-  ebook_delivery_system:   { type: "text" },
-  student_info_system:     { type: "text" },
-  lms_system:              { type: "text" },
+  pos_system:              { type: "select", options: ["Bookware (Carleton Technologies)", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Waterloo Information Systems (WISL)", "Ratex", "Built in house", "Other"] },
+  ebook_delivery_system:   { type: "select", options: ["CEI", "VitalSource", "Kivuto", "Built in house", "Other"] },
+  student_info_system:     { type: "select", options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution", "Other"] },
+  lms_system:              { type: "select", options: ["D2L / Brightspace", "Moodle", "Canvas", "Blackboard", "LEA", "Other"] },
   payment_options:         { type: "multiselect", allowOther: true, options: ["Gift Cards", "Accept Campus Card", "Loyalty / Frequent Shopper Program"] },
   social_media_platforms:  { type: "multiselect", allowOther: true, options: ["Instagram", "Facebook", "TikTok", "Twitter (X)", "Threads", "YouTube", "BlueSky"] },
   social_media_frequency:  { type: "select", options: ["Daily", "Several times a week", "Weekly", "Monthly", "Rarely", "Never"] },
@@ -187,6 +187,62 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   ia_ea_enrolment_model_other: { type: "text", maxLength: 200 },
   ia_ea_collection_model:  { type: "select", options: ["We collect the sales", "It flows through student fees", "Other"] },
   ia_ea_collection_model_other:{ type: "text", maxLength: 200 },
+
+  // ── §5 Campus Contributions ──
+  contrib_discounts:            { type: "currency", min: 0 },
+  contrib_rent_to_institution:  { type: "currency", min: 0 },
+  contrib_commissions:          { type: "currency", min: 0 },
+  contrib_donations:            { type: "currency", min: 0 },
+  contrib_scholarships:         { type: "currency", min: 0 },
+  contrib_bad_debt:             { type: "currency", min: 0 },
+  contrib_rebates:              { type: "currency", min: 0 },
+  contrib_other_agreements:     { type: "currency", min: 0 },
+  contrib_local_marketing:      { type: "currency", min: 0 },
+  contrib_student_wages:        { type: "currency", min: 0 },
+
+  // ── §6 Staffing: wages by employment type, feeding §7 ──
+  wages_full_time:              { type: "currency", min: 0 },
+  wages_part_time:              { type: "currency", min: 0 },
+  wages_student:                { type: "currency", min: 0 },
+  wages_seasonal:               { type: "currency", min: 0 },
+  seasonal_employees:           { type: "number", min: 0, max: 10000 },
+
+  // ── §7 Expenses ──
+  expense_advertising:          { type: "currency", min: 0 },
+  expense_telephone:            { type: "currency", min: 0 },
+  expense_store_supplies:       { type: "currency", min: 0 },
+  expense_it:                   { type: "currency", min: 0 },
+  expense_postage:              { type: "currency", min: 0 },
+  expense_depreciation:         { type: "currency", min: 0 },
+  expense_professional_services:{ type: "currency", min: 0 },
+  expense_education_travel:     { type: "currency", min: 0 },
+  expense_insurance:            { type: "currency", min: 0 },
+  expense_card_fees:            { type: "currency", min: 0 },
+  expense_university_admin:     { type: "currency", min: 0 },
+  expense_utilities:            { type: "currency", min: 0 },
+  // Dollars, not percentages — a percentage cannot be reconciled to a P&L.
+  shrink_at_cost:               { type: "currency" },
+  shrink_at_retail:             { type: "currency" },
+
+  // ── §1 Their market, §3 sell-through, §10 the share booked elsewhere ──
+  competing_stores_count:       { type: "integer", min: 0, max: 200 },
+  competing_stores_notes:       { type: "text", maxLength: 500 },
+  // Physical course materials only. Digital and IA have no comparable figure.
+  cm_sell_through_pct:          { type: "percentage", min: 0, max: 100 },
+  ia_ea_booked_outside_pct:     { type: "percentage", min: 0, max: 100 },
+
+  // ── §9 Technology, now picked from a list ──
+  pos_system_other:             { type: "text", maxLength: 200 },
+  ebook_delivery_system_other:  { type: "text", maxLength: 200 },
+  student_info_system_other:    { type: "text", maxLength: 200 },
+  lms_system_other:             { type: "text", maxLength: 200 },
+
+  // ── §10 IA/EA ──
+  ia_ea_operated_by:            { type: "select", options: ["The institution", "In house", "Other"] },
+  ia_ea_operated_by_other:      { type: "text", maxLength: 200 },
+  ia_ea_software:               { type: "text", maxLength: 200 },
+  ia_ea_institution_amount:     { type: "currency", min: 0 },
+  ia_ea_count_as_revenue:       { type: "boolean" },
 };
 
 /** Set of all editable field names (fast lookups) */

@@ -18,7 +18,21 @@ import KeyDatesEditor from "./KeyDatesEditor";
 import ServicesJourney from "./ServicesJourney";
 import LogoConfirm from "./LogoConfirm";
 import CategorySales from "./CategorySales";
+import OtherIncomeEditor from "./OtherIncomeEditor";
+import OtherExpensesEditor from "./OtherExpensesEditor";
+import StaffingEditor from "./StaffingEditor";
+import ReviewFinancials from "./ReviewFinancials";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
+import type {
+  OtherIncomeRow,
+  OtherExpenseRow,
+  StaffRow,
+} from "@/lib/actions/benchmarking-financials";
+import {
+  NAMED_EXPENSE_LINES,
+  categorySalesTotal,
+  sumFields,
+} from "@/lib/benchmarking/financial-lines";
 import type { KeyDate } from "@/lib/actions/benchmarking-profile";
 import type { ServiceStatus } from "@/lib/benchmarking/key-dates";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
@@ -45,6 +59,10 @@ interface BenchmarkingSurveyFormProps {
   /** §2 and §3, both category-driven. */
   gmCategories?: SurveyCategory[];
   cmCategories?: SurveyCategory[];
+  /** §4, §7 and §6 — the rows a store adds itself. */
+  otherIncome?: OtherIncomeRow[];
+  otherExpenses?: OtherExpenseRow[];
+  staff?: StaffRow[];
 }
 
 export default function BenchmarkingSurveyForm({
@@ -63,6 +81,9 @@ export default function BenchmarkingSurveyForm({
   logos,
   gmCategories = [],
   cmCategories = [],
+  otherIncome = [],
+  otherExpenses = [],
+  staff = [],
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -100,10 +121,12 @@ export default function BenchmarkingSurveyForm({
   }, [carriedForward, sections]);
 
   const [activeSection, setActiveSection] = useState(0); // index into sections array
+
   const [formData, setFormData] = useState<Record<string, unknown>>(
     currentData as unknown as Record<string, unknown>
   );
   const [deltaFlags, setDeltaFlags] = useState<DeltaFlag[]>(initialDeltaFlags);
+
   const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved" | "error">("idle");
   const [lastSaved, setLastSaved] = useState<Date | null>(
     currentData.updated_at ? new Date(currentData.updated_at) : null
@@ -127,6 +150,34 @@ export default function BenchmarkingSurveyForm({
 
   const isSubmitted = formData.status === "submitted";
   const isReadOnly = isSubmitted;
+
+  /*
+    Running totals for the sections that show the store where it stands before
+    asking for the next number. §4 is the first place merchandise and course
+    materials are seen together, and §7 is the only place an expense total
+    means anything while it is still being typed.
+  */
+  const merchandiseTotal = useMemo(() => categorySalesTotal(gmCategories), [gmCategories]);
+  const courseMaterialsTotal = useMemo(() => categorySalesTotal(cmCategories), [cmCategories]);
+  const namedExpenseTotal = useMemo(
+    () => sumFields(formData, NAMED_EXPENSE_LINES),
+    [formData],
+  );
+
+  /**
+   * Jump to a section by id — what §8's statement lines do when clicked.
+   *
+   * Takes an id rather than an index because the index depends on the stored
+   * config's ordering, and a review line that lands on the wrong section is
+   * worse than one that does nothing.
+   */
+  const jumpToSection = useCallback(
+    (sectionId: string) => {
+      const idx = sections.findIndex((section) => section.id === sectionId);
+      if (idx >= 0) setActiveSection(idx);
+    },
+    [sections],
+  );
 
   // Auto-save a single field with debounce
   const handleFieldChange = useCallback(
@@ -417,26 +468,72 @@ export default function BenchmarkingSurveyForm({
             <DynamicSurveySection
               sectionConfig={sections[activeSection]}
               {...sectionProps}
+              /* §2 and §3 are category-driven: the store says what it carries
+                 before we ask anything about it. */
+              beforeFields={
+                sections[activeSection]?.id === "general_merchandise" ? (
+                  <CategorySales
+                    benchmarkingId={benchmarkingId}
+                    scope="general_merchandise"
+                    initialCategories={gmCategories}
+                    locations={locations}
+                    contacts={storeContacts}
+                    isReadOnly={isReadOnly}
+                  />
+                ) : sections[activeSection]?.id === "course_materials" ? (
+                  <CategorySales
+                    benchmarkingId={benchmarkingId}
+                    scope="course_materials"
+                    initialCategories={cmCategories}
+                    locations={locations}
+                    contacts={storeContacts}
+                    isReadOnly={isReadOnly}
+                  />
+                ) : sections[activeSection]?.id === "other_income" ? (
+                  /* The running total leads the section: this is the first
+                     place a store sees merchandise and course materials
+                     together, and it is the context for everything under it. */
+                  <OtherIncomeEditor
+                    benchmarkingId={benchmarkingId}
+                    initialRows={otherIncome}
+                    merchandiseTotal={merchandiseTotal}
+                    courseMaterialsTotal={courseMaterialsTotal}
+                    centralFunding={
+                      typeof formData.central_funding === "number"
+                        ? formData.central_funding
+                        : 0
+                    }
+                    isReadOnly={isReadOnly}
+                  />
+                ) : null
+              }
             />
-            {/* §2 and §3 are category-driven: the store says what it carries. */}
-            {sections[activeSection]?.id === "general_merchandise" && (
-              <CategorySales
+            {/* §6 — the team, not just the headcount above it. */}
+            {sections[activeSection]?.id === "staffing" && (
+              <StaffingEditor
                 benchmarkingId={benchmarkingId}
-                scope="general_merchandise"
-                initialCategories={gmCategories}
-                locations={locations}
-                contacts={storeContacts}
+                initialStaff={staff}
                 isReadOnly={isReadOnly}
               />
             )}
-            {sections[activeSection]?.id === "course_materials" && (
-              <CategorySales
+            {/* §7 — the escape hatch, under the lines we named. */}
+            {sections[activeSection]?.id === "expenses" && (
+              <OtherExpensesEditor
                 benchmarkingId={benchmarkingId}
-                scope="course_materials"
-                initialCategories={cmCategories}
-                locations={locations}
-                contacts={storeContacts}
+                initialRows={otherExpenses}
+                namedExpenseTotal={namedExpenseTotal}
                 isReadOnly={isReadOnly}
+              />
+            )}
+            {/* §8 — everything above, as one statement they can check. */}
+            {sections[activeSection]?.id === "review_financials" && (
+              <ReviewFinancials
+                gmCategories={gmCategories}
+                cmCategories={cmCategories}
+                otherIncome={otherIncome}
+                otherExpenses={otherExpenses}
+                formData={formData}
+                onJumpToSection={jumpToSection}
               />
             )}
             {sections[activeSection]?.id === "institution_profile" && (

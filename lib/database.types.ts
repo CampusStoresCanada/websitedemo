@@ -812,7 +812,20 @@ export type Database = {
           cm_print_used_total: number | null
           cm_rentals_online: number | null
           cm_rentals_total: number | null
+          cm_sell_through_pct: number | null
+          competing_stores_count: number | null
+          competing_stores_notes: string | null
           computers_online_only: boolean | null
+          contrib_bad_debt: number | null
+          contrib_commissions: number | null
+          contrib_discounts: number | null
+          contrib_donations: number | null
+          contrib_local_marketing: number | null
+          contrib_other_agreements: number | null
+          contrib_rebates: number | null
+          contrib_rent_to_institution: number | null
+          contrib_scholarships: number | null
+          contrib_student_wages: number | null
           contributions_to_campus: string[] | null
           created_at: string | null
           custom_imprint_online_only: boolean | null
@@ -822,8 +835,20 @@ export type Database = {
           does_book_buyback: boolean | null
           ebook_delivery_system: string | null
           enrollment_fte: number | null
+          expense_advertising: number | null
+          expense_card_fees: number | null
+          expense_depreciation: number | null
+          expense_education_travel: number | null
           expense_hr: number | null
+          expense_insurance: number | null
+          expense_it: number | null
+          expense_postage: number | null
+          expense_professional_services: number | null
           expense_rent_maintenance: number | null
+          expense_store_supplies: number | null
+          expense_telephone: number | null
+          expense_university_admin: number | null
+          expense_utilities: number | null
           fiscal_year: number
           fiscal_year_end_date: string | null
           fiscal_year_end_day: string | null
@@ -832,12 +857,18 @@ export type Database = {
           fye_inventory_value: number | null
           has_webstore: boolean | null
           hours_vary_seasonally: boolean | null
+          ia_ea_booked_outside_pct: number | null
           ia_ea_collection_model: string | null
           ia_ea_collection_model_other: string | null
+          ia_ea_count_as_revenue: boolean | null
           ia_ea_enrolment_model: string | null
           ia_ea_enrolment_model_other: string | null
+          ia_ea_institution_amount: number | null
+          ia_ea_operated_by: string | null
+          ia_ea_operated_by_other: string | null
           ia_ea_program_type: string | null
           ia_ea_program_type_other: string | null
+          ia_ea_software: string | null
           ia_revenue: number | null
           id: string
           institution_type: string | null
@@ -870,6 +901,7 @@ export type Database = {
           respondent_phone: string | null
           respondent_title: string | null
           respondent_user_id: string | null
+          reviewed_at: string | null
           sales_apparel: number | null
           sales_apparel_imprint: number | null
           sales_apparel_non_imprint: number | null
@@ -887,9 +919,12 @@ export type Database = {
           sales_technology: number | null
           saturday_hours_close: string | null
           saturday_hours_open: string | null
+          seasonal_employees: number | null
           service_status: Json | null
           services_offered: string[] | null
           shopping_services: string[] | null
+          shrink_at_cost: number | null
+          shrink_at_retail: number | null
           shrink_general_merch: number | null
           shrink_percentage: number | null
           shrink_textbooks: number | null
@@ -923,6 +958,10 @@ export type Database = {
           verified_at: string | null
           verified_by: string | null
           visibility: string | null
+          wages_full_time: number | null
+          wages_part_time: number | null
+          wages_seasonal: number | null
+          wages_student: number | null
           weekday_hours_close: string | null
           weekday_hours_open: string | null
         }
@@ -947,7 +986,20 @@ export type Database = {
           cm_print_used_total?: number | null
           cm_rentals_online?: number | null
           cm_rentals_total?: number | null
+          cm_sell_through_pct?: number | null
+          competing_stores_count?: number | null
+          competing_stores_notes?: string | null
           computers_online_only?: boolean | null
+          contrib_bad_debt?: number | null
+          contrib_commissions?: number | null
+          contrib_discounts?: number | null
+          contrib_donations?: number | null
+          contrib_local_marketing?: number | null
+          contrib_other_agreements?: number | null
+          contrib_rebates?: number | null
+          contrib_rent_to_institution?: number | null
+          contrib_scholarships?: number | null
+          contrib_student_wages?: number | null
           contributions_to_campus?: string[] | null
           created_at?: string | null
           custom_imprint_online_only?: boolean | null
@@ -957,8 +1009,20 @@ export type Database = {
           does_book_buyback?: boolean | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
+          expense_advertising?: number | null
+          expense_card_fees?: number | null
+          expense_depreciation?: number | null
+          expense_education_travel?: number | null
           expense_hr?: number | null
+          expense_insurance?: number | null
+          expense_it?: number | null
+          expense_postage?: number | null
+          expense_professional_services?: number | null
           expense_rent_maintenance?: number | null
+          expense_store_supplies?: number | null
+          expense_telephone?: number | null
+          expense_university_admin?: number | null
+          expense_utilities?: number | null
           fiscal_year: number
           fiscal_year_end_date?: string | null
           fiscal_year_end_day?: string | null
@@ -967,12 +1031,18 @@ export type Database = {
           fye_inventory_value?: number | null
           has_webstore?: boolean | null
           hours_vary_seasonally?: boolean | null
+          ia_ea_booked_outside_pct?: number | null
           ia_ea_collection_model?: string | null
           ia_ea_collection_model_other?: string | null
+          ia_ea_count_as_revenue?: boolean | null
           ia_ea_enrolment_model?: string | null
           ia_ea_enrolment_model_other?: string | null
+          ia_ea_institution_amount?: number | null
+          ia_ea_operated_by?: string | null
+          ia_ea_operated_by_other?: string | null
           ia_ea_program_type?: string | null
           ia_ea_program_type_other?: string | null
+          ia_ea_software?: string | null
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
@@ -1005,6 +1075,7 @@ export type Database = {
           respondent_phone?: string | null
           respondent_title?: string | null
           respondent_user_id?: string | null
+          reviewed_at?: string | null
           sales_apparel?: number | null
           sales_apparel_imprint?: number | null
           sales_apparel_non_imprint?: number | null
@@ -1022,9 +1093,12 @@ export type Database = {
           sales_technology?: number | null
           saturday_hours_close?: string | null
           saturday_hours_open?: string | null
+          seasonal_employees?: number | null
           service_status?: Json | null
           services_offered?: string[] | null
           shopping_services?: string[] | null
+          shrink_at_cost?: number | null
+          shrink_at_retail?: number | null
           shrink_general_merch?: number | null
           shrink_percentage?: number | null
           shrink_textbooks?: number | null
@@ -1058,6 +1132,10 @@ export type Database = {
           verified_at?: string | null
           verified_by?: string | null
           visibility?: string | null
+          wages_full_time?: number | null
+          wages_part_time?: number | null
+          wages_seasonal?: number | null
+          wages_student?: number | null
           weekday_hours_close?: string | null
           weekday_hours_open?: string | null
         }
@@ -1082,7 +1160,20 @@ export type Database = {
           cm_print_used_total?: number | null
           cm_rentals_online?: number | null
           cm_rentals_total?: number | null
+          cm_sell_through_pct?: number | null
+          competing_stores_count?: number | null
+          competing_stores_notes?: string | null
           computers_online_only?: boolean | null
+          contrib_bad_debt?: number | null
+          contrib_commissions?: number | null
+          contrib_discounts?: number | null
+          contrib_donations?: number | null
+          contrib_local_marketing?: number | null
+          contrib_other_agreements?: number | null
+          contrib_rebates?: number | null
+          contrib_rent_to_institution?: number | null
+          contrib_scholarships?: number | null
+          contrib_student_wages?: number | null
           contributions_to_campus?: string[] | null
           created_at?: string | null
           custom_imprint_online_only?: boolean | null
@@ -1092,8 +1183,20 @@ export type Database = {
           does_book_buyback?: boolean | null
           ebook_delivery_system?: string | null
           enrollment_fte?: number | null
+          expense_advertising?: number | null
+          expense_card_fees?: number | null
+          expense_depreciation?: number | null
+          expense_education_travel?: number | null
           expense_hr?: number | null
+          expense_insurance?: number | null
+          expense_it?: number | null
+          expense_postage?: number | null
+          expense_professional_services?: number | null
           expense_rent_maintenance?: number | null
+          expense_store_supplies?: number | null
+          expense_telephone?: number | null
+          expense_university_admin?: number | null
+          expense_utilities?: number | null
           fiscal_year?: number
           fiscal_year_end_date?: string | null
           fiscal_year_end_day?: string | null
@@ -1102,12 +1205,18 @@ export type Database = {
           fye_inventory_value?: number | null
           has_webstore?: boolean | null
           hours_vary_seasonally?: boolean | null
+          ia_ea_booked_outside_pct?: number | null
           ia_ea_collection_model?: string | null
           ia_ea_collection_model_other?: string | null
+          ia_ea_count_as_revenue?: boolean | null
           ia_ea_enrolment_model?: string | null
           ia_ea_enrolment_model_other?: string | null
+          ia_ea_institution_amount?: number | null
+          ia_ea_operated_by?: string | null
+          ia_ea_operated_by_other?: string | null
           ia_ea_program_type?: string | null
           ia_ea_program_type_other?: string | null
+          ia_ea_software?: string | null
           ia_revenue?: number | null
           id?: string
           institution_type?: string | null
@@ -1140,6 +1249,7 @@ export type Database = {
           respondent_phone?: string | null
           respondent_title?: string | null
           respondent_user_id?: string | null
+          reviewed_at?: string | null
           sales_apparel?: number | null
           sales_apparel_imprint?: number | null
           sales_apparel_non_imprint?: number | null
@@ -1157,9 +1267,12 @@ export type Database = {
           sales_technology?: number | null
           saturday_hours_close?: string | null
           saturday_hours_open?: string | null
+          seasonal_employees?: number | null
           service_status?: Json | null
           services_offered?: string[] | null
           shopping_services?: string[] | null
+          shrink_at_cost?: number | null
+          shrink_at_retail?: number | null
           shrink_general_merch?: number | null
           shrink_percentage?: number | null
           shrink_textbooks?: number | null
@@ -1193,6 +1306,10 @@ export type Database = {
           verified_at?: string | null
           verified_by?: string | null
           visibility?: string | null
+          wages_full_time?: number | null
+          wages_part_time?: number | null
+          wages_seasonal?: number | null
+          wages_student?: number | null
           weekday_hours_close?: string | null
           weekday_hours_open?: string | null
         }
@@ -1708,6 +1825,82 @@ export type Database = {
           },
         ]
       }
+      benchmarking_other_expenses: {
+        Row: {
+          amount: number | null
+          benchmarking_id: string
+          created_at: string
+          id: string
+          label: string
+          position: number
+        }
+        Insert: {
+          amount?: number | null
+          benchmarking_id: string
+          created_at?: string
+          id?: string
+          label: string
+          position?: number
+        }
+        Update: {
+          amount?: number | null
+          benchmarking_id?: string
+          created_at?: string
+          id?: string
+          label?: string
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_other_expenses_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_other_income: {
+        Row: {
+          amount: number | null
+          benchmarking_id: string
+          created_at: string
+          id: string
+          kind: string
+          label: string
+          position: number
+          service_name: string | null
+        }
+        Insert: {
+          amount?: number | null
+          benchmarking_id: string
+          created_at?: string
+          id?: string
+          kind?: string
+          label: string
+          position?: number
+          service_name?: string | null
+        }
+        Update: {
+          amount?: number | null
+          benchmarking_id?: string
+          created_at?: string
+          id?: string
+          kind?: string
+          label?: string
+          position?: number
+          service_name?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_other_income_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_recipients: {
         Row: {
           assigned_to: string | null
@@ -1874,6 +2067,75 @@ export type Database = {
             columns: ["viewed_by"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      benchmarking_staff: {
+        Row: {
+          benchmarking_id: string
+          contact_id: string | null
+          created_at: string
+          employment_type: string | null
+          id: string
+          name: string
+          position: number
+          years_in_campus_retail: number | null
+        }
+        Insert: {
+          benchmarking_id: string
+          contact_id?: string | null
+          created_at?: string
+          employment_type?: string | null
+          id?: string
+          name: string
+          position?: number
+          years_in_campus_retail?: number | null
+        }
+        Update: {
+          benchmarking_id?: string
+          contact_id?: string | null
+          created_at?: string
+          employment_type?: string | null
+          id?: string
+          name?: string
+          position?: number
+          years_in_campus_retail?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_staff_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_staff_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_staff_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_staff_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_staff_contact_id_fkey"
+            columns: ["contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
         ]

@@ -254,6 +254,16 @@ export default async function BenchmarkingSurveyPage({
   const { loadKeyDates } = await import("@/lib/actions/benchmarking-profile");
   const keyDates = await loadKeyDates(organization.id);
 
+  // §4, §6 and §7 — the rows a store adds itself, rather than a fixed field.
+  const { loadOtherIncome, loadOtherExpenses, loadStaff } = await import(
+    "@/lib/actions/benchmarking-financials"
+  );
+  const [otherIncome, otherExpenses, staff] = await Promise.all([
+    loadOtherIncome(currentRow!.id),
+    loadOtherExpenses(currentRow!.id),
+    loadStaff(currentRow!.id),
+  ]);
+
   const { data: orgLogos } = await db
     .from("organizations")
     .select("logo_url, logo_horizontal_url, logo_confirmed_at")
@@ -393,6 +403,9 @@ export default async function BenchmarkingSurveyPage({
         keyDates={keyDates}
         gmCategories={gmCategories}
         cmCategories={cmCategories}
+        otherIncome={otherIncome}
+        otherExpenses={otherExpenses}
+        staff={staff}
         logos={{
           logoUrl: (orgLogos?.logo_url as string | null) ?? null,
           logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,

@@ -22,10 +22,20 @@ import {
 
 interface DynamicSurveySectionProps extends SurveySectionProps {
   sectionConfig: SectionConfig;
+  /**
+   * Rendered under the section heading, above its fields.
+   *
+   * For the category-driven sections: what a store carries has to come before
+   * questions about what it carries, and the heading has to come before both.
+   * Putting the grid outside this component got the order right and the
+   * heading wrong — the categories appeared above the section title.
+   */
+  beforeFields?: React.ReactNode;
 }
 
 export default function DynamicSurveySection({
   sectionConfig,
+  beforeFields,
   ...props
 }: DynamicSurveySectionProps) {
   const visibleFields = sectionConfig.fields
@@ -45,6 +55,8 @@ export default function DynamicSurveySection({
         title={`${sectionConfig.order}. ${sectionConfig.title}`}
         description={sectionConfig.description}
       />
+
+      {beforeFields}
 
       {groupedFields.map((block, blockIdx) => {
         if (block.type === "group") {
