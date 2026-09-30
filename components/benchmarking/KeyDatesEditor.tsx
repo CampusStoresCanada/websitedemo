@@ -79,6 +79,14 @@ export default function KeyDatesEditor({
 }) {
   const [dates, setDates] = useState<KeyDate[]>(initialDates);
   const [error, setError] = useState<string | null>(null);
+  /*
+    Suggestions taken in this sitting.
+
+    The server recomputes which profile dates are still missing on a page load,
+    and this screen no longer reloads, so an adopted suggestion would otherwise
+    sit there inviting a second click and a duplicate row.
+  */
+  const [adopted, setAdopted] = useState<string[]>([]);
 
   const kinds = KEY_DATE_KINDS.filter(
     (k) => k.value !== "semester" || isSemesterBased,
@@ -120,8 +128,9 @@ export default function KeyDatesEditor({
     seeding.current = true;
     const wanted = expectedCounts - countDates;
     void (async () => {
+      let latest: KeyDate[] | undefined;
       for (let i = 0; i < wanted; i += 1) {
-        await addKeyDate({
+        const res = await addKeyDate({
           benchmarkingId,
           kind: "inventory_count",
           label:
@@ -129,8 +138,11 @@ export default function KeyDatesEditor({
               ? `Inventory count ${countDates + i + 1} of 2`
               : "Inventory count",
         });
+        if (res.dates) latest = res.dates;
       }
-      window.location.reload();
+      // ⛔ Never a page reload. Saves here are debounced by 800ms, so reloading
+      // to reveal a date we added for them can discard what they just typed.
+      if (latest) setDates(latest);
     })();
   }, [benchmarkingId, isReadOnly, expectedCounts, countDates]);
 
@@ -140,6 +152,10 @@ export default function KeyDatesEditor({
     person's own answer because a different answer changed is not ours to do.
   */
   const orphanedSemesters = !isSemesterBased && have("semester");
+
+  const pendingSuggestions = profileSuggestions.filter(
+    (s) => !adopted.includes(`${s.title}|${s.date}`),
+  );
 
   const patch = (id: string, fn: (d: KeyDate) => KeyDate) =>
     setDates((prev) => prev.map((d) => (d.id === id ? fn(d) : d)));
@@ -186,7 +202,7 @@ export default function KeyDatesEditor({
         </div>
       )}
 
-      {profileSuggestions.length > 0 && !isReadOnly && (
+      {pendingSuggestions.length > 0 && !isReadOnly && (
         <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
           <p className="text-xs font-semibold text-gray-700">
             We already have these on your profile
@@ -196,7 +212,7 @@ export default function KeyDatesEditor({
             still hold and ignore the rest.
           </p>
           <ul className="mt-2 space-y-1.5">
-            {profileSuggestions.map((sug) => (
+            {pendingSuggestions.map((sug) => (
               <li key={`${sug.title}|${sug.date}`} className="flex flex-wrap items-center gap-2">
                 <span className="text-xs text-gray-700">
                   {sug.title} · {sug.date}
@@ -209,7 +225,12 @@ export default function KeyDatesEditor({
                       label: sug.title,
                       occursOn: sug.date,
                     });
-                    if (res.success) window.location.reload();
+                    if (res.dates) {
+                      setDates(res.dates);
+                      setAdopted((prev) => [...prev, `${sug.title}|${sug.date}`]);
+                    } else if (res.error) {
+                      setError(res.error);
+                    }
                   }}
                   className="rounded-full border border-gray-400 px-2.5 py-0.5 text-xs font-medium text-gray-700 hover:border-[#163D6D] hover:text-[#163D6D]"
                 >

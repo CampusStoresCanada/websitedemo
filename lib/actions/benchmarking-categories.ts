@@ -221,9 +221,10 @@ export async function removeCategory(input: {
 export async function setCategorySplit(input: {
   benchmarkingId: string;
   categoryId: string;
+  scope: CategoryScope;
   split: boolean;
   subcategories: string[];
-}): Promise<{ success: boolean; error?: string }> {
+}): Promise<{ success: boolean; error?: string; category?: SurveyCategory }> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
 
@@ -260,7 +261,17 @@ export async function setCategorySplit(input: {
     .eq("id", input.categoryId);
 
   if (error) return { success: false, error: "Could not save that." };
-  return { success: true };
+
+  /*
+    Hand back the category as it now stands, rows and all.
+
+    The caller used to reload the page to see the lines this created, which
+    throws away any field typed in the last 800ms — the debounce window on every
+    save in this form. Splitting a category into subcategories is not worth
+    losing somebody's figure from two sections ago.
+  */
+  const categories = await loadCategories(input.benchmarkingId, input.scope);
+  return { success: true, category: categories.find((c) => c.id === input.categoryId) };
 }
 
 export async function updateCategoryLine(input: {

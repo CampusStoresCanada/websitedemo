@@ -188,14 +188,25 @@ export default function CategorySales({
                     onChange={async (e) => {
                       const split = e.target.checked;
                       patch(cat.id, (c) => ({ ...c, splitBySubcategory: split }));
-                      await setCategorySplit({
+                      const res = await setCategorySplit({
                         benchmarkingId,
                         categoryId: cat.id,
+                        scope,
                         split,
                         subcategories: subs,
                       });
-                      // Rows are created server-side; reload rather than guess.
-                      window.location.reload();
+                      /*
+                        The rows are made server-side, so we take them back
+                        rather than guessing at them. ⛔ Never a page reload:
+                        saves here are debounced by 800ms and a reload would
+                        discard whatever was typed last.
+                      */
+                      if (res.category) {
+                        const fresh = res.category;
+                        patch(cat.id, () => fresh);
+                      } else if (res.error) {
+                        setError(res.error);
+                      }
                     }}
                   />
                   Break this into subcategories

@@ -143,7 +143,12 @@ export async function addKeyDate(input: {
   label: string;
   /** Prefilled when adopting a date we already hold on the profile. */
   occursOn?: string | null;
-}): Promise<{ success: boolean; error?: string; id?: string }> {
+}): Promise<{
+  success: boolean;
+  error?: string;
+  id?: string;
+  dates?: KeyDate[];
+}> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
   if (!input.label.trim()) return { success: false, error: "Give the date a name." };
@@ -167,7 +172,20 @@ export async function addKeyDate(input: {
     .single();
 
   if (error || !data) return { success: false, error: "Could not add that date." };
-  return { success: true, id: data.id as string };
+
+  /*
+    The whole list back, not just the new id.
+
+    Callers reloaded the page to see a date they had just added, and a reload
+    discards any field typed in the last 800ms. It also makes the seeding
+    effects idempotent: React mounts an effect twice in development, and a
+    caller that reads back the current state does not care which call wins.
+  */
+  return {
+    success: true,
+    id: data.id as string,
+    dates: await loadKeyDates(g.organizationId),
+  };
 }
 
 export async function updateKeyDate(input: {
