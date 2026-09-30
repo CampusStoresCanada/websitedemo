@@ -109,12 +109,43 @@ export default async function BenchmarkingWorksheetPage({
     .lt("fiscal_year", survey.fiscal_year)
     .order("fiscal_year", { ascending: false });
 
+  /*
+    What we already hold, so the sheet prints it instead of asking for it.
+
+    ⛔ Scoped to this organisation, like everything else on this page. A printed
+    staff list is exactly the kind of thing that must never be able to carry
+    somebody else's people.
+  */
+  const [{ data: contactRows }, { data: dateRows }] = await Promise.all([
+    db
+      .from("contacts")
+      .select("name, role_title")
+      .eq("organization_id", organization.id)
+      .order("name"),
+    db
+      .from("organization_key_dates")
+      .select("kind, label, occurs_on, ends_on, position")
+      .eq("organization_id", organization.id)
+      .order("position"),
+  ]);
+
   const worksheet = buildWorksheet({
     organizationName: organization.name,
     fiscalYear: survey.fiscal_year,
     closesAt: survey.closes_at,
     config: getFieldConfig(survey),
     priorRows: (priorRows ?? []) as unknown as PriorRow[],
+    knownPeople: (contactRows ?? []).map((c) => ({
+      name: (c.name as string) ?? "",
+      roleTitle: (c.role_title as string | null) ?? null,
+    })),
+    knownDates: (dateRows ?? []).map((d) => ({
+      kind: (d.kind as string) ?? "",
+      label: (d.label as string) ?? "",
+      occursOn: (d.occurs_on as string | null) ?? null,
+      endsOn: (d.ends_on as string | null) ?? null,
+    })),
+    organizationSlug: organization.slug,
   });
 
   return (

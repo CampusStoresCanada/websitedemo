@@ -304,12 +304,17 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                   into a space it does not fit in. 9mm is the smallest that
                   works with a ballpoint.
                 */
-                const labels = list.rowLabels ?? (list.blankRows ? [] : list.choices?.map((c) => c.label) ?? []);
-                const named = labels.length > 0;
+                const labels =
+                  list.rowLabels ?? (list.blankRows ? [] : list.choices?.map((c) => c.label) ?? []);
+                const known = list.rowCells ?? labels.map((l) => [l]);
+                const named = known.length > 0;
                 const nameHeading = list.nameColumn ?? (named ? "Category" : null);
                 const headings = nameHeading ? [nameHeading, ...list.columns!] : list.columns!;
                 const blanks = list.blankRows ?? list.extraBlankRows ?? 0;
-                const rows = [...labels, ...Array.from({ length: blanks }, () => "")];
+                const rows: string[][] = [
+                  ...known,
+                  ...Array.from({ length: blanks }, () => [] as string[]),
+                ];
 
                 return (
                   <table className="mt-2 w-full border-collapse text-[10px]">
@@ -326,27 +331,31 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                       </tr>
                     </thead>
                     <tbody>
-                      {rows.map((label, i) => (
+                      {rows.map((cells, i) => (
                         <tr key={i}>
-                          {headings.map((col, j) => (
-                            <td
-                              key={col}
-                              className="border border-black/40 px-1 align-middle text-[10px] leading-tight"
-                              style={{ height: "9mm" }}
-                            >
-                              {/*
-                                A yes/no column gets its answers pre-printed to
-                                circle. A blank cell under "Counts as income?"
-                                tells the reader nothing about what shape of
-                                answer belongs there.
-                              */}
-                              {nameHeading && j === 0
-                                ? label
-                                : /\?$/.test(col)
-                                  ? <span className="text-black/45">Y / N</span>
-                                  : ""}
-                            </td>
-                          ))}
+                          {headings.map((col, j) => {
+                            // Offset by the name column, which is cells[0].
+                            const known = nameHeading ? cells[j] : cells[j + 1];
+                            return (
+                              <td
+                                key={col}
+                                className="border border-black/40 px-1 align-middle text-[10px] leading-tight"
+                                style={{ height: "9mm" }}
+                              >
+                                {known
+                                  ? known
+                                  : /*
+                                      A yes/no column gets its answers printed to
+                                      circle. A blank cell under "Counts as
+                                      income?" tells the reader nothing about
+                                      what shape of answer belongs there.
+                                    */
+                                    /\?$/.test(col)
+                                    ? <span className="text-black/45">Y / N</span>
+                                    : ""}
+                              </td>
+                            );
+                          })}
                         </tr>
                       ))}
                     </tbody>

@@ -277,3 +277,77 @@ describe("the printed sheet shows the full scope", () => {
     expect(income.columns).toContain("Cost to deliver ($)");
   });
 });
+
+describe("the sheet prints what we already hold", () => {
+  /*
+    A store should not be writing out its own staff list on paper when we are
+    holding it. The columns left blank are the ones we genuinely do not know.
+  */
+  const withPeople = buildWorksheet({
+    organizationName: "Test Store",
+    fiscalYear: 2026,
+    closesAt: null,
+    config: DEFAULT_FIELD_CONFIG,
+    priorRows: [],
+    knownPeople: [
+      { name: "Dana Okonkwo", roleTitle: "Course Materials Buyer" },
+      { name: "Sam Reid", roleTitle: null },
+    ],
+    knownDates: [
+      { kind: "adoption_deadline", label: "Fall adoption deadline", occursOn: "2026-06-15", endsOn: null },
+    ],
+    organizationSlug: "test-store",
+  });
+
+  const team = (w: typeof withPeople) =>
+    w.sections
+      .find((s) => s.id === "staffing")!
+      .lists.find((l) => l.title === "Your team")!;
+
+  it("lists the people by name, with their job titles", () => {
+    expect(team(withPeople).rowLabels).toEqual([
+      "Dana Okonkwo (Course Materials Buyer)",
+      "Sam Reid",
+    ]);
+  });
+
+  it("leaves blank only the columns we cannot know", () => {
+    expect(team(withPeople).columns).toEqual([
+      "Employment type",
+      "Years in campus retail",
+    ]);
+  });
+
+  it("sends them to their own organisation page to fix the list first", () => {
+    expect(team(withPeople).intro).toContain("campusstores.ca/org/test-store");
+    expect(team(withPeople).intro).toContain("BEFORE you start");
+  });
+
+  it("pre-fills a known date across the row, not just its name", () => {
+    const dates = withPeople.sections
+      .find((s) => s.id === "institution_profile")!
+      .lists.find((l) => l.title === "Your year ahead")!;
+    // [what you call it, kind, date, ends]
+    expect(dates.rowCells![0]).toEqual([
+      "Fall adoption deadline",
+      "Textbook adoption deadline",
+      "2026-06-15",
+      "",
+    ]);
+  });
+
+  it("asks a store with nobody on file to add them, and still gives it room", () => {
+    const empty = buildWorksheet({
+      organizationName: "Test Store",
+      fiscalYear: 2026,
+      closesAt: null,
+      config: DEFAULT_FIELD_CONFIG,
+      priorRows: [],
+      organizationSlug: "test-store",
+    });
+    const block = team(empty);
+    expect(block.intro).toContain("We have nobody on file");
+    expect(block.rowLabels).toEqual([]);
+    expect(block.extraBlankRows).toBeGreaterThan(4);
+  });
+});

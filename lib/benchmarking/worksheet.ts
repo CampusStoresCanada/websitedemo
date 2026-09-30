@@ -85,6 +85,15 @@ export interface WorksheetList {
   blankRows?: number;
   /** Pre-printed first column, one row each. */
   rowLabels?: string[];
+  /**
+   * Whole rows we already know, aligned with [nameColumn, ...columns].
+   *
+   * An empty string means we hold nothing for that cell and the reader writes
+   * it. Printing only the name in a row whose next two columns are also known
+   * makes a reader re-enter what we are already holding, which is the opposite
+   * of the point.
+   */
+  rowCells?: string[][];
   /** Ruled rows after the labelled ones, for subcategory splits. */
   extraBlankRows?: number;
   /** Heading for the pre-printed first column. */
@@ -97,6 +106,20 @@ export interface WorksheetSection {
   description?: string;
   lines: WorksheetLine[];
   lists: WorksheetList[];
+}
+
+/** Somebody we already hold for this store, printed rather than asked for. */
+export interface KnownPerson {
+  name: string;
+  roleTitle: string | null;
+}
+
+/** A date we already hold, printed so it is confirmed rather than retyped. */
+export interface KnownDate {
+  kind: string;
+  label: string;
+  occursOn: string | null;
+  endsOn: string | null;
 }
 
 export interface Worksheet {
@@ -196,14 +219,17 @@ function isGatherable(field: FieldConfig): boolean {
  * printed survey: a store gathers the wrong figures and only finds out at the
  * keyboard.
  */
-function listsForSection(sectionId: string): WorksheetList[] {
+function listsForSection(
+  sectionId: string,
+  known: { people: KnownPerson[]; dates: KnownDate[]; orgPath: string | null },
+): WorksheetList[] {
   switch (sectionId) {
     case "institution_profile":
       return [
         {
           title: "Who is filling this in",
           intro:
-            "The person who actually pulled the figures together, so a question in November reaches them and not the account holder. You pick them from your store's contacts on screen; write the name here while you are gathering.",
+            "The person who actually pulled the figures together, so a question in November reaches them and not the account holder. On screen you pick them from the list of your people, which is printed under Staffing below. Circle one there, or write a name here if they are not on it.",
           columns: ["Name", "Job title", "Email", "Phone"],
           blankRows: 1,
         },
@@ -244,10 +270,20 @@ function listsForSection(sectionId: string): WorksheetList[] {
         {
           title: "Your year ahead",
           intro:
-            "The dates your year turns on, for the year COMING, not the one you are reporting. Add as many of each as you need: one adoption deadline per term, every buyback window, each semester.",
+            (known.dates.length > 0
+              ? `The ${known.dates.length} dates we already hold are printed below: check each one is still right for the year COMING and correct it in place. `
+              : "The dates your year turns on, for the year COMING, not the one you are reporting. ") +
+            "Add as many of each kind as you need: one adoption deadline per term, every buyback window, each semester.",
           choices: KEY_DATE_KINDS.map((k) => ({ label: k.label, note: k.help })),
-          columns: ["Kind", "What you call it", "Date", "Ends (if a window)"],
-          blankRows: 6,
+          nameColumn: "What you call it",
+          columns: ["Kind", "Date", "Ends (if a window)"],
+          rowCells: known.dates.map((d) => [
+            d.label,
+            KEY_DATE_KINDS.find((k) => k.value === d.kind)?.label ?? d.kind,
+            d.occursOn ?? "",
+            d.endsOn ?? "",
+          ]),
+          extraBlankRows: 6,
         },
         {
           title: "Who competes with you",
@@ -401,12 +437,39 @@ function listsForSection(sectionId: string): WorksheetList[] {
           rowLabels: EMPLOYMENT_TYPES.map((t) => t.label),
         },
         {
+          /*
+            Printed by name, not as eight ruled lines.
+
+            The sheet was asking a store to write out a staff list we are
+            already holding. The columns left blank are the ones we genuinely do
+            not know: which of our four employment types each person is, and how
+            long they have worked in campus retail anywhere.
+
+            The instruction to fix the list on the website first is the actual
+            time saver. Correcting it there means it is right for the survey,
+            the directory, the conference and next year, whereas correcting it
+            on paper means typing it again at the keyboard.
+          */
           title: "Your team",
           intro:
-            "One row per person, started from the people we already hold for your store. Years in campus retail means anywhere, not just with you.",
+            known.people.length > 0
+              ? `These are the ${known.people.length} people we have on file for your store. ` +
+                (known.orgPath
+                  ? `If anyone is missing or has left, fix it at ${known.orgPath} BEFORE you start, then print this again. Correcting it there means it is right for the directory and the conference too, not just for this survey. `
+                  : "") +
+                "Then fill in the two columns we cannot know: which employment type each person is, and how long they have worked in campus retail anywhere, not just with you."
+              : "We have nobody on file for your store yet. " +
+                (known.orgPath
+                  ? `Add your people at ${known.orgPath} and print this again, and they will be listed here for you. `
+                  : "") +
+                "Otherwise write them in below.",
           choices: EMPLOYMENT_TYPES.map((t) => ({ label: t.label })),
-          columns: ["Name", "Employment type", "Years in campus retail"],
-          blankRows: 8,
+          nameColumn: "Name",
+          columns: ["Employment type", "Years in campus retail"],
+          rowLabels: known.people.map((p) =>
+            p.roleTitle ? `${p.name} (${p.roleTitle})` : p.name,
+          ),
+          extraBlankRows: known.people.length > 0 ? 4 : 8,
         },
       ];
 
@@ -452,6 +515,19 @@ export function buildWorksheet(input: {
   priorRows: PriorRow[];
   /** How many prior years to print. More than three will not fit the page. */
   maxPriorYears?: number;
+  /**
+   * The store's people, printed by name instead of as ruled lines.
+   *
+   * ⛔ The whole point: a store should not be writing out its own staff list on
+   * paper when we are holding it. Printed with the columns the survey adds
+   * (employment type, years in campus retail) left blank, because those are the
+   * parts we genuinely do not know.
+   */
+  knownPeople?: KnownPerson[];
+  /** Dates already on the organisation's profile, for the same reason. */
+  knownDates?: KnownDate[];
+  /** Used to tell the reader exactly which page to fix their people on. */
+  organizationSlug?: string | null;
 }): Worksheet {
   const {
     organizationName,
@@ -460,6 +536,9 @@ export function buildWorksheet(input: {
     config,
     priorRows,
     maxPriorYears = 2,
+    knownPeople = [],
+    knownDates = [],
+    organizationSlug = null,
   } = input;
 
   const priors = [...priorRows]
@@ -495,7 +574,11 @@ export function buildWorksheet(input: {
           conditionHint: conditionHint(field, config),
           priorValues: priors.map((row) => formatValue(row[field.name], field.type)),
         })),
-      lists: listsForSection(section.id),
+      lists: listsForSection(section.id, {
+        people: knownPeople,
+        dates: knownDates,
+        orgPath: organizationSlug ? `campusstores.ca/org/${organizationSlug}` : null,
+      }),
     }))
     /*
       Kept if it has questions OR lists. §2 General Merchandise has no scalar
