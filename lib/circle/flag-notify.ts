@@ -30,12 +30,18 @@ export interface FlagNotificationParams {
 
 
 /**
- * Who answers for the survey: the committee lead, plus the office.
+ * Who answers for the survey: whoever holds the committee lead, and nobody else.
  *
- * The lead because the questions are theirs, and the office because during a
- * beta round somebody has to be able to fix the thing the same afternoon. Falls
- * through to the super admins on its own if no lead is appointed, which is the
- * state the survey is in right now.
+ * ⛔ NOT every super admin. The office has three, and two of them have nothing
+ * to do with benchmarking — a beta round could easily produce a report a day,
+ * and a DM that is nearly always somebody else's job is a DM people learn to
+ * ignore. The capability already resolves ex officio holders, so the secretary
+ * is in this list without being named in it.
+ *
+ * Super admins remain the fallback for the case where NOBODY holds the
+ * capability, because a flag that reaches no one is worse than a flag that
+ * reaches the wrong one. That state is real: the survey has sat with no
+ * appointed lead before.
  */
 async function benchmarkingRecipients(): Promise<string[]> {
   const adminClient = createAdminClient();
@@ -46,17 +52,18 @@ async function benchmarkingRecipients(): Promise<string[]> {
     .eq("capability", "benchmarking.committee_lead")
     .eq("is_active", true);
 
-  const { data: superAdmins } = await adminClient
-    .from("profiles")
-    .select("id")
-    .eq("global_role", "super_admin");
+  let ids = [...new Set((leads ?? []).map((l) => l.subject_id as string))];
 
-  const ids = [
-    ...new Set([
-      ...(leads ?? []).map((l) => l.subject_id as string),
-      ...(superAdmins ?? []).map((a) => a.id as string),
-    ]),
-  ];
+  if (ids.length === 0) {
+    console.warn(
+      "[flag-notify] No benchmarking committee lead appointed; falling back to super admins",
+    );
+    const { data: superAdmins } = await adminClient
+      .from("profiles")
+      .select("id")
+      .eq("global_role", "super_admin");
+    ids = (superAdmins ?? []).map((a) => a.id as string);
+  }
 
   const emails = await Promise.all(
     ids.map(async (id) => {
