@@ -234,6 +234,11 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   cm_sell_through_pct:          { type: "percentage", min: 0, max: 100 },
   ia_ea_booked_outside_pct:     { type: "percentage", min: 0, max: 100 },
 
+  // ── §6 Benefits, told apart from wages ──
+  benefits_paid_by:             { type: "select", options: ["The store pays them", "The institution pays them centrally", "Split between the store and the institution", "Staff are not eligible for benefits"] },
+  benefits_total:               { type: "currency", min: 0 },
+  student_wages_is_contribution:{ type: "boolean" },
+
   // ── §10 IA/EA ──
   ia_ea_operated_by:            { type: "select", options: ["In house", "The institution", "A third party", "Other"] },
   ia_ea_operated_by_other:      { type: "text", maxLength: 200 },

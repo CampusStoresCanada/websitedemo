@@ -795,6 +795,8 @@ export type Database = {
           adoption_deadline_window: string | null
           adoptions_by_deadline: number | null
           amended_at: string | null
+          benefits_paid_by: string | null
+          benefits_total: number | null
           central_funding: number | null
           cm_course_packs_online: number | null
           cm_course_packs_total: number | null
@@ -941,6 +943,7 @@ export type Database = {
           store_name: string | null
           student_fte_average: number | null
           student_info_system: string[] | null
+          student_wages_is_contribution: boolean
           submitted_at: string | null
           sunday_hours_close: string | null
           sunday_hours_open: string | null
@@ -969,6 +972,8 @@ export type Database = {
           adoption_deadline_window?: string | null
           adoptions_by_deadline?: number | null
           amended_at?: string | null
+          benefits_paid_by?: string | null
+          benefits_total?: number | null
           central_funding?: number | null
           cm_course_packs_online?: number | null
           cm_course_packs_total?: number | null
@@ -1115,6 +1120,7 @@ export type Database = {
           store_name?: string | null
           student_fte_average?: number | null
           student_info_system?: string[] | null
+          student_wages_is_contribution?: boolean
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null
@@ -1143,6 +1149,8 @@ export type Database = {
           adoption_deadline_window?: string | null
           adoptions_by_deadline?: number | null
           amended_at?: string | null
+          benefits_paid_by?: string | null
+          benefits_total?: number | null
           central_funding?: number | null
           cm_course_packs_online?: number | null
           cm_course_packs_total?: number | null
@@ -1289,6 +1297,7 @@ export type Database = {
           store_name?: string | null
           student_fte_average?: number | null
           student_info_system?: string[] | null
+          student_wages_is_contribution?: boolean
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null
@@ -1864,6 +1873,7 @@ export type Database = {
         Row: {
           amount: number | null
           benchmarking_id: string
+          counts_as_income: boolean
           created_at: string
           id: string
           kind: string
@@ -1874,6 +1884,7 @@ export type Database = {
         Insert: {
           amount?: number | null
           benchmarking_id: string
+          counts_as_income?: boolean
           created_at?: string
           id?: string
           kind?: string
@@ -1884,6 +1895,7 @@ export type Database = {
         Update: {
           amount?: number | null
           benchmarking_id?: string
+          counts_as_income?: boolean
           created_at?: string
           id?: string
           kind?: string

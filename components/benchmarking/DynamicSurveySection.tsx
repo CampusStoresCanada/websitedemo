@@ -100,7 +100,9 @@ function FieldRenderer({
   isReadOnly,
   organizationName,
   organizationProvince,
+  highlightField,
 }: { field: FieldConfig } & SurveySectionProps) {
+  const highlighted = highlightField === field.name;
   const indent = field.indent;
   const indentClass =
     indent === true || indent === 1
@@ -194,10 +196,24 @@ function FieldRenderer({
     isReadOnly,
     organizationName,
     organizationProvince,
+    highlightField,
   };
 
+  /*
+    Every field is addressable and can be lit up.
+
+    Needed by two things that had nothing to aim at before: "you missed this
+    one" has to scroll to the box rather than just say a name, and the review
+    screen's click-through has to land on the answer rather than the top of its
+    section.
+  */
   const wrapper = (children: React.ReactNode) => (
-    <div className={indentClass}>
+    <div
+      id={`field-${field.name}`}
+      className={`${indentClass} scroll-mt-28 rounded-md transition-colors ${
+        highlighted ? "bg-amber-50 ring-2 ring-amber-400 ring-offset-2" : ""
+      }`}
+    >
       {children}
       {field.example && (
         <div className="-mt-2 mb-4 rounded border border-slate-200 bg-slate-50 px-3 py-2">

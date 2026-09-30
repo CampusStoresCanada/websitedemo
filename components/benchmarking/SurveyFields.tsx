@@ -23,6 +23,15 @@ export interface SurveySectionProps {
   isReadOnly: boolean;
   organizationName: string;
   organizationProvince: string;
+  /**
+   * The field the form wants the reader to look at right now.
+   *
+   * Set when a required answer is missing at submit, and when the review
+   * screen sends someone back to change one particular thing. Naming a field
+   * in an error message and leaving the reader to find it in a 24-question
+   * section is not telling them where it is.
+   */
+  highlightField?: string | null;
 }
 
 // ─────────────────────────────────────────────────────────────────

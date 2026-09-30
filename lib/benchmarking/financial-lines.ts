@@ -16,10 +16,25 @@ export interface StatementLine {
   label: string;
   /** Section id the field is answered in, for "click to go and fix it". */
   section: string;
+  /**
+   * A boolean column that decides whether this line counts at all.
+   *
+   * Student wages are the case: most stores count employing students as giving
+   * back, some treat it as ordinary staffing because the work would be done
+   * either way, and it is not our call to make for them.
+   */
+  onlyIf?: string;
 }
 
 export const NAMED_EXPENSE_LINES: StatementLine[] = [
-  { name: "expense_hr", label: "Salaries, wages and benefits", section: "staffing" },
+  { name: "expense_hr", label: "Salaries and wages", section: "staffing" },
+  /*
+    Only what the STORE pays. Where the institution carries benefits centrally
+    this is blank, and that blank is the answer — it is why two stores with the
+    same payroll show different staff costs, and the old single "wages and
+    benefits" figure hid it completely.
+  */
+  { name: "benefits_total", label: "Staff benefits", section: "staffing" },
   { name: "expense_rent_maintenance", label: "Rent, maintenance and repairs", section: "expenses" },
   { name: "expense_utilities", label: "Utilities", section: "expenses" },
   { name: "expense_advertising", label: "Advertising and promotion", section: "expenses" },
@@ -60,7 +75,13 @@ export const CONTRIBUTION_LINES: StatementLine[] = [
     answered honestly in §6 was then asked for the same number again, and the
     two were free to disagree.
   */
-  { name: "wages_student", label: "Student wages", section: "staffing" },
+  {
+    name: "wages_student",
+    label: "Student wages",
+    section: "staffing",
+    // Counted only if the store said it counts. See CONTRIBUTION_LINES below.
+    onlyIf: "student_wages_is_contribution",
+  },
   { name: "expense_university_admin", label: "University administrative charge", section: "expenses" },
 ];
 
@@ -108,8 +129,21 @@ export function sumFields(
   formData: Record<string, unknown>,
   lines: StatementLine[],
 ): number {
-  return lines.reduce((total, line) => {
+  return countedLines(formData, lines).reduce((total, line) => {
     const value = formData[line.name];
     return total + (typeof value === "number" ? value : 0);
   }, 0);
+}
+
+/**
+ * The lines that actually count, once the store's own switches are applied.
+ *
+ * Used by the total AND by whatever displays the lines, so a line can never be
+ * shown in a list whose total excludes it.
+ */
+export function countedLines(
+  formData: Record<string, unknown>,
+  lines: StatementLine[],
+): StatementLine[] {
+  return lines.filter((line) => !line.onlyIf || formData[line.onlyIf] !== false);
 }

@@ -8,6 +8,7 @@ import {
   removeOtherIncome,
   type OtherIncomeRow,
 } from "@/lib/actions/benchmarking-financials";
+import Explain from "./Explain";
 
 /**
  * §4 Other Income — money booked through the store that is not merchandise.
@@ -59,7 +60,11 @@ export default function OtherIncomeEditor({
     };
   }, [benchmarkingId, isReadOnly]);
 
-  const otherTotal = rows.reduce((s, r) => s + (r.amount ?? 0), 0);
+  const otherTotal = rows.reduce(
+    (s, r) => s + (r.countsAsIncome ? (r.amount ?? 0) : 0),
+    0,
+  );
+  const excluded = rows.filter((r) => !r.countsAsIncome && (r.amount ?? 0) > 0);
   const money = (n: number) =>
     n.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
 
@@ -75,34 +80,78 @@ export default function OtherIncomeEditor({
         </p>
         <dl className="mt-2 space-y-1 text-sm">
           <div className="flex justify-between">
-            <dt className="text-gray-700">General merchandise</dt>
+            <dt className="text-gray-700">
+              <Explain text="Retail plus Online across every category you added in Section 2, General Merchandise.">
+                General merchandise
+              </Explain>
+            </dt>
             <dd className="font-medium text-gray-900">{money(merchandiseTotal)}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-gray-700">Course materials</dt>
+            <dt className="text-gray-700">
+              <Explain text="Retail plus Online across every format you added in Section 3, Course Materials.">
+                Course materials
+              </Explain>
+            </dt>
             <dd className="font-medium text-gray-900">{money(courseMaterialsTotal)}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-gray-700">Other income below</dt>
+            <dt className="text-gray-700">
+              <Explain text="The lines below, counting only the ones you have ticked as income. Untick a line and it drops out of this total and out of every comparison.">
+                Other income below
+              </Explain>
+            </dt>
             <dd className="font-medium text-gray-900">{money(otherTotal)}</dd>
           </div>
           <div className="flex justify-between">
-            <dt className="text-gray-700">Funding from the institution</dt>
+            <dt className="text-gray-700">
+              <Explain text="The operating subsidy or covered deficit you enter at the bottom of this section.">
+                Funding from the institution
+              </Explain>
+            </dt>
             <dd className="font-medium text-gray-900">{money(centralFunding)}</dd>
           </div>
           <div className="flex justify-between border-t border-gray-300 pt-1">
-            <dt className="font-medium text-gray-900">Total revenue</dt>
+            <dt className="font-medium text-gray-900">
+              <Explain text="The four lines above, added together. This is the revenue every ratio in your report is a share of.">
+                Total revenue
+              </Explain>
+            </dt>
             <dd className="font-semibold text-gray-900">
               {money(merchandiseTotal + courseMaterialsTotal + otherTotal + centralFunding)}
             </dd>
           </div>
+          {excluded.length > 0 && (
+            <div className="flex justify-between pt-1 text-xs text-gray-500">
+              <dt>
+                Not counted, at your request: {excluded.map((r) => r.label).join(", ")}
+              </dt>
+              <dd className="tabular-nums">
+                {money(excluded.reduce((s, r) => s + (r.amount ?? 0), 0))}
+              </dd>
+            </div>
+          )}
         </dl>
       </div>
 
-      <p className="mt-4 text-xs text-gray-600">
+      <div className="mt-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-3">
+        <p className="text-sm font-semibold text-amber-900">
+          Do not include money the institution collects that does not appear in your
+          financials.
+        </p>
+        <p className="mt-1 text-xs text-amber-900">
+          If it never passed through your books, it is not your income — however large
+          the programme is and however much work your store does to run it. Section 10
+          asks for it separately and lets you decide whether it counts toward your
+          comparison. Putting it here instead inflates your revenue against every store
+          that left it out, and makes your margin and expense ratios look worse than
+          they are.
+        </p>
+      </div>
+
+      <p className="mt-3 text-xs text-gray-600">
         Retail and online income booked through your store that is not merchandise.
-        Services you told us you offer are listed already. Do not include money the
-        institution collects — that is asked in Inclusive &amp; Equitable Access.
+        Services you told us you offer are listed already.
       </p>
 
       <div className="mt-3 space-y-2">
@@ -142,6 +191,28 @@ export default function OtherIncomeEditor({
               }
               className="w-36 rounded border border-gray-300 px-2 py-1.5 text-sm"
             />
+            <label className="flex w-52 shrink-0 items-center gap-1.5 text-xs text-gray-700">
+              <input
+                type="checkbox"
+                checked={r.countsAsIncome}
+                disabled={isReadOnly}
+                onChange={(e) => {
+                  const on = e.target.checked;
+                  patch(r.id, (x) => ({ ...x, countsAsIncome: on }));
+                  void updateOtherIncome({
+                    benchmarkingId,
+                    rowId: r.id,
+                    countsAsIncome: on,
+                  });
+                }}
+              />
+              <Explain
+                align="right"
+                text="Ticked, this line is part of your revenue and every ratio built on it. Untick it for a service you run at cost as a campus obligation — a print desk or locker programme that clears its own expenses and nothing more. We will still report what it earned; it just will not count as revenue when your store is compared."
+              >
+                Included as income
+              </Explain>
+            </label>
             {!isReadOnly && r.kind !== "store_service" && (
               <button
                 onClick={async () => {
@@ -176,7 +247,14 @@ export default function OtherIncomeEditor({
               }
               setRows((p) => [
                 ...p,
-                { id: res.id!, kind: "other", serviceName: null, label: newLabel.trim(), amount: null },
+                {
+                  id: res.id!,
+                  kind: "other",
+                  serviceName: null,
+                  label: newLabel.trim(),
+                  amount: null,
+                  countsAsIncome: true,
+                },
               ]);
               setNewLabel("");
             }}

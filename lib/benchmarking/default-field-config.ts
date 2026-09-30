@@ -1138,7 +1138,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "wages_full_time",
-          label: "Full-time wages and benefits",
+          label: "Full-time wages",
           type: "currency",
           order: 10,
           visible: true,
@@ -1146,7 +1146,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "wages_part_time",
-          label: "Part-time wages and benefits",
+          label: "Part-time wages",
           type: "currency",
           order: 11,
           visible: true,
@@ -1154,7 +1154,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "wages_seasonal",
-          label: "Seasonal wages and benefits",
+          label: "Seasonal wages",
           type: "currency",
           order: 12,
           visible: true,
@@ -1162,12 +1162,64 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "wages_student",
-          label: "Student wages and benefits",
+          label: "Student wages",
           type: "currency",
           helpText:
-            "Counted toward your campus contribution as well, because employing students is one. Entered here only — Campus Contributions reads this figure rather than asking again.",
+            "Wages only. Whether this also counts toward your campus contribution is the question under it.",
           order: 13,
           visible: true,
+          group: "What it costs",
+        },
+        {
+          /*
+            The single largest reason two identical stores show different staff
+            costs, and nothing in the old survey could see it. Some institutions
+            carry benefits centrally and the store never sees the number; others
+            charge it back in full. Asked as one question rather than folded
+            into four wage lines, because most stores are under a collective
+            agreement covering everybody and cannot split benefits by
+            employment type even if we asked.
+          */
+          name: "benefits_paid_by",
+          label: "Who pays your staff benefits?",
+          type: "select",
+          options: [
+            "The store pays them",
+            "The institution pays them centrally",
+            "Split between the store and the institution",
+            "Staff are not eligible for benefits",
+          ],
+          helpText:
+            "The wage lines above are wages only. This asks where the benefit cost lands, so your staff cost can be compared with a store whose institution handles it differently.",
+          order: 14,
+          visible: true,
+          allowOther: true,
+          group: "What it costs",
+        },
+        {
+          name: "benefits_total",
+          label: "Benefits the store pays",
+          type: "currency",
+          helpText:
+            "One total across everybody, not split by employment type. Include the employer's share of payroll taxes if your store carries it.",
+          order: 15,
+          visible: true,
+          indent: true,
+          showIf: {
+            field: "benefits_paid_by",
+            value: ["The store pays them", "Split between the store and the institution"],
+          },
+          group: "What it costs",
+        },
+        {
+          name: "student_wages_is_contribution",
+          label: "Count student wages toward your campus contribution?",
+          type: "boolean",
+          helpText:
+            "Most stores do — employing students is one of the clearest ways a store gives back. Some treat it as an ordinary staffing cost because the work would be done either way. Your call: we will use whichever you choose and say which we used.",
+          order: 16,
+          visible: true,
+          indent: true,
           group: "What it costs",
         },
       ],

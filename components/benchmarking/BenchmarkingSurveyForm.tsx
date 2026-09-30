@@ -22,6 +22,8 @@ import OtherIncomeEditor from "./OtherIncomeEditor";
 import OtherExpensesEditor from "./OtherExpensesEditor";
 import StaffingEditor from "./StaffingEditor";
 import ReviewFinancials from "./ReviewFinancials";
+import ReviewAllAnswers from "./ReviewAllAnswers";
+import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type {
   OtherIncomeRow,
@@ -121,6 +123,17 @@ export default function BenchmarkingSurveyForm({
   }, [carriedForward, sections]);
 
   const [activeSection, setActiveSection] = useState(0); // index into sections array
+  /** The whole-survey read-through, opened before submitting. */
+  const [reviewingAll, setReviewingAll] = useState(false);
+  /**
+   * True once the store has opened the review, so "Back to review" can appear
+   * beside the section they went off to fix. Without it, changing one answer
+   * meant walking back through every section in between.
+   */
+  const [hasReviewed, setHasReviewed] = useState(false);
+  /** The field to scroll to and light up when a section opens. */
+  const [highlightField, setHighlightField] = useState<string | null>(null);
+  const formTopRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState<Record<string, unknown>>(
     currentData as unknown as Record<string, unknown>
@@ -148,6 +161,41 @@ export default function BenchmarkingSurveyForm({
   */
   const saveTimersRef = useRef<Map<string, NodeJS.Timeout>>(new Map());
 
+  /*
+    Moving between sections puts you at the TOP of the next one.
+
+    Clicking Next left the reader exactly where they were on the page, which on
+    a long section is its foot — so the next section opened already scrolled
+    past its heading, its description, and often its first two questions.
+  */
+  const goToSection = useCallback(
+    (idx: number, field?: string) => {
+      setReviewingAll(false);
+      setActiveSection(idx);
+      setHighlightField(field ?? null);
+      requestAnimationFrame(() => {
+        if (field) {
+          const el = document.getElementById(`field-${field}`);
+          if (el) {
+            el.scrollIntoView({ behavior: "smooth", block: "center" });
+            return;
+          }
+        }
+        formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    },
+    [],
+  );
+
+  const openReview = useCallback(() => {
+    setReviewingAll(true);
+    setHasReviewed(true);
+    setHighlightField(null);
+    requestAnimationFrame(() =>
+      formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
+    );
+  }, []);
+
   const isSubmitted = formData.status === "submitted";
   const isReadOnly = isSubmitted;
 
@@ -174,8 +222,9 @@ export default function BenchmarkingSurveyForm({
   const jumpToSection = useCallback(
     (sectionId: string) => {
       const idx = sections.findIndex((section) => section.id === sectionId);
-      if (idx >= 0) setActiveSection(idx);
+      if (idx >= 0) goToSection(idx);
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [sections],
   );
 
@@ -275,7 +324,47 @@ export default function BenchmarkingSurveyForm({
   );
 
   // Submit survey
+  /**
+   * Required answers that are still missing, in the order they are asked.
+   *
+   * ⛔ Skips anything a conditional is hiding. A store cannot answer a question
+   * it was never shown, and demanding it would be a dead end with no box to
+   * type in.
+   */
+  const missingRequired = useMemo(() => {
+    const out: { sectionIdx: number; field: string; label: string; section: string }[] = [];
+    sections.forEach((section, idx) => {
+      section.fields
+        .filter((f) => f.required && f.visible !== false)
+        .filter((f) => !f.calculated && !f.displayOnly)
+        .filter((f) => matchesShowIf(f.showIf, formData))
+        .forEach((f) => {
+          const v = formData[f.name];
+          const empty =
+            v === null || v === undefined || v === "" || (Array.isArray(v) && v.length === 0);
+          if (empty) {
+            out.push({ sectionIdx: idx, field: f.name, label: f.label, section: section.title });
+          }
+        });
+    });
+    return out;
+  }, [sections, formData]);
+
   const handleSubmit = async () => {
+    // Take them to the first gap rather than naming it and leaving them to
+    // hunt: the survey is ten sections long and the name of a field is not a
+    // location.
+    if (missingRequired.length > 0) {
+      const first = missingRequired[0];
+      setSubmitError(
+        missingRequired.length === 1
+          ? `“${first.label}” is still needed, in ${first.section}.`
+          : `${missingRequired.length} required answers are still missing. The first is “${first.label}”, in ${first.section}.`,
+      );
+      goToSection(first.sectionIdx, first.field);
+      return;
+    }
+
     setIsSubmitting(true);
     setSubmitError(null);
 
@@ -319,6 +408,7 @@ export default function BenchmarkingSurveyForm({
   const priorData = priorYearData as unknown as Record<string, unknown> | null;
 
   const sectionProps = {
+    highlightField,
     formData,
     priorYearData: priorData,
     onFieldChange: handleFieldChange,
@@ -410,14 +500,14 @@ export default function BenchmarkingSurveyForm({
       </div>
 
       {/* Section Navigation */}
-      <div className="mb-6 border-b border-gray-200">
+      <div ref={formTopRef} className="mb-6 scroll-mt-24 border-b border-gray-200">
         <nav className="flex overflow-x-auto -mb-px" aria-label="Survey sections">
           {sections.map((section, idx) => (
             <button
               key={section.id}
-              onClick={() => setActiveSection(idx)}
+              onClick={() => goToSection(idx)}
               className={`whitespace-nowrap px-4 py-3 border-b-2 text-sm font-medium transition-colors ${
-                activeSection === idx
+                activeSection === idx && !reviewingAll
                   ? "border-[#EE2A2E] text-[#EE2A2E]"
                   : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
               }`}
@@ -425,8 +515,41 @@ export default function BenchmarkingSurveyForm({
               {section.order}. {section.title}
             </button>
           ))}
+          {!isSubmitted && (
+            <button
+              onClick={openReview}
+              className={`ml-auto whitespace-nowrap px-4 py-3 border-b-2 text-sm font-medium transition-colors ${
+                reviewingAll
+                  ? "border-[#EE2A2E] text-[#EE2A2E]"
+                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
+              }`}
+            >
+              Review all answers
+            </button>
+          )}
         </nav>
       </div>
+
+      {/*
+        The way back, once they have been to the review.
+
+        Changing one answer from the review meant walking forward through every
+        section between it and the end to get back — so people either did not
+        go and fix it, or did and lost their place.
+      */}
+      {hasReviewed && !reviewingAll && !isSubmitted && (
+        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-3 py-2">
+          <p className="text-sm text-[#163D6D]">
+            You came here from the review.
+          </p>
+          <button
+            onClick={openReview}
+            className="rounded-lg bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
+          >
+            Back to review
+          </button>
+        </div>
+      )}
 
       {/* Error display */}
       {submitError && (
@@ -447,7 +570,18 @@ export default function BenchmarkingSurveyForm({
 
       {/* Active Section */}
       <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-        {sections[activeSection] && (
+        {reviewingAll && (
+          <ReviewAllAnswers
+            config={config}
+            formData={formData}
+            onJumpToField={(sectionId, fieldName) => {
+              const idx = sections.findIndex((x) => x.id === sectionId);
+              if (idx >= 0) goToSection(idx, fieldName);
+            }}
+            onClose={() => goToSection(activeSection)}
+          />
+        )}
+        {!reviewingAll && sections[activeSection] && (
           <>
             {/*
               Above the questions, because "who is answering" is not one of the
@@ -576,8 +710,8 @@ export default function BenchmarkingSurveyForm({
       {/* Navigation + Submit */}
       <div className="mt-6 flex items-center justify-between">
         <button
-          onClick={() => setActiveSection(Math.max(0, activeSection - 1))}
-          disabled={activeSection === 0}
+          onClick={() => goToSection(Math.max(0, activeSection - 1))}
+          disabled={activeSection === 0 || reviewingAll}
           className="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           Previous
@@ -586,7 +720,7 @@ export default function BenchmarkingSurveyForm({
         <div className="flex items-center gap-3">
           {activeSection < sections.length - 1 ? (
             <button
-              onClick={() => setActiveSection(Math.min(sections.length - 1, activeSection + 1))}
+              onClick={() => goToSection(Math.min(sections.length - 1, activeSection + 1))}
               className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327]"
             >
               Next Section

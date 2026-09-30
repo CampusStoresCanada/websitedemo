@@ -17,6 +17,15 @@ export interface OtherIncomeRow {
   serviceName: string | null;
   label: string;
   amount: number | null;
+  /**
+   * The store's own call on whether this line is revenue for comparison.
+   *
+   * Some run a service at cost as a campus obligation — a print desk that
+   * clears its expenses and nothing more. Counting that as revenue makes the
+   * store look bigger and its margin worse, and only the store knows which it
+   * is.
+   */
+  countsAsIncome: boolean;
 }
 
 export interface OtherExpenseRow {
@@ -76,7 +85,7 @@ export async function loadOtherIncome(benchmarkingId: string): Promise<OtherInco
   const db = createAdminClient();
   const { data } = await db
     .from("benchmarking_other_income")
-    .select("id, kind, service_name, label, amount, position")
+    .select("id, kind, service_name, label, amount, counts_as_income, position")
     .eq("benchmarking_id", benchmarkingId)
     .order("position");
   return (data ?? []).map((r) => ({
@@ -85,6 +94,7 @@ export async function loadOtherIncome(benchmarkingId: string): Promise<OtherInco
     serviceName: (r.service_name as string | null) ?? null,
     label: (r.label as string) ?? "",
     amount: (r.amount as number | null) ?? null,
+    countsAsIncome: (r.counts_as_income as boolean | null) ?? true,
   }));
 }
 
@@ -172,6 +182,7 @@ export async function updateOtherIncome(input: {
   rowId: string;
   label?: string;
   amount?: number | null;
+  countsAsIncome?: boolean;
 }): Promise<{ success: boolean; error?: string }> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
@@ -179,6 +190,7 @@ export async function updateOtherIncome(input: {
   const patch: Record<string, unknown> = {};
   if (input.label !== undefined) patch.label = input.label.trim();
   if (input.amount !== undefined) patch.amount = input.amount;
+  if (input.countsAsIncome !== undefined) patch.counts_as_income = input.countsAsIncome;
 
   const db = createAdminClient();
   const { error } = await db

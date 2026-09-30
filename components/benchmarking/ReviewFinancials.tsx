@@ -8,7 +8,9 @@ import {
   sumCategories,
   grossMarginFromCategories,
   sumFields,
+  countedLines,
 } from "@/lib/benchmarking/financial-lines";
+import Explain from "./Explain";
 
 /**
  * §8 — the income statement, assembled from what the store actually answered.
@@ -46,22 +48,45 @@ function Line({
   indent?: boolean;
   onJump?: () => void;
 }) {
+  /*
+    The figure is clickable as well as the label.
+
+    A reader scanning a statement stops at the number that looks wrong, not at
+    the words beside it — so the number is where they try to click, and a label
+    that was the only target sent them back to hunt for it.
+  */
+  const jump = onJump ? (
+    <button
+      type="button"
+      onClick={onJump}
+      className="tabular-nums text-sm underline decoration-dotted underline-offset-4 hover:decoration-solid"
+    >
+      {value}
+    </button>
+  ) : (
+    <span className="tabular-nums text-sm">{value}</span>
+  );
+
   return (
     <div
       className={`flex items-baseline justify-between gap-4 border-b border-gray-100 py-1.5 ${
         strong ? "font-semibold text-gray-900" : "text-gray-700"
       } ${indent ? "pl-4" : ""}`}
     >
-      <button
-        type="button"
-        title={from}
-        onClick={onJump}
-        disabled={!onJump}
-        className="text-left text-sm underline decoration-dotted underline-offset-4 hover:decoration-solid disabled:no-underline"
-      >
-        {label}
-      </button>
-      <span className="tabular-nums text-sm">{value}</span>
+      <Explain text={from}>
+        {onJump ? (
+          <button
+            type="button"
+            onClick={onJump}
+            className="text-left text-sm hover:text-[#163D6D]"
+          >
+            {label}
+          </button>
+        ) : (
+          <span className="text-sm">{label}</span>
+        )}
+      </Explain>
+      {jump}
     </div>
   );
 }
@@ -90,7 +115,19 @@ export default function ReviewFinancials({
   const gmOnline = sumCategories(gmCategories, "onlineSales");
   const cmRetail = sumCategories(cmCategories, "retailSales");
   const cmOnline = sumCategories(cmCategories, "onlineSales");
-  const other = otherIncome.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+  /*
+    Only the lines the store ticked as income. §4 shows the same total under
+    the same rule — if this one quietly counted an excluded line, the two
+    screens would disagree about the store's revenue, and the store would be
+    right to trust neither.
+  */
+  const other = otherIncome.reduce(
+    (sum, row) => sum + (row.countsAsIncome ? (row.amount ?? 0) : 0),
+    0,
+  );
+  const excludedIncome = otherIncome.filter(
+    (row) => !row.countsAsIncome && (row.amount ?? 0) > 0,
+  );
   const funding = num("central_funding") ?? 0;
 
   const netSales = gmRetail + gmOnline + cmRetail + cmOnline + other + funding;
@@ -155,7 +192,7 @@ export default function ReviewFinancials({
         <Line
           label="Other income"
           value={money(other)}
-          from="Every line you entered in Other Income, added up"
+          from="Every line in Other Income you ticked as income, added up. Lines you unticked are shown below the statement instead."
           indent
           onJump={() => onJumpToSection("other_income")}
         />
@@ -199,7 +236,7 @@ export default function ReviewFinancials({
 
         <div className="h-3" />
 
-        {NAMED_EXPENSE_LINES.map((line) => (
+        {countedLines(formData, NAMED_EXPENSE_LINES).map((line) => (
           <Line
             key={line.name}
             label={line.label}
@@ -251,6 +288,30 @@ export default function ReviewFinancials({
           indent
         />
       </div>
+
+      {excludedIncome.length > 0 && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
+          <p className="font-medium text-gray-900">Earned, but not counted as revenue</p>
+          <p className="mt-1 text-xs text-gray-600">
+            You told us these run at cost rather than as income, so they are outside the
+            statement above. We still report what they earned.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {excludedIncome.map((row) => (
+              <li key={row.id} className="flex justify-between">
+                <button
+                  type="button"
+                  onClick={() => onJumpToSection("other_income")}
+                  className="text-left underline decoration-dotted underline-offset-4"
+                >
+                  {row.label}
+                </button>
+                <span className="tabular-nums">{money(row.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {institutionCollected !== null && institutionCollected > 0 && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">
