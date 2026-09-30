@@ -3,6 +3,7 @@
 import { useMemo } from "react";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
+import { completenessGaps } from "@/lib/benchmarking/completeness";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type {
   OtherIncomeRow,
@@ -260,6 +261,8 @@ export default function ReviewAllAnswers({
     }
   }
 
+  const gaps = completenessGaps(formData);
+
   const missing = sections.flatMap((s) =>
     s.fields
       .filter((f) => f.required && !displayValue(formData[f.name]).answered)
@@ -302,6 +305,36 @@ export default function ReviewAllAnswers({
                 >
                   {section.order}. {section.title} — {field.label}
                 </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {/*
+        What each blank costs, rather than a rule saying it must be filled.
+
+        Only eight figures are watched, each one chosen because leaving it out
+        silently removes the store from something it would otherwise get back. A
+        list of every empty box is a list nobody reads, and a red asterisk on
+        all of them would block the stores whose institutions genuinely do not
+        give them the number.
+      */}
+      {gaps.length > 0 && (
+        <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4">
+          <p className="text-sm font-semibold text-gray-900">
+            You can file without these, but here is what each one costs you
+          </p>
+          <ul className="mt-2 space-y-2">
+            {gaps.map((gap) => (
+              <li key={gap.key}>
+                <button
+                  onClick={() => onJumpToField(gap.section, gap.key)}
+                  className="text-left text-sm font-medium text-[#163D6D] underline underline-offset-4"
+                >
+                  {gap.label}
+                </button>
+                <p className="text-xs text-gray-600">{gap.cost}</p>
               </li>
             ))}
           </ul>

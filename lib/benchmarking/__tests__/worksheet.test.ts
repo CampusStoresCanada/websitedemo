@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { buildWorksheet, type PriorRow } from "../worksheet";
-import type { SurveyFieldConfig } from "../default-field-config";
+import { DEFAULT_FIELD_CONFIG, type SurveyFieldConfig } from "../default-field-config";
 
 const config: SurveyFieldConfig = {
   sections: [
@@ -167,5 +167,51 @@ describe("historic values", () => {
     expect(w.priorYears).toEqual([]);
     // 15 of the 52 active member stores are in exactly this position.
     expect(w.sections[0].lines[0].priorValues).toEqual([]);
+  });
+});
+
+describe("the printed sheet shows the full scope", () => {
+  /*
+    The point of the print-off is to see everything that COULD be asked before
+    starting, not the handful of fixed questions. A reader with no idea that
+    Course Packs or Graduation & Regalia exist gathers the wrong figures and
+    finds out at the keyboard.
+  */
+  const built = buildWorksheet({
+    organizationName: "Test Store",
+    fiscalYear: 2026,
+    closesAt: null,
+    config: DEFAULT_FIELD_CONFIG,
+    priorRows: [],
+  });
+
+  const section = (id: string) => built.sections.find((s) => s.id === id);
+
+  it("keeps General Merchandise, which has no fixed questions left at all", () => {
+    const gm = section("general_merchandise");
+    expect(gm).toBeDefined();
+    expect(gm!.lines).toHaveLength(0);
+    expect(gm!.lists.length).toBeGreaterThan(0);
+  });
+
+  it("prints every general merchandise category a store could carry", () => {
+    const choices = section("general_merchandise")!.lists[0].choices!.map((c) => c.label);
+    for (const expected of ["Apparel", "Graduation & Regalia", "Technology & Electronics"]) {
+      expect(choices).toContain(expected);
+    }
+  });
+
+  it("prints every course material format, and says which have no unit counts", () => {
+    const choices = section("course_materials")!.lists[0].choices!.map((c) => c.label);
+    expect(choices).toContain("Print — New");
+    expect(choices).toContain("Course Packs");
+    expect(choices).toContain("Digital (no unit counts)");
+  });
+
+  it("gives the free-form lists ruled rows rather than a vocabulary", () => {
+    const income = section("other_income")!.lists[0];
+    expect(income.choices).toBeUndefined();
+    expect(income.blankRows).toBeGreaterThan(0);
+    expect(income.columns).toContain("Cost to deliver ($)");
   });
 });

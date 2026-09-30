@@ -29,6 +29,7 @@ import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import { iaEaContradiction } from "@/lib/benchmarking/iaea-consistency";
+import { hasAnySales } from "@/lib/benchmarking/completeness";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type {
   OtherIncomeRow,
@@ -439,6 +440,21 @@ export default function BenchmarkingSurveyForm({
       return;
     }
 
+    /*
+      Not a field, so it cannot carry `required`: sales live on the category
+      rows. A submission with no sales anywhere is not a thin submission, it is
+      an empty one, and letting it into the aggregate moves every median it
+      touches.
+    */
+    if (!hasAnySales(gmCategories, cmCategories)) {
+      setSubmitError(
+        "There are no sales figures anywhere yet. Add what you sold in General Merchandise or Course Materials before filing.",
+      );
+      const idx = sections.findIndex((x) => x.id === "general_merchandise");
+      if (idx >= 0) goToSection(idx);
+      return;
+    }
+
     if (missingRequired.length > 0) {
       const first = missingRequired[0];
       setSubmitError(
@@ -623,27 +639,6 @@ export default function BenchmarkingSurveyForm({
           </button>
         )}
       </div>
-
-      {/*
-        The way back, once they have been to the review.
-
-        Changing one answer from the review meant walking forward through every
-        section between it and the end to get back — so people either did not
-        go and fix it, or did and lost their place.
-      */}
-      {hasReviewed && !reviewingAll && !isSubmitted && (
-        <div className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-[#163D6D]/20 bg-[#163D6D]/5 px-3 py-2">
-          <p className="text-sm text-[#163D6D]">
-            You came here from the review.
-          </p>
-          <button
-            onClick={openReview}
-            className="rounded-lg bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
-          >
-            Back to review
-          </button>
-        </div>
-      )}
 
       {/*
         Shown the moment the two answers disagree, not held back until submit.
@@ -914,6 +909,35 @@ export default function BenchmarkingSurveyForm({
                 {isSubmitting ? "Submitting..." : "Submit Survey"}
               </button>
             )
+          ) : hasReviewed && !isSubmitted ? (
+            /*
+              Once they have been to the review, the primary button IS the way
+              back. It used to be a banner at the top of the page, which is not
+              where this form teaches anyone to navigate: every other move is
+              made from this corner, and a control somewhere else does not read
+              as navigation at all.
+
+              Next section stays as a quiet link beside it. Someone who came
+              from the review to fix one thing wants to go back; someone who
+              decided to keep working forward should not be sent to the tab bar
+              to do it.
+            */
+            <>
+              {activeSection < sections.length - 1 && (
+                <button
+                  onClick={() => goToSection(activeSection + 1)}
+                  className="text-sm font-medium text-gray-600 underline underline-offset-4 hover:text-gray-900"
+                >
+                  Next section
+                </button>
+              )}
+              <button
+                onClick={openReview}
+                className="rounded-lg bg-[#163D6D] px-8 py-2.5 text-sm font-medium text-white hover:bg-[#12325a]"
+              >
+                Return to review
+              </button>
+            </>
           ) : activeSection < sections.length - 1 ? (
             <button
               onClick={() => goToSection(Math.min(sections.length - 1, activeSection + 1))}

@@ -300,6 +300,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 8,
           visible: true,
           options: ["Cost Recovery", "For-profit", "Not-for-profit"],
+          required: true,
         },
         {
           name: "is_semester_based",
@@ -325,6 +326,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
             "January", "February", "March", "April", "May", "June",
             "July", "August", "September", "October", "November", "December",
           ],
+          required: true,
         },
         {
           name: "fiscal_year_end_day",
@@ -334,6 +336,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 10.1,
           visible: true,
           options: Array.from({ length: 31 }, (_, i) => String(i + 1).padStart(2, "0")),
+          required: true,
         },
         {
           name: "inventory_count_style",

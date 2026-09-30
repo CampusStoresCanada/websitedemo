@@ -3,6 +3,17 @@ import type {
   SurveyFieldConfig,
 } from "@/lib/benchmarking/default-field-config";
 import { describeShowIf } from "@/lib/benchmarking/show-if";
+import {
+  departmentsFor,
+  subcategoriesFor,
+  DEPARTMENT_NOTES,
+  COURSE_MATERIAL_FORMAT_NOTES,
+  NON_PHYSICAL_FORMATS,
+} from "@/lib/benchmarking/categories";
+import { KEY_DATE_KINDS } from "@/lib/benchmarking/key-dates";
+import { COMPETITOR_KINDS } from "@/lib/benchmarking/competitor-kinds";
+import { EMPLOYMENT_TYPES } from "@/lib/benchmarking/systems";
+import { LOCATION_KINDS } from "@/lib/benchmarking/location-kinds";
 
 /**
  * The printable gathering sheet.
@@ -43,11 +54,32 @@ export interface WorksheetLine {
   priorValues: (string | null)[];
 }
 
+/**
+ * A part of the survey that is a LIST rather than a set of fixed questions.
+ *
+ * ⛔ The printed sheet has to show the whole vocabulary. On screen a store adds
+ * the categories it carries and never sees the rest; on paper there is nobody
+ * to click, so a sheet that printed only the default questions left a reader
+ * with no idea that Graduation & Regalia or Course Packs were even askable.
+ * The point of the print-off is to see the full scope before starting.
+ */
+export interface WorksheetList {
+  title: string;
+  intro: string;
+  /** Everything the store could pick, so the scope is visible on paper. */
+  choices?: { label: string; note?: string }[];
+  /** Figures wanted for each thing they pick. */
+  columns?: string[];
+  /** Ruled lines for a list with no fixed vocabulary. */
+  blankRows?: number;
+}
+
 export interface WorksheetSection {
   id: string;
   title: string;
   description?: string;
   lines: WorksheetLine[];
+  lists: WorksheetList[];
 }
 
 export interface Worksheet {
@@ -137,6 +169,146 @@ function isGatherable(field: FieldConfig): boolean {
   return true;
 }
 
+
+/**
+ * The list-driven parts of each section, with their full vocabularies.
+ *
+ * Read from the same modules the form renders from, so a category added to the
+ * taxonomy appears on the printed sheet without anybody remembering to update
+ * it here. A printed survey that has drifted from the real one is worse than no
+ * printed survey: a store gathers the wrong figures and only finds out at the
+ * keyboard.
+ */
+function listsForSection(sectionId: string): WorksheetList[] {
+  switch (sectionId) {
+    case "institution_profile":
+      return [
+        {
+          title: "Your locations",
+          intro:
+            "One row per place you operate. The web store is not a location. Square footage is asked per location, and the survey adds it up for you.",
+          choices: LOCATION_KINDS.map((k) => ({ label: k.label, note: k.help })),
+          columns: [
+            "Name",
+            "Kind",
+            "Sales floor",
+            "Storage",
+            "Office",
+            "Other space",
+          ],
+          blankRows: 4,
+        },
+        {
+          title: "Your year ahead",
+          intro:
+            "The dates your year turns on, for the year COMING, not the one you are reporting. Add as many of each as you need: one adoption deadline per term, every buyback window, each semester.",
+          choices: KEY_DATE_KINDS.map((k) => ({ label: k.label, note: k.help })),
+          columns: ["Kind", "What you call it", "Date", "Ends (if a window)"],
+          blankRows: 6,
+        },
+        {
+          title: "Who competes with you",
+          intro:
+            "Stores on campus, or close enough that a student would go there instead. One row each. None at all is an answer too.",
+          choices: COMPETITOR_KINDS.map((k) => ({ label: k.label, note: k.help })),
+          columns: ["Name", "What kind"],
+          blankRows: 4,
+        },
+      ];
+
+    case "general_merchandise":
+      return [
+        {
+          title: "Every category you could carry",
+          intro:
+            "Say which of these you sell and give the figures for each. You may break any of them into the subcategories listed under it if that is how you run them. Merchandise income that fits none of these belongs in Other Income.",
+          choices: departmentsFor("general_merchandise").map((d) => {
+            const subs = subcategoriesFor(d, "general_merchandise");
+            const note = [DEPARTMENT_NOTES[d], subs.length ? `Subcategories: ${subs.join(", ")}` : ""]
+              .filter(Boolean)
+              .join(" ");
+            return { label: d, note: note || undefined };
+          }),
+          columns: [
+            "Retail sales ($)",
+            "Online sales ($)",
+            "Gross margin (%)",
+            "Opening inventory ($)",
+            "Closing inventory ($)",
+          ],
+        },
+      ];
+
+    case "course_materials":
+      return [
+        {
+          title: "Every format you could sell",
+          intro:
+            "Course materials are asked by FORMAT, because the same textbook is new print in September, a rental in January and a digital licence in an Inclusive Access cohort, and the figures differ every time. Units are wanted for the physical ones only.",
+          choices: departmentsFor("course_materials").map((d) => ({
+            label:
+              (NON_PHYSICAL_FORMATS as readonly string[]).includes(d)
+                ? `${d} (no unit counts)`
+                : d,
+            note: COURSE_MATERIAL_FORMAT_NOTES[d],
+          })),
+          columns: [
+            "Retail sales ($)",
+            "Online sales ($)",
+            "Gross margin (%)",
+            "Opening inventory ($)",
+            "Closing inventory ($)",
+            "Units sold",
+            "Units available",
+          ],
+        },
+      ];
+
+    case "other_income":
+      return [
+        {
+          title: "Income lines",
+          intro:
+            "Money booked through your store that is not merchandise. Every service you told us you offer gets a line of its own on screen. Do NOT include money the institution collects that does not appear in your financial statements; that is asked in Inclusive & Equitable Access.",
+          columns: [
+            "What it is",
+            "Earned ($)",
+            "Cost to deliver ($)",
+            "Cost already in Expenses?",
+            "Counts as income?",
+          ],
+          blankRows: 6,
+        },
+      ];
+
+    case "staffing":
+      return [
+        {
+          title: "Your team",
+          intro:
+            "One row per person, started from the people we already hold for your store. Years in campus retail means anywhere, not just with you.",
+          choices: EMPLOYMENT_TYPES.map((t) => ({ label: t.label })),
+          columns: ["Name", "Employment type", "Years in campus retail"],
+          blankRows: 8,
+        },
+      ];
+
+    case "expenses":
+      return [
+        {
+          title: "Anything we did not name",
+          intro:
+            "Only what does not belong on one of the expense lines above. Use the name you use internally; we will show it back to you that way.",
+          columns: ["What it is", "Amount ($)"],
+          blankRows: 4,
+        },
+      ];
+
+    default:
+      return [];
+  }
+}
+
 export function buildWorksheet(input: {
   organizationName: string;
   fiscalYear: number;
@@ -187,9 +359,14 @@ export function buildWorksheet(input: {
           conditionHint: conditionHint(field, config),
           priorValues: priors.map((row) => formatValue(row[field.name], field.type)),
         })),
+      lists: listsForSection(section.id),
     }))
-    // A section whose fields are all calculated has nothing to gather.
-    .filter((s) => s.lines.length > 0);
+    /*
+      Kept if it has questions OR lists. §2 General Merchandise has no scalar
+      fields left at all since the category grid replaced them, so filtering on
+      questions alone printed a survey with its largest section missing.
+    */
+    .filter((s) => s.lines.length > 0 || s.lists.length > 0);
 
   return {
     organizationName,

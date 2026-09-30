@@ -225,6 +225,79 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
               </li>
             ))}
           </ul>
+
+          {/*
+            The list-driven parts, with the whole vocabulary printed.
+
+            On screen a store adds the categories it carries and never sees the
+            rest. On paper there is nobody to click, so printing only the fixed
+            questions left a reader with no idea that Graduation & Regalia or
+            Course Packs were even askable. Seeing the full scope before
+            starting is most of the reason to print it at all.
+          */}
+          {section.lists.map((list) => (
+            <div key={list.title} className="mt-4 break-inside-avoid">
+              <p className="text-[12px] font-semibold">{list.title}</p>
+              <p className="mt-0.5 text-[10.5px] leading-snug">{list.intro}</p>
+
+              {list.choices && (
+                <ul className="mt-1.5 space-y-1">
+                  {list.choices.map((choice) => (
+                    <li key={choice.label} className="flex gap-2 text-[10.5px] leading-snug">
+                      <span aria-hidden className="mt-[2px] inline-block h-3 w-3 shrink-0 border border-black/60" />
+                      <span>
+                        <span className="font-semibold">{choice.label}</span>
+                        {choice.note && <span> {choice.note}</span>}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+
+              {list.columns && (() => {
+                /*
+                  A vocabulary table needs a column for the thing being named,
+                  which the measure columns do not provide. Without it the
+                  category name was written into the "Retail sales" cell and the
+                  whole grid was off by one.
+                */
+                const named = Boolean(list.choices) && !list.blankRows;
+                const headings = named ? ["Category", ...list.columns!] : list.columns!;
+                const rowCount = list.blankRows ?? list.choices!.length;
+
+                return (
+                  <table className="mt-2 w-full border-collapse text-[10px]">
+                    <thead>
+                      <tr>
+                        {headings.map((col) => (
+                          <th
+                            key={col}
+                            className="border border-black/40 px-1 py-1 text-left font-semibold"
+                          >
+                            {col}
+                          </th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {Array.from({ length: rowCount }).map((_, i) => (
+                        <tr key={i}>
+                          {headings.map((col, j) => (
+                            <td
+                              key={col}
+                              className="h-6 border border-black/40 px-1 align-middle text-[10px]"
+                            >
+                              {named && j === 0 ? list.choices![i]?.label : ""}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                );
+              })()}
+            </div>
+          ))}
         </section>
       ))}
 
