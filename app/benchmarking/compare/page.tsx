@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { releasedFiscalYears } from "@/lib/benchmarking/release";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import {
@@ -101,14 +102,17 @@ export default async function BenchmarkingComparePage({
 
   const db = createAdminClient();
 
-  // The newest year anyone has actually filed.
-  const { data: years } = await db
-    .from("benchmarking")
-    .select("fiscal_year")
-    .not("status", "eq", "draft")
-    .order("fiscal_year", { ascending: false })
-    .limit(1);
-  const fiscalYear = (years?.[0]?.fiscal_year as number) ?? null;
+  /*
+    The newest year the committee has RELEASED, not the newest anyone has filed.
+
+    ⛔ This asked for the newest non-draft row, so the first store to submit
+    FY2026 flipped the whole association onto FY2026 — and the medians below
+    were then built from every FY2026 row, which at that moment was that one
+    store. Every member comparing themselves would have been measured against a
+    single early filer, in a year nobody had reviewed.
+  */
+  const released = await releasedFiscalYears();
+  const fiscalYear = released[0] ?? null;
 
   if (!fiscalYear) {
     return (
@@ -121,6 +125,7 @@ export default async function BenchmarkingComparePage({
     );
   }
 
+  // A released year, and still never a draft inside it.
   const { data: rowsRaw } = await db
     .from("benchmarking")
     .select("*")
