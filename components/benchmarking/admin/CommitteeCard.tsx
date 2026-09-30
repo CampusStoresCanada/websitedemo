@@ -39,6 +39,11 @@ const SLOTS = [
     capability: CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM,
     blurb: "Confirms who actually runs each store in their region.",
   },
+  {
+    capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
+    blurb:
+      "Fills the survey before it opens and tries to break it. Their answers count as a real submission, and they can wipe them and start again.",
+  },
 ] as const;
 
 export interface CommitteeHolder {

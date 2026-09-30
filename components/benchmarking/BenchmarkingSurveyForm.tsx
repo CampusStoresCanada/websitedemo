@@ -24,6 +24,7 @@ import StaffingEditor from "./StaffingEditor";
 import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
+import BetaResetPanel from "./BetaResetPanel";
 import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
@@ -76,6 +77,8 @@ interface BenchmarkingSurveyFormProps {
   staff?: StaffRow[];
   /** §1 — who else sells to this store's students. */
   competitors?: CompetitorRow[];
+  /** Appointed to break this on purpose. Unlocks the wipe. */
+  isBetaTester?: boolean;
 }
 
 export default function BenchmarkingSurveyForm({
@@ -93,6 +96,7 @@ export default function BenchmarkingSurveyForm({
   locations = [],
   keyDates = [],
   profileKeyDates = [],
+  isBetaTester = false,
   logos,
   gmCategories = [],
   cmCategories = [],
@@ -881,6 +885,11 @@ export default function BenchmarkingSurveyForm({
           </>
         )}
       </div>
+
+      {/* The wipe, at the foot, for the people asked to break this. */}
+      {isBetaTester && !isReadOnly && (
+        <BetaResetPanel benchmarkingId={benchmarkingId} />
+      )}
 
       {/* Navigation + Submit */}
       <div className="mt-6 flex items-center justify-between">

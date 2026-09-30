@@ -10,6 +10,8 @@ import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
 import RespondentNotes from "@/components/benchmarking/RespondentNotes";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
+import { hasCapability } from "@/lib/auth/capabilities";
+import { CAPABILITIES } from "@/lib/auth/capability-names";
 
 export const metadata = {
   title: "Benchmarking Survey | Campus Stores Canada",
@@ -159,11 +161,21 @@ export default async function BenchmarkingSurveyPage({
   }
 
 
+  /*
+    Appointed beta testers file for real before the doors open. The appointment
+    is on the PERSON, so it is read here rather than inferred from the store.
+  */
+  const isBetaTester = await hasCapability(
+    userId,
+    CAPABILITIES.BENCHMARKING_BETA_TESTER,
+  );
+
   const access = await resolveSurveyAccess({
     surveyId: activeSurvey.id,
     surveyStatus: activeSurvey.status,
     organizationId: organization.id,
     isAdmin,
+    isBetaTester,
   });
 
   if (!access.canFile) {
@@ -418,6 +430,7 @@ export default async function BenchmarkingSurveyPage({
         staff={staff}
         competitors={competitors}
         profileKeyDates={profileKeyDates}
+        isBetaTester={isBetaTester}
         logos={{
           logoUrl: (orgLogos?.logo_url as string | null) ?? null,
           logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,

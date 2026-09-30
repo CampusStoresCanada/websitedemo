@@ -30,6 +30,14 @@ export const CAPABILITIES = {
   BENCHMARKING_QA_VERIFY: "benchmarking.qa_verify",
   /** Regional reps confirming the right respondent per member store. */
   BENCHMARKING_RECIPIENT_CONFIRM: "benchmarking.recipient_confirm",
+  /**
+   * Store people filling the survey early, on purpose, to try to break it.
+   *
+   * ⛔ Not benchmarking_recipients.is_beta, which decides which cohort an
+   * INVITATION counts a store in. This decides whether a person may file before
+   * the doors open, and it carries a term like every other appointment.
+   */
+  BENCHMARKING_BETA_TESTER: "benchmarking.beta_tester",
 } as const;
 
 export type Capability = (typeof CAPABILITIES)[keyof typeof CAPABILITIES];
@@ -49,6 +57,7 @@ export const CAPABILITY_LABELS: Record<Capability, string> = {
   [CAPABILITIES.BENCHMARKING_CONTENT_REVIEW]: "Question review",
   [CAPABILITIES.BENCHMARKING_QA_VERIFY]: "Interpretation",
   [CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM]: "Recipient confirmation",
+  [CAPABILITIES.BENCHMARKING_BETA_TESTER]: "Beta tester",
 };
 
 /**

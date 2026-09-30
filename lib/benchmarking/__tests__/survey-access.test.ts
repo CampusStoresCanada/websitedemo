@@ -77,3 +77,57 @@ describe("who may file the survey", () => {
     });
   });
 });
+
+describe("appointed beta testers", () => {
+  /*
+    The point of appointing one is that they use the survey the way a member
+    will, in the weeks before it opens. An admin preview is not that: an admin
+    looking at their own staff org sees a different survey to the one a store
+    sees.
+  */
+  it("files while the survey is still in draft", async () => {
+    const access = await resolveSurveyAccess({
+      surveyId: "s1",
+      surveyStatus: "draft",
+      organizationId: "o1",
+      isAdmin: false,
+      isBetaTester: true,
+    });
+    expect(access).toEqual({ canFile: true, reason: "beta" });
+  });
+
+  it("files during the beta window without needing a recipient row", async () => {
+    // is_beta on the recipient decides which cohort an INVITATION counts a
+    // store in. The appointment decides who may file. Different questions.
+    const access = await resolveSurveyAccess({
+      surveyId: "s1",
+      surveyStatus: "beta",
+      organizationId: "o1",
+      isAdmin: false,
+      isBetaTester: true,
+    });
+    expect(access).toEqual({ canFile: true, reason: "beta" });
+  });
+
+  it("is still shut out once the year is closed", async () => {
+    const access = await resolveSurveyAccess({
+      surveyId: "s1",
+      surveyStatus: "complete",
+      organizationId: "o1",
+      isAdmin: false,
+      isBetaTester: true,
+    });
+    expect(access.canFile).toBe(false);
+  });
+
+  it("changes nothing for somebody who was never appointed", async () => {
+    const access = await resolveSurveyAccess({
+      surveyId: "s1",
+      surveyStatus: "draft",
+      organizationId: "o1",
+      isAdmin: false,
+      isBetaTester: false,
+    });
+    expect(access.canFile).toBe(false);
+  });
+});
