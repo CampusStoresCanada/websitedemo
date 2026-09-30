@@ -26,9 +26,36 @@ import { useRouter, useSearchParams } from "next/navigation";
  * takes its place, so a menu print comes out as one sheet saying where the
  * worksheet is rather than as thirty sheets of dead form controls.
  */
-export default function PrintWorksheetLink() {
+export default function PrintWorksheetLink({
+  priorYears = [],
+}: {
+  /**
+   * The prior fiscal years the worksheet will actually print for this store,
+   * newest first. Drives the label, because what the sheet is worth printing
+   * for depends entirely on whether it arrives with their own history on it.
+   */
+  priorYears?: number[];
+}) {
   const router = useRouter();
   const params = useSearchParams();
+
+  /*
+    Say what is on the sheet.
+
+    "Print a blank copy" was wrong for most stores and undersold it for all of
+    them: the worksheet arrives carrying their own previous answers beside empty
+    space for this year, which is the difference between a form and a starting
+    point. Nobody should have to print it to find that out.
+
+    ⛔ The year is named rather than called "last year's". For the stores that
+    skipped a round the newest figures we hold are two years old, and telling
+    them the sheet has last year's numbers on it is how they conclude the sheet
+    is broken.
+  */
+  const label =
+    priorYears.length === 0
+      ? "Print a copy to fill in by hand"
+      : `Print a copy with your FY${priorYears[0]} figures and room for this year's`;
 
   /*
     Scoped exactly like the survey it sits on. An admin filling one store's
@@ -71,7 +98,7 @@ export default function PrintWorksheetLink() {
           d="M6 9V4h12v5M6 18H5a2 2 0 01-2-2v-5a2 2 0 012-2h14a2 2 0 012 2v5a2 2 0 01-2 2h-1m-12 0v3h12v-3m-12 0h12"
         />
       </svg>
-      Print a blank copy to fill in by hand
+      {label}
     </a>
   );
 }

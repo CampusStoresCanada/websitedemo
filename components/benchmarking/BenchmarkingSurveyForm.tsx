@@ -81,6 +81,12 @@ interface BenchmarkingSurveyFormProps {
   competitors?: CompetitorRow[];
   /** Appointed to break this on purpose. Unlocks the wipe. */
   isBetaTester?: boolean;
+  /**
+   * Prior fiscal years the printable worksheet will carry for this store,
+   * newest first. ⛔ Not derivable from `priorYearData`, which is only
+   * fiscal_year - 1 — see the query in app/benchmarking/survey/page.tsx.
+   */
+  worksheetPriorYears?: number[];
 }
 
 export default function BenchmarkingSurveyForm({
@@ -106,6 +112,7 @@ export default function BenchmarkingSurveyForm({
   otherExpenses = [],
   staff = [],
   competitors = [],
+  worksheetPriorYears = [],
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -544,8 +551,9 @@ export default function BenchmarkingSurveyForm({
           not what comes out of the printer.
         </p>
         <p className="mt-2 text-sm">
-          The worksheet is the printable version. It carries every question with
-          room to write the answers in by hand, and it is at{" "}
+          The worksheet is the printable version. It carries every question, your
+          own figures from previous years where we hold them, and room to write
+          this year&apos;s in by hand. It is at{" "}
           <strong>campusstorescanada.ca/benchmarking/worksheet</strong>, or from the
           &ldquo;Print a blank copy&rdquo; link near the top of the survey.
         </p>
@@ -582,7 +590,7 @@ export default function BenchmarkingSurveyForm({
           last one.
         */}
         <div className="mt-2">
-          <PrintWorksheetLink />
+          <PrintWorksheetLink priorYears={worksheetPriorYears} />
         </div>
 
         {isSubmitted && (

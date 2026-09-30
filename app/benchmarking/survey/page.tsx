@@ -300,6 +300,30 @@ export default async function BenchmarkingSurveyPage({
     // "no prior row" is expected, not exceptional.
     .maybeSingle()) as { data: any };
 
+  /*
+    Which of this store's prior years the worksheet will actually print.
+
+    ⛔ NOT the same question as priorYearData above, which is strictly
+    fiscal_year - 1. Fifteen of the 52 active stores did not file last year, so
+    for those the immediately-prior row is null while the worksheet still has
+    FY-2 figures to print. Keying the Print label off priorYearData told exactly
+    those stores they were getting a blank sheet, which is both wrong and the
+    least useful thing to tell someone deciding whether the sheet is worth
+    printing.
+
+    Two, because that is the worksheet's own maxPriorYears default.
+  */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: priorYearRows } = (await (supabase as any)
+    .from("benchmarking")
+    .select("fiscal_year")
+    .eq("organization_id", organization.id)
+    .lt("fiscal_year", activeSurvey.fiscal_year)
+    .order("fiscal_year", { ascending: false })
+    .limit(2)) as { data: { fiscal_year: number }[] | null };
+
+  const worksheetPriorYears = (priorYearRows ?? []).map((r) => r.fiscal_year);
+
   // 7. Fetch existing delta flags for this row
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: deltaFlags } = (await (supabase as any)
@@ -417,6 +441,7 @@ export default async function BenchmarkingSurveyPage({
         organizationProvince={organization.province}
         currentData={currentRow!}
         priorYearData={priorYearRow}
+        worksheetPriorYears={worksheetPriorYears}
         deltaFlags={deltaFlags ?? []}
         surveyClosesAt={activeSurvey.closes_at}
         fieldConfig={fieldConfig}
