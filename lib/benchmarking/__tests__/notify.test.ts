@@ -19,6 +19,9 @@ const state = vi.hoisted(() => ({
   } as Record<string, unknown> | null,
   recipients: [] as Record<string, unknown>[],
   submissions: [] as Record<string, unknown>[],
+  /** Who holds benchmarking.beta_tester, and which store each of them works at. */
+  betaHolders: [] as string[],
+  orgLinks: [] as { user_id: string; organization_id: string }[],
   updates: [] as { id: string; patch: Record<string, unknown> }[],
   sends: [] as { templateKey: string; to: string; variables: Record<string, unknown> }[],
   sendResult: { success: true } as { success: boolean; error?: string },
@@ -34,6 +37,38 @@ vi.mock("@/lib/supabase/admin", () => ({
       }
       if (table === "benchmarking") {
         return { select: () => ({ eq: async () => ({ data: state.submissions }) }) };
+      }
+      /*
+        The beta guard: nobody appointed at a store means that store cannot open
+        a draft survey, so inviting it would send someone to a locked door.
+        Modelled as two tables rather than one canned answer, because the bug
+        this protects against is the JOIN going wrong, not the lookup.
+      */
+      if (table === "capability_contributions") {
+        const rows = state.betaHolders.map((id) => ({ subject_id: id }));
+        const b: Record<string, unknown> = {
+          eq: () => b,
+          in: () => b,
+          then: (res: (v: unknown) => unknown) => Promise.resolve({ data: rows }).then(res),
+        };
+        return { select: () => b };
+      }
+      if (table === "user_organizations") {
+        let filtered = state.orgLinks;
+        const b: Record<string, unknown> = {
+          eq: () => b,
+          in: (col: string, values: string[]) => {
+            filtered = filtered.filter((l) =>
+              values.includes(l[col === "user_id" ? "user_id" : "organization_id"]),
+            );
+            return b;
+          },
+          then: (res: (v: unknown) => unknown) =>
+            Promise.resolve({
+              data: filtered.map((l) => ({ organization_id: l.organization_id })),
+            }).then(res),
+        };
+        return { select: () => b };
       }
       // benchmarking_recipients: a chainable builder that is also awaitable, so
       // the same object serves .eq().is() and a bare await.
@@ -90,6 +125,8 @@ function recipient(over: Record<string, unknown> = {}) {
 
 beforeEach(() => {
   state.recipients = [recipient()];
+  state.betaHolders = ["user-1"];
+  state.orgLinks = [{ user_id: "user-1", organization_id: "org-1" }];
   state.submissions = [];
   state.updates = [];
   state.sends = [];
@@ -110,6 +147,30 @@ describe("benchmarking invitations", () => {
   it("sends the going-first copy when betaOnly is set", async () => {
     await sendBenchmarkingInvitations("survey-1", { betaOnly: true });
     expect(state.sends[0].templateKey).toBe("benchmarking_beta_invitation");
+  });
+
+  /*
+    The survey is in draft when the beta cohort is mailed, so only an appointed
+    beta tester can open it. Mailing a store before anyone there is appointed
+    sends them to a locked door — the worst possible first impression from the
+    fifteen stores this cycle is trying to win back.
+  */
+  it("blocks a beta invitation to a store with nobody appointed", async () => {
+    state.orgLinks = [{ user_id: "user-1", organization_id: "some-other-org" }];
+
+    const result = await sendBenchmarkingInvitations("survey-1", { betaOnly: true });
+
+    expect(result.sent).toBe(0);
+    expect(state.sends).toHaveLength(0);
+  });
+
+  it("blocks the beta invitation when the capability is held by nobody at all", async () => {
+    state.betaHolders = [];
+
+    const result = await sendBenchmarkingInvitations("survey-1", { betaOnly: true });
+
+    expect(result.sent).toBe(0);
+    expect(state.sends).toHaveLength(0);
   });
 
   it("records the error and does NOT stamp invited_at when the send fails", async () => {
