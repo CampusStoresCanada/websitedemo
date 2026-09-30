@@ -229,8 +229,19 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                       {line.label}
                       {line.required && <span aria-hidden> *</span>}
                     </p>
+                    {/*
+                      Paragraph breaks survive onto paper, as they do on screen.
+
+                      The longest help texts are the ones that DEFINE something,
+                      and they are written as "here is what it is / here is what
+                      it is not / here is how to express it". Collapsed into one
+                      run-on paragraph, the exclusions — the half that stops a
+                      store counting the wrong thing — stop being findable.
+                    */}
                     {line.helpText && (
-                      <p className="mt-0.5 text-[10.5px] leading-snug">{line.helpText}</p>
+                      <p className="mt-0.5 whitespace-pre-line text-[10.5px] leading-snug">
+                        {line.helpText}
+                      </p>
                     )}
                     {line.example && (
                       <p className="mt-0.5 text-[10.5px] italic leading-snug">
