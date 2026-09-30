@@ -26,6 +26,7 @@ import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
 import BetaResetPanel from "./BetaResetPanel";
 import SurveyFlagCallout from "./SurveyFlagCallout";
+import PrintWorksheetLink from "./PrintWorksheetLink";
 import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
@@ -526,7 +527,31 @@ export default function BenchmarkingSurveyForm({
   };
 
   return (
-    <div>
+    <>
+      {/*
+        Paper, when somebody printed this page from the browser's own File menu.
+
+        That is the one print route a page cannot intercept — ⌘P is taken over
+        in PrintWorksheetLink, but the menu goes straight to the document. What
+        used to come out was thirty sheets of collapsed sections and greyed-out
+        selects: recognisably the survey, impossible to fill in. One sheet
+        saying where the real worksheet is beats a ream of that.
+      */}
+      <div className="hidden print:block text-black">
+        <h1 className="text-xl font-bold">FY{fiscalYear} Benchmarking Survey</h1>
+        <p className="mt-3 text-sm">
+          The online survey does not print usefully, so this page is deliberately
+          not what comes out of the printer.
+        </p>
+        <p className="mt-2 text-sm">
+          The worksheet is the printable version. It carries every question with
+          room to write the answers in by hand, and it is at{" "}
+          <strong>campusstorescanada.ca/benchmarking/worksheet</strong>, or from the
+          &ldquo;Print a blank copy&rdquo; link near the top of the survey.
+        </p>
+      </div>
+
+    <div className="print:hidden">
       {/* Header */}
       <div className="mb-8">
         <div className="flex items-center justify-between">
@@ -549,6 +574,16 @@ export default function BenchmarkingSurveyForm({
             Survey closes {formatDeadline(surveyClosesAt)}
           </p>
         )}
+
+        {/*
+          Print lives here rather than at the foot: gathering figures on paper
+          is something you do BEFORE working through the form, so the control
+          has to be visible from the question you are stuck on, not after the
+          last one.
+        */}
+        <div className="mt-2">
+          <PrintWorksheetLink />
+        </div>
 
         {isSubmitted && (
           <div className="mt-4 bg-green-50 border border-green-200 rounded-lg p-4">
@@ -975,6 +1010,7 @@ export default function BenchmarkingSurveyForm({
         </div>
       </div>
     </div>
+    </>
   );
 }
 

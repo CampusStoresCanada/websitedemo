@@ -28,7 +28,7 @@ export const metadata = {
 export default async function BenchmarkingWorksheetPage({
   searchParams,
 }: {
-  searchParams: Promise<{ org?: string; preview?: string }>;
+  searchParams: Promise<{ org?: string; preview?: string; print?: string }>;
 }) {
   const params = await searchParams;
   const auth = await requireAuthenticated();
@@ -169,7 +169,7 @@ export default async function BenchmarkingWorksheetPage({
           .fixed, [style*="position: fixed"] { display: none !important; }
         }
       `}</style>
-      <WorksheetSheet worksheet={worksheet} />
+      <WorksheetSheet worksheet={worksheet} autoPrint={params?.print === "1"} />
     </div>
   );
 }

@@ -108,7 +108,14 @@ function WriteBox({ line }: { line: WorksheetLine }) {
   );
 }
 
-export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) {
+export default function WorksheetSheet({
+  worksheet,
+  autoPrint = false,
+}: {
+  worksheet: Worksheet;
+  /** Arrived here from a Print control, so open the dialogue without asking. */
+  autoPrint?: boolean;
+}) {
   const closes = formatDeadline(worksheet.closesAt);
   const cols = worksheet.priorYears.length;
 
@@ -133,7 +140,7 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
         }
       `}</style>
       <div className="mb-4 flex justify-end print:hidden">
-        <PrintButton />
+        <PrintButton auto={autoPrint} />
       </div>
 
       <header className="mb-5 border-b-2 border-black pb-3">
