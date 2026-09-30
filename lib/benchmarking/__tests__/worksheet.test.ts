@@ -202,10 +202,54 @@ describe("the printed sheet shows the full scope", () => {
   });
 
   it("prints every course material format, and says which have no unit counts", () => {
-    const choices = section("course_materials")!.lists[0].choices!.map((c) => c.label);
-    expect(choices).toContain("Print — New");
-    expect(choices).toContain("Course Packs");
-    expect(choices).toContain("Digital (no unit counts)");
+    const formats = section("course_materials")!.lists[0].choices!;
+    const labels = formats.map((c) => c.label);
+    expect(labels).toContain("Print — New");
+    expect(labels).toContain("Course Packs");
+
+    // The label stays the format's name; the caveat sits in the note beside it,
+    // so the grid's first column reads as a list of formats rather than a list
+    // of formats with parenthetical asides.
+    const digital = formats.find((c) => c.label === "Digital");
+    expect(digital?.note).toMatch(/no copies to count/);
+  });
+
+  it("splits the wide grids so they fit a printed page", () => {
+    // Name column plus six measures came to eight columns, which does not fit
+    // the printable width of a portrait page.
+    for (const id of ["general_merchandise", "course_materials"]) {
+      const tables = section(id)!.lists.filter((l) => l.columns);
+      expect(tables.length).toBeGreaterThan(1);
+      for (const table of tables) {
+        expect(table.columns!.length).toBeLessThanOrEqual(4);
+      }
+    }
+  });
+
+  it("puts the pay grid on paper, which the hidden config fields could not", () => {
+    const pay = section("staffing")!.lists.find((l) => l.nameColumn === "Employment type");
+    expect(pay).toBeDefined();
+    expect(pay!.rowLabels).toContain("Full-time");
+    expect(pay!.columns).toContain("Wages ($)");
+  });
+
+  it("asks for opening hours, which the sheet used to omit entirely", () => {
+    const hours = section("institution_profile")!.lists.find((l) =>
+      l.title.startsWith("Opening hours"),
+    );
+    expect(hours).toBeDefined();
+    expect(hours!.rowLabels).toContain("monday");
+  });
+
+  it("states the unit on every square footage column", () => {
+    const locations = section("institution_profile")!.lists.find(
+      (l) => l.title === "Your locations",
+    )!;
+    const footage = locations.columns!.filter((c) =>
+      /Sales floor|Storage|Office|Other space/.test(c),
+    );
+    expect(footage).toHaveLength(4);
+    for (const col of footage) expect(col).toMatch(/sq ft/);
   });
 
   it("gives the free-form lists ruled rows rather than a vocabulary", () => {

@@ -88,12 +88,22 @@ function WriteBox({ line }: { line: WorksheetLine }) {
     );
   }
 
+  /*
+    A ruled line with room above it.
+
+    It used to sit flush under the label, so the space to write in was the
+    height of the rule itself. A seven-figure number written by hand needs about
+    9mm of clear height and it had none: the figure would have run into the
+    question above it.
+  */
   return (
-    <span className="flex items-end gap-1">
-      {line.type === "currency" && <span className="text-[11px]">$</span>}
+    <span className="flex items-end gap-1 pt-3.5">
+      {line.type === "currency" && <span className="text-[11px] leading-none">$</span>}
       <span className="inline-block min-w-[92px] flex-1 border-b border-black/70">&nbsp;</span>
-      {line.suffix && <span className="text-[11px]">{line.suffix}</span>}
-      {line.type === "percentage" && !line.suffix && <span className="text-[11px]">%</span>}
+      {line.suffix && <span className="text-[11px] leading-none">{line.suffix}</span>}
+      {line.type === "percentage" && !line.suffix && (
+        <span className="text-[11px] leading-none">%</span>
+      )}
     </span>
   );
 }
@@ -104,6 +114,24 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
 
   return (
     <div className="mx-auto max-w-4xl bg-white px-6 py-8 text-black print:max-w-none print:px-0 print:py-0">
+      {/*
+        Predictable paper.
+
+        There was no @page rule at all, so margins were whatever the browser
+        felt like and the widest grid could land anywhere between comfortable
+        and clipped. Letter at 14mm gives about 190mm of usable width, which is
+        what the six-column tables are sized against. A table is told not to
+        break across a page: half a grid at the foot of one sheet and the rest
+        overleaf is worse than a page break before it.
+      */}
+      <style>{`
+        @page { size: Letter portrait; margin: 14mm; }
+        @media print {
+          table { page-break-inside: auto; }
+          tr, td, th { page-break-inside: avoid; }
+          thead { display: table-header-group; }
+        }
+      `}</style>
       <div className="mb-4 flex justify-end print:hidden">
         <PrintButton />
       </div>
@@ -181,6 +209,20 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                   on the label row either way, so the years still line up down
                   the page.
                 */}
+                {/*
+                  The caption for a pair of controls that answer one question.
+                  Printed on the first of the pair, which is where the config
+                  carries it, so "Month" and "Day" stop reading as two unrelated
+                  questions about nothing in particular.
+                */}
+                {line.rowLabel && (
+                  <div className="mb-1">
+                    <p className="text-[12px] font-semibold leading-snug">{line.rowLabel}</p>
+                    {line.rowHelpText && (
+                      <p className="mt-0.5 text-[10.5px] leading-snug">{line.rowHelpText}</p>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-start gap-3">
                   <div className="flex-1">
                     <p className="text-[12px] font-semibold leading-snug">
@@ -211,7 +253,7 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                   ))}
 
                   {!WIDE_ANSWER.has(line.type) && (
-                    <div className="w-40 pt-0.5">
+                    <div className="w-48 shrink-0">
                       <WriteBox line={line} />
                     </div>
                   )}
@@ -256,14 +298,18 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
 
               {list.columns && (() => {
                 /*
-                  A vocabulary table needs a column for the thing being named,
-                  which the measure columns do not provide. Without it the
-                  category name was written into the "Retail sales" cell and the
-                  whole grid was off by one.
+                  Room to actually write. The cells were 24px, about 6mm, which
+                  is under the height of ordinary handwriting: a store filling
+                  this in by hand was being asked to fit a seven-digit figure
+                  into a space it does not fit in. 9mm is the smallest that
+                  works with a ballpoint.
                 */
-                const named = Boolean(list.choices) && !list.blankRows;
-                const headings = named ? ["Category", ...list.columns!] : list.columns!;
-                const rowCount = list.blankRows ?? list.choices!.length;
+                const labels = list.rowLabels ?? (list.blankRows ? [] : list.choices?.map((c) => c.label) ?? []);
+                const named = labels.length > 0;
+                const nameHeading = list.nameColumn ?? (named ? "Category" : null);
+                const headings = nameHeading ? [nameHeading, ...list.columns!] : list.columns!;
+                const blanks = list.blankRows ?? list.extraBlankRows ?? 0;
+                const rows = [...labels, ...Array.from({ length: blanks }, () => "")];
 
                 return (
                   <table className="mt-2 w-full border-collapse text-[10px]">
@@ -272,7 +318,7 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                         {headings.map((col) => (
                           <th
                             key={col}
-                            className="border border-black/40 px-1 py-1 text-left font-semibold"
+                            className="border border-black/40 px-1 py-1 text-left align-bottom font-semibold leading-tight"
                           >
                             {col}
                           </th>
@@ -280,14 +326,25 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
                       </tr>
                     </thead>
                     <tbody>
-                      {Array.from({ length: rowCount }).map((_, i) => (
+                      {rows.map((label, i) => (
                         <tr key={i}>
                           {headings.map((col, j) => (
                             <td
                               key={col}
-                              className="h-6 border border-black/40 px-1 align-middle text-[10px]"
+                              className="border border-black/40 px-1 align-middle text-[10px] leading-tight"
+                              style={{ height: "9mm" }}
                             >
-                              {named && j === 0 ? list.choices![i]?.label : ""}
+                              {/*
+                                A yes/no column gets its answers pre-printed to
+                                circle. A blank cell under "Counts as income?"
+                                tells the reader nothing about what shape of
+                                answer belongs there.
+                              */}
+                              {nameHeading && j === 0
+                                ? label
+                                : /\?$/.test(col)
+                                  ? <span className="text-black/45">Y / N</span>
+                                  : ""}
                             </td>
                           ))}
                         </tr>

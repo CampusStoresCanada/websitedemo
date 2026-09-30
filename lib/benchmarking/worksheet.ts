@@ -10,7 +10,8 @@ import {
   COURSE_MATERIAL_FORMAT_NOTES,
   NON_PHYSICAL_FORMATS,
 } from "@/lib/benchmarking/categories";
-import { KEY_DATE_KINDS } from "@/lib/benchmarking/key-dates";
+import { KEY_DATE_KINDS, DAYS } from "@/lib/benchmarking/key-dates";
+import { STORE_SERVICES } from "@/lib/types/procurement";
 import { COMPETITOR_KINDS } from "@/lib/benchmarking/competitor-kinds";
 import { EMPLOYMENT_TYPES } from "@/lib/benchmarking/systems";
 import { LOCATION_KINDS } from "@/lib/benchmarking/location-kinds";
@@ -38,6 +39,16 @@ import { LOCATION_KINDS } from "@/lib/benchmarking/location-kinds";
 export interface WorksheetLine {
   name: string;
   label: string;
+  /**
+   * Caption for a pair of fields that answer one question together.
+   *
+   * On screen these render side by side under one heading. The sheet was
+   * printing them as two separate questions called "Month" and "Day", with
+   * nothing anywhere saying month of what — the fiscal year end, the single
+   * answer that makes every other figure readable, had no label at all.
+   */
+  rowLabel?: string;
+  rowHelpText?: string;
   type: FieldConfig["type"];
   helpText?: string;
   example?: string;
@@ -72,6 +83,12 @@ export interface WorksheetList {
   columns?: string[];
   /** Ruled lines for a list with no fixed vocabulary. */
   blankRows?: number;
+  /** Pre-printed first column, one row each. */
+  rowLabels?: string[];
+  /** Ruled rows after the labelled ones, for subcategory splits. */
+  extraBlankRows?: number;
+  /** Heading for the pre-printed first column. */
+  nameColumn?: string;
 }
 
 export interface WorksheetSection {
@@ -184,19 +201,45 @@ function listsForSection(sectionId: string): WorksheetList[] {
     case "institution_profile":
       return [
         {
+          title: "Who is filling this in",
+          intro:
+            "The person who actually pulled the figures together, so a question in November reaches them and not the account holder. You pick them from your store's contacts on screen; write the name here while you are gathering.",
+          columns: ["Name", "Job title", "Email", "Phone"],
+          blankRows: 1,
+        },
+        {
           title: "Your locations",
           intro:
-            "One row per place you operate. The web store is not a location. Square footage is asked per location, and the survey adds it up for you.",
+            "One row per place you operate. The web store is not a location. Square footage is asked per location and the survey adds it up for you, so you never type a total.",
           choices: LOCATION_KINDS.map((k) => ({ label: k.label, note: k.help })),
           columns: [
             "Name",
             "Kind",
-            "Sales floor",
-            "Storage",
-            "Office",
-            "Other space",
+            "Sales floor (sq ft)",
+            "Storage (sq ft)",
+            "Office (sq ft)",
+            "Other space (sq ft, and what it is)",
           ],
           blankRows: 4,
+        },
+        {
+          /*
+            Absent from the printed sheet entirely until now, which meant a
+            store gathering on paper walked into seven days of opening and
+            closing times it had not collected.
+          */
+          title: "Opening hours, for each permanent location with a sales floor",
+          intro:
+            "Term-time hours. Leave a day blank if you are closed. Asked per location, so copy this grid for each permanent shop. Not asked for seasonal or warehouse space.",
+          nameColumn: "Location:",
+          columns: ["Opens", "Closes"],
+          rowLabels: [...DAYS],
+        },
+        {
+          title: "Services you run",
+          intro:
+            "Tick what you offer now, and mark with a P anything you are planning to add and an S anything you are stopping. Each service you offer becomes an income line in Other Income.",
+          choices: STORE_SERVICES.map((label) => ({ label })),
         },
         {
           title: "Your year ahead",
@@ -216,53 +259,98 @@ function listsForSection(sectionId: string): WorksheetList[] {
         },
       ];
 
-    case "general_merchandise":
+    case "general_merchandise": {
+      const departments = departmentsFor("general_merchandise").map((d) => {
+        const subs = subcategoriesFor(d, "general_merchandise");
+        const note = [
+          DEPARTMENT_NOTES[d],
+          subs.length ? `You may split this into: ${subs.join(", ")}` : "",
+        ]
+          .filter(Boolean)
+          .join(" ");
+        return { label: d, note: note || undefined };
+      });
       return [
         {
           title: "Every category you could carry",
           intro:
-            "Say which of these you sell and give the figures for each. You may break any of them into the subcategories listed under it if that is how you run them. Merchandise income that fits none of these belongs in Other Income.",
-          choices: departmentsFor("general_merchandise").map((d) => {
-            const subs = subcategoriesFor(d, "general_merchandise");
-            const note = [DEPARTMENT_NOTES[d], subs.length ? `Subcategories: ${subs.join(", ")}` : ""]
-              .filter(Boolean)
-              .join(" ");
-            return { label: d, note: note || undefined };
-          }),
+            "Tick the ones you sell, then fill the two tables below for each. You may break any of them into the subcategories listed under it, in which case give the figures per subcategory rather than for the department as a whole.",
+          choices: departments,
+        },
+        {
+          /*
+            Split in two at a seam that means something. All six measures plus a
+            name column came to eight columns, which does not fit the printable
+            width of a portrait page: every figure ended up in about 22mm, and a
+            seven-digit number does not go in 22mm in handwriting.
+          */
+          title: "Sales and margin, by category",
+          intro:
+            "Blank rows are for subcategory splits. Write the subcategory name in the first column and give its figures instead of the department's.",
+          nameColumn: "Category",
+          columns: ["Retail sales ($)", "Online sales ($)", "Gross margin (%)"],
+          rowLabels: departments.map((d) => d.label),
+          extraBlankRows: 6,
+        },
+        {
+          title: "Inventory and who handles it, by category",
+          intro:
+            "Inventory at COST, on the first and last day of your fiscal year. Sold at is which of your locations carries it; Buyer is whoever does the buying, and the survey uses that to confirm your buyer list for vendor partners.",
+          nameColumn: "Category",
           columns: [
-            "Retail sales ($)",
-            "Online sales ($)",
-            "Gross margin (%)",
             "Opening inventory ($)",
             "Closing inventory ($)",
+            "Sold at (location)",
+            "Buyer (name)",
           ],
+          rowLabels: departments.map((d) => d.label),
+          extraBlankRows: 6,
         },
       ];
+    }
 
-    case "course_materials":
+    case "course_materials": {
+      const formats = departmentsFor("course_materials").map((d) => ({
+        label: d,
+        note:
+          [
+            COURSE_MATERIAL_FORMAT_NOTES[d],
+            (NON_PHYSICAL_FORMATS as readonly string[]).includes(d)
+              ? "No unit counts for this one: there are no copies to count."
+              : "",
+          ]
+            .filter(Boolean)
+            .join(" ") || undefined,
+      }));
       return [
         {
           title: "Every format you could sell",
           intro:
-            "Course materials are asked by FORMAT, because the same textbook is new print in September, a rental in January and a digital licence in an Inclusive Access cohort, and the figures differ every time. Units are wanted for the physical ones only.",
-          choices: departmentsFor("course_materials").map((d) => ({
-            label:
-              (NON_PHYSICAL_FORMATS as readonly string[]).includes(d)
-                ? `${d} (no unit counts)`
-                : d,
-            note: COURSE_MATERIAL_FORMAT_NOTES[d],
-          })),
+            "Course materials are asked by FORMAT, because the same textbook is new print in September, a rental in January and a digital licence in an Inclusive Access cohort, and the figures differ every time.",
+          choices: formats,
+        },
+        {
+          title: "Sales and margin, by format",
+          intro: "The same columns as General Merchandise, so the two add up together.",
+          nameColumn: "Format",
+          columns: ["Retail sales ($)", "Online sales ($)", "Gross margin (%)"],
+          rowLabels: formats.map((f) => f.label),
+        },
+        {
+          title: "Inventory and units, by format",
+          intro:
+            "Units for the physical formats only. Units available means opening stock plus everything you received, which is what sell-through divides into.",
+          nameColumn: "Format",
           columns: [
-            "Retail sales ($)",
-            "Online sales ($)",
-            "Gross margin (%)",
             "Opening inventory ($)",
             "Closing inventory ($)",
-            "Units sold",
-            "Units available",
+            "Units sold (count)",
+            "Units available (count)",
           ],
+          rowLabels: formats.map((f) => f.label),
         },
       ];
+    }
 
     case "other_income":
       return [
@@ -283,6 +371,21 @@ function listsForSection(sectionId: string): WorksheetList[] {
 
     case "staffing":
       return [
+        {
+          /*
+            Four to eight figures that did not appear on the printed sheet at
+            all: the config fields behind this grid were hidden when the grid
+            replaced them, and isGatherable quite correctly skipped them. A
+            store gathering on paper had no idea it needed wages by employment
+            type.
+          */
+          title: "What your people cost",
+          intro:
+            "Wages only in the first column. The benefits column is asked only if your STORE pays them; leave it blank where your institution carries the cost centrally, because that blank is itself the answer.",
+          nameColumn: "Employment type",
+          columns: ["Wages ($)", "Benefits the store pays ($)"],
+          rowLabels: EMPLOYMENT_TYPES.map((t) => t.label),
+        },
         {
           title: "Your team",
           intro:
@@ -347,6 +450,8 @@ export function buildWorksheet(input: {
         .map((field) => ({
           name: field.name,
           label: field.label,
+          rowLabel: field.rowLabel,
+          rowHelpText: field.rowHelpText,
           type: field.type,
           helpText: field.helpText,
           example: field.example,

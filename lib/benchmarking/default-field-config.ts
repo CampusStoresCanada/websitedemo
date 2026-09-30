@@ -254,6 +254,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           name: "enrollment_fte",
           label: "FTE Enrolment",
+          suffix: "students",
           type: "number",
           /*
             Settled by the ED, 2026-09-25, after question review deadlocked.
@@ -476,6 +477,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "total_transaction_count",
           label: "Total transactions",
           type: "integer",
+          suffix: "transactions",
           helpText:
             "Across every till and the webstore, for the whole store, not course materials alone. With your total sales this gives an average basket, the figure most stores ask us for first.",
           order: 62,
@@ -889,6 +891,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "total_course_sections",
           label: "Course sections needing materials",
           type: "integer",
+          suffix: "sections",
           order: 521,
           visible: true,
           indent: true,
@@ -899,6 +902,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "adoptions_by_deadline",
           label: "Of those, adoptions received by your deadline",
           type: "integer",
+          suffix: "sections",
           order: 522,
           visible: true,
           indent: true,
@@ -1092,6 +1096,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           name: "fulltime_employees",
           label: "Full-Time Employees",
+          suffix: "people",
           type: "number",
           helpText:
             "Headcount of full-time positions, not FTE. Count filled positions, not budgeted ones.",
@@ -1148,6 +1153,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "seasonal_employees",
           label: "Seasonal employees at peak",
           type: "number",
+          suffix: "people",
           helpText:
             "People you take on for rush and let go afterwards, counted at your busiest week.",
           order: 4,
@@ -1358,6 +1364,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "marketing_spend",
           label: "Total marketing spend",
           type: "currency",
+          helpText:
+            "Everything you spent getting people into the store, including the Advertising and promotion line above plus design, print, swag, event sponsorship and anything paid to an agency. If the two are the same number for your store, say so by entering it twice.",
           order: 14,
           visible: true,
         },
