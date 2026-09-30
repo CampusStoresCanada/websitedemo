@@ -25,6 +25,7 @@ import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
 import BetaResetPanel from "./BetaResetPanel";
+import SurveyFlagCallout from "./SurveyFlagCallout";
 import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
@@ -885,6 +886,15 @@ export default function BenchmarkingSurveyForm({
           </>
         )}
       </div>
+
+      {/*
+        Shown once, on first arrival, pointing at the toolkit.
+
+        ⛔ Not gated to beta testers. A member guessing at a question during the
+        real round is the same loss as a beta tester guessing during the trial,
+        and we only hear about either if asking is easier than guessing.
+      */}
+      {!isReadOnly && <SurveyFlagCallout />}
 
       {/* The wipe, at the foot, for the people asked to break this. */}
       {isBetaTester && !isReadOnly && (
