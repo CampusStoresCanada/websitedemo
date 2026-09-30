@@ -8,7 +8,7 @@ import { CAPABILITIES, CAPABILITY_LABELS } from "@/lib/auth/capability-names";
 /**
  * Staffing the benchmarking committee, from the benchmarking dashboard.
  *
- * The office appoints the lead; the lead then hands out the three workstreams
+ * The office appoints the lead; the lead then hands out the workstreams
  * from their own console. Both need to be possible from where the work is, so
  * this card carries all four capabilities rather than sending the office to a
  * governance screen in a different part of the admin console.
@@ -25,7 +25,7 @@ const SLOTS = [
   {
     capability: CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD,
     blurb:
-      "Appoints the rest of the committee and keeps the three workstreams moving.",
+      "Appoints the rest of the committee and keeps the workstreams moving.",
   },
   {
     capability: CAPABILITIES.BENCHMARKING_CONTENT_REVIEW,
@@ -69,7 +69,7 @@ export default function CommitteeCard({
             Benchmarking Committee
           </h3>
           <p className="text-xs text-gray-500 mt-1">
-            Appoint the lead and the three workstreams. The lead can hand out
+            Appoint the lead and the workstreams. The lead can hand out
             the workstreams themselves from their own console.
           </p>
         </div>
