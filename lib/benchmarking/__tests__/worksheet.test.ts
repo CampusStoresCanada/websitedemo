@@ -214,6 +214,24 @@ describe("the printed sheet shows the full scope", () => {
     expect(digital?.note).toMatch(/no copies to count/);
   });
 
+  it("asks course materials everything it asks general merchandise", () => {
+    /*
+      The category grid is one component serving both sections, and neither
+      "Sold at" nor "Buyer" is scope-gated in it. The sheet printed them for §2
+      only, so a store gathering on paper collected them for one section and met
+      them cold in the other.
+    */
+    const columnsIn = (id: string) =>
+      section(id)!
+        .lists.flatMap((l) => l.columns ?? [])
+        .join(" | ");
+
+    for (const shared of ["Retail sales ($)", "Gross margin (%)", "Sold at (location)", "Buyer (name)"]) {
+      expect(columnsIn("general_merchandise")).toContain(shared);
+      expect(columnsIn("course_materials")).toContain(shared);
+    }
+  });
+
   it("splits the wide grids so they fit a printed page", () => {
     // Name column plus six measures came to eight columns, which does not fit
     // the printable width of a portrait page.

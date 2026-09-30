@@ -349,6 +349,20 @@ function listsForSection(sectionId: string): WorksheetList[] {
           ],
           rowLabels: formats.map((f) => f.label),
         },
+        {
+          /*
+            Asked of course materials on screen exactly as it is of general
+            merchandise, and missing from the printed sheet for §3 alone. A
+            store gathering on paper would have collected it for one section and
+            been surprised by it in the other.
+          */
+          title: "Where it sells and who buys it, by format",
+          intro:
+            "Sold at is which of your locations carries it. Buyer is whoever does the buying, and the survey uses that to confirm your buyer list for vendor partners, so you are not asked it twice.",
+          nameColumn: "Format",
+          columns: ["Sold at (location)", "Buyer (name)"],
+          rowLabels: formats.map((f) => f.label),
+        },
       ];
     }
 
@@ -393,6 +407,23 @@ function listsForSection(sectionId: string): WorksheetList[] {
           choices: EMPLOYMENT_TYPES.map((t) => ({ label: t.label })),
           columns: ["Name", "Employment type", "Years in campus retail"],
           blankRows: 8,
+        },
+      ];
+
+    case "technology_systems":
+      return [
+        {
+          /*
+            Asked on screen whenever "who runs it" is answered with somebody on
+            staff, and absent from the sheet entirely. Optional there and
+            optional here: plenty of stores will not want a student employee
+            named in a national association's records.
+          */
+          title: "Who runs your social, by name",
+          intro:
+            "Only if the answer above is somebody on your own staff. Optional, and skipping it costs you nothing. It exists so a peer asking how a campaign went reaches the person who ran it rather than your general inbox.",
+          columns: ["Name", "Job title"],
+          blankRows: 1,
         },
       ];
 
