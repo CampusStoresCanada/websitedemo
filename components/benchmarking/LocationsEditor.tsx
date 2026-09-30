@@ -228,8 +228,17 @@ export default function LocationsEditor({
                 <div className="mt-2 space-y-1.5">
                   {DAYS.map((day) => {
                     const h = loc.hours?.[day] ?? null;
+                    /*
+                      Closing before opening is almost always a typo — 09:00
+                      typed into the close box, or a 5 that should have been 17.
+                      Flagged rather than refused: a handful of stores really do
+                      run past midnight during rush, and a hard block would send
+                      them looking for somewhere else to put the truth.
+                    */
+                    const backwards =
+                      Boolean(h?.open) && Boolean(h?.close) && h!.close <= h!.open;
                     return (
-                      <div key={day} className="flex items-center gap-2">
+                      <div key={day} className="flex flex-wrap items-center gap-2">
                         <span className="w-24 text-xs capitalize text-gray-600">{day}</span>
                         {(["open", "close"] as const).map((edge) => (
                           <input
@@ -254,9 +263,20 @@ export default function LocationsEditor({
                                 hours: loc.hours ?? null,
                               })
                             }
-                            className="rounded border border-gray-300 px-2 py-1 text-xs"
+                            className={`rounded border px-2 py-1 text-xs ${
+                              backwards && edge === "close"
+                                ? "border-amber-500 bg-amber-50"
+                                : "border-gray-300"
+                            }`}
                           />
                         ))}
+                        {backwards && (
+                          <span className="text-[11px] text-amber-800">
+                            {h!.close === h!.open
+                              ? "Opens and closes at the same time."
+                              : "Closes before it opens — unless you really are open past midnight."}
+                          </span>
+                        )}
                       </div>
                     );
                   })}

@@ -9,6 +9,16 @@ import {
 } from "@/lib/actions/benchmarking-profile";
 import { KEY_DATE_KINDS, type KeyDateKind } from "@/lib/benchmarking/key-dates";
 
+/** How many count dates an inventory style implies, or null if it implies none. */
+function countsExpected(style: string | null): number | null {
+  if (!style) return null;
+  const s = style.toLowerCase();
+  if (s.startsWith("annual")) return 1;
+  if (s.startsWith("bi-annual")) return 2;
+  // Cycle counts run continuously and have no date to name.
+  return null;
+}
+
 /**
  * The dates the year turns on, for the year AHEAD.
  *
@@ -24,12 +34,21 @@ export default function KeyDatesEditor({
   initialDates,
   isReadOnly,
   isSemesterBased,
+  inventoryCountStyle,
 }: {
   benchmarkingId: string;
   initialDates: KeyDate[];
   isReadOnly: boolean;
   /** Semesters are only worth asking for where the year has them. */
   isSemesterBased: boolean;
+  /**
+   * How the store said it counts stock, two questions up.
+   *
+   * Answering "bi-annual" and then never being asked WHEN is the gap this
+   * closes: the style on its own tells a reader nothing they can plan around,
+   * and the store has the dates in front of it at exactly this moment.
+   */
+  inventoryCountStyle: string | null;
 }) {
   const [dates, setDates] = useState<KeyDate[]>(initialDates);
   const [error, setError] = useState<string | null>(null);
@@ -37,6 +56,44 @@ export default function KeyDatesEditor({
   const kinds = KEY_DATE_KINDS.filter(
     (k) => k.value !== "semester" || isSemesterBased,
   );
+
+  const have = (kind: KeyDateKind) => dates.some((d) => d.kind === kind);
+
+  /*
+    What their own answers imply we should have, and do not.
+
+    Only ever a prompt — nothing here blocks the section. A store that counts
+    stock continuously has no count date to give, and a store that has not set
+    next year's semester dates yet should not be stuck on this screen for it.
+  */
+  const expectedCounts = countsExpected(inventoryCountStyle);
+  const countDates = dates.filter((d) => d.kind === "inventory_count").length;
+  const prompts: { kind: KeyDateKind; label: string; why: string }[] = [];
+
+  if (isSemesterBased && !have("semester")) {
+    prompts.push({
+      kind: "semester",
+      label: "Semester",
+      why: "You told us your year runs in semesters. Add each one for the year ahead, with its first and last day.",
+    });
+  }
+  if (expectedCounts !== null && countDates < expectedCounts) {
+    prompts.push({
+      kind: "inventory_count",
+      label: "Inventory count",
+      why:
+        expectedCounts === 1
+          ? `You count ${(inventoryCountStyle ?? "").toLowerCase()}. When is it?`
+          : `You count ${(inventoryCountStyle ?? "").toLowerCase()}, so we are expecting ${expectedCounts} dates and have ${countDates}.`,
+    });
+  }
+
+  /*
+    Semester rows held by a store that has since said it does not run semesters.
+    Shown rather than deleted: the store entered them, and quietly removing a
+    person's own answer because a different answer changed is not ours to do.
+  */
+  const orphanedSemesters = !isSemesterBased && have("semester");
 
   const patch = (id: string, fn: (d: KeyDate) => KeyDate) =>
     setDates((prev) => prev.map((d) => (d.id === id ? fn(d) : d)));
@@ -61,6 +118,35 @@ export default function KeyDatesEditor({
         next year you are confirming them rather than typing them again, and CSC can plan
         around them instead of guessing.
       </p>
+
+      {prompts.length > 0 && !isReadOnly && (
+        <div className="mt-3 rounded-lg border-l-4 border-[#163D6D] bg-[#163D6D]/5 p-3">
+          <p className="text-xs font-semibold text-[#163D6D]">
+            Your answers above suggest we are missing something
+          </p>
+          <ul className="mt-2 space-y-2">
+            {prompts.map((p) => (
+              <li key={p.kind} className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-700">{p.why}</span>
+                <button
+                  onClick={() => void add(p.kind, p.label)}
+                  className="rounded-full border border-[#163D6D] px-2.5 py-0.5 text-xs font-medium text-[#163D6D]"
+                >
+                  + Add {p.label.toLowerCase()}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {orphanedSemesters && (
+        <p className="mt-3 rounded bg-amber-50 p-3 text-xs text-amber-900">
+          You have semester dates below, but you told us your year does not run in
+          semesters. We have left them alone rather than deleting your own entries —
+          remove any that no longer apply, or change that answer above.
+        </p>
+      )}
 
       <div className="mt-4 space-y-3">
         {dates.map((d) => {

@@ -23,6 +23,8 @@ import OtherExpensesEditor from "./OtherExpensesEditor";
 import StaffingEditor from "./StaffingEditor";
 import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
+import CompetitorsEditor from "./CompetitorsEditor";
+import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type {
@@ -44,6 +46,7 @@ import { parseUTC } from "@/lib/utils";
 interface BenchmarkingSurveyFormProps {
   benchmarkingId: string;
   fiscalYear: number;
+  organizationId: string;
   organizationName: string;
   organizationProvince: string;
   currentData: Benchmarking;
@@ -65,11 +68,14 @@ interface BenchmarkingSurveyFormProps {
   otherIncome?: OtherIncomeRow[];
   otherExpenses?: OtherExpenseRow[];
   staff?: StaffRow[];
+  /** §1 — who else sells to this store's students. */
+  competitors?: CompetitorRow[];
 }
 
 export default function BenchmarkingSurveyForm({
   benchmarkingId,
   fiscalYear,
+  organizationId,
   organizationName,
   organizationProvince,
   currentData,
@@ -86,6 +92,7 @@ export default function BenchmarkingSurveyForm({
   otherIncome = [],
   otherExpenses = [],
   staff = [],
+  competitors = [],
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -684,6 +691,16 @@ export default function BenchmarkingSurveyForm({
                   initialDates={keyDates}
                   isReadOnly={isReadOnly}
                   isSemesterBased={formData.is_semester_based === true}
+                  inventoryCountStyle={
+                    typeof formData.inventory_count_style === "string"
+                      ? formData.inventory_count_style
+                      : null
+                  }
+                />
+                <CompetitorsEditor
+                  benchmarkingId={benchmarkingId}
+                  initialRows={competitors}
+                  isReadOnly={isReadOnly}
                 />
                 <ServicesJourney
                   benchmarkingId={benchmarkingId}
@@ -695,6 +712,7 @@ export default function BenchmarkingSurveyForm({
                 {logos && (
                   <LogoConfirm
                     benchmarkingId={benchmarkingId}
+                    organizationId={organizationId}
                     logoUrl={logos.logoUrl}
                     logoHorizontalUrl={logos.logoHorizontalUrl}
                     confirmedAt={logos.confirmedAt}

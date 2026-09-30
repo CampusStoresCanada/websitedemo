@@ -1541,6 +1541,41 @@ export type Database = {
           },
         ]
       }
+      benchmarking_competitors: {
+        Row: {
+          benchmarking_id: string
+          created_at: string
+          id: string
+          kind: string | null
+          name: string
+          position: number
+        }
+        Insert: {
+          benchmarking_id: string
+          created_at?: string
+          id?: string
+          kind?: string | null
+          name: string
+          position?: number
+        }
+        Update: {
+          benchmarking_id?: string
+          created_at?: string
+          id?: string
+          kind?: string | null
+          name?: string
+          position?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_competitors_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_field_reviews: {
         Row: {
           comment: string | null

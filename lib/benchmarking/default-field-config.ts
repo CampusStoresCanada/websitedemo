@@ -435,23 +435,37 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
             the same enrolment are not in the same market if one of them has a
             Chapters across the road.
           */
+          /*
+            Replaced by the competitor list, which asks one store at a time.
+            A count plus a free-text "who are they?" made a store compress
+            four answers into one box and gave back a sentence nobody can
+            group by — so "how many members compete with a national chain",
+            the question it existed for, was unanswerable.
+          */
           name: "competing_stores_count",
           label: "How many other stores compete with you for this business?",
           type: "integer",
           helpText:
             "On campus or close enough that a student would walk there instead. Count each store, not each chain.",
           order: 60,
-          visible: true,
+          visible: false,
           group: "Your market",
         },
         {
+          /*
+            Replaced by the competitor list, which asks one store at a time.
+            A count plus a free-text "who are they?" made a store compress
+            four answers into one box and gave back a sentence nobody can
+            group by — so "how many members compete with a national chain",
+            the question it existed for, was unanswerable.
+          */
           name: "competing_stores_notes",
           label: "Who are they?",
           type: "text",
           helpText:
             "Names, or just what they are — a student union shop, a campus convenience store, a chain bookstore nearby.",
           order: 61,
-          visible: true,
+          visible: false,
           indent: true,
           group: "Your market",
         },

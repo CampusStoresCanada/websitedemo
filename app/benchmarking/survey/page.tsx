@@ -258,10 +258,12 @@ export default async function BenchmarkingSurveyPage({
   const { loadOtherIncome, loadOtherExpenses, loadStaff } = await import(
     "@/lib/actions/benchmarking-financials"
   );
-  const [otherIncome, otherExpenses, staff] = await Promise.all([
+  const { loadCompetitors } = await import("@/lib/actions/benchmarking-competitors");
+  const [otherIncome, otherExpenses, staff, competitors] = await Promise.all([
     loadOtherIncome(currentRow!.id),
     loadOtherExpenses(currentRow!.id),
     loadStaff(currentRow!.id),
+    loadCompetitors(currentRow!.id),
   ]);
 
   const { data: orgLogos } = await db
@@ -391,6 +393,7 @@ export default async function BenchmarkingSurveyPage({
       <BenchmarkingSurveyForm
         benchmarkingId={currentRow!.id}
         fiscalYear={activeSurvey.fiscal_year}
+        organizationId={organization.id}
         organizationName={organization.name}
         organizationProvince={organization.province}
         currentData={currentRow!}
@@ -406,6 +409,7 @@ export default async function BenchmarkingSurveyPage({
         otherIncome={otherIncome}
         otherExpenses={otherExpenses}
         staff={staff}
+        competitors={competitors}
         logos={{
           logoUrl: (orgLogos?.logo_url as string | null) ?? null,
           logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,
