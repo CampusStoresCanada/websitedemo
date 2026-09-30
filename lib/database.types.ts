@@ -933,6 +933,7 @@ export type Database = {
           social_media_frequency: string | null
           social_media_platforms: string[] | null
           social_media_run_by: string | null
+          social_media_run_by_contact_id: string | null
           special_charges_notes: string | null
           sqft_office: number | null
           sqft_other: number | null
@@ -1110,6 +1111,7 @@ export type Database = {
           social_media_frequency?: string | null
           social_media_platforms?: string[] | null
           social_media_run_by?: string | null
+          social_media_run_by_contact_id?: string | null
           special_charges_notes?: string | null
           sqft_office?: number | null
           sqft_other?: number | null
@@ -1287,6 +1289,7 @@ export type Database = {
           social_media_frequency?: string | null
           social_media_platforms?: string[] | null
           social_media_run_by?: string | null
+          social_media_run_by_contact_id?: string | null
           special_charges_notes?: string | null
           sqft_office?: number | null
           sqft_other?: number | null
@@ -1384,6 +1387,34 @@ export type Database = {
             columns: ["respondent_user_id"]
             isOneToOne: false
             referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_social_media_run_by_contact_id_fkey"
+            columns: ["social_media_run_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "active_contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_social_media_run_by_contact_id_fkey"
+            columns: ["social_media_run_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_social_media_run_by_contact_id_fkey"
+            columns: ["social_media_run_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_circle_sync"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_social_media_run_by_contact_id_fkey"
+            columns: ["social_media_run_by_contact_id"]
+            isOneToOne: false
+            referencedRelation: "contacts_needing_notion_sync"
             referencedColumns: ["id"]
           },
           {

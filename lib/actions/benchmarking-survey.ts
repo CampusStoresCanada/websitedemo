@@ -48,6 +48,14 @@ interface FieldDef {
   allowOther?: boolean;
   /** Max length for text fields (defaults to 500) */
   maxLength?: number;
+  /**
+   * Shape a text value must match.
+   *
+   * Exists for the id fields that point at another table. Without it a typo
+   * reaches Postgres as a malformed uuid and comes back as a 500 the reader
+   * cannot act on, instead of a sentence telling them what went wrong.
+   */
+  pattern?: { test: RegExp; message: string };
   /** Min numeric value (inclusive) */
   min?: number;
   /** Max numeric value (inclusive) */
@@ -233,6 +241,16 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   // Physical course materials only. Digital and IA have no comparable figure.
   cm_sell_through_pct:          { type: "percentage", min: 0, max: 100 },
   ia_ea_booked_outside_pct:     { type: "percentage", min: 0, max: 100 },
+
+  // The person behind "store staff run it" — see components/.../SocialOwner.
+  social_media_run_by_contact_id: {
+    type: "text",
+    maxLength: 36,
+    pattern: {
+      test: /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
+      message: "That is not one of your store's people.",
+    },
+  },
 
   // ── §6 Benefits, told apart from wages ──
   benefits_paid_by:             { type: "select", options: ["The store pays them", "The institution pays them centrally", "Split between the store and the institution", "Staff are not eligible for benefits"] },
@@ -461,6 +479,9 @@ function validateFieldValue(
       }
       // Strip control characters (except newlines for long text)
       const sanitized = trimmed.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "");
+      if (sanitized && def.pattern && !def.pattern.test.test(sanitized)) {
+        return { valid: false, cleanValue: null, error: def.pattern.message };
+      }
       return { valid: true, cleanValue: sanitized || null };
     }
 

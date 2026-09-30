@@ -24,6 +24,7 @@ import StaffingEditor from "./StaffingEditor";
 import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
+import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
@@ -649,6 +650,20 @@ export default function BenchmarkingSurveyForm({
                 ) : null
               }
             />
+            {/* §9 — "store staff" names an arrangement, not a person. */}
+            {sections[activeSection]?.id === "technology_systems" &&
+              isInternalSocialAnswer(formData.social_media_run_by) && (
+                <SocialOwner
+                  contacts={storeContacts}
+                  value={
+                    typeof formData.social_media_run_by_contact_id === "string"
+                      ? formData.social_media_run_by_contact_id
+                      : null
+                  }
+                  onChange={(id) => handleFieldChange("social_media_run_by_contact_id", id)}
+                  isReadOnly={isReadOnly}
+                />
+              )}
             {/* §6 — the team, not just the headcount above it. */}
             {sections[activeSection]?.id === "staffing" && (
               <StaffingEditor
