@@ -143,8 +143,19 @@ export default function BenchmarkingSurveyForm({
    * meant walking back through every section in between.
    */
   const [hasReviewed, setHasReviewed] = useState(false);
-  /** The field to scroll to and light up when a section opens. */
-  const [highlightField, setHighlightField] = useState<string | null>(null);
+  /**
+   * The field to scroll to and light up when a section opens.
+   *
+   * `why` matters: a highlight set because an answer is MISSING should vanish
+   * the moment it is supplied, but one set because somebody clicked an answer
+   * in the review must not. That field already has a value, so clearing on
+   * "is it answered yet" would wipe it before the scroll even finished.
+   */
+  const [highlight, setHighlight] = useState<{
+    field: string;
+    why: "required" | "review";
+  } | null>(null);
+  const highlightField = highlight?.field ?? null;
   const formTopRef = useRef<HTMLDivElement | null>(null);
 
   const [formData, setFormData] = useState<Record<string, unknown>>(
@@ -181,10 +192,10 @@ export default function BenchmarkingSurveyForm({
     past its heading, its description, and often its first two questions.
   */
   const goToSection = useCallback(
-    (idx: number, field?: string) => {
+    (idx: number, field?: string, why: "required" | "review" = "review") => {
       setReviewingAll(false);
       setActiveSection(idx);
-      setHighlightField(field ?? null);
+      setHighlight(field ? { field, why } : null);
 
       /*
         One scroll, after the new section has actually rendered.
@@ -215,7 +226,7 @@ export default function BenchmarkingSurveyForm({
   const openReview = useCallback(() => {
     setReviewingAll(true);
     setHasReviewed(true);
-    setHighlightField(null);
+    setHighlight(null);
     requestAnimationFrame(() =>
       formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }),
     );
@@ -384,11 +395,14 @@ export default function BenchmarkingSurveyForm({
     from formData, so watching it is enough.
   */
   useEffect(() => {
-    if (highlightField && !missingRequired.some((m) => m.field === highlightField)) {
-      setHighlightField(null);
+    if (
+      highlight?.why === "required" &&
+      !missingRequired.some((m) => m.field === highlight.field)
+    ) {
+      setHighlight(null);
     }
     if (submitError && missingRequired.length === 0) setSubmitError(null);
-  }, [missingRequired, highlightField, submitError]);
+  }, [missingRequired, highlight, submitError]);
 
   const handleSubmit = async () => {
     // Take them to the first gap rather than naming it and leaving them to
@@ -401,7 +415,7 @@ export default function BenchmarkingSurveyForm({
           ? `“${first.label}” is still needed, in ${first.section}.`
           : `${missingRequired.length} required answers are still missing. The first is “${first.label}”, in ${first.section}.`,
       );
-      goToSection(first.sectionIdx, first.field);
+      goToSection(first.sectionIdx, first.field, "required");
       return;
     }
 
@@ -636,7 +650,7 @@ export default function BenchmarkingSurveyForm({
             onJumpToSection={jumpToSection}
             onJumpToField={(sectionId, fieldName) => {
               const idx = sections.findIndex((x) => x.id === sectionId);
-              if (idx >= 0) goToSection(idx, fieldName);
+              if (idx >= 0) goToSection(idx, fieldName, "review");
             }}
             onClose={() => goToSection(activeSection)}
           />
