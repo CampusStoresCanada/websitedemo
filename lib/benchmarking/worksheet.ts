@@ -352,8 +352,24 @@ function listsForSection(
             seven-digit number does not go in 22mm in handwriting.
           */
           title: "Sales and margin, by category",
+          /*
+            Says why this table arrives empty when the rest of the sheet carries
+            figures.
+
+            ⛔ Not a gap to be filled. The categories are CSC's own, put to the
+            community to adopt, and the old flat sales columns were dropped
+            rather than mapped onto them: deciding for a store whether its
+            imprint and non-imprint apparel becomes one Apparel figure is an
+            interpretation, and the new cuts are theirs to declare in the new
+            words. See project_csc_categorization_is_a_clean_break.
+
+            The note exists because the asymmetry reads as broken data. §1
+            prints last year's figures, this table does not, and without a
+            sentence saying so the reasonable conclusion is that the sheet
+            failed — which now costs a flag and a DM.
+          */
           intro:
-            "Blank rows are for subcategory splits. Write the subcategory name in the first column and give its figures instead of the department's.",
+            "These categories are new this year, so there is nothing to carry forward and this table starts empty. Fill it in using the new cuts. Blank rows are for subcategory splits: write the subcategory name in the first column and give its figures instead of the department's.",
           nameColumn: "Category",
           columns: ["Retail sales ($)", "Online sales ($)", "Gross margin (%)"],
           rowLabels: departments.map((d) => d.label),
@@ -398,7 +414,9 @@ function listsForSection(
         },
         {
           title: "Sales and margin, by format",
-          intro: "The same columns as General Merchandise, so the two add up together.",
+          /* Same clean break as General Merchandise above, same reason. */
+          intro:
+            "These formats are new this year, so there is nothing to carry forward and this table starts empty. The columns match General Merchandise, so the two add up together.",
           nameColumn: "Format",
           columns: ["Retail sales ($)", "Online sales ($)", "Gross margin (%)"],
           rowLabels: formats.map((f) => f.label),
