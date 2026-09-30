@@ -227,9 +227,44 @@ function listsForSection(
     case "institution_profile":
       return [
         {
+          /*
+            Printed by name, not as eight ruled lines.
+
+            The sheet was asking a store to write out a staff list we are
+            already holding. The columns left blank are the ones we genuinely do
+            not know: which of our four employment types each person is, and how
+            long they have worked in campus retail anywhere.
+
+            The instruction to fix the list on the website first is the actual
+            time saver. Correcting it there means it is right for the survey,
+            the directory, the conference and next year, whereas correcting it
+            on paper means typing it again at the keyboard.
+          */
+          title: "Your people",
+          intro:
+            known.people.length > 0
+              ? `These are the ${known.people.length} people we have on file for your store. ` +
+                (known.orgPath
+                  ? `If anyone is missing or has left, fix it at ${known.orgPath} BEFORE you start, then print this again. Correcting it there means it is right for the directory and the conference too, not just for this survey. `
+                  : "") +
+                "Then fill in the two columns we cannot know: which employment type each person is, and how long they have worked in campus retail anywhere, not just with you. The survey asks those under Staffing, but the list is here because this is the part to fix before you start."
+              : "We have nobody on file for your store yet. " +
+                (known.orgPath
+                  ? `Add your people at ${known.orgPath} and print this again, and they will be listed here for you. `
+                  : "") +
+                "Otherwise write them in below.",
+          choices: EMPLOYMENT_TYPES.map((t) => ({ label: t.label })),
+          nameColumn: "Name",
+          columns: ["Employment type", "Years in campus retail"],
+          rowLabels: known.people.map((p) =>
+            p.roleTitle ? `${p.name} (${p.roleTitle})` : p.name,
+          ),
+          extraBlankRows: known.people.length > 0 ? 4 : 8,
+        },
+        {
           title: "Who is filling this in",
           intro:
-            "The person who actually pulled the figures together, so a question in November reaches them and not the account holder. On screen you pick them from the list of your people, which is printed under Staffing below. Circle one there, or write a name here if they are not on it.",
+            "The person who actually pulled the figures together, so a question in November reaches them and not the account holder. On screen you pick them from the list above. Circle one there, or write a name here if they are not on it.",
           columns: ["Name", "Job title", "Email", "Phone"],
           blankRows: 1,
         },
@@ -431,45 +466,10 @@ function listsForSection(
           */
           title: "What your people cost",
           intro:
-            "Wages only in the first column. The benefits column is asked only if your STORE pays them; leave it blank where your institution carries the cost centrally, because that blank is itself the answer.",
+            "Your people are listed at the front of this worksheet, with the note about correcting that list first. Wages only in the first column. The benefits column is asked only if your STORE pays them; leave it blank where your institution carries the cost centrally, because that blank is itself the answer.",
           nameColumn: "Employment type",
           columns: ["Wages ($)", "Benefits the store pays ($)"],
           rowLabels: EMPLOYMENT_TYPES.map((t) => t.label),
-        },
-        {
-          /*
-            Printed by name, not as eight ruled lines.
-
-            The sheet was asking a store to write out a staff list we are
-            already holding. The columns left blank are the ones we genuinely do
-            not know: which of our four employment types each person is, and how
-            long they have worked in campus retail anywhere.
-
-            The instruction to fix the list on the website first is the actual
-            time saver. Correcting it there means it is right for the survey,
-            the directory, the conference and next year, whereas correcting it
-            on paper means typing it again at the keyboard.
-          */
-          title: "Your team",
-          intro:
-            known.people.length > 0
-              ? `These are the ${known.people.length} people we have on file for your store. ` +
-                (known.orgPath
-                  ? `If anyone is missing or has left, fix it at ${known.orgPath} BEFORE you start, then print this again. Correcting it there means it is right for the directory and the conference too, not just for this survey. `
-                  : "") +
-                "Then fill in the two columns we cannot know: which employment type each person is, and how long they have worked in campus retail anywhere, not just with you."
-              : "We have nobody on file for your store yet. " +
-                (known.orgPath
-                  ? `Add your people at ${known.orgPath} and print this again, and they will be listed here for you. `
-                  : "") +
-                "Otherwise write them in below.",
-          choices: EMPLOYMENT_TYPES.map((t) => ({ label: t.label })),
-          nameColumn: "Name",
-          columns: ["Employment type", "Years in campus retail"],
-          rowLabels: known.people.map((p) =>
-            p.roleTitle ? `${p.name} (${p.roleTitle})` : p.name,
-          ),
-          extraBlankRows: known.people.length > 0 ? 4 : 8,
         },
       ];
 

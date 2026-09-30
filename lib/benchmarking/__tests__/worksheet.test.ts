@@ -244,6 +244,20 @@ describe("the printed sheet shows the full scope", () => {
     }
   });
 
+  it("puts the people before everything else in their section", () => {
+    const profile = buildWorksheet({
+      organizationName: "Test Store",
+      fiscalYear: 2026,
+      closesAt: null,
+      config: DEFAULT_FIELD_CONFIG,
+      priorRows: [],
+      knownPeople: [{ name: "Dana Okonkwo", roleTitle: null }],
+      organizationSlug: "test-store",
+    }).sections.find((s) => s.id === "institution_profile")!;
+
+    expect(profile.lists[0].title).toBe("Your people");
+  });
+
   it("puts the pay grid on paper, which the hidden config fields could not", () => {
     const pay = section("staffing")!.lists.find((l) => l.nameColumn === "Employment type");
     expect(pay).toBeDefined();
@@ -299,10 +313,15 @@ describe("the sheet prints what we already hold", () => {
     organizationSlug: "test-store",
   });
 
+  /*
+    At the FRONT, in Institution Profile, not two thirds of the way down under
+    Staffing. The note beside it says to correct the list before starting, which
+    is only useful if the reader meets it before starting.
+  */
   const team = (w: typeof withPeople) =>
     w.sections
-      .find((s) => s.id === "staffing")!
-      .lists.find((l) => l.title === "Your team")!;
+      .find((s) => s.id === "institution_profile")!
+      .lists.find((l) => l.title === "Your people")!;
 
   it("lists the people by name, with their job titles", () => {
     expect(team(withPeople).rowLabels).toEqual([
