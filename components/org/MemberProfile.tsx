@@ -16,6 +16,7 @@ import ColorizedImage from "@/components/ui/ColorizedImage";
 import { ProtectedSection } from "@/components/ui/GreyBlur";
 import BlurredField from "@/components/ui/BlurredField";
 import BenchmarkingDetails from "./BenchmarkingDetails";
+import BenchmarkingYearSwitcher from "./BenchmarkingYearSwitcher";
 import type { ManualEditMark } from "@/lib/benchmarking/manual-edit";
 import BenchmarkingComparison from "./BenchmarkingComparison";
 import PartnerViewOfMember from "./PartnerViewOfMember";
@@ -69,6 +70,9 @@ interface MemberProfileProps {
   benchmarkingWithheldReason?: string | null;
   benchmarkingManualEdits?: Record<string, ManualEditMark>;
   benchmarkingYearIsPublished?: boolean;
+  /** Showing the store's own filing for a year the committee has not released. */
+  benchmarkingIsUnreleased?: boolean;
+  benchmarkingYears?: { fiscalYear: number; released: boolean }[];
   viewerLevel: ViewerLevel;
   conferenceAttendance: Array<{
     id: string;
@@ -123,6 +127,8 @@ export default function MemberProfile({
   benchmarkingWithheldReason,
   benchmarkingManualEdits = {},
   benchmarkingYearIsPublished = false,
+  benchmarkingIsUnreleased = false,
+  benchmarkingYears = [],
   viewerLevel,
   conferenceAttendance,
   orgAssignableUsers,
@@ -1273,6 +1279,33 @@ export default function MemberProfile({
                     )}
                     {showInBenchmarking ? "Included" : "Opted out"}
                   </button>
+                </div>
+              )}
+              {benchmarkingYears.length > 1 && (
+                <div className="mb-4">
+                  <BenchmarkingYearSwitcher
+                    years={benchmarkingYears}
+                    current={benchmarking.fiscal_year ?? null}
+                  />
+                </div>
+              )}
+              {/*
+                Said plainly, because the figures on screen are real but not yet
+                the community's. Between submitting and the committee's release
+                a store can read back exactly what it filed, and should be in no
+                doubt that nobody else can.
+              */}
+              {benchmarkingIsUnreleased && (
+                <div className="mb-4 rounded-lg border-l-4 border-[#163D6D] bg-[#163D6D]/5 p-3">
+                  <p className="text-sm font-semibold text-[#163D6D]">
+                    Your FY{benchmarking.fiscal_year} filing, not yet released
+                  </p>
+                  <p className="mt-1 text-xs text-gray-700">
+                    These are the figures you filed. Only your store and CSC staff can see
+                    them. Nobody else sees this year at all until the committee releases
+                    its findings, and until then the rest of the association still sees
+                    your last released year. Use the year buttons above to read that back.
+                  </p>
                 </div>
               )}
               <BenchmarkingDetails

@@ -2,6 +2,7 @@ import { cache } from "react";
 import { supabase } from "./supabase";
 import type { Organization, Contact, BrandColor, Benchmarking, SiteContent } from "./types/db";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { releasedFiscalYears } from "@/lib/benchmarking/release";
 import { PUBLIC_LISTABLE_ORG_STATUSES, ORG_PROFILE_RESOLVABLE_STATUSES } from "@/lib/membership/status";
 
 /** Org data embedded in a board card contact join. */
@@ -222,7 +223,9 @@ export async function getBrandColorsForOrganization(
 
 // Fetch latest benchmarking data for an organization
 export async function getLatestBenchmarking(
-  organizationId: string
+  organizationId: string,
+  /** Restrict to released years. Omit to get the newest row whatever its state. */
+  onlyYears?: number[],
 ): Promise<Benchmarking | null> {
   const result = await withTimeout(
     // Service role. This used to read through the anon singleton, and anon lost
@@ -230,13 +233,22 @@ export async function getLatestBenchmarking(
     // on every org page from that day, logging an error and rendering nothing.
     // Who may SEE these figures is decided in lib/visibility/data.ts, before
     // the payload is built; it is not, and never was, an RLS decision.
-    createAdminClient()
-      .from("benchmarking")
-      .select("*")
-      .eq("organization_id", organizationId)
-      .order("fiscal_year", { ascending: false })
-      .limit(1)
-      .single(),
+    (() => {
+      /*
+        ⛔ `onlyYears` is the committee's release, not a nicety.
+
+        Without it this returns the newest row whatever its state, so a DRAFT a
+        store has merely opened becomes its public figures and displaces the
+        verified year underneath. Callers that legitimately want the newest row
+        regardless — the survey itself, the admin tools — pass nothing.
+      */
+      let q = createAdminClient()
+        .from("benchmarking")
+        .select("*")
+        .eq("organization_id", organizationId);
+      if (onlyYears) q = q.in("fiscal_year", onlyYears);
+      return q.order("fiscal_year", { ascending: false }).limit(1).single();
+    })(),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
   );
@@ -259,12 +271,32 @@ export type BenchmarkingWithOrg = Benchmarking & {
   organization: Pick<Organization, 'id' | 'name' | 'slug'>;
 };
 
-export async function getAllBenchmarking(): Promise<BenchmarkingWithOrg[]> {
+/** One store's filing for one year, for the profile's year switcher. */
+export async function getBenchmarkingForYear(
+  organizationId: string,
+  fiscalYear: number,
+): Promise<Benchmarking | null> {
+  const { data } = await createAdminClient()
+    .from("benchmarking")
+    .select("*")
+    .eq("organization_id", organizationId)
+    .eq("fiscal_year", fiscalYear)
+    .maybeSingle();
+  return (data as Benchmarking | null) ?? null;
+}
+
+export async function getAllBenchmarking(
+  /** Released years. Omit for the admin views that need everything. */
+  onlyYears?: number[],
+): Promise<BenchmarkingWithOrg[]> {
   // Service role, not the anon singleton — see the note on getLatestBenchmarking.
   const result = await withTimeout(
-    createAdminClient()
-      .from("benchmarking")
-      .select(`
+    (() => {
+      // ⛔ The peer set never carries an unreleased year, for anybody. A store
+      // may read back its own figures early; it may not read anyone else's.
+      let q = createAdminClient()
+        .from("benchmarking")
+        .select(`
         *,
         organization:organizations!benchmarking_organization_id_fkey (
           id,
@@ -272,8 +304,10 @@ export async function getAllBenchmarking(): Promise<BenchmarkingWithOrg[]> {
           slug,
           is_test
         )
-      `)
-      .order("fiscal_year", { ascending: false }),
+      `);
+      if (onlyYears) q = q.in("fiscal_year", onlyYears);
+      return q.order("fiscal_year", { ascending: false });
+    })(),
     DB_TIMEOUT,
     { data: null, error: TIMEOUT_ERROR }
   );
@@ -298,23 +332,70 @@ export async function getOrganizationProfile(slug: string): Promise<{
   contacts: Contact[];
   brandColors: BrandColor[];
   benchmarking: Benchmarking | null;
+  /** Newest row of any state, for the store itself and for staff. */
+  ownLatest: Benchmarking | null;
+  /** Every year this store has filed, newest first, with its release state. */
+  benchmarkingYears: { fiscalYear: number; released: boolean }[];
   allBenchmarking: BenchmarkingWithOrg[];
 }> {
   const organization = await getOrganizationBySlug(slug);
 
   if (!organization || !organization.id) {
-    return { organization: null, contacts: [], brandColors: [], benchmarking: null, allBenchmarking: [] };
+    return {
+      organization: null,
+      contacts: [],
+      brandColors: [],
+      benchmarking: null,
+      ownLatest: null,
+      benchmarkingYears: [],
+      allBenchmarking: [],
+    };
   }
 
-  // Fetch all related data in parallel
-  const [contacts, brandColors, benchmarking, allBenchmarking] = await Promise.all([
-    getContactsForOrganization(organization.id),
-    getBrandColorsForOrganization(organization.id),
-    getLatestBenchmarking(organization.id),
-    getAllBenchmarking(),
-  ]);
+  /*
+    Two rows for this store, not one.
 
-  return { organization, contacts, brandColors, benchmarking, allBenchmarking };
+    `benchmarking` is what the world may see: the newest RELEASED year. `ownDraft`
+    is the newest row of any state, which only the store itself and CSC staff are
+    shown, marked as not yet released. Deciding between them needs the viewer,
+    and the viewer is not known here.
+  */
+  const released = await releasedFiscalYears();
+
+  /*
+    Every year this store has filed, so the profile can offer a year switcher.
+    Status travels with it: the switcher marks an unreleased year rather than
+    presenting it as though it were published.
+  */
+  const { data: yearRows } = await createAdminClient()
+    .from("benchmarking")
+    .select("fiscal_year, status")
+    .eq("organization_id", organization.id)
+    .order("fiscal_year", { ascending: false });
+
+  const benchmarkingYears = (yearRows ?? []).map((r) => ({
+    fiscalYear: r.fiscal_year as number,
+    released: released.includes(r.fiscal_year as number),
+  }));
+
+  const [contacts, brandColors, benchmarking, ownLatest, allBenchmarking] =
+    await Promise.all([
+      getContactsForOrganization(organization.id),
+      getBrandColorsForOrganization(organization.id),
+      getLatestBenchmarking(organization.id, released),
+      getLatestBenchmarking(organization.id),
+      getAllBenchmarking(released),
+    ]);
+
+  return {
+    organization,
+    contacts,
+    brandColors,
+    benchmarking,
+    ownLatest,
+    benchmarkingYears,
+    allBenchmarking,
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────

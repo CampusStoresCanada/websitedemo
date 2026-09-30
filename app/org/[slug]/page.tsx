@@ -103,7 +103,7 @@ export const dynamic = "force-dynamic";
 interface PageProps {
   params: Promise<{ slug: string }>;
   /** `?s=b` marks an arrival from an exhibitor badge — see the scan record below. */
-  searchParams: Promise<{ s?: string }>;
+  searchParams: Promise<{ s?: string; fy?: string }>;
 }
 
 export default async function OrgProfilePage({ params, searchParams }: PageProps) {
@@ -114,8 +114,21 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
   const { viewer, effectiveViewer, org: orgIdRow, orgAccessActive } =
     await getOrgPageViewerContext(slug);
 
-  const { organization, contacts, brandColors, benchmarking, allBenchmarking, benchmarkingWithheldReason } =
-    await getOrganizationForViewer(slug, effectiveViewer);
+  const requestedYear = Number((await searchParams)?.fy);
+  const {
+    organization,
+    contacts,
+    brandColors,
+    benchmarking,
+    allBenchmarking,
+    benchmarkingWithheldReason,
+    benchmarkingIsUnreleased,
+    benchmarkingYears,
+  } = await getOrganizationForViewer(
+    slug,
+    effectiveViewer,
+    Number.isFinite(requestedYear) ? requestedYear : null,
+  );
 
   if (!organization) {
     notFound();
@@ -643,6 +656,8 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
         benchmarkingWithheldReason={benchmarkingWithheldReason}
         benchmarkingManualEdits={benchmarkingManualEdits}
         benchmarkingYearIsPublished={benchmarkingYearIsPublished}
+        benchmarkingIsUnreleased={benchmarkingIsUnreleased ?? false}
+        benchmarkingYears={benchmarkingYears ?? []}
         viewerLevel={effectiveViewerLevel}
         conferenceAttendance={conferenceAttendance}
         orgAssignableUsers={orgAssignableUsers}

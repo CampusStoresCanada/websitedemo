@@ -156,6 +156,22 @@ export function confidentialityPoints(minCutSize = MIN_CUT_SIZE) {
         "anonymous, it is a subtraction.",
     },
     {
+      /*
+        The timing, said before anyone starts. Filing is not publishing, and the
+        gate that enforces that is benchmarking_surveys.status — see
+        lib/benchmarking/release.ts.
+      */
+      heading: "Nothing you file appears to anyone else until the committee releases the year",
+      body:
+        "Submitting does not publish anything. Your figures show on your own store's " +
+        "profile straight away, as your FY2026 filing, so you can read back exactly " +
+        "what you sent and correct it. Nobody else sees that year at all: the rest of " +
+        "the association still sees your last released year, and you can switch back " +
+        "to it yourself with the year buttons on your profile. When the committee has " +
+        "checked the round and releases its findings, the year opens to the stores " +
+        "that took part and we talk about it as a community.",
+    },
+    {
       heading: "You choose whether your store is named",
       body:
         "Your figures count toward every median either way. Naming is a separate " +

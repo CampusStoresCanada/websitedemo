@@ -26,6 +26,7 @@ import {
   mayReceivePeerSet,
 } from "@/lib/benchmarking/org-page-visibility";
 import { isOrgAccessActive } from "@/lib/membership/status";
+import { getBenchmarkingForYear } from "@/lib/data";
 import type { OrgMembershipStatus } from "@/lib/membership/types";
 
 // ---------------------------------------------------------------------------
@@ -52,6 +53,14 @@ export interface VisibleOrganizationProfile {
   benchmarking: Benchmarking | null;
   /** Set when detail is withheld, so the page can say why instead of going blank. */
   benchmarkingWithheldReason?: string | null;
+  /**
+   * True when what is shown is the store's OWN filing for a year the committee
+   * has not released. Nobody else is ever shown such a row, so this is only
+   * ever true for the store itself or for staff.
+   */
+  benchmarkingIsUnreleased?: boolean;
+  /** Years this reader may switch between on the profile. */
+  benchmarkingYears?: { fiscalYear: number; released: boolean }[];
   allBenchmarking: BenchmarkingWithOrg[];
 }
 
@@ -75,7 +84,9 @@ export interface VisibleOrganizationProfile {
  */
 export async function getOrganizationForViewer(
   slug: string,
-  viewer: ViewerContext
+  viewer: ViewerContext,
+  /** Which filed year to show, from ?fy= on the profile. Newest if absent. */
+  requestedYear?: number | null,
 ): Promise<VisibleOrganizationProfile> {
   const raw = await getCachedOrgProfile(slug);
 
@@ -204,12 +215,54 @@ export async function getOrganizationForViewer(
       ? []
       : raw.brandColors;
 
-  // Benchmarking: hide own data and filter from comparison if opted out
-  let visibleBenchmarking = raw.benchmarking;
+  /*
+    Released figures by default; the store's own in-progress row only for the
+    store itself and for CSC staff.
+
+    ⛔ Filing is not publishing. A figure used to go live the moment a row
+    existed — including a row a store had merely OPENED, which replaced a full
+    year of verified figures with an empty one before anyone typed anything.
+    The committee's release is the switch now, and a store reading back its own
+    unreleased filing is told that is what it is looking at.
+  */
+  const isOwnOrgViewer = (viewer.viewerOrgIds ?? []).includes(targetOrgId);
+  const maySeeUnreleased = isOwnOrgViewer || isStaffViewer;
+
+  const ownUnreleased =
+    raw.ownLatest &&
+    raw.benchmarking?.fiscal_year !== raw.ownLatest.fiscal_year
+      ? raw.ownLatest
+      : null;
+
+  let visibleBenchmarking =
+    maySeeUnreleased && ownUnreleased ? ownUnreleased : raw.benchmarking;
+  let benchmarkingIsUnreleased = Boolean(maySeeUnreleased && ownUnreleased);
+
+  /*
+    A year the reader asked for, if they are allowed it.
+
+    ⛔ The permission check is the same one above, not a separate rule: asking
+    for ?fy=2026 must not be a way round the release. An unreleased year is
+    offered only to the store itself and to staff, so requesting one as anybody
+    else falls through to the released row.
+  */
+  if (typeof requestedYear === "number") {
+    const year = (raw.benchmarkingYears ?? []).find(
+      (y) => y.fiscalYear === requestedYear,
+    );
+    if (year && (year.released || maySeeUnreleased)) {
+      const row = await getBenchmarkingForYear(targetOrgId, requestedYear);
+      if (row) {
+        visibleBenchmarking = row;
+        benchmarkingIsUnreleased = !year.released;
+      }
+    }
+  }
   let visibleAllBenchmarking = raw.allBenchmarking;
 
   if (!isPrivilegedViewer && orgFlags.show_in_benchmarking === false) {
     visibleBenchmarking = null;
+    benchmarkingIsUnreleased = false;
   }
 
   let benchmarkingWithheldReason: string | null = null;
@@ -240,7 +293,7 @@ export async function getOrganizationForViewer(
       ?.disclosure_level,
     viewerFiled: standing.filed,
     viewerDisclosureLevel: standing.disclosureLevel,
-    isOwnOrg: (viewer.viewerOrgIds ?? []).includes(targetOrgId),
+    isOwnOrg: isOwnOrgViewer,
     isStaff: isStaffViewer,
   });
 
@@ -249,12 +302,14 @@ export async function getOrganizationForViewer(
     // neither does an account outside the exchange.
     visibleAllBenchmarking = [];
     visibleBenchmarking = null;
+    benchmarkingIsUnreleased = false;
     if (viewerInExchange && decision.show === "none") {
       benchmarkingWithheldReason = decision.reason;
     }
   } else {
     if (decision.show === "aggregate") {
       visibleBenchmarking = null;
+      benchmarkingIsUnreleased = false;
       benchmarkingWithheldReason = decision.reason;
     }
 
@@ -305,6 +360,10 @@ export async function getOrganizationForViewer(
     contacts: visibleContacts,
     brandColors: visibleBrandColors,
     benchmarking: visibleBenchmarking,
+    benchmarkingIsUnreleased,
+    benchmarkingYears: (raw.benchmarkingYears ?? []).filter(
+      (y) => y.released || maySeeUnreleased,
+    ),
     allBenchmarking: visibleAllBenchmarking,
     benchmarkingWithheldReason,
   };
