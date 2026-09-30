@@ -22,6 +22,8 @@ interface Store {
   isBeta: boolean;
   invited: boolean;
   participatedLastYear: boolean;
+  /** Somebody at this store holds benchmarking.beta_tester. */
+  hasBetaTester: boolean;
 }
 
 export default function BetaCohort({ stores }: { stores: Store[] }) {
@@ -73,6 +75,23 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
         the whole membership sees it.
       </p>
 
+      {inCohort.some((s) => !s.hasBetaTester) && (
+        <div className="mb-4 rounded-lg border-l-4 border-red-500 bg-red-50 p-3">
+          <p className="text-sm font-semibold text-red-900">
+            Some of these stores cannot open the survey yet
+          </p>
+          <p className="mt-1 text-xs text-red-900">
+            Being in the cohort decides who gets the going-first email. Opening the
+            survey before it is public is a separate appointment, made on the{" "}
+            <a href="/benchmarking/admin" className="underline">
+              benchmarking admin page
+            </a>{" "}
+            under Beta tester. Send without it and they get a link to a locked door. The
+            send panel below will refuse those stores until somebody is appointed.
+          </p>
+        </div>
+      )}
+
       {inCohort.length > 0 ? (
         <ul className="mb-5 space-y-2">
           {inCohort.map((s) => (
@@ -87,6 +106,17 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
                 <span className="text-xs text-gray-400">{s.province}</span>
                 {/* An invited store cannot be un-invited by unticking it, and
                     saying so here is cheaper than explaining it afterwards. */}
+                {/*
+                  ⛔ The half the operator cannot see from here otherwise.
+                  Flagging a store and appointing a person are two acts on two
+                  pages; without this, sending the invitation mails a link to a
+                  door that will not open.
+                */}
+                {!s.hasBetaTester && (
+                  <span className="rounded bg-red-50 px-1.5 py-0.5 text-xs font-medium text-red-700">
+                    Nobody appointed
+                  </span>
+                )}
                 {s.invited && (
                   <span className="rounded bg-amber-50 px-1.5 py-0.5 text-xs font-medium text-amber-700">
                     Already invited

@@ -105,3 +105,95 @@ export async function loadMyIssues(benchmarkingId: string): Promise<IssueReport[
     createdAt: (r.created_at as string) ?? "",
   }));
 }
+
+
+// ── The committee's side ────────────────────────────────────────────────────
+
+export interface AdminIssue extends IssueReport {
+  organizationId: string;
+  organizationName: string;
+  fiscalYear: number;
+  reporterName: string | null;
+  resolution: string | null;
+}
+
+/**
+ * Everything respondents have reported, newest first.
+ *
+ * ⛔ Includes the reports a store made about a submission nobody has released.
+ * The quarantine is a rule about members reading each other's figures, not
+ * about the committee reading a complaint addressed to it.
+ */
+export async function loadIssuesForAdmin(fiscalYear?: number): Promise<AdminIssue[]> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)) return [];
+
+  const db = createAdminClient();
+  let q = db
+    .from("benchmarking_issues")
+    .select(
+      "id, organization_id, fiscal_year, section_id, field_name, body, status, resolution, created_at, reported_by, organizations(name)",
+    )
+    .order("created_at", { ascending: false });
+  if (typeof fiscalYear === "number") q = q.eq("fiscal_year", fiscalYear);
+
+  const { data } = await q;
+  const rows = (data ?? []) as unknown as Record<string, unknown>[];
+
+  /*
+    Reporter names in one query rather than a join. benchmarking_issues.reported_by
+    points at auth, which has no foreign key into contacts — a PostgREST embed
+    would fail rather than come back thin.
+  */
+  const ids = [...new Set(rows.map((r) => r.reported_by as string).filter(Boolean))];
+  const names = new Map<string, string>();
+  if (ids.length > 0) {
+    const { data: people } = await db
+      .from("contacts")
+      .select("profile_id, name")
+      .in("profile_id", ids);
+    for (const p of people ?? []) {
+      names.set(p.profile_id as string, (p.name as string) ?? "");
+    }
+  }
+
+  return rows.map((r) => ({
+    id: r.id as string,
+    organizationId: r.organization_id as string,
+    organizationName:
+      ((r.organizations as { name?: string } | null)?.name as string) ?? "Unknown store",
+    fiscalYear: r.fiscal_year as number,
+    sectionId: (r.section_id as string | null) ?? null,
+    fieldName: (r.field_name as string | null) ?? null,
+    body: (r.body as string) ?? "",
+    status: (r.status as string) ?? "open",
+    resolution: (r.resolution as string | null) ?? null,
+    reporterName: names.get(r.reported_by as string) ?? null,
+    createdAt: (r.created_at as string) ?? "",
+  }));
+}
+
+export async function decideIssue(input: {
+  issueId: string;
+  status: "open" | "acknowledged" | "fixed" | "not_a_problem";
+  resolution?: string;
+}): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok || !isGlobalAdmin(auth.ctx.globalRole)) {
+    return { success: false, error: "Not your call." };
+  }
+
+  const db = createAdminClient();
+  const { error } = await db
+    .from("benchmarking_issues")
+    .update({
+      status: input.status,
+      resolution: input.resolution?.trim() || null,
+      resolved_by: input.status === "open" ? null : auth.ctx.userId,
+      resolved_at: input.status === "open" ? null : new Date().toISOString(),
+    })
+    .eq("id", input.issueId);
+
+  if (error) return { success: false, error: "Could not save that." };
+  return { success: true };
+}
