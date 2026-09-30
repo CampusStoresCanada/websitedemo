@@ -121,9 +121,9 @@ export async function loadOtherIncome(benchmarkingId: string): Promise<OtherInco
  */
 export async function seedServiceIncome(
   benchmarkingId: string,
-): Promise<{ success: boolean; added: number }> {
+): Promise<{ success: boolean; added: number; rows: OtherIncomeRow[] }> {
   const g = await guard(benchmarkingId);
-  if (!g.ok) return { success: false, added: 0 };
+  if (!g.ok) return { success: false, added: 0, rows: [] };
 
   const db = createAdminClient();
   const [{ data: row }, { data: existing }] = await Promise.all([
@@ -143,7 +143,9 @@ export async function seedServiceIncome(
 
   const have = new Set((existing ?? []).map((e) => e.service_name as string));
   const missing = offered.filter((s) => !have.has(s));
-  if (missing.length === 0) return { success: true, added: 0 };
+  if (missing.length === 0) {
+    return { success: true, added: 0, rows: await loadOtherIncome(benchmarkingId) };
+  }
 
   const { count } = await db
     .from("benchmarking_other_income")
@@ -159,7 +161,9 @@ export async function seedServiceIncome(
       position: (count ?? 0) + i,
     })),
   );
-  return { success: true, added: missing.length };
+
+  // ⛔ The whole list, for the same reason as seedStaffFromContacts.
+  return { success: true, added: missing.length, rows: await loadOtherIncome(benchmarkingId) };
 }
 
 export async function addOtherIncome(input: {
@@ -350,9 +354,9 @@ export async function loadStaff(benchmarkingId: string): Promise<StaffRow[]> {
  */
 export async function seedStaffFromContacts(
   benchmarkingId: string,
-): Promise<{ success: boolean; added: number }> {
+): Promise<{ success: boolean; added: number; rows: StaffRow[] }> {
   const g = await guard(benchmarkingId);
-  if (!g.ok) return { success: false, added: 0 };
+  if (!g.ok) return { success: false, added: 0, rows: [] };
 
   const db = createAdminClient();
   const [{ data: contacts }, { data: existing }] = await Promise.all([
@@ -385,9 +389,23 @@ export async function seedStaffFromContacts(
     });
   }
 
-  if (rows.length === 0) return { success: true, added: 0 };
-  await db.from("benchmarking_staff").insert(rows);
-  return { success: true, added: rows.length };
+  /*
+    ⛔ Returns the WHOLE roster, not just what this call inserted.
+
+    React mounts an effect twice in development, and the two calls raced: the
+    first inserted the rows and had its result thrown away by the unmount
+    cleanup, and the second found nothing left to insert and returned an empty
+    list. Five people sat in the database with an empty list on screen. Reading
+    back the current state makes the call idempotent, so it does not matter
+    which of them wins.
+  */
+  if (rows.length > 0) await db.from("benchmarking_staff").insert(rows);
+
+  return {
+    success: true,
+    added: rows.length,
+    rows: await loadStaff(benchmarkingId),
+  };
 }
 
 export async function addStaff(input: {

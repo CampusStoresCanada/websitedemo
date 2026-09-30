@@ -53,7 +53,10 @@ export default function OtherIncomeEditor({
     if (isReadOnly) return;
     let cancelled = false;
     void seedServiceIncome(benchmarkingId).then((r) => {
-      if (!cancelled && r.added > 0) window.location.reload();
+      // ⛔ Never a page reload. Saves in this form are debounced by 800ms, so
+      // reloading to reveal seeded rows can discard the figure somebody just
+      // typed in another section.
+      if (!cancelled && r.rows.length > 0) setRows(r.rows);
     });
     return () => {
       cancelled = true;

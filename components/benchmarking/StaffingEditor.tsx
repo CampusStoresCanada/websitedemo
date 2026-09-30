@@ -38,7 +38,10 @@ export default function StaffingEditor({
     if (isReadOnly || initialStaff.length > 0) return;
     let cancelled = false;
     void seedStaffFromContacts(benchmarkingId).then((r) => {
-      if (!cancelled && r.added > 0) window.location.reload();
+      // ⛔ Never a page reload. Saves in this form are debounced by 800ms, so
+      // reloading to reveal seeded rows can discard the figure somebody just
+      // typed in another section.
+      if (!cancelled && r.rows.length > 0) setStaff(r.rows);
     });
     return () => {
       cancelled = true;
