@@ -25,6 +25,7 @@ import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
 import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
+import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
@@ -61,6 +62,8 @@ interface BenchmarkingSurveyFormProps {
   locations?: SurveyLocation[];
   /** Section 1 answers that live on the organisation, not the submission. */
   keyDates?: KeyDate[];
+  /** Dates already on the organisation's profile, offered for adoption. */
+  profileKeyDates?: { title: string; date: string }[];
   logos?: { logoUrl: string | null; logoHorizontalUrl: string | null; confirmedAt: string | null };
   /** §2 and §3, both category-driven. */
   gmCategories?: SurveyCategory[];
@@ -87,6 +90,7 @@ export default function BenchmarkingSurveyForm({
   storeContacts = [],
   locations = [],
   keyDates = [],
+  profileKeyDates = [],
   logos,
   gmCategories = [],
   cmCategories = [],
@@ -181,16 +185,29 @@ export default function BenchmarkingSurveyForm({
       setReviewingAll(false);
       setActiveSection(idx);
       setHighlightField(field ?? null);
-      requestAnimationFrame(() => {
-        if (field) {
-          const el = document.getElementById(`field-${field}`);
-          if (el) {
-            el.scrollIntoView({ behavior: "smooth", block: "center" });
+
+      /*
+        One scroll, after the new section has actually rendered.
+
+        Both scrolls used to fire inside a single animation frame: the section
+        top went first and the field second, and because `smooth` scrolling is
+        asynchronous the browser simply abandoned the second one. The field was
+        the target that mattered and it was the one that lost, every time.
+
+        Two frames, because the first only guarantees React has committed the
+        state change, not that the new section's DOM is laid out — and an
+        element with no layout scrolls to the wrong place.
+      */
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => {
+          const target = field ? document.getElementById(`field-${field}`) : null;
+          if (target) {
+            target.scrollIntoView({ behavior: "smooth", block: "center" });
             return;
           }
-        }
-        formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
+          formTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }),
+      );
     },
     [],
   );
@@ -358,6 +375,21 @@ export default function BenchmarkingSurveyForm({
     return out;
   }, [sections, formData]);
 
+  /*
+    Clear the complaint as soon as it stops being true.
+
+    The error and the amber ring used to persist until the next submit, so a
+    store would fill in the box it had been sent to and still be looking at a
+    message telling it the box was empty. missingRequired is already derived
+    from formData, so watching it is enough.
+  */
+  useEffect(() => {
+    if (highlightField && !missingRequired.some((m) => m.field === highlightField)) {
+      setHighlightField(null);
+    }
+    if (submitError && missingRequired.length === 0) setSubmitError(null);
+  }, [missingRequired, highlightField, submitError]);
+
   const handleSubmit = async () => {
     // Take them to the first gap rather than naming it and leaving them to
     // hunt: the survey is ten sections long and the name of a field is not a
@@ -508,8 +540,8 @@ export default function BenchmarkingSurveyForm({
       </div>
 
       {/* Section Navigation */}
-      <div ref={formTopRef} className="mb-6 scroll-mt-24 border-b border-gray-200">
-        <nav className="flex overflow-x-auto -mb-px" aria-label="Survey sections">
+      <div ref={formTopRef} className="mb-6 flex scroll-mt-24 items-stretch gap-3 border-b border-gray-200">
+        <nav className="flex flex-1 overflow-x-auto -mb-px" aria-label="Survey sections">
           {sections.map((section, idx) => (
             <button
               key={section.id}
@@ -523,19 +555,28 @@ export default function BenchmarkingSurveyForm({
               {section.order}. {section.title}
             </button>
           ))}
-          {!isSubmitted && (
-            <button
-              onClick={openReview}
-              className={`ml-auto whitespace-nowrap px-4 py-3 border-b-2 text-sm font-medium transition-colors ${
-                reviewingAll
-                  ? "border-[#EE2A2E] text-[#EE2A2E]"
-                  : "border-transparent text-gray-500 hover:border-gray-300 hover:text-gray-700"
-              }`}
-            >
-              Review all answers
-            </button>
-          )}
         </nav>
+        {/*
+          Outside the scrolling list on purpose. Inside it, ten section tabs
+          pushed this off the right-hand edge and the only way to find the
+          review was to scroll a nav bar nobody scrolls.
+
+          Shown after submitting too. Reading back what you filed is the most
+          obvious thing to want once it is in, and hiding the only whole-survey
+          view the moment it becomes a record made no sense.
+        */}
+        {(
+          <button
+            onClick={openReview}
+            className={`-mb-px shrink-0 self-end whitespace-nowrap border-b-2 px-4 py-3 text-sm font-semibold transition-colors ${
+              reviewingAll
+                ? "border-[#EE2A2E] text-[#EE2A2E]"
+                : "border-transparent text-[#163D6D] hover:border-[#163D6D]"
+            }`}
+          >
+            {isSubmitted ? "Read back what you filed" : "Review all answers"}
+          </button>
+        )}
       </div>
 
       {/*
@@ -582,6 +623,17 @@ export default function BenchmarkingSurveyForm({
           <ReviewAllAnswers
             config={config}
             formData={formData}
+            lists={{
+              gmCategories,
+              cmCategories,
+              otherIncome,
+              otherExpenses,
+              staff,
+              competitors,
+              locations,
+              keyDates,
+            }}
+            onJumpToSection={jumpToSection}
             onJumpToField={(sectionId, fieldName) => {
               const idx = sections.findIndex((x) => x.id === sectionId);
               if (idx >= 0) goToSection(idx, fieldName);
@@ -615,6 +667,7 @@ export default function BenchmarkingSurveyForm({
               beforeFields={
                 sections[activeSection]?.id === "general_merchandise" ? (
                   <CategorySales
+                    key="general_merchandise"
                     benchmarkingId={benchmarkingId}
                     scope="general_merchandise"
                     initialCategories={gmCategories}
@@ -623,7 +676,15 @@ export default function BenchmarkingSurveyForm({
                     isReadOnly={isReadOnly}
                   />
                 ) : sections[activeSection]?.id === "course_materials" ? (
+                  /*
+                    Keyed, or §3 opens showing §2's categories until a reload.
+                    Both branches render CategorySales at the same position in
+                    the tree, so React reuses the instance and its
+                    useState(initialCategories) — set once, on first mount —
+                    keeps §2's list.
+                  */
                   <CategorySales
+                    key="course_materials"
                     benchmarkingId={benchmarkingId}
                     scope="course_materials"
                     initialCategories={cmCategories}
@@ -654,6 +715,7 @@ export default function BenchmarkingSurveyForm({
             {sections[activeSection]?.id === "technology_systems" &&
               isInternalSocialAnswer(formData.social_media_run_by) && (
                 <SocialOwner
+                  benchmarkingId={benchmarkingId}
                   contacts={storeContacts}
                   value={
                     typeof formData.social_media_run_by_contact_id === "string"
@@ -664,6 +726,14 @@ export default function BenchmarkingSurveyForm({
                   isReadOnly={isReadOnly}
                 />
               )}
+            {/* §6 — pay as a grid, so benefits sit beside the wages they go with. */}
+            {sections[activeSection]?.id === "staffing" && (
+              <WagesAndBenefits
+                formData={formData}
+                onFieldChange={handleFieldChange}
+                isReadOnly={isReadOnly}
+              />
+            )}
             {/* §6 — the team, not just the headcount above it. */}
             {sections[activeSection]?.id === "staffing" && (
               <StaffingEditor
@@ -711,6 +781,7 @@ export default function BenchmarkingSurveyForm({
                       ? formData.inventory_count_style
                       : null
                   }
+                  profileSuggestions={profileKeyDates}
                 />
                 <CompetitorsEditor
                   benchmarkingId={benchmarkingId}
@@ -751,7 +822,23 @@ export default function BenchmarkingSurveyForm({
         </button>
 
         <div className="flex items-center gap-3">
-          {activeSection < sections.length - 1 ? (
+          {reviewingAll ? (
+            /*
+              The only place Submit lives. Reviewing is not submitting, and the
+              old flow put the two on the same button at the end of §10 — so the
+              last thing a store did before filing was answer a question about
+              Inclusive Access, not read back what it had said.
+            */
+            !isSubmitted && (
+              <button
+                onClick={handleSubmit}
+                disabled={isSubmitting}
+                className="px-8 py-2.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327] disabled:opacity-50"
+              >
+                {isSubmitting ? "Submitting..." : "Submit Survey"}
+              </button>
+            )
+          ) : activeSection < sections.length - 1 ? (
             <button
               onClick={() => goToSection(Math.min(sections.length - 1, activeSection + 1))}
               className="px-6 py-2 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327]"
@@ -760,11 +847,10 @@ export default function BenchmarkingSurveyForm({
             </button>
           ) : !isSubmitted ? (
             <button
-              onClick={handleSubmit}
-              disabled={isSubmitting}
-              className="px-8 py-2.5 text-sm font-medium text-white bg-[#EE2A2E] rounded-lg hover:bg-[#D92327] disabled:opacity-50"
+              onClick={openReview}
+              className="px-8 py-2.5 text-sm font-medium text-white bg-[#163D6D] rounded-lg hover:bg-[#12325a]"
             >
-              {isSubmitting ? "Submitting..." : "Submit Survey"}
+              Review your answers
             </button>
           ) : null}
         </div>

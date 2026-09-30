@@ -95,6 +95,97 @@ export interface SetRespondentResult {
  * should not carry the right to manage the store's users, billing or listings
  * for the rest of time.
  */
+
+/**
+ * Add a person to the store's contacts.
+ *
+ * ⛔ One writer, called by every part of the survey that can add somebody: the
+ * respondent picker and the social owner both reach it, so a person added in
+ * either place is the same kind of record. Two inserts against `contacts` would
+ * be two chances to set different columns for the same act.
+ *
+ * ⛔ No directory_visibility is set. Consent to be listed is per person and is
+ * theirs to give; being named as the person who compiled a survey, or who runs
+ * the store's Instagram, is not consent to appear anywhere public.
+ */
+async function insertStoreContact(
+  db: ReturnType<typeof createAdminClient>,
+  organizationId: string,
+  person: { name: string; email: string; roleTitle?: string; phone?: string },
+): Promise<string | null> {
+  const { data, error } = await db
+    .from("contacts")
+    .insert({
+      organization_id: organizationId,
+      name: person.name.trim(),
+      work_email: person.email.trim(),
+      role_title: person.roleTitle?.trim() || null,
+      work_phone_number: person.phone?.trim() || null,
+    })
+    .select("id")
+    .single();
+
+  if (error || !data) {
+    console.error("[benchmarking] create store contact:", error);
+    return null;
+  }
+  return data.id as string;
+}
+
+/**
+ * Add somebody to the store, outside the respondent flow.
+ *
+ * Exists so §9 can name the person who runs social without sending the reader
+ * back to §1 to create them first. A survey that makes you leave the question
+ * to answer the question is a survey people abandon at that question.
+ */
+export async function addStoreContact(input: {
+  benchmarkingId: string;
+  name: string;
+  email: string;
+  roleTitle?: string;
+}): Promise<{ success: boolean; error?: string; contact?: StoreContact }> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return { success: false, error: auth.error };
+
+  const db = createAdminClient();
+  const { data: row } = await db
+    .from("benchmarking")
+    .select("organization_id, status")
+    .eq("id", input.benchmarkingId)
+    .maybeSingle();
+  if (!row) return { success: false, error: "Submission not found." };
+  if (row.status === "submitted") {
+    return { success: false, error: "This submission is already in. Choose Amend first." };
+  }
+
+  const name = input.name.trim();
+  const email = input.email.trim();
+  if (!name || !email) return { success: false, error: "A new person needs a name and an email." };
+
+  const id = await insertStoreContact(db, row.organization_id as string, {
+    name,
+    email,
+    roleTitle: input.roleTitle,
+  });
+  if (!id) return { success: false, error: "Could not add that person." };
+
+  return {
+    success: true,
+    contact: {
+      id,
+      name,
+      email,
+      roleTitle: input.roleTitle?.trim() || null,
+      phone: null,
+      isYou: false,
+      // A contact is a record of a person, not an account. Provisioning a login
+      // is the respondent flow's job, and only when the store asks for it.
+      hasLogin: false,
+    },
+  };
+}
+
 export async function setRespondent(input: {
   benchmarkingId: string;
   contactId: string | null;
@@ -143,31 +234,14 @@ export async function setRespondent(input: {
       return { success: false, error: "A new person needs a name and an email." };
     }
 
-    /*
-      A real contact on the store, not a survey-local scribble — it is the same
-      record the directory, the conference and next year's survey will use.
-
-      ⛔ No directory_visibility is set. Consent to be listed is per person and
-      is theirs to give; being named as the person who compiled a survey is not
-      consent to appear anywhere public.
-    */
-    const { data: created, error: createErr } = await db
-      .from("contacts")
-      .insert({
-        organization_id: row.organization_id as string,
-        name,
-        work_email: email,
-        role_title: input.newContact.roleTitle?.trim() || null,
-        work_phone_number: input.newContact.phone?.trim() || null,
-      })
-      .select("id")
-      .single();
-
-    if (createErr || !created) {
-      console.error("[benchmarking] create respondent contact:", createErr);
-      return { success: false, error: "Could not add that person." };
-    }
-    contactId = created.id as string;
+    const created = await insertStoreContact(db, row.organization_id as string, {
+      name,
+      email,
+      roleTitle: input.newContact.roleTitle,
+      phone: input.newContact.phone,
+    });
+    if (!created) return { success: false, error: "Could not add that person." };
+    contactId = created;
     createdContactId = contactId;
   }
 

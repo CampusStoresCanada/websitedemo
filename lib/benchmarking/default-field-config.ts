@@ -168,7 +168,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           required: true,
           group: "Who to contact about this submission",
           helpText:
-            "The person who actually pulled these numbers together. Often not the account holder — if a colleague did the work, put their name here so a question in November reaches them and not you.",
+            "The person who actually pulled these numbers together. Often not the account holder. If a colleague did the work, put their name here so a question in November reaches them and not you.",
         },
         {
           name: "respondent_title",
@@ -318,7 +318,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           row: "fiscal_year_end",
           rowLabel: "Fiscal Year End",
           rowHelpText:
-            "The day your fiscal year closes. Asked as two lists rather than a text box, because free text gives us \"Apr 30\", \"04/30\" and \"April 30th\" for the same date — and pairing consecutive year-ends is exactly what inventory turns and GMROI depend on.",
+            "The day your fiscal year closes. Asked as two lists rather than a text box, because free text gives us \"Apr 30\", \"04/30\" and \"April 30th\" for the same date, and pairing consecutive year-ends is exactly what inventory turns and GMROI depend on.",
           order: 10,
           visible: true,
           options: [
@@ -364,7 +364,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Do you buy books back from students?",
           type: "boolean",
           helpText:
-            "If you do, add each buyback window to Your year ahead below — the dates matter as much as the fact.",
+            "If you do, add each buyback window to Your year ahead below. The dates matter as much as the fact.",
           order: 10.4,
           visible: true,
         },
@@ -423,7 +423,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Total Store Space",
           type: "number",
           helpText:
-            "Everything above, added up. We work it out from your breakdown rather than asking twice — asking for both is how a total and its parts end up disagreeing.",
+            "Everything above, added up. We work it out from your breakdown rather than asking twice, because asking for both is how a total and its parts end up disagreeing.",
           order: 15,
           visible: false,
           group: "Square Footage Breakdown",
@@ -463,11 +463,21 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Who are they?",
           type: "text",
           helpText:
-            "Names, or just what they are — a student union shop, a campus convenience store, a chain bookstore nearby.",
+            "Names, or just what they are: a student union shop, a campus convenience store, a chain bookstore nearby.",
           order: 61,
           visible: false,
           indent: true,
           group: "Your market",
+        },
+        {
+          name: "total_transaction_count",
+          label: "Total transactions",
+          type: "integer",
+          helpText:
+            "Across every till and the webstore, for the whole store, not course materials alone. With your total sales this gives an average basket, the figure most stores ask us for first.",
+          order: 62,
+          visible: true,
+          group: "Your year",
         },
       ],
     },
@@ -599,7 +609,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Custom / Licensed Merchandise",
           type: "currency",
           helpText:
-            "Institution-branded merchandise that is not apparel, gifts or drinkware — pennants, decals, regalia and the like.",
+            "Institution-branded merchandise that is not apparel, gifts or drinkware: pennants, decals, regalia and the like.",
           order: 12,
           visible: false,
           group: "Product Categories",
@@ -757,7 +767,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           // EXCEPT books, and both misreadings come from it not looking like the
           // rest of the list it sits in.
           helpText:
-            "Course materials supplied through your Inclusive Access or Equitable Access programme. One more channel in this list — the same question asked of print, rentals and digital, asked of IA/EA. Course materials only: general merchandise bundled into the programme goes in General Merchandise. Leave blank if you do not run one.",
+            "Course materials supplied through your Inclusive Access or Equitable Access programme. One more channel in this list: the same question asked of print, rentals and digital, asked of IA/EA. Course materials only: general merchandise bundled into the programme goes in General Merchandise. Leave blank if you do not run one.",
           reviewerNote:
             "Rewritten 2026-09. This used to say it was 'the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAMME CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
           order: 11,
@@ -857,22 +867,13 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Sell-through on physical course materials",
           type: "percentage",
           helpText:
-            "Of the physical course materials you brought in for the year, the share that sold before you returned or wrote off the rest. Print only — digital and Inclusive Access are asked separately.",
+            "By UNITS, not by dollars: of every physical copy you brought in for the year, the share that sold before you returned or wrote off the rest. Units rather than dollars because a store that discounts its returns would otherwise look like it sold more than it did. Print only, since digital and Inclusive Access have no copies to count.",
           order: 500,
           visible: true,
           suffix: "%",
           group: "How the year ran",
         },
-        {
-          name: "total_transaction_count",
-          label: "Total transactions",
-          type: "integer",
-          helpText:
-            "Across every till and the webstore. With sales, this gives an average basket — the figure most stores ask us for first.",
-          order: 510,
-          visible: true,
-          group: "How the year ran",
-        },
+
         {
           name: "tracks_adoptions",
           label: "Do you track faculty adoptions?",
@@ -1151,40 +1152,6 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           group: "Headcount",
         },
         {
-          name: "wages_full_time",
-          label: "Full-time wages",
-          type: "currency",
-          order: 10,
-          visible: true,
-          group: "What it costs",
-        },
-        {
-          name: "wages_part_time",
-          label: "Part-time wages",
-          type: "currency",
-          order: 11,
-          visible: true,
-          group: "What it costs",
-        },
-        {
-          name: "wages_seasonal",
-          label: "Seasonal wages",
-          type: "currency",
-          order: 12,
-          visible: true,
-          group: "What it costs",
-        },
-        {
-          name: "wages_student",
-          label: "Student wages",
-          type: "currency",
-          helpText:
-            "Wages only. Whether this also counts toward your campus contribution is the question under it.",
-          order: 13,
-          visible: true,
-          group: "What it costs",
-        },
-        {
           /*
             The single largest reason two identical stores show different staff
             costs, and nothing in the old survey could see it. Some institutions
@@ -1204,12 +1171,47 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
             "Staff are not eligible for benefits",
           ],
           helpText:
-            "The wage lines above are wages only. This asks where the benefit cost lands, so your staff cost can be compared with a store whose institution handles it differently.",
-          order: 14,
+            "Asked before the pay figures because it decides what we ask for. Say your store pays some and a benefits column appears beside the wages below; say your institution carries them and we do not ask for numbers you do not have.",
+          order: 9,
           visible: true,
           allowOther: true,
           group: "What it costs",
         },
+        {
+          name: "wages_full_time",
+          label: "Full-time wages",
+          type: "currency",
+          order: 10,
+          visible: false,
+          group: "What it costs",
+        },
+        {
+          name: "wages_part_time",
+          label: "Part-time wages",
+          type: "currency",
+          order: 11,
+          visible: false,
+          group: "What it costs",
+        },
+        {
+          name: "wages_seasonal",
+          label: "Seasonal wages",
+          type: "currency",
+          order: 12,
+          visible: false,
+          group: "What it costs",
+        },
+        {
+          name: "wages_student",
+          label: "Student wages",
+          type: "currency",
+          helpText:
+            "Wages only. Whether this also counts toward your campus contribution is the question under it.",
+          order: 13,
+          visible: false,
+          group: "What it costs",
+        },
+
         {
           name: "benefits_total",
           label: "Benefits the store pays",
@@ -1217,7 +1219,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           helpText:
             "One total across everybody, not split by employment type. Include the employer's share of payroll taxes if your store carries it.",
           order: 15,
-          visible: true,
+          visible: false,
           indent: true,
           showIf: {
             field: "benefits_paid_by",
@@ -1230,7 +1232,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Count student wages toward your campus contribution?",
           type: "boolean",
           helpText:
-            "Most stores do — employing students is one of the clearest ways a store gives back. Some treat it as an ordinary staffing cost because the work would be done either way. Your call: we will use whichever you choose and say which we used.",
+            "Most stores do, because employing students is one of the clearest ways a store gives back. Some treat it as an ordinary staffing cost because the work would be done either way. Your call: we will use whichever you choose and say which we used.",
           order: 16,
           visible: true,
           indent: true,
@@ -1410,7 +1412,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
       id: "review_financials",
       title: "Review",
       description:
-        "Everything you have entered, as one statement. Nothing here is typed in — every line is built from your answers, so hover a line to see where it came from, or click it to go back and change it.",
+        "Everything you have entered, as one statement. Nothing here is typed in. Every line is built from your answers, so hover a line to see where it came from, or click it to go back and change it.",
       order: 8,
       fields: [
         {
@@ -1444,7 +1446,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
       id: "technology_systems",
       title: "Technology & Systems",
       description:
-        "Select all that apply — a store mid-migration genuinely runs two, and the old single-answer version made it pick one. Picked from lists rather than typed, because free text gave us NetSuite and Oracle Netsuite as two systems and Prism three ways, which made a question about what the sector runs on unanswerable. If yours is missing, type it in the box under the list and press Enter.",
+        "Select all that apply. A store mid-migration genuinely runs two, and the old single-answer version made it pick one. Picked from lists rather than typed, because free text gave us NetSuite and Oracle Netsuite as two systems and Prism three ways, which made a question about what the sector runs on unanswerable. If yours is missing, type it in the box under the list and press Enter.",
       order: 9,
       fields: [
         {
@@ -1507,6 +1509,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "payment_options",
           label: "How can a customer pay?",
           type: "multiselect",
+          helpText:
+            "Tap to pay on mobile means Apple Pay, Google Pay and the like: the phone or watch itself as the card. A contactless plastic card is just Debit or Credit, so tick those instead. Buy now, pay later means Afterpay, Klarna, Sezzle and so on.",
           options: [
             "Cash",
             "Debit",
@@ -1596,6 +1600,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
     {
       id: "inclusive_access",
       title: "Inclusive & Equitable Access",
+      description:
+        "Two different things get asked here and they are easy to run together, so they are in separate blocks below. The money block is about who takes the student's payment. The materials block is about who actually supplies the books. A store can collect every dollar and supply none of the materials, or supply all of them and never see a dollar.",
       order: 10,
       fields: [
         {
@@ -1605,7 +1611,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 1,
           visible: true,
           options: ["Inclusive Access", "Equitable Access", "Both", "Neither"],
-          helpText: "If you run neither, nothing else in this section applies.",
+          helpText: "If you run neither, nothing else in this section applies and the rest of it disappears.",
           allowOther: true,
         },
         {
@@ -1625,18 +1631,14 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "ia_ea_enrolment_model",
           label: "Is it opt-in or opt-out?",
           type: "select",
-          order: 2,
-          visible: true,
           options: ["Opt-in", "Opt-out"],
           helpText: "Whether a student is in the programme by default, or has to choose it.",
+          order: 2,
+          visible: true,
           allowOther: true,
+          showIf: { field: "ia_ea_program_type", value: ["Inclusive Access", "Equitable Access", "Both"] },
         },
         {
-          /*
-            Replaced by the type-and-Enter box on the question above, which
-            stores what the store typed as the answer itself. Kept hidden so
-            any 2025 value already in this column is still readable.
-          */
           name: "ia_ea_enrolment_model_other",
           label: "Describe how students join or leave",
           type: "text",
@@ -1651,13 +1653,14 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           order: 3,
           visible: true,
           options: ["In house", "The institution", "A third party", "Other"],
+          showIf: { field: "ia_ea_program_type", value: ["Inclusive Access", "Equitable Access", "Both"] },
         },
         {
           name: "ia_ea_operated_by_other",
           label: "Who, and how does that work?",
           type: "text",
           helpText:
-            "Name the third party if one runs it. If it is some other arrangement, describe it — a shared service between campuses, a consortium, a faculty-run programme.",
+            "Name the third party if one runs it. If it is some other arrangement, describe it: a shared service between campuses, a consortium, a faculty-run programme.",
           order: 3.1,
           visible: true,
           indent: true,
@@ -1667,66 +1670,85 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           name: "ia_ea_software",
           label: "What software delivers it?",
           type: "text",
+          helpText: "The platform students actually receive their materials through.",
           order: 4,
           visible: true,
-          helpText: "The platform students actually receive their materials through.",
+          showIf: { field: "ia_ea_program_type", value: ["Inclusive Access", "Equitable Access", "Both"] },
         },
-        {
-          name: "ia_ea_collection_model",
-          label: "Do you collect the sales, or do they flow through student fees?",
-          type: "select",
-          order: 5,
-          visible: true,
-          options: ["We collect the sales", "It flows through student fees"],
-          helpText: "Who takes the student's money. This is about the mechanism, not the amount.",
-          allowOther: true,
-        },
+
         {
           /*
-            Replaced by the type-and-Enter box on the question above, which
-            stores what the store typed as the answer itself. Kept hidden so
-            any 2025 value already in this column is still readable.
+            ⛔ The money question and the materials question below it were read
+            as one question asked twice, by the person who commissioned them.
+            They are not: one is about whose bank account the student's payment
+            lands in, the other about whose warehouse the book leaves. Grouped
+            and captioned so the difference is structural rather than buried in
+            help text.
           */
+          name: "ia_ea_collection_model",
+          label: "Who takes the student's payment?",
+          type: "select",
+          options: ["We collect the sales", "It flows through student fees"],
+          helpText:
+            "Whether the money lands in your till or on the student's fee statement. Nothing here is about who supplies the books, which is the next block.",
+          order: 5,
+          visible: true,
+          allowOther: true,
+          group: "The money",
+          showIf: { field: "ia_ea_program_type", value: ["Inclusive Access", "Equitable Access", "Both"] },
+        },
+        {
           name: "ia_ea_collection_model_other",
           label: "Describe how the money reaches you",
           type: "text",
           order: 5.1,
           visible: false,
           indent: true,
+          group: "The money",
         },
         {
           name: "ia_ea_institution_amount",
-          label: "How much did the institution collect?",
+          label: "How much did the institution collect on your behalf?",
           type: "currency",
+          helpText:
+            "The fee revenue for the programme, in dollars, where it went onto student fee statements and never appeared on your financial statements. Asked here because it is not your revenue in the ordinary sense, and every other section of this survey deliberately excludes it.",
           order: 6,
           visible: true,
-          helpText: "The programme's value where the money never came through your books. Asked here because it is not your revenue in any ordinary sense, and your other sections deliberately exclude it.",
+          indent: true,
+          group: "The money",
           showIf: { field: "ia_ea_collection_model", value: "It flows through student fees" },
         },
         {
           name: "ia_ea_count_as_revenue",
-          label: "For comparison, should we count this as part of your revenue?",
+          label: "For comparison, should we count that as part of your revenue?",
           type: "boolean",
+          helpText:
+            "Your call, not ours. Counting it shows the scale of what you handle; leaving it out compares your books with everyone else's. We will use whichever you choose and say which we used.",
           order: 7,
           visible: true,
-          helpText: "Your call, not ours. Counting it shows the scale of what you handle; leaving it out compares your books with everyone else's. We will use whichever you choose and say which we used.",
+          indent: true,
+          group: "The money",
           showIf: { field: "ia_ea_collection_model", value: "It flows through student fees" },
         },
+
         {
           /*
-            Asked here, in the section that already establishes what the
-            programme is — three sections away from the sales figures, because
-            the two numbers are about different things and stores kept reading
-            them as the same question asked twice.
+            Fulfilment, not money. A store can collect every dollar of an IA
+            programme and still supply none of the books, because the institution
+            contracted the publisher or the platform directly for some courses.
+            That store looks like it runs a large programme and carries almost no
+            inventory for it, and nothing else in the survey would show why.
           */
           name: "ia_ea_booked_outside_pct",
-          label: "How much of the programme is booked through something that is not the bookstore?",
+          label: "What share of the programme's materials does someone other than your store supply?",
           type: "percentage",
           helpText:
-            "By value. If every title flows through your system, this is zero. If the institution buys direct from a publisher for some courses, that share belongs here.",
+            "By value of the materials, not by the money. Zero if every title in the programme is ordered, received and issued through your store, whoever took the payment. Above zero if the institution or the platform gets some titles to students without them ever passing through you, which usually means a direct deal with a publisher for particular courses.",
           order: 8,
           visible: true,
           suffix: "%",
+          group: "The materials",
+          showIf: { field: "ia_ea_program_type", value: ["Inclusive Access", "Equitable Access", "Both"] },
         },
       ],
     },

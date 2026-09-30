@@ -212,14 +212,53 @@ export default function LocationsEditor({
               )}
             </fieldset>
 
+
+            <div className="mt-3 grid gap-3 md:grid-cols-3">
+              {SPACE_FIELDS.map((f) => (
+                <div key={f.key}>
+                  <label className="block text-xs font-medium text-gray-700">{f.label}</label>
+                  <p className="text-[11px] leading-snug text-gray-500">{f.help}</p>
+                  <input
+                    type="number"
+                    value={loc[f.key] ?? ""}
+                    disabled={isReadOnly}
+                    onFocus={(e) => {
+                      const el = e.currentTarget;
+                      requestAnimationFrame(() => el.select());
+                    }}
+                    onChange={(e) =>
+                      patch(loc.id, (l) => ({
+                        ...l,
+                        [f.key]: e.target.value === "" ? null : Number(e.target.value),
+                      }))
+                    }
+                    onBlur={(e) =>
+                      void updateLocation({
+                        benchmarkingId,
+                        locationId: loc.id,
+                        [f.key]: e.target.value === "" ? null : Number(e.target.value),
+                      })
+                    }
+                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+                    placeholder="sq ft"
+                  />
+                </div>
+              ))}
+            </div>
+
             {/*
               Hours belong to the LOCATION, not the store. They used to be three
               store-level pairs, which asked a store with a main shop and a
               seasonal kiosk for one set of hours describing neither. Asked for
-              permanent locations only — a pop-up's opening times are a fact
+              permanent locations only: a pop-up's opening times are a fact
               about a few weeks, not about the year.
+
+              Asked AFTER the square footage, and only where there is sales
+              floor to open. A warehouse, an office or a pure fulfilment site
+              has no opening hours in any sense a student would recognise, and
+              asking anyway invited a store to enter its staff's working day.
             */}
-            {loc.kind === "Permanent" && (
+            {loc.kind === "Permanent" && (loc.salesFloor ?? 0) > 0 && (
               <div className="mt-3 rounded border border-gray-100 bg-gray-50 p-3">
                 <p className="text-xs font-medium text-gray-700">Opening hours</p>
                 <p className="text-[11px] text-gray-500">
@@ -299,39 +338,6 @@ export default function LocationsEditor({
                 </label>
               </div>
             )}
-
-            <div className="mt-3 grid gap-3 md:grid-cols-3">
-              {SPACE_FIELDS.map((f) => (
-                <div key={f.key}>
-                  <label className="block text-xs font-medium text-gray-700">{f.label}</label>
-                  <p className="text-[11px] leading-snug text-gray-500">{f.help}</p>
-                  <input
-                    type="number"
-                    value={loc[f.key] ?? ""}
-                    disabled={isReadOnly}
-                    onFocus={(e) => {
-                      const el = e.currentTarget;
-                      requestAnimationFrame(() => el.select());
-                    }}
-                    onChange={(e) =>
-                      patch(loc.id, (l) => ({
-                        ...l,
-                        [f.key]: e.target.value === "" ? null : Number(e.target.value),
-                      }))
-                    }
-                    onBlur={(e) =>
-                      void updateLocation({
-                        benchmarkingId,
-                        locationId: loc.id,
-                        [f.key]: e.target.value === "" ? null : Number(e.target.value),
-                      })
-                    }
-                    className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
-                    placeholder="sq ft"
-                  />
-                </div>
-              ))}
-            </div>
 
             {/* Other spaces — a list, each with its own explanation. */}
             <div className="mt-4 border-t border-gray-100 pt-3">

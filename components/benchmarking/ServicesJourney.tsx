@@ -41,7 +41,7 @@ export default function ServicesJourney({
     <div className="mb-6">
       <h3 className="text-sm font-medium text-gray-900">Services and operations</h3>
       <p className="mt-1 text-xs text-gray-600">
-        Not just what you run today — what you are planning to add or stop. Anything
+        Not just what you run today, but what you are planning to add or stop. Anything
         marked as currently offered appears on your store&apos;s profile for vendor
         partners; plans stay between you and CSC.
       </p>

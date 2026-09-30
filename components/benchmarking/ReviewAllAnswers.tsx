@@ -3,6 +3,15 @@
 import { useMemo } from "react";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
+import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
+import type {
+  OtherIncomeRow,
+  OtherExpenseRow,
+  StaffRow,
+} from "@/lib/actions/benchmarking-financials";
+import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
+import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
+import type { KeyDate } from "@/lib/actions/benchmarking-profile";
 
 /**
  * Every answer on one screen, before anything is submitted.
@@ -32,16 +41,91 @@ function displayValue(value: unknown): { text: string; answered: boolean } {
   return { text: String(value), answered: true };
 }
 
+
+/** Sections that carry a list even when they have no scalar fields left. */
+const SECTIONS_WITH_LISTS = [
+  "institution_profile",
+  "general_merchandise",
+  "course_materials",
+  "other_income",
+  "staffing",
+  "expenses",
+];
+
+const money = (n: number | null | undefined) =>
+  typeof n === "number"
+    ? n.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 })
+    : "—";
+
+function ListBlock({
+  title,
+  empty,
+  rows,
+  onJump,
+}: {
+  title: string;
+  empty: string;
+  rows: { key: string; left: string; right?: string }[];
+  onJump: () => void;
+}) {
+  return (
+    <div className="mt-3 rounded-md border border-gray-200 bg-gray-50 p-3">
+      <div className="flex items-baseline justify-between gap-4">
+        <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">{title}</p>
+        <button
+          onClick={onJump}
+          className="text-xs text-[#163D6D] underline underline-offset-4"
+        >
+          Change
+        </button>
+      </div>
+      {rows.length === 0 ? (
+        <p className="mt-1 text-sm italic text-gray-400">{empty}</p>
+      ) : (
+        <ul className="mt-1 space-y-0.5">
+          {rows.map((r) => (
+            <li key={r.key} className="flex justify-between gap-4 text-sm text-gray-700">
+              <span>{r.left}</span>
+              {r.right && <span className="tabular-nums">{r.right}</span>}
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
 export default function ReviewAllAnswers({
   config,
   formData,
+  lists,
   onJumpToField,
+  onJumpToSection,
   onClose,
 }: {
   config: SurveyFieldConfig;
   formData: Record<string, unknown>;
+  /**
+   * The parts of the submission that are lists rather than single answers.
+   *
+   * They were left out of the first version with a footnote saying they read
+   * better where they were built. That made this screen a review of the FIELDS,
+   * not of the submission, so the one place meant to show everything at once
+   * was missing the categories the whole report is built from.
+   */
+  lists: {
+    gmCategories: SurveyCategory[];
+    cmCategories: SurveyCategory[];
+    otherIncome: OtherIncomeRow[];
+    otherExpenses: OtherExpenseRow[];
+    staff: StaffRow[];
+    competitors: CompetitorRow[];
+    locations: SurveyLocation[];
+    keyDates: KeyDate[];
+  };
   /** Go to the section holding this field, and light the field up. */
   onJumpToField: (sectionId: string, fieldName: string) => void;
+  onJumpToSection: (sectionId: string) => void;
   onClose: () => void;
 }) {
   const sections = useMemo(
@@ -58,9 +142,123 @@ export default function ReviewAllAnswers({
             .filter((f) => matchesShowIf(f.showIf, formData))
             .sort((a, b) => a.order - b.order),
         }))
-        .filter((s) => s.fields.length > 0),
+        /*
+          A section stays if it has answers OR lists.
+
+          ⛔ Filtering on fields alone dropped §2 General Merchandise out of the
+          review entirely: every one of its scalar fields was retired when the
+          category grid replaced them, so the section the whole report is built
+          from had nothing left to count and vanished from the one screen meant
+          to show everything.
+        */
+        .filter((s) => s.fields.length > 0 || SECTIONS_WITH_LISTS.includes(s.id)),
     [config, formData],
   );
+
+  /** The list blocks belonging to a section, if it has any. */
+  function listsFor(sectionId: string) {
+    const jump = () => onJumpToSection(sectionId);
+    const cats = (list: SurveyCategory[], title: string) => (
+      <ListBlock
+        title={title}
+        empty="None added."
+        onJump={jump}
+        rows={list.map((c) => ({
+          key: c.id,
+          left: c.department,
+          right: money(
+            c.lines.reduce((t, l) => t + (l.retailSales ?? 0) + (l.onlineSales ?? 0), 0),
+          ),
+        }))}
+      />
+    );
+
+    switch (sectionId) {
+      case "institution_profile":
+        return (
+          <>
+            <ListBlock
+              title="Locations"
+              empty="None added."
+              onJump={jump}
+              rows={lists.locations.map((l) => ({
+                key: l.id,
+                left: l.name || "Unnamed location",
+                right: l.kind ?? undefined,
+              }))}
+            />
+            <ListBlock
+              title="Your year ahead"
+              empty="No dates added."
+              onJump={jump}
+              rows={lists.keyDates.map((d) => ({
+                key: d.id,
+                left: d.label,
+                right: d.occursOn ?? "No date",
+              }))}
+            />
+            <ListBlock
+              title="Who competes with you"
+              empty="None added."
+              onJump={jump}
+              rows={lists.competitors.map((c) => ({
+                key: c.id,
+                left: c.name,
+                right: c.kind ?? undefined,
+              }))}
+            />
+          </>
+        );
+      case "general_merchandise":
+        return cats(lists.gmCategories, "Categories you carry");
+      case "course_materials":
+        return cats(lists.cmCategories, "Formats you sell");
+      case "other_income":
+        return (
+          <ListBlock
+            title="Income lines"
+            empty="None added."
+            onJump={jump}
+            rows={lists.otherIncome.map((r) => ({
+              key: r.id,
+              left: r.countsAsIncome ? r.label : `${r.label} (not counted as income)`,
+              right: money(r.amount),
+            }))}
+          />
+        );
+      case "staffing":
+        return (
+          <ListBlock
+            title="Your team"
+            empty="Nobody added."
+            onJump={jump}
+            rows={lists.staff.map((p) => ({
+              key: p.id,
+              left: p.name,
+              right:
+                typeof p.yearsInCampusRetail === "number"
+                  ? `${p.yearsInCampusRetail} yrs`
+                  : undefined,
+            }))}
+          />
+        );
+      case "expenses":
+        return (
+          <ListBlock
+            title="Expenses you named yourself"
+            empty="None added."
+            onJump={jump}
+            rows={lists.otherExpenses.map((r) => ({
+              key: r.id,
+              left: r.label,
+              right: money(r.amount),
+            }))}
+          />
+        );
+      default:
+        return null;
+    }
+  }
 
   const missing = sections.flatMap((s) =>
     s.fields
@@ -76,9 +274,8 @@ export default function ReviewAllAnswers({
             Everything you have answered
           </h3>
           <p className="mt-1 max-w-2xl text-sm text-gray-600">
-            Read it through before you submit. Click any answer to go and change it —
-            you will land on that question, and a button will bring you straight back
-            here.
+            Read it through before you submit. Click any answer to go and change it. You
+            will land on that question, and a button will bring you straight back here.
           </p>
         </div>
         <button
@@ -117,6 +314,7 @@ export default function ReviewAllAnswers({
             <h4 className="text-sm font-semibold text-gray-900">
               {section.order}. {section.title}
             </h4>
+            {listsFor(section.id)}
             <dl className="mt-2 divide-y divide-gray-100 border-t border-gray-100">
               {section.fields.map((field) => {
                 const { text, answered } = displayValue(formData[field.name]);
@@ -149,11 +347,6 @@ export default function ReviewAllAnswers({
         ))}
       </div>
 
-      <p className="mt-6 text-xs text-gray-500">
-        The categories, locations, people and income lines you added are shown in their
-        own sections rather than listed here — they are lists rather than single
-        answers, and they read better where you built them.
-      </p>
     </div>
   );
 }

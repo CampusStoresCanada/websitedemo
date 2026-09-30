@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 import type {
   SectionConfig,
   FieldConfig,
@@ -20,6 +22,15 @@ import {
   type SurveySectionProps,
 } from "./SurveyFields";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
+
+/**
+ * The option that opens the free-text box on an allowOther select.
+ *
+ * Never stored: choosing it reveals the input, and what they type replaces it.
+ * A submission holding this string would mean somebody opened the box and left
+ * it empty, which is the same as not answering.
+ */
+const OTHER_SENTINEL = "Something else";
 
 interface DynamicSurveySectionProps extends SurveySectionProps {
   sectionConfig: SectionConfig;
@@ -103,6 +114,13 @@ function FieldRenderer({
   highlightField,
 }: { field: FieldConfig } & SurveySectionProps) {
   const highlighted = highlightField === field.name;
+  /*
+    Whether the reader has asked for the free-text box on a multiselect.
+
+    Local, not stored: a tick that only reveals an input is not an answer, and
+    persisting it would put the words "Something else" into a submission.
+  */
+  const [wantsOther, setWantsOther] = useState(false);
   const indent = field.indent;
   const indentClass =
     indent === true || indent === 1
@@ -309,10 +327,22 @@ function FieldRenderer({
         typeof current === "string" && current !== "" && !listed.includes(current)
           ? current
           : null;
-      const options = [...listed, ...(typedIn ? [typedIn] : [])].map((opt) => ({
-        value: opt,
-        label: opt,
-      }));
+      /*
+        The box appears only once they ask for it.
+
+        Offering a free-text field under every dropdown made the dropdown look
+        optional and put a second empty box on screen for every question. It is
+        an option in the list now, so choosing it is what opens the box.
+      */
+      const options = [
+        ...listed,
+        ...(typedIn ? [typedIn] : []),
+        ...(field.allowOther ? [OTHER_SENTINEL] : []),
+      ].map((opt) => ({ value: opt, label: opt }));
+
+      // Shown while the sentinel is selected OR while an off-list answer stands,
+      // so they can edit what they typed instead of retyping it.
+      const askingForOther = current === OTHER_SENTINEL || typedIn !== null;
 
       return wrapper(
         <div>
@@ -327,18 +357,27 @@ function FieldRenderer({
             onFieldChange={onFieldChange}
             isReadOnly={isReadOnly}
           />
-          {field.allowOther && !isReadOnly && (
+          {askingForOther && !isReadOnly && (
             <input
               type="text"
-              placeholder="Something else? Type it and press Enter"
+              autoFocus
+              placeholder="Type it and press Enter"
+              aria-label={`${field.label}: something else`}
               className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              defaultValue={typedIn ?? ""}
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;
                 e.preventDefault();
                 const v = e.currentTarget.value.trim();
                 if (!v) return;
                 onFieldChange(field.name, v);
-                e.currentTarget.value = "";
+              }}
+              onBlur={(e) => {
+                // Typed but never confirmed with Enter. Keeping it is kinder
+                // than discarding what they wrote. Empty clears the sentinel so
+                // no submission ever stores the words "Something else".
+                const v = e.currentTarget.value.trim();
+                onFieldChange(field.name, v || null);
               }}
             />
           )}
@@ -418,10 +457,27 @@ function FieldRenderer({
             </div>
           )}
 
+          {/*
+            One more checkbox, which opens the box. A permanently visible text
+            field under every list made the list look optional and left an empty
+            input on screen for every question on the page.
+          */}
           {!isReadOnly && (
+            <label className="mt-2 flex items-center gap-2 text-sm text-gray-800">
+              <input
+                type="checkbox"
+                checked={wantsOther}
+                onChange={() => setWantsOther((v) => !v)}
+              />
+              Something else
+            </label>
+          )}
+          {!isReadOnly && wantsOther && (
             <input
               type="text"
-              placeholder="Something else? Type it and press Enter"
+              autoFocus
+              placeholder="Type it and press Enter"
+              aria-label={`${field.label}: something else`}
               className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
               onKeyDown={(e) => {
                 if (e.key !== "Enter") return;

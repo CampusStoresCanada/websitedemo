@@ -251,8 +251,13 @@ export default async function BenchmarkingSurveyPage({
     loadCategories(currentRow!.id, "course_materials"),
   ]);
 
-  const { loadKeyDates } = await import("@/lib/actions/benchmarking-profile");
-  const keyDates = await loadKeyDates(organization.id);
+  const { loadKeyDates, loadProfileKeyDateSuggestions } = await import(
+    "@/lib/actions/benchmarking-profile"
+  );
+  const [keyDates, profileKeyDates] = await Promise.all([
+    loadKeyDates(organization.id),
+    loadProfileKeyDateSuggestions(organization.id),
+  ]);
 
   // §4, §6 and §7 — the rows a store adds itself, rather than a fixed field.
   const { loadOtherIncome, loadOtherExpenses, loadStaff } = await import(
@@ -410,6 +415,7 @@ export default async function BenchmarkingSurveyPage({
         otherExpenses={otherExpenses}
         staff={staff}
         competitors={competitors}
+        profileKeyDates={profileKeyDates}
         logos={{
           logoUrl: (orgLogos?.logo_url as string | null) ?? null,
           logoHorizontalUrl: (orgLogos?.logo_horizontal_url as string | null) ?? null,

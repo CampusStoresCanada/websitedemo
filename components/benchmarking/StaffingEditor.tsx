@@ -61,7 +61,7 @@ export default function StaffingEditor({
       <p className="mt-1 text-xs text-gray-600">
         Started from the people we already have on file for your store. Add anyone missing,
         remove anyone who has left, and say how long each has worked in campus retail
-        anywhere — not just with you.
+        anywhere, not just with you.
       </p>
 
       <div className="mt-3 space-y-2">

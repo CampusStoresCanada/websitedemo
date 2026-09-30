@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   addKeyDate,
   updateKeyDate,
@@ -8,6 +8,24 @@ import {
   type KeyDate,
 } from "@/lib/actions/benchmarking-profile";
 import { KEY_DATE_KINDS, type KeyDateKind } from "@/lib/benchmarking/key-dates";
+
+/**
+ * Best guess at what kind of date a profile entry is, from its own title.
+ *
+ * Only ever decides which heading it files under; the store can change it. A
+ * wrong guess costs a dropdown, and refusing to guess costs them a decision on
+ * every row.
+ */
+function guessKind(title: string): KeyDateKind {
+  const t = title.toLowerCase();
+  if (t.includes("adoption")) return "adoption_deadline";
+  if (t.includes("buyback") || t.includes("buy back")) return "buyback";
+  if (t.includes("add") && t.includes("drop")) return "add_drop";
+  if (t.includes("return")) return "returns_cutoff";
+  if (t.includes("inventory") || t.includes("count")) return "inventory_count";
+  if (t.includes("semester") || t.includes("term")) return "semester";
+  return "other";
+}
 
 /** How many count dates an inventory style implies, or null if it implies none. */
 function countsExpected(style: string | null): number | null {
@@ -35,6 +53,7 @@ export default function KeyDatesEditor({
   isReadOnly,
   isSemesterBased,
   inventoryCountStyle,
+  profileSuggestions,
 }: {
   benchmarkingId: string;
   initialDates: KeyDate[];
@@ -49,6 +68,14 @@ export default function KeyDatesEditor({
    * and the store has the dates in front of it at exactly this moment.
    */
   inventoryCountStyle: string | null;
+  /**
+   * Dates we already hold for this organisation, from its procurement profile.
+   *
+   * Offered, not adopted. They came from a different conversation and may be
+   * stale; only the store knows. Asking a store to retype dates we are already
+   * holding is the thing worth avoiding, not the click to confirm them.
+   */
+  profileSuggestions: { title: string; date: string }[];
 }) {
   const [dates, setDates] = useState<KeyDate[]>(initialDates);
   const [error, setError] = useState<string | null>(null);
@@ -77,16 +104,35 @@ export default function KeyDatesEditor({
       why: "You told us your year runs in semesters. Add each one for the year ahead, with its first and last day.",
     });
   }
-  if (expectedCounts !== null && countDates < expectedCounts) {
-    prompts.push({
-      kind: "inventory_count",
-      label: "Inventory count",
-      why:
-        expectedCounts === 1
-          ? `You count ${(inventoryCountStyle ?? "").toLowerCase()}. When is it?`
-          : `You count ${(inventoryCountStyle ?? "").toLowerCase()}, so we are expecting ${expectedCounts} dates and have ${countDates}.`,
-    });
-  }
+
+  /*
+    An annual or bi-annual count means one or two dated rows, so put them there
+    rather than asking the store to click a button to be asked a question. The
+    row arrives empty and waits for its date; nothing is invented.
+
+    Guarded by a ref because this runs on render and the rows arrive through a
+    reload: without it, a slow round trip would add the same row twice.
+  */
+  const seeding = useRef(false);
+  useEffect(() => {
+    if (isReadOnly || seeding.current) return;
+    if (expectedCounts === null || countDates >= expectedCounts) return;
+    seeding.current = true;
+    const wanted = expectedCounts - countDates;
+    void (async () => {
+      for (let i = 0; i < wanted; i += 1) {
+        await addKeyDate({
+          benchmarkingId,
+          kind: "inventory_count",
+          label:
+            expectedCounts === 2
+              ? `Inventory count ${countDates + i + 1} of 2`
+              : "Inventory count",
+        });
+      }
+      window.location.reload();
+    })();
+  }, [benchmarkingId, isReadOnly, expectedCounts, countDates]);
 
   /*
     Semester rows held by a store that has since said it does not run semesters.
@@ -133,6 +179,41 @@ export default function KeyDatesEditor({
                   className="rounded-full border border-[#163D6D] px-2.5 py-0.5 text-xs font-medium text-[#163D6D]"
                 >
                   + Add {p.label.toLowerCase()}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
+      {profileSuggestions.length > 0 && !isReadOnly && (
+        <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+          <p className="text-xs font-semibold text-gray-700">
+            We already have these on your profile
+          </p>
+          <p className="mt-0.5 text-[11px] text-gray-500">
+            From your procurement details, so they may be out of date. Add the ones that
+            still hold and ignore the rest.
+          </p>
+          <ul className="mt-2 space-y-1.5">
+            {profileSuggestions.map((sug) => (
+              <li key={`${sug.title}|${sug.date}`} className="flex flex-wrap items-center gap-2">
+                <span className="text-xs text-gray-700">
+                  {sug.title} · {sug.date}
+                </span>
+                <button
+                  onClick={async () => {
+                    const res = await addKeyDate({
+                      benchmarkingId,
+                      kind: guessKind(sug.title),
+                      label: sug.title,
+                      occursOn: sug.date,
+                    });
+                    if (res.success) window.location.reload();
+                  }}
+                  className="rounded-full border border-gray-400 px-2.5 py-0.5 text-xs font-medium text-gray-700 hover:border-[#163D6D] hover:text-[#163D6D]"
+                >
+                  Add it
                 </button>
               </li>
             ))}

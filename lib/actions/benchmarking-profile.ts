@@ -88,10 +88,61 @@ export async function loadKeyDates(organizationId: string): Promise<KeyDate[]> {
   }));
 }
 
+/**
+ * Dates the organisation already told us, outside this survey.
+ *
+ * ⛔ Suggested, never adopted silently. Two stores have adoption deadlines in
+ * their procurement profile from an entirely different conversation, and
+ * loadKeyDates could not see them: the survey read only its own table and asked
+ * those stores to type dates we were already holding. Copying them in
+ * automatically would make a guess about currency that only the store can make,
+ * so they arrive as something to confirm.
+ */
+export async function loadProfileKeyDateSuggestions(
+  organizationId: string,
+): Promise<{ title: string; date: string }[]> {
+  const auth = await requireAuthenticated();
+  if (!auth.ok) return [];
+
+  const db = createAdminClient();
+  const [{ data: org }, { data: existing }] = await Promise.all([
+    db
+      .from("organizations")
+      .select("procurement_info")
+      .eq("id", organizationId)
+      .maybeSingle(),
+    db
+      .from("organization_key_dates")
+      .select("label, occurs_on")
+      .eq("organization_id", organizationId),
+  ]);
+
+  const info = (org?.procurement_info as Record<string, unknown> | null) ?? {};
+  const cycle = (info.buying_cycle as Record<string, unknown> | null) ?? {};
+  const raw = Array.isArray(cycle.key_dates) ? cycle.key_dates : [];
+
+  const have = new Set(
+    (existing ?? []).map((e) => `${(e.label as string) ?? ""}|${(e.occurs_on as string) ?? ""}`),
+  );
+
+  return raw
+    .map((d) => {
+      const entry = d as Record<string, unknown>;
+      return {
+        title: typeof entry.title === "string" ? entry.title : "",
+        date: typeof entry.date === "string" ? entry.date : "",
+      };
+    })
+    .filter((d) => d.title && d.date)
+    .filter((d) => !have.has(`${d.title}|${d.date}`));
+}
+
 export async function addKeyDate(input: {
   benchmarkingId: string;
   kind: KeyDateKind;
   label: string;
+  /** Prefilled when adopting a date we already hold on the profile. */
+  occursOn?: string | null;
 }): Promise<{ success: boolean; error?: string; id?: string }> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
@@ -109,6 +160,7 @@ export async function addKeyDate(input: {
       organization_id: g.organizationId,
       kind: input.kind,
       label: input.label.trim(),
+      occurs_on: input.occursOn ?? null,
       position: count ?? 0,
     })
     .select("id")

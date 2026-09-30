@@ -29,12 +29,25 @@ export interface StatementLine {
 export const NAMED_EXPENSE_LINES: StatementLine[] = [
   { name: "expense_hr", label: "Salaries and wages", section: "staffing" },
   /*
-    Only what the STORE pays. Where the institution carries benefits centrally
-    this is blank, and that blank is the answer — it is why two stores with the
-    same payroll show different staff costs, and the old single "wages and
-    benefits" figure hid it completely.
+    Only what the STORE pays toward benefits. Where the institution carries them
+    centrally these are blank, and that blank is the answer: it is why two stores
+    with the same payroll show different staff costs, and the old combined "wages
+    and benefits" figure hid it completely.
+
+    ⛔ benefits_total is the fallback for a store that only has one number, and
+    is counted ONLY when the per-type rows are empty. Counting both would double
+    the benefit cost for anyone who filled in the grid.
   */
-  { name: "benefits_total", label: "Staff benefits", section: "staffing" },
+  { name: "benefits_full_time", label: "Benefits, full-time", section: "staffing" },
+  { name: "benefits_part_time", label: "Benefits, part-time", section: "staffing" },
+  { name: "benefits_student", label: "Benefits, student", section: "staffing" },
+  { name: "benefits_seasonal", label: "Benefits, seasonal", section: "staffing" },
+  {
+    name: "benefits_total",
+    label: "Staff benefits",
+    section: "staffing",
+    onlyIf: "__no_benefit_rows",
+  },
   { name: "expense_rent_maintenance", label: "Rent, maintenance and repairs", section: "expenses" },
   { name: "expense_utilities", label: "Utilities", section: "expenses" },
   { name: "expense_advertising", label: "Advertising and promotion", section: "expenses" },
@@ -141,9 +154,26 @@ export function sumFields(
  * Used by the total AND by whatever displays the lines, so a line can never be
  * shown in a list whose total excludes it.
  */
+const BENEFIT_ROWS = [
+  "benefits_full_time",
+  "benefits_part_time",
+  "benefits_student",
+  "benefits_seasonal",
+];
+
 export function countedLines(
   formData: Record<string, unknown>,
   lines: StatementLine[],
 ): StatementLine[] {
-  return lines.filter((line) => !line.onlyIf || formData[line.onlyIf] !== false);
+  /*
+    The one derived switch: whether the store used the per-type benefit grid.
+    A store that filled the grid must not also have its single fallback figure
+    added on top, or its benefit cost doubles.
+  */
+  const hasRows = BENEFIT_ROWS.some((k) => typeof formData[k] === "number");
+  const derived: Record<string, unknown> = {
+    ...formData,
+    __no_benefit_rows: !hasRows,
+  };
+  return lines.filter((line) => !line.onlyIf || derived[line.onlyIf] !== false);
 }
