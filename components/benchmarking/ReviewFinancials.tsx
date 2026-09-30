@@ -357,7 +357,8 @@ export default function ReviewFinancials({
 
       {grossMargin === null && (
         <p className="mt-3 rounded bg-amber-50 p-3 text-xs text-amber-900">
-          No gross margin yet. Add a target margin to at least one category and this fills in.
+          No gross margin yet. Add a gross margin % to at least one category and this fills
+          in.
         </p>
       )}
     </div>
