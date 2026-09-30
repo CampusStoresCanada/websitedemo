@@ -28,6 +28,7 @@ import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
 import { matchesShowIf } from "@/lib/benchmarking/show-if";
+import { iaEaContradiction } from "@/lib/benchmarking/iaea-consistency";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type {
   OtherIncomeRow,
@@ -367,6 +368,28 @@ export default function BenchmarkingSurveyForm({
    * it was never shown, and demanding it would be a dead end with no box to
    * type in.
    */
+  /**
+   * The store says two things that cannot both be true.
+   *
+   * ⛔ A contradiction, not a missing answer, so it is checked separately and
+   * worded differently. Adding the Inclusive or Equitable Access format in §3
+   * means the store sells course materials through such a programme; answering
+   * "Neither" in §10 says it runs none. One of the two is wrong and only the
+   * store knows which, so we point at both rather than picking a winner.
+   */
+  const iaeaContradiction = useMemo(() => {
+    const message = iaEaContradiction({
+      courseMaterialCategories: cmCategories,
+      programmeType: formData.ia_ea_program_type,
+    });
+    if (!message) return null;
+    return {
+      sectionIdx: sections.findIndex((x) => x.id === "inclusive_access"),
+      field: "ia_ea_program_type",
+      message,
+    };
+  }, [cmCategories, formData.ia_ea_program_type, sections]);
+
   const missingRequired = useMemo(() => {
     const out: { sectionIdx: number; field: string; label: string; section: string }[] = [];
     sections.forEach((section, idx) => {
@@ -401,13 +424,21 @@ export default function BenchmarkingSurveyForm({
     ) {
       setHighlight(null);
     }
-    if (submitError && missingRequired.length === 0) setSubmitError(null);
-  }, [missingRequired, highlight, submitError]);
+    if (submitError && missingRequired.length === 0 && !iaeaContradiction) {
+      setSubmitError(null);
+    }
+  }, [missingRequired, highlight, submitError, iaeaContradiction]);
 
   const handleSubmit = async () => {
     // Take them to the first gap rather than naming it and leaving them to
     // hunt: the survey is ten sections long and the name of a field is not a
     // location.
+    if (iaeaContradiction) {
+      setSubmitError(iaeaContradiction.message);
+      goToSection(iaeaContradiction.sectionIdx, iaeaContradiction.field, "required");
+      return;
+    }
+
     if (missingRequired.length > 0) {
       const first = missingRequired[0];
       setSubmitError(
@@ -611,6 +642,37 @@ export default function BenchmarkingSurveyForm({
           >
             Back to review
           </button>
+        </div>
+      )}
+
+      {/*
+        Shown the moment the two answers disagree, not held back until submit.
+        A store that finds out at the end has to go and work out which of two
+        sections it got wrong; a store that sees it while it is still in one of
+        them already knows.
+      */}
+      {iaeaContradiction && !isSubmitted && (
+        <div className="mb-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-3">
+          <p className="text-sm font-semibold text-amber-900">
+            Two answers disagree
+          </p>
+          <p className="mt-1 text-xs text-amber-900">{iaeaContradiction.message}</p>
+          <div className="mt-2 flex flex-wrap gap-3">
+            <button
+              onClick={() => jumpToSection("course_materials")}
+              className="text-xs font-medium text-amber-900 underline underline-offset-4"
+            >
+              Go to Section 3
+            </button>
+            <button
+              onClick={() =>
+                goToSection(iaeaContradiction.sectionIdx, iaeaContradiction.field, "review")
+              }
+              className="text-xs font-medium text-amber-900 underline underline-offset-4"
+            >
+              Go to Section 10
+            </button>
+          </div>
         </div>
       )}
 

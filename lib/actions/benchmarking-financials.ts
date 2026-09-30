@@ -26,6 +26,16 @@ export interface OtherIncomeRow {
    * is.
    */
   countsAsIncome: boolean;
+  /** What it costs to deliver this income, if the store tracks it. */
+  directCost: number | null;
+  /**
+   * Whether that cost is already inside the Expenses section.
+   *
+   * ⛔ The statement adds it to operating expenses ONLY when this is false.
+   * For most stores the toner is already in "Store and business supplies" and
+   * the machine lease in "Depreciation", so counting it again would double it.
+   */
+  directCostInExpenses: boolean;
 }
 
 export interface OtherExpenseRow {
@@ -85,7 +95,9 @@ export async function loadOtherIncome(benchmarkingId: string): Promise<OtherInco
   const db = createAdminClient();
   const { data } = await db
     .from("benchmarking_other_income")
-    .select("id, kind, service_name, label, amount, counts_as_income, position")
+    .select(
+      "id, kind, service_name, label, amount, counts_as_income, direct_cost, direct_cost_in_expenses, position",
+    )
     .eq("benchmarking_id", benchmarkingId)
     .order("position");
   return (data ?? []).map((r) => ({
@@ -95,6 +107,8 @@ export async function loadOtherIncome(benchmarkingId: string): Promise<OtherInco
     label: (r.label as string) ?? "",
     amount: (r.amount as number | null) ?? null,
     countsAsIncome: (r.counts_as_income as boolean | null) ?? true,
+    directCost: (r.direct_cost as number | null) ?? null,
+    directCostInExpenses: (r.direct_cost_in_expenses as boolean | null) ?? true,
   }));
 }
 
@@ -183,6 +197,8 @@ export async function updateOtherIncome(input: {
   label?: string;
   amount?: number | null;
   countsAsIncome?: boolean;
+  directCost?: number | null;
+  directCostInExpenses?: boolean;
 }): Promise<{ success: boolean; error?: string }> {
   const g = await guard(input.benchmarkingId);
   if (!g.ok) return { success: false, error: g.error };
@@ -191,6 +207,10 @@ export async function updateOtherIncome(input: {
   if (input.label !== undefined) patch.label = input.label.trim();
   if (input.amount !== undefined) patch.amount = input.amount;
   if (input.countsAsIncome !== undefined) patch.counts_as_income = input.countsAsIncome;
+  if (input.directCost !== undefined) patch.direct_cost = input.directCost;
+  if (input.directCostInExpenses !== undefined) {
+    patch.direct_cost_in_expenses = input.directCostInExpenses;
+  }
 
   const db = createAdminClient();
   const { error } = await db

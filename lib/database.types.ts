@@ -795,7 +795,11 @@ export type Database = {
           adoption_deadline_window: string | null
           adoptions_by_deadline: number | null
           amended_at: string | null
+          benefits_full_time: number | null
           benefits_paid_by: string | null
+          benefits_part_time: number | null
+          benefits_seasonal: number | null
+          benefits_student: number | null
           benefits_total: number | null
           central_funding: number | null
           cm_course_packs_online: number | null
@@ -973,7 +977,11 @@ export type Database = {
           adoption_deadline_window?: string | null
           adoptions_by_deadline?: number | null
           amended_at?: string | null
+          benefits_full_time?: number | null
           benefits_paid_by?: string | null
+          benefits_part_time?: number | null
+          benefits_seasonal?: number | null
+          benefits_student?: number | null
           benefits_total?: number | null
           central_funding?: number | null
           cm_course_packs_online?: number | null
@@ -1151,7 +1159,11 @@ export type Database = {
           adoption_deadline_window?: string | null
           adoptions_by_deadline?: number | null
           amended_at?: string | null
+          benefits_full_time?: number | null
           benefits_paid_by?: string | null
+          benefits_part_time?: number | null
+          benefits_seasonal?: number | null
+          benefits_student?: number | null
           benefits_total?: number | null
           central_funding?: number | null
           cm_course_packs_online?: number | null
@@ -1941,6 +1953,8 @@ export type Database = {
           benchmarking_id: string
           counts_as_income: boolean
           created_at: string
+          direct_cost: number | null
+          direct_cost_in_expenses: boolean
           id: string
           kind: string
           label: string
@@ -1952,6 +1966,8 @@ export type Database = {
           benchmarking_id: string
           counts_as_income?: boolean
           created_at?: string
+          direct_cost?: number | null
+          direct_cost_in_expenses?: boolean
           id?: string
           kind?: string
           label: string
@@ -1963,6 +1979,8 @@ export type Database = {
           benchmarking_id?: string
           counts_as_income?: boolean
           created_at?: string
+          direct_cost?: number | null
+          direct_cost_in_expenses?: boolean
           id?: string
           kind?: string
           label?: string

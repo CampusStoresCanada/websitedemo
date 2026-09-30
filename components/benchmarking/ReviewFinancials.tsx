@@ -141,9 +141,21 @@ export default function ReviewFinancials({
     grossMarginFromCategories(gmCategories) + grossMarginFromCategories(cmCategories);
   const grossMargin = marginDollars > 0 ? marginDollars : null;
 
+  /*
+    Service costs the store told us are NOT already in its expense lines.
+
+    ⛔ Only the unticked ones. For most stores a print desk's toner is already
+    inside "Store and business supplies", so adding it here would count it
+    twice and quietly worsen every expense ratio the report prints.
+  */
+  const uncountedDirectCosts = otherIncome.filter(
+    (row) => !row.directCostInExpenses && (row.directCost ?? 0) > 0,
+  );
+
   const expenseTotal =
     sumFields(formData, NAMED_EXPENSE_LINES) +
-    otherExpenses.reduce((sum, row) => sum + (row.amount ?? 0), 0);
+    otherExpenses.reduce((sum, row) => sum + (row.amount ?? 0), 0) +
+    uncountedDirectCosts.reduce((sum, row) => sum + (row.directCost ?? 0), 0);
 
   const operatingIncome = grossMargin !== null ? grossMargin - expenseTotal : null;
 
@@ -254,6 +266,16 @@ export default function ReviewFinancials({
             indent
             from="An expense you named yourself, in Expenses"
             onJump={() => onJumpToSection("expenses")}
+          />
+        ))}
+        {uncountedDirectCosts.map((row) => (
+          <Line
+            key={`direct-${row.id}`}
+            label={`Cost of delivering ${row.label.toLowerCase()}`}
+            value={money(row.directCost)}
+            indent
+            from="You told us this cost is not in your Expenses section, so it is added here. Untick that in Other Income if it is already counted."
+            onJump={() => onJumpToSection("other_income")}
           />
         ))}
         <Line
