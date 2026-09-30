@@ -135,6 +135,16 @@ export default function OtherExpensesEditor({
         <span className="font-medium text-gray-900">Total operating expenses</span>
         <span className="font-semibold text-gray-900">{money(namedExpenseTotal + otherTotal)}</span>
       </div>
+      {/*
+        Shrinkage is on this page and deliberately not in this total, so typing
+        it moves nothing. Without a line saying why, that reads as a figure that
+        failed to save.
+      */}
+      <p className="mt-1 text-xs text-gray-500">
+        Shrinkage is not in this total. It is already inside your cost of sales, so adding
+        it here would count the same loss twice and make your expenses look worse than
+        they are.
+      </p>
 
       {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
     </div>

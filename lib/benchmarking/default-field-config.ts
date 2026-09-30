@@ -1049,7 +1049,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           order: 8,
           visible: true,
-          helpText: "What the institution charges you for central services. It also appears in Expenses \u2014 entered once, counted once.",
+          helpText:
+            "What the institution charges you for central services. It also appears in Expenses, entered once and counted once.",
         },
         {
           name: "contrib_other_agreements",
@@ -1375,7 +1376,27 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           order: 20,
           visible: true,
-          helpText: "In dollars, not a percentage \u2014 a percentage cannot be reconciled to your P&L. Positive if shrink increased your cost of sales.",
+          /*
+            ⛔ The definition is the point, not the number.
+
+            Shrink is already inside achieved gross margin: it lands in cost of
+            sales when a count writes the stock down. Asking for it again is not
+            a second measurement, it is a DECOMPOSITION. Two stores at 22%
+            margin are different businesses if one lost half a point to shrink
+            and the other lost four.
+
+            That only works if every store counts the same thing, and the survey
+            used to say how to EXPRESS the figure without ever saying what
+            belonged IN it. Book-to-physical variance is the definition used
+            here because it is the one a count produces on its own, with the
+            least judgement left in it.
+
+            ⛔ Never added to operating expenses in the review. It is inside cost
+            of sales already, and counting it twice would worsen every expense
+            ratio the report prints.
+          */
+          helpText:
+            "The difference between what your records said you had and what your count actually found. That is the whole definition, and it is deliberately narrow: theft, damage, breakage, receiving error and paperwork error all land in it, because every one of them makes the shelf disagree with the system.\n\nNot here: markdowns and student discounts, which change what stock is worth rather than whether it is there. Student discounts are a campus contribution, asked in Section 5. Nor stock you still hold but have written down, which belongs in your closing inventory instead.\n\nIn dollars rather than a percentage, because a percentage cannot be reconciled to anything. This figure is already inside your gross margin, so we never add it to your expenses a second time. We use it to say how much of the gap between what you priced at and what you made was loss rather than markdown.",
           group: "Shrinkage",
         },
         {
@@ -1384,7 +1405,8 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "currency",
           order: 21,
           visible: true,
-          helpText: "The same loss valued at the price you would have sold it for.",
+          helpText:
+            "The same missing stock, valued at what you would have sold it for. Asked separately rather than worked out from the figure above, because goods that go missing rarely carry your blended margin: most stores lose technology and apparel far faster than they lose lab coats. Shrink as a share of retail sales is also how the rest of retail quotes it, so this is the figure that lets you compare yourself against retailers who are not campus stores.",
           group: "Shrinkage",
         },
         {
