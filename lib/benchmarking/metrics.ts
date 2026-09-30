@@ -1,3 +1,7 @@
+import {
+  deriveStatement,
+  type StatementParts,
+} from "@/lib/benchmarking/financial-lines";
 
 /**
  * The KPI computation for one store, one year.
@@ -132,23 +136,59 @@ export interface ComputeOptions {
   orgFte?: unknown;
   /** Prior year's FYE inventory, for the two-year averages. */
   priorFyeInventory?: unknown;
+  /**
+   * The category rows, income lines and expense lines for THIS submission.
+   *
+   * ⛔ From FY2026 the figures this file needs stopped being columns. Sales,
+   * margin and inventory live on `benchmarking_category_lines`, and the flat
+   * columns that used to carry them are retired and never written. Without
+   * these, every headline metric for a 2026 submission computes null: a store
+   * would file a complete survey and get an empty report.
+   *
+   * Absent for every earlier year, which is correct. Those rows have the flat
+   * columns and are read from them, so year-over-year still works: the two
+   * years disagree about where a figure came FROM, not about what it means.
+   */
+  statement?: StatementParts;
 }
 
 export function computeMetrics(
   row: MetricSourceRow,
   opts: ComputeOptions = {},
 ): ComputedMetrics {
-  const inStore = num(row.total_gross_sales_instore);
-  const online = num(row.total_online_sales);
-  const retail = sumOrNull(inStore, online);
+  /*
+    Two shapes, one set of meanings.
+
+    A 2026 submission derives from its category rows; anything earlier reads the
+    flat columns it was filed against. Same formulas either way, so a metric is
+    comparable across the boundary and yoyDeltas needs to know nothing about it.
+  */
+  const derived = opts.statement ? deriveStatement(opts.statement) : null;
+  const fromCategories = derived?.fromCategories ?? false;
+
+  const inStore = fromCategories
+    ? derived!.merchandiseRetail + derived!.courseMaterialsRetail
+    : num(row.total_gross_sales_instore);
+  const online = fromCategories ? derived!.onlineSales : num(row.total_online_sales);
+  const retail = fromCategories ? sumOrNull(inStore, online) : sumOrNull(inStore, online);
 
   // Non-retail streams are a 2026 addition, so this equals retail for every
   // 2025 row and starts to diverge the first time a store reports them.
-  const nonRetail = sumOrNull(num(row.ia_revenue), num(row.other_non_retail_revenue));
-  const total = retail === null && nonRetail === null ? null : (retail ?? 0) + (nonRetail ?? 0);
+  const nonRetail = fromCategories
+    ? sumOrNull(derived!.otherIncome, derived!.centralFunding)
+    : sumOrNull(num(row.ia_revenue), num(row.other_non_retail_revenue));
+  const total = fromCategories
+    ? derived!.totalRevenue
+    : retail === null && nonRetail === null
+      ? null
+      : (retail ?? 0) + (nonRetail ?? 0);
 
-  const cogs = num(row.total_cogs);
-  const grossMargin = total === null || cogs === null ? null : total - cogs;
+  const cogs = fromCategories ? derived!.costOfSales : num(row.total_cogs);
+  const grossMargin = fromCategories
+    ? derived!.grossMargin
+    : total === null || cogs === null
+      ? null
+      : total - cogs;
 
   // One FTE everywhere — the same figure dues are charged on.
   const fte = effectiveFte(opts.orgFte, row.enrollment_fte);
@@ -156,7 +196,7 @@ export function computeMetrics(
   // GMROI and turns need an AVERAGE inventory across two year-ends, so they
   // stay null until a prior year exists. Using a single year-end as if it were
   // the average would publish a number that looks like a KPI and is not one.
-  const fyeNow = num(row.fye_inventory_value);
+  const fyeNow = fromCategories ? derived!.closingInventory : num(row.fye_inventory_value);
   const fyePrior = num(opts.priorFyeInventory);
   const avgInventory =
     fyeNow === null || fyePrior === null ? null : (fyeNow + fyePrior) / 2;
@@ -171,7 +211,19 @@ export function computeMetrics(
     total_revenue: total,
     gross_margin: grossMargin,
     gross_margin_pct: pct(grossMargin, total),
-    net_margin_pct: pct(num(row.net_profit), total),
+    /*
+      Operating income from 2026, net profit before it.
+
+      The rebuilt survey collects no below-the-line items, so operating income
+      IS the bottom line it can see. Naming the column net_margin_pct and
+      feeding it operating income is a compromise worth stating out loud rather
+      than hiding: the two differ for any store with interest or extraordinary
+      items, and none of them were ever asked for.
+    */
+    net_margin_pct: pct(
+      fromCategories ? derived!.operatingIncome : num(row.net_profit),
+      total,
+    ),
     hr_pct: pct(num(row.expense_hr), total),
     // Against RETAIL revenue, per the brief — an online share of a total that
     // includes non-retail streams would shrink as a store diversifies.
@@ -198,7 +250,12 @@ export function computeMetrics(
     sales_per_sqft_total: div(total, num(row.total_square_footage)),
     sales_per_sqft_storage: div(total, num(row.sqft_storage)),
     sales_per_sqft_office: div(total, num(row.sqft_office)),
-    cm_sales_per_fte: div(num(row.sales_course_materials), fte),
+    cm_sales_per_fte: div(
+      fromCategories
+        ? derived!.courseMaterialsRetail + derived!.courseMaterialsOnline
+        : num(row.sales_course_materials),
+      fte,
+    ),
     avg_transaction_value: div(total, num(row.total_transaction_count)),
     adoption_completion_rate: tracks
       ? pct(num(row.adoptions_by_deadline), num(row.total_course_sections))

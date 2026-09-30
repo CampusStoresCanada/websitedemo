@@ -104,6 +104,20 @@ export type CategoryAmountKey =
   | "inventoryOpen"
   | "inventoryClose";
 
+/**
+ * The lines a category is actually reporting on.
+ *
+ * ⛔ A split category keeps its whole-department row in the table, so summing
+ * every line counts a properly split department twice. The form shows one set
+ * or the other; everything that adds them up has to agree with what the form
+ * showed, or the review screen and the report describe different stores.
+ */
+export function linesInUse(category: SurveyCategory) {
+  return category.splitBySubcategory
+    ? category.lines.filter((l) => l.subcategory !== null)
+    : category.lines.filter((l) => l.subcategory === null);
+}
+
 export function sumCategories(
   categories: SurveyCategory[],
   key: CategoryAmountKey,
@@ -111,7 +125,7 @@ export function sumCategories(
   return categories.reduce(
     (total, category) =>
       total +
-      category.lines.reduce((sum, line) => sum + ((line[key] as number | null) ?? 0), 0),
+      linesInUse(category).reduce((sum, line) => sum + ((line[key] as number | null) ?? 0), 0),
     0,
   );
 }
@@ -130,7 +144,7 @@ export function grossMarginFromCategories(categories: SurveyCategory[]): number 
   return categories.reduce(
     (total, category) =>
       total +
-      category.lines.reduce((sum, line) => {
+      linesInUse(category).reduce((sum, line) => {
         const sales = (line.retailSales ?? 0) + (line.onlineSales ?? 0);
         return sum + (line.grossMarginPct !== null ? sales * (line.grossMarginPct / 100) : 0);
       }, 0),
@@ -176,4 +190,161 @@ export function countedLines(
     __no_benefit_rows: !hasRows,
   };
   return lines.filter((line) => !line.onlyIf || derived[line.onlyIf] !== false);
+}
+
+
+// ─────────────────────────────────────────────────────────────────
+// The statement, derived once
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Everything the income statement needs, from the parts a store actually gave.
+ *
+ * ⛔ ONE derivation, used by the review screen the store reads and by the
+ * metrics the report publishes. They were separate, and the report's half still
+ * read the flat columns the category grid replaced — so an FY2026 submission
+ * would have produced a full statement on screen and a page of nulls in the
+ * report. A store cannot be shown one set of figures and compared on another.
+ */
+export interface StatementParts {
+  gmCategories: SurveyCategory[];
+  cmCategories: SurveyCategory[];
+  otherIncome: {
+    amount: number | null;
+    countsAsIncome: boolean;
+    directCost: number | null;
+    directCostInExpenses: boolean;
+  }[];
+  otherExpenses: { amount: number | null }[];
+  /** The `benchmarking` row, for the fields that are still plain columns. */
+  formData: Record<string, unknown>;
+}
+
+export interface Statement {
+  merchandiseRetail: number;
+  merchandiseOnline: number;
+  courseMaterialsRetail: number;
+  courseMaterialsOnline: number;
+  onlineSales: number;
+  otherIncome: number;
+  centralFunding: number;
+  totalRevenue: number | null;
+  grossMargin: number | null;
+  costOfSales: number | null;
+  openingInventory: number | null;
+  closingInventory: number | null;
+  operatingExpenses: number;
+  operatingIncome: number | null;
+  campusContribution: number;
+  /**
+   * Whether this was derived from category rows at all.
+   *
+   * False for every pre-2026 submission, which has no category data and must
+   * fall back to the flat columns it was filed against. Year-over-year then
+   * still works: the two years disagree about where the number came FROM, not
+   * about what the number means.
+   */
+  fromCategories: boolean;
+}
+
+function orNull(value: number, present: boolean): number | null {
+  return present ? value : null;
+}
+
+export function deriveStatement(parts: StatementParts): Statement {
+  const { gmCategories, cmCategories, otherIncome, otherExpenses, formData } = parts;
+
+  const categories = [...gmCategories, ...cmCategories];
+  const fromCategories = categories.some((c) => c.lines.length > 0);
+
+  const merchandiseRetail = sumCategories(gmCategories, "retailSales");
+  const merchandiseOnline = sumCategories(gmCategories, "onlineSales");
+  const courseMaterialsRetail = sumCategories(cmCategories, "retailSales");
+  const courseMaterialsOnline = sumCategories(cmCategories, "onlineSales");
+
+  const income = otherIncome.reduce(
+    (sum, row) => sum + (row.countsAsIncome ? (row.amount ?? 0) : 0),
+    0,
+  );
+  const funding = typeof formData.central_funding === "number" ? formData.central_funding : 0;
+
+  const totalRevenue =
+    merchandiseRetail +
+    merchandiseOnline +
+    courseMaterialsRetail +
+    courseMaterialsOnline +
+    income +
+    funding;
+
+  const marginDollars =
+    grossMarginFromCategories(gmCategories) + grossMarginFromCategories(cmCategories);
+
+  const openingInventory =
+    sumCategories(gmCategories, "inventoryOpen") + sumCategories(cmCategories, "inventoryOpen");
+  const closingInventory =
+    sumCategories(gmCategories, "inventoryClose") + sumCategories(cmCategories, "inventoryClose");
+
+  // Only the service costs a store said are NOT already in its expense lines.
+  const uncountedDirectCosts = otherIncome.reduce(
+    (sum, row) => sum + (!row.directCostInExpenses ? (row.directCost ?? 0) : 0),
+    0,
+  );
+
+  const operatingExpenses =
+    sumFields(formData, NAMED_EXPENSE_LINES) +
+    otherExpenses.reduce((sum, row) => sum + (row.amount ?? 0), 0) +
+    uncountedDirectCosts;
+
+  const grossMargin = orNull(marginDollars, fromCategories && marginDollars > 0);
+
+  return {
+    merchandiseRetail,
+    merchandiseOnline,
+    courseMaterialsRetail,
+    courseMaterialsOnline,
+    onlineSales: merchandiseOnline + courseMaterialsOnline,
+    otherIncome: income,
+    centralFunding: funding,
+    totalRevenue: orNull(totalRevenue, fromCategories || totalRevenue > 0),
+    grossMargin,
+    // Implied, not asked. Asking for cost of sales AND a margin per category is
+    // how a total and its parts end up disagreeing.
+    costOfSales: grossMargin === null ? null : totalRevenue - grossMargin,
+    openingInventory: orNull(openingInventory, fromCategories),
+    closingInventory: orNull(closingInventory, fromCategories),
+    operatingExpenses,
+    operatingIncome: grossMargin === null ? null : grossMargin - operatingExpenses,
+    campusContribution: sumFields(formData, CONTRIBUTION_LINES),
+    fromCategories,
+  };
+}
+
+
+/**
+ * Figures sitting on a whole-department row of a category that has been split.
+ *
+ * Ticking "break this into subcategories" leaves the department's own row in
+ * place with its figures on it, and from that moment nothing counts them. A
+ * store that typed 420,000 against Apparel and then split it watches its
+ * largest category silently become zero, with the number still sitting in the
+ * database looking fine.
+ *
+ * ⛔ Reported, never moved. Splitting 420,000 across six subcategories is a
+ * judgement only the store can make, and guessing it would be writing an
+ * interpretation into their submission.
+ */
+export function strandedBySplit(
+  categories: SurveyCategory[],
+): { department: string; amount: number }[] {
+  return categories
+    .filter((c) => c.splitBySubcategory)
+    .map((c) => {
+      const whole = c.lines.filter((l) => l.subcategory === null);
+      const amount = whole.reduce(
+        (sum, l) => sum + (l.retailSales ?? 0) + (l.onlineSales ?? 0),
+        0,
+      );
+      return { department: c.department, amount };
+    })
+    .filter((c) => c.amount > 0);
 }

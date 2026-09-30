@@ -9,6 +9,8 @@ import {
   grossMarginFromCategories,
   sumFields,
   countedLines,
+  deriveStatement,
+  strandedBySplit,
 } from "@/lib/benchmarking/financial-lines";
 import Explain from "./Explain";
 
@@ -111,55 +113,55 @@ export default function ReviewFinancials({
     return typeof value === "number" ? value : null;
   };
 
+  /*
+    ⛔ The same derivation the REPORT uses, not a second one beside it.
+
+    These figures were computed inline here while lib/benchmarking/metrics.ts
+    computed its own from the flat columns the category grid replaced. A store
+    would have read a complete statement on this screen and been compared on a
+    page of nulls. One function now, so the screen and the report cannot say
+    different things about the same store.
+  */
+  const statement = deriveStatement({
+    gmCategories,
+    cmCategories,
+    otherIncome,
+    otherExpenses,
+    formData,
+  });
+
   const gmRetail = sumCategories(gmCategories, "retailSales");
   const gmOnline = sumCategories(gmCategories, "onlineSales");
   const cmRetail = sumCategories(cmCategories, "retailSales");
   const cmOnline = sumCategories(cmCategories, "onlineSales");
-  /*
-    Only the lines the store ticked as income. §4 shows the same total under
-    the same rule — if this one quietly counted an excluded line, the two
-    screens would disagree about the store's revenue, and the store would be
-    right to trust neither.
-  */
-  const other = otherIncome.reduce(
-    (sum, row) => sum + (row.countsAsIncome ? (row.amount ?? 0) : 0),
-    0,
-  );
+
+  const other = statement.otherIncome;
   const excludedIncome = otherIncome.filter(
     (row) => !row.countsAsIncome && (row.amount ?? 0) > 0,
   );
-  const funding = num("central_funding") ?? 0;
 
-  const netSales = gmRetail + gmOnline + cmRetail + cmOnline + other + funding;
+  const netSales = statement.totalRevenue ?? 0;
+  const invOpen = statement.openingInventory ?? 0;
+  const invClose = statement.closingInventory ?? 0;
+  const grossMargin = statement.grossMargin;
 
-  const invOpen =
-    sumCategories(gmCategories, "inventoryOpen") + sumCategories(cmCategories, "inventoryOpen");
-  const invClose =
-    sumCategories(gmCategories, "inventoryClose") + sumCategories(cmCategories, "inventoryClose");
-
-  const marginDollars =
-    grossMarginFromCategories(gmCategories) + grossMarginFromCategories(cmCategories);
-  const grossMargin = marginDollars > 0 ? marginDollars : null;
-
-  /*
-    Service costs the store told us are NOT already in its expense lines.
-
-    ⛔ Only the unticked ones. For most stores a print desk's toner is already
-    inside "Store and business supplies", so adding it here would count it
-    twice and quietly worsen every expense ratio the report prints.
-  */
   const uncountedDirectCosts = otherIncome.filter(
     (row) => !row.directCostInExpenses && (row.directCost ?? 0) > 0,
   );
 
-  const expenseTotal =
-    sumFields(formData, NAMED_EXPENSE_LINES) +
-    otherExpenses.reduce((sum, row) => sum + (row.amount ?? 0), 0) +
-    uncountedDirectCosts.reduce((sum, row) => sum + (row.directCost ?? 0), 0);
+  /*
+    Figures a split has stranded. Loud, because this is the one way a store can
+    watch its largest category become zero with the number still sitting there
+    looking perfectly fine.
+  */
+  const stranded = [
+    ...strandedBySplit(gmCategories).map((s) => ({ ...s, section: "general_merchandise" })),
+    ...strandedBySplit(cmCategories).map((s) => ({ ...s, section: "course_materials" })),
+  ];
 
-  const operatingIncome = grossMargin !== null ? grossMargin - expenseTotal : null;
-
-  const contributionTotal = sumFields(formData, CONTRIBUTION_LINES);
+  const expenseTotal = statement.operatingExpenses;
+  const operatingIncome = statement.operatingIncome;
+  const contributionTotal = statement.campusContribution;
   const contributionPct = netSales > 0 ? (contributionTotal / netSales) * 100 : null;
 
   /*
@@ -310,6 +312,34 @@ export default function ReviewFinancials({
           indent
         />
       </div>
+
+      {stranded.length > 0 && (
+        <div className="mt-4 rounded-lg border-l-4 border-amber-500 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-900">
+            Some figures are not being counted
+          </p>
+          <p className="mt-1 text-xs text-amber-900">
+            You broke these categories into subcategories after entering a figure for the
+            whole department. The department figure is still there but nothing counts it,
+            because the subcategory rows are what you are reporting now. Put the figures on
+            the subcategory rows, or untick the split to go back to one line.
+          </p>
+          <ul className="mt-2 space-y-1">
+            {stranded.map((item) => (
+              <li key={item.department} className="flex justify-between text-sm">
+                <button
+                  type="button"
+                  onClick={() => onJumpToSection(item.section)}
+                  className="text-left text-amber-900 underline underline-offset-4"
+                >
+                  {item.department}
+                </button>
+                <span className="tabular-nums text-amber-900">{money(item.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
 
       {excludedIncome.length > 0 && (
         <div className="mt-4 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm">

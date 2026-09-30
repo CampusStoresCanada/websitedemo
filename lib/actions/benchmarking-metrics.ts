@@ -10,6 +10,7 @@ import {
 } from "@/lib/benchmarking/metrics";
 import { resolveSizeBand, getSizeBands } from "@/lib/benchmarking/size-band";
 import { REGION_OF } from "@/lib/benchmarking/comparison";
+import type { StatementParts } from "@/lib/benchmarking/financial-lines";
 
 /**
  * Keeping computed_metrics true.
@@ -124,6 +125,82 @@ async function loadYear(fiscalYear: number) {
  * ways that are corrections, and someone should see the list before the
  * numbers behind an already-sent package move.
  */
+
+/**
+ * The category rows, income and expenses behind one submission.
+ *
+ * ⛔ Read straight through the admin client rather than the guarded loaders in
+ * lib/actions/benchmarking-*. Those guard on the SIGNED-IN user, and this runs
+ * from a cron and from an admin recompute where there is either no user or the
+ * wrong one. Borrowing a member-facing guard here would fail closed and quietly
+ * produce a page of nulls, which is exactly the failure this whole change is
+ * fixing.
+ */
+async function statementPartsFor(
+  db: ReturnType<typeof createAdminClient>,
+  row: Record<string, unknown>,
+): Promise<StatementParts> {
+  const benchmarkingId = row.id as string;
+
+  const [{ data: categories }, { data: income }, { data: expenses }] = await Promise.all([
+    db
+      .from("benchmarking_categories")
+      .select(
+        "id, scope, department, split_by_subcategory, buyer_contact_ids, benchmarking_category_lines(id, subcategory, retail_sales, online_sales, gross_margin_pct, inventory_open, inventory_close, units_sold, units_available)",
+      )
+      .eq("benchmarking_id", benchmarkingId),
+    db
+      .from("benchmarking_other_income")
+      .select("amount, counts_as_income, direct_cost, direct_cost_in_expenses")
+      .eq("benchmarking_id", benchmarkingId),
+    db
+      .from("benchmarking_other_expenses")
+      .select("amount")
+      .eq("benchmarking_id", benchmarkingId),
+  ]);
+
+  const shape = (scope: string) =>
+    (categories ?? [])
+      .filter((c) => c.scope === scope)
+      .map((c) => ({
+        id: c.id as string,
+        department: (c.department as string) ?? "",
+        splitBySubcategory: Boolean(c.split_by_subcategory),
+        buyerContactIds: (c.buyer_contact_ids as string[] | null) ?? [],
+        locations: [],
+        // Every line, in the shape loadCategories returns. Which of them count
+        // is decided by linesInUse(), so the report and the review screen apply
+        // one rule rather than each having its own.
+        lines: ((c.benchmarking_category_lines as Record<string, unknown>[] | null) ?? [])
+          .map((l) => ({
+            id: l.id as string,
+            subcategory: (l.subcategory as string | null) ?? null,
+            retailSales: (l.retail_sales as number | null) ?? null,
+            onlineSales: (l.online_sales as number | null) ?? null,
+            grossMarginPct: (l.gross_margin_pct as number | null) ?? null,
+            inventoryOpen: (l.inventory_open as number | null) ?? null,
+            inventoryClose: (l.inventory_close as number | null) ?? null,
+            unitsSold: (l.units_sold as number | null) ?? null,
+            unitsAvailable: (l.units_available as number | null) ?? null,
+          })),
+      }));
+
+  return {
+    gmCategories: shape("general_merchandise"),
+    cmCategories: shape("course_materials"),
+    otherIncome: (income ?? []).map((r) => ({
+      amount: (r.amount as number | null) ?? null,
+      countsAsIncome: (r.counts_as_income as boolean | null) ?? true,
+      directCost: (r.direct_cost as number | null) ?? null,
+      directCostInExpenses: (r.direct_cost_in_expenses as boolean | null) ?? true,
+    })),
+    otherExpenses: (expenses ?? []).map((r) => ({
+      amount: (r.amount as number | null) ?? null,
+    })),
+    formData: row,
+  };
+}
+
 export async function recomputeYear(
   fiscalYear: number,
   options: { dryRun?: boolean } = {},
@@ -165,13 +242,19 @@ export async function recomputeYear(
       const org = orgById.get(row.organization_id as string);
       const prior = priorByOrg.get(row.organization_id as string) ?? null;
 
+      const [parts, priorParts] = await Promise.all([
+        statementPartsFor(db, row as Record<string, unknown>),
+        prior ? statementPartsFor(db, prior as Record<string, unknown>) : Promise.resolve(null),
+      ]);
+
       const metrics = computeMetrics(row, {
         orgFte: org?.fte,
         priorFyeInventory: prior?.fye_inventory_value,
+        statement: parts,
       });
 
       const priorMetrics = prior
-        ? computeMetrics(prior, { orgFte: org?.fte })
+        ? computeMetrics(prior, { orgFte: org?.fte, statement: priorParts ?? undefined })
         : null;
 
       const existing = existingByBenchmarking.get(row.id as string);
@@ -267,11 +350,21 @@ export async function syncMetricsFor(benchmarkingId: string): Promise<void> {
   if (await yearIsClosed(row.fiscal_year as number)) return;
 
   const bands = await getSizeBands();
+
+  // Both years, each from whichever shape it was filed in.
+  const [parts, priorParts] = await Promise.all([
+    statementPartsFor(db, row as Record<string, unknown>),
+    prior ? statementPartsFor(db, prior as Record<string, unknown>) : Promise.resolve(null),
+  ]);
+
   const metrics = computeMetrics(row, {
     orgFte: org?.fte,
     priorFyeInventory: prior?.fye_inventory_value,
+    statement: parts,
   });
-  const priorMetrics = prior ? computeMetrics(prior, { orgFte: org?.fte }) : null;
+  const priorMetrics = prior
+    ? computeMetrics(prior, { orgFte: org?.fte, statement: priorParts ?? undefined })
+    : null;
 
   const { error } = await db.from("computed_metrics").upsert(
     {

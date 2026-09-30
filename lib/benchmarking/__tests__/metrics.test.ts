@@ -1,3 +1,4 @@
+import { deriveStatement, strandedBySplit } from "@/lib/benchmarking/financial-lines";
 import { describe, it, expect } from "vitest";
 import {
   computeMetrics,
@@ -171,5 +172,169 @@ describe("a published year is closed to writes", () => {
     // Absence of a record is not evidence of publication.
     expect(isYearClosedToWrites(null)).toBe(false);
     expect(isYearClosedToWrites(undefined)).toBe(false);
+  });
+});
+
+describe("a 2026 submission, whose figures are no longer columns", () => {
+  /*
+    The failure this guards against: from FY2026 sales, margin and inventory
+    live on benchmarking_category_lines, and the flat columns computeMetrics
+    used to read are retired and never written. Without the statement, a store
+    files a complete survey and every headline metric comes back null.
+  */
+  const line = (over: Record<string, number | null> = {}) => ({
+    id: "l1",
+    subcategory: null,
+    retailSales: null,
+    onlineSales: null,
+    grossMarginPct: null,
+    inventoryOpen: null,
+    inventoryClose: null,
+    unitsSold: null,
+    unitsAvailable: null,
+    ...over,
+  });
+
+  const category = (id: string, department: string, over: Record<string, number | null>) => ({
+    id,
+    department,
+    splitBySubcategory: false,
+    buyerContactIds: [],
+    locations: [],
+    lines: [line(over)],
+  });
+
+  const statement = {
+    gmCategories: [
+      category("gm", "Apparel", {
+        retailSales: 400_000,
+        onlineSales: 100_000,
+        grossMarginPct: 40,
+        inventoryOpen: 120_000,
+        inventoryClose: 80_000,
+      }),
+    ],
+    cmCategories: [
+      category("cm", "Print — New", {
+        retailSales: 300_000,
+        onlineSales: 200_000,
+        grossMarginPct: 20,
+        inventoryOpen: 80_000,
+        inventoryClose: 120_000,
+      }),
+    ],
+    otherIncome: [
+      { amount: 50_000, countsAsIncome: true, directCost: null, directCostInExpenses: true },
+      // Excluded by the store, so it must not reach revenue.
+      { amount: 9_000, countsAsIncome: false, directCost: null, directCostInExpenses: true },
+    ],
+    otherExpenses: [{ amount: 15_000 }],
+    formData: { central_funding: 0, expense_hr: 250_000 },
+  };
+
+  const row = {
+    // Every legacy column empty, exactly as a 2026 row will be.
+    total_gross_sales_instore: null,
+    total_online_sales: null,
+    total_cogs: null,
+    net_profit: null,
+    fye_inventory_value: null,
+    sales_course_materials: null,
+    expense_hr: 250_000,
+    enrollment_fte: 10_000,
+    sqft_salesfloor: 5_000,
+    total_transaction_count: 50_000,
+  };
+
+  it("computes the headline figures instead of nulls", () => {
+    const m = computeMetrics(row, { statement, orgFte: 10_000 });
+
+    // 400k + 100k + 300k + 200k + 50k counted income. The 9k is excluded.
+    expect(m.total_revenue).toBe(1_050_000);
+    // 500k at 40% + 500k at 20% = 300k.
+    expect(m.gross_margin).toBe(300_000);
+    expect(m.gross_margin_pct).toBeCloseTo(28.57, 1);
+    expect(m.sales_per_fte).toBeCloseTo(105, 1);
+    expect(m.sales_per_sqft).toBe(210);
+    expect(m.avg_transaction_value).toBe(21);
+    expect(m.online_pct).toBeCloseTo(30, 1);
+  });
+
+  it("uses operating income as the bottom line it can actually see", () => {
+    // 300k margin less 250k salaries and 15k of named-yourself expenses.
+    const m = computeMetrics(row, { statement, orgFte: 10_000 });
+    expect(m.net_margin_pct).toBeCloseTo((35_000 / 1_050_000) * 100, 2);
+  });
+
+  it("returns nulls when there is no statement, which is the bug it fixes", () => {
+    const m = computeMetrics(row, { orgFte: 10_000 });
+    expect(m.total_revenue).toBeNull();
+    expect(m.gross_margin).toBeNull();
+    expect(m.sales_per_fte).toBeNull();
+  });
+
+  it("still reads the flat columns for a year filed before the rebuild", () => {
+    const legacy = computeMetrics(
+      { ...row, total_gross_sales_instore: 900_000, total_online_sales: 100_000, total_cogs: 700_000 },
+      { orgFte: 10_000 },
+    );
+    expect(legacy.total_revenue).toBe(1_000_000);
+    expect(legacy.gross_margin).toBe(300_000);
+  });
+});
+
+describe("a category that has been split", () => {
+  const split = {
+    id: "gm",
+    department: "Apparel",
+    splitBySubcategory: true,
+    buyerContactIds: [],
+    locations: [],
+    lines: [
+      // The department's own row, left behind by the split with its figure on it.
+      {
+        id: "whole",
+        subcategory: null,
+        retailSales: 420_000,
+        onlineSales: 38_000,
+        grossMarginPct: 41.5,
+        inventoryOpen: null,
+        inventoryClose: null,
+        unitsSold: null,
+        unitsAvailable: null,
+      },
+      {
+        id: "sub",
+        subcategory: "Men's / Unisex",
+        retailSales: 100_000,
+        onlineSales: null,
+        grossMarginPct: 40,
+        inventoryOpen: null,
+        inventoryClose: null,
+        unitsSold: null,
+        unitsAvailable: null,
+      },
+    ],
+  };
+
+  const parts = {
+    gmCategories: [split],
+    cmCategories: [],
+    otherIncome: [],
+    otherExpenses: [],
+    formData: {},
+  };
+
+  it("counts the subcategories and not the department row", () => {
+    // 520,000 would be the double count; 458,000 would be the stale one.
+    expect(deriveStatement(parts).totalRevenue).toBe(100_000);
+  });
+
+  it("reports what the split stranded rather than silently dropping it", () => {
+    expect(strandedBySplit([split])).toEqual([{ department: "Apparel", amount: 458_000 }]);
+  });
+
+  it("says nothing about a category that was never split", () => {
+    expect(strandedBySplit([{ ...split, splitBySubcategory: false }])).toEqual([]);
   });
 });
