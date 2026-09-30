@@ -39,6 +39,12 @@ const BLOCKED_COPY: Record<string, string> = {
   already_submitted: "already filed",
   never_invited: "never received the invitation",
   no_address: "no address on file",
+  /*
+    The one an operator has to act on rather than just note: the store is in the
+    beta cohort but nobody there is appointed, so the survey is still a locked
+    door for them. Appoint someone on the benchmarking admin page first.
+  */
+  nobody_can_file_yet: "nobody there is appointed as a beta tester yet",
 };
 
 export default function SendPanel({

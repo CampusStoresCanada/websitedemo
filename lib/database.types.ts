@@ -1695,6 +1695,76 @@ export type Database = {
           },
         ]
       }
+      benchmarking_issues: {
+        Row: {
+          benchmarking_id: string
+          body: string
+          created_at: string
+          field_name: string | null
+          fiscal_year: number
+          id: string
+          organization_id: string
+          reported_by: string | null
+          resolution: string | null
+          resolved_at: string | null
+          resolved_by: string | null
+          section_id: string | null
+          status: string
+        }
+        Insert: {
+          benchmarking_id: string
+          body: string
+          created_at?: string
+          field_name?: string | null
+          fiscal_year: number
+          id?: string
+          organization_id: string
+          reported_by?: string | null
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          section_id?: string | null
+          status?: string
+        }
+        Update: {
+          benchmarking_id?: string
+          body?: string
+          created_at?: string
+          field_name?: string | null
+          fiscal_year?: number
+          id?: string
+          organization_id?: string
+          reported_by?: string | null
+          resolution?: string | null
+          resolved_at?: string | null
+          resolved_by?: string | null
+          section_id?: string | null
+          status?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "benchmarking_issues_benchmarking_id_fkey"
+            columns: ["benchmarking_id"]
+            isOneToOne: false
+            referencedRelation: "benchmarking"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_issues_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "benchmarking_issues_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       benchmarking_location_other_spaces: {
         Row: {
           created_at: string
