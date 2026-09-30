@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import BusyButton from "./BusyButton";
 import {
   seedStaffFromContacts,
   addStaff,
@@ -135,7 +136,8 @@ export default function StaffingEditor({
             placeholder="Add someone we don't have"
             className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
-          <button
+          <BusyButton
+            busyLabel="Adding…"
             onClick={async () => {
               const res = await addStaff({ benchmarkingId, name: newName });
               if (!res.success || !res.id) {
@@ -155,10 +157,10 @@ export default function StaffingEditor({
               setNewName("");
             }}
             disabled={!newName.trim()}
-            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
           >
             Add
-          </button>
+          </BusyButton>
         </div>
       )}
 

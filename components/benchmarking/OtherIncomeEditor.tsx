@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import BusyButton from "./BusyButton";
 import {
   seedServiceIncome,
   addOtherIncome,
@@ -339,7 +340,8 @@ export default function OtherIncomeEditor({
             placeholder="Name another kind of income"
             className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
-          <button
+          <BusyButton
+            busyLabel="Adding…"
             onClick={async () => {
               const res = await addOtherIncome({ benchmarkingId, label: newLabel });
               if (!res.success || !res.id) {
@@ -362,10 +364,10 @@ export default function OtherIncomeEditor({
               setNewLabel("");
             }}
             disabled={!newLabel.trim()}
-            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
           >
             Add
-          </button>
+          </BusyButton>
         </div>
       )}
 

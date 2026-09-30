@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BusyButton from "./BusyButton";
 import {
   addOtherExpense,
   updateOtherExpense,
@@ -113,7 +114,8 @@ export default function OtherExpensesEditor({
             placeholder="Name another expense"
             className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
-          <button
+          <BusyButton
+            busyLabel="Adding…"
             onClick={async () => {
               const res = await addOtherExpense({ benchmarkingId, label: newLabel });
               if (!res.success || !res.id) {
@@ -124,10 +126,10 @@ export default function OtherExpensesEditor({
               setNewLabel("");
             }}
             disabled={!newLabel.trim()}
-            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
           >
             Add
-          </button>
+          </BusyButton>
         </div>
       )}
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import BusyButton from "./BusyButton";
 import {
   addCompetitor,
   updateCompetitor,
@@ -125,13 +126,14 @@ export default function CompetitorsEditor({
             placeholder="Name a store, then press Enter"
             className="flex-1 rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
-          <button
-            onClick={() => void add()}
+          <BusyButton
+            onClick={add}
+            busyLabel="Adding…"
             disabled={!newName.trim()}
-            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white disabled:opacity-40"
+            className="rounded bg-[#163D6D] px-3 py-1.5 text-sm font-medium text-white"
           >
             Add
-          </button>
+          </BusyButton>
         </div>
       )}
 

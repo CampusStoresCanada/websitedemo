@@ -11,6 +11,7 @@ import {
   type SurveyCategory,
   type CategoryScope,
 } from "@/lib/actions/benchmarking-categories";
+import BusyButton from "./BusyButton";
 import {
   departmentsFor,
   subcategoriesFor,
@@ -167,15 +168,16 @@ export default function CategorySales({
                   )}
                 </div>
                 {!isReadOnly && (
-                  <button
+                  <BusyButton
                     onClick={async () => {
                       const res = await removeCategory({ benchmarkingId, categoryId: cat.id });
                       if (res.success) setCats((p) => p.filter((c) => c.id !== cat.id));
                     }}
+                    busyLabel="Removing…"
                     className="text-xs text-gray-500 underline hover:text-red-700"
                   >
                     We don&apos;t carry this
-                  </button>
+                  </BusyButton>
                 )}
               </div>
 
@@ -424,13 +426,19 @@ export default function CategorySales({
           <p className="text-xs font-medium text-gray-700">Add a category you carry</p>
           <div className="mt-2 flex flex-wrap gap-2">
             {available.map((d) => (
-              <button
+              /*
+                Guarded because this inserts a row. Without it a slow round trip
+                invites a second click and the store ends up with two Apparels,
+                and nothing downstream knows which one was meant.
+              */
+              <BusyButton
                 key={d}
-                onClick={() => void add(d)}
+                onClick={() => add(d)}
+                busyLabel={`Adding ${d}…`}
                 className="rounded-full border border-gray-300 px-3 py-1 text-xs text-gray-700 hover:border-[#163D6D] hover:text-[#163D6D]"
               >
                 + {d}
-              </button>
+              </BusyButton>
             ))}
           </div>
         </div>
