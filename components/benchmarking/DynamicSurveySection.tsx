@@ -226,8 +226,20 @@ function FieldRenderer({
     section.
   */
   const wrapper = (children: React.ReactNode) => (
+    /*
+      data-flaggable on the QUESTION, so the site-wide toolkit Flag selects the
+      thing that is actually wrong.
+
+      ⛔ I built a bespoke "something wrong with this section" box before
+      checking whether the site already had one. It does — + → Flag → Describe,
+      on every other page. The survey simply had no flaggable element for it to
+      grab, which made it look absent rather than unwired. Marking the whole
+      section panel was the first fix and it was worse: four thousand pixels
+      tall, and "section 3 is confusing" is not something a reviewer can act on.
+    */
     <div
       id={`field-${field.name}`}
+      data-flaggable
       className={`${indentClass} scroll-mt-28 rounded-md transition-colors ${
         highlighted ? "bg-amber-50 ring-2 ring-amber-400 ring-offset-2" : ""
       }`}

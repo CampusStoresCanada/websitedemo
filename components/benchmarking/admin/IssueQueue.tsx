@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { decideIssue, type AdminIssue } from "@/lib/actions/benchmarking-issues";
+import { decideSurveyFlag, type SurveyFlag } from "@/lib/actions/benchmarking-flags";
 import BusyButton from "@/components/benchmarking/BusyButton";
 
 /**
@@ -13,27 +13,15 @@ import BusyButton from "@/components/benchmarking/BusyButton";
  * cannot answer is guess.
  */
 
+/** The site-wide flag statuses, not a benchmarking-only set. */
 const STATUS_LABEL: Record<string, string> = {
   open: "Open",
   acknowledged: "Acknowledged",
-  fixed: "Fixed",
-  not_a_problem: "Not a problem",
+  resolved: "Resolved",
+  dismissed: "Not a problem",
 };
 
-const SECTION_LABEL: Record<string, string> = {
-  institution_profile: "1. Institution Profile",
-  general_merchandise: "2. General Merchandise",
-  course_materials: "3. Course Materials",
-  other_income: "4. Other Income",
-  campus_contributions: "5. Campus Contributions",
-  staffing: "6. Staffing",
-  expenses: "7. Expenses",
-  review_financials: "8. Review",
-  technology_systems: "9. Technology & Systems",
-  inclusive_access: "10. Inclusive & Equitable Access",
-};
-
-export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
+export default function IssueQueue({ issues }: { issues: SurveyFlag[] }) {
   const [rows, setRows] = useState(issues);
   const [editing, setEditing] = useState<string | null>(null);
   const [note, setNote] = useState("");
@@ -43,17 +31,21 @@ export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
   const closed = rows.filter((r) => r.status !== "open");
 
   async function decide(
-    issue: AdminIssue,
-    status: "open" | "acknowledged" | "fixed" | "not_a_problem",
+    issue: SurveyFlag,
+    status: "open" | "acknowledged" | "resolved" | "dismissed",
   ) {
-    const res = await decideIssue({ issueId: issue.id, status, resolution: note });
+    const res = await decideSurveyFlag({
+      flagId: issue.id,
+      status,
+      resolutionNotes: note,
+    });
     if (!res.success) {
       setError(res.error ?? "Could not save that.");
       return;
     }
     setRows((prev) =>
       prev.map((r) =>
-        r.id === issue.id ? { ...r, status, resolution: note.trim() || null } : r,
+        r.id === issue.id ? { ...r, status, resolutionNotes: note.trim() || null } : r,
       ),
     );
     setEditing(null);
@@ -61,17 +53,17 @@ export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
     setError(null);
   }
 
-  const card = (issue: AdminIssue) => (
+  const card = (issue: SurveyFlag) => (
     <li key={issue.id} className="rounded-lg border border-gray-200 bg-white p-4">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-gray-900">{issue.organizationName}</p>
+          <p className="text-sm font-semibold text-gray-900">
+            {issue.organizationName ?? "Unknown store"}
+          </p>
           <p className="text-xs text-gray-500">
-            {issue.sectionId
-              ? SECTION_LABEL[issue.sectionId] ?? issue.sectionId
-              : "No section recorded"}
-            {issue.fieldName ? ` · ${issue.fieldName}` : ""} · FY{issue.fiscalYear}
-            {issue.reporterName ? ` · ${issue.reporterName}` : ""}
+            {issue.section ?? "No section recorded"}
+            {issue.flaggerName ? ` · ${issue.flaggerName}` : ""}
+            {issue.priority === "high" ? " · urgent" : ""}
           </p>
         </div>
         <span
@@ -85,12 +77,20 @@ export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
         </span>
       </div>
 
-      <p className="mt-2 whitespace-pre-line text-sm text-gray-800">{issue.body}</p>
+      <p className="mt-2 whitespace-pre-line text-sm text-gray-800">
+        {issue.note ?? "No description given."}
+      </p>
+      <a
+        href={issue.pageUrl}
+        className="mt-1 inline-block text-xs text-[#163D6D] underline underline-offset-4"
+      >
+        Go to where they were
+      </a>
 
-      {issue.resolution && (
+      {issue.resolutionNotes && (
         <p className="mt-2 rounded bg-gray-50 p-2 text-xs text-gray-700">
           <span className="font-medium">What we did: </span>
-          {issue.resolution}
+          {issue.resolutionNotes}
         </p>
       )}
 
@@ -105,7 +105,7 @@ export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
             className="w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
           <div className="mt-2 flex flex-wrap gap-2">
-            {(["acknowledged", "fixed", "not_a_problem"] as const).map((s) => (
+            {(["acknowledged", "resolved", "dismissed"] as const).map((s) => (
               <BusyButton
                 key={s}
                 onClick={() => decide(issue, s)}
@@ -129,7 +129,7 @@ export default function IssueQueue({ issues }: { issues: AdminIssue[] }) {
         <button
           onClick={() => {
             setEditing(issue.id);
-            setNote(issue.resolution ?? "");
+            setNote(issue.resolutionNotes ?? "");
           }}
           className="mt-2 text-xs text-[#163D6D] underline underline-offset-4"
         >

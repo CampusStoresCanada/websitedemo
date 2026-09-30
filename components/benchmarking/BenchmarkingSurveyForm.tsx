@@ -25,7 +25,6 @@ import ReviewFinancials from "./ReviewFinancials";
 import ReviewAllAnswers from "./ReviewAllAnswers";
 import CompetitorsEditor from "./CompetitorsEditor";
 import BetaResetPanel from "./BetaResetPanel";
-import ReportIssue from "./ReportIssue";
 import SocialOwner, { isInternalSocialAnswer } from "./SocialOwner";
 import WagesAndBenefits from "./WagesAndBenefits";
 import type { CompetitorRow } from "@/lib/actions/benchmarking-competitors";
@@ -886,19 +885,6 @@ export default function BenchmarkingSurveyForm({
           </>
         )}
       </div>
-
-      {/*
-        On every section, because a problem is reported where it is met. Not
-        gated to beta testers: a member hitting a broken question during the
-        real round is exactly who we want to hear from.
-      */}
-      {!reviewingAll && sections[activeSection] && (
-        <ReportIssue
-          benchmarkingId={benchmarkingId}
-          sectionId={sections[activeSection].id}
-          sectionTitle={sections[activeSection].title}
-        />
-      )}
 
       {/* The wipe, at the foot, for the people asked to break this. */}
       {isBetaTester && !isReadOnly && (

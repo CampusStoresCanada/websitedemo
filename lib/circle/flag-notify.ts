@@ -14,6 +14,7 @@ import { getCircleGhostClient } from "./client";
 import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { isBenchmarkingSurveyFlag } from "@/lib/circle/flag-routing";
 import { createClient } from "@/lib/supabase/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -25,6 +26,45 @@ export interface FlagNotificationParams {
   priority: "normal" | "high";
   organizationId: string | null;
   reporterName: string | null;
+}
+
+
+/**
+ * Who answers for the survey: the committee lead, plus the office.
+ *
+ * The lead because the questions are theirs, and the office because during a
+ * beta round somebody has to be able to fix the thing the same afternoon. Falls
+ * through to the super admins on its own if no lead is appointed, which is the
+ * state the survey is in right now.
+ */
+async function benchmarkingRecipients(): Promise<string[]> {
+  const adminClient = createAdminClient();
+
+  const { data: leads } = await adminClient
+    .from("capability_contributions")
+    .select("subject_id")
+    .eq("capability", "benchmarking.committee_lead")
+    .eq("is_active", true);
+
+  const { data: superAdmins } = await adminClient
+    .from("profiles")
+    .select("id")
+    .eq("global_role", "super_admin");
+
+  const ids = [
+    ...new Set([
+      ...(leads ?? []).map((l) => l.subject_id as string),
+      ...(superAdmins ?? []).map((a) => a.id as string),
+    ]),
+  ];
+
+  const emails = await Promise.all(
+    ids.map(async (id) => {
+      const { data } = await adminClient.auth.admin.getUserById(id);
+      return data?.user?.email ?? null;
+    }),
+  );
+  return emails.filter((e): e is string => !!e);
 }
 
 export async function sendFlagNotification(
@@ -39,7 +79,19 @@ export async function sendFlagNotification(
 
   let recipientEmails: string[] = [];
 
-  if (organizationId) {
+  /*
+    ⛔ A flag raised inside the benchmarking survey goes to the COMMITTEE, never
+    to the store's own admins.
+
+    Everywhere else on the site a flag means "this page says something wrong
+    about you", so the store that owns the page is exactly who should hear it.
+    In the survey it is the reverse: the store is the one reporting, and routing
+    by organization_id would have mailed their complaint back to themselves and
+    told CSC nothing.
+  */
+  if (isBenchmarkingSurveyFlag(pageUrl)) {
+    recipientEmails = await benchmarkingRecipients();
+  } else if (organizationId) {
     const { data: memberships } = await supabase
       .from("user_organizations")
       .select("user_id")
@@ -88,9 +140,13 @@ export async function sendFlagNotification(
 
   const reviewLink = `${pageLink}${pageLink.includes("?") ? "&" : "?"}flag=${flagId}`;
 
-  const dmText =
-    `${priorityLabel} — A CSC member flagged content as potentially incorrect.${excerpt}\n\n` +
-    `Review: ${reviewLink}`;
+  const survey = isBenchmarkingSurveyFlag(pageUrl);
+
+  const dmText = survey
+    ? `${priorityLabel} — A store flagged a problem while filling the benchmarking survey.${excerpt}\n\n` +
+      `Read it and answer: ${APP_URL}/benchmarking/admin/issues`
+    : `${priorityLabel} — A CSC member flagged content as potentially incorrect.${excerpt}\n\n` +
+      `Review: ${reviewLink}`;
 
   const emailSubject = priority === "high"
     ? "🔴 HIGH PRIORITY: Content flagged on CSC site"
