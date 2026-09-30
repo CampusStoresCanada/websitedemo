@@ -3,6 +3,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { FieldType, FieldDef } from "@/lib/benchmarking/field-registry";
 import { FIELD_REGISTRY } from "@/lib/benchmarking/field-registry";
+import { RETIRED_FIELDS } from "@/lib/benchmarking/retired-fields";
 import {
   canManageOrganization,
   isGlobalAdmin,
@@ -559,6 +560,16 @@ async function carryForwardUnanswered(
 
   for (const [name, def] of Object.entries(FIELD_REGISTRY)) {
     if (SYSTEM_ONLY_FIELDS.has(name)) continue;
+    /*
+      ⛔ Never carry a column the rebuild stopped writing.
+
+      53 of them would otherwise have been copied from 2025 into a 2026 row:
+      last year's total sales, cost of goods, year-end inventory and every
+      retired cm_* and sales_* line. Nothing reads them now, so they would sit
+      in the record looking like this year's answers, and the store would be
+      TOLD we had carried them forward — for questions it was never shown.
+    */
+    if (RETIRED_FIELDS.has(name)) continue;
     // Figures only — see above.
     if (!["currency", "number", "integer", "percentage"].includes(def.type)) continue;
     if (current[name] !== null && current[name] !== undefined) continue;
