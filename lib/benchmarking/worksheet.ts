@@ -2,6 +2,7 @@ import type {
   FieldConfig,
   SurveyFieldConfig,
 } from "@/lib/benchmarking/default-field-config";
+import { describeShowIf } from "@/lib/benchmarking/show-if";
 
 /**
  * The printable gathering sheet.
@@ -113,9 +114,7 @@ function conditionHint(field: FieldConfig, config: SurveyFieldConfig): string | 
     .flatMap((s) => s.fields)
     .find((f) => f.name === field.showIf!.field);
   const label = target?.label ?? field.showIf.field;
-  const value = field.showIf.value;
-  const shown = value === true ? "yes" : value === false ? "no" : String(value);
-  return `Only if “${label}” is ${shown}`;
+  return describeShowIf(field.showIf, label);
 }
 
 function indentLevel(field: FieldConfig): number {

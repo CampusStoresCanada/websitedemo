@@ -833,7 +833,7 @@ export type Database = {
           disclosure_level_set_at: string | null
           disclosure_level_set_by: string | null
           does_book_buyback: boolean | null
-          ebook_delivery_system: string | null
+          ebook_delivery_system: string[] | null
           enrollment_fte: number | null
           expense_advertising: number | null
           expense_card_fees: number | null
@@ -875,7 +875,7 @@ export type Database = {
           inventory_count_style: string | null
           inventory_count_style_other: string | null
           is_semester_based: boolean | null
-          lms_system: string | null
+          lms_system: string[] | null
           manager_years_current_position: number | null
           manager_years_in_industry: number | null
           marketing_spend: number | null
@@ -892,7 +892,7 @@ export type Database = {
           payment_options: string[] | null
           physical_inventory_schedule: string[] | null
           pos_runs_inventory: boolean | null
-          pos_system: string | null
+          pos_system: string[] | null
           respondent_contact_id: string | null
           respondent_delegate_profile_id: string | null
           respondent_delegated_at: string | null
@@ -940,7 +940,7 @@ export type Database = {
           store_in_stores: string[] | null
           store_name: string | null
           student_fte_average: number | null
-          student_info_system: string | null
+          student_info_system: string[] | null
           submitted_at: string | null
           sunday_hours_close: string | null
           sunday_hours_open: string | null
@@ -1007,7 +1007,7 @@ export type Database = {
           disclosure_level_set_at?: string | null
           disclosure_level_set_by?: string | null
           does_book_buyback?: boolean | null
-          ebook_delivery_system?: string | null
+          ebook_delivery_system?: string[] | null
           enrollment_fte?: number | null
           expense_advertising?: number | null
           expense_card_fees?: number | null
@@ -1049,7 +1049,7 @@ export type Database = {
           inventory_count_style?: string | null
           inventory_count_style_other?: string | null
           is_semester_based?: boolean | null
-          lms_system?: string | null
+          lms_system?: string[] | null
           manager_years_current_position?: number | null
           manager_years_in_industry?: number | null
           marketing_spend?: number | null
@@ -1066,7 +1066,7 @@ export type Database = {
           payment_options?: string[] | null
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
-          pos_system?: string | null
+          pos_system?: string[] | null
           respondent_contact_id?: string | null
           respondent_delegate_profile_id?: string | null
           respondent_delegated_at?: string | null
@@ -1114,7 +1114,7 @@ export type Database = {
           store_in_stores?: string[] | null
           store_name?: string | null
           student_fte_average?: number | null
-          student_info_system?: string | null
+          student_info_system?: string[] | null
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null
@@ -1181,7 +1181,7 @@ export type Database = {
           disclosure_level_set_at?: string | null
           disclosure_level_set_by?: string | null
           does_book_buyback?: boolean | null
-          ebook_delivery_system?: string | null
+          ebook_delivery_system?: string[] | null
           enrollment_fte?: number | null
           expense_advertising?: number | null
           expense_card_fees?: number | null
@@ -1223,7 +1223,7 @@ export type Database = {
           inventory_count_style?: string | null
           inventory_count_style_other?: string | null
           is_semester_based?: boolean | null
-          lms_system?: string | null
+          lms_system?: string[] | null
           manager_years_current_position?: number | null
           manager_years_in_industry?: number | null
           marketing_spend?: number | null
@@ -1240,7 +1240,7 @@ export type Database = {
           payment_options?: string[] | null
           physical_inventory_schedule?: string[] | null
           pos_runs_inventory?: boolean | null
-          pos_system?: string | null
+          pos_system?: string[] | null
           respondent_contact_id?: string | null
           respondent_delegate_profile_id?: string | null
           respondent_delegated_at?: string | null
@@ -1288,7 +1288,7 @@ export type Database = {
           store_in_stores?: string[] | null
           store_name?: string | null
           student_fte_average?: number | null
-          student_info_system?: string | null
+          student_info_system?: string[] | null
           submitted_at?: string | null
           sunday_hours_close?: string | null
           sunday_hours_open?: string | null

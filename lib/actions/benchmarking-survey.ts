@@ -146,10 +146,13 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   sales_food_beverage:          { type: "currency", min: 0 },
 
   // ── Section 7: Technology & Systems ──
-  pos_system:              { type: "select", options: ["Bookware (Carleton Technologies)", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Waterloo Information Systems (WISL)", "Ratex", "Built in house", "Other"] },
-  ebook_delivery_system:   { type: "select", options: ["CEI", "VitalSource", "Kivuto", "Built in house", "Other"] },
-  student_info_system:     { type: "select", options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution", "Other"] },
-  lms_system:              { type: "select", options: ["D2L / Brightspace", "Moodle", "Canvas", "Blackboard", "LEA", "Other"] },
+  // Select all that apply: a store mid-migration runs two, and the columns are
+  // text[] as of the FY2026 rebuild. allowOther keeps the type-and-Enter escape
+  // open, so a system we have not heard of is recorded rather than refused.
+  pos_system:              { type: "multiselect", allowOther: true, options: ["Carleton Technologies - Bookware", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Ratex", "Waterloo Information Systems (WISL)", "Built in house"] },
+  ebook_delivery_system:   { type: "multiselect", allowOther: true, options: ["CEI", "VitalSource", "Kivuto", "Built in house"] },
+  student_info_system:     { type: "multiselect", allowOther: true, options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution"] },
+  lms_system:              { type: "multiselect", allowOther: true, options: ["D2L/Brightspace", "Moodle", "Canvas", "Blackboard", "LEA"] },
   payment_options:         { type: "multiselect", allowOther: true, options: ["Gift Cards", "Accept Campus Card", "Loyalty / Frequent Shopper Program"] },
   social_media_platforms:  { type: "multiselect", allowOther: true, options: ["Instagram", "Facebook", "TikTok", "Twitter (X)", "Threads", "YouTube", "BlueSky"] },
   social_media_frequency:  { type: "select", options: ["Daily", "Several times a week", "Weekly", "Monthly", "Rarely", "Never"] },
@@ -231,14 +234,8 @@ const FIELD_REGISTRY: Record<string, FieldDef> = {
   cm_sell_through_pct:          { type: "percentage", min: 0, max: 100 },
   ia_ea_booked_outside_pct:     { type: "percentage", min: 0, max: 100 },
 
-  // ── §9 Technology, now picked from a list ──
-  pos_system_other:             { type: "text", maxLength: 200 },
-  ebook_delivery_system_other:  { type: "text", maxLength: 200 },
-  student_info_system_other:    { type: "text", maxLength: 200 },
-  lms_system_other:             { type: "text", maxLength: 200 },
-
   // ── §10 IA/EA ──
-  ia_ea_operated_by:            { type: "select", options: ["The institution", "In house", "Other"] },
+  ia_ea_operated_by:            { type: "select", options: ["In house", "The institution", "A third party", "Other"] },
   ia_ea_operated_by_other:      { type: "text", maxLength: 200 },
   ia_ea_software:               { type: "text", maxLength: 200 },
   ia_ea_institution_amount:     { type: "currency", min: 0 },

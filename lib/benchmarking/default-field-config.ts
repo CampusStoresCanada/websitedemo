@@ -39,6 +39,14 @@ export interface FieldConfig {
   placeholder?: string;
   suffix?: string;
   options?: string[];
+  /**
+   * Offer a "Something else? Type it and press Enter" box under the control.
+   *
+   * On a multiselect it adds a value to the list; on a select it becomes the
+   * answer. Either way it replaces the "Other" option plus companion text
+   * field, which asked one question twice and stored it in two places.
+   */
+  allowOther?: boolean;
   /** Visual group heading this field belongs to */
   group?: string;
   /**
@@ -55,7 +63,13 @@ export interface FieldConfig {
   rowHelpText?: string;
   /** Indent level: true = 1 level, or a number for deeper nesting */
   indent?: boolean | number;
-  /** Conditional visibility — hide unless another field has a specific value */
+  /**
+   * Conditional visibility — hide unless another field has a matching value.
+   *
+   * An array means "any of these". Needed the moment one follow-up serves two
+   * answers: §10 asks who runs the programme, and both "a third party" and
+   * "other" need the same "who, and how does that work?" box under them.
+   */
   showIf?: { field: string; value: unknown };
   /** Calculated field config — not editable, displayed as computed value */
   calculated?: {
@@ -329,16 +343,21 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
             "Count dates go in Your year ahead below, so a reviewer can see when your figures were last verified against a shelf.",
           order: 10.2,
           visible: true,
-          options: ["Annual", "Bi-annual", "Cycle Counts", "Other"],
+          options: ["Annual", "Bi-annual", "Cycle Counts"],
+          allowOther: true,
         },
         {
+          /*
+            Replaced by the type-and-Enter box on the question above, which
+            stores what the store typed as the answer itself. Kept hidden so
+            any 2025 value already in this column is still readable.
+          */
           name: "inventory_count_style_other",
           label: "Describe how you count",
           type: "text",
           order: 10.3,
-          visible: true,
+          visible: false,
           indent: true,
-          showIf: { field: "inventory_count_style", value: "Other" },
         },
         {
           name: "does_book_buyback",
@@ -870,7 +889,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         },
         {
           name: "adoption_deadline_window",
-          label: "How far ahead is your deadline?",
+          label: "Approximately how far ahead is your deadline?",
           type: "select",
           options: [
             "More than 12 weeks before term",
@@ -1358,77 +1377,65 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
     {
       id: "technology_systems",
       title: "Technology & Systems",
-      description: "Picked from lists rather than typed. Free text gave us NetSuite and Oracle NetSuite as two systems, and Prism three ways — which made a question about what the sector runs on unanswerable.",
+      description:
+        "Select all that apply — a store mid-migration genuinely runs two, and the old single-answer version made it pick one. Picked from lists rather than typed, because free text gave us NetSuite and Oracle Netsuite as two systems and Prism three ways, which made a question about what the sector runs on unanswerable. If yours is missing, type it in the box under the list and press Enter.",
       order: 9,
       fields: [
         {
+          /*
+            Option spellings match what stores actually entered in 2025, so a
+            carried answer ticks its box instead of arriving as a stray chip.
+            The ones that genuinely differ stay visible as chips rather than
+            being rewritten — deciding that "Oracle Netsuite" meant "NetSuite"
+            is the store's call to make, not ours to make on their behalf.
+          */
           name: "pos_system",
           label: "Point of sale",
-          type: "select",
+          type: "multiselect",
+          options: [
+            "Carleton Technologies - Bookware",
+            "PrismRBS",
+            "Lightspeed",
+            "NetSuite",
+            "MBS",
+            "Ratex",
+            "Waterloo Information Systems (WISL)",
+            "Built in house",
+          ],
           order: 1,
           visible: true,
-          helpText: "Picked from a list rather than typed, because free text gave us Netsuite and Oracle Netsuite, Prism and PrismRBS and PrismPOS as four different systems.",
-          options: ["Bookware (Carleton Technologies)", "PrismRBS", "Lightspeed", "NetSuite", "MBS", "Waterloo Information Systems (WISL)", "Ratex", "Built in house", "Other"],
-        },
-        {
-          name: "pos_system_other",
-          label: "Which one?",
-          type: "text",
-          order: 1.1,
-          visible: true,
-          indent: true,
-          showIf: { field: "pos_system", value: "Other" },
         },
         {
           name: "ebook_delivery_system",
           label: "eBook delivery",
-          type: "select",
+          type: "multiselect",
+          options: ["CEI", "VitalSource", "Kivuto", "Built in house"],
           order: 2,
           visible: true,
-          options: ["CEI", "VitalSource", "Kivuto", "Built in house", "Other"],
-        },
-        {
-          name: "ebook_delivery_system_other",
-          label: "Which one?",
-          type: "text",
-          order: 2.1,
-          visible: true,
-          indent: true,
-          showIf: { field: "ebook_delivery_system", value: "Other" },
         },
         {
           name: "student_info_system",
           label: "Student information system",
-          type: "select",
+          type: "multiselect",
+          options: [
+            "Banner",
+            "PeopleSoft",
+            "Colleague",
+            "Workday Student",
+            "Omnivox",
+            "Salesforce",
+            "Built by the institution",
+          ],
           order: 3,
           visible: true,
-          options: ["Banner", "PeopleSoft", "Colleague", "Workday Student", "Omnivox", "Salesforce", "Built by the institution", "Other"],
-        },
-        {
-          name: "student_info_system_other",
-          label: "Which one?",
-          type: "text",
-          order: 3.1,
-          visible: true,
-          indent: true,
-          showIf: { field: "student_info_system", value: "Other" },
         },
         {
           name: "lms_system",
           label: "Learning management system",
-          type: "select",
+          type: "multiselect",
+          options: ["D2L/Brightspace", "Moodle", "Canvas", "Blackboard", "LEA"],
           order: 4,
           visible: true,
-          options: ["D2L / Brightspace", "Moodle", "Canvas", "Blackboard", "LEA", "Other"],
-        },
-        {
-          name: "lms_system_other",
-          label: "Which one?",
-          type: "text",
-          order: 4.1,
-          visible: true,
-          indent: true,
-          showIf: { field: "lms_system", value: "Other" },
         },
         {
           name: "payment_options",
@@ -1531,17 +1538,22 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "select",
           order: 1,
           visible: true,
-          options: ["Inclusive Access", "Equitable Access", "Both", "Neither", "Other"],
+          options: ["Inclusive Access", "Equitable Access", "Both", "Neither"],
           helpText: "If you run neither, nothing else in this section applies.",
+          allowOther: true,
         },
         {
+          /*
+            Replaced by the type-and-Enter box on the question above, which
+            stores what the store typed as the answer itself. Kept hidden so
+            any 2025 value already in this column is still readable.
+          */
           name: "ia_ea_program_type_other",
           label: "Tell us what you run",
           type: "text",
           order: 1.1,
-          visible: true,
+          visible: false,
           indent: true,
-          showIf: { field: "ia_ea_program_type", value: "Other" },
         },
         {
           name: "ia_ea_enrolment_model",
@@ -1549,17 +1561,22 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "select",
           order: 2,
           visible: true,
-          options: ["Opt-in", "Opt-out", "Other"],
+          options: ["Opt-in", "Opt-out"],
           helpText: "Whether a student is in the programme by default, or has to choose it.",
+          allowOther: true,
         },
         {
+          /*
+            Replaced by the type-and-Enter box on the question above, which
+            stores what the store typed as the answer itself. Kept hidden so
+            any 2025 value already in this column is still readable.
+          */
           name: "ia_ea_enrolment_model_other",
           label: "Describe how students join or leave",
           type: "text",
           order: 2.1,
-          visible: true,
+          visible: false,
           indent: true,
-          showIf: { field: "ia_ea_enrolment_model", value: "Other" },
         },
         {
           name: "ia_ea_operated_by",
@@ -1567,16 +1584,18 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "select",
           order: 3,
           visible: true,
-          options: ["The institution", "In house", "Other"],
+          options: ["In house", "The institution", "A third party", "Other"],
         },
         {
           name: "ia_ea_operated_by_other",
-          label: "Who?",
+          label: "Who, and how does that work?",
           type: "text",
+          helpText:
+            "Name the third party if one runs it. If it is some other arrangement, describe it — a shared service between campuses, a consortium, a faculty-run programme.",
           order: 3.1,
           visible: true,
           indent: true,
-          showIf: { field: "ia_ea_operated_by", value: "Other" },
+          showIf: { field: "ia_ea_operated_by", value: ["A third party", "Other"] },
         },
         {
           name: "ia_ea_software",
@@ -1592,17 +1611,22 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           type: "select",
           order: 5,
           visible: true,
-          options: ["We collect the sales", "It flows through student fees", "Other"],
+          options: ["We collect the sales", "It flows through student fees"],
           helpText: "Who takes the student's money. This is about the mechanism, not the amount.",
+          allowOther: true,
         },
         {
+          /*
+            Replaced by the type-and-Enter box on the question above, which
+            stores what the store typed as the answer itself. Kept hidden so
+            any 2025 value already in this column is still readable.
+          */
           name: "ia_ea_collection_model_other",
           label: "Describe how the money reaches you",
           type: "text",
           order: 5.1,
-          visible: true,
+          visible: false,
           indent: true,
-          showIf: { field: "ia_ea_collection_model", value: "Other" },
         },
         {
           name: "ia_ea_institution_amount",

@@ -19,6 +19,7 @@ import {
   CalculatedField,
   type SurveySectionProps,
 } from "./SurveyFields";
+import { matchesShowIf } from "@/lib/benchmarking/show-if";
 
 interface DynamicSurveySectionProps extends SurveySectionProps {
   sectionConfig: SectionConfig;
@@ -41,8 +42,7 @@ export default function DynamicSurveySection({
   const visibleFields = sectionConfig.fields
     .filter((f) => f.visible !== false)
     .filter((f) => {
-      if (!f.showIf) return true;
-      return props.formData[f.showIf.field] === f.showIf.value;
+      return matchesShowIf(f.showIf, props.formData);
     })
     .sort((a, b) => a.order - b.order);
 
@@ -278,22 +278,55 @@ function FieldRenderer({
       );
 
     case "select": {
-      const options = (field.options ?? []).map((opt) => ({
+      const listed = field.options ?? [];
+      const current = formData[field.name];
+      /*
+        An answer the store typed itself, rather than one of ours.
+
+        The pattern this replaces was an "Other" option plus a companion text
+        field, which meant two questions for one answer, two columns to read,
+        and — for the four §9 system fields — a companion column that was
+        declared here but never actually minted, so the typed answer had
+        nowhere to go at all.
+      */
+      const typedIn =
+        typeof current === "string" && current !== "" && !listed.includes(current)
+          ? current
+          : null;
+      const options = [...listed, ...(typedIn ? [typedIn] : [])].map((opt) => ({
         value: opt,
         label: opt,
       }));
+
       return wrapper(
-        <SelectField
-          label={field.label}
-          field={field.name}
-          options={options}
-          helpText={field.helpText}
-          required={field.required}
-          tooltip={field.tooltip}
-          formData={formData}
-          onFieldChange={onFieldChange}
-          isReadOnly={isReadOnly}
-        />,
+        <div>
+          <SelectField
+            label={field.label}
+            field={field.name}
+            options={options}
+            helpText={field.helpText}
+            required={field.required}
+            tooltip={field.tooltip}
+            formData={formData}
+            onFieldChange={onFieldChange}
+            isReadOnly={isReadOnly}
+          />
+          {field.allowOther && !isReadOnly && (
+            <input
+              type="text"
+              placeholder="Something else? Type it and press Enter"
+              className="mt-2 w-full rounded-md border border-gray-300 px-3 py-2 text-sm"
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                e.preventDefault();
+                const v = e.currentTarget.value.trim();
+                if (!v) return;
+                onFieldChange(field.name, v);
+                e.currentTarget.value = "";
+              }}
+            />
+          )}
+        </div>,
       );
     }
 

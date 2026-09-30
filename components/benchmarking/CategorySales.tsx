@@ -11,7 +11,13 @@ import {
   type SurveyCategory,
   type CategoryScope,
 } from "@/lib/actions/benchmarking-categories";
-import { departmentsFor, subcategoriesFor, DEPARTMENT_NOTES } from "@/lib/benchmarking/categories";
+import {
+  departmentsFor,
+  subcategoriesFor,
+  DEPARTMENT_NOTES,
+  COURSE_MATERIAL_FORMAT_NOTES,
+  NON_PHYSICAL_FORMATS,
+} from "@/lib/benchmarking/categories";
 import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
 import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
 
@@ -29,17 +35,55 @@ import type { SurveyLocation } from "@/lib/actions/benchmarking-locations";
  * grid it replaces despite covering more.
  */
 
+/*
+  Column headings carry their unit, and abbreviations are spelled out.
+
+  "Opening inv." saved eight characters and cost the reader the two facts that
+  decide what goes in the box: that it is a dollar value and not a unit count,
+  and that it is measured at a fiscal year end rather than a calendar one. A
+  store whose year ends in April read "first day of the year" as January.
+*/
 const MEASURES = [
-  { key: "retailSales" as const, label: "Retail", prefix: "$", help: "In-store sales for the year." },
-  { key: "onlineSales" as const, label: "Online", prefix: "$", help: "Sold through your web store." },
-  { key: "grossMarginPct" as const, label: "GM %", suffix: "%", help: "Achieved gross margin, not your target." },
-  { key: "inventoryOpen" as const, label: "Opening inv.", prefix: "$", help: "At cost, first day of the year." },
-  { key: "inventoryClose" as const, label: "Closing inv.", prefix: "$", help: "At cost, last day of the year." },
+  {
+    key: "retailSales" as const,
+    label: "Retail sales",
+    unit: "$",
+    help: "In-store sales for the fiscal year, in dollars. Exclude tax.",
+  },
+  {
+    key: "onlineSales" as const,
+    label: "Online sales",
+    unit: "$",
+    help: "Sold through your web store, in dollars. Exclude tax. Counted separately from Retail, not inside it.",
+  },
+  {
+    key: "grossMarginPct" as const,
+    label: "Gross margin",
+    unit: "%",
+    help: "Achieved gross margin on this category, not your target. As a percentage of the sales beside it.",
+  },
+  {
+    key: "inventoryOpen" as const,
+    label: "Opening inventory",
+    unit: "$",
+    help: "At cost, on the FIRST day of your fiscal year — the year you are reporting, not the calendar year. This is last year's closing figure.",
+  },
+  {
+    key: "inventoryClose" as const,
+    label: "Closing inventory",
+    unit: "$",
+    help: "At cost, on the LAST day of your fiscal year. The figure your year-end count or your system produced, before any write-down you booked elsewhere.",
+  },
 ];
 
 const UNIT_MEASURES = [
-  { key: "unitsSold" as const, label: "Units sold", help: "Physical units only." },
-  { key: "unitsAvailable" as const, label: "Units available", help: "What you had to sell. Gives sell-through." },
+  { key: "unitsSold" as const, label: "Units sold", unit: "#", help: "Physical units only." },
+  {
+    key: "unitsAvailable" as const,
+    label: "Units available",
+    unit: "#",
+    help: "What you had to sell across the year: opening stock plus everything received. Divided into Units sold, this gives sell-through.",
+  },
 ];
 
 export default function CategorySales({
@@ -60,7 +104,7 @@ export default function CategorySales({
   const [cats, setCats] = useState<SurveyCategory[]>(initialCategories);
   const [error, setError] = useState<string | null>(null);
 
-  const withUnits = scope === "course_materials";
+  const notes = scope === "course_materials" ? COURSE_MATERIAL_FORMAT_NOTES : DEPARTMENT_NOTES;
   const available = departmentsFor(scope).filter(
     (d) => !cats.some((c) => c.department === d),
   );
@@ -104,6 +148,9 @@ export default function CategorySales({
       <div className="space-y-5">
         {cats.map((cat) => {
           const subs = subcategoriesFor(cat.department, scope);
+          const withUnits =
+            scope === "course_materials" &&
+            !(NON_PHYSICAL_FORMATS as readonly string[]).includes(cat.department);
           const shown = cat.splitBySubcategory
             ? cat.lines.filter((l) => l.subcategory !== null)
             : cat.lines.filter((l) => l.subcategory === null);
@@ -113,9 +160,9 @@ export default function CategorySales({
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h4 className="text-sm font-semibold text-gray-900">{cat.department}</h4>
-                  {DEPARTMENT_NOTES[cat.department] && (
+                  {notes[cat.department] && (
                     <p className="mt-0.5 max-w-xl text-[11px] leading-snug text-gray-500">
-                      {DEPARTMENT_NOTES[cat.department]}
+                      {notes[cat.department]}
                     </p>
                   )}
                 </div>
@@ -167,9 +214,12 @@ export default function CategorySales({
                         <th
                           key={m.key}
                           title={m.help}
-                          className="px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500"
+                          className="cursor-help px-1 pb-1 text-[11px] font-medium uppercase tracking-wide text-gray-500"
                         >
-                          {m.label}
+                          {m.label}{" "}
+                          <span className="font-normal normal-case text-gray-400">
+                            ({m.unit})
+                          </span>
                         </th>
                       ))}
                     </tr>
@@ -300,29 +350,54 @@ export default function CategorySales({
                 <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-500">
                   Who buys for this category
                 </label>
-                <select
-                  value={cat.buyerContactIds[0] ?? ""}
-                  disabled={isReadOnly}
-                  onChange={async (e) => {
-                    const ids = e.target.value ? [e.target.value] : [];
-                    patch(cat.id, (c) => ({ ...c, buyerContactIds: ids }));
-                    await setCategoryBuyers({
-                      benchmarkingId,
-                      categoryId: cat.id,
-                      department: cat.department,
-                      contactIds: ids,
-                    });
-                  }}
-                  className="mt-1 w-full max-w-sm rounded border border-gray-300 bg-white px-2 py-1.5 text-sm"
-                >
-                  <option value="">Nobody assigned</option>
-                  {contacts.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                      {c.roleTitle ? ` — ${c.roleTitle}` : ""}
-                    </option>
-                  ))}
-                </select>
+                {/*
+                  More than one, because more than one is the truth. Apparel and
+                  Gifts are routinely split between two buyers, and the column
+                  behind this has always been an array — the single select was
+                  quietly making a store choose which of its buyers to name.
+                */}
+                <div className="mt-1 flex flex-wrap gap-x-5 gap-y-1.5">
+                  {contacts.map((c) => {
+                    const on = cat.buyerContactIds.includes(c.id);
+                    return (
+                      <label
+                        key={c.id}
+                        className="flex items-center gap-1.5 text-sm text-gray-800"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={isReadOnly}
+                          onChange={async () => {
+                            const ids = on
+                              ? cat.buyerContactIds.filter((id) => id !== c.id)
+                              : [...cat.buyerContactIds, c.id];
+                            patch(cat.id, (x) => ({ ...x, buyerContactIds: ids }));
+                            await setCategoryBuyers({
+                              benchmarkingId,
+                              categoryId: cat.id,
+                              department: cat.department,
+                              contactIds: ids,
+                            });
+                          }}
+                        />
+                        {c.name}
+                        {c.roleTitle ? (
+                          <span className="text-gray-500">— {c.roleTitle}</span>
+                        ) : null}
+                      </label>
+                    );
+                  })}
+                  {contacts.length === 0 && (
+                    <p className="text-xs text-gray-500">
+                      We do not have anyone on file for your store yet. Add your people in
+                      Section 1 and they will appear here.
+                    </p>
+                  )}
+                </div>
+                {cat.buyerContactIds.length === 0 && contacts.length > 0 && (
+                  <p className="mt-1 text-[11px] text-gray-500">Nobody assigned.</p>
+                )}
                 <p className="mt-1 text-[11px] text-gray-500">
                   This also updates your store&apos;s buyer list for vendor partners, so you
                   are confirming it here rather than answering it twice.
