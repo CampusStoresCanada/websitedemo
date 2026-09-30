@@ -195,6 +195,33 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
             </div>
           )}
 
+          {/*
+            Anything marked `lead` prints ABOVE the questions. There is one:
+            the note telling a store to go and correct its people first. Under
+            ten questions and a long definition of FTE enrolment, an instruction
+            to do something first is an instruction nobody reaches first.
+          */}
+          {section.lists.filter((l) => l.lead).map((list) => (
+            <div
+              key={list.title}
+              className="mb-4 break-inside-avoid border-l-2 border-black/60 pl-3"
+            >
+              <p className="text-[12px] font-semibold">{list.title}</p>
+              <p className="mt-0.5 whitespace-pre-line text-[10.5px] leading-snug">
+                {list.intro}
+              </p>
+              {list.choices && list.choices.length > 0 && (
+                <ul className="mt-1.5 columns-2 gap-4 text-[10.5px] leading-snug">
+                  {list.choices.map((choice) => (
+                    <li key={choice.label} className="break-inside-avoid">
+                      {choice.label}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+
           <ul className="space-y-2">
             {section.lines.map((line) => (
               <li
@@ -288,7 +315,7 @@ export default function WorksheetSheet({ worksheet }: { worksheet: Worksheet }) 
             Course Packs were even askable. Seeing the full scope before
             starting is most of the reason to print it at all.
           */}
-          {section.lists.map((list) => (
+          {section.lists.filter((l) => !l.lead).map((list) => (
             <div key={list.title} className="mt-4 break-inside-avoid">
               <p className="text-[12px] font-semibold">{list.title}</p>
               <p className="mt-0.5 text-[10.5px] leading-snug">{list.intro}</p>

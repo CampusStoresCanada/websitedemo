@@ -9,6 +9,8 @@ import {
   RESULTS_LADDER,
 } from "@/lib/benchmarking/intro-facts";
 import TermsAcknowledgement from "@/components/benchmarking/TermsAcknowledgement";
+import KnownPeopleNotice from "@/components/benchmarking/KnownPeopleNotice";
+import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
 import type { SurveyFieldConfig } from "@/lib/benchmarking/default-field-config";
 import type { DisclosureLevel } from "@/lib/benchmarking/disclosure";
 
@@ -42,6 +44,8 @@ export default function SurveyIntro({
   worksheetHref,
   termsAcknowledged,
   readOnlyMessage,
+  storeContacts,
+  organizationSlug,
 }: {
   fiscalYear: number;
   organizationName: string;
@@ -56,6 +60,9 @@ export default function SurveyIntro({
   worksheetHref: string;
   /** Has the respondent confirmed they understand the ladder? */
   termsAcknowledged: boolean;
+  /** The store's people, so they can check the list before starting. */
+  storeContacts: StoreContact[];
+  organizationSlug: string | null;
   /**
    * Set when this page is being LOOKED at rather than filled in — an admin
    * previewing a store that has not started. Reuses DisclosureChoice's existing
@@ -227,6 +234,14 @@ export default function SurveyIntro({
           on your submission as you work.
         </p>
       </div>
+
+      {/*
+        Last thing before the Start button, and deliberately after the consent
+        and disclosure choices. It is an instruction to go and do something
+        else first, so it has to be the thing they read as they reach for Start,
+        not a paragraph competing with the protections copy above it.
+      */}
+      <KnownPeopleNotice people={storeContacts} organizationSlug={organizationSlug} />
 
       <TermsAcknowledgement
         benchmarkingId={benchmarkingId}

@@ -352,6 +352,8 @@ export default async function BenchmarkingSurveyPage({
         }
         closesOn={formatDeadline(activeSurvey.closes_at)}
         chairNote={chairRow ?? null}
+        storeContacts={storeContacts}
+        organizationSlug={organization.slug}
         termsAcknowledged={Boolean(
           (currentRow as { terms_acknowledged_at?: string | null }).terms_acknowledged_at,
         )}

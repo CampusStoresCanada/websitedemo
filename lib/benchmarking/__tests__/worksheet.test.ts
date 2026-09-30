@@ -244,7 +244,7 @@ describe("the printed sheet shows the full scope", () => {
     }
   });
 
-  it("puts the people before everything else in their section", () => {
+  it("puts the note above the questions, not after ten of them", () => {
     const profile = buildWorksheet({
       organizationName: "Test Store",
       fiscalYear: 2026,
@@ -255,7 +255,9 @@ describe("the printed sheet shows the full scope", () => {
       organizationSlug: "test-store",
     }).sections.find((s) => s.id === "institution_profile")!;
 
-    expect(profile.lists[0].title).toBe("Your people");
+    expect(profile.lists[0].lead).toBe(true);
+    // Everything else in the section prints below the questions.
+    expect(profile.lists.slice(1).every((l) => !l.lead)).toBe(true);
   });
 
   it("puts the pay grid on paper, which the hidden config fields could not", () => {
@@ -318,10 +320,20 @@ describe("the sheet prints what we already hold", () => {
     Staffing. The note beside it says to correct the list before starting, which
     is only useful if the reader meets it before starting.
   */
+  /*
+    Two separate things, and conflating them was the mistake.
+
+    The ROSTER is a staffing question and lives there. What lives at the front
+    is the one sentence that saves a store the most time, and only if it is read
+    before starting rather than two thirds of the way down.
+  */
   const team = (w: typeof withPeople) =>
+    w.sections.find((s) => s.id === "staffing")!.lists.find((l) => l.title === "Your team")!;
+
+  const leadNote = (w: typeof withPeople) =>
     w.sections
       .find((s) => s.id === "institution_profile")!
-      .lists.find((l) => l.title === "Your people")!;
+      .lists.find((l) => l.lead)!;
 
   it("lists the people by name, with their job titles", () => {
     expect(team(withPeople).rowLabels).toEqual([
@@ -337,9 +349,13 @@ describe("the sheet prints what we already hold", () => {
     ]);
   });
 
-  it("sends them to their own organisation page to fix the list first", () => {
-    expect(team(withPeople).intro).toContain("campusstores.ca/org/test-store");
-    expect(team(withPeople).intro).toContain("BEFORE you start");
+  it("sends them to their own organisation page before anything else", () => {
+    const note = leadNote(withPeople);
+    expect(note.lead).toBe(true);
+    expect(note.intro).toContain("campusstores.ca/org/test-store");
+    expect(note.intro).toContain("before you begin");
+    // Names, so they can see at a glance whether it is wrong.
+    expect(note.choices!.map((c) => c.label)).toContain("Sam Reid");
   });
 
   it("pre-fills a known date across the row, not just its name", () => {
@@ -364,8 +380,8 @@ describe("the sheet prints what we already hold", () => {
       priorRows: [],
       organizationSlug: "test-store",
     });
+    expect(leadNote(empty).intro).toContain("We have nobody on file");
     const block = team(empty);
-    expect(block.intro).toContain("We have nobody on file");
     expect(block.rowLabels).toEqual([]);
     expect(block.extraBlankRows).toBeGreaterThan(4);
   });
