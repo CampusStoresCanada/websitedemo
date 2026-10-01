@@ -260,18 +260,6 @@ export default async function RecipientsPage() {
     };
   });
 
-  /*
-    When a beta appointment lapses.
-
-    ⛔ term_end is EXCLUSIVE — capability_contributions tests `term_end > today`
-    — so this is the day AFTER their last, and the survey's own close date is
-    the honest choice: the job is over when the survey is.
-  */
-  const closes = survey.closes_at ? new Date(survey.closes_at) : null;
-  const betaAppointmentEndsOn = (closes ?? new Date(Date.now() + 90 * 86400000))
-    .toISOString()
-    .slice(0, 10);
-
   return (
     <>
       <RecipientQueue
@@ -296,11 +284,8 @@ export default async function RecipientsPage() {
           {/* Who goes first, before the thing that sends to them. A beta send
               with an empty cohort is the failure this sits above. */}
           <BetaCohort
-            appointmentEndsOn={betaAppointmentEndsOn}
-            fiscalYear={survey.fiscal_year}
             stores={items.map((i) => ({
               id: i.id,
-              orgId: i.orgId,
               orgName: i.orgName,
               province: i.province,
               isBeta: i.isBeta,

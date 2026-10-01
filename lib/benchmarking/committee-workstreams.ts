@@ -110,8 +110,8 @@ export const WORKSTREAMS: Workstream[] = [
     href: "/benchmarking/survey",
     doneWhen: "Your submission is filed and anything unclear has been flagged",
     appointedAt: {
-      label: "the beta cohort, beside the store",
-      href: "/benchmarking/recipients",
+      label: "the benchmarking admin page, under Beta tester",
+      href: "/benchmarking/admin",
     },
   },
 ];
