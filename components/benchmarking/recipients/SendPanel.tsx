@@ -44,7 +44,6 @@ const BLOCKED_COPY: Record<string, string> = {
     beta cohort but nobody there is appointed, so the survey is still a locked
     door for them. Appoint someone on the benchmarking admin page first.
   */
-  nobody_can_file_yet: "nobody there is appointed as a beta tester yet",
 };
 
 export default function SendPanel({
@@ -55,7 +54,6 @@ export default function SendPanel({
   surveyStatus: string;
 }) {
   const [kind, setKind] = useState<Kind>("invitation");
-  const [betaOnly, setBetaOnly] = useState(surveyStatus === "beta");
   const [plan, setPlan] = useState<PlanShape | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
@@ -76,7 +74,7 @@ export default function SendPanel({
     setBusy(true);
     setError(null);
     setResult(null);
-    const res = await previewSend({ surveyId, kind, betaOnly });
+    const res = await previewSend({ surveyId, kind });
     setBusy(false);
     if (!res.success || !res.plan) {
       setError(res.error ?? "Could not build the preview.");
@@ -93,7 +91,7 @@ export default function SendPanel({
     const res =
       kind === "reminder"
         ? await sendReminders({ surveyId })
-        : await sendInvitations({ surveyId, betaOnly });
+        : await sendInvitations({ surveyId });
     setBusy(false);
     if (!res.success) {
       setError(res.error ?? "Send failed.");
@@ -127,16 +125,13 @@ export default function SendPanel({
           </select>
         </label>
 
-        {kind === "invitation" && (
-          <label className="flex items-center gap-2 text-sm text-gray-700">
-            <input
-              type="checkbox"
-              checked={betaOnly}
-              onChange={(e) => reset(() => setBetaOnly(e.target.checked))}
-            />
-            Beta stores only
-          </label>
-        )}
+        {/*
+          ⛔ No "beta stores only" audience. A beta tester is invited by being
+          appointed, which mails them the going-first copy and the survey link.
+          This panel addressed the store's confirmed respondent instead, so a
+          cohort store got two invitations aimed at two people and only the
+          appointment one actually opened anything.
+        */}
 
         <button
           type="button"

@@ -255,7 +255,6 @@ export async function resolveRecipient(input: {
  */
 export async function sendInvitations(input: {
   surveyId: string;
-  betaOnly?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -270,9 +269,7 @@ export async function sendInvitations(input: {
   }
 
   const { sendBenchmarkingInvitations } = await import("@/lib/benchmarking/notify");
-  const summary = await sendBenchmarkingInvitations(input.surveyId, {
-    betaOnly: input.betaOnly,
-  });
+  const summary = await sendBenchmarkingInvitations(input.surveyId);
 
   revalidatePath("/benchmarking/recipients");
   return {
@@ -333,7 +330,6 @@ export async function sendReminders(input: { surveyId: string }): Promise<{
 export async function previewSend(input: {
   surveyId: string;
   kind: "invitation" | "reminder";
-  betaOnly?: boolean;
 }): Promise<{
   success: boolean;
   error?: string;
@@ -356,7 +352,7 @@ export async function previewSend(input: {
   const plan =
     input.kind === "reminder"
       ? await planReminders(input.surveyId)
-      : await planInvitations(input.surveyId, { betaOnly: input.betaOnly });
+      : await planInvitations(input.surveyId);
 
   if (!plan) return { success: false, error: "No survey found." };
 

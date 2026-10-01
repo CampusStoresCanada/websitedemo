@@ -171,7 +171,7 @@ async function loadSurveyByYear(fiscalYear: number): Promise<SurveyRow | null> {
 
 async function loadRecipients(
   surveyId: string,
-  filter: { betaOnly?: boolean; uninvitedOnly?: boolean } = {},
+  filter: { uninvitedOnly?: boolean } = {},
 ): Promise<RecipientRow[]> {
   const db = createAdminClient();
   let q = db
@@ -181,7 +181,6 @@ async function loadRecipients(
     )
     .eq("survey_id", surveyId);
 
-  if (filter.betaOnly) q = q.eq("is_beta", true);
   if (filter.uninvitedOnly) q = q.is("invited_at", null);
 
   const { data } = await q;
@@ -274,7 +273,7 @@ export type BlockedReason =
    * merged — but sending the first without the second mails somebody a link to
    * a locked door, and they find out by clicking it.
    */
-  | "nobody_can_file_yet";
+;
 
 export interface PlannedSend {
   recipientId: string;
@@ -319,77 +318,29 @@ function planLine(r: RecipientRow, blockedReason?: BlockedReason): PlannedSend {
  * first time the two disagree is the time it matters.
  */
 
-/**
- * Which of these stores has at least one appointed beta tester.
- *
- * Capability holders are people; a store can file early when one of its own
- * people holds it. Resolved through capability_contributions, which is the
- * canonical answer to who holds what and already accounts for ex officio.
- */
-async function orgsWithABetaTester(organizationIds: string[]): Promise<Set<string>> {
-  if (organizationIds.length === 0) return new Set();
-  const db = createAdminClient();
-
-  const { data: holders } = await db
-    .from("capability_contributions")
-    .select("subject_id")
-    .eq("capability", "benchmarking.beta_tester")
-    .eq("is_active", true);
-
-  const subjectIds = (holders ?? []).map((h) => h.subject_id as string);
-  if (subjectIds.length === 0) return new Set();
-
-  const { data: links } = await db
-    .from("user_organizations")
-    .select("organization_id")
-    .in("user_id", subjectIds)
-    .in("organization_id", organizationIds)
-    .eq("status", "active");
-
-  return new Set((links ?? []).map((l) => l.organization_id as string));
-}
-
-export async function planInvitations(
-  surveyId: string,
-  options: { betaOnly?: boolean } = {},
-): Promise<SendPlan | null> {
+export async function planInvitations(surveyId: string): Promise<SendPlan | null> {
   const survey = await loadSurvey(surveyId);
   if (!survey) return null;
 
   // Deliberately NOT filtered to uninvited in the query — the preview should
   // show the already-invited stores too, so the operator can see that running
   // it again is safe rather than having to trust that it is.
-  const recipients = await loadRecipients(surveyId, { betaOnly: options.betaOnly });
+  const recipients = await loadRecipients(surveyId);
 
   const willSend: PlannedSend[] = [];
   const blocked: PlannedSend[] = [];
 
-  /*
-    For a beta send, which of these stores actually has somebody appointed.
-
-    The survey is still in draft when the beta cohort is mailed, so an ordinary
-    member of a flagged store cannot open it. This is what stops the invitation
-    going out ahead of the appointment.
-  */
-  const canFile = options.betaOnly
-    ? await orgsWithABetaTester(recipients.map((r) => r.organization_id))
-    : null;
-
   for (const r of recipients) {
     if (r.invited_at) blocked.push(planLine(r, "already_invited"));
     else if (!recipientEmail(r)) blocked.push(planLine(r, "no_address"));
-    else if (canFile && !canFile.has(r.organization_id)) {
-      blocked.push(planLine(r, "nobody_can_file_yet"));
-    } else willSend.push(planLine(r));
+    else willSend.push(planLine(r));
   }
 
   return {
     surveyId,
     fiscalYear: survey.fiscal_year,
     surveyStatus: survey.status,
-    templateKey: options.betaOnly
-      ? "benchmarking_beta_invitation"
-      : "benchmarking_invitation",
+    templateKey: "benchmarking_invitation",
     killSwitchOn: emailSuppressed(),
     willSend,
     blocked,
@@ -430,20 +381,25 @@ export async function planReminders(surveyId: string): Promise<SendPlan | null> 
 /**
  * Invite the stores whose survey is open.
  *
- * `betaOnly` sends the going-first copy to the flagged stores; without it this
- * sends the general invitation. Both skip anyone already invited, so running it
- * twice does not mail a store twice — which matters because the natural way to
- * handle a partial failure is to run it again.
+ * Skips anyone already invited, so running it twice does not mail a store
+ * twice — which matters because the natural way to handle a partial failure is
+ * to run it again.
+ *
+ * ⛔ There is no beta variant, deliberately. A beta tester is invited by being
+ * APPOINTED: appointToCapability mails them the going-first copy and the survey
+ * link, and they are the only person who can open a draft survey anyway. A
+ * second send addressed to the store's confirmed respondent reached a different
+ * person — one with no capability and therefore a locked door — so the store
+ * got two invitations and the wrong one of them worked.
  */
 export async function sendBenchmarkingInvitations(
   surveyId: string,
-  options: { betaOnly?: boolean } = {},
 ): Promise<SendSummary> {
   const survey = await loadSurvey(surveyId);
   if (!survey) return summarise([], 0);
 
   // Same plan the operator was shown. Not a second, similar query.
-  const plan = await planInvitations(surveyId, options);
+  const plan = await planInvitations(surveyId);
   if (!plan) return summarise([], 0);
 
   const outcomes: NotifyOutcome[] = [];
