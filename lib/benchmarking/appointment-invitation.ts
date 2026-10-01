@@ -88,6 +88,55 @@ async function firstNameForProfile(profileId: string): Promise<string> {
  * access expires, and using it here once told a reviewer they had until
  * December for something wanted within the week.
  */
+/**
+ * The store a beta appointment is about, and the survey they are going first
+ * into.
+ *
+ * ⛔ Only used for the beta copy, which names both. A committee workstream is
+ * association work and belongs to no store, so it asks for neither.
+ */
+async function betaContext(profileId: string): Promise<{
+  organizationName: string;
+  fiscalYear: number;
+  opensOn: string;
+} | null> {
+  const db = createAdminClient();
+
+  const { data: link } = await db
+    .from("user_organizations")
+    .select("organization_id, organizations(name)")
+    .eq("user_id", profileId)
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  const { data: survey } = await db
+    .from("benchmarking_surveys")
+    .select("fiscal_year, opens_at")
+    .order("fiscal_year", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (!link || !survey) return null;
+
+  const org = (link as { organizations?: { name?: string } | null }).organizations;
+  const opensAt = (survey as { opens_at?: string | null }).opens_at;
+
+  return {
+    organizationName: org?.name ?? "your store",
+    fiscalYear: (survey as { fiscal_year: number }).fiscal_year,
+    // The date the rest of the membership follows on. Without one the sentence
+    // still reads, so this degrades to a phrase rather than an empty gap.
+    opensOn: opensAt
+      ? new Date(opensAt).toLocaleDateString("en-CA", {
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })
+      : "the published opening date",
+  };
+}
+
 function formatDue(dueDate: string): string {
   const [y, m, d] = dueDate.slice(0, 10).split("-").map(Number);
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString("en-CA", {
@@ -115,6 +164,33 @@ export async function sendAppointmentInvitation(input: {
     const firstName = await firstNameForProfile(input.subjectId);
 
     const { sendTransactional } = await import("@/lib/comms/send");
+
+    /*
+      A beta appointment uses the going-first copy, not the committee copy.
+
+      ⛔ Appointing IS the beta invitation — there is no separate send — so this
+      is the only mail a beta tester gets, and it has to carry what the generic
+      committee template never did: that the submission is real, that flagging
+      beats guessing, and that there is a wipe if they want to start again.
+      That copy already existed as benchmarking_beta_invitation, addressed to
+      the store's respondent by a second sender that has been deleted.
+    */
+    if (input.capability === CAPABILITIES.BENCHMARKING_BETA_TESTER) {
+      const ctx = await betaContext(input.subjectId);
+      const beta = await sendTransactional({
+        templateKey: "benchmarking_beta_invitation",
+        to,
+        variables: {
+          contact_name: firstName,
+          organization_name: ctx?.organizationName ?? "your store",
+          fiscal_year: String(ctx?.fiscalYear ?? ""),
+          opens_date: ctx?.opensOn ?? "the published opening date",
+          survey_url: `${appUrl}/benchmarking/survey`,
+        },
+      });
+      return { sent: beta.success, reason: beta.error };
+    }
+
     const result = await sendTransactional({
       templateKey: "benchmarking_committee_invitation",
       to,
