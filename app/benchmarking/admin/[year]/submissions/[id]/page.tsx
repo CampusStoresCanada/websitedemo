@@ -3,11 +3,11 @@ import { redirect } from "next/navigation";
 import SubmissionDetail from "@/components/benchmarking/admin/SubmissionDetail";
 
 interface Props {
-  params: Promise<{ id: string }>;
+  params: Promise<{ year: string; id: string }>;
 }
 
 export default async function SubmissionDetailPage({ params }: Props) {
-  const { id } = await params;
+  const { year, id } = await params;
   const supabase = await createClient();
 
   // Fetch the benchmarking row with org info
@@ -24,7 +24,7 @@ export default async function SubmissionDetailPage({ params }: Props) {
     .single()) as { data: any };
 
   if (!submission) {
-    redirect("/benchmarking/admin/submissions");
+    redirect(`/benchmarking/admin/${year}/submissions`);
   }
 
   // Fetch delta flags for this submission

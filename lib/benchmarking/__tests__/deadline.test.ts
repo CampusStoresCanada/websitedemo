@@ -1,5 +1,13 @@
 import { describe, it, expect } from "vitest";
-import { formatDeadline, formatOpening, daysUntilDeadline } from "../deadline";
+import {
+  formatDeadline,
+  formatOpening,
+  daysUntilDeadline,
+  deadlineDay,
+  openingDay,
+  boundaryFromLastDay,
+  openingFromDay,
+} from "../deadline";
 
 /**
  * The 2026 cycle: opens 2026-10-08T12:00Z, closes 2026-11-21T08:00Z.
@@ -62,5 +70,38 @@ describe("daysUntilDeadline", () => {
 
   it("counts a month out correctly", () => {
     expect(daysUntilDeadline(CLOSES, new Date("2026-10-22T08:00:00Z"))).toBe(30);
+  });
+});
+
+describe("editing a deadline without moving it", () => {
+  it("round-trips the stored boundary through what a member is told", () => {
+    // The live FY2026 row: midnight Pacific on the 21st, so the 20th is a full
+    // working day coast to coast.
+    const stored = "2026-11-21T08:00:00+00";
+    const lastDay = deadlineDay(stored);
+    expect(lastDay).toBe("2026-11-20");
+
+    // Opening the editor and pressing Save without touching anything must not
+    // move the cutoff by so much as an hour.
+    expect(boundaryFromLastDay(lastDay)).toBe("2026-11-21T08:00:00.000Z");
+    expect(formatDeadline(boundaryFromLastDay(lastDay))).toBe(formatDeadline(stored));
+  });
+
+  it("follows daylight saving rather than a fixed offset", () => {
+    // A cycle closing in June closes at midnight PDT, which is 07:00Z — an hour
+    // off the November figure. A hardcoded offset gets exactly one of these right.
+    expect(boundaryFromLastDay("2027-06-21")).toBe("2027-06-22T07:00:00.000Z");
+    expect(deadlineDay("2027-06-22T07:00:00Z")).toBe("2027-06-21");
+  });
+
+  it("opens at the start of the day it names, out west", () => {
+    expect(openingFromDay("2027-05-10")).toBe("2027-05-10T07:00:00.000Z");
+    expect(openingDay(openingFromDay("2027-05-10"))).toBe("2027-05-10");
+  });
+
+  it("refuses anything that is not a plain date", () => {
+    expect(boundaryFromLastDay("")).toBeNull();
+    expect(boundaryFromLastDay("next tuesday")).toBeNull();
+    expect(openingFromDay("2027-05-10T00:00:00Z")).toBeNull();
   });
 });

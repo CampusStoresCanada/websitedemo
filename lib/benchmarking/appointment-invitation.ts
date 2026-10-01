@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { WORKSTREAMS } from "./committee-workstreams";
+import { taskFor } from "./committee-workstreams";
 import { CAPABILITIES } from "@/lib/auth/capability-names";
 
 /**
@@ -21,45 +21,6 @@ import { CAPABILITIES } from "@/lib/auth/capability-names";
  * from conference marketing still needs to be told what they have been asked
  * to do. A dead mailbox is still filtered, by lib/email/send.ts.
  */
-
-interface TaskCopy {
-  title: string;
-  summary: string;
-  whatYouDo: string;
-  timeCommitment: string;
-  window: string;
-  href: string;
-}
-
-/** The capabilities a person can be invited to, and how to describe each. */
-function taskFor(capability: string): TaskCopy | null {
-  const w = WORKSTREAMS.find((x) => x.capability === capability);
-  if (w) {
-    return {
-      title: w.title,
-      summary: w.summary,
-      whatYouDo: w.whatYouDo,
-      timeCommitment: w.timeCommitment,
-      window: w.window,
-      href: w.href,
-    };
-  }
-  if (capability === CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD) {
-    return {
-      title: "Committee lead",
-      summary:
-        "Bring people in for each piece of work, and keep an eye on how it is going.",
-      whatYouDo:
-        "You decide who takes on question review, interpretation and recipient confirmation, and you can see at a glance how far each one has got.",
-      timeCommitment: "A few minutes to bring someone in",
-      window: "Across the survey cycle",
-      href: "/benchmarking/committee",
-    };
-  }
-  // Elections capabilities and anything added later: no invitation copy yet,
-  // so say nothing rather than send something generic and confusing.
-  return null;
-}
 
 async function emailForProfile(profileId: string): Promise<string | null> {
   const admin = createAdminClient();

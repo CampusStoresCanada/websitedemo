@@ -15,7 +15,7 @@ export default async function ReviewAdminPage({
   const { year } = await params;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/review"));
+  if (!auth.ok) redirect(loginWithNext(`/benchmarking/admin/${year}/review`));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking");
 
   const { supabase } = auth.ctx;

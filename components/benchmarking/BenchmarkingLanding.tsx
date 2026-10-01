@@ -101,7 +101,7 @@ export default function BenchmarkingLanding({
               : "You have reviewer access to the benchmarking system."}
           </span>
           <Link
-            href={isAdmin ? "/benchmarking/admin" : "/benchmarking/admin/submissions"}
+            href="/benchmarking/admin"
             className="text-sm px-3 py-1.5 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-medium"
           >
             {isAdmin ? "Admin Dashboard" : "Review Submissions"}

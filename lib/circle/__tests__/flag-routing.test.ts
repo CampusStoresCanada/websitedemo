@@ -28,7 +28,7 @@ describe("flag routing", () => {
       "/partners",
       "/conference/2027/99",
       // The admin pages are CSC's own and route normally.
-      "/benchmarking/admin/submissions",
+      "/benchmarking/admin/2026/submissions",
     ]) {
       expect(isBenchmarkingSurveyFlag(url)).toBe(false);
     }

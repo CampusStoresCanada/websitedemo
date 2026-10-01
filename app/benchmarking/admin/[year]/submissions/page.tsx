@@ -16,7 +16,7 @@ export default async function SubmissionsPage({
   // for authorisation is one refactor away from being wide open, and this one
   // lists named member stores.
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/submissions"));
+  if (!auth.ok) redirect(loginWithNext(`/benchmarking/admin/${year}/submissions`));
   const { globalRole, capabilities } = auth.ctx;
   if (!isGlobalAdmin(globalRole) && !opensBenchmarkingAdmin(capabilities)) {
     redirect("/benchmarking");

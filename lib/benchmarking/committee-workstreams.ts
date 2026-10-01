@@ -110,7 +110,7 @@ export const WORKSTREAMS: Workstream[] = [
     href: "/benchmarking/survey",
     doneWhen: "Your submission is filed and anything unclear has been flagged",
     appointedAt: {
-      label: "the benchmarking admin page, under Beta tester",
+      label: "the cycle's own page, at the step that appoints the testers",
       href: "/benchmarking/admin",
     },
   },
@@ -119,3 +119,51 @@ export const WORKSTREAMS: Workstream[] = [
 export function workstreamFor(capability: string): Workstream | undefined {
   return WORKSTREAMS.find((w) => w.capability === capability);
 }
+
+export interface TaskCopy {
+  title: string;
+  summary: string;
+  whatYouDo: string;
+  timeCommitment: string;
+  window: string;
+  href: string;
+}
+
+/**
+ * The capabilities a person can be invited to, and how to describe each.
+ *
+ * ⛔ Lives here, beside the table it reads, because BOTH the appointment email
+ * and the admin preview of that email must say the same thing. It used to sit
+ * inside the server-only send module, so the preview could not reach it and
+ * hand-typed a subset instead — every appointment step previewed as "A small
+ * ask: Question review", including the one that appoints beta testers.
+ */
+export function taskFor(capability: string): TaskCopy | null {
+  const w = WORKSTREAMS.find((x) => x.capability === capability);
+  if (w) {
+    return {
+      title: w.title,
+      summary: w.summary,
+      whatYouDo: w.whatYouDo,
+      timeCommitment: w.timeCommitment,
+      window: w.window,
+      href: w.href,
+    };
+  }
+  if (capability === CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD) {
+    return {
+      title: "Committee lead",
+      summary:
+        "Bring people in for each piece of work, and keep an eye on how it is going.",
+      whatYouDo:
+        "You decide who takes on question review, interpretation and recipient confirmation, and you can see at a glance how far each one has got.",
+      timeCommitment: "A few minutes to bring someone in",
+      window: "Across the survey cycle",
+      href: "/benchmarking/committee",
+    };
+  }
+  // Elections capabilities and anything added later: no invitation copy yet,
+  // so say nothing rather than send something generic and confusing.
+  return null;
+}
+

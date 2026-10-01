@@ -32,6 +32,8 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
 import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
 import { getTemplate, renderTemplateContent } from "@/lib/comms/templates";
+import { taskFor } from "./committee-workstreams";
+import { CAPABILITIES } from "@/lib/auth/capability-names";
 import type { StageMessage } from "@/lib/elections/messages";
 
 export interface NotifyOutcome {
@@ -597,17 +599,42 @@ export async function benchmarkingStageMessages(
   const invitePlan = await planInvitations(surveyId);
   const remindPlan = await planReminders(surveyId);
 
-  const [appointReviewer, appointTester, invitation, reminder, receipt] = await Promise.all([
-    describe("benchmarking_committee_invitation", {
-      key: "appointment", stage: "appoint_testers",
-      label: "Sent when you appoint someone, to any workstream", recipientCount: null,
+  /*
+    One template, the copy of the workstream being filled.
+
+    ⛔ Read from taskFor(), the function the real send calls, rather than typed
+    out here. This step previewed a hardcoded "Question review" for EVERY
+    workstream — so the admin appointing a beta tester was shown a mail subject
+    saying they were being asked to review questions. The preview's own note
+    further up this file says a preview that shows the wrong subject is worse
+    than no preview; this was that, on the step the beta hangs off.
+  */
+  const appointmentPreview = (capability: string, stage: string) => {
+    const task = taskFor(capability);
+    return describe("benchmarking_committee_invitation", {
+      key: `appointment:${stage}`,
+      stage,
+      label: `Sent when you appoint someone to ${task?.title ?? "a workstream"}`,
+      recipientCount: null,
       vars: {
-        task_title: "Question review",
-        task_summary: "Check the questions that caused trouble last year, and write the examples.",
-        time_commitment: "About 30 minutes",
-        window: "September, before the survey opens",
+        task_title: task?.title ?? "",
+        task_summary: task?.summary ?? "",
+        what_you_do: task?.whatYouDo ?? "",
+        time_commitment: task?.timeCommitment ?? "",
+        window: task?.window ?? "",
+        task_url: `${(process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "")}${task?.href ?? ""}`,
+        // The send only fills this when a due date was set, and the whole
+        // sentence disappears when it was not. Previewing it empty is the
+        // honest default.
+        deadline_line: "",
       },
-    }),
+    });
+  };
+
+  const [appointReviewer, appointTester, betaOpening, invitation, reminder, receipt] =
+    await Promise.all([
+    appointmentPreview(CAPABILITIES.BENCHMARKING_CONTENT_REVIEW, "question_review"),
+    appointmentPreview(CAPABILITIES.BENCHMARKING_BETA_TESTER, "appoint_testers"),
     describe("benchmarking_beta_invitation", {
       key: "beta_opening", stage: "beta",
       label: "Going first — sent when beta testing starts", recipientCount: null,
@@ -627,11 +654,11 @@ export async function benchmarkingStageMessages(
   ]);
 
   return {
-    // The same appointment copy serves every workstream, so it hangs off the
-    // step where appointing happens rather than being listed twice.
+    // One template, two steps, each previewing the workstream it actually
+    // appoints to. Same copy the send uses, read from the same function.
     question_review: [appointReviewer],
-    appoint_testers: [appointReviewer],
-    beta: [appointTester],
+    appoint_testers: [appointTester],
+    beta: [betaOpening],
     invitations: [invitation],
     reminders: [reminder],
     open: [receipt],

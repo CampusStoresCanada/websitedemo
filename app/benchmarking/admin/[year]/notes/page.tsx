@@ -32,7 +32,7 @@ export default async function BenchmarkingNotesPage({
   const { year } = await params;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/notes"));
+  if (!auth.ok) redirect(loginWithNext(`/benchmarking/admin/${year}/notes`));
 
   const { globalRole, capabilities } = auth.ctx;
   const isLead =

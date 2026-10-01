@@ -1,5 +1,6 @@
 import type { TimelineStage } from "@/lib/elections/timeline";
 import { SURVEY_LADDER, ladderIndex, type SurveyState } from "./lifecycle";
+import { deadlineDay, openingDay, formatDeadline, formatOpening } from "./deadline";
 
 /**
  * The benchmarking cycle as one ordered list of stages.
@@ -42,9 +43,16 @@ export interface BenchmarkingTimelineFacts {
   reviewTotal: number;
 }
 
-function day(iso: string | null): string | null {
-  return iso ? iso.slice(0, 10) : null;
-}
+/*
+  ⛔ Never `iso.slice(0, 10)`.
+
+  `closes_at` is an EXCLUSIVE boundary stored as midnight Pacific, so its own
+  date string names a day the survey is already shut. Slicing it printed
+  "Closes 2026-11-21" in this timeline beside a header reading "closes November
+  20, 2026" — two dates for one deadline, on one screen, and the wrong one was
+  the one standing next to the Close the survey button. lib/benchmarking/deadline.ts
+  owns this arithmetic for exactly this reason; both displays now read it.
+*/
 
 export function buildBenchmarkingTimeline(
   facts: BenchmarkingTimelineFacts,
@@ -56,8 +64,8 @@ export function buildBenchmarkingTimeline(
   /** Is the cycle sitting in this state right now? */
   const now = (s: SurveyState) => facts.status === s;
 
-  const opens = day(facts.opensAt);
-  const closes = day(facts.closesAt);
+  const opens = openingDay(facts.opensAt);
+  const closes = deadlineDay(facts.closesAt);
   const stages: TimelineStage[] = [];
 
   // 1 — The questions, reviewed before anybody is asked them.
@@ -150,7 +158,7 @@ export function buildBenchmarkingTimeline(
     detail: now("open")
       ? `${facts.submitted} of ${facts.recipientsTotal} stores have filed.`
       : opens
-        ? `Planned for ${opens}.`
+        ? `Planned for ${formatOpening(facts.opensAt)}.`
         : "No opening date set.",
     action: now("beta")
       ? { key: "openSurvey", label: "Open to everyone", blockedBy: null }
@@ -209,7 +217,9 @@ export function buildBenchmarkingTimeline(
     until: null,
     windowLabel: null,
     state: past("closed") ? "done" : now("closed") ? "current" : closes && today > closes ? "overdue" : "upcoming",
-    detail: closes ? `Closes ${closes}.` : "No closing date set.",
+    detail: closes
+      ? `Last day to file is ${formatDeadline(facts.closesAt)}.`
+      : "No closing date set.",
     action: now("open") ? { key: "closeSurvey", label: "Close the survey", blockedBy: null } : null,
   });
 

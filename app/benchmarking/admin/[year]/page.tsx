@@ -11,7 +11,17 @@ import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
-import { termEndsFor } from "@/lib/benchmarking/lifecycle";
+import { termEndsFor, surveyState } from "@/lib/benchmarking/lifecycle";
+import AdminPageHeader from "@/components/admin/AdminPageHeader";
+import {
+  formatDeadline,
+  formatOpening,
+  deadlineDay,
+  openingDay,
+  boundaryFromLastDay,
+  openingFromDay,
+} from "@/lib/benchmarking/deadline";
+import { updateSurveyDates } from "@/lib/actions/benchmarking-admin";
 import { CAPABILITIES } from "@/lib/auth/capability-names";
 import { notFound } from "next/navigation";
 
@@ -23,7 +33,7 @@ export default async function BenchmarkingCyclePage({
   const { year } = await params;
   const auth = await requireAdmin();
   if (!auth.ok) {
-    redirect("/benchmarking/admin/submissions");
+    redirect(`/benchmarking/admin/${year}/submissions`);
   }
 
   const supabase = await createClient();
@@ -182,6 +192,36 @@ export default async function BenchmarkingCyclePage({
     if (surveyId) await updateSurveyStatus(surveyId, to);
   };
 
+  async function saveDates(formData: FormData) {
+    "use server";
+    if (!surveyId) return;
+    /*
+      ⛔ The inputs hold the days a MEMBER is told; the columns hold instants.
+      `closes_at` is an EXCLUSIVE boundary, so writing the input straight
+      through would re-read a bare date as midnight UTC and move the real
+      cutoff hours earlier than the committee set it, with every displayed
+      deadline unchanged. deadline.ts owns both directions.
+
+      ⛔ And an untouched field is written back byte-identical rather than
+      renormalised. FY2026 opens at 12:00Z — 8am Eastern, a deliberate hour,
+      not midnight anywhere. Converting a day back to an instant has to pick
+      one, so opening this form and pressing Save would have quietly moved an
+      opening nobody edited. A no-op has to be a no-op.
+    */
+    const opensDay = String(formData.get("opensAt") ?? "").trim();
+    const closesDay = String(formData.get("closesAt") ?? "").trim();
+    const opensWas = (latestSurvey.opens_at as string | null) ?? null;
+    const closesWas = (latestSurvey.closes_at as string | null) ?? null;
+
+    await updateSurveyDates(
+      surveyId,
+      opensDay === openingDay(opensWas) ? opensWas : openingFromDay(opensDay),
+      closesDay === deadlineDay(closesWas) ? closesWas : boundaryFromLastDay(closesDay),
+    );
+    const { revalidatePath } = await import("next/cache");
+    revalidatePath("/benchmarking/admin", "layout");
+  }
+
   /*
     ⛔ Keyed by ACTION key, not stage key — actions[act.key] is the lookup.
 
@@ -221,7 +261,7 @@ export default async function BenchmarkingCyclePage({
       { href: "/benchmarking/survey", label: "survey" },
       { href: "/benchmarking/worksheet", label: "printable worksheet" },
     ],
-    interpretation: [{ href: "/benchmarking/admin/flags", label: "flag queue" }],
+    interpretation: [{ href: `/benchmarking/admin/${year}/flags`, label: "flag queue" }],
     complete: [{ href: "/benchmarking/compare", label: "what members will see" }],
   };
 
@@ -311,7 +351,7 @@ export default async function BenchmarkingCyclePage({
     : {};
 
   const timelineActions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined> = {
-    openReview: "/benchmarking/admin/review",
+    openReview: `/benchmarking/admin/${year}/review`,
     openQueue: "/benchmarking/recipients",
 
     startBeta: move("beta"),
@@ -319,23 +359,42 @@ export default async function BenchmarkingCyclePage({
 
 
     closeSurvey: move("closed"),
-    openFlagReview: "/benchmarking/admin/flags",
+    openFlagReview: `/benchmarking/admin/${year}/flags`,
     beginProcessing: move("processing"),
     markComplete: move("complete"),
   };
 
+  /*
+    The cycle's standing facts, in the header, the way the election page carries
+    "4 seats · AGM Jan 21 · nominations Dec 1 – Dec 22". Where it is and when it
+    ends are the two things you check before pressing anything, so they belong
+    beside the title rather than in a card you scroll to.
+  */
+  const def = surveyState((latestSurvey.status as string) ?? "draft");
+  const headerFacts = [
+    def?.label ?? (latestSurvey.status as string),
+    // ⛔ formatOpening, not a raw toLocaleDateString: the same zone the deadline
+    // beside it is read in, and the same long form, so one line does not say
+    // "opens 2028-05-08 · closes June 19, 2028".
+    latestSurvey.opens_at ? `opens ${formatOpening(latestSurvey.opens_at as string)}` : null,
+    latestSurvey.closes_at ? `closes ${formatDeadline(latestSurvey.closes_at as string)}` : null,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+
   return (
     <div>
-      <div className="mb-6">
-        <Link
-          href="/benchmarking/admin"
-          className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-900"
-        >
-          ← All cycles
-        </Link>
-        <h1 className="mt-1 text-2xl font-bold text-gray-900">
-          FY{latestSurvey.fiscal_year} Benchmarking
-        </h1>
+      <Link
+        href="/benchmarking/admin"
+        className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-900"
+      >
+        ← All cycles
+      </Link>
+      <div className="mt-1">
+        <AdminPageHeader
+          title={`FY${latestSurvey.fiscal_year} Benchmarking`}
+          description={headerFacts}
+        />
       </div>
 
       <div className="grid gap-6">
@@ -385,60 +444,53 @@ export default async function BenchmarkingCyclePage({
               verified={responseRate.verified}
             />
 
-            {/* Quick Stats */}
-            <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm">
-              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-4">
-                Quick Actions
+            {/*
+              ⛔ What used to sit here was a "Quick Actions" card linking to
+              submissions, the flag queue, the recipient queue and the preview.
+              Every one of those is in the sidebar on the left, two of them had
+              gone stale pointing at routes that no longer exist, and the counts
+              they carried are already in the card beside them and in the
+              timeline's own steps. A third way to reach a page is not a
+              shortcut, it is a thing to keep in sync.
+
+              Configuration takes its place, because that is what belongs below
+              the spine: the dates the whole cycle is measured against.
+            */}
+            <div className="bg-white border border-gray-200 rounded-lg p-6 shadow-sm" id="dates">
+              <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-1">
+                Cycle dates
               </h3>
-              <div className="space-y-3">
-                <Link
-                  href="/benchmarking/admin/submissions"
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
+              <p className="mb-4 text-xs text-gray-500">
+                The closing date is the deadline every member sees, and it is what expires
+                appointed reviewers and beta testers — see the committee list below. Moving
+                it moves both.
+              </p>
+              <form action={saveDates} className="space-y-3">
+                <label className="block text-xs text-gray-600">
+                  <span className="block font-medium text-gray-900">Collection opens</span>
+                  <input
+                    type="date"
+                    name="opensAt"
+                    defaultValue={openingDay(latestSurvey.opens_at as string | null) ?? ""}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <label className="block text-xs text-gray-600">
+                  <span className="block font-medium text-gray-900">Last day to file</span>
+                  <input
+                    type="date"
+                    name="closesAt"
+                    defaultValue={deadlineDay(latestSurvey.closes_at as string | null) ?? ""}
+                    className="mt-1 w-full rounded-lg border border-gray-300 px-3 py-2 text-sm"
+                  />
+                </label>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-gray-300 px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
                 >
-                  <span className="text-sm font-medium text-gray-700">
-                    View All Submissions
-                  </span>
-                  <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">
-                    {responseRate.drafts + responseRate.submitted} total
-                  </span>
-                </Link>
-                <Link
-                  href="/benchmarking/admin/flags"
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-sm font-medium text-gray-700">
-                    Review Flagged Values
-                  </span>
-                  {pendingFlagCount > 0 ? (
-                    <span className="text-xs bg-amber-100 text-amber-700 px-2 py-1 rounded-full font-medium">
-                      {pendingFlagCount} pending
-                    </span>
-                  ) : (
-                    <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">
-                      All clear
-                    </span>
-                  )}
-                </Link>
-                <Link
-                  href="/benchmarking/recipients"
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-sm font-medium text-gray-700">
-                    Recipients &amp; beta stores
-                  </span>
-                  <span className="text-xs text-gray-400">who gets it, and who goes first</span>
-                </Link>
-                <Link
-                  href="/benchmarking/admin/preview"
-                  className="flex items-center justify-between p-3 rounded-lg border border-gray-100 hover:bg-gray-50 transition-colors"
-                >
-                  <span className="text-sm font-medium text-gray-700">
-                    Walk the survey
-                  </span>
-                  {/* Says what it does now: the real form, as the test store. */}
-                  <span className="text-xs text-gray-400">as the test store</span>
-                </Link>
-              </div>
+                  Save dates
+                </button>
+              </form>
             </div>
           </div>
         )}

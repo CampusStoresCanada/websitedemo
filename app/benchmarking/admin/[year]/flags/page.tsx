@@ -16,7 +16,7 @@ export default async function FlagsPage({
   // for authorisation is one refactor away from being wide open, and this one
   // lists named member stores.
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/flags"));
+  if (!auth.ok) redirect(loginWithNext(`/benchmarking/admin/${year}/flags`));
   const { globalRole, capabilities } = auth.ctx;
   if (!isGlobalAdmin(globalRole) && !opensBenchmarkingAdmin(capabilities)) {
     redirect("/benchmarking");
