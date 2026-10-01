@@ -37,7 +37,6 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
   const router = useRouter();
   const [showCreate, setShowCreate] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [transitioning, setTransitioning] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // Create form state
@@ -67,17 +66,6 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
     setCreating(false);
   };
 
-  const handleTransition = async (surveyId: string, newStatus: string) => {
-    setTransitioning(true);
-    setError(null);
-    const result = await updateSurveyStatus(surveyId, newStatus);
-    if (result.success) {
-      router.refresh();
-    } else {
-      setError(result.error || "Failed to update status");
-    }
-    setTransitioning(false);
-  };
 
   const handleUpdateDates = async (surveyId: string, opensAt: string, closesAt: string) => {
     setError(null);
@@ -216,15 +204,16 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
                   </div>
                 </div>
 
-                {next && (
-                  <button
-                    onClick={() => handleTransition(survey.id, next.state)}
-                    disabled={transitioning}
-                    className="ml-4 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
-                  >
-                    {transitioning ? "..." : next.label}
-                  </button>
-                )}
+                {/*
+                  ⛔ No transition button here. Moving the cycle on happens in
+                  the timeline above, where the step also says what it is
+                  waiting for and what the move will send. Two buttons for one
+                  state change is two places to press, and only one of them
+                  tells you that starting beta mails the appointed testers.
+
+                  This card is what it says: the surveys, their state, their
+                  dates. Reading, not acting.
+                */}
               </div>
             );
           })}

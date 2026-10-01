@@ -348,3 +348,28 @@ export function strandedBySplit(
     })
     .filter((c) => c.amount > 0);
 }
+
+
+/**
+ * Human names for the CALCULATED lines of the statement.
+ *
+ * ⛔ Here, not in the component that renders them. A store overwriting one of
+ * these writes a note against the line key, and the note is read somewhere
+ * else entirely — a DM to the committee lead, the Explanations queue, the
+ * appendix. fieldLabel() walks the field config, which these are not in, so it
+ * fell through to the raw key and sent "explanation pending on gm_online".
+ */
+export const STATEMENT_LINE_LABELS: Record<string, string> = {
+  gm_retail: "General merchandise, retail sales",
+  gm_online: "General merchandise, online sales",
+  cm_retail: "Course materials, retail sales",
+  cm_online: "Course materials, online sales",
+  other_income: "Other income",
+  total_revenue: "Total revenue",
+  gross_margin: "Gross margin",
+  inventory_open: "Opening inventory, at cost",
+  inventory_close: "Closing inventory, at cost",
+  operating_expenses: "Total operating expenses",
+  operating_income: "Operating income",
+  campus_contribution: "Total campus contribution",
+};

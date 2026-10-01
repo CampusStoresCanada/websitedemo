@@ -520,8 +520,10 @@ async function fetchMapOrgsWithBenchmarking(
   const [orgResult, benchResult] = await Promise.all([
     orgQuery,
     createAdminClient()
+      // ⛔ Never a test store in a public figure.
       .from("benchmarking")
-      .select("organization_id, pos_system, enrollment_fte, num_store_locations, total_square_footage, services_offered, operations_mandate, payment_options, shopping_services, lms_system, social_media_platforms, institution_type, fulltime_employees")
+      .select("organization_id, pos_system, enrollment_fte, num_store_locations, total_square_footage, services_offered, operations_mandate, payment_options, shopping_services, lms_system, social_media_platforms, institution_type, fulltime_employees, organizations!inner(is_test)")
+      .not("organizations.is_test", "is", true)
       .order("fiscal_year", { ascending: false }),
   ]);
 

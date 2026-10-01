@@ -8,6 +8,7 @@ import {
   notifyStoreOfPendingNote,
   notifyAuthorOfOutcome,
 } from "@/lib/benchmarking/note-notifications";
+import { STATEMENT_LINE_LABELS } from "@/lib/benchmarking/financial-lines";
 import { DEFAULT_FIELD_CONFIG } from "@/lib/benchmarking/default-field-config";
 
 /** Human label for a field, so a DM doesn't say "total_gross_sales_instore". */
@@ -16,7 +17,30 @@ function fieldLabel(fieldName: string): string {
     const match = section.fields.find((f) => f.name === fieldName);
     if (match) return match.label;
   }
-  return fieldName;
+  /*
+    ⛔ The calculated lines are not fields, so they were never found here and
+    the raw key went out in a DM: "explanation pending on gm_online". A note
+    against an overwritten total is the one kind most likely to need reading by
+    somebody who did not write it.
+  */
+  return STATEMENT_LINE_LABELS[fieldName] ?? fieldName;
+}
+
+/**
+ * Is this a test organisation?
+ *
+ * ⛔ Checked before any notification goes out. Walking the survey as the test
+ * store is how the whole thing gets exercised, and every explanation written
+ * on that walk DMed the committee lead about a store that does not exist.
+ */
+async function isTestOrg(organizationId: string): Promise<boolean> {
+  const db = createAdminClient();
+  const { data } = await db
+    .from("organizations")
+    .select("is_test")
+    .eq("id", organizationId)
+    .maybeSingle();
+  return data?.is_test === true;
 }
 
 async function storeName(organizationId: string): Promise<string> {
@@ -163,11 +187,13 @@ export async function writeNote(input: {
         .maybeSingle(),
     ]);
     // Best-effort: a failed DM must not undo a saved explanation.
-    void notifyLeadOfPendingNote({
-      storeName: name,
-      fieldLabel: fieldLabel(input.fieldName),
-      authorName: me2?.display_name ?? null,
-    }).catch(() => {});
+    if (!(await isTestOrg(input.organizationId))) {
+      void notifyLeadOfPendingNote({
+        storeName: name,
+        fieldLabel: fieldLabel(input.fieldName),
+        authorName: me2?.display_name ?? null,
+      }).catch(() => {});
+    }
   }
 
   revalidatePath("/benchmarking/admin/flags");

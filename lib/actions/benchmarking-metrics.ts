@@ -95,10 +95,19 @@ async function loadYear(fiscalYear: number) {
   const db = createAdminClient();
 
   const { data: rows } = await db
+    /*
+      ⛔ Test organisations are not part of anybody's cohort.
+
+      This pooled every non-draft row for the year, and a test store's row is
+      non-draft like any other — so a scratch submission written while walking
+      the survey sat in the medians real stores are compared against. Nothing
+      about it is visible downstream: it is one more row in a percentile.
+    */
     .from("benchmarking")
-    .select("*")
+    .select("*, organizations!inner(is_test)")
     .eq("fiscal_year", fiscalYear)
-    .neq("status", "draft");
+    .neq("status", "draft")
+    .not("organizations.is_test", "is", true);
 
   const orgIds = (rows ?? []).map((r) => r.organization_id as string);
 

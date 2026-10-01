@@ -127,11 +127,20 @@ export default async function BenchmarkingComparePage({
   }
 
   // A released year, and still never a draft inside it.
+    /*
+      ⛔ Test organisations are not part of anybody's cohort.
+
+      This pooled every non-draft row for the year, and a test store's row is
+      non-draft like any other — so a scratch submission written while walking
+      the survey sat in the medians real stores are compared against. Nothing
+      about it is visible downstream: it is one more row in a percentile.
+    */
   const { data: rowsRaw } = await db
     .from("benchmarking")
-    .select("*")
+    .select("*, organizations!inner(is_test)")
     .eq("fiscal_year", fiscalYear)
-    .not("status", "eq", "draft");
+    .not("status", "eq", "draft")
+    .not("organizations.is_test", "is", true);
 
   const rows = (rowsRaw ?? []) as unknown as BenchmarkingRow[];
 
