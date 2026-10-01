@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getUserBookmarks } from "@/lib/actions/bookmarks";
 import BookmarksClient from "./BookmarksClient";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "My Bookmarks | Campus Stores Canada",
@@ -9,7 +10,7 @@ export const metadata = {
 
 export default async function MyBookmarksPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/me/bookmarks"));
 
   const { bookmarks } = await getUserBookmarks();
 

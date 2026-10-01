@@ -3,6 +3,7 @@ import Link from "next/link";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import EditEventForm from "@/components/toolkit/EditEventForm";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Edit Event | Campus Stores Canada",
@@ -13,10 +14,13 @@ export default async function MemberEditEventPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
-
+  // Resolved above the gate: the login bounce needs the id to send them back
+  // to the event they were editing rather than to the events list.
   const { id } = await params;
+
+  const auth = await requireAuthenticated();
+  if (!auth.ok) redirect(loginWithNext(`/me/events/${id}/edit`));
+
   const db = createAdminClient();
 
   const { data: event } = await db

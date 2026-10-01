@@ -7,6 +7,7 @@ import { getRenewalConfig } from "@/lib/policy/engine";
 import { stripe } from "@/lib/stripe/client";
 import { RenewalStatusCard } from "@/components/renewal/RenewalStatusCard";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const dynamic = "force-dynamic";
 export const metadata = { title: "Billing | Campus Stores Canada" };
@@ -22,7 +23,7 @@ export default async function OrgBillingPage({
   searchParams: Promise<{ org?: string }>;
 }) {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/org/billing"));
 
   const query = await searchParams;
   const db = createAdminClient();

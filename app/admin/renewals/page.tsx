@@ -4,12 +4,13 @@ import { requireAdmin } from "@/lib/auth/guards";
 import { getRenewalCallList } from "@/lib/renewal/call-list";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import CallList from "@/components/renewals/CallList";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = { title: "My renewal calls | Campus Stores Canada" };
 
 export default async function RenewalCallListPage() {
   const auth = await requireAdmin();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/admin/renewals"));
 
   // The cycle is whichever one today's date sits in for board reporting. Using
   // the same resolver as the board tab keeps the two surfaces talking about the

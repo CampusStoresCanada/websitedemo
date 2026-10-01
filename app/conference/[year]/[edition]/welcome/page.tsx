@@ -3,6 +3,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import { getMyRequiredLegalDocuments, getMyLegalAcceptances } from "@/lib/actions/conference-legal";
 import AssigneeAcceptance from "./AssigneeAcceptance";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = { title: "Complete Your Registration" };
 
@@ -13,7 +14,7 @@ export default async function AssigneeWelcomePage({
 }) {
   const { year, edition } = await params;
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/welcome`));
 
   const confResult = await getPublicConference(parseInt(year, 10), edition);
   if (!confResult.success || !confResult.data) {

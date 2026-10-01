@@ -12,6 +12,7 @@ import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getOrganizations } from "@/lib/data";
 import OffersClient from "./offers-client";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 interface OrganizationMembership {
   id: string;
@@ -33,7 +34,7 @@ export default async function ConferenceOffersPage({
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/offers`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);
   if (!conferenceResult.success || !conferenceResult.data) {

@@ -4,6 +4,7 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import PresentationBlock from "@/components/presentation/PresentationBlock";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -16,7 +17,18 @@ export default async function AdminLayout({
 }) {
   const auth = await requireAdmin();
   if (!auth.ok) {
-    redirect(auth.status === 401 ? "/login" : "/");
+    /*
+      401 is "not signed in" and 302s to the login screen; 403 is "signed in,
+      not an admin" and goes home, because sending them to login would invite
+      them to try different credentials.
+
+      ⛔ /admin rather than the page they asked for. A layout is not told the
+      child path and this app has no middleware setting one, so the exact
+      destination is not knowable here. Landing on the admin dashboard is the
+      honest approximation; landing on the public homepage, which is what this
+      did, reads as "your login failed".
+    */
+    redirect(auth.status === 401 ? loginWithNext("/admin") : "/");
   }
 
   // Every page under here reads through createAdminClient(), so the visibility

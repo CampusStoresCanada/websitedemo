@@ -9,6 +9,7 @@ import { listEntitySeatsForOrg } from "@/lib/actions/conference-entity-commerce"
 import { getContactsForOrganization, getOrganizations } from "@/lib/data";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CartClient from "./cart-client";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 interface OrganizationMembership {
   id: string;
@@ -29,7 +30,7 @@ export default async function ConferenceCartPage({
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/cart`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);
   if (!conferenceResult.success || !conferenceResult.data) {

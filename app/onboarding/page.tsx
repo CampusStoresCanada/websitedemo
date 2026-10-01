@@ -3,6 +3,7 @@ import { getServerAuthState } from "@/lib/auth/server";
 import { createClient } from "@/lib/supabase/server";
 import { isGlobalAdmin } from "@/lib/auth/guards";
 import { OnboardingWizard } from "./OnboardingWizard";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Onboarding | Campus Stores Canada",
@@ -12,7 +13,7 @@ export default async function OnboardingPage() {
   const auth = await getServerAuthState();
 
   if (!auth.user) {
-    redirect("/login");
+    redirect(loginWithNext("/onboarding"));
   }
 
   // Every "not eligible for onboarding" exit below goes to /me, the signed-in

@@ -2,6 +2,7 @@ import { redirect, notFound } from "next/navigation";
 import Link from "next/link";
 import { resolveOrgSlug } from "@/lib/org/resolve";
 import { requireOrgAdminOrSuperAdmin } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 interface OrgAdminLayoutProps {
   children: React.ReactNode;
@@ -23,7 +24,7 @@ export default async function OrgAdminLayout({
   // Auth guard: org_admin of this org, or global admin/super_admin
   const auth = await requireOrgAdminOrSuperAdmin(org.id);
   if (!auth.ok) {
-    redirect(auth.status === 401 ? "/login" : `/org/${slug}`);
+    redirect(auth.status === 401 ? loginWithNext(`/org/${slug}/admin`) : `/org/${slug}`);
   }
 
   return (

@@ -2,6 +2,7 @@ import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import AccessGrantsBoard from "@/components/admin/AccessGrantsBoard";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Access Grants | Admin",
@@ -14,7 +15,7 @@ export default async function AccessGrantsPage({
   searchParams: Promise<{ year?: string }>;
 }) {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/admin/access"));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/");
 
   const { supabase } = auth.ctx;

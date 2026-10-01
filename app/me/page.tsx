@@ -15,6 +15,7 @@ import MemberSupplierPanel from "@/components/org/MemberSupplierPanel";
 import DirectoryVisibilityPanel, { type VisibilityRow } from "@/components/me/DirectoryVisibilityPanel";
 import type { DirectoryVisibility } from "@/lib/contacts/visibility";
 import PartnerMarketPanel from "@/components/org/PartnerMarketPanel";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 /**
  * Never cached. This page shows a person their own conference answers, and a
@@ -36,7 +37,7 @@ const ORG_ROLE_LABELS: Record<string, string> = {
 
 export default async function MyAccountPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/me"));
 
   const db = createAdminClient();
   const userId = auth.ctx.userId;

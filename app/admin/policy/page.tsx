@@ -4,6 +4,7 @@ import { getPolicyDashboardData } from "@/lib/actions/policy";
 import { getPlatformConfig, getPlatformFeatures } from "@/lib/actions/platform";
 import PolicyDashboard from "@/components/admin/policy/PolicyDashboard";
 import BootstrapWizard from "@/components/admin/policy/BootstrapWizard";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Policy Settings | Admin | Campus Stores Canada",
@@ -12,7 +13,7 @@ export const metadata = {
 export default async function PolicyPage() {
   const auth = await requireAdmin();
   if (!auth.ok) {
-    redirect(auth.status === 401 ? "/login" : "/");
+    redirect(auth.status === 401 ? loginWithNext("/admin/policy") : "/");
   }
   const superAdmin = isSuperAdmin(auth.ctx.globalRole);
 

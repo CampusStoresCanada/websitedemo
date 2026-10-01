@@ -12,6 +12,7 @@ import PartnerRegistrationForm from "./PartnerRegistrationForm";
 import DelegateRegistrationForm from "./DelegateRegistrationForm";
 import RegistrationOptionForm from "./RegistrationOptionForm";
 import { getProgramsConfig, resolveConferenceTier } from "@/lib/policy/engine";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = { title: "Conference Registration" };
 
@@ -25,7 +26,7 @@ export default async function RegisterPage({
   const { year, edition } = await params;
   const query = await searchParams;
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/register`, query));
 
   // Load conference
   const confResult = await getPublicConference(parseInt(year), edition);

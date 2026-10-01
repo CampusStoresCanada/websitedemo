@@ -12,6 +12,7 @@ import ComparisonView from "@/components/benchmarking/ComparisonView";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import { resolveActingOrg } from "@/lib/benchmarking/acting-org";
 import { getSizeBands, resolveSizeBand } from "@/lib/benchmarking/size-band";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import {
   resultsTierFor,
   NOT_PARTICIPATING_REASON,
@@ -41,7 +42,7 @@ export default async function BenchmarkingComparePage({
 }) {
   const params = await searchParams;
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/compare"));
 
   const { supabase, userId, globalRole } = auth.ctx;
   const isAdmin = isGlobalAdmin(globalRole);

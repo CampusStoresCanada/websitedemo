@@ -4,6 +4,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CancelRsvpButton from "@/components/events/CancelRsvpButton";
 import ShowMoreList from "@/components/ui/ShowMoreList";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "My Events | Campus Stores Canada",
@@ -55,7 +56,7 @@ const regStatusColor: Record<string, string> = {
 
 export default async function MyEventsPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/me/events"));
 
   const adminClient = createAdminClient();
   const userId = auth.ctx.userId;

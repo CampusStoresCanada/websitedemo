@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { requireAuthenticated } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = { title: "Checkout Canceled" };
 
@@ -17,7 +18,7 @@ export default async function ConferenceCheckoutCancelPage({
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/checkout/cancel`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);
   const conferenceName = conferenceResult.success && conferenceResult.data

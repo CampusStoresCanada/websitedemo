@@ -7,6 +7,7 @@ import { listConferenceOrdersForOrganization } from "@/lib/actions/conference-co
 import { createAdminClient } from "@/lib/supabase/admin";
 import { formatCents } from "@/lib/utils";
 import { Timestamp } from "@/components/ui/LocalDate";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 interface OrganizationMembership {
   id: string;
@@ -26,7 +27,7 @@ export default async function ConferenceOrdersPage({
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/orders`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);
   if (!conferenceResult.success || !conferenceResult.data) {

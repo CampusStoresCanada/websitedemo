@@ -3,6 +3,7 @@ import { requireAuthenticated } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import FieldReviewWorkspace from "@/components/benchmarking/review/FieldReviewWorkspace";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = {
   title: "Question Review — a look around | Campus Stores Canada",
@@ -22,7 +23,7 @@ export const metadata = {
  */
 export default async function ReviewPreviewPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/preview/review"));
 
   const db = createAdminClient();
   const { data: surveys } = await db

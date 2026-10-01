@@ -7,6 +7,7 @@ import { getConferenceOrderDetails } from "@/lib/actions/conference-commerce";
 import { formatCents } from "@/lib/utils";
 import { Timestamp } from "@/components/ui/LocalDate";
 import OrderActions from "./order-actions";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 export const metadata = { title: "Conference Order Details" };
 
@@ -21,7 +22,7 @@ export default async function ConferenceOrderDetailPage({
   const query = await searchParams;
 
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext(`/conference/${year}/${edition}/orders/${orderId}`, query));
 
   const conferenceResult = await getPublicConference(parseInt(year, 10), edition);
   if (!conferenceResult.success || !conferenceResult.data) {
