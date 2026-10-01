@@ -533,6 +533,22 @@ export default function BenchmarkingSurveyForm({
     organizationProvince,
   };
 
+  /*
+    The worksheet's address, for the one line on the printed sheet whose whole
+    job is to be typed back in by hand.
+
+    ⛔ Never a hardcoded host. This said campusstorescanada.ca, which I had not
+    checked: that domain carries CSC's mail but does not currently resolve as a
+    web host, so a reader typing it in would have got nowhere, with no link to
+    click and nothing to explain why. Derived from the same env var the rest of
+    the app builds its links from, so it is correct wherever this is deployed,
+    and degrades to a plain instruction rather than a broken address.
+  */
+  const appOrigin = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/^https?:\/\//, "");
+  const worksheetPrintAddress = appOrigin
+    ? `${appOrigin}/benchmarking/worksheet`
+    : "the Benchmarking section of the CSC website";
+
   return (
     <>
       {/*
@@ -554,8 +570,8 @@ export default function BenchmarkingSurveyForm({
           The worksheet is the printable version. It carries every question, your
           own figures from previous years where we hold them, and room to write
           this year&apos;s in by hand. It is at{" "}
-          <strong>campusstorescanada.ca/benchmarking/worksheet</strong>, or from the
-          &ldquo;Print a blank copy&rdquo; link near the top of the survey.
+          <strong>{worksheetPrintAddress}</strong>, or from the &ldquo;Print a blank
+          copy&rdquo; link near the top of the survey.
         </p>
       </div>
 
