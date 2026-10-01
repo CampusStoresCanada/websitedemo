@@ -159,6 +159,7 @@ export default async function RecipientsPage() {
       note: (r.note as string) ?? null,
       contactId: (r.contact_id as string) ?? null,
       orgName: org?.name ?? "Unknown store",
+      orgSlug: (org?.slug as string | undefined) ?? null,
       province: org?.province ?? "",
       region: REGION_OF[org?.province ?? ""] ?? "Unknown",
       participatedLastYear: participated.has(r.organization_id),

@@ -18,6 +18,8 @@ interface Item {
   note: string | null;
   contactId: string | null;
   orgName: string;
+  /** For the office: where to go to add a person this store has none of. */
+  orgSlug: string | null;
   province: string;
   region: string;
   participatedLastYear: boolean;
@@ -142,23 +144,34 @@ export default function RecipientQueue({
           </h2>
           <p className="text-xs text-gray-500 mb-3">
             Either nobody on file to ask about, or a rep said they didn&rsquo;t
-            know. These don&rsquo;t sit in anyone&rsquo;s queue going stale.
+            know. These don&rsquo;t sit in anyone&rsquo;s queue going stale, so
+            they sit here until you settle them.
           </p>
-          <ul className="space-y-1">
+          {/*
+            ⛔ The same card the queue uses, not a read-only list.
+
+            This printed the store name and a reason badge and nothing else. An
+            escalation is a handoff TO the office, and the office is the one
+            place in this flow that had no controls at all: three stores sat in
+            an amber box with no way to resolve them and no hint of where to go.
+            Every one of them had people on file the whole time.
+
+            resolveRecipient acts on any row regardless of status, so confirming
+            here needs no new mechanism. "I don't know" is hidden, because this
+            bucket IS where not knowing sends you and offering it again is a
+            loop with no exit.
+          */}
+          <div className="space-y-3">
             {escalated.map((e) => (
-              <li
+              <StoreCard
                 key={e.id}
-                className="flex items-center justify-between p-3 bg-amber-50 border border-amber-200 rounded text-sm"
-              >
-                <span className="text-gray-900">{e.orgName}</span>
-                <span className="text-xs text-amber-800">
-                  {e.contacts.length === 0
-                    ? "no contacts on file"
-                    : "rep didn't know"}
-                </span>
-              </li>
+                item={e}
+                busy={busy === e.id}
+                onAct={act}
+                officeView
+              />
             ))}
-          </ul>
+          </div>
         </div>
       )}
     </div>
@@ -171,9 +184,12 @@ function StoreCard({
   item,
   busy,
   onAct,
+  officeView = false,
 }: {
   item: Item;
   busy: boolean;
+  /** Rendered in the office's escalation bucket rather than a rep's queue. */
+  officeView?: boolean;
   onAct: (
     id: string,
     outcome: "confirmed" | "corrected" | "unknown",
@@ -184,7 +200,23 @@ function StoreCard({
     item.contacts.find((c) => c.id === item.contactId) ??
     item.contacts.find((c) => c.isPrimary) ??
     null;
-  const [picking, setPicking] = useState(false);
+  /*
+    ⛔ "No suggestion" is NOT "no people".
+
+    `suggested` falls back to the primary contact, and the queue escalates a
+    store precisely when it has no primary — so the office's bucket is full of
+    stores that have people and no suggestion. New Brunswick Community College
+    has eight contacts and no primary: the card would have told the office
+    nobody was on file and sent them off to add a ninth.
+
+    When there is nobody to suggest but there are people to choose from, the
+    list opens itself. The office came here to settle this, not to discover a
+    second button.
+  */
+  const nothingToSuggestYet = item.contacts.length > 0;
+  const [picking, setPicking] = useState(
+    officeView && !suggested && nothingToSuggestYet,
+  );
 
   const isDone = item.status === "confirmed" || item.status === "corrected";
 
@@ -219,9 +251,36 @@ function StoreCard({
           </p>
         </div>
       ) : (
-        <p className="mt-3 text-sm text-amber-800">
-          Nobody on file for this store.
-        </p>
+        <div className="mt-3 rounded border border-amber-200 bg-amber-50 px-3 py-2">
+          <p className="text-sm text-amber-900">
+            {item.contacts.length === 0
+              ? "Nobody on file for this store."
+              : `${item.contacts.length} ${
+                  item.contacts.length === 1 ? "person" : "people"
+                } on file, none of them marked as the main contact. Pick who should get the survey.`}
+          </p>
+          {/*
+            The only escalation that cannot be settled on this page: with no
+            contacts there is nobody to pick. Naming the next move beats an
+            amber badge, which is what this was.
+          */}
+          {officeView && item.contacts.length === 0 && (
+            <p className="mt-1 text-xs text-amber-900">
+              Add someone on{" "}
+              {item.orgSlug ? (
+                <a
+                  href={`/org/${item.orgSlug}/admin/users`}
+                  className="underline underline-offset-2"
+                >
+                  this store&rsquo;s people page
+                </a>
+              ) : (
+                <span>the store&rsquo;s people page</span>
+              )}
+              , then come back and pick them.
+            </p>
+          )}
+        </div>
       )}
 
       {isDone ? (
@@ -274,13 +333,15 @@ function StoreCard({
             >
               {picking ? "Never mind" : "It's someone else"}
             </button>
-            <button
-              onClick={() => onAct(item.id, "unknown")}
-              disabled={busy}
-              className="text-xs font-medium px-3 py-1.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-50"
-            >
-              I don&rsquo;t know
-            </button>
+            {!officeView && (
+              <button
+                onClick={() => onAct(item.id, "unknown")}
+                disabled={busy}
+                className="text-xs font-medium px-3 py-1.5 rounded border border-gray-300 text-gray-500 hover:bg-gray-50 disabled:opacity-50"
+              >
+                I don&rsquo;t know
+              </button>
+            )}
           </div>
         </>
       )}
