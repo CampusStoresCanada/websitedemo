@@ -31,6 +31,8 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import type { TemplateKey } from "@/lib/comms/types";
 import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
+import { getTemplate, renderTemplateContent } from "@/lib/comms/templates";
+import type { StageMessage } from "@/lib/elections/messages";
 
 export interface NotifyOutcome {
   template: string;
@@ -503,4 +505,142 @@ export async function sendSubmissionReceipt(
       closes_date: formatDeadline(survey.closes_at) ?? "",
     },
   );
+}
+
+// ─────────────────────────────────────────────────────────────────
+// What each step of the cycle sends
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * The messages hanging off each timeline stage, for the admin spine.
+ *
+ * ⛔ Reuses StageMessage and the same getTemplate/renderTemplateContent pair
+ * elections uses — the shape is not election-specific and neither is the
+ * problem. The point is `missingTemplate`: a template row that is absent makes
+ * the send fail at the moment it matters, and the only way anyone found out
+ * was by sending. Now the step says so beforehand.
+ *
+ * Lives here rather than in its own module because this file already decides
+ * which template each benchmarking event uses; a second place to answer that
+ * is a second place for them to disagree.
+ */
+export async function benchmarkingStageMessages(
+  surveyId: string,
+): Promise<Record<string, StageMessage[]>> {
+  const survey = await loadSurvey(surveyId);
+  if (!survey) return {};
+
+  const closes = (survey.closes_at ? formatDeadline(survey.closes_at) : null) ?? "the closing date";
+  const opens = survey.opens_at
+    ? new Date(survey.opens_at).toLocaleDateString("en-CA", {
+        year: "numeric", month: "long", day: "numeric",
+      })
+    : "the opening date";
+
+  /*
+    A stand-in store, used for rendering the preview. Clearly bracketed rather
+    than invented, so nobody mistakes it for a real recipient — the same move
+    elections makes with an empty electorate.
+  */
+  const sample = {
+    contact_name: "[their first name]",
+    organization_name: "[their store]",
+    fiscal_year: String(survey.fiscal_year),
+    opens_date: opens,
+    closes_date: closes,
+    days_remaining: "7",
+    survey_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/benchmarking/survey`,
+    submitted_date: "[the day they filed]",
+    task_title: "[the workstream]",
+    task_summary: "[what it is, in one line]",
+    what_you_do: "[what the workstream asks of them]",
+    time_commitment: "[how long]",
+    window: "[when]",
+    task_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/benchmarking/survey`,
+    deadline_line: "",
+    first_name: "[their first name]",
+  };
+
+  async function describe(
+    templateKey: string,
+    meta: {
+      key: string; label: string; stage: string; recipientCount: number | null;
+      /*
+        ⛔ Per-message overrides. One shared sample rendered the REVIEWER's
+        invitation as "A small ask: Beta testing", because the committee
+        template takes a task_title and the sample only had one value for it.
+        A preview that shows the wrong subject is worse than no preview: it is
+        read as what will go out.
+      */
+      vars?: Record<string, string>;
+    },
+  ): Promise<StageMessage> {
+    const template = await getTemplate(templateKey as TemplateKey);
+    const variables = { ...sample, ...(meta.vars ?? {}) };
+    const rendered = template
+      ? renderTemplateContent(template, {
+          app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
+          ...variables,
+        })
+      : { subject: "", bodyHtml: "" };
+
+    return {
+      key: meta.key,
+      stage: meta.stage,
+      label: meta.label,
+      templateKey: templateKey as TemplateKey,
+      templateId: template?.id ?? null,
+      missingTemplate: !template,
+      isTransactional: template?.is_transactional ?? true,
+      subject: template?.subject ?? "",
+      bodyHtml: template?.body_html ?? "",
+      variableKeys: template?.variable_keys ?? Object.keys(variables),
+      variables,
+      recipientCount: meta.recipientCount,
+      renderedSubject: rendered.subject,
+      note: template ? null : "No template row exists, so this step would fail to send.",
+    };
+  }
+
+  // How many each step would actually reach, from the same planners the send
+  // panel uses. Not a second count.
+  const invitePlan = await planInvitations(surveyId);
+  const remindPlan = await planReminders(surveyId);
+
+  const [appointReviewer, appointTester, invitation, reminder, receipt] = await Promise.all([
+    describe("benchmarking_committee_invitation", {
+      key: "reviewer_appointment", stage: "question_review",
+      label: "Invitation to review the questions", recipientCount: null,
+      vars: {
+        task_title: "Question review",
+        task_summary: "Check the questions that caused trouble last year, and write the examples.",
+        time_commitment: "About 30 minutes",
+        window: "September, before the survey opens",
+      },
+    }),
+    describe("benchmarking_beta_invitation", {
+      key: "beta_appointment", stage: "appoint_testers",
+      label: "Going first — sent when you appoint them", recipientCount: null,
+    }),
+    describe("benchmarking_invitation", {
+      key: "invitation", stage: "invitations",
+      label: "The survey is open", recipientCount: invitePlan?.willSend.length ?? null,
+    }),
+    describe("benchmarking_reminder", {
+      key: "reminder", stage: "reminders",
+      label: "Reminder", recipientCount: remindPlan?.willSend.length ?? null,
+    }),
+    describe("benchmarking_submission_received", {
+      key: "receipt", stage: "open",
+      label: "Receipt, sent when a store files", recipientCount: null,
+    }),
+  ]);
+
+  return {
+    question_review: [appointReviewer],
+    appoint_testers: [appointTester],
+    invitations: [invitation],
+    reminders: [reminder],
+    open: [receipt],
+  };
 }

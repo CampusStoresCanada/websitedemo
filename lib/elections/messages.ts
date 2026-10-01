@@ -56,7 +56,14 @@ export interface StageMessage {
   /** This election's real values, keyed as the template expects. */
   variables: Record<string, string>;
   /** How many people this would reach right now. */
-  recipientCount: number;
+  /**
+   * How many this step would reach, or null when there is no fixed audience.
+   *
+   * An appointment has no precomputed list — it reaches whoever you appoint,
+   * one at a time — and 0 would read as "this will mail nobody", which is a
+   * different and wrong statement.
+   */
+  recipientCount: number | null;
   /** Rendered with the real values, for display without opening anything. */
   renderedSubject: string;
   /** Set when nothing could be resolved — an empty electorate, usually. */

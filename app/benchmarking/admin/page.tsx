@@ -189,6 +189,52 @@ export default async function BenchmarkingAdminPage() {
   };
 
   // ⛔ Keyed by ACTION key, not stage key — actions[act.key] is the lookup.
+  /*
+    What each step sends, and the member-facing page it affects.
+
+    ⛔ Both reuse the elections machinery rather than resembling it:
+    StageMessage, the same preview modal, and the same ?preview=1 convention
+    the timeline adds to every stagePages href. The preview is display-only —
+    every write path re-checks the actor independently.
+  */
+  const stageMessages = latestSurvey
+    ? await (await import("@/lib/benchmarking/notify")).benchmarkingStageMessages(
+        latestSurvey.id as string,
+      )
+    : {};
+
+  const stagePages: Record<string, { href: string; label: string }[]> = {
+    question_review: [{ href: "/benchmarking/review", label: "reviewer's page" }],
+    recipients: [{ href: "/benchmarking/recipients", label: "recipient queue" }],
+    appoint_testers: [{ href: "/benchmarking/survey", label: "survey they will open" }],
+    beta: [
+      { href: "/benchmarking/survey", label: "survey" },
+      { href: "/benchmarking/worksheet", label: "printable worksheet" },
+    ],
+    open: [
+      { href: "/benchmarking/survey", label: "survey" },
+      { href: "/benchmarking/worksheet", label: "printable worksheet" },
+    ],
+    interpretation: [{ href: "/benchmarking/admin/flags", label: "flag queue" }],
+    complete: [{ href: "/benchmarking/compare", label: "what members will see" }],
+  };
+
+  /*
+    How many a step would mail, so the confirmation names a number instead of
+    asking a generic "are you sure". Read from the same planners the send panel
+    uses — not a second count that can disagree with it.
+  */
+  const sendCounts: Record<string, { recipients: number | null; audience: string }> = {
+    openSendPanel: {
+      recipients: stageMessages.invitations?.[0]?.recipientCount ?? null,
+      audience: "every store with a confirmed respondent that has not been invited",
+    },
+    openReminders: {
+      recipients: stageMessages.reminders?.[0]?.recipientCount ?? null,
+      audience: "invited stores that have not filed",
+    },
+  };
+
   const timelineActions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined> = {
     openReview: "/benchmarking/admin/review",
     openQueue: "/benchmarking/recipients",
@@ -221,6 +267,12 @@ export default async function BenchmarkingAdminPage() {
             title={`The FY${latestSurvey?.fiscal_year} cycle`}
             subtitle="Everything in the order it happens. Each step says what it is waiting for."
             actions={timelineActions}
+            stageMessages={stageMessages}
+            stagePages={stagePages}
+            sendCounts={sendCounts}
+            // requireAdmin's context carries userId, not an address. This only
+            // pre-fills the test-send box, so it is not worth a lookup.
+            testEmail={null}
           />
         )}
 
