@@ -609,8 +609,8 @@ export async function benchmarkingStageMessages(
 
   const [appointReviewer, appointTester, invitation, reminder, receipt] = await Promise.all([
     describe("benchmarking_committee_invitation", {
-      key: "reviewer_appointment", stage: "question_review",
-      label: "Invitation to review the questions", recipientCount: null,
+      key: "appointment", stage: "appoint_testers",
+      label: "Sent when you appoint someone, to any workstream", recipientCount: null,
       vars: {
         task_title: "Question review",
         task_summary: "Check the questions that caused trouble last year, and write the examples.",
@@ -619,8 +619,8 @@ export async function benchmarkingStageMessages(
       },
     }),
     describe("benchmarking_beta_invitation", {
-      key: "beta_appointment", stage: "appoint_testers",
-      label: "Going first — sent when you appoint them", recipientCount: null,
+      key: "beta_opening", stage: "beta",
+      label: "Going first — sent when beta testing starts", recipientCount: null,
     }),
     describe("benchmarking_invitation", {
       key: "invitation", stage: "invitations",
@@ -637,10 +637,108 @@ export async function benchmarkingStageMessages(
   ]);
 
   return {
+    // The same appointment copy serves every workstream, so it hangs off the
+    // step where appointing happens rather than being listed twice.
     question_review: [appointReviewer],
-    appoint_testers: [appointTester],
+    appoint_testers: [appointReviewer],
+    beta: [appointTester],
     invitations: [invitation],
     reminders: [reminder],
     open: [receipt],
   };
+}
+
+/**
+ * Tell the appointed beta testers that beta testing has started.
+ *
+ * ⛔ Fired by the STATE CHANGE, not by appointment. Those are two events at two
+ * times: you appoint weeks early, while the survey is still being written, and
+ * that tells somebody they have been asked to do a job. Telling them to go now
+ * is what happens when the phase actually opens. Sending the going-first copy
+ * at appointment told people the survey was open for them weeks before it was.
+ *
+ * ⛔ Addressed to the PEOPLE who hold the capability, not to recipient rows.
+ * They are the only ones who can open a draft survey, so mailing a store's
+ * confirmed respondent instead would send somebody to a locked door — which is
+ * the bug the old betaOnly send had.
+ *
+ * Best-effort: the transition has already happened and must not roll back
+ * because mail failed. Returns what went out so the caller can say.
+ */
+export async function sendBetaOpening(
+  surveyId: string,
+): Promise<{ sent: number; failed: number; skipped: number }> {
+  const survey = await loadSurvey(surveyId);
+  if (!survey) return { sent: 0, failed: 0, skipped: 0 };
+
+  if (emailSuppressed()) {
+    console.warn("[benchmarking] beta opening suppressed by kill switch");
+    return { sent: 0, failed: 0, skipped: 0 };
+  }
+
+  const db = createAdminClient();
+
+  const { data: holders } = await db
+    .from("capability_contributions")
+    .select("subject_id, display_name")
+    .eq("capability", "benchmarking.beta_tester")
+    .eq("is_active", true)
+    .eq("appointable", true);
+
+  const people = holders ?? [];
+  if (people.length === 0) return { sent: 0, failed: 0, skipped: 0 };
+
+  const opens = survey.opens_at
+    ? new Date(survey.opens_at).toLocaleDateString("en-CA", {
+        year: "numeric", month: "long", day: "numeric",
+      })
+    : "the published opening date";
+
+  const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "").replace(/\/$/, "");
+  const { sendTransactional } = await import("@/lib/comms/send");
+
+  let sent = 0, failed = 0, skipped = 0;
+
+  for (const h of people) {
+    const subjectId = h.subject_id as string;
+
+    // Their own login address, because an appointment is made against a profile.
+    const { data: auth } = await db.auth.admin.getUserById(subjectId);
+    const to = auth?.user?.email ?? null;
+    if (!to) { skipped += 1; continue; }
+
+    // Which store they are going first FOR. Named in the copy.
+    const { data: link } = await db
+      .from("user_organizations")
+      .select("organizations(name)")
+      .eq("user_id", subjectId)
+      .eq("status", "active")
+      .limit(1)
+      .maybeSingle();
+    const orgName =
+      (link as { organizations?: { name?: string } | null } | null)?.organizations?.name ??
+      "your store";
+
+    const first = ((h.display_name as string) ?? "").trim().split(/\s+/)[0] || "there";
+
+    const result = await sendTransactional({
+      templateKey: "benchmarking_beta_invitation",
+      to,
+      variables: {
+        contact_name: first,
+        organization_name: orgName,
+        fiscal_year: String(survey.fiscal_year),
+        opens_date: opens,
+        survey_url: `${appUrl}/benchmarking/survey`,
+      },
+    });
+
+    if (result.success) sent += 1;
+    else {
+      failed += 1;
+      console.error(`[benchmarking] beta opening to ${subjectId} failed: ${result.error}`);
+    }
+  }
+
+  return { sent, failed, skipped };
 }

@@ -91,7 +91,17 @@ beforeEach(() => {
 });
 
 describe("appointment invitations", () => {
-  it("sends the going-first copy for a beta appointment, not the committee copy", async () => {
+  /*
+    ⛔ Appointing is LOADING THE AUDIENCE, not the invitation.
+
+    It happens weeks early, while the survey is still being written, and it
+    tells somebody they have been asked to do a job. Telling them to GO belongs
+    to the state change — see sendBetaOpening. A beta appointment that mailed
+    the going-first copy told people the survey was open for them weeks before
+    it was, and the only symptom would have been a tester trying to file into a
+    draft nobody had started.
+  */
+  it("sends the committee copy for a beta appointment, like every other workstream", async () => {
     const result = await sendAppointmentInvitation({
       subjectId: "p1",
       capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
@@ -99,43 +109,17 @@ describe("appointment invitations", () => {
 
     expect(result.sent).toBe(true);
     expect(state.sends).toHaveLength(1);
-    expect(state.sends[0].templateKey).toBe("benchmarking_beta_invitation");
+    expect(state.sends[0].templateKey).toBe("benchmarking_committee_invitation");
   });
 
-  it("names the store and the year the beta copy asks for", async () => {
+  it("never sends the going-first copy at appointment time", async () => {
     await sendAppointmentInvitation({
       subjectId: "p1",
       capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
     });
-
-    const v = state.sends[0].variables;
-    expect(v.organization_name).toBe("Conestoga College");
-    expect(v.fiscal_year).toBe("2026");
-    // Every variable the template declares must be filled, or the reader gets
-    // a literal [placeholder] in their inbox.
-    for (const key of [
-      "contact_name",
-      "organization_name",
-      "fiscal_year",
-      "opens_date",
-      "survey_url",
-    ]) {
-      expect(String(v[key] ?? "")).not.toBe("");
-    }
-  });
-
-  it("still sends, naming no store, when the appointee has no org link", async () => {
-    state.orgName = null;
-
-    const result = await sendAppointmentInvitation({
-      subjectId: "p1",
-      capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
-    });
-
-    // ⛔ Mail is a courtesy and must never be the thing that makes an
-    // appointment look failed. Degrades to a phrase rather than refusing.
-    expect(result.sent).toBe(true);
-    expect(state.sends[0].variables.organization_name).toBe("your store");
+    expect(state.sends.map((s) => s.templateKey)).not.toContain(
+      "benchmarking_beta_invitation",
+    );
   });
 
   it("leaves a committee workstream on the committee copy", async () => {

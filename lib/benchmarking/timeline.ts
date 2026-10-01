@@ -107,7 +107,7 @@ export function buildBenchmarkingTimeline(
     state: facts.betaTestersAppointed > 0 ? "done" : past("beta") ? "not_applicable" : "current",
     detail:
       facts.betaTestersAppointed > 0
-        ? `${facts.betaTestersAppointed} appointed. Appointing is what invites them.`
+        ? `${facts.betaTestersAppointed} appointed. They are told to start when beta begins, not now.`
         : "Nobody is appointed, so nobody can open a survey that is still in draft.",
     action: past("beta")
       ? null
@@ -133,7 +133,7 @@ export function buildBenchmarkingTimeline(
           label: "Start beta testing",
           blockedBy:
             facts.betaTestersAppointed === 0
-              ? "Appoint at least one beta tester first — nobody could open it."
+              ? "Appoint at least one beta tester first. Starting beta is what tells them to go, so with nobody appointed it notifies nobody and opens nothing."
               : null,
         }
       : null,

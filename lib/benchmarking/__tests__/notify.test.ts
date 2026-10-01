@@ -19,6 +19,9 @@ const state = vi.hoisted(() => ({
   } as Record<string, unknown> | null,
   recipients: [] as Record<string, unknown>[],
   submissions: [] as Record<string, unknown>[],
+  /** Appointed beta testers, and the address each resolves to. */
+  betaHolders: [] as { subject_id: string; display_name: string }[],
+  emails: {} as Record<string, string | null>,
   updates: [] as { id: string; patch: Record<string, unknown> }[],
   sends: [] as { templateKey: string; to: string; variables: Record<string, unknown> }[],
   sendResult: { success: true } as { success: boolean; error?: string },
@@ -26,7 +29,31 @@ const state = vi.hoisted(() => ({
 
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminClient: () => ({
+    // An appointment is made against a profile, so the address comes from auth.
+    auth: {
+      admin: {
+        getUserById: async (id: string) => ({
+          data: { user: { email: state.emails[id] ?? null } },
+        }),
+      },
+    },
     from(table: string) {
+      if (table === "capability_contributions") {
+        const b: Record<string, unknown> = {
+          eq: () => b,
+          then: (res: (v: unknown) => unknown) =>
+            Promise.resolve({ data: state.betaHolders }).then(res),
+        };
+        return { select: () => b };
+      }
+      if (table === "user_organizations") {
+        const b: Record<string, unknown> = {
+          eq: () => b,
+          limit: () => b,
+          maybeSingle: async () => ({ data: { organizations: { name: "Conestoga College" } } }),
+        };
+        return { select: () => b };
+      }
       if (table === "benchmarking_surveys") {
         return {
           select: () => ({ eq: () => ({ maybeSingle: async () => ({ data: state.survey }) }) }),
@@ -70,6 +97,7 @@ vi.mock("@/lib/comms/send", () => ({
 import {
   sendBenchmarkingInvitations,
   sendBenchmarkingReminders,
+  sendBetaOpening,
   planInvitations,
   planReminders,
 } from "../notify";
@@ -91,6 +119,8 @@ function recipient(over: Record<string, unknown> = {}) {
 beforeEach(() => {
   state.recipients = [recipient()];
   state.submissions = [];
+  state.betaHolders = [{ subject_id: "u1", display_name: "Pat Lee" }];
+  state.emails = { u1: "pat@store.ca" };
   state.updates = [];
   state.sends = [];
   state.sendResult = { success: true };
@@ -249,5 +279,50 @@ describe("the plan the operator is shown", () => {
       "already_submitted",
       "never_invited",
     ]);
+  });
+});
+
+describe("beta opening", () => {
+  /*
+    ⛔ This is the half that fires on the STATE CHANGE, and its failure is
+    silent: the transition succeeds, the survey is in beta, and nobody was
+    told. Appointing deliberately does NOT send this — see
+    appointment-invitation.test.ts.
+  */
+  it("mails the going-first copy to the appointed testers when beta starts", async () => {
+    const result = await sendBetaOpening("survey-1");
+
+    expect(result.sent).toBe(1);
+    expect(state.sends[0].templateKey).toBe("benchmarking_beta_invitation");
+    expect(state.sends[0].to).toBe("pat@store.ca");
+    expect(state.sends[0].variables.organization_name).toBe("Conestoga College");
+  });
+
+  it("sends nothing when nobody is appointed, rather than failing", async () => {
+    state.betaHolders = [];
+
+    const result = await sendBetaOpening("survey-1");
+
+    expect(result.sent).toBe(0);
+    expect(state.sends).toHaveLength(0);
+  });
+
+  it("skips a tester with no address instead of counting them sent", async () => {
+    state.emails = { u1: null };
+
+    const result = await sendBetaOpening("survey-1");
+
+    expect(result.sent).toBe(0);
+    expect(result.skipped).toBe(1);
+    expect(state.sends).toHaveLength(0);
+  });
+
+  it("sends nothing at all when the kill switch is set", async () => {
+    process.env.BENCHMARKING_SUPPRESS_EMAIL = "1";
+
+    const result = await sendBetaOpening("survey-1");
+
+    expect(result.sent).toBe(0);
+    expect(state.sends).toHaveLength(0);
   });
 });

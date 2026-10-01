@@ -130,7 +130,12 @@ export async function createBenchmarkingSurvey(
 export async function updateSurveyStatus(
   surveyId: string,
   newStatus: string,
-): Promise<{ success: boolean; error?: string }> {
+): Promise<{
+  success: boolean;
+  error?: string;
+  /** Who was told, when the new state is one that notifies. */
+  notified?: { sent: number; failed: number; skipped: number };
+}> {
   const auth = await verifyAdminAccess();
   if (!auth.authorized || !auth.supabase)
     return { success: false, error: auth.error };
@@ -164,7 +169,30 @@ export async function updateSurveyStatus(
     return { success: false, error: "Failed to update status" };
   }
 
-  return { success: true };
+  /*
+    The state change IS the notification.
+
+    ⛔ Not the appointment. You appoint weeks early, while the survey is still
+    being written; that tells somebody they have been asked to do a job. This
+    tells them to go, and it can only be true once the phase has actually
+    opened. Sending the going-first copy at appointment told people the survey
+    was open for them weeks before it was.
+
+    ⛔ Best-effort, after the write, never before it. The transition has
+    succeeded and must not roll back because mail failed — the state is the
+    truth and the message is the courtesy. A failure is reported, not thrown.
+  */
+  let notified: { sent: number; failed: number; skipped: number } | undefined;
+  if (newStatus === "beta") {
+    try {
+      const { sendBetaOpening } = await import("@/lib/benchmarking/notify");
+      notified = await sendBetaOpening(surveyId);
+    } catch (err) {
+      console.error("[benchmarking-admin] beta opening mail failed:", err);
+    }
+  }
+
+  return { success: true, notified };
 }
 
 export async function updateSurveyDates(
