@@ -10,21 +10,23 @@ import {
 } from "@/lib/actions/benchmarking-admin";
 import { useRouter } from "next/navigation";
 import { parseUTC } from "@/lib/utils";
+import { surveyState } from "@/lib/benchmarking/lifecycle";
 
-const STATUS_LABELS: Record<string, { label: string; color: string }> = {
-  draft: { label: "Draft", color: "bg-gray-100 text-gray-700" },
-  open: { label: "Open", color: "bg-green-100 text-green-800" },
-  closed: { label: "Closed", color: "bg-amber-100 text-amber-800" },
-  processing: { label: "Processing", color: "bg-blue-100 text-blue-800" },
-  complete: { label: "Complete", color: "bg-gray-100 text-gray-700" },
-};
-
-const NEXT_STATUS: Record<string, { label: string; value: string } | null> = {
-  draft: { label: "Open Survey", value: "open" },
-  open: { label: "Close Survey", value: "closed" },
-  closed: { label: "Begin Processing", value: "processing" },
-  processing: { label: "Mark Complete", value: "complete" },
-  complete: null,
+/*
+  ⛔ Colour only. The states, their order, what each means and the transition
+  out of each all live in lib/benchmarking/lifecycle.ts, because the ladder is
+  not a property of this card: survey-access decides who may file from the same
+  vocabulary, and a timeline will render it. This file held the only copy, and
+  `beta` was missing from it — which is why a state the database has always
+  allowed looked like a phase nobody had built.
+*/
+const STATUS_COLOR: Record<string, string> = {
+  draft: "bg-gray-100 text-gray-700",
+  beta: "bg-purple-100 text-purple-800",
+  open: "bg-green-100 text-green-800",
+  closed: "bg-amber-100 text-amber-800",
+  processing: "bg-blue-100 text-blue-800",
+  complete: "bg-gray-100 text-gray-700",
 };
 
 interface SurveyManagementCardProps {
@@ -178,8 +180,9 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
       ) : (
         <div className="space-y-3">
           {surveys.map((survey) => {
-            const status = STATUS_LABELS[survey.status ?? "draft"];
-            const next = NEXT_STATUS[survey.status ?? "draft"];
+            const def = surveyState(survey.status ?? "draft");
+            const color = STATUS_COLOR[survey.status ?? "draft"] ?? STATUS_COLOR.draft;
+            const next = def?.next ?? null;
 
             return (
               <div
@@ -192,9 +195,10 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
                       {survey.title}
                     </span>
                     <span
-                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${status?.color}`}
+                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${color}`}
+                      title={def?.meaning ?? undefined}
                     >
-                      {status?.label}
+                      {def?.label ?? survey.status}
                     </span>
                   </div>
                   <div className="flex items-center gap-4 text-xs text-gray-500">
@@ -214,7 +218,7 @@ export default function SurveyManagementCard({ surveys }: SurveyManagementCardPr
 
                 {next && (
                   <button
-                    onClick={() => handleTransition(survey.id, next.value)}
+                    onClick={() => handleTransition(survey.id, next.state)}
                     disabled={transitioning}
                     className="ml-4 px-3 py-1.5 text-xs font-medium border border-gray-300 rounded-lg hover:bg-gray-50 disabled:opacity-50 transition-colors"
                   >

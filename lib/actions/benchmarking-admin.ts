@@ -9,6 +9,7 @@ import { promoteBenchmarkingToOrganizationCurrentState } from "@/lib/benchmarkin
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import type { FieldType } from "@/lib/benchmarking/default-field-config";
+import { SURVEY_LADDER } from "@/lib/benchmarking/lifecycle";
 import {
   addColumnSql,
   validateNewQuestion,
@@ -61,13 +62,22 @@ async function verifyReviewerAccess(): Promise<AuthResult> {
 // Survey Management (admin-only)
 // ─────────────────────────────────────────────────────────────────
 
-const VALID_TRANSITIONS: Record<string, string[]> = {
-  draft: ["open"],
-  open: ["closed"],
-  closed: ["processing"],
-  processing: ["complete"],
-  complete: [],
-};
+/*
+  Derived from the ladder, never written out again.
+
+  ⛔ This was a third copy of the state machine — the admin card had its own
+  labels and transitions, survey-access branches on status strings, and this
+  decided what the server would accept. It said draft -> open, so `beta` was
+  unreachable even though the database has always allowed it: the button would
+  have offered a move the server refused. One list now, in
+  lib/benchmarking/lifecycle.ts, and this reads it.
+
+  Still a whitelist, and still enforced here: the ladder describes the only
+  move out of each state, and the client is not trusted to have obeyed it.
+*/
+const VALID_TRANSITIONS: Record<string, string[]> = Object.fromEntries(
+  SURVEY_LADDER.map((d) => [d.state, d.next ? [d.next.state] : []]),
+);
 
 export async function createBenchmarkingSurvey(
   fiscalYear: number,
