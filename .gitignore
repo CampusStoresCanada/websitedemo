@@ -44,3 +44,12 @@ yarn-error.log*
 next-env.d.ts
 .env*.local
 .cache/
+
+# borrow-check runtime state — see .claude/hooks/README.md
+#
+# ⛔ Deliberately NOT shared. An acknowledgement is one person deciding, in one
+# conversation, that one file is genuinely new. Committing it would let that
+# decision clear the same path for every future session, which is how a gate
+# becomes a rubber stamp.
+.claude/.borrow-check-ok
+.claude/.borrow-check-log

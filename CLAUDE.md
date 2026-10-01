@@ -2,6 +2,47 @@
 
 Next.js 16 (App Router, Turbopack) + Supabase + TypeScript.
 
+## ⛔ STOP before you build anything new
+
+**If you are about to create a new file, component, panel, action, template, or
+code path: STOP. Do not write it. Ask first:**
+
+> *Is this genuinely novel, or are we borrowing from our own code?*
+
+Ask the USER, in the conversation, before writing. Not in review. Not in the
+commit message. Before.
+
+**This is not advice and it is not a style preference. It is the first rule of
+this codebase: create something once and reuse it.** The metaphor IS the
+product — people learn one path and expect it everywhere. The toolkit is how
+you flag something. `AssignPanel` in the admin console is how you give a person
+a job. `updateField` is how org data gets written. A second surface for a verb
+that already has one is a defect even when it works, because the next person
+cannot tell which one is real.
+
+**You will have a good reason. The reason is the symptom.** Every duplicate in
+this repo's history was defended by naming a difference that was genuinely
+true. Naming a difference feels like analysis, so it passes for a reason; it is
+a rationalisation that arrives after the decision to build. The test, asked
+BEFORE writing: *does this difference need a different STORE, or just a
+different CONTROL?* It is almost always the control.
+
+**The specific trap: a leftover artifact looking for a job.** When something
+you built earlier is no longer needed, delete it. Do not find it new work. Do
+not keep it because "something still reads it" — check whether that reader is
+reachable. Scaffolding built before a flow was settled is scaffolding; when the
+flow settles, it comes down.
+
+⚠️ The tell in code is a branch that routes by kind to keep two
+implementations coexisting rather than to render two shapes. Delete the newer
+one.
+
+Worked example, 2026-10-01: the beta-tester feature's correct diff was ONE
+array element, because the question-review path already supplied the
+appointment panel, the invitation email and the task card. Three separate
+things got built on top of that finished path instead. See
+`feedback_a_real_difference_is_not_a_second_system` in memory.
+
 ## ⚠️ The dev server is shared — attach, don't spawn
 
 **One `next dev` serves everybody.** Several sessions work in this directory at once, and
