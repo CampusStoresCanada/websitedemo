@@ -192,6 +192,9 @@ export async function writeNote(input: {
         storeName: name,
         fieldLabel: fieldLabel(input.fieldName),
         authorName: me2?.display_name ?? null,
+        note: text,
+        computed: input.computedValue ?? null,
+        stated: input.statedValue ?? null,
       }).catch(() => {});
     }
   }

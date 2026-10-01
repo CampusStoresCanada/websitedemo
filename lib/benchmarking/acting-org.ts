@@ -155,15 +155,24 @@ export async function resolveActingOrg(input: {
   const db = createAdminClient();
   let roster: ActingOrg[] = [];
 
+  /*
+    ⛔ No test store in the roster.
+
+    This is the "act as another store" list, and the test store has its own
+    door: pinToTestStore above, which is what Walk the survey uses and which
+    exists precisely because walking WRITES. Offering it here as well puts a
+    scratch store in a list of real ones, one click from being mistaken for a
+    member — and it is already how a $0 draft reached a real store once.
+  */
   if (surveyId) {
     const { data: recipientRows } = await db
       .from("benchmarking_recipients")
-      .select("organization:organizations(id, name, slug, type, province)")
+      .select("organization:organizations(id, name, slug, type, province, is_test)")
       .eq("survey_id", surveyId);
 
     roster = (recipientRows ?? [])
-      .map((r) => (r as { organization: unknown }).organization as ActingOrg | null)
-      .filter((o): o is ActingOrg => Boolean(o));
+      .map((r) => (r as { organization: unknown }).organization as (ActingOrg & { is_test?: boolean }) | null)
+      .filter((o): o is ActingOrg & { is_test?: boolean } => Boolean(o) && o!.is_test !== true);
   }
 
   // No recipient list yet — the state between creating a survey and inviting
@@ -175,6 +184,7 @@ export async function resolveActingOrg(input: {
       .eq("type", "Member")
       .in("membership_status", ["active", "grace"])
       .is("archived_at", null)
+      .not("is_test", "is", true)
       .order("name");
     roster = (memberOrgs ?? []) as unknown as ActingOrg[];
   }

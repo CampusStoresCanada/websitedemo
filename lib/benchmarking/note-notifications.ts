@@ -114,17 +114,45 @@ export async function notifyLeadOfPendingNote(input: {
   storeName: string;
   fieldLabel: string;
   authorName: string | null;
+  /**
+   * What they actually said, and the figures if they changed one.
+   *
+   * ⛔ The message used to carry neither. "Somebody has written an explanation
+   * for Conestoga's Gross margin" tells the lead that work exists and nothing
+   * about whether it needs them — so every one of them cost a page load to
+   * find out, and the ones that mattered looked exactly like the ones that did
+   * not. Pass the message along.
+   */
+  note?: string | null;
+  computed?: number | null;
+  stated?: number | null;
 }): Promise<void> {
   const emails = await committeeLeadEmails();
-  await butlerDM(
-    emails,
-    [
-      `${input.authorName ?? "A reviewer"} has written an explanation for ${input.storeName}'s ${input.fieldLabel}.`,
-      "It won't go to the store until you've had a look at it.",
-    ],
-    "Review it here",
-    `${APP_URL}/benchmarking/admin/notes`,
-  );
+
+  const money = (n: number) =>
+    n.toLocaleString("en-CA", { style: "currency", currency: "CAD", maximumFractionDigits: 0 });
+
+  const lines = [
+    `${input.authorName ?? "A reviewer"} has written an explanation for ${input.storeName}'s ${input.fieldLabel}.`,
+  ];
+
+  // An overwritten figure is the case most likely to need a decision, so the
+  // change itself goes in the message rather than behind a click.
+  if (input.stated !== null && input.stated !== undefined) {
+    lines.push(
+      `They changed it${
+        input.computed !== null && input.computed !== undefined
+          ? ` from ${money(input.computed)}`
+          : ""
+      } to ${money(input.stated)}.`,
+    );
+  }
+
+  if (input.note?.trim()) lines.push(`"${input.note.trim()}"`);
+
+  lines.push("It won't go to the store until you've had a look at it.");
+
+  await butlerDM(emails, lines, "Review it here", `${APP_URL}/benchmarking/admin/notes`);
 }
 
 /** The lead said yes. Now the store decides whether it's happy to be described. */
