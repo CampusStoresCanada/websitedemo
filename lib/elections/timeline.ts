@@ -33,8 +33,19 @@ import { BALLOT_CIRCULATION_DEADLINE_DAYS_BEFORE_AGM } from "./schedule";
 export interface TimelineStage {
   key: string;
   label: string;
-  /** The date it happens or is due. A window uses `windowLabel` instead. */
+  /** The date it happens or is due. A window uses `on` + `until`. */
   on: string | null;
+  /**
+   * The far end of a window, when this stage is one.
+   *
+   * ⛔ Real dates, not only the prose in `windowLabel`. A window has to be
+   * missable from BOTH ends — the AGM notice is defective sent too early as
+   * well as too late — and anything consuming a stage programmatically (the
+   * admin calendar renders projected items with a start and an end) cannot get
+   * that out of a label. `windowLabel` stays for display, so a screen keeps
+   * saying "2026-12-17 to 2026-12-31" rather than re-formatting these.
+   */
+  until: string | null;
   windowLabel: string | null;
   state: StageState;
   /** What happened, or what it is waiting for. */
@@ -102,6 +113,7 @@ export function buildElectionTimeline(
     key: "cycle_open",
     label: "Cycle opened",
     on: null,
+    until: null,
     windowLabel: null,
     state: "done",
     detail: `The ${facts.cycleYear} cycle exists, with the AGM set for ${s.agmDate}.`,
@@ -114,6 +126,7 @@ export function buildElectionTimeline(
     key: "call_for_nominations",
     label: "Call for nominations",
     on: s.nominationsOpenAt,
+    until: null,
     windowLabel: null,
     state: callSent
       ? "done"
@@ -136,6 +149,7 @@ export function buildElectionTimeline(
     key: "close_nominations",
     label: "Nominations close",
     on: s.nominationsCloseAt,
+    until: null,
     windowLabel: null,
     state: nominationsClosed
       ? "done"
@@ -163,6 +177,7 @@ export function buildElectionTimeline(
       key: "ballot",
       label: "Ballot",
       on: null,
+      until: null,
       windowLabel: null,
       state: "not_applicable",
       detail: "The slate is acclaimed, so there is no ballot.",
@@ -182,6 +197,7 @@ export function buildElectionTimeline(
       key: "circulate_ballots",
       label: "Voting opens",
       on: s.ballotsOpenAt,
+      until: null,
       windowLabel: `${s.ballotsOpenAt} to ${s.ballotsCloseAt}`,
       state: circulated
         ? "done"
@@ -215,6 +231,7 @@ export function buildElectionTimeline(
       key: "ballots_close",
       label: "Voting closes",
       on: s.ballotsCloseAt,
+      until: null,
       windowLabel: null,
       state: facts.sealed
         ? "done"
@@ -238,6 +255,7 @@ export function buildElectionTimeline(
       key: "certify",
       label: "Count and certify",
       on: null,
+      until: null,
       windowLabel: null,
       state: facts.certifiedAt ? "done" : facts.sealed ? "current" : "blocked",
       detail: facts.certifiedAt
@@ -261,7 +279,8 @@ export function buildElectionTimeline(
   stages.push({
     key: "agm_notice",
     label: "Notice of the meeting",
-    on: null,
+    on: w?.opensOn ?? null,
+    until: w?.closesOn ?? null,
     windowLabel: w ? `${w.opensOn} to ${w.closesOn}` : null,
     state: noticeSent
       ? "done"
@@ -296,6 +315,7 @@ export function buildElectionTimeline(
     key: "proxy_form",
     label: "Proxy form",
     on: w?.proxyDueOn ?? null,
+    until: null,
     windowLabel: null,
     state: proxySent
       ? "done"
@@ -319,6 +339,7 @@ export function buildElectionTimeline(
     key: "agm_package",
     label: "Members' AGM package",
     on: null,
+    until: null,
     windowLabel: null,
     state: packageSent ? "done" : packageSeason ? "current" : "upcoming",
     detail: packageSent
@@ -334,6 +355,7 @@ export function buildElectionTimeline(
     key: "agm",
     label: `${facts.cycleYear} Annual General Meeting`,
     on: s.agmDate,
+    until: null,
     windowLabel: null,
     state: today > s.agmDate ? "done" : today === s.agmDate ? "current" : "upcoming",
     detail:
@@ -350,6 +372,7 @@ export function buildElectionTimeline(
     key: "tell_candidates",
     label: "Tell the candidates",
     on: null,
+    until: null,
     windowLabel: null,
     state: candidatesTold ? "done" : facts.certifiedAt && today >= s.agmDate ? "current" : "blocked",
     detail: candidatesTold
@@ -374,6 +397,7 @@ export function buildElectionTimeline(
     key: "announce_result",
     label: "Announce the result",
     on: null,
+    until: null,
     windowLabel: null,
     state: announced ? "done" : today >= s.agmDate ? "current" : "blocked",
     detail: announced
