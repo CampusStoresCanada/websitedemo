@@ -424,55 +424,78 @@ export async function syncAndFetchCalendar(
     ));
   }
 
-  // ── 16. Elections and the AGM notice window ──────────────────────
+  // ── 16. Elections, from the cycle's own timeline ─────────────────
+  //
+  // ⛔ Reads getElectionTimeline rather than re-deriving milestones from the
+  // date columns. This block used to carry its own list — nominations open,
+  // nominations close, voting opens, voting closes, the AGM, the notice window
+  // — with its own labels and its own copy, so TWO places knew the order of an
+  // election and could disagree. Changing a stage in lib/elections/timeline.ts
+  // left the calendar quietly describing the old shape.
+  //
+  // The timeline is the source. This decides only what the CALENDAR adds:
+  // which layer and category a stage belongs to, and how a stage state maps to
+  // a calendar status. That is calendar vocabulary and belongs here.
   const { data: electionsData } = await supabase
     .from("elections")
-    .select("id, slug, cycle_year, status, agm_date, nominations_open_at, nominations_close_at, ballots_open_at, ballots_close_at, seats_available");
+    .select("id, slug, cycle_year, status, seats_available");
 
-  for (const el of electionsData ?? []) {
-    // A date column is midnight UTC; read it as a morning in Eastern so it
-    // lands on the right day for everyone reading the calendar.
-    const at = (d: string | null) => (d ? new Date(`${d}T09:00:00-05:00`) : null);
-    const draftNote = el.status === "draft"
-      ? " ⚠ This election is still a draft, so nothing will fire automatically."
-      : "";
-    const meta = { election_status: el.status, cycle_year: el.cycle_year, seats: el.seats_available };
-    const label = `Board election ${el.cycle_year}`;
+  if ((electionsData ?? []).length > 0) {
+    const { getElectionTimeline } = await import("@/lib/elections/service");
 
-    const milestones: [Date | null, string, string, string][] = [
-      [at(el.nominations_open_at), `${label}: nominations open`, `Call for nominations goes out. ${el.seats_available} seats.${draftNote}`, "nominations_open"],
-      [at(el.nominations_close_at), `${label}: nominations close`, `Each nomination needs two co-signers from distinct stores.${draftNote}`, "nominations_close"],
-      [at(el.ballots_open_at), `${label}: voting opens`, `One ballot per store, cast by an org admin.${draftNote}`, "ballots_open"],
-      [at(el.ballots_close_at), `${label}: voting closes`, `Ballots seal at close.${draftNote}`, "ballots_close"],
-    ];
-    for (const [when, title, description, event] of milestones) {
-      if (when) projected.push(makeProjected(title, description, "membership", "admin_ops", when, null, "election", el.id, event, now, meta));
-    }
+    /** Stages the calendar has no use for: they mark state, not a date to keep. */
+    const NOT_ON_CALENDAR = new Set(["cycle_open"]);
 
-    if (el.agm_date) {
-      const agm = at(el.agm_date)!;
-      projected.push(makeProjected(
-        `Annual General Meeting ${el.cycle_year}`,
-        "Results are declared at the AGM.",
-        "membership", "people", agm, null, "election", el.id, "agm", now, meta
-      ));
+    /** Where a stage sits on the calendar. Default is the membership ops lane. */
+    const LANE: Record<string, { category: CalendarCategory; layer: CalendarLayer }> = {
+      agm: { category: "membership", layer: "people" },
+      agm_notice: { category: "legal_retention", layer: "admin_ops" },
+      agm_package: { category: "membership", layer: "people" },
+    };
 
-      // The notice is a WINDOW, not a deadline: too early is as defective as
-      // too late, and missing it means the meeting was improperly called.
-      // Modelled with a real start and end so it reads as a window on the
-      // calendar rather than a single day someone can slip past.
-      const day = 24 * 60 * 60 * 1000;
-      projected.push(makeProjected(
-        `AGM notice must go out`,
-        "By-Law notice window: no earlier than 35 days and no later than 21 days before the meeting. Sending outside it makes the meeting improperly called.",
-        "legal_retention", "admin_ops",
-        new Date(agm.getTime() - 35 * day),
-        new Date(agm.getTime() - 21 * day),
-        "election", el.id, "agm_notice_window", now,
-        { ...meta, agm_date: el.agm_date }
-      ));
+    for (const el of electionsData ?? []) {
+      const stages = await getElectionTimeline(el.slug as string);
+      if (!stages) continue;
+
+      const draftNote = el.status === "draft"
+        ? " ⚠ This election is still a draft, so nothing will fire automatically."
+        : "";
+      const meta = { election_status: el.status, cycle_year: el.cycle_year, seats: el.seats_available };
+      const label = `Board election ${el.cycle_year}`;
+
+      // A date column is midnight UTC; read it as a morning in Eastern so it
+      // lands on the right day for everyone reading the calendar.
+      const at = (d: string | null) => (d ? new Date(`${d}T09:00:00-05:00`) : null);
+
+      for (const stage of stages) {
+        if (NOT_ON_CALENDAR.has(stage.key)) continue;
+        // Nothing to place. A stage with no date is waiting on something else.
+        if (!stage.on) continue;
+        // "Does not apply to this cycle" — an acclaimed election holds no vote.
+        if (stage.state === "not_applicable") continue;
+
+        const startsAt = at(stage.on);
+        if (!startsAt) continue;
+        const endsAt = at(stage.until);
+
+        const lane = LANE[stage.key] ?? { category: "membership" as CalendarCategory, layer: "admin_ops" as CalendarLayer };
+
+        // The AGM is the meeting itself and reads better unprefixed; every
+        // other stage is one step of a named cycle.
+        const title = stage.key === "agm" ? `Annual General Meeting ${el.cycle_year}` : `${label}: ${stage.label}`;
+
+        projected.push(makeProjected(
+          title,
+          `${stage.detail}${draftNote}`.trim() || null,
+          lane.category, lane.layer,
+          startsAt, endsAt,
+          "election", el.id as string, stage.key, now,
+          { ...meta, stage_state: stage.state }
+        ));
+      }
     }
   }
+
 
   // ── Upsert projected rows (batched) ──────────────────────────────
   // confirmed_at / confirmed_by are intentionally excluded from the upsert
@@ -501,6 +524,90 @@ export async function syncAndFetchCalendar(
           `[calendar] upsert failed for rows ${i}–${i + CHUNK}: ${error.message}. ` +
           `Categories in this chunk: ${[...new Set(rows.slice(i, i + CHUNK).map((r) => r.category))].join(", ")}`
         );
+      }
+    }
+  }
+
+  // ── Prune superseded projections ─────────────────────────────────
+  //
+  // A projected row is a CACHE of a derived fact, keyed by
+  // source_key = entityType:entityId:event. Nothing deleted them, so a source
+  // that renamed an event, dropped a milestone or had a date removed left its
+  // old rows on the calendar forever, beside the new ones. Two entries for one
+  // step reads as two steps.
+  //
+  // ⛔ Scoped to prefixes this run actually WROTE, and that is the safety
+  // property, not a detail. Every source above does `const { data } = await
+  // supabase…` and discards the error, so a failed query is indistinguishable
+  // from "nothing is scheduled". A prune that trusted an empty result would let
+  // one transient failure wipe that source's calendar. Writing nothing for a
+  // prefix therefore means we know nothing about it, and we touch nothing.
+  //
+  // ⛔ Never `source_mode = 'manual'`. Those are a human's own entries and are
+  // not derived from anything.
+  //
+  // A row carrying a note or a confirmation is somebody's work. Those are
+  // marked cancelled rather than deleted, so a superseded step a human had
+  // engaged with stays visible and explicable instead of vanishing.
+  if (projected.length > 0) {
+    // source_key is nullable on the column even though every projection sets
+    // one. A null would make "did we write this scope" unanswerable, so it is
+    // filtered out rather than coerced.
+    const written = projected
+      .map((p) => p.source_key)
+      .filter((k): k is string => typeof k === "string" && k.length > 0);
+    const writtenKeys = new Set(written);
+    const scopes = new Set(written.map((k) => k.split(":").slice(0, 2).join(":") + ":"));
+
+    const { data: existing, error: existingErr } = await supabase
+      .from("calendar_items")
+      .select("id, source_key, confirmed_at")
+      .eq("source_mode", "projected");
+
+    // Reading failed, so we cannot tell stale from unknown. Prune nothing.
+    if (existingErr) {
+      console.error(`[calendar] prune skipped — could not read existing projections: ${existingErr.message}`);
+    } else {
+      const stale = (existing ?? []).filter((r) => {
+        const key = r.source_key as string | null;
+        if (!key || writtenKeys.has(key)) return false;
+        const scope = key.split(":").slice(0, 2).join(":") + ":";
+        return scopes.has(scope);
+      });
+
+      if (stale.length > 0) {
+        const staleIds = stale.map((r) => r.id as string);
+
+        // Whose rows has a human touched?
+        const { data: noted } = await supabase
+          .from("calendar_item_notes")
+          .select("calendar_item_id")
+          .in("calendar_item_id", staleIds);
+        const touched = new Set((noted ?? []).map((n) => n.calendar_item_id as string));
+        for (const r of stale) if (r.confirmed_at) touched.add(r.id as string);
+
+        const keepIds = staleIds.filter((id) => touched.has(id));
+        const dropIds = staleIds.filter((id) => !touched.has(id));
+
+        if (keepIds.length > 0) {
+          const { error } = await supabase
+            .from("calendar_items")
+            .update({ status: "cancelled", severity: "normal" })
+            .in("id", keepIds);
+          if (error) console.error(`[calendar] could not cancel superseded items: ${error.message}`);
+        }
+
+        if (dropIds.length > 0) {
+          const { error } = await supabase.from("calendar_items").delete().in("id", dropIds);
+          if (error) {
+            console.error(`[calendar] prune failed: ${error.message}`);
+          } else {
+            console.log(
+              `[calendar] pruned ${dropIds.length} superseded projection(s)` +
+              (keepIds.length > 0 ? `, kept ${keepIds.length} with notes or confirmations as cancelled` : "")
+            );
+          }
+        }
       }
     }
   }
