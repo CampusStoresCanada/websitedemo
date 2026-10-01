@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import type { FieldConfig } from "@/lib/benchmarking/default-field-config";
 import FacilitatorBoard from "@/components/benchmarking/review/FacilitatorBoard";
@@ -8,7 +9,7 @@ export const metadata = { title: "Question Review | Benchmarking Admin" };
 
 export default async function ReviewAdminPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/review"));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking");
 
   const { supabase } = auth.ctx;

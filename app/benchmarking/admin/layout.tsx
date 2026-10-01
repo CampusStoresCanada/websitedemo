@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import {
   CAPABILITIES,
   opensBenchmarkingAdmin,
@@ -32,7 +33,7 @@ export default async function BenchmarkingAdminLayout({
   children: React.ReactNode;
 }) {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin"));
 
   const { globalRole, capabilities } = auth.ctx;
   const isAdmin = isGlobalAdmin(globalRole);

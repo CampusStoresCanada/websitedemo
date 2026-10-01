@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 import NotesQueue from "@/components/benchmarking/admin/NotesQueue";
 
@@ -25,7 +26,7 @@ export const metadata = {
  */
 export default async function BenchmarkingNotesPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/notes"));
 
   const { globalRole, capabilities } = auth.ctx;
   const isLead =

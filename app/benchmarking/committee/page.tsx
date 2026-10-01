@@ -4,6 +4,7 @@ import { getIntroNote } from "@/lib/actions/benchmarking-intro-note";
 import { formatOpening } from "@/lib/benchmarking/deadline";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { WORKSTREAMS } from "@/lib/benchmarking/committee-workstreams";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import CommitteeConsole from "@/components/benchmarking/committee/CommitteeConsole";
@@ -15,7 +16,7 @@ export const metadata = {
 
 export default async function CommitteePage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/committee"));
 
   const { supabase, userId, globalRole, capabilities } = auth.ctx;
   const admin = isGlobalAdmin(globalRole);

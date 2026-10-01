@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
@@ -38,7 +39,7 @@ const REGION_OF: Record<string, string> = {
 
 export default async function RecipientsPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/recipients"));
 
   const { supabase, userId, globalRole, capabilities } = auth.ctx;
   const admin = isGlobalAdmin(globalRole);

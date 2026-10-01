@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { createClient } from "@/lib/supabase/server";
 import SubmissionsTable from "@/components/benchmarking/admin/SubmissionsTable";
@@ -9,7 +10,7 @@ export default async function SubmissionsPage() {
   // for authorisation is one refactor away from being wide open, and this one
   // lists named member stores.
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/submissions"));
   const { globalRole, capabilities } = auth.ctx;
   if (!isGlobalAdmin(globalRole) && !opensBenchmarkingAdmin(capabilities)) {
     redirect("/benchmarking");

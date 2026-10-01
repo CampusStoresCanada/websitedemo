@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { buildWorksheet, type PriorRow } from "@/lib/benchmarking/worksheet";
@@ -32,7 +33,7 @@ export default async function BenchmarkingWorksheetPage({
 }) {
   const params = await searchParams;
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/worksheet"));
 
   const { supabase, userId, globalRole } = auth.ctx;
   const isAdmin = isGlobalAdmin(globalRole);

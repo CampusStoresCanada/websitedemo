@@ -1,5 +1,6 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { loadSurveyFlags } from "@/lib/actions/benchmarking-flags";
 import IssueQueue from "@/components/benchmarking/admin/IssueQueue";
 
@@ -16,7 +17,7 @@ export const metadata = {
  */
 export default async function BenchmarkingIssuesPage() {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect("/login");
+  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/issues"));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking/admin");
 
   const issues = await loadSurveyFlags();

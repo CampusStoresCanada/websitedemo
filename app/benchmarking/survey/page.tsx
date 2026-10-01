@@ -4,6 +4,7 @@ import SurveyIntro from "@/components/benchmarking/SurveyIntro";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
 import { getFieldConfig } from "@/lib/benchmarking/default-field-config";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 import { resolveSurveyAccess } from "@/lib/benchmarking/survey-access";
 import { createAdminClient } from "@/lib/supabase/admin";
 import DisclosureChoice from "@/components/benchmarking/DisclosureChoice";
@@ -23,15 +24,24 @@ export default async function BenchmarkingSurveyPage({
 }: {
   searchParams: Promise<{ start?: string; org?: string; preview?: string }>;
 }) {
+  /*
+    Resolved BEFORE the auth gate so the login bounce can carry them.
+
+    A tester arriving from the beta invitation has no query at all, but an
+    admin opening a preview link does, and dropping it meant signing in and
+    landing on your own store's survey instead of the one you were sent to.
+  */
+  const params = await searchParams;
+
   const auth = await requireAuthenticated();
   if (!auth.ok) {
-    redirect("/login");
+    redirect(loginWithNext("/benchmarking/survey", params));
   }
   const { supabase, userId, globalRole } = auth.ctx;
 
-  // Read once, up here: `?org=` decides WHICH store this page is about, so it
-  // has to be known before the org is resolved rather than at render time.
-  const params = await searchParams;
+  // `?org=` decides WHICH store this page is about, so it has to be known
+  // before the org is resolved rather than at render time. Resolved above the
+  // auth gate, which also needs it to build the login return path.
   const skipIntro = params?.start === "1";
   const requestedOrgId = params?.org ?? null;
   // Arrived via "Walk the survey" — pinned to the test store, see resolveActingOrg.
