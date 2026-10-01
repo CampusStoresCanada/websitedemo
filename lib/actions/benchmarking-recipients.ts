@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { PATCH_PROVINCES, type Patch } from "@/lib/benchmarking/rep-patches";
 
 /**
  * Recipient confirmation — who actually receives the survey at each store.
@@ -137,19 +138,8 @@ export async function assignRegion(
   //
   // Keep these two maps separate. Collapsing them would either give a rep a
   // two-store round or destroy a legitimate comparison group.
-  const REGION: Record<string, string[]> = {
-    "Atlantic & Quebec": [
-      "Newfoundland and Labrador",
-      "Nova Scotia",
-      "New Brunswick",
-      "Prince Edward Island",
-      "Quebec",
-    ],
-    Ontario: ["Ontario"],
-    Prairies: ["Manitoba", "Saskatchewan", "Alberta"],
-    West: ["British Columbia", "Yukon", "Northwest Territories", "Nunavut"],
-  };
-  const provinces = REGION[region] ?? [];
+
+  const provinces = PATCH_PROVINCES[region as Patch] ?? [];
   const orgIds = (orgs ?? [])
     .filter((o) => provinces.includes(o.province ?? ""))
     .map((o) => o.id);

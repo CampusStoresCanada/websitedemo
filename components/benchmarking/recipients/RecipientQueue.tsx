@@ -10,6 +10,8 @@ interface ContactOption {
   roleTitle: string | null;
   email: string | null;
   isPrimary: boolean;
+  /** Holds org_admin on this store, which is what replaced is_primary. */
+  isOrgAdmin: boolean;
 }
 
 interface Item {
@@ -196,8 +198,19 @@ function StoreCard({
     contactId?: string | null,
   ) => void;
 }) {
+  /*
+    Who to put forward, best evidence first.
+
+    1. Whoever is already on the row — a human already answered this.
+    2. An org admin. This is what the store itself asserts about who runs it,
+       and it replaced is_primary.
+    3. is_primary, last, and only as a fallback for stores we hold nothing
+       better for. ⛔ Being retired: nothing in the product can set it, so
+       every value came from an import and is stale by construction.
+  */
   const suggested =
     item.contacts.find((c) => c.id === item.contactId) ??
+    item.contacts.find((c) => c.isOrgAdmin) ??
     item.contacts.find((c) => c.isPrimary) ??
     null;
   /*
@@ -217,6 +230,8 @@ function StoreCard({
   const [picking, setPicking] = useState(
     officeView && !suggested && nothingToSuggestYet,
   );
+  /** Reopened a settled row to change the respondent. */
+  const [changing, setChanging] = useState(false);
 
   const isDone = item.status === "confirmed" || item.status === "corrected";
 
@@ -283,10 +298,32 @@ function StoreCard({
         </div>
       )}
 
-      {isDone ? (
-        <p className="mt-3 text-xs text-green-700">
-          {item.status === "corrected" ? "Corrected" : "Confirmed"}
-        </p>
+      {isDone && !changing ? (
+        /*
+          ⛔ Confirmed was a one-way door.
+
+          A confirmed row showed its outcome and nothing else, so a respondent
+          who left, or a wrong click, could not be put right from the only page
+          that knows about respondents. The survey then went to a dead inbox and
+          the store read as unresponsive.
+
+          Reopening is the same resolveRecipient call with a different contact,
+          so this needs no new mechanism either.
+        */
+        <div className="mt-3 flex items-center justify-between gap-3">
+          <p className="text-xs text-green-700">
+            {item.status === "corrected" ? "Corrected" : "Confirmed"}
+          </p>
+          <button
+            onClick={() => {
+              setChanging(true);
+              setPicking(true);
+            }}
+            className="text-xs font-medium text-gray-600 underline underline-offset-2 hover:text-gray-900"
+          >
+            Change who gets it
+          </button>
+        </div>
       ) : (
         <>
           {picking && (
@@ -327,7 +364,15 @@ function StoreCard({
               </button>
             )}
             <button
-              onClick={() => setPicking((v) => !v)}
+              onClick={() => {
+                if (changing && picking) {
+                  // Back out of a reopened row without recording anything.
+                  setChanging(false);
+                  setPicking(false);
+                  return;
+                }
+                setPicking((v) => !v);
+              }}
               disabled={busy}
               className="text-xs font-medium px-3 py-1.5 rounded border border-gray-300 text-gray-700 hover:bg-gray-50 disabled:opacity-50"
             >

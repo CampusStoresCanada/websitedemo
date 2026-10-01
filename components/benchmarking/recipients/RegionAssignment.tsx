@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { assignRegion } from "@/lib/actions/benchmarking-recipients";
+import { PATCHES } from "@/lib/benchmarking/rep-patches";
 
 /**
  * Handing a region to a regional rep.
@@ -20,7 +21,9 @@ import { assignRegion } from "@/lib/actions/benchmarking-recipients";
 
 // Four patches, not the five the comparison uses. Quebec's two stores ride
 // with Atlantic: a province is a peer group, but it is not a rep's round.
-const REGIONS = ["Atlantic & Quebec", "Ontario", "Prairies", "West"] as const;
+// ⛔ Imported, not retyped — see lib/benchmarking/rep-patches.ts for what
+// happened when this list and the page's rows disagreed.
+const REGIONS = PATCHES;
 
 interface Person {
   id: string;

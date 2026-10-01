@@ -7,6 +7,7 @@ import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue"
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import RegionAssignment from "@/components/benchmarking/recipients/RegionAssignment";
 import BetaCohort from "@/components/benchmarking/recipients/BetaCohort";
+import { PATCHES, patchFor } from "@/lib/benchmarking/rep-patches";
 
 export const metadata = {
   title: "Recipient Confirmation | Campus Stores Canada",
@@ -21,21 +22,6 @@ export const metadata = {
  * two stores is not one — so Quebec rides with Atlantic here and only here.
  * See lib/benchmarking/comparison.ts for the other map.
  */
-const REGION_OF: Record<string, string> = {
-  "Newfoundland and Labrador": "Atlantic & Quebec",
-  "Nova Scotia": "Atlantic & Quebec",
-  "New Brunswick": "Atlantic & Quebec",
-  "Prince Edward Island": "Atlantic & Quebec",
-  Quebec: "Atlantic & Quebec",
-  Ontario: "Ontario",
-  Manitoba: "Prairies",
-  Saskatchewan: "Prairies",
-  Alberta: "Prairies",
-  "British Columbia": "West",
-  Yukon: "West",
-  "Northwest Territories": "West",
-  Nunavut: "West",
-};
 
 export default async function RecipientsPage() {
   const auth = await requireAuthenticated();
@@ -97,10 +83,11 @@ export default async function RecipientsPage() {
     work_email: string | null;
     email: string | null;
     is_primary: boolean | null;
+    profile_id: string | null;
   }>({
     organizationIds: orgIds,
     fields:
-      "id, organization_id, name, role_title, work_email, email, is_primary",
+      "id, organization_id, name, role_title, work_email, email, is_primary, profile_id",
   });
 
   const contactsByOrg = new Map<string, typeof contacts>();
@@ -144,6 +131,33 @@ export default async function RecipientsPage() {
     for (const l of links ?? []) betaOrgs.add(l.organization_id as string);
   }
 
+  /*
+    Who the store itself says runs it: its org admins.
+
+    ⛔ NOT contacts.is_primary, which is being retired. Nothing in the product
+    can set is_primary — it only ever came from imports — so it is stale by
+    construction, and a stale flag is what sent three stores to the office with
+    eight perfectly good people on file. Every one of the 53 stores has an
+    active org admin; only 51 have an is_primary.
+
+    Matched on (profile, org), because contacts is per person PER ORG and a
+    profile_id is not unique across the table.
+  */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: orgAdminLinks } = (await (createAdminClient() as any)
+    .from("user_organizations")
+    .select("user_id, organization_id")
+    .in("organization_id", orgIds)
+    .eq("status", "active")
+    .eq("role", "org_admin")) as { data: any[] | null };
+
+  const adminProfilesByOrg = new Map<string, Set<string>>();
+  for (const l of orgAdminLinks ?? []) {
+    const set = adminProfilesByOrg.get(l.organization_id as string) ?? new Set<string>();
+    set.add(l.user_id as string);
+    adminProfilesByOrg.set(l.organization_id as string, set);
+  }
+
   const items = recipients.map((r) => {
     const org = orgById.get(r.organization_id);
     const list = (contactsByOrg.get(r.organization_id) ?? []).sort(
@@ -161,7 +175,7 @@ export default async function RecipientsPage() {
       orgName: org?.name ?? "Unknown store",
       orgSlug: (org?.slug as string | undefined) ?? null,
       province: org?.province ?? "",
-      region: REGION_OF[org?.province ?? ""] ?? "Unknown",
+      region: patchFor(org?.province),
       participatedLastYear: participated.has(r.organization_id),
       isBeta: r.is_beta === true,
       hasBetaTester: betaOrgs.has(r.organization_id as string),
@@ -172,6 +186,12 @@ export default async function RecipientsPage() {
         roleTitle: (c.role_title as string) ?? null,
         email: (c.work_email as string) ?? (c.email as string) ?? null,
         isPrimary: c.is_primary === true,
+        isOrgAdmin:
+          c.profile_id != null &&
+          (adminProfilesByOrg.get(r.organization_id as string)?.has(
+            c.profile_id as string,
+          ) ??
+            false),
       })),
     };
   });
@@ -223,7 +243,13 @@ export default async function RecipientsPage() {
   );
   const repNameById = new Map(reps.map((r) => [r.id, r.name]));
 
-  const regionRows = ["Atlantic", "Quebec", "Ontario", "Prairies", "West"].map((region) => {
+  /*
+    ⛔ PATCHES, not a hand-typed list. These rows are looked up by name inside
+    RegionAssignment, and the five comparison regions were pasted here against
+    a panel that renders four patches, so "Atlantic & Quebec" matched nothing:
+    nine stores reported as zero, and its rep could never be displayed.
+  */
+  const regionRows = PATCHES.map((region) => {
     const inRegion = items.filter((i) => i.region === region);
     const repId = inRegion.map((i) => assignedByOrg.get(i.orgId)).find(Boolean) ?? null;
     return {
