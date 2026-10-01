@@ -12,6 +12,8 @@ import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
+import { termEndsFor } from "@/lib/benchmarking/lifecycle";
+import { CAPABILITIES } from "@/lib/auth/capability-names";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -270,10 +272,36 @@ export default async function BenchmarkingAdminPage() {
     Same components, scoped: CommitteeCard renders only the beta slot, and
     SendPanel is locked to the one message the step names.
   */
+  /*
+    The cycle's answer to "how long does this appointment last", declared once
+    in lifecycle.ts rather than typed per person.
+  */
+  const termEnds = latestSurvey
+    ? Object.fromEntries(
+        [
+          CAPABILITIES.BENCHMARKING_CONTENT_REVIEW,
+          CAPABILITIES.BENCHMARKING_BETA_TESTER,
+          CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM,
+          CAPABILITIES.BENCHMARKING_QA_VERIFY,
+          CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD,
+        ].map((c) => [
+          c,
+          termEndsFor(c, {
+            opensAt: (latestSurvey.opens_at as string | null) ?? null,
+            closesAt: (latestSurvey.closes_at as string | null) ?? null,
+          }),
+        ]),
+      )
+    : {};
+
   const stageControls: Record<string, React.ReactNode> = latestSurvey
     ? {
         appoint_testers: (
-          <CommitteeCard holders={holders} only="benchmarking.beta_tester" />
+          <CommitteeCard
+            holders={holders}
+            only="benchmarking.beta_tester"
+            termEnds={termEnds}
+          />
         ),
         /*
           ⛔ The whole send panel used to sit here, so the step contained the
@@ -429,7 +457,7 @@ export default async function BenchmarkingAdminPage() {
         )}
 
         <div id="committee">
-          <CommitteeCard holders={holders} />
+          <CommitteeCard holders={holders} termEnds={termEnds} />
         </div>
       </div>
     </div>

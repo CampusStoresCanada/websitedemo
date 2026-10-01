@@ -116,6 +116,61 @@ export const SURVEY_LADDER: SurveyStateDef[] = [
   },
 ];
 
+/**
+ * When an appointment to a benchmarking capability should lapse.
+ *
+ * ⛔ A rule, declared once, not a date somebody types per person. Every
+ * appointment asked the operator to invent an end date with nothing checking it
+ * against the cycle, so a beta tester could be given access that expired while
+ * the survey was still in beta, and a reviewer could keep access to a finished
+ * one. The cycle already knows when its work ends.
+ *
+ * ⚠️ term_end is EXCLUSIVE — capability_contributions tests
+ * `term_end > CURRENT_DATE`, evaluated in UTC. So this returns the day AFTER
+ * their last, and the caller must not subtract one "to be safe". Twelve
+ * question reviewers held term_end 2026-10-01 and lost access at 6pm Mountain
+ * on September 30, which is what that mistake looks like.
+ */
+export function termEndsFor(
+  capability: string,
+  survey: { closesAt: string | null; opensAt: string | null },
+): string | null {
+  const dayAfter = (iso: string) => {
+    const d = new Date(iso);
+    d.setUTCDate(d.getUTCDate() + 1);
+    return d.toISOString().slice(0, 10);
+  };
+
+  switch (capability) {
+    /*
+      Reviewers are done when the questions are fixed, which is when the survey
+      opens — but they keep access through the opening day rather than losing
+      it the evening before, because a reviewer checking their own wording on
+      the morning it goes live is the point.
+    */
+    case CAPABILITIES.BENCHMARKING_CONTENT_REVIEW:
+      return survey.opensAt ? dayAfter(survey.opensAt) : null;
+
+    /*
+      A beta tester files a real submission and may amend it, so their access
+      has to outlast the beta phase. Ends with the survey.
+    */
+    case CAPABILITIES.BENCHMARKING_BETA_TESTER:
+    case CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM:
+      return survey.closesAt ? dayAfter(survey.closesAt) : null;
+
+    /*
+      Interpretation starts when collection closes, so it cannot end there.
+      Deliberately NOT derived — the committee decides when its reading is
+      finished, and guessing a date here would expire somebody mid-judgement.
+    */
+    case CAPABILITIES.BENCHMARKING_QA_VERIFY:
+    case CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD:
+    default:
+      return null;
+  }
+}
+
 const BY_STATE = new Map<string, SurveyStateDef>(
   SURVEY_LADDER.map((d) => [d.state, d]),
 );

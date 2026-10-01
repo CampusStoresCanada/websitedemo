@@ -40,12 +40,22 @@ export const fmt = (termEnd: string) => {
 
 export default function AssignPanel({
   capability,
+  defaultEndsAt = null,
   title,
   ceiling,
   onError,
   onDone,
 }: {
   capability: string;
+  /**
+   * When this appointment lapses, from the rule the cycle declares.
+   *
+   * ⛔ Prefilled, not invented per person. Typing a date for each appointment
+   * is how somebody ends up with access that expires while the phase they were
+   * appointed to is still running. Still editable — a term can be shortened for
+   * a reason — but the cycle's answer is the one that appears.
+   */
+  defaultEndsAt?: string | null;
   title: string;
   ceiling: string | null;
   onError: (m: string | null) => void;
@@ -60,7 +70,7 @@ export default function AssignPanel({
     null,
   );
   const [reason, setReason] = useState(`CSC 2026 benchmarking — ${title}`);
-  const [endsAt, setEndsAt] = useState("");
+  const [endsAt, setEndsAt] = useState(defaultEndsAt ?? "");
   const [dueDate, setDueDate] = useState("");
   const [saving, setSaving] = useState(false);
 
@@ -194,6 +204,11 @@ export default function AssignPanel({
           onChange={(e) => setEndsAt(e.target.value)}
           className="w-full px-3 py-2 border border-gray-300 rounded text-sm"
         />
+        {defaultEndsAt && (
+          <p className="text-[11px] text-gray-500 mt-1">
+            Set from the cycle. Change it only if this person needs less.
+          </p>
+        )}
         {ceilingDate && (
           <p className="text-[11px] text-gray-500 mt-1">
             Your own access ends {fmt(ceiling!)}, so this cannot run past it.

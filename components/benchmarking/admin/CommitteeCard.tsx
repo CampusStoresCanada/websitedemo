@@ -63,6 +63,7 @@ export interface CommitteeHolder {
 export default function CommitteeCard({
   holders,
   only,
+  termEnds,
 }: {
   holders: CommitteeHolder[];
   /**
@@ -73,6 +74,8 @@ export default function CommitteeCard({
    * full card still lists all five below. One implementation, two framings.
    */
   only?: string;
+  /** Capability -> the date its appointments should lapse, from the cycle. */
+  termEnds?: Record<string, string | null>;
 }) {
   /*
     A step on the timeline that says "Appoint someone" should APPOINT someone.
@@ -159,6 +162,7 @@ export default function CommitteeCard({
               {open && (
                 <AssignPanel
                   capability={slot.capability}
+                  defaultEndsAt={termEnds?.[slot.capability] ?? null}
                   title={label}
                   // Admin-only surface, so there is no delegation ceiling to
                   // respect — the office is not handing out its own access.
