@@ -231,8 +231,11 @@ export default function ElectionTimeline({
                 )}
 
                 {/* An action with no handler wired yet says so rather than
-                    rendering a button that does nothing. */}
-                {act && !act.blockedBy && !runnable && (
+                    rendering a button that does nothing. ⛔ A step carrying its
+                    own control IS wired — saying the act is "available from the
+                    panels below" beside the control that performs it is worse
+                    than silence, because it sends you looking. */}
+                {act && !act.blockedBy && !runnable && !stageControls[stage.key] && (
                   <p className="mt-1.5 text-xs text-amber-700">
                     {act.label} — available from the panels below.
                   </p>

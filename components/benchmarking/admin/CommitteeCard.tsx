@@ -108,12 +108,21 @@ export default function CommitteeCard({
 
           return (
             <div key={slot.capability}>
-              <div className="p-5">
+              <div className={only ? "" : "p-5"}>
                 <div className="flex items-start justify-between gap-4">
-                  <div className="min-w-0">
-                    <p className="text-sm font-medium text-gray-900">{label}</p>
-                    <p className="text-xs text-gray-500 mt-0.5">{slot.blurb}</p>
-                  </div>
+                  {/*
+                    ⛔ Not in the step. The timeline already names the act and
+                    counts the holders; repeating the label, the blurb and the
+                    roster there turns a two-second lookup into something to
+                    read. Who holds it is a REVIEW question and it is answered
+                    by the full card below.
+                  */}
+                  {!only && (
+                    <div className="min-w-0">
+                      <p className="text-sm font-medium text-gray-900">{label}</p>
+                      <p className="text-xs text-gray-500 mt-0.5">{slot.blurb}</p>
+                    </div>
+                  )}
                   <button
                     onClick={() => {
                       setError(null);
@@ -125,7 +134,7 @@ export default function CommitteeCard({
                   </button>
                 </div>
 
-                {people.length > 0 ? (
+                {only ? null : people.length > 0 ? (
                   <ul className="mt-3 space-y-1">
                     {people.map((p) => (
                       <li
