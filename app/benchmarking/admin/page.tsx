@@ -6,6 +6,10 @@ import SurveyManagementCard from "@/components/benchmarking/admin/SurveyManageme
 import ResponseRateCard from "@/components/benchmarking/admin/ResponseRateCard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CommitteeCard from "@/components/benchmarking/admin/CommitteeCard";
+import CycleTimeline from "@/components/admin/elections/ElectionTimeline";
+import { buildBenchmarkingTimeline, STAGE_TRANSITIONS } from "@/lib/benchmarking/timeline";
+import type { TimelineStage } from "@/lib/elections/timeline";
+import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -123,6 +127,82 @@ export default async function BenchmarkingAdminPage() {
     exOfficio: h.appointable === false,
   }));
 
+  /*
+    The cycle as one ordered spine, the way the election admin reads.
+
+    ⛔ Facts gathered here and passed in; buildBenchmarkingTimeline is pure,
+    exactly like buildElectionTimeline. One extra query, for the recipient
+    queue — everything else is already loaded above for the cards.
+  */
+  let timeline: TimelineStage[] | null = null;
+  if (latestSurvey) {
+    const db = createAdminClient();
+
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const { data: recipientRows } = (await (db as any)
+      .from("benchmarking_recipients")
+      .select("status, invited_at")
+      .eq("survey_id", latestSurvey.id)) as { data: { status: string; invited_at: string | null }[] | null };
+
+    const recips = recipientRows ?? [];
+    const betaTesters = holders.filter(
+      (h) => h.capability === "benchmarking.beta_tester",
+    ).length;
+
+    timeline = buildBenchmarkingTimeline(
+      {
+        fiscalYear: latestSurvey.fiscal_year,
+        status: (latestSurvey.status as string) ?? "draft",
+        opensAt: (latestSurvey.opens_at as string | null) ?? null,
+        closesAt: (latestSurvey.closes_at as string | null) ?? null,
+        recipientsTotal: recips.length,
+        recipientsConfirmed: recips.filter(
+          (r) => r.status === "confirmed" || r.status === "corrected",
+        ).length,
+        betaTestersAppointed: betaTesters,
+        invited: recips.filter((r) => r.invited_at !== null).length,
+        drafts: responseRate.drafts,
+        submitted: responseRate.submitted,
+        openFlags: pendingFlagCount,
+        // Question review reads the newest survey whatever its status; its
+        // progress is not on this page, so the stage reports what it knows.
+        reviewDone: 0,
+        reviewTotal: 0,
+      },
+      new Date().toISOString().slice(0, 10),
+    );
+  }
+
+  /*
+    Where each step goes. A path navigates; a function runs here.
+
+    ⛔ Keyed by STAGE, the way the component expects, so a step and its action
+    cannot drift apart. Every transition goes through updateSurveyStatus, which
+    enforces the ladder server-side — the timeline offering a move is not the
+    same as the server accepting it, and that gap is exactly what made `beta`
+    unreachable.
+  */
+  const surveyId = latestSurvey?.id as string | undefined;
+  const move = (to: string) => async () => {
+    "use server";
+    if (surveyId) await updateSurveyStatus(surveyId, to);
+  };
+
+  // ⛔ Keyed by ACTION key, not stage key — actions[act.key] is the lookup.
+  const timelineActions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined> = {
+    openReview: "/benchmarking/admin/review",
+    openQueue: "/benchmarking/recipients",
+    appoint: "committee",
+    startBeta: move("beta"),
+    openSurvey: move("open"),
+    openSendPanel: "/benchmarking/recipients",
+    openReminders: "/benchmarking/recipients",
+    closeSurvey: move("closed"),
+    openFlagReview: "/benchmarking/admin/flags",
+    beginProcessing: move("processing"),
+    markComplete: move("complete"),
+  };
+
   return (
     <div>
       <h1 className="text-2xl font-bold text-gray-900 mb-6">
@@ -130,6 +210,20 @@ export default async function BenchmarkingAdminPage() {
       </h1>
 
       <div className="grid gap-6">
+        {/*
+          First, because it is the only thing on this screen that says what
+          happens next. The cards below answer questions you already know to
+          ask; the spine is for the eleven months a year when you do not.
+        */}
+        {timeline && (
+          <CycleTimeline
+            stages={timeline}
+            title={`The FY${latestSurvey?.fiscal_year} cycle`}
+            subtitle="Everything in the order it happens. Each step says what it is waiting for."
+            actions={timelineActions}
+          />
+        )}
+
         <SurveyManagementCard surveys={surveys ?? []} />
 
         {latestSurvey && (
@@ -200,7 +294,9 @@ export default async function BenchmarkingAdminPage() {
           </div>
         )}
 
-        <CommitteeCard holders={holders} />
+        <div id="committee">
+          <CommitteeCard holders={holders} />
+        </div>
       </div>
     </div>
   );

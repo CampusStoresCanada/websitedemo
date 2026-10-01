@@ -64,8 +64,10 @@ export default function ElectionTimeline({
   title: string;
   subtitle: string;
   /**
-   * Keyed the same way the stages are. A function is run directly from the
-   * timeline; a STRING is the id of the panel that owns the real form.
+   * Keyed by ACTION key — `actions[stage.action.key]` — not by stage key. A
+   * function is run directly from the timeline; a STRING is somewhere to go:
+   * a leading slash navigates, anything else is the id of the panel on this
+   * page that owns the real form.
    *
    * Some stages cannot be a one-click button and should not be: closing
    * nominations needs its confirmation ticked, and the AGM notice needs the
@@ -184,9 +186,16 @@ export default function ElectionTimeline({
                   )
                 )}
 
+                {/*
+                  A string action is a place to go. Elections' steps all live on
+                  this page, so it was always an anchor; benchmarking's live on
+                  the recipients queue and the flag review, so a path has to
+                  travel. Leading slash means navigate, anything else is still
+                  an id on this page.
+                */}
                 {act && typeof runnable === "string" && (
                   <a
-                    href={`#${runnable}`}
+                    href={runnable.startsWith("/") ? runnable : `#${runnable}`}
                     className="mt-2 inline-block rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"
                   >
                     {act.label} →
