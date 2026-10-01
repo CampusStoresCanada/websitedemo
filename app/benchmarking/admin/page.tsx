@@ -10,6 +10,7 @@ import CycleTimeline from "@/components/admin/elections/ElectionTimeline";
 import { buildBenchmarkingTimeline, STAGE_TRANSITIONS } from "@/lib/benchmarking/timeline";
 import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
+import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -188,7 +189,19 @@ export default async function BenchmarkingAdminPage() {
     if (surveyId) await updateSurveyStatus(surveyId, to);
   };
 
-  // ⛔ Keyed by ACTION key, not stage key — actions[act.key] is the lookup.
+  /*
+    ⛔ Keyed by ACTION key, not stage key — actions[act.key] is the lookup.
+
+    Every one of these either runs here or opens a panel ON THIS PAGE. A link
+    carries the query that OPENS the panel rather than only scrolling to it,
+    because a step that says "appoint someone" should leave you appointing
+    someone, not looking at the control that would.
+
+    The three that do navigate — question review, the recipient queue, the flag
+    queue — are working queues somebody sits in for an hour, the same way
+    elections keeps proxies and audit on their own pages. They are destinations,
+    not the action the step names.
+  */
   /*
     What each step sends, and the member-facing page it affects.
 
@@ -241,8 +254,8 @@ export default async function BenchmarkingAdminPage() {
     appoint: "/benchmarking/admin?assign=benchmarking.beta_tester#committee",
     startBeta: move("beta"),
     openSurvey: move("open"),
-    openSendPanel: "/benchmarking/recipients?send=invitation#send",
-    openReminders: "/benchmarking/recipients?send=reminder#send",
+    openSendPanel: "/benchmarking/admin?send=invitation#send",
+    openReminders: "/benchmarking/admin?send=reminder#send",
     closeSurvey: move("closed"),
     openFlagReview: "/benchmarking/admin/flags",
     beginProcessing: move("processing"),
@@ -274,6 +287,22 @@ export default async function BenchmarkingAdminPage() {
             // pre-fills the test-send box, so it is not worth a lookup.
             testEmail={null}
           />
+        )}
+
+        {/*
+          Panels under the spine, the way the election cycle page reads: the
+          timeline is where you act, and everything below it is progress and
+          context. A step either runs here or anchors to the panel that owns
+          its form — it never sends you to another page to do the thing it
+          just named.
+        */}
+        {latestSurvey && (
+          <div id="send">
+            <SendPanel
+              surveyId={latestSurvey.id as string}
+              surveyStatus={(latestSurvey.status as string) ?? "draft"}
+            />
+          </div>
         )}
 
         <SurveyManagementCard surveys={surveys ?? []} />

@@ -4,7 +4,6 @@ import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
 import { loginWithNext } from "@/lib/auth/login-redirect";
 import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
-import SendPanel from "@/components/benchmarking/recipients/SendPanel";
 import RegionAssignment from "@/components/benchmarking/recipients/RegionAssignment";
 import BetaCohort from "@/components/benchmarking/recipients/BetaCohort";
 import { PATCHES, patchFor } from "@/lib/benchmarking/rep-patches";
@@ -294,11 +293,14 @@ export default async function RecipientsPage() {
               participatedLastYear: i.participatedLastYear,
             }))}
           />
-          {/* Anchored, so a timeline step lands on the panel rather than the
-              top of a long queue. */}
-          <div id="send">
-            <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
-          </div>
+          {/*
+            ⛔ The send panel is NOT here any more. It lives under the cycle
+            timeline on /benchmarking/admin, beside every other act of the
+            office, because that is where elections puts its sends and because
+            a step that says "invite the stores" should not send you to the
+            regional reps' working queue to do it. Duplicating it here would be
+            two places to mail 53 stores from.
+          */}
         </div>
       )}
     </>
