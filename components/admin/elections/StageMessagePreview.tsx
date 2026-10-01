@@ -14,13 +14,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { Eye, Pencil, AlertTriangle } from "lucide-react";
 import EmailPreviewModal from "@/components/comms/EmailPreviewModal";
-import type { ElectionMessage } from "@/lib/elections/messages";
+import type { StageMessage } from "@/lib/elections/messages";
 
 export default function StageMessagePreview({
   message,
   testEmail,
 }: {
-  message: ElectionMessage;
+  message: StageMessage;
   testEmail: string | null;
 }) {
   const [open, setOpen] = useState(false);

@@ -16,7 +16,7 @@ import type { TimelineStage } from "@/lib/elections/timeline";
 import ConfirmSendButton from "./ConfirmSendButton";
 import StageMessagePreview from "./StageMessagePreview";
 import { ExternalLink } from "lucide-react";
-import type { ElectionMessage } from "@/lib/elections/messages";
+import type { StageMessage } from "@/lib/elections/messages";
 
 const DOT: Record<TimelineStage["state"], string> = {
   done: "bg-green-600",
@@ -43,6 +43,8 @@ function when(stage: TimelineStage): string | null {
 
 export default function ElectionTimeline({
   stages,
+  title,
+  subtitle,
   actions,
   sendCounts = {},
   stageMessages = {},
@@ -50,6 +52,17 @@ export default function ElectionTimeline({
   testEmail = null,
 }: {
   stages: TimelineStage[];
+  /**
+   * What this cycle is called, and one line on what moves its dates.
+   *
+   * ⛔ Props, not constants. These were "The cycle" and "Dates move with the
+   * AGM", which is the only election-specific text left in a component whose
+   * every other input is keyed by stage. A second cycle reusing this needed to
+   * change two strings, and hardcoding them is what would have made someone
+   * copy the file instead.
+   */
+  title: string;
+  subtitle: string;
   /**
    * Keyed the same way the stages are. A function is run directly from the
    * timeline; a STRING is the id of the panel that owns the real form.
@@ -74,7 +87,7 @@ export default function ElectionTimeline({
    * messages saying opposite things — passes an array, so neither can be
    * silently hidden by the other.
    */
-  stageMessages?: Record<string, ElectionMessage | ElectionMessage[]>;
+  stageMessages?: Record<string, StageMessage | StageMessage[]>;
   /**
    * The member-facing page each step points at, keyed by stage key. Opened with
    * ?preview=1, which bypasses what the page DISPLAYS and nothing that writes —
@@ -86,10 +99,8 @@ export default function ElectionTimeline({
 }) {
   return (
     <section className="rounded-lg border border-gray-200 bg-white px-5 py-4">
-      <h2 className="text-sm font-semibold text-gray-900">The cycle</h2>
-      <p className="mt-1 text-xs text-gray-500">
-        Everything in the order it happens. Dates move with the AGM.
-      </p>
+      <h2 className="text-sm font-semibold text-gray-900">{title}</h2>
+      <p className="mt-1 text-xs text-gray-500">{subtitle}</p>
 
       <ol className="mt-4">
         {stages.map((stage, i) => {
@@ -130,8 +141,8 @@ export default function ElectionTimeline({
 
                 {stageMessages[stage.key] &&
                   (Array.isArray(stageMessages[stage.key])
-                    ? (stageMessages[stage.key] as ElectionMessage[])
-                    : [stageMessages[stage.key] as ElectionMessage]
+                    ? (stageMessages[stage.key] as StageMessage[])
+                    : [stageMessages[stage.key] as StageMessage]
                   ).map((m) => (
                     <StageMessagePreview key={m.key} message={m} testEmail={testEmail} />
                   ))}

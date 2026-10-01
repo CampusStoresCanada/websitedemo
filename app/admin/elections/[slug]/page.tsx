@@ -452,6 +452,8 @@ export default async function ElectionReviewPage({
       {timeline && (
         <ElectionTimeline
           stages={timeline}
+          title="The cycle"
+          subtitle="Everything in the order it happens. Dates move with the AGM."
           testEmail={auth.user?.email ?? null}
           // Keyed by STAGE, so each step carries the message it sends. The
           // reminder hangs off "ballots close" because that is the step it

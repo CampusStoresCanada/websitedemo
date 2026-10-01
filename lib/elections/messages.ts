@@ -30,7 +30,16 @@ import {
   type PreparedMessages,
 } from "./notify";
 
-export interface ElectionMessage {
+/**
+ * One message a STAGE sends.
+ *
+ * ⛔ Nothing here is about elections — key, stage, label, template, whether the
+ * template row is missing, whether it is transactional. It was called
+ * ElectionMessage because elections is where the timeline was built first, and
+ * that name is the only thing that would have stopped the benchmarking cycle
+ * reusing it. The readers below stay election-specific; the shape does not.
+ */
+export interface StageMessage {
   key: string;
   /** Where in the cycle this one goes out. */
   stage: string;
@@ -76,7 +85,7 @@ const SAMPLE = {
 async function describe(
   prepared: PreparedMessages,
   meta: { key: string; stage: string; label: string; note?: string | null }
-): Promise<ElectionMessage> {
+): Promise<StageMessage> {
   const template: MessageTemplate | null = await getTemplate(prepared.templateKey);
   const first = prepared.recipients[0];
   const variables = stringify({ ...SAMPLE, ...(first?.variables ?? {}) });
@@ -111,7 +120,7 @@ export async function getElectionMessages(
   election: Election,
   eligibleOrganizationIds: string[],
   opts: { candidateCount: number }
-): Promise<ElectionMessage[]> {
+): Promise<StageMessage[]> {
   const appUrl = process.env.NEXT_PUBLIC_APP_URL?.replace(/\/$/, "") ?? "";
   const orgs = eligibleOrganizationIds;
 
@@ -226,7 +235,7 @@ export async function getElectionMessages(
  */
 export async function getElectionMessagesForSlug(
   slug: string
-): Promise<ElectionMessage[] | null> {
+): Promise<StageMessage[] | null> {
   const { createAdminClient } = await import("@/lib/supabase/admin");
   const { getElection, listNominations } = await import("./service");
 
