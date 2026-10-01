@@ -651,6 +651,12 @@ export async function benchmarkingStageMessages(
  * They are the only ones who can open a draft survey, so mailing a store's
  * confirmed respondent instead would send somebody to a locked door.
  *
+ * ⛔ Ex officio holders are mailed too. This filtered to appointable=true, so
+ * the Secretary — who holds every benchmarking capability by office and whose
+ * store can therefore file — was the one person in the cohort nobody told.
+ * Holding the capability by office IS being in the cohort; that is what being
+ * the committee lead means.
+ *
  * Best-effort: the transition has already happened and must not roll back
  * because mail failed. Returns what went out so the caller can say.
  */
@@ -671,8 +677,7 @@ export async function sendBetaOpening(
     .from("capability_contributions")
     .select("subject_id, display_name")
     .eq("capability", "benchmarking.beta_tester")
-    .eq("is_active", true)
-    .eq("appointable", true);
+    .eq("is_active", true);
 
   const people = holders ?? [];
   if (people.length === 0) return { sent: 0, failed: 0, skipped: 0 };

@@ -7,7 +7,8 @@ import { CAPABILITIES } from "@/lib/auth/capability-names";
 const NAV_ITEMS = [
   {
     href: "/benchmarking/admin",
-    label: "Dashboard",
+    // A list of cycles, not a dashboard: you pick the year, then work it.
+    label: "Cycles",
     icon: "M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4",
     needs: "admin" as const,
   },
