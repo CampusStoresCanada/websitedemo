@@ -46,19 +46,22 @@ describe("who may file the survey", () => {
     expect(await ask("open")).toEqual({ canFile: true, reason: "open" });
   });
 
-  it("beta lets a flagged store file", async () => {
+  /*
+    ⛔ Being in the beta is holding the capability, not carrying a flag.
+
+    The flag used to grant access on its own, which meant everybody at a
+    flagged store could file while the opening mail went only to the appointed
+    person — access nobody was told about. NAIT was exactly that the moment the
+    ladder made the state reachable.
+  */
+  it("beta keeps out a flagged store with nobody appointed", async () => {
     betaFlag = true;
-    expect(await ask("beta")).toEqual({ canFile: true, reason: "beta" });
+    expect(await ask("beta")).toEqual({ canFile: false, reason: "not_started" });
   });
 
-  it("beta keeps everyone else out — this is the whole point", async () => {
+  it("beta keeps out an unflagged store too", async () => {
     betaFlag = false;
-    expect(await ask("beta")).toEqual({ canFile: false, reason: "not_in_beta" });
-  });
-
-  it("a store with no recipient row is not in the beta", async () => {
-    betaFlag = null;
-    expect(await ask("beta")).toEqual({ canFile: false, reason: "not_in_beta" });
+    expect(await ask("beta")).toEqual({ canFile: false, reason: "not_started" });
   });
 
   it("closed keeps members out", async () => {

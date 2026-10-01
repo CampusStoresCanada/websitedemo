@@ -5,7 +5,6 @@ import { loginWithNext } from "@/lib/auth/login-redirect";
 import { listDirectoryContacts } from "@/lib/contacts/directory";
 import RecipientQueue from "@/components/benchmarking/recipients/RecipientQueue";
 import RegionAssignment from "@/components/benchmarking/recipients/RegionAssignment";
-import BetaCohort from "@/components/benchmarking/recipients/BetaCohort";
 import { PATCHES, patchFor } from "@/lib/benchmarking/rep-patches";
 
 export const metadata = {
@@ -176,7 +175,6 @@ export default async function RecipientsPage() {
       province: org?.province ?? "",
       region: patchFor(org?.province),
       participatedLastYear: participated.has(r.organization_id),
-      isBeta: r.is_beta === true,
       hasBetaTester: betaOrgs.has(r.organization_id as string),
       invited: r.invited_at != null,
       contacts: list.map((c) => ({
@@ -280,19 +278,14 @@ export default async function RecipientsPage() {
             regions={regionRows}
             people={reps}
           />
-          {/* Who goes first, before the thing that sends to them. A beta send
-              with an empty cohort is the failure this sits above. */}
-          <BetaCohort
-            stores={items.map((i) => ({
-              id: i.id,
-              orgName: i.orgName,
-              province: i.province,
-              isBeta: i.isBeta,
-              hasBetaTester: i.hasBetaTester,
-              invited: i.invited,
-              participatedLastYear: i.participatedLastYear,
-            }))}
-          />
+          {/*
+            ⛔ No cohort panel. Being "in the beta" is holding
+            benchmarking.beta_tester, appointed on the committee card — one
+            thing that is both the access and the notification. The flag beside
+            it was a second, weaker answer: per store rather than per person, so
+            everybody there could file, and nobody was told because the opening
+            mail goes to the people who hold the capability.
+          */}
           {/*
             ⛔ The send panel is NOT here any more. It lives under the cycle
             timeline on /benchmarking/admin, beside every other act of the

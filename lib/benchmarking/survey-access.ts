@@ -1,5 +1,4 @@
 import "server-only";
-import { createAdminClient } from "@/lib/supabase/admin";
 
 /**
  * Who may file the survey right now.
@@ -19,7 +18,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 
 export type SurveyAccess =
   | { canFile: true; reason: "open" | "beta" | "admin_preview" }
-  | { canFile: false; reason: "not_started" | "closed" | "not_in_beta" };
+  | { canFile: false; reason: "not_started" | "closed" };
 
 export async function resolveSurveyAccess(input: {
   surveyId: string;
@@ -53,21 +52,19 @@ export async function resolveSurveyAccess(input: {
     return { canFile: true, reason: "beta" };
   }
 
-  if (surveyStatus === "beta") {
-    const db = createAdminClient();
-    const { data } = await db
-      .from("benchmarking_recipients")
-      .select("is_beta")
-      .eq("survey_id", surveyId)
-      .eq("organization_id", organizationId)
-      .maybeSingle();
+  /*
+    ⛔ No second door for the cohort flag.
 
-    if (data?.is_beta === true) return { canFile: true, reason: "beta" };
-    // An admin previewing during beta is still previewing, not filing for real.
-    if (isAdmin) return { canFile: true, reason: "admin_preview" };
-    return { canFile: false, reason: "not_in_beta" };
-  }
+    This granted access to anyone at a store with benchmarking_recipients.is_beta
+    set, beside the capability check above. Two ways to be in the beta, and the
+    flag was the weaker one: it is per STORE, so everybody there could file, and
+    sendBetaOpening addresses the people holding the capability — so a store
+    flagged but unappointed got access that nobody was ever told about. NAIT was
+    exactly that when the ladder made this branch reachable.
 
+    A beta tester is appointed. The appointment is the access and the
+    notification, and there is one of each.
+  */
   if (isAdmin) return { canFile: true, reason: "admin_preview" };
 
   return {
