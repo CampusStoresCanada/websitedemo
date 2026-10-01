@@ -123,30 +123,6 @@ export default async function RecipientsPage() {
     .eq("fiscal_year", survey.fiscal_year - 1)) as { data: any[] | null };
   const participated = new Set((prior ?? []).map((b) => b.organization_id));
 
-  /*
-    Which stores actually have somebody who can open the survey early.
-
-    ⛔ Flagging a store into the beta cohort and appointing a person are two
-    different acts, on two different pages, and doing only the first mails
-    somebody a link to a locked door. The cohort list says which half is
-    missing rather than leaving the operator to find out from a member.
-  */
-  const { data: betaHolders } = (await (createAdminClient() as any)
-    .from("capability_contributions")
-    .select("subject_id")
-    .eq("capability", "benchmarking.beta_tester")
-    .eq("is_active", true)) as { data: any[] | null };
-
-  const betaOrgs = new Set<string>();
-  const holderIds = (betaHolders ?? []).map((h) => h.subject_id as string);
-  if (holderIds.length > 0) {
-    const { data: links } = (await (createAdminClient() as any)
-      .from("user_organizations")
-      .select("organization_id")
-      .in("user_id", holderIds)
-      .eq("status", "active")) as { data: any[] | null };
-    for (const l of links ?? []) betaOrgs.add(l.organization_id as string);
-  }
 
   /*
     Who the store itself says runs it: its org admins.
@@ -194,7 +170,6 @@ export default async function RecipientsPage() {
       province: org?.province ?? "",
       region: patchFor(org?.province),
       participatedLastYear: participated.has(r.organization_id),
-      hasBetaTester: betaOrgs.has(r.organization_id as string),
       invited: r.invited_at != null,
       contacts: list.map((c) => ({
         id: c.id as string,

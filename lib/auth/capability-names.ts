@@ -33,9 +33,6 @@ export const CAPABILITIES = {
   /**
    * Store people filling the survey early, on purpose, to try to break it.
    *
-   * ⛔ Not benchmarking_recipients.is_beta, which decides which cohort an
-   * INVITATION counts a store in. This decides whether a person may file before
-   * the doors open, and it carries a term like every other appointment.
    */
   BENCHMARKING_BETA_TESTER: "benchmarking.beta_tester",
 } as const;

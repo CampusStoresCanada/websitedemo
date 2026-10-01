@@ -107,7 +107,6 @@ function recipient(over: Record<string, unknown> = {}) {
     id: "r1",
     organization_id: "org-1",
     contact_id: "c1",
-    is_beta: false,
     invited_at: null,
     reminder_count: 0,
     organizations: { name: "Test University" },

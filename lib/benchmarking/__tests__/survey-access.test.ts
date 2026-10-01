@@ -8,24 +8,8 @@ import {
   ladderIndex,
   hasReached,
 } from "../lifecycle";
-
-let betaFlag: boolean | null = null;
-
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminClient: () => ({
-    from: () => ({
-      select: () => ({
-        eq: () => ({
-          eq: () => ({
-            maybeSingle: async () => ({
-              data: betaFlag === null ? null : { is_beta: betaFlag },
-            }),
-          }),
-        }),
-      }),
-    }),
-  }),
-}));
+// ⛔ No admin client mock: resolveSurveyAccess reads no table any more.
+// Who may file is the capability it is handed, not a flag it looks up.
 
 import { resolveSurveyAccess } from "../survey-access";
 
@@ -38,7 +22,6 @@ const ask = (surveyStatus: string, isAdmin = false) =>
   });
 
 beforeEach(() => {
-  betaFlag = null;
 });
 
 describe("who may file the survey", () => {
@@ -55,12 +38,10 @@ describe("who may file the survey", () => {
     ladder made the state reachable.
   */
   it("beta keeps out a flagged store with nobody appointed", async () => {
-    betaFlag = true;
     expect(await ask("beta")).toEqual({ canFile: false, reason: "not_started" });
   });
 
   it("beta keeps out an unflagged store too", async () => {
-    betaFlag = false;
     expect(await ask("beta")).toEqual({ canFile: false, reason: "not_started" });
   });
 
@@ -80,7 +61,6 @@ describe("who may file the survey", () => {
   });
 
   it("an admin previewing during beta is previewing, not filing", async () => {
-    betaFlag = false;
     expect(await ask("beta", true)).toEqual({
       canFile: true,
       reason: "admin_preview",
@@ -107,7 +87,7 @@ describe("appointed beta testers", () => {
   });
 
   it("files during the beta window without needing a recipient row", async () => {
-    // is_beta on the recipient decides which cohort an INVITATION counts a
+    // The recipient row decides who an INVITATION counts as; it grants a
     // store in. The appointment decides who may file. Different questions.
     const access = await resolveSurveyAccess({
       surveyId: "s1",

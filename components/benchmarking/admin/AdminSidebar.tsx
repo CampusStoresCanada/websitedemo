@@ -49,21 +49,13 @@ const NAV_ITEMS = [
   },
   {
     /*
-      The beta panel is NOT under /benchmarking/admin, and it stays where it is.
-
-      Choosing the cohort, appointing a tester and sending the going-first mail
-      are three halves of one job that already live together on
-      /benchmarking/recipients, beside the queue that decides who gets mailed at
-      all. Copying them into the admin shell would be a second place to tick a
-      store into the cohort, and the first one to drift would silently mail the
-      wrong list.
-
-      What was actually wrong is that nothing in here pointed AT it. Question
-      Review has a door in this sidebar and the beta work did not, so from
-      inside the back office the panel did not appear to exist.
+      Who the survey is addressed to, who is still missing a respondent, and
+      the send. ⛔ Not the beta: a tester is appointed on the committee card,
+      which is both the access and the notification, so there is nothing about
+      going first on this page to point at.
     */
     href: "/benchmarking/recipients",
-    label: "Invitations & beta",
+    label: "Invitations",
     icon: "M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z",
     /*
       ⛔ Exactly the page's own gate, which is recipient_confirm or global

@@ -134,7 +134,6 @@ interface RecipientRow {
   id: string;
   organization_id: string;
   contact_id: string | null;
-  is_beta: boolean;
   invited_at: string | null;
   reminder_count: number;
   organizations: { name: string; is_test?: boolean | null } | null;
@@ -179,7 +178,7 @@ async function loadRecipients(
   let q = db
     .from("benchmarking_recipients")
     .select(
-      "id, organization_id, contact_id, is_beta, invited_at, reminder_count, organizations(name, is_test), contacts(name, first_name, email, work_email)",
+      "id, organization_id, contact_id, invited_at, reminder_count, organizations(name, is_test), contacts(name, first_name, email, work_email)",
     )
     .eq("survey_id", surveyId);
 
@@ -266,15 +265,6 @@ export type BlockedReason =
   | "already_submitted"
   | "never_invited"
   | "no_address"
-  /**
-   * A beta send to a store where nobody can open the survey yet.
-   *
-   * ⛔ Two switches, on purpose: benchmarking_recipients.is_beta says who gets
-   * the going-first email, and benchmarking.beta_tester says who may file
-   * before the doors open. They answer different questions, so they are not
-   * merged — but sending the first without the second mails somebody a link to
-   * a locked door, and they find out by clicking it.
-   */
 ;
 
 export interface PlannedSend {
@@ -659,8 +649,7 @@ export async function benchmarkingStageMessages(
  *
  * ⛔ Addressed to the PEOPLE who hold the capability, not to recipient rows.
  * They are the only ones who can open a draft survey, so mailing a store's
- * confirmed respondent instead would send somebody to a locked door — which is
- * the bug the old betaOnly send had.
+ * confirmed respondent instead would send somebody to a locked door.
  *
  * Best-effort: the transition has already happened and must not roll back
  * because mail failed. Returns what went out so the caller can say.
