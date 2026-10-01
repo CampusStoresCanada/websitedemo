@@ -62,8 +62,17 @@ export interface CommitteeHolder {
 
 export default function CommitteeCard({
   holders,
+  only,
 }: {
   holders: CommitteeHolder[];
+  /**
+   * Render just this one capability, with no card chrome.
+   *
+   * ⛔ The same card, scoped — not a second appointment control. The timeline
+   * puts the beta slot inside its own step so appointing happens there; the
+   * full card still lists all five below. One implementation, two framings.
+   */
+  only?: string;
 }) {
   /*
     A step on the timeline that says "Appoint someone" should APPOINT someone.
@@ -75,37 +84,19 @@ export default function CommitteeCard({
     renders, so a hand-typed value opens nothing rather than inventing a slot.
   */
   const requested = useSearchParams().get("assign");
+  const slots = only ? SLOTS.filter((s) => s.capability === only) : SLOTS;
   const [assigning, setAssigning] = useState<string | null>(
     requested && SLOTS.some((s) => s.capability === requested) ? requested : null,
   );
   const [error, setError] = useState<string | null>(null);
 
-  return (
-    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
-      <div className="flex items-start justify-between p-6 pb-4">
-        <div>
-          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
-            Benchmarking Committee
-          </h3>
-          <p className="text-xs text-gray-500 mt-1">
-            Appoint the lead and the workstreams. The lead can hand out
-            the workstreams themselves from their own console.
-          </p>
-        </div>
-        <Link
-          href="/benchmarking/committee"
-          className="shrink-0 text-xs font-medium text-gray-600 hover:text-gray-900 underline"
-        >
-          Committee console
-        </Link>
-      </div>
-
-      {error && (
-        <p className="px-6 pb-2 text-xs text-red-600">{error}</p>
-      )}
-
-      <div className="divide-y divide-gray-100 border-t border-gray-100">
-        {SLOTS.map((slot) => {
+  /*
+    Scoped: no heading, no border, no link to the console — the step it sits in
+    already says what it is. The full card keeps its chrome.
+  */
+  const list = (
+    <div className={only ? "" : "divide-y divide-gray-100 border-t border-gray-100"}>
+        {slots.map((slot) => {
           const people = holders.filter(
             (h) => h.capability === slot.capability,
           );
@@ -171,6 +162,39 @@ export default function CommitteeCard({
           );
         })}
       </div>
+  );
+  if (only) {
+    return (
+      <>
+        {error && <p className="mb-2 text-xs text-red-600">{error}</p>}
+        {list}
+      </>
+    );
+  }
+
+  return (
+    <div className="bg-white border border-gray-200 rounded-lg shadow-sm">
+      <div className="flex items-start justify-between p-6 pb-4">
+        <div>
+          <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider">
+            Benchmarking Committee
+          </h3>
+          <p className="text-xs text-gray-500 mt-1">
+            Appoint the lead and the workstreams. The lead can hand out
+            the rest from their own console.
+          </p>
+        </div>
+        <Link
+          href="/benchmarking/committee"
+          className="shrink-0 text-xs font-medium text-[#163D6D] underline underline-offset-2"
+        >
+          Committee console
+        </Link>
+      </div>
+
+      {error && <p className="px-6 pb-2 text-xs text-red-600">{error}</p>}
+
+      {list}
 
       <div className="px-6 py-3 border-t border-gray-100">
         <Link

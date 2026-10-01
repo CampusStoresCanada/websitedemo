@@ -248,14 +248,47 @@ export default async function BenchmarkingAdminPage() {
     },
   };
 
+  /*
+    The control lives IN the step.
+
+    ⛔ Not an anchor to a panel further down. Pressing "Appoint someone" and
+    being scrolled somewhere, to find a control and start again, is the step
+    describing an act rather than containing one. Appointing is typing a name,
+    so the name box is in the step.
+
+    Same components, scoped: CommitteeCard renders only the beta slot, and
+    SendPanel is locked to the one message the step names.
+  */
+  const stageControls: Record<string, React.ReactNode> = latestSurvey
+    ? {
+        appoint_testers: (
+          <CommitteeCard holders={holders} only="benchmarking.beta_tester" />
+        ),
+        invitations: (
+          <SendPanel
+            surveyId={latestSurvey.id as string}
+            surveyStatus={(latestSurvey.status as string) ?? "draft"}
+            fixedKind="invitation"
+          />
+        ),
+        reminders: (
+          <SendPanel
+            surveyId={latestSurvey.id as string}
+            surveyStatus={(latestSurvey.status as string) ?? "draft"}
+            fixedKind="reminder"
+          />
+        ),
+      }
+    : {};
+
   const timelineActions: Record<string, ((formData: FormData) => Promise<void>) | string | undefined> = {
     openReview: "/benchmarking/admin/review",
     openQueue: "/benchmarking/recipients",
-    appoint: "/benchmarking/admin?assign=benchmarking.beta_tester#committee",
+
     startBeta: move("beta"),
     openSurvey: move("open"),
-    openSendPanel: "/benchmarking/admin?send=invitation#send",
-    openReminders: "/benchmarking/admin?send=reminder#send",
+
+
     closeSurvey: move("closed"),
     openFlagReview: "/benchmarking/admin/flags",
     beginProcessing: move("processing"),
@@ -281,28 +314,13 @@ export default async function BenchmarkingAdminPage() {
             subtitle="Everything in the order it happens. Each step says what it is waiting for."
             actions={timelineActions}
             stageMessages={stageMessages}
+            stageControls={stageControls}
             stagePages={stagePages}
             sendCounts={sendCounts}
             // requireAdmin's context carries userId, not an address. This only
             // pre-fills the test-send box, so it is not worth a lookup.
             testEmail={null}
           />
-        )}
-
-        {/*
-          Panels under the spine, the way the election cycle page reads: the
-          timeline is where you act, and everything below it is progress and
-          context. A step either runs here or anchors to the panel that owns
-          its form — it never sends you to another page to do the thing it
-          just named.
-        */}
-        {latestSurvey && (
-          <div id="send">
-            <SendPanel
-              surveyId={latestSurvey.id as string}
-              surveyStatus={(latestSurvey.status as string) ?? "draft"}
-            />
-          </div>
         )}
 
         <SurveyManagementCard surveys={surveys ?? []} />

@@ -49,6 +49,7 @@ export default function ElectionTimeline({
   sendCounts = {},
   stageMessages = {},
   stagePages = {},
+  stageControls = {},
   testEmail = null,
 }: {
   stages: TimelineStage[];
@@ -96,6 +97,18 @@ export default function ElectionTimeline({
    * see lib/elections/preview.ts.
    */
   stagePages?: Record<string, { href: string; label: string }[]>;
+  /**
+   * A control rendered INSIDE a step, for actions that are not one click.
+   *
+   * ⛔ The alternative was an anchor to a panel further down, which is what
+   * this did: you pressed "Appoint someone" and the page scrolled, leaving you
+   * to find the right control and start again. Appointing somebody is typing a
+   * name. A step that names an act should contain it.
+   *
+   * Only rendered when the step is actually actionable — never beside a
+   * blocker, or the control would offer what the blocker just refused.
+   */
+  stageControls?: Record<string, React.ReactNode>;
   /** Pre-fills the test-send box on any preview opened from here. */
   testEmail?: string | null;
 }) {
@@ -193,7 +206,13 @@ export default function ElectionTimeline({
                   travel. Leading slash means navigate, anything else is still
                   an id on this page.
                 */}
-                {act && typeof runnable === "string" && (
+                {act && !act.blockedBy && stageControls[stage.key] && (
+                  <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 p-3">
+                    {stageControls[stage.key]}
+                  </div>
+                )}
+
+                {act && typeof runnable === "string" && !stageControls[stage.key] && (
                   <a
                     href={runnable.startsWith("/") ? runnable : `#${runnable}`}
                     className="mt-2 inline-block rounded-lg bg-gray-900 px-3 py-1.5 text-xs font-medium text-white hover:bg-gray-800"

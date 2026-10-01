@@ -50,9 +50,18 @@ const BLOCKED_COPY: Record<string, string> = {
 export default function SendPanel({
   surveyId,
   surveyStatus,
+  fixedKind,
 }: {
   surveyId: string;
   surveyStatus: string;
+  /**
+   * Lock the panel to one kind and hide the chooser.
+   *
+   * ⛔ A step that says "chase who has not filed" should not then ask which
+   * message you meant. Same panel, same preview, same confirmation — only the
+   * question it no longer needs to ask is removed.
+   */
+  fixedKind?: Kind;
 }) {
   /*
     Arriving from a timeline step that says "Send a reminder" should put you on
@@ -63,7 +72,7 @@ export default function SendPanel({
   */
   const requestedKind = useSearchParams().get("send");
   const [kind, setKind] = useState<Kind>(
-    requestedKind === "reminder" ? "reminder" : "invitation",
+    fixedKind ?? (requestedKind === "reminder" ? "reminder" : "invitation"),
   );
   const [plan, setPlan] = useState<PlanShape | null>(null);
   const [confirmText, setConfirmText] = useState("");
@@ -124,17 +133,19 @@ export default function SendPanel({
       </p>
 
       <div className="mt-4 flex flex-wrap items-center gap-4">
-        <label className="text-sm">
-          <span className="mr-2 text-gray-700">What</span>
-          <select
-            value={kind}
-            onChange={(e) => reset(() => setKind(e.target.value as Kind))}
-            className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-          >
-            <option value="invitation">Invitation</option>
-            <option value="reminder">Reminder</option>
-          </select>
-        </label>
+        {!fixedKind && (
+          <label className="text-sm">
+            <span className="mr-2 text-gray-700">What</span>
+            <select
+              value={kind}
+              onChange={(e) => reset(() => setKind(e.target.value as Kind))}
+              className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+            >
+              <option value="invitation">Invitation</option>
+              <option value="reminder">Reminder</option>
+            </select>
+          </label>
+        )}
 
         {/*
           ⛔ No "beta stores only" audience. A beta tester is invited by being
