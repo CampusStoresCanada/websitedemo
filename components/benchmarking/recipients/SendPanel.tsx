@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { previewSend, sendInvitations, sendReminders } from "@/lib/actions/benchmarking-recipients";
+import { previewSend } from "@/lib/actions/benchmarking-recipients";
 import { useSearchParams } from "next/navigation";
 
 /**
@@ -75,7 +75,6 @@ export default function SendPanel({
     fixedKind ?? (requestedKind === "reminder" ? "reminder" : "invitation"),
   );
   const [plan, setPlan] = useState<PlanShape | null>(null);
-  const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<ResultShape | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -85,7 +84,6 @@ export default function SendPanel({
   function reset(next: () => void) {
     next();
     setPlan(null);
-    setConfirmText("");
     setResult(null);
     setError(null);
   }
@@ -101,33 +99,14 @@ export default function SendPanel({
       return;
     }
     setPlan(res.plan);
-    setConfirmText("");
   }
 
-  async function onSend() {
-    if (!plan) return;
-    setBusy(true);
-    setError(null);
-    const res =
-      kind === "reminder"
-        ? await sendReminders({ surveyId })
-        : await sendInvitations({ surveyId });
-    setBusy(false);
-    if (!res.success) {
-      setError(res.error ?? "Send failed.");
-      return;
-    }
-    setResult(res);
-    setPlan(null);
-    setConfirmText("");
-  }
 
-  const armed = confirmText.trim().toUpperCase() === "SEND";
   const count = plan?.willSend.length ?? 0;
 
   return (
     <section className="rounded-xl border border-gray-200 bg-white p-5">
-      <h2 className="text-base font-semibold text-gray-900">Send</h2>
+      <h2 className="text-base font-semibold text-gray-900">Who can be sent to</h2>
       <p className="mt-1 text-sm text-gray-600">
         Preview first. Nothing goes out until you have seen the list and confirmed it.
       </p>
@@ -223,28 +202,19 @@ export default function SendPanel({
             </details>
           )}
 
+          {/*
+            ⛔ No send button here. Sending is a quick act and it lives in the
+            timeline step, armed and confirmed by the count — the same control
+            elections uses. This panel is the work you do BEFORE that: who is in
+            scope, who cannot be reached and why. Two places to mail 53 stores
+            from would be the duplication; one place to read the list and one
+            place to act is the split.
+          */}
           {count > 0 ? (
-            <div className="mt-4 rounded-lg bg-gray-50 p-3">
-              <p className="text-sm text-gray-800">
-                This cannot be undone. Type <strong>SEND</strong> to confirm.
-              </p>
-              <div className="mt-2 flex items-center gap-3">
-                <input
-                  value={confirmText}
-                  onChange={(e) => setConfirmText(e.target.value)}
-                  placeholder="SEND"
-                  className="w-28 rounded-md border border-gray-300 px-2 py-1.5 text-sm"
-                />
-                <button
-                  type="button"
-                  onClick={onSend}
-                  disabled={!armed || busy}
-                  className="rounded-lg bg-[#EE2A2E] px-4 py-2 text-sm font-semibold text-white hover:bg-[#D92327] disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  {busy ? "Sending…" : `Send to ${count}`}
-                </button>
-              </div>
-            </div>
+            <p className="mt-4 text-sm text-gray-700">
+              <strong>{count}</strong> ready to send. The act is on the step
+              above, which names the number before it goes.
+            </p>
           ) : (
             <p className="mt-4 text-sm text-gray-600">
               Nothing to send. Everyone in scope is listed above with the reason.

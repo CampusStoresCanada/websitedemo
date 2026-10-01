@@ -11,6 +11,7 @@ import { buildBenchmarkingTimeline, STAGE_TRANSITIONS } from "@/lib/benchmarking
 import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
+import ConfirmSendButton from "@/components/admin/elections/ConfirmSendButton";
 
 export default async function BenchmarkingAdminPage() {
   const auth = await requireAdmin();
@@ -184,6 +185,16 @@ export default async function BenchmarkingAdminPage() {
     unreachable.
   */
   const surveyId = latestSurvey?.id as string | undefined;
+  const send = (kind: "invitation" | "reminder") => async () => {
+    "use server";
+    if (!surveyId) return;
+    const { sendInvitations, sendReminders } = await import(
+      "@/lib/actions/benchmarking-recipients"
+    );
+    if (kind === "invitation") await sendInvitations({ surveyId });
+    else await sendReminders({ surveyId });
+  };
+
   const move = (to: string) => async () => {
     "use server";
     if (surveyId) await updateSurveyStatus(surveyId, to);
@@ -264,18 +275,28 @@ export default async function BenchmarkingAdminPage() {
         appoint_testers: (
           <CommitteeCard holders={holders} only="benchmarking.beta_tester" />
         ),
+        /*
+          ⛔ The whole send panel used to sit here, so the step contained the
+          plan, every blocked store and its reason. That is the work you do
+          BEFORE sending, not the act — it belongs in the anchored panel below,
+          the way elections keeps its readiness list in AgmPackagePanel.
+
+          The act is one control: arm, then confirm naming the number.
+        */
         invitations: (
-          <SendPanel
-            surveyId={latestSurvey.id as string}
-            surveyStatus={(latestSurvey.status as string) ?? "draft"}
-            fixedKind="invitation"
+          <ConfirmSendButton
+            action={send("invitation")}
+            label="Invite the stores"
+            recipients={sendCounts.openSendPanel?.recipients ?? null}
+            audience="stores with a confirmed respondent that have not been invited"
           />
         ),
         reminders: (
-          <SendPanel
-            surveyId={latestSurvey.id as string}
-            surveyStatus={(latestSurvey.status as string) ?? "draft"}
-            fixedKind="reminder"
+          <ConfirmSendButton
+            action={send("reminder")}
+            label="Send the reminder"
+            recipients={sendCounts.openReminders?.recipients ?? null}
+            audience="invited stores that have not filed"
           />
         ),
       }
@@ -321,6 +342,20 @@ export default async function BenchmarkingAdminPage() {
             // pre-fills the test-send box, so it is not worth a lookup.
             testEmail={null}
           />
+        )}
+
+        {/*
+          Below the spine: the information and configuration a step points at.
+          Which stores cannot be mailed and why is the work to do before
+          sending, so it reads here rather than inside the act.
+        */}
+        {latestSurvey && (
+          <div id="send">
+            <SendPanel
+              surveyId={latestSurvey.id as string}
+              surveyStatus={(latestSurvey.status as string) ?? "draft"}
+            />
+          </div>
         )}
 
         <SurveyManagementCard surveys={surveys ?? []} />
