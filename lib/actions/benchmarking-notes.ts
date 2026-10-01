@@ -110,6 +110,17 @@ export async function writeNote(input: {
   deltaFlagId?: string | null;
   /** Leave false to keep drafting; true sends it to the Secretary. */
   submit?: boolean;
+  /**
+   * An override of a CALCULATED figure: what the store says it is, and what the
+   * survey worked out.
+   *
+   * ⛔ Both, always. Keeping only the stated number makes a correction
+   * indistinguishable from an original answer, and seeing the difference is the
+   * committee's entire job on a figure somebody changed by hand. The note is
+   * the reason, and the reason is what travels into the appendices.
+   */
+  statedValue?: number | null;
+  computedValue?: number | null;
 }): Promise<{ success: boolean; noteId?: string; error?: string }> {
   const me = await actor();
   if (!me.ok || !me.userId) return { success: false, error: me.error };
@@ -129,6 +140,8 @@ export async function writeNote(input: {
       field_name: input.fieldName,
       delta_flag_id: input.deltaFlagId ?? null,
       note: text,
+      stated_value: input.statedValue ?? null,
+      computed_value: input.computedValue ?? null,
       author_id: me.userId,
       status: input.submit ? "secretary_review" : "draft",
     })

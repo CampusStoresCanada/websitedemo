@@ -54,6 +54,8 @@ interface BenchmarkingSurveyFormProps {
   benchmarkingId: string;
   fiscalYear: number;
   organizationId: string;
+  /** The CYCLE, not the submission — a note hangs off the survey. */
+  surveyId: string;
   organizationName: string;
   organizationProvince: string;
   currentData: Benchmarking;
@@ -87,12 +89,15 @@ interface BenchmarkingSurveyFormProps {
    * fiscal_year - 1 — see the query in app/benchmarking/survey/page.tsx.
    */
   worksheetPriorYears?: number[];
+  /** Calculated figures this store has already overwritten, keyed by line. */
+  figureOverrides?: Record<string, { stated: number; note: string }>;
 }
 
 export default function BenchmarkingSurveyForm({
   benchmarkingId,
   fiscalYear,
   organizationId,
+  surveyId,
   organizationName,
   organizationProvince,
   currentData,
@@ -113,6 +118,7 @@ export default function BenchmarkingSurveyForm({
   staff = [],
   competitors = [],
   worksheetPriorYears = [],
+  figureOverrides = {},
 }: BenchmarkingSurveyFormProps) {
   const config = useMemo(
     () => fieldConfig ?? DEFAULT_FIELD_CONFIG,
@@ -889,6 +895,9 @@ export default function BenchmarkingSurveyForm({
             {/* §8 — everything above, as one statement they can check. */}
             {sections[activeSection]?.id === "review_financials" && (
               <ReviewFinancials
+                surveyId={surveyId}
+                organizationId={organizationId}
+                overrides={figureOverrides}
                 gmCategories={gmCategories}
                 cmCategories={cmCategories}
                 otherIncome={otherIncome}

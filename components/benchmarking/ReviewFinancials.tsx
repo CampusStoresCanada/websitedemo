@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 import type { OtherIncomeRow, OtherExpenseRow } from "@/lib/actions/benchmarking-financials";
 import {
@@ -41,9 +42,25 @@ function Line({
   strong,
   indent,
   onJump,
+  fieldKey,
+  computed,
+  override,
+  onOverwrite,
 }: {
   label: string;
   value: string;
+  /**
+   * Stable name for this calculated line, used as the note's field_name.
+   *
+   * ⛔ Not the label. A label is copy and will be reworded; a note written
+   * against one would come loose from the figure it explains.
+   */
+  fieldKey?: string;
+  /** What the survey worked out, so an override can record both. */
+  computed?: number | null;
+  /** What this store already said instead, if anything. */
+  override?: { stated: number; note: string } | null;
+  onOverwrite?: (fieldKey: string, computed: number | null) => void;
   /** Exactly where this came from, so a wrong number is findable. */
   from: string;
   strong?: boolean;
@@ -71,10 +88,11 @@ function Line({
 
   return (
     <div
-      className={`flex items-baseline justify-between gap-4 border-b border-gray-100 py-1.5 ${
+      className={`border-b border-gray-100 py-1.5 ${
         strong ? "font-semibold text-gray-900" : "text-gray-700"
       } ${indent ? "pl-4" : ""}`}
     >
+    <div className="flex items-baseline justify-between gap-4">
       <Explain text={from}>
         {onJump ? (
           <button
@@ -88,12 +106,48 @@ function Line({
           <span className="text-sm">{label}</span>
         )}
       </Explain>
-      {jump}
+      <span className="flex items-baseline gap-2">
+        {override ? (
+          <>
+            <span className="text-xs text-gray-400 line-through tabular-nums">{value}</span>
+            <span className="tabular-nums text-sm">{money(override.stated)}</span>
+          </>
+        ) : (
+          jump
+        )}
+        {/*
+          Wherever we calculate, the store can say it is something else.
+
+          ⛔ Not a validation on the way past. Their system genuinely cannot
+          produce some of these splits — online sales by category is the
+          standing example — and a figure they are forced to leave at 0 enters
+          the comparison as a fact. Overwriting it and saying why is the honest
+          answer, and the why is what travels into the appendices.
+        */}
+        {fieldKey && onOverwrite && (
+          <button
+            type="button"
+            onClick={() => onOverwrite(fieldKey, computed ?? null)}
+            className="text-[11px] text-gray-400 underline underline-offset-2 hover:text-[#163D6D]"
+          >
+            {override ? "change" : "not right?"}
+          </button>
+        )}
+      </span>
+    </div>
+      {override && (
+        <p className="mt-1 text-[11px] text-gray-500">
+          You changed this. {override.note}
+        </p>
+      )}
     </div>
   );
 }
 
 export default function ReviewFinancials({
+  surveyId,
+  organizationId,
+  overrides = {},
   gmCategories,
   cmCategories,
   otherIncome,
@@ -107,7 +161,55 @@ export default function ReviewFinancials({
   otherExpenses: OtherExpenseRow[];
   formData: Record<string, unknown>;
   onJumpToSection: (sectionId: string) => void;
+  surveyId: string;
+  organizationId: string;
+  /** What this store has already overwritten, keyed by line. */
+  overrides?: Record<string, { stated: number; note: string }>;
 }) {
+  const [editing, setEditing] = useState<{ fieldKey: string; computed: number | null } | null>(null);
+  const [stated, setStated] = useState("");
+  const [why, setWhy] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saved, setSaved] = useState<Record<string, { stated: number; note: string }>>({});
+
+  const current = { ...overrides, ...saved };
+
+  const openOverwrite = (fieldKey: string, computed: number | null) => {
+    setSaveError(null);
+    setStated(current[fieldKey] ? String(current[fieldKey].stated) : computed !== null ? String(computed) : "");
+    setWhy(current[fieldKey]?.note ?? "");
+    setEditing({ fieldKey, computed });
+  };
+
+  async function saveOverwrite() {
+    if (!editing) return;
+    const value = Number(stated);
+    if (!Number.isFinite(value)) { setSaveError("Give a number."); return; }
+    /*
+      ⛔ The reason is required, not optional. The figure travels into a report
+      the whole membership reads; a changed number with no explanation is worse
+      than the calculated one, because nobody can tell it was changed on purpose.
+    */
+    if (why.trim().length < 3) { setSaveError("Say why, so it can travel with the figure."); return; }
+
+    setSaving(true);
+    const { writeNote } = await import("@/lib/actions/benchmarking-notes");
+    const res = await writeNote({
+      surveyId,
+      organizationId,
+      fieldName: editing.fieldKey,
+      note: why.trim(),
+      statedValue: value,
+      computedValue: editing.computed,
+      submit: true,
+    });
+    setSaving(false);
+    if (!res.success) { setSaveError(res.error ?? "Could not save that."); return; }
+    setSaved((p) => ({ ...p, [editing.fieldKey]: { stated: value, note: why.trim() } }));
+    setEditing(null);
+  }
+
   const num = (key: string) => {
     const value = formData[key];
     return typeof value === "number" ? value : null;
@@ -174,9 +276,67 @@ export default function ReviewFinancials({
 
   return (
     <div className="mb-6">
+      {editing && (
+        <div className="mb-4 rounded-lg border-l-4 border-[#163D6D] bg-blue-50 p-4">
+          <p className="text-sm font-semibold text-gray-900">
+            Change this figure to what it really is
+          </p>
+          <p className="mt-1 text-xs text-gray-700">
+            We worked this out from your answers. If your system cannot produce
+            it that way, put the right number in and tell us why. Your
+            explanation is published beside the figure, so nobody reads it
+            without the context.
+          </p>
+          <div className="mt-3 flex flex-wrap items-center gap-3">
+            <label className="text-xs text-gray-700">
+              <span className="mr-2">We calculated</span>
+              <span className="tabular-nums font-medium">{money(editing.computed)}</span>
+            </label>
+            <label className="text-xs text-gray-700">
+              <span className="mr-2">It is actually</span>
+              <input
+                value={stated}
+                onChange={(e) => setStated(e.target.value)}
+                inputMode="decimal"
+                className="w-36 rounded border border-gray-300 px-2 py-1.5 text-sm"
+              />
+            </label>
+          </div>
+          <textarea
+            value={why}
+            onChange={(e) => setWhy(e.target.value)}
+            rows={2}
+            placeholder="Why is the calculated figure wrong for your store?"
+            className="mt-3 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
+          />
+          {saveError && <p className="mt-2 text-xs text-red-700">{saveError}</p>}
+          <div className="mt-3 flex items-center gap-3">
+            <button
+              type="button"
+              onClick={saveOverwrite}
+              disabled={saving}
+              className="rounded bg-[#163D6D] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+            >
+              {saving ? "Saving…" : "Yes, use my number"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setEditing(null)}
+              className="text-xs text-gray-600 underline underline-offset-2"
+            >
+              Never mind
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-gray-200 bg-white p-4">
         <Line
           label="General merchandise — retail"
+          fieldKey="gm_retail"
+          computed={gmRetail}
+          override={current["gm_retail"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(gmRetail)}
           from="Every category's Retail column in General Merchandise, added up"
           indent
@@ -184,6 +344,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="General merchandise — online"
+          fieldKey="gm_online"
+          computed={gmOnline}
+          override={current["gm_online"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(gmOnline)}
           from="Every category's Online column in General Merchandise, added up"
           indent
@@ -191,6 +355,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Course materials — retail"
+          fieldKey="cm_retail"
+          computed={cmRetail}
+          override={current["cm_retail"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(cmRetail)}
           from="Every category's Retail column in Course Materials, added up"
           indent
@@ -198,6 +366,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Course materials — online"
+          fieldKey="cm_online"
+          computed={cmOnline}
+          override={current["cm_online"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(cmOnline)}
           from="Every category's Online column in Course Materials, added up"
           indent
@@ -205,6 +377,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Other income"
+          fieldKey="other_income"
+          computed={other}
+          override={current["other_income"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(other)}
           from="Every line in Other Income you ticked as income, added up. Lines you unticked are shown below the statement instead."
           indent
@@ -219,6 +395,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Total revenue"
+          fieldKey="total_revenue"
+          computed={netSales}
+          override={current["total_revenue"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(netSales)}
           strong
           from="Merchandise, course materials, other income and institutional funding"
@@ -228,6 +408,10 @@ export default function ReviewFinancials({
 
         <Line
           label="Gross margin"
+          fieldKey="gross_margin"
+          computed={grossMargin}
+          override={current["gross_margin"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(grossMargin)}
           strong
           from="Each category's sales multiplied by the gross margin % you gave it, added up"
@@ -235,6 +419,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Opening inventory, at cost"
+          fieldKey="inventory_open"
+          computed={invOpen}
+          override={current["inventory_open"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(invOpen)}
           from="Every category's Opening inventory, added up"
           indent
@@ -242,6 +430,10 @@ export default function ReviewFinancials({
         />
         <Line
           label="Closing inventory, at cost"
+          fieldKey="inventory_close"
+          computed={invClose}
+          override={current["inventory_close"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(invClose)}
           from="Every category's Closing inventory, added up"
           indent
@@ -282,6 +474,10 @@ export default function ReviewFinancials({
         ))}
         <Line
           label="Total operating expenses"
+          fieldKey="operating_expenses"
+          computed={expenseTotal}
+          override={current["operating_expenses"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(expenseTotal)}
           strong
           from="Every expense line above, added up"
@@ -291,6 +487,10 @@ export default function ReviewFinancials({
 
         <Line
           label="Operating income"
+          fieldKey="operating_income"
+          computed={operatingIncome}
+          override={current["operating_income"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(operatingIncome)}
           strong
           from="Gross margin less total operating expenses"
@@ -300,6 +500,10 @@ export default function ReviewFinancials({
 
         <Line
           label="Total campus contribution"
+          fieldKey="campus_contribution"
+          computed={contributionTotal}
+          override={current["campus_contribution"] ?? null}
+          onOverwrite={openOverwrite}
           value={money(contributionTotal)}
           strong
           from="Everything in Campus Contributions, plus student wages and the university administrative charge"

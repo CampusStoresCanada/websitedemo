@@ -334,6 +334,27 @@ export default async function BenchmarkingSurveyPage({
 
   const worksheetPriorYears = (priorYearRows ?? []).map((r) => r.fiscal_year);
 
+  /*
+    Figures this store has already overwritten, so the review shows them rather
+    than silently recalculating over the top. Keyed by the line, which is why
+    the line keys are stable names and not labels.
+  */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: overrideRows } = (await (createAdminClient() as any)
+    .from("benchmarking_notes")
+    .select("field_name, note, stated_value")
+    .eq("survey_id", activeSurvey.id)
+    .eq("organization_id", organization.id)
+    .not("stated_value", "is", null)) as { data: any[] | null };
+
+  const figureOverrides: Record<string, { stated: number; note: string }> = {};
+  for (const r of overrideRows ?? []) {
+    figureOverrides[r.field_name as string] = {
+      stated: Number(r.stated_value),
+      note: (r.note as string) ?? "",
+    };
+  }
+
   // 7. Fetch existing delta flags for this row
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: deltaFlags } = (await (supabase as any)
@@ -447,6 +468,8 @@ export default async function BenchmarkingSurveyPage({
         benchmarkingId={currentRow!.id}
         fiscalYear={activeSurvey.fiscal_year}
         organizationId={organization.id}
+        surveyId={activeSurvey.id}
+        figureOverrides={figureOverrides}
         organizationName={organization.name}
         organizationProvince={organization.province}
         currentData={currentRow!}
