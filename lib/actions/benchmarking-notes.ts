@@ -199,7 +199,7 @@ export async function writeNote(input: {
     }
   }
 
-  revalidatePath("/benchmarking/admin/flags");
+  revalidatePath("/benchmarking/admin", "layout");
   return { success: true, noteId: data.id };
 }
 
@@ -229,7 +229,7 @@ export async function updateNote(
     console.error("[benchmarking-notes] updateNote failed:", error);
     return { success: false, error: "Could not update" };
   }
-  revalidatePath("/benchmarking/admin/flags");
+  revalidatePath("/benchmarking/admin", "layout");
   return { success: true };
 }
 
@@ -283,7 +283,7 @@ export async function secretaryDecide(
     }
   }
 
-  revalidatePath("/benchmarking/admin/notes");
+  revalidatePath("/benchmarking/admin", "layout");
   revalidatePath("/benchmarking/survey");
   return { success: true };
 }
@@ -349,7 +349,7 @@ export async function respondentDecide(
   }
 
   revalidatePath("/benchmarking/survey");
-  revalidatePath("/benchmarking/admin/notes");
+  revalidatePath("/benchmarking/admin", "layout");
   return { success: true };
 }
 
@@ -394,6 +394,6 @@ export async function overridePublish(
     return { success: false, error: "Could not publish" };
   }
 
-  revalidatePath("/benchmarking/admin/notes");
+  revalidatePath("/benchmarking/admin", "layout");
   return { success: true };
 }

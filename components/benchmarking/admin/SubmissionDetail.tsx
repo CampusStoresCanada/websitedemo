@@ -93,7 +93,7 @@ export default function SubmissionDetail({
       <div className="flex items-start justify-between mb-6">
         <div>
           <Link
-            href="/benchmarking/admin/submissions"
+            href={`/benchmarking/admin/${submission.fiscal_year}/submissions`}
             className="text-xs text-gray-500 hover:text-gray-700 mb-1 inline-block"
           >
             &larr; Back to Submissions

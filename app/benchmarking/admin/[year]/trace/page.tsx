@@ -7,7 +7,13 @@ export const metadata = {
   title: "Trace a leaked report | Campus Stores Canada",
 };
 
-export default async function BenchmarkingTracePage() {
+export default async function BenchmarkingTracePage({
+  params,
+}: {
+  params: Promise<{ year: string }>;
+}) {
+  const { year } = await params;
+
   const guard = await requireAdmin();
   if (!guard.ok) redirect("/benchmarking");
 
@@ -18,9 +24,10 @@ export default async function BenchmarkingTracePage() {
     .from("benchmarking")
     .select("fiscal_year")
     .neq("status", "draft")
-    .order("fiscal_year", { ascending: false })
+    .eq("fiscal_year", Number(year))
     .limit(1);
-  const fiscalYear = (years?.[0]?.fiscal_year as number) ?? new Date().getFullYear();
+  // ⛔ The route decides the cycle; the query only confirms it has figures.
+  const fiscalYear = Number(year);
 
   const { data: rows } = await db
     .from("benchmarking")

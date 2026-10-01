@@ -63,7 +63,7 @@ export const WORKSTREAMS: Workstream[] = [
       "When a store's numbers carry a note in a report the whole membership reads, that judgment should come from an elected peer rather than the office. It protects the data and it protects CSC.",
     timeCommitment: "45-minute briefing, then 2–3 hours spread out",
     window: "November and December, once collection closes",
-    href: "/benchmarking/admin/flags",
+    href: "/benchmarking/admin",
     doneWhen: "Every flagged value has been resolved",
   },
   {

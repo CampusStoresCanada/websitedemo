@@ -24,18 +24,32 @@ export const metadata = {
  * in doubt which one. This is that.
  */
 export default async function BenchmarkingCyclesPage() {
-  const auth = await requireAdmin();
-  if (!auth.ok) {
-    redirect("/benchmarking/admin/submissions");
-  }
-
   const supabase = await createClient();
+
+  /*
+    ⛔ Surveys read BEFORE the admin gate, because the bounce needs a year.
+
+    This sent a non-admin to /benchmarking/admin/submissions, which stopped
+    existing the moment the deep dives moved under the cycle — so an
+    interpretation reviewer following their own task link would have landed on
+    a 404. A redirect to a route that no longer exists is the quietest kind of
+    broken: nothing errors, the person simply cannot get to their work.
+  */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { data: surveys } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("id, title, fiscal_year, status, opens_at, closes_at")
     .order("fiscal_year", { ascending: false })) as { data: any[] | null };
 
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    const newest = (surveys ?? [])[0]?.fiscal_year;
+    redirect(
+      newest
+        ? `/benchmarking/admin/${newest}/submissions`
+        : "/benchmarking",
+    );
+  }
   const rows = surveys ?? [];
 
   return (

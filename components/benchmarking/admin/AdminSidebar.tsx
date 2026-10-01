@@ -13,7 +13,7 @@ const NAV_ITEMS = [
     needs: "admin" as const,
   },
   {
-    href: "/benchmarking/admin/submissions",
+    href: "submissions",
     label: "Submissions",
     icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z",
     needs: [CAPABILITIES.BENCHMARKING_QA_VERIFY, CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
@@ -22,13 +22,13 @@ const NAV_ITEMS = [
     // Sits next to Flag Review because it is the other half of the same job:
     // a reviewer explains a flag here, the lead decides what happens to the
     // explanation there.
-    href: "/benchmarking/admin/notes",
+    href: "notes",
     label: "Explanations",
     icon: "M8 12h.01M12 12h.01M16 12h.01M21 12c0 4.418-4.03 8-9 8a9.86 9.86 0 01-4-.8L3 20l1.3-3.9A7.96 7.96 0 013 12c0-4.418 4.03-8 9-8s9 3.582 9 8z",
     needs: [CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
   },
   {
-    href: "/benchmarking/admin/flags",
+    href: "flags",
     label: "Flag Review",
     icon: "M3 21v-4m0 0V5a2 2 0 012-2h6.5l1 1H21l-3 6 3 6h-8.5l-1-1H5a2 2 0 00-2 2zm9-13.5V9",
     needs: [CAPABILITIES.BENCHMARKING_QA_VERIFY, CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD],
@@ -43,7 +43,7 @@ const NAV_ITEMS = [
     needs: "admin" as const,
   },
   {
-    href: "/benchmarking/admin/review",
+    href: "review",
     label: "Question Review",
     icon: "M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z M15 11l-3 3-1.5-1.5",
     needs: "admin" as const,
@@ -93,6 +93,23 @@ export default function AdminSidebar({
 }: AdminSidebarProps) {
   const pathname = usePathname();
 
+  /*
+    Which cycle these links belong to.
+
+    ⛔ A relative href in NAV_ITEMS is scoped to the year; an absolute one is
+    not. The deep dives used to be flat siblings that each picked "whichever
+    survey sorted first", so the sidebar could take you to a different year
+    than the page you were on. Elections keeps audit and proxies under the
+    cycle for exactly this reason.
+
+    Off a cycle there is no year to carry, and guessing one is how you act on
+    the wrong survey — so a scoped item is HIDDEN rather than pointed at the
+    list. Four nav entries leading to the same page is not navigation.
+  */
+  const year = pathname.match(/^\/benchmarking\/admin\/(\d{4})(?:\/|$)/)?.[1] ?? null;
+  const hrefFor = (href: string): string | null =>
+    href.startsWith("/") ? href : year ? `/benchmarking/admin/${year}/${href}` : null;
+
   // Show only what this person can actually open. A link that bounces you is
   // worse than no link: it reads as broken software rather than as a boundary.
   // "Explanations" was the standing example — visible to anyone in the shell,
@@ -112,15 +129,17 @@ export default function AdminSidebar({
         </h2>
         <ul className="space-y-1">
           {visibleItems.map((item) => {
+            const target = hrefFor(item.href);
+            if (!target) return null;
             const isActive =
               item.href === "/benchmarking/admin"
-                ? pathname === "/benchmarking/admin"
-                : pathname.startsWith(item.href);
+                ? /^\/benchmarking\/admin(?:\/\d{4})?$/.test(pathname)
+                : pathname.startsWith(target);
 
             return (
               <li key={item.href}>
                 <Link
-                  href={item.href}
+                  href={target}
                   className={`flex items-center gap-2.5 px-3 py-2 rounded-lg text-sm font-medium transition-colors ${
                     isActive
                       ? "bg-red-50 text-[#EE2A2E]"

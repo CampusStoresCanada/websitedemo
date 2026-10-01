@@ -7,7 +7,13 @@ import FacilitatorBoard from "@/components/benchmarking/review/FacilitatorBoard"
 
 export const metadata = { title: "Question Review | Benchmarking Admin" };
 
-export default async function ReviewAdminPage() {
+export default async function ReviewAdminPage({
+  params,
+}: {
+  params: Promise<{ year: string }>;
+}) {
+  const { year } = await params;
+
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/review"));
   if (!isGlobalAdmin(auth.ctx.globalRole)) redirect("/benchmarking");
@@ -18,8 +24,8 @@ export default async function ReviewAdminPage() {
   const { data: surveys } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
-    .order("fiscal_year", { ascending: false })
-    .limit(1)) as { data: any[] | null };
+    // ⛔ The cycle named in the route, not whichever sorted first.
+    .eq("fiscal_year", Number(year))) as { data: any[] | null };
 
   const survey = surveys?.[0] ?? null;
   if (!survey) {

@@ -35,7 +35,18 @@ export default async function BenchmarkingCyclePage({
     .select("*")
     .order("fiscal_year", { ascending: false })) as { data: any[] | null };
 
-  const latestSurvey = surveys?.[0] ?? null;
+  /*
+    ⛔ The cycle named in the ROUTE, not whichever survey sorted first.
+
+    This page was a dashboard that showed the newest survey with a picker card
+    in the middle to change it, so the year you acted on was implied. A
+    transition pressed against "whatever was newest" has no undo.
+  */
+  const latestSurvey =
+    (surveys ?? []).find((s: { fiscal_year: number }) => String(s.fiscal_year) === year) ?? null;
+
+  // A year with no cycle is a 404, never a silent fall back to another one.
+  if (!latestSurvey) notFound();
 
   // Response rate for latest survey
   let responseRate = { totalMemberOrgs: 0, drafts: 0, submitted: 0, verified: 0 };

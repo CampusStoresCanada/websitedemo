@@ -156,7 +156,7 @@ export default function SubmissionsTable({ submissions, fiscalYear }: Submission
                     </td>
                     <td className="px-4 py-3 text-right">
                       <Link
-                        href={`/benchmarking/admin/submissions/${s.id}`}
+                        href={`/benchmarking/admin/${fiscalYear}/submissions/${s.id}`}
                         className="text-xs text-[#EE2A2E] hover:underline font-medium"
                       >
                         View

@@ -48,7 +48,13 @@ const fmt = (n: number | null, field: string) => {
     : `$${Math.round(n).toLocaleString("en-CA")}`;
 };
 
-export default async function BenchmarkingDriftPage() {
+export default async function BenchmarkingDriftPage({
+  params,
+}: {
+  params: Promise<{ year: string }>;
+}) {
+  const { year } = await params;
+
   const guard = await requireAdmin();
   if (!guard.ok) redirect("/benchmarking");
 

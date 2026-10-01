@@ -383,7 +383,7 @@ export default function DeltaFlagsTable({
                           {saving === flag.id ? "..." : "Reject"}
                         </button>
                         <Link
-                          href={`/benchmarking/admin/submissions/${flag.benchmarkingId}`}
+                          href={`/benchmarking/admin/${fiscalYear}/submissions/${flag.benchmarkingId}`}
                           className="px-4 py-1.5 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 transition-colors"
                         >
                           View Submission

@@ -134,7 +134,7 @@ export async function resolveFieldReview(
     return { success: false, error: "Could not resolve" };
   }
 
-  revalidatePath("/benchmarking/admin/review");
+  revalidatePath("/benchmarking/admin", "layout");
   return { success: true };
 }
 
@@ -237,7 +237,7 @@ export async function applyFieldReview(
     })
     .eq("id", reviewId);
 
-  revalidatePath("/benchmarking/admin/review");
+  revalidatePath("/benchmarking/admin", "layout");
   revalidatePath("/benchmarking/survey");
   return { success: true };
 }

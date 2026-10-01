@@ -24,7 +24,13 @@ export const metadata = {
  * Gated on the capability rather than on being Sean, so it becomes the next
  * secretary's queue the day the office changes hands.
  */
-export default async function BenchmarkingNotesPage() {
+export default async function BenchmarkingNotesPage({
+  params,
+}: {
+  params: Promise<{ year: string }>;
+}) {
+  const { year } = await params;
+
   const auth = await requireAuthenticated();
   if (!auth.ok) redirect(loginWithNext("/benchmarking/admin/notes"));
 

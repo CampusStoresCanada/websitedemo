@@ -152,7 +152,7 @@ export async function notifyLeadOfPendingNote(input: {
 
   lines.push("It won't go to the store until you've had a look at it.");
 
-  await butlerDM(emails, lines, "Review it here", `${APP_URL}/benchmarking/admin/notes`);
+  await butlerDM(emails, lines, "Review it here", `${APP_URL}/benchmarking/admin`);
 }
 
 /** The lead said yes. Now the store decides whether it's happy to be described. */
@@ -188,6 +188,6 @@ export async function notifyAuthorOfOutcome(input: {
     emails,
     [line],
     "See it",
-    `${APP_URL}/benchmarking/admin/notes`,
+    `${APP_URL}/benchmarking/admin`,
   );
 }

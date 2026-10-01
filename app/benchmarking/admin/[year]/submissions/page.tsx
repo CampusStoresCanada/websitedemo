@@ -5,7 +5,13 @@ import { opensBenchmarkingAdmin } from "@/lib/auth/capability-names";
 import { createClient } from "@/lib/supabase/server";
 import SubmissionsTable from "@/components/benchmarking/admin/SubmissionsTable";
 
-export default async function SubmissionsPage() {
+export default async function SubmissionsPage({
+  params,
+}: {
+  params: Promise<{ year: string }>;
+}) {
+  const { year } = await params;
+
   // Gated here and not only in the layout. A page that relies on its parent
   // for authorisation is one refactor away from being wide open, and this one
   // lists named member stores.
@@ -23,9 +29,9 @@ export default async function SubmissionsPage() {
   const { data: latestSurvey } = (await (supabase as any)
     .from("benchmarking_surveys")
     .select("*")
-    .order("fiscal_year", { ascending: false })
-    .limit(1)
-    .single()) as { data: any };
+    // ⛔ The cycle named in the route, not whichever sorted first.
+    .eq("fiscal_year", Number(year))
+    .maybeSingle()) as { data: any };
 
   if (!latestSurvey) {
     return (
