@@ -3,6 +3,10 @@
 import { useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { setRecipientBeta } from "@/lib/actions/benchmarking-recipients";
+import {
+  peopleAtOrgForAppointment,
+  appointToCapability,
+} from "@/lib/actions/capability-appointments";
 
 /**
  * Picking the stores that go first.
@@ -17,6 +21,8 @@ import { setRecipientBeta } from "@/lib/actions/benchmarking-recipients";
 
 interface Store {
   id: string;
+  /** The ORGANISATION, not the recipient row — appointments are per store. */
+  orgId: string;
   orgName: string;
   province: string;
   isBeta: boolean;
@@ -26,7 +32,19 @@ interface Store {
   hasBetaTester: boolean;
 }
 
-export default function BetaCohort({ stores }: { stores: Store[] }) {
+export default function BetaCohort({
+  stores,
+  appointmentEndsOn,
+  fiscalYear,
+}: {
+  stores: Store[];
+  /**
+   * When a beta appointment lapses. ⛔ EXCLUSIVE: capability_contributions
+   * tests `term_end > today`, so this must be the day AFTER their last.
+   */
+  appointmentEndsOn: string;
+  fiscalYear: number;
+}) {
   const router = useRouter();
   const [query, setQuery] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
@@ -81,13 +99,10 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
             Some of these stores cannot open the survey yet
           </p>
           <p className="mt-1 text-xs text-red-900">
-            Being in the cohort decides who gets the going-first email. Opening the
-            survey before it is public is a separate appointment, made on the{" "}
-            <a href="/benchmarking/admin" className="underline">
-              benchmarking admin page
-            </a>{" "}
-            under Beta tester. Send without it and they get a link to a locked door. The
-            send panel below will refuse those stores until somebody is appointed.
+            Being in the cohort decides who gets the going-first email. Somebody
+            at the store also has to be named, or the email arrives before anyone
+            there can open the survey. Name them on the store below. The send
+            panel will refuse any store without one.
           </p>
         </div>
       )}
@@ -95,10 +110,8 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
       {inCohort.length > 0 ? (
         <ul className="mb-5 space-y-2">
           {inCohort.map((s) => (
-            <li
-              key={s.id}
-              className="flex items-center justify-between rounded-lg bg-gray-50 p-3"
-            >
+            <li key={s.id} className="rounded-lg bg-gray-50 p-3">
+              <div className="flex items-center justify-between">
               <span className="flex items-center gap-2">
                 <span className="text-sm font-medium text-gray-900">
                   {s.orgName}
@@ -130,6 +143,30 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
               >
                 {saving === s.id ? "..." : "Remove"}
               </button>
+              </div>
+              {/*
+                ⛔ Naming the person happens HERE, not on another page.
+
+                The cohort and the appointment were two controls on two pages
+                pointing in opposite directions: one invites a store, the other
+                appoints a person, and nothing on either said they were halves
+                of the same act. The operator had to know that sending without
+                the second mails a link to a locked door.
+
+                Same appointToCapability the committee console calls, so there
+                is still one appointment mechanism. What is different here is
+                the CANDIDATE LIST: only people with an active link to this
+                store, because a beta tester unblocks their own store and
+                nobody else's.
+              */}
+              {!s.invited && (
+                <NameTheTester
+                  store={s}
+                  endsOn={appointmentEndsOn}
+                  fiscalYear={fiscalYear}
+                  onError={setError}
+                />
+              )}
             </li>
           ))}
         </ul>
@@ -193,6 +230,126 @@ export default function BetaCohort({ stores }: { stores: Store[] }) {
         <p className="mt-2 text-xs text-gray-500">
           No stores match that, or they are already in the cohort.
         </p>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────
+
+/**
+ * Naming the person who will go first at one store.
+ *
+ * Loads candidates only when opened: the cohort is small but the page already
+ * does enough work, and nobody needs 52 stores' staff lists fetched to render
+ * four rows.
+ */
+function NameTheTester({
+  store,
+  endsOn,
+  fiscalYear,
+  onError,
+}: {
+  store: Store;
+  endsOn: string;
+  fiscalYear: number;
+  onError: (m: string | null) => void;
+}) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [people, setPeople] = useState<
+    { id: string; name: string; alreadyHolds: boolean }[] | null
+  >(null);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function openPicker() {
+    setOpen(true);
+    if (people) return;
+    setLoading(true);
+    const rows = await peopleAtOrgForAppointment(store.orgId);
+    setPeople(rows);
+    setLoading(false);
+  }
+
+  async function appoint(subjectId: string, name: string) {
+    setBusy(subjectId);
+    onError(null);
+    const result = await appointToCapability({
+      subjectId,
+      capability: "benchmarking.beta_tester",
+      reason: `Beta tester for the FY${fiscalYear} benchmarking survey`,
+      endsAt: endsOn,
+    });
+    setBusy(null);
+    if (!result.success) {
+      onError(result.error ?? `Could not appoint ${name}.`);
+      return;
+    }
+    setOpen(false);
+    router.refresh();
+  }
+
+  if (store.hasBetaTester && !open) {
+    return (
+      <div className="mt-2 flex items-center gap-2 border-t border-gray-200 pt-2">
+        <span className="text-xs text-green-700">Someone here is named</span>
+        <button
+          onClick={openPicker}
+          className="text-xs text-gray-500 underline underline-offset-2 hover:text-gray-900"
+        >
+          Name someone else
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="mt-2 border-t border-gray-200 pt-2">
+      {!open ? (
+        <button
+          onClick={openPicker}
+          className="text-xs font-medium text-[#163D6D] underline underline-offset-2"
+        >
+          Name who goes first here
+        </button>
+      ) : (
+        <div>
+          {loading && <p className="text-xs text-gray-500">Loading people…</p>}
+          {people && people.length === 0 && (
+            <p className="text-xs text-amber-800">
+              Nobody at this store has a login yet, so there is nobody who could
+              open the survey. Invite someone from the store&rsquo;s own page
+              first.
+            </p>
+          )}
+          {people && people.length > 0 && (
+            <ul className="divide-y divide-gray-200 rounded border border-gray-200 bg-white">
+              {people.map((p) => (
+                <li key={p.id} className="flex items-center justify-between px-2 py-1.5">
+                  <span className="text-sm text-gray-900">{p.name}</span>
+                  {p.alreadyHolds ? (
+                    <span className="text-xs text-green-700">already named</span>
+                  ) : (
+                    <button
+                      onClick={() => appoint(p.id, p.name)}
+                      disabled={busy !== null}
+                      className="text-xs font-medium text-[#163D6D] underline underline-offset-2 disabled:opacity-50"
+                    >
+                      {busy === p.id ? "…" : "Name them"}
+                    </button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+          <button
+            onClick={() => setOpen(false)}
+            className="mt-2 text-xs text-gray-500 underline underline-offset-2"
+          >
+            Never mind
+          </button>
+        </div>
       )}
     </div>
   );
