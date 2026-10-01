@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { previewSend, sendInvitations, sendReminders } from "@/lib/actions/benchmarking-recipients";
+import { useSearchParams } from "next/navigation";
 
 /**
  * The control that puts mail into 52 real inboxes.
@@ -53,7 +54,17 @@ export default function SendPanel({
   surveyId: string;
   surveyStatus: string;
 }) {
-  const [kind, setKind] = useState<Kind>("invitation");
+  /*
+    Arriving from a timeline step that says "Send a reminder" should put you on
+    the reminder, not on the panel's default with the right option one more
+    click away. ⛔ Preselects only; the preview is still a deliberate press and
+    nothing sends without the confirmation, because arriving by link must never
+    be mistaken for intent to send.
+  */
+  const requestedKind = useSearchParams().get("send");
+  const [kind, setKind] = useState<Kind>(
+    requestedKind === "reminder" ? "reminder" : "invitation",
+  );
   const [plan, setPlan] = useState<PlanShape | null>(null);
   const [confirmText, setConfirmText] = useState("");
   const [busy, setBusy] = useState(false);

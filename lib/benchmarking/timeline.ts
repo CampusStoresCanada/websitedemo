@@ -164,7 +164,21 @@ export function buildBenchmarkingTimeline(
     on: null,
     until: null,
     windowLabel: null,
-    state: !now("open") && !past("open") ? "blocked" : facts.invited > 0 ? "done" : "current",
+    /*
+      ⛔ past("open") means DONE, whatever the count says.
+
+      This read "invited > 0 ? done : current", so a finished cycle whose
+      recipient rows had been cleared came back as current — FY2025, complete
+      since last year, announced "Invite the stores" on the calendar dated
+      today. A step cannot still be waiting in a cycle that has been published.
+    */
+    state: past("open")
+      ? "done"
+      : !now("open")
+        ? "blocked"
+        : facts.invited > 0
+          ? "done"
+          : "current",
     detail:
       facts.invited > 0
         ? `${facts.invited} of ${facts.recipientsTotal} invited.`
@@ -259,5 +273,71 @@ export const STAGE_TRANSITIONS: Record<string, SurveyState> = {
 export function transitionTargets(): SurveyState[] {
   return SURVEY_LADDER.map((d) => d.state).filter((s) =>
     Object.values(STAGE_TRANSITIONS).includes(s),
+  );
+}
+
+/**
+ * The same stages, with the facts fetched for you.
+ *
+ * ⛔ Mirrors getElectionTimeline: one call that gathers and builds, so every
+ * consumer agrees. The admin spine and the calendar both want this cycle's
+ * stages, and two places assembling the facts is two places to drift — which
+ * is precisely what the calendar's own hardcoded election milestones were.
+ *
+ * The builder above stays pure and is what the tests exercise. This is the
+ * only part that touches the database.
+ */
+export async function getBenchmarkingTimeline(
+  surveyId: string,
+  onDate?: string,
+): Promise<TimelineStage[] | null> {
+  const { createAdminClient } = await import("@/lib/supabase/admin");
+  const db = createAdminClient();
+
+  const { data: survey } = await db
+    .from("benchmarking_surveys")
+    .select("id, fiscal_year, status, opens_at, closes_at")
+    .eq("id", surveyId)
+    .maybeSingle();
+  if (!survey) return null;
+
+  const [recipients, submissions, holders, flags] = await Promise.all([
+    db.from("benchmarking_recipients").select("status, invited_at").eq("survey_id", surveyId),
+    db.from("benchmarking").select("status").eq("fiscal_year", survey.fiscal_year),
+    db
+      .from("capability_contributions")
+      .select("subject_id")
+      .eq("capability", "benchmarking.beta_tester")
+      .eq("is_active", true),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (db as any)
+      .from("delta_flags")
+      .select("id, benchmarking!inner(fiscal_year)", { count: "exact", head: true })
+      .eq("committee_status", "pending")
+      .eq("benchmarking.fiscal_year", survey.fiscal_year),
+  ]);
+
+  const recips = (recipients.data ?? []) as { status: string; invited_at: string | null }[];
+  const subs = (submissions.data ?? []) as { status: string }[];
+
+  return buildBenchmarkingTimeline(
+    {
+      fiscalYear: survey.fiscal_year as number,
+      status: (survey.status as string) ?? "draft",
+      opensAt: (survey.opens_at as string | null) ?? null,
+      closesAt: (survey.closes_at as string | null) ?? null,
+      recipientsTotal: recips.length,
+      recipientsConfirmed: recips.filter(
+        (r) => r.status === "confirmed" || r.status === "corrected",
+      ).length,
+      betaTestersAppointed: (holders.data ?? []).length,
+      invited: recips.filter((r) => r.invited_at !== null).length,
+      drafts: subs.filter((s) => s.status === "draft").length,
+      submitted: subs.filter((s) => s.status === "submitted").length,
+      openFlags: (flags as { count: number | null }).count ?? 0,
+      reviewDone: 0,
+      reviewTotal: 0,
+    },
+    onDate ?? new Date().toISOString().slice(0, 10),
   );
 }

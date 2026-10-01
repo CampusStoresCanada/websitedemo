@@ -117,6 +117,21 @@ export async function syncAndFetchCalendar(
 
   const projected: ProjectedRow[] = [];
 
+  /*
+    Scopes a source evaluated successfully but produced NO rows for.
+
+    ⛔ The prune is deliberately scoped to prefixes it wrote, because a failed
+    query is indistinguishable from "nothing is scheduled" and must never look
+    like permission to delete. That leaves one gap: an entity that legitimately
+    has nothing left to show keeps its last row forever. FY2025 benchmarking,
+    published and finished, went on advertising "Invite the stores" dated today.
+
+    A source that KNOWS it evaluated an entity can say so here, and the prune
+    treats the scope as owned even though it is empty. Opt-in, so every source
+    that does not bother keeps the safe behaviour.
+  */
+  const ownedScopes = new Set<string>();
+
   // ── 1. Conference instances ──────────────────────────────────────
   const { data: conferences } = await supabase
     .from("conference_instances")
@@ -238,11 +253,55 @@ export async function syncAndFetchCalendar(
     .from("benchmarking_surveys")
     .select("id, title, fiscal_year, status, opens_at, closes_at");
 
-  for (const s of surveys ?? []) {
-    const label = s.title ?? `FY${s.fiscal_year} Survey`;
-    const meta  = { survey_title: s.title, fiscal_year: s.fiscal_year, survey_status: s.status };
-    if (s.opens_at)  projected.push(makeProjected(`Benchmarking: ${label} Opens`,  "Benchmarking survey opens for member organization submissions.", "membership", "people", new Date(s.opens_at),  null, "benchmarking_survey", s.id, "opens",  now, meta));
-    if (s.closes_at) projected.push(makeProjected(`Benchmarking: ${label} Closes`, "Deadline for benchmarking survey submissions.", "membership", "people", new Date(s.closes_at), null, "benchmarking_survey", s.id, "closes", now, meta));
+  /*
+    ⛔ From the cycle's own timeline, exactly like elections above.
+
+    This block projected two dates, Opens and Closes, read straight off the
+    columns. Everything else the cycle does — appointing the testers, beta,
+    inviting, the chase, closing, interpretation, publication — was invisible
+    here, so the calendar showed a survey as two days a year. The spine on
+    /benchmarking/admin already knows all of it.
+  */
+  if ((surveys ?? []).length > 0) {
+    const { getBenchmarkingTimeline } = await import("@/lib/benchmarking/timeline");
+
+    /** Steps that are a standing job rather than a day to keep. */
+    const NOT_ON_CALENDAR = new Set(["question_review", "recipients", "interpretation"]);
+
+    for (const s of surveys ?? []) {
+      const stages = await getBenchmarkingTimeline(s.id as string);
+      if (!stages) continue;
+      // Resolved, so whatever it yields is the whole truth for this survey.
+      ownedScopes.add(`benchmarking_survey:${s.id}:`);
+
+      const label = s.title ?? `FY${s.fiscal_year} Survey`;
+      const meta = { survey_title: s.title, fiscal_year: s.fiscal_year, survey_status: s.status };
+
+      for (const stage of stages) {
+        if (NOT_ON_CALENDAR.has(stage.key)) continue;
+        if (stage.state === "not_applicable") continue;
+
+        /*
+          A stage with no date of its own still belongs on the calendar when it
+          is the step the cycle is sitting on — "this is happening now" is the
+          thing an operator is looking for. Undated future steps are not placed,
+          because inventing a date for them would be a guess on a calendar.
+        */
+        const on = stage.on ?? (stage.state === "current" ? now.toISOString().slice(0, 10) : null);
+        if (!on) continue;
+
+        projected.push(makeProjected(
+          `Benchmarking ${s.fiscal_year}: ${stage.label}`,
+          `${stage.detail}`.trim() || null,
+          "membership",
+          stage.key === "open" || stage.key === "closed" ? "people" : "admin_ops",
+          new Date(`${on}T09:00:00-05:00`),
+          stage.until ? new Date(`${stage.until}T09:00:00-05:00`) : null,
+          "benchmarking_survey", s.id as string, stage.key, now,
+          { ...meta, stage_state: stage.state, cycle_label: label }
+        ));
+      }
+    }
   }
 
   // ── 9. Billing runs ──────────────────────────────────────────────
@@ -456,6 +515,7 @@ export async function syncAndFetchCalendar(
     for (const el of electionsData ?? []) {
       const stages = await getElectionTimeline(el.slug as string);
       if (!stages) continue;
+      ownedScopes.add(`election:${el.id}:`);
 
       const draftNote = el.status === "draft"
         ? " ⚠ This election is still a draft, so nothing will fire automatically."
@@ -557,7 +617,10 @@ export async function syncAndFetchCalendar(
       .map((p) => p.source_key)
       .filter((k): k is string => typeof k === "string" && k.length > 0);
     const writtenKeys = new Set(written);
-    const scopes = new Set(written.map((k) => k.split(":").slice(0, 2).join(":") + ":"));
+    const scopes = new Set([
+      ...written.map((k) => k.split(":").slice(0, 2).join(":") + ":"),
+      ...ownedScopes,
+    ]);
 
     const { data: existing, error: existingErr } = await supabase
       .from("calendar_items")

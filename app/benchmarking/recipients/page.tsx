@@ -294,7 +294,11 @@ export default async function RecipientsPage() {
               participatedLastYear: i.participatedLastYear,
             }))}
           />
-          <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
+          {/* Anchored, so a timeline step lands on the panel rather than the
+              top of a long queue. */}
+          <div id="send">
+            <SendPanel surveyId={survey.id} surveyStatus={survey.status} />
+          </div>
         </div>
       )}
     </>

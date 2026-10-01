@@ -4,6 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import AssignPanel from "@/components/benchmarking/committee/AssignPanel";
 import { CAPABILITIES, CAPABILITY_LABELS } from "@/lib/auth/capability-names";
+import { useSearchParams } from "next/navigation";
 
 /**
  * Staffing the benchmarking committee, from the benchmarking dashboard.
@@ -64,7 +65,19 @@ export default function CommitteeCard({
 }: {
   holders: CommitteeHolder[];
 }) {
-  const [assigning, setAssigning] = useState<string | null>(null);
+  /*
+    A step on the timeline that says "Appoint someone" should APPOINT someone.
+
+    ⛔ It used to be an anchor to this card, which scrolled you to the bottom of
+    the page and left you to find the right slot and press its button. Arriving
+    with ?assign=<capability> opens that slot's panel, so the click does the
+    thing it names. The capability is matched against the slots this card
+    renders, so a hand-typed value opens nothing rather than inventing a slot.
+  */
+  const requested = useSearchParams().get("assign");
+  const [assigning, setAssigning] = useState<string | null>(
+    requested && SLOTS.some((s) => s.capability === requested) ? requested : null,
+  );
   const [error, setError] = useState<string | null>(null);
 
   return (
