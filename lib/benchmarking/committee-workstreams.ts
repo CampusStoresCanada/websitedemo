@@ -22,6 +22,16 @@ export interface Workstream {
   href: string;
   /** How "done" is measured, shown against live numbers. */
   doneWhen: string;
+  /**
+   * Set when this capability is NOT appointed from the committee surfaces.
+   *
+   * ⛔ One appointment path per capability, always. A beta tester is named
+   * beside the store they are going first for, because the cohort flag and the
+   * appointment are halves of one act and splitting them across pages is how
+   * you mail somebody a link to a locked door. The committee surfaces link
+   * here rather than offering a second control.
+   */
+  appointedAt?: { label: string; href: string };
 }
 
 export const WORKSTREAMS: Workstream[] = [
@@ -70,26 +80,24 @@ export const WORKSTREAMS: Workstream[] = [
     doneWhen: "Every active member store has a confirmed respondent",
   },
   /*
-    ⛔ This entry is the whole appointment mechanism, not a description of it.
+    Beta testing is a workstream for the TASK, not for the appointment.
 
-    The capability, the role mapping, the survey unlock, the invitation guard
-    and the wipe all existed and were all tested, and none of it was reachable:
-    CommitteeConsole appoints by mapping this array, and app/benchmarking/page
-    builds a volunteer's own task list by filtering it. Missing from here meant
-    the lead had no control to appoint a beta tester, and anyone appointed by
-    hand arrived at a page with nothing on it.
+    This entry gives an appointed tester the same task card every other
+    workstream gets on /benchmarking, and gives their invitation email its copy
+    (see appointment-invitation.ts, which looks up WORKSTREAMS and sends
+    nothing when it finds no entry).
 
-    Worse, it fails CLOSED and silently: orgsWithABetaTester blocks the going
-    first invitation for every store with nobody appointed, so an unappointable
-    capability meant a beta send that refused all of them.
+    ⛔ It does NOT create an appointment control. `appointedAt` suppresses the
+    one CommitteeConsole would otherwise render, because a beta tester is named
+    beside the store they are going first for. There was a window where the
+    cohort, the committee card and the console could each appoint this
+    capability: three ways to do one thing, and an operator could set up half a
+    send on each of two pages without either telling them.
 
-    Beta testers are member stores rather than committee volunteers, which is a
-    real difference and still not a reason for a second system. Appointment,
-    notification and the task panel are identical, so it belongs in the one
-    array. opensBenchmarkingAdmin deliberately does NOT include this capability:
-    a tester gets the survey door, never the back office.
+    opensBenchmarkingAdmin still excludes this capability: a tester gets the
+    survey door, never the back office.
   */
-  {
+ {
     capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
     title: "Beta testing",
     summary: "Fill in the survey before anyone else, and try to break it.",
@@ -101,6 +109,10 @@ export const WORKSTREAMS: Workstream[] = [
     window: "Early October, before the survey opens to everyone",
     href: "/benchmarking/survey",
     doneWhen: "Your submission is filed and anything unclear has been flagged",
+    appointedAt: {
+      label: "the beta cohort, beside the store",
+      href: "/benchmarking/recipients",
+    },
   },
 ];
 

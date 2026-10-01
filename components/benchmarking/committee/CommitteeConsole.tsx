@@ -67,7 +67,12 @@ export default function CommitteeConsole({
         {WORKSTREAMS.map((w) => {
           const people = byCapability(w.capability);
           const ceiling = delegableUntil[w.capability];
-          const canAssign = isAdmin || ceiling != null;
+          /*
+            ⛔ Never a second way to appoint. A workstream that declares
+            appointedAt is appointed on that page and nowhere else; offering a
+            control here as well is the duplication, not a convenience.
+          */
+          const canAssign = (isAdmin || ceiling != null) && !w.appointedAt;
 
           const progressLabel =
             w.capability === "benchmarking.content_review"
@@ -180,6 +185,14 @@ export default function CommitteeConsole({
                   >
                     I&rsquo;ll do this
                   </Link>
+                  {w.appointedAt && (
+                    <a
+                      href={w.appointedAt.href}
+                      className="text-xs font-medium text-[#163D6D] underline underline-offset-2"
+                    >
+                      Named in {w.appointedAt.label}
+                    </a>
+                  )}
                   {canAssign && (
                     <button
                       onClick={() =>

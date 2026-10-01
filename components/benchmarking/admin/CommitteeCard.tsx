@@ -21,6 +21,12 @@ import { CAPABILITIES, CAPABILITY_LABELS } from "@/lib/auth/capability-names";
  * trail of its own, and it stays on the grants board.
  */
 
+/*
+  ⛔ No Beta tester slot. It is appointed on /benchmarking/recipients, beside
+  the store it is going first for, and this card offering a second Assign
+  control for the same capability is exactly the duplication that had an
+  operator setting up one half of a send on each of two pages.
+*/
 const SLOTS = [
   {
     capability: CAPABILITIES.BENCHMARKING_COMMITTEE_LEAD,
@@ -38,11 +44,6 @@ const SLOTS = [
   {
     capability: CAPABILITIES.BENCHMARKING_RECIPIENT_CONFIRM,
     blurb: "Confirms who actually runs each store in their region.",
-  },
-  {
-    capability: CAPABILITIES.BENCHMARKING_BETA_TESTER,
-    blurb:
-      "Fills the survey before it opens and tries to break it. Their answers count as a real submission, and they can wipe them and start again.",
   },
 ] as const;
 
