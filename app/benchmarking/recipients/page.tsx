@@ -53,9 +53,28 @@ export default async function RecipientsPage() {
     .eq("survey_id", survey.id);
   // Reps see their own region; the office sees everything.
   if (!admin) query = query.eq("assigned_to", userId);
-  const { data: rows } = (await query) as { data: any[] | null };
+  const rawRows = ((await query) as { data: any[] | null }).data ?? [];
 
-  const recipients = rows ?? [];
+  /*
+    ⛔ Test organisations are filtered at READ, not only when the queue is built.
+
+    The builder already excludes them and so does the send, but a row written
+    before those filters existed sat here looking exactly like a real
+    recipient — a test store among the ones this survey is addressed to. A
+    filter that only runs at creation cannot clean up after itself, and the row
+    it leaves behind is indistinguishable from a store somebody is about to
+    mail.
+  */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data: testOrgs } = (await (supabase as any)
+    .from("organizations")
+    .select("id")
+    .eq("is_test", true)) as { data: { id: string }[] | null };
+  const testOrgIds = new Set((testOrgs ?? []).map((o) => o.id));
+
+  const recipients = rawRows.filter(
+    (r: { organization_id: string }) => !testOrgIds.has(r.organization_id),
+  );
   const orgIds = recipients.map((r) => r.organization_id);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

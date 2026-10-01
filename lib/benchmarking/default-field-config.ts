@@ -493,7 +493,15 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
     {
       id: "general_merchandise",
       title: "General Merchandise",
-      description: "The categories you carry, in the same words the rest of the association uses. Say which ones you sell, break any of them into subcategories if that is how you run them, and leave the rest alone. Merchandise income that fits none of these belongs in Other Income.",
+      /*
+        The last two sentences exist because stores were entering zeros rather
+        than admitting a split their system cannot make. A zero is a reported
+        fact: online share of sales is a published comparison, so a store with
+        real e-commerce that cannot attribute it by category reads as having
+        none, and drags the cohort down with it. Saying up front that the total
+        can be corrected is what stops the guess.
+      */
+      description: "The categories you carry, in the same words the rest of the association uses. Say which ones you sell, break any of them into subcategories if that is how you run them, and leave the rest alone. Merchandise income that fits none of these belongs in Other Income.\n\nIf your system cannot break the figures out this way, give us what it can and leave the rest blank rather than guessing. Online sales are the usual one: plenty of systems report a single online total and cannot attribute it by category. Enter what you have here, then correct the total in section 8, Review, where you can overwrite any calculated figure and tell us why. Your explanation is published beside the number, so nobody reads it without the context.",
       order: 2,
       fields: [
         {
@@ -660,7 +668,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
     {
       id: "course_materials",
       title: "Course Materials",
-      description: "Course materials on the same category lines as everything else. The questions below are the ones that only make sense for course materials.",
+      description: "Course materials on the same category lines as everything else. The questions below are the ones that only make sense for course materials.\n\nIf your system cannot separate these cleanly, give us what it can. Course-required materials are the usual one: art supplies and the like often sit in the same bucket whether a course asked for them or not, and whether the buyer was a student or the public. Enter what you have here, then correct the total in section 8, Review, where you can overwrite any calculated figure and say what it actually includes. Your explanation is published beside the number.",
       order: 3,
       fields: [
         {

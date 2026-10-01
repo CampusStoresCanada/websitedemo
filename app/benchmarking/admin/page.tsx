@@ -7,7 +7,7 @@ import ResponseRateCard from "@/components/benchmarking/admin/ResponseRateCard";
 import { createAdminClient } from "@/lib/supabase/admin";
 import CommitteeCard from "@/components/benchmarking/admin/CommitteeCard";
 import CycleTimeline from "@/components/admin/elections/ElectionTimeline";
-import { buildBenchmarkingTimeline, STAGE_TRANSITIONS } from "@/lib/benchmarking/timeline";
+import { getBenchmarkingTimeline } from "@/lib/benchmarking/timeline";
 import type { TimelineStage } from "@/lib/elections/timeline";
 import { updateSurveyStatus } from "@/lib/actions/benchmarking-admin";
 import SendPanel from "@/components/benchmarking/recipients/SendPanel";
@@ -138,55 +138,19 @@ export default async function BenchmarkingAdminPage() {
     exactly like buildElectionTimeline. One extra query, for the recipient
     queue — everything else is already loaded above for the cards.
   */
-  let timeline: TimelineStage[] | null = null;
-  if (latestSurvey) {
-    const db = createAdminClient();
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const { data: recipientRows } = (await (db as any)
-      .from("benchmarking_recipients")
-      .select("status, invited_at")
-      .eq("survey_id", latestSurvey.id)) as { data: { status: string; invited_at: string | null }[] | null };
-
-    const recips = recipientRows ?? [];
-    const betaTesters = holders.filter(
-      (h) => h.capability === "benchmarking.beta_tester",
-    ).length;
-
-    timeline = buildBenchmarkingTimeline(
-      {
-        fiscalYear: latestSurvey.fiscal_year,
-        status: (latestSurvey.status as string) ?? "draft",
-        opensAt: (latestSurvey.opens_at as string | null) ?? null,
-        closesAt: (latestSurvey.closes_at as string | null) ?? null,
-        recipientsTotal: recips.length,
-        recipientsConfirmed: recips.filter(
-          (r) => r.status === "confirmed" || r.status === "corrected",
-        ).length,
-        betaTestersAppointed: betaTesters,
-        invited: recips.filter((r) => r.invited_at !== null).length,
-        drafts: responseRate.drafts,
-        submitted: responseRate.submitted,
-        openFlags: pendingFlagCount,
-        // Question review reads the newest survey whatever its status; its
-        // progress is not on this page, so the stage reports what it knows.
-        reviewDone: 0,
-        reviewTotal: 0,
-      },
-      new Date().toISOString().slice(0, 10),
-    );
-  }
-
   /*
-    Where each step goes. A path navigates; a function runs here.
+    ⛔ One gatherer, not a second set of the same queries.
 
-    ⛔ Keyed by STAGE, the way the component expects, so a step and its action
-    cannot drift apart. Every transition goes through updateSurveyStatus, which
-    enforces the ladder server-side — the timeline offering a move is not the
-    same as the server accepting it, and that gap is exactly what made `beta`
-    unreachable.
+    This assembled the facts inline while getBenchmarkingTimeline assembled
+    them for the calendar, so the two could disagree — and did: the recipient
+    count here included a test store the queue excluded.
   */
+  const timeline: TimelineStage[] | null = latestSurvey
+    ? await getBenchmarkingTimeline(latestSurvey.id as string)
+    : null;
+
   const surveyId = latestSurvey?.id as string | undefined;
+
   const send = (kind: "invitation" | "reminder") => async () => {
     "use server";
     if (!surveyId) return;

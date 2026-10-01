@@ -302,7 +302,19 @@ export async function getBenchmarkingTimeline(
   if (!survey) return null;
 
   const [recipients, submissions, holders, flags] = await Promise.all([
-    db.from("benchmarking_recipients").select("status, invited_at").eq("survey_id", surveyId),
+    /*
+      ⛔ organizations!inner so a TEST store cannot be counted.
+
+      The queue builder and the send both exclude test organisations, but this
+      counted every row — so the spine said "52 of 53" while the queue said
+      "52 of 52", and the extra one was a test store sitting among the real
+      recipients. A filter at creation does not clean up rows written before it.
+    */
+    db
+      .from("benchmarking_recipients")
+      .select("status, invited_at, organizations!inner(is_test)")
+      .eq("survey_id", surveyId)
+      .not("organizations.is_test", "is", true),
     db.from("benchmarking").select("status").eq("fiscal_year", survey.fiscal_year),
     db
       .from("capability_contributions")
