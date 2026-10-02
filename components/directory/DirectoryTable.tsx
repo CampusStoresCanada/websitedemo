@@ -8,6 +8,7 @@ import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import type { HomeMapOrg } from "@/lib/homepage";
 import { getPartnerOrgProfile, getMemberOrgProfile, type PartnerOrgProfile, type MemberOrgProfile } from "@/lib/actions/partner-context";
 import { CertificationBadges } from "@/components/ui/CertificationBadges";
+import SignInLink from "@/components/auth/SignInLink";
 
 // ---------------------------------------------------------------------------
 // Category colour mapping
@@ -848,12 +849,11 @@ export default function DirectoryTable({
           <div className="flex flex-col gap-3">
             {isReturningVisitor ? (
               <>
-                <a
-                  href="/login"
+                <SignInLink
                   className="w-full inline-flex items-center justify-center rounded-xl bg-[#1A1A1A] px-5 py-3 text-sm font-medium text-white hover:bg-gray-800 transition-colors"
                 >
                   Sign In
-                </a>
+                </SignInLink>
                 <a
                   href="/membership"
                   className="w-full inline-flex items-center justify-center rounded-xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
@@ -869,12 +869,11 @@ export default function DirectoryTable({
                 >
                   Join CSC
                 </a>
-                <a
-                  href="/login"
+                <SignInLink
                   className="w-full inline-flex items-center justify-center rounded-xl border border-gray-200 px-5 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50 transition-colors"
                 >
                   Sign In
-                </a>
+                </SignInLink>
               </>
             )}
           </div>

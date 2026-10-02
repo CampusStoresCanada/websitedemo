@@ -21,6 +21,7 @@ import type { AssignableMember } from "@/lib/renewal/outreach";
 import type { RenewalSnapshot, RenewalDelta } from "@/lib/renewal/snapshot";
 import type { BoardRenewalReport, BoothGapOrgRow } from "@/lib/renewal/board-report";
 import { DateTimeRange } from "@/components/ui/LocalDate";
+import SignInLink from "@/components/auth/SignInLink";
 
 export const revalidate = 30;
 
@@ -274,12 +275,9 @@ export default async function EventDetailPage({
               <p className="text-blue-800 font-medium mb-3">
                 This is a members-only event. Sign in to view full details and register.
               </p>
-              <a
-                href="/login"
-                className="inline-block px-5 py-2.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white font-semibold text-sm transition-colors"
-              >
+              <SignInLink className="inline-block px-5 py-2.5 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white font-semibold text-sm transition-colors">
                 Sign In
-              </a>
+              </SignInLink>
             </div>
           ) : null}
 
@@ -452,7 +450,7 @@ export default async function EventDetailPage({
             <p className="text-sm text-gray-500">
               <strong className="text-gray-900">{attendeeData.total}</strong>{" "}
               {attendeeData.total === 1 ? "person is" : "people are"} coming.{" "}
-              <a href="/login" className="text-[#EE2A2E] hover:underline">Sign in</a> to see who.
+              <SignInLink className="text-[#EE2A2E] hover:underline">Sign in</SignInLink> to see who.
             </p>
           )}
         </div>

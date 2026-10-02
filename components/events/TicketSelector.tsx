@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import type { AvailableTicket, LockedTicket } from "@/lib/events/tickets";
 import { registerWithTicket, createEventCheckoutSession } from "@/lib/actions/event-tickets";
+import SignInLink from "@/components/auth/SignInLink";
 
 interface TicketSelectorProps {
   eventId: string;
@@ -25,12 +26,11 @@ export default function TicketSelector({
 
   if (!isAuthenticated) {
     return (
-      <a
-        href="/login"
+      <SignInLink
         className="block w-full text-center px-5 py-3 rounded-xl bg-[#EE2A2E] hover:bg-[#D92327] text-white font-semibold text-sm transition-colors"
       >
         Sign in to Register
-      </a>
+      </SignInLink>
     );
   }
 
@@ -41,12 +41,11 @@ export default function TicketSelector({
   // All tickets are locked for this user — show why but no register CTA
   if (available.length === 0 && locked.length > 0 && !isAuthenticated) {
     return (
-      <a
-        href="/login"
+      <SignInLink
         className="block w-full text-center px-5 py-3 rounded-xl bg-[#EE2A2E] hover:bg-[#D92327] text-white font-semibold text-sm transition-colors"
       >
         Sign in to Register
-      </a>
+      </SignInLink>
     );
   }
 

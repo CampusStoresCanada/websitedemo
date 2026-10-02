@@ -1,4 +1,4 @@
-import Link from "next/link";
+import SignInLink from "@/components/auth/SignInLink";
 
 /**
  * Benchmarking preview for anonymous users.
@@ -66,12 +66,11 @@ export default function BenchmarkingPreview() {
               comparisons and reporting.
             </p>
           </div>
-          <Link
-            href="/login"
+          <SignInLink
             className="flex-shrink-0 px-6 py-2.5 bg-[#1A1A1A] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
           >
             Sign In to Access
-          </Link>
+          </SignInLink>
         </div>
       </div>
     </section>

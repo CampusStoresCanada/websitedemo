@@ -3,6 +3,7 @@
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import { registerForEvent, cancelRegistration } from "@/lib/actions/event-registration";
+import SignInLink from "@/components/auth/SignInLink";
 
 interface EventRegistrationButtonProps {
   eventId: string;
@@ -34,12 +35,11 @@ export default function EventRegistrationButton({
   if (!isAuthenticated) {
     return (
       <div className="space-y-2">
-        <a
-          href="/login"
+        <SignInLink
           className="block w-full text-center px-6 py-3 rounded-lg bg-[#EE2A2E] hover:bg-[#D92327] text-white font-semibold transition-colors"
         >
           Sign in to Register
-        </a>
+        </SignInLink>
         {isMembersOnly && (
           <p className="text-sm text-center text-gray-500">Members only event</p>
         )}

@@ -6,6 +6,7 @@ import { LINK_TYPE_LABELS } from "@/lib/partner-links";
 import type { ViewerLevel } from "@/lib/visibility/defaults";
 import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import PartnerLinksEditor from "./PartnerLinksEditor";
+import SignInLink from "@/components/auth/SignInLink";
 
 // ---------------------------------------------------------------------------
 // Link type icons (inline SVG, no external dep)
@@ -91,13 +92,12 @@ function GatedPlaceholder({
           <p className="text-xs text-gray-400 mt-0.5 mb-3">
             Catalogues and price lists are available to members.
           </p>
-          <a
-            href="/login"
+          <SignInLink
             className="inline-block px-4 py-1.5 rounded-full text-xs font-semibold text-white transition-all hover:opacity-90"
             style={{ backgroundColor: primaryColor }}
           >
             Log in
-          </a>
+          </SignInLink>
         </>
       ) : (
         <>
@@ -113,12 +113,11 @@ function GatedPlaceholder({
             >
               Become a member
             </a>
-            <a
-              href="/login"
+            <SignInLink
               className="inline-block text-xs font-medium text-gray-500 hover:text-gray-700"
             >
               Log in
-            </a>
+            </SignInLink>
           </div>
         </>
       )}

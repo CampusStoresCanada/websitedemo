@@ -6,6 +6,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { hasPermission } from "@/lib/auth/permissions";
 import { hadPriorSession } from "@/lib/auth/persona-cookie";
 import { decryptPayload } from "@/lib/auth/crypto";
+import { useLoginHref } from "@/components/auth/SignInLink";
 import type { PermissionState, EncryptedField } from "@/lib/auth/types";
 
 // ─── Page owner context ────────────────────────────────────────────────────────
@@ -133,6 +134,8 @@ export default function GreyBlur({
   const [decryptedData, setDecryptedData] = useState<unknown>(null);
   const [isDecrypting, setIsDecrypting] = useState(false);
   const gateState = useViewerGateState(user);
+  // Above the early return below — this is a hook.
+  const loginHref = useLoginHref();
 
   const isAuthorized = isPageOwner || (!isLoading && (() => {
     if (requiredPermission === "survey_participant") {
@@ -184,6 +187,15 @@ export default function GreyBlur({
     secondaryCta = content.secondaryCta;
     secondaryLink = content.secondaryLink;
   }
+
+  /*
+    ⛔ Every "/login" that reaches here, whoever set it, becomes a link that
+    comes back. getGatedContent's literals, the two above, and a caller's
+    ctaLink="/login" all land in `link`/`secondaryLink`, so normalising here is
+    the one place that cannot be half-done.
+  */
+  if (link === "/login") link = loginHref;
+  if (secondaryLink === "/login") secondaryLink = loginHref;
 
   return (
     <div className="relative">
@@ -271,6 +283,7 @@ export function ProtectedSection({
   const { permissionState, isLoading, isSurveyParticipant, user } = useAuth();
   const isPageOwner = useIsPageOwner();
   const gateState = useViewerGateState(user);
+  const loginHref = useLoginHref();
 
   const isAuthorized = bypass || isPageOwner || (!isLoading && (() => {
     if (requiredPermission === "survey_participant") {
@@ -308,6 +321,10 @@ export function ProtectedSection({
     secondaryCta = content.secondaryCta;
     secondaryLink = content.secondaryLink;
   }
+
+  // Same normalisation as GreyBlur above, same reason.
+  if (link === "/login") link = loginHref;
+  if (secondaryLink === "/login") secondaryLink = loginHref;
 
   return (
     <ProtectedSectionContext.Provider value={{ isAuthorized, requiredPermission }}>

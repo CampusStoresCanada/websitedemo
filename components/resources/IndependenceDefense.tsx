@@ -1,6 +1,7 @@
 import Link from "next/link";
 import type { SiteContentWithContact } from "@/lib/data";
 import { fieldProps } from "@/lib/editable-fields";
+import SignInLink from "@/components/auth/SignInLink";
 
 interface IndependenceDefenseProps {
   content: SiteContentWithContact | null;
@@ -53,12 +54,22 @@ export default function IndependenceDefense({ content }: IndependenceDefenseProp
                   </li>
                 ))}
               </ul>
-              <Link
-                href={ctaHref}
-                className="inline-flex h-12 px-6 items-center bg-[#EE2A2E] hover:bg-[#D92327] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
-              >
-                {ctaText}
-              </Link>
+              {/*
+                The CTA href is CMS-configurable, so only the sign-in fallback
+                needs the return path — a curated cta_href goes where it says.
+              */}
+              {ctaHref === "/login" ? (
+                <SignInLink className="inline-flex h-12 px-6 items-center bg-[#EE2A2E] hover:bg-[#D92327] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25">
+                  {ctaText}
+                </SignInLink>
+              ) : (
+                <Link
+                  href={ctaHref}
+                  className="inline-flex h-12 px-6 items-center bg-[#EE2A2E] hover:bg-[#D92327] text-white font-medium rounded-full transition-all hover:shadow-lg hover:shadow-red-500/25"
+                >
+                  {ctaText}
+                </Link>
+              )}
             </div>
 
             <div className="hidden lg:flex items-center justify-center">

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import SignInLink from "@/components/auth/SignInLink";
 
 export interface ThreeDoorsProps {
   isLoggedIn: boolean;
@@ -326,7 +327,7 @@ function BenchmarkingCTA({
       </Link>
       <p className="text-xs text-gray-400">
         Already a member?{" "}
-        <Link href="/login" className="text-[#163D6D] hover:underline">Sign in</Link>
+        <SignInLink className="text-[#163D6D] hover:underline">Sign in</SignInLink>
       </p>
     </div>
   );

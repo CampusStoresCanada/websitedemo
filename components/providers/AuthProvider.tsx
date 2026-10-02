@@ -22,6 +22,7 @@ import type {
 } from "@/lib/auth/types";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import type { PresentationLevel } from "@/lib/presentation/mode";
+import { loginWithNext } from "@/lib/auth/login-redirect";
 
 // Client-safe fallback matching lib/policy/engine.ts's server-only
 // defaultMembershipPrograms() — only used if this provider somehow mounts
@@ -88,7 +89,6 @@ interface AuthContextValue {
   setDevSurveyParticipantOverride: (override: boolean | null) => void;
   requiresReauth: boolean;
   reauthMessage: string | null;
-  reauthUrl: string;
   reauthCountdownSeconds: number;
   idleWarningVisible: boolean;
   idleSecondsRemaining: number;
@@ -117,7 +117,6 @@ const AuthContext = createContext<AuthContextValue>({
   setDevSurveyParticipantOverride: () => {},
   requiresReauth: false,
   reauthMessage: null,
-  reauthUrl: "/login",
   reauthCountdownSeconds: 0,
   idleWarningVisible: false,
   idleSecondsRemaining: 0,
@@ -271,7 +270,6 @@ export function AuthProvider({
   const [requiresReauth, setRequiresReauth] = useState(false);
   const [reauthMessage, setReauthMessage] = useState<string | null>(null);
   const [reauthCountdownSeconds, setReauthCountdownSeconds] = useState(0);
-  const [reauthUrl] = useState("/login");
   const [idleWarningVisible, setIdleWarningVisible] = useState(false);
   const [idleSecondsRemaining, setIdleSecondsRemaining] = useState(0);
   // Programs config rarely changes (admin-edited only) — reuse the SSR-seeded
@@ -947,14 +945,20 @@ export function AuthProvider({
     }, 250);
 
     const timer = setTimeout(() => {
-      window.location.assign(reauthUrl);
+      // Back to the page the expired session was on. ⛔ Computed here, not
+      // from usePathname in this provider: it wraps the whole app, so a
+      // pathname hook here would re-render every consumer on each navigation.
+      const path = window.location.pathname;
+      window.location.assign(
+        path.startsWith("/login") ? "/login" : loginWithNext(path),
+      );
     }, REAUTH_REDIRECT_DELAY_MS);
 
     return () => {
       clearInterval(tick);
       clearTimeout(timer);
     };
-  }, [requiresReauth, reauthUrl]);
+  }, [requiresReauth]);
 
   const signOut = useCallback(async () => {
     // Clear local state immediately - don't wait for network
@@ -1022,7 +1026,17 @@ export function AuthProvider({
             path:
               typeof window !== "undefined" ? window.location.pathname : null,
           });
-          window.location.assign("/login?reason=idle_timeout");
+          /*
+            Come back to the page they were timed out of. ⛔ Without the
+            destination an idle timeout mid-task dumps them on the homepage
+            after they re-authenticate, which reads as "it lost my work".
+            Not from a hook — this runs in a timer callback.
+          */
+          const timedOutPath = window.location.pathname;
+          const returnTo = timedOutPath.startsWith("/login")
+            ? "/login"
+            : loginWithNext(timedOutPath);
+          window.location.assign(`${returnTo}${returnTo.includes("?") ? "&" : "?"}reason=idle_timeout`);
         });
         return;
       }
@@ -1103,7 +1117,6 @@ export function AuthProvider({
       setDevSurveyParticipantOverride,
       requiresReauth,
       reauthMessage,
-      reauthUrl,
       reauthCountdownSeconds,
       idleWarningVisible,
       idleSecondsRemaining,
@@ -1128,7 +1141,6 @@ export function AuthProvider({
       devSurveyParticipantOverride,
       requiresReauth,
       reauthMessage,
-      reauthUrl,
       reauthCountdownSeconds,
       idleWarningVisible,
       idleSecondsRemaining,

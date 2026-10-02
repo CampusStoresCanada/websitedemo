@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
+import { useLoginHref } from "@/components/auth/SignInLink";
 
 interface JoinCTAProps {
   /** Message to display. Defaults based on auth state. */
@@ -25,13 +26,14 @@ export default function JoinCTA({
   compact = false,
 }: JoinCTAProps) {
   const { user } = useAuth();
+  const loginHref = useLoginHref();
 
   const defaultMessage = user
     ? "This information is available to CSC members"
     : "Sign in to view full details";
 
   const defaultCtaText = user ? "Join CSC" : "Sign In";
-  const defaultCtaLink = user ? "/membership" : "/login";
+  const defaultCtaLink = user ? "/membership" : loginHref;
 
   const resolvedMessage = message ?? defaultMessage;
   const resolvedCtaText = ctaText ?? defaultCtaText;

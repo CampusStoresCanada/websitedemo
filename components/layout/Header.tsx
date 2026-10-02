@@ -9,6 +9,7 @@ import { useAuth } from "@/components/providers/AuthProvider";
 import { CONFERENCE_CART_UPDATED_EVENT, type ConferenceCartUpdatedDetail } from "@/lib/conference/cart-events";
 import { hadPriorSession, hasKnownAccountPersona } from "@/lib/auth/persona-cookie";
 import type { PlatformIdentity } from "@/lib/data";
+import { useLoginHref } from "@/components/auth/SignInLink";
 
 const ROLE_BADGES: Record<string, { label: string; color: string }> = {
   super_admin: { label: "Super Admin", color: "bg-purple-100 text-purple-700" },
@@ -109,6 +110,7 @@ export default function Header({
   const alertMenuRef = useRef<HTMLDivElement>(null);
 
   const pathname = usePathname();
+  const loginHref = useLoginHref();
   const searchParams = useSearchParams();
   const {
     user,
@@ -120,7 +122,6 @@ export default function Header({
     signOut,
     requiresReauth,
     reauthMessage,
-    reauthUrl,
     reauthCountdownSeconds,
     idleWarningVisible,
     idleSecondsRemaining,
@@ -483,7 +484,7 @@ export default function Header({
               {reauthCountdownSeconds > 0 ? ` Redirecting in ${reauthCountdownSeconds}s.` : ""}
             </span>
             <Link
-              href={reauthUrl}
+              href={loginHref}
               className="shrink-0 inline-flex items-center px-3 py-1.5 rounded-md bg-amber-700 text-white text-xs font-medium hover:bg-amber-800 transition-colors"
             >
               Sign in again
@@ -858,7 +859,7 @@ export default function Header({
               </div>
             ) : isKnownPersona ? (
               // Known member/org admin/admin/partner, signed out — decisive nudge, no join upsell
-              <Link href="/login" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+              <Link href={loginHref} className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
                 Sign In
               </Link>
             ) : hadSession ? (
@@ -867,7 +868,7 @@ export default function Header({
                 <Link href="/membership" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
                   Become a Member
                 </Link>
-                <Link href="/login" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
+                <Link href={loginHref} className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
                   Sign In
                 </Link>
               </>
@@ -876,7 +877,7 @@ export default function Header({
               // this is a brand-new prospect or an existing member who's
               // never logged in on this browser, so offer both paths.
               <>
-                <Link href="/login" className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
+                <Link href={loginHref} className="hidden sm:inline text-sm font-medium text-[#6B6B6B] hover:text-[#1A1A1A]">
                   Sign In
                 </Link>
                 <Link href="/membership" className="h-8 px-4 bg-[var(--brand-red)] hover:bg-[var(--brand-red-hover)] text-white text-sm font-medium rounded-md flex items-center">
@@ -938,7 +939,7 @@ export default function Header({
                 <div className="pt-2 mt-1 border-t border-gray-100 flex flex-col gap-2">
                   {isKnownPersona ? (
                     <Link
-                      href="/login"
+                      href={loginHref}
                       className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
                     >
                       Sign In
@@ -946,7 +947,7 @@ export default function Header({
                   ) : hadSession ? (
                     <>
                       <Link
-                        href="/login"
+                        href={loginHref}
                         className="px-3 py-2 rounded-md bg-[var(--brand-red)] text-white text-sm font-medium text-center"
                       >
                         Sign In
@@ -967,7 +968,7 @@ export default function Header({
                         Become a Member
                       </Link>
                       <Link
-                        href="/login"
+                        href={loginHref}
                         className="px-3 py-2 rounded-md text-sm font-medium text-[#6B6B6B] hover:bg-gray-50 text-center"
                       >
                         Sign In

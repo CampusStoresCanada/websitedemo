@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
-import Link from "next/link";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { maySeeCancoll } from "@/lib/visibility/cancoll";
 import { hasPermission } from "@/lib/auth/permissions";
@@ -26,6 +25,7 @@ import {
   type MemberOrgProfile,
 } from "@/lib/actions/partner-context";
 import { GroupSummary } from "@/components/explore/GroupSummary";
+import SignInLink from "@/components/auth/SignInLink";
 
 const DirectoryTable = dynamic(
   () => import("@/components/directory/DirectoryTable"),
@@ -1755,15 +1755,14 @@ function DiscoveryMenu({
             <p className="text-sm text-gray-600 mb-3">
               Sign in to access contact details, benchmarking data, and deeper comparisons.
             </p>
-            <Link
-              href="/login"
+            <SignInLink
               className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#1A1A1A] text-white text-sm font-medium rounded-full hover:bg-gray-800 transition-colors"
             >
               Sign In
               <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
               </svg>
-            </Link>
+            </SignInLink>
           </div>
         </>
       )}

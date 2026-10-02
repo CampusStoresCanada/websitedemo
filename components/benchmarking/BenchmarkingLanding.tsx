@@ -5,6 +5,7 @@ import { formatDeadline } from "@/lib/benchmarking/deadline";
 import type { BenchmarkingSurvey } from "@/lib/types/db";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { parseUTC } from "@/lib/utils";
+import SignInLink from "@/components/auth/SignInLink";
 
 export interface BenchmarkingTask {
   title: string;
@@ -167,12 +168,11 @@ export default function BenchmarkingLanding({
             <p className="text-gray-600 mb-4">
               Sign in with your CSC member account to access the benchmarking survey.
             </p>
-            <Link
-              href="/login"
+            <SignInLink
               className="inline-block px-6 py-2.5 bg-[#EE2A2E] text-white rounded-lg font-medium hover:bg-[#D92327] transition-colors"
             >
               Sign In
-            </Link>
+            </SignInLink>
           </div>
         ) : !userOrgInfo ? (
           /* Logged in but not associated with a member org */
