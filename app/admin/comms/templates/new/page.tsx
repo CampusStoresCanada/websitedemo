@@ -2,6 +2,7 @@ import { createTemplate } from "@/lib/comms/templates";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import type { TemplateCategory } from "@/lib/comms/types";
+import { TEMPLATE_CATEGORY_OPTIONS } from "@/lib/comms/template-categories";
 import type { ContentBlock } from "@/lib/comms/blocks/types";
 import TemplateVariablesAndBody from "@/components/comms/TemplateVariablesAndBody";
 import PreviewEmailButton from "@/components/comms/PreviewEmailButton";
@@ -10,14 +11,6 @@ import UnsavedChangesGuard from "@/components/comms/UnsavedChangesGuard";
 export const metadata = {
   title: "New Template | Communications | Admin | Campus Stores Canada",
 };
-
-const CATEGORY_LABELS: { value: TemplateCategory; label: string }[] = [
-  { value: "general",    label: "General" },
-  { value: "membership", label: "Membership" },
-  { value: "renewal",    label: "Renewal" },
-  { value: "conference", label: "Conference" },
-  { value: "user_mgmt",  label: "User Management" },
-];
 
 async function handleCreate(formData: FormData) {
   "use server";
@@ -88,7 +81,7 @@ export default async function NewTemplatePage({
               defaultValue="general"
               className="mt-1 block w-full rounded-lg border border-gray-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#163D6D]/30 focus:border-[#163D6D]"
             >
-              {CATEGORY_LABELS.map((c) => (
+              {TEMPLATE_CATEGORY_OPTIONS.map((c) => (
                 <option key={c.value} value={c.value}>{c.label}</option>
               ))}
             </select>
