@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { formatDeadline } from "@/lib/benchmarking/deadline";
+import { surveyState } from "@/lib/benchmarking/lifecycle";
 import type { BenchmarkingSurvey } from "@/lib/types/db";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { parseUTC } from "@/lib/utils";
@@ -25,6 +26,16 @@ interface BenchmarkingLandingProps {
     orgSlug: string | null;
     isOrgAdmin: boolean;
   } | null;
+  /*
+    The fiscal year this viewer may actually file, decided server-side by
+    resolveSurveyAccess — the same gate /benchmarking/survey uses.
+
+    ⛔ Never re-derive this from a status here. This component matched
+    `status === "open"`, so a survey in `beta` had no Start button and no
+    explanation, and the Continue button for a half-finished draft vanished
+    with it. One question, answered once, upstream.
+  */
+  fileableFiscalYear: number | null;
   existingDraft: {
     id: string;
     status: string;
@@ -37,6 +48,7 @@ export default function BenchmarkingLanding({
   tasks,
   surveys,
   userOrgInfo,
+  fileableFiscalYear,
   existingDraft,
 }: BenchmarkingLandingProps) {
   const { user, permissionState, organizations, isBenchmarkingReviewer, presentationMode } =
@@ -49,7 +61,10 @@ export default function BenchmarkingLanding({
   // so it is suppressed: on a screen share it both contradicts the member view
   // being demonstrated and leads to an interstitial.
   const hasAdminAccess = (isAdmin || isBenchmarkingReviewer) && presentationMode === null;
-  const activeSurvey = surveys.find((s) => s.status === "open");
+  const activeSurvey =
+    fileableFiscalYear === null
+      ? undefined
+      : surveys.find((s) => s.fiscal_year === fileableFiscalYear);
   const latestSurvey = surveys[0];
 
   return (
@@ -132,31 +147,20 @@ export default function BenchmarkingLanding({
             <SurveyStatusBadge status={latestSurvey.status ?? "draft"} />
           </div>
 
-          {latestSurvey.status === "open" && (
-            <div className="text-sm text-gray-600">
-              {latestSurvey.closes_at && (
-                <p>
-                  Closes:{" "}
-                  {formatDeadline(latestSurvey.closes_at)}
-                </p>
+          {/*
+            ⛔ Every state says something, because the ladder has an answer for
+            every state. Three hand-written branches covered open, complete,
+            draft and closed — so `beta` and `processing` printed NOTHING, and a
+            card with a badge and no sentence reads as a survey that has passed
+            you by.
+          */}
+          <div className="text-sm text-gray-600">
+            <p>{surveyState(latestSurvey.status ?? "draft")?.meaning}</p>
+            {latestSurvey.closes_at &&
+              (latestSurvey.status === "open" || latestSurvey.status === "beta") && (
+                <p className="mt-1">Closes: {formatDeadline(latestSurvey.closes_at)}</p>
               )}
-            </div>
-          )}
-
-          {latestSurvey.status === "complete" && (
-            <p className="text-sm text-gray-600">
-              This survey has been completed. Results are available in your
-              organization profile.
-            </p>
-          )}
-
-          {(latestSurvey.status === "draft" || latestSurvey.status === "closed") && (
-            <p className="text-sm text-gray-600">
-              {latestSurvey.status === "draft"
-                ? "This survey is being prepared and will open soon."
-                : "This survey has closed for submissions. Results are being processed."}
-            </p>
-          )}
+          </div>
         </div>
       )}
 
@@ -196,9 +200,12 @@ export default function BenchmarkingLanding({
           /* Org admin, nothing open yet */
           <div className="py-4 text-center">
             <p className="text-gray-600">
-              There is no survey currently open for submissions.
-              {latestSurvey?.status === "draft" &&
-                " The next survey is being prepared."}
+              There is no survey open to you yet.
+              {latestSurvey?.status === "beta"
+                ? " A few stores are going first to shake out the questions; yours opens to everyone shortly."
+                : latestSurvey?.status === "draft"
+                  ? " The next survey is being prepared."
+                  : ""}
             </p>
             {/*
               The worksheet belongs HERE most of all. It exists so a store can

@@ -18,6 +18,7 @@ export default async function BenchmarkingPage() {
       <BenchmarkingLanding
         surveys={[]}
         userOrgInfo={null}
+        fileableFiscalYear={null}
         existingDraft={null}
         tasks={[]}
       />
@@ -31,6 +32,11 @@ export default async function BenchmarkingPage() {
     .select("*")
     .order("fiscal_year", { ascending: false })
     .limit(2)) as { data: any[] | null };
+
+  // The survey this viewer can file right now, if any. Resolved below by the
+  // same gate the survey page uses, never by matching on status.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let activeSurvey: any = null;
 
   // If logged in, check their org role and survey status
   let userOrgInfo: {
@@ -82,10 +88,42 @@ export default async function BenchmarkingPage() {
         isOrgAdmin: memberOrg.role === "org_admin",
       };
 
-      // Check for existing draft/submission for current survey year
-      const activeSurvey = surveys?.find(
-        (s) => s.status === "open" || s.status === "draft"
-      );
+      /*
+        Which survey can THIS person file right now.
+
+        ⛔ Not a status list. This page had one ("open" or "draft"), the landing
+        component had a second ("open"), and neither learned that `beta` exists
+        when the ladder gained it — so pressing Start beta testing moved the
+        survey out of the only set this page recognised and hid it from the
+        seven people the same button had just emailed. A beta tester saw "There
+        is no survey currently open for submissions", which reads as too late,
+        and Tina Shannon reported exactly that within the hour.
+
+        resolveSurveyAccess already answers this, it is what /benchmarking/survey
+        gates on, and a second opinion about who may file is how the two screens
+        disagreed in the first place.
+      */
+      const { hasCapability } = await import("@/lib/auth/capabilities");
+      const { resolveSurveyAccess } = await import("@/lib/benchmarking/survey-access");
+      const isAdmin =
+        auth?.globalRole === "admin" || auth?.globalRole === "super_admin";
+      const isBetaTester = userId
+        ? await hasCapability(userId, CAPABILITIES.BENCHMARKING_BETA_TESTER)
+        : false;
+
+      for (const s of surveys ?? []) {
+        const access = await resolveSurveyAccess({
+          surveyId: s.id,
+          surveyStatus: s.status,
+          organizationId: org.id,
+          isAdmin,
+          isBetaTester,
+        });
+        if (access.canFile) {
+          activeSurvey = s;
+          break;
+        }
+      }
 
       if (activeSurvey) {
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -145,6 +183,7 @@ export default async function BenchmarkingPage() {
       surveys={surveys ?? []}
       userOrgInfo={userOrgInfo}
       existingDraft={existingDraft}
+      fileableFiscalYear={activeSurvey?.fiscal_year ?? null}
     />
   );
 }
