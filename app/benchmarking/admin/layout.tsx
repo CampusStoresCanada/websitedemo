@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { isGlobalAdmin, requireAuthenticated } from "@/lib/auth/guards";
-import { loginWithNext } from "@/lib/auth/login-redirect";
+import { headers } from "next/headers";
+import { loginPathFromHeaders } from "@/lib/auth/request-path";
 import {
   CAPABILITIES,
   opensBenchmarkingAdmin,
@@ -33,7 +34,12 @@ export default async function BenchmarkingAdminLayout({
   children: React.ReactNode;
 }) {
   const auth = await requireAuthenticated();
-  if (!auth.ok) redirect(loginWithNext("/benchmarking/admin"));
+  // The exact page, from proxy.ts — a layout is told nothing about the child
+  // path. ⛔ This matters most for the flag DM, whose whole point is to land
+  // someone on /benchmarking/admin/issues.
+  if (!auth.ok) {
+    redirect(loginPathFromHeaders(await headers(), "/benchmarking/admin"));
+  }
 
   const { globalRole, capabilities } = auth.ctx;
   const isAdmin = isGlobalAdmin(globalRole);

@@ -1,6 +1,11 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/middleware";
 import { getCurrentConferencePath } from "@/lib/conference/current";
+import {
+  REQUEST_PATHNAME_HEADER,
+  REQUEST_SEARCH_HEADER,
+  needsRequestPathStamp,
+} from "@/lib/auth/request-path";
 
 const EVENTS_DOMAIN_HOSTS = new Set(["campusstores.events", "www.campusstores.events"]);
 const CANONICAL_ORIGIN = "https://www.campusstores.ca";
@@ -20,7 +25,32 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  return await updateSession(request);
+  /*
+    Carry the requested path into the areas gated in a layout.
+
+    ⛔ A layout gate fires before the page's own guard, and Next tells a layout
+    nothing about the child path. So a signed-out visitor to /admin/renewals got
+    sent to the admin dashboard, and the exact loginWithNext("/admin/renewals")
+    that page makes for itself never ran. This is the only way those gates can
+    name where someone was going.
+
+    Which areas, and why they are a list rather than the whole site: see
+    LAYOUT_GATED_PREFIXES. This proxy already runs on every request for the
+    Supabase session refresh, so the stamp is scoped rather than the matcher.
+    Setting rather than appending also means a client that sends its own
+    x-csc-pathname has it overwritten on exactly the paths that trust it.
+  */
+  const { pathname, search } = request.nextUrl;
+
+  return await updateSession(
+    request,
+    needsRequestPathStamp(pathname)
+      ? {
+          [REQUEST_PATHNAME_HEADER]: pathname,
+          [REQUEST_SEARCH_HEADER]: search,
+        }
+      : undefined,
+  );
 }
 
 export const config = {

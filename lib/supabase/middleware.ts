@@ -9,10 +9,30 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
   ]);
 }
 
-export async function updateSession(request: NextRequest) {
-  let supabaseResponse = NextResponse.next({
-    request,
-  });
+export async function updateSession(
+  request: NextRequest,
+  /**
+   * Extra request headers to hand downstream, for callers that need a server
+   * component to see something only the proxy knows (see lib/auth/request-path.ts).
+   *
+   * ⛔ Applied by re-snapshotting request.headers at each NextResponse.next()
+   * below rather than once up front. request.cookies.set() rewrites the
+   * `cookie` request header in place, so a snapshot taken before the refresh
+   * would hand downstream the *stale* cookies and log people out at random —
+   * exactly the failure the comments below warn about.
+   */
+  extraRequestHeaders?: Record<string, string>,
+) {
+  const nextWithExtras = () => {
+    if (!extraRequestHeaders) return NextResponse.next({ request });
+    const headers = new Headers(request.headers);
+    for (const [name, value] of Object.entries(extraRequestHeaders)) {
+      headers.set(name, value);
+    }
+    return NextResponse.next({ request: { headers } });
+  };
+
+  let supabaseResponse = nextWithExtras();
 
   // With Fluid compute, don't put this client in a global environment
   // variable. Always create a new one on each request.
@@ -28,9 +48,7 @@ export async function updateSession(request: NextRequest) {
           cookiesToSet.forEach(({ name, value }) =>
             request.cookies.set(name, value)
           );
-          supabaseResponse = NextResponse.next({
-            request,
-          });
+          supabaseResponse = nextWithExtras();
           cookiesToSet.forEach(({ name, value, options }) =>
             supabaseResponse.cookies.set(name, value, options)
           );

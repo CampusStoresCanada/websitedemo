@@ -4,7 +4,8 @@ import AdminBreadcrumbs from "@/components/admin/AdminBreadcrumbs";
 import AdminSidebar from "@/components/admin/AdminSidebar";
 import { resolveBoardRenewalWindow } from "@/lib/renewal/board-report";
 import PresentationBlock from "@/components/presentation/PresentationBlock";
-import { loginWithNext } from "@/lib/auth/login-redirect";
+import { headers } from "next/headers";
+import { loginPathFromHeaders } from "@/lib/auth/request-path";
 
 export const metadata = {
   title: "Admin | Campus Stores Canada",
@@ -22,13 +23,18 @@ export default async function AdminLayout({
       not an admin" and goes home, because sending them to login would invite
       them to try different credentials.
 
-      ⛔ /admin rather than the page they asked for. A layout is not told the
-      child path and this app has no middleware setting one, so the exact
-      destination is not knowable here. Landing on the admin dashboard is the
-      honest approximation; landing on the public homepage, which is what this
-      did, reads as "your login failed".
+      The exact page they asked for comes from proxy.ts, because Next tells a
+      layout nothing about the child path. ⛔ This gate fires before each page's
+      own guard, so this is the only place under /admin where the destination
+      can be made exact — the per-page loginWithNext calls under /admin never
+      run for a signed-out visitor. /admin is the fallback for a request that
+      somehow arrived without the stamp.
     */
-    redirect(auth.status === 401 ? loginWithNext("/admin") : "/");
+    redirect(
+      auth.status === 401
+        ? loginPathFromHeaders(await headers(), "/admin")
+        : "/",
+    );
   }
 
   // Every page under here reads through createAdminClient(), so the visibility
