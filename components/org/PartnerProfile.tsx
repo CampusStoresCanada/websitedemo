@@ -386,6 +386,9 @@ export default function PartnerProfile({
     const value = (primary || fallback) as string | null;
     if (!value) return <BlurredField placeholderWidth={type === "email" ? 20 : 12} />;
     if (isMaskedValue(value)) return <BlurredField maskedValue={value} />;
+    // In edit mode the row itself is the control (opens the contact editor), so a
+    // mailto:/tel: link here would swallow the click. Render plain text instead.
+    if (editMode) return value;
     if (type === "email") {
       return (
         <a href={`mailto:${value}`} className="hover:text-[#1A1A1A] transition-colors">
