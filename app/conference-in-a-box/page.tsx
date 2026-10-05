@@ -1,9 +1,12 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { getOptionalAuthContext } from "@/lib/auth/guards";
+import { getOptionalAuthContext, isGlobalAdmin } from "@/lib/auth/guards";
 import { SALES_OPEN_STATUSES } from "@/lib/constants/conference";
 import { formatCents } from "@/lib/utils";
+import { listConferenceOffers } from "@/lib/actions/conference-entities";
+import OfferCard from "@/components/conference/OfferCard";
+import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
 import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
 /**
@@ -27,7 +30,32 @@ export const metadata = {
 
 const OFFER_NAME = "Conference in a Box";
 
-export default async function ConferenceInABoxPage() {
+/**
+ * "Friday, November 20, 2026", not "2026-11-20".
+ *
+ * Parsed as UTC noon rather than `new Date("2026-11-20")`, which is midnight
+ * UTC and renders as the 19th for every reader west of Greenwich — i.e. every
+ * Canadian partner this page is written for.
+ */
+function formatDeadline(date: string | undefined): string {
+  if (!date) return "";
+  const [y, m, d] = date.split("-").map(Number);
+  if (!y || !m || !d) return date;
+  return new Date(Date.UTC(y, m - 1, d, 12)).toLocaleDateString("en-CA", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+    timeZone: "UTC",
+  });
+}
+
+export default async function ConferenceInABoxPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ org?: string }>;
+}) {
+  const query = await searchParams;
   const db = createAdminClient();
 
   // Which conference is selling right now — the same resolution app/org/[slug]
@@ -59,14 +87,66 @@ export default async function ConferenceInABoxPage() {
     ? (attrs.deadlines as Array<{ date?: string; label?: string; consequence?: string }>)
     : [];
 
-  // Signed in with an org? Send them to the catalogue with this offer named,
-  // where addOfferToCart already attaches a membership renewal if theirs does
-  // not cover the conference. Signed out, there is no user and no org to write
-  // a cart row against, so the pay-first path takes the purchase and the
-  // partnership in one Stripe session instead.
+  // Signed in with an org? The add-to-cart control goes HERE. Sending them to
+  // the catalogue to press the same button there is a click that buys nothing
+  // — and `OfferCard` already IS that control, with the price for this org's
+  // tier, the eligibility reason when it can't be bought, and the cart-badge
+  // event on success. Rendering it is reuse; a second button would be a second
+  // answer to "how do I buy this".
+  //
+  // addOfferToCart attaches a membership renewal in the same cart when the
+  // org's membership doesn't cover the conference, so an unrenewed partner is
+  // handled without leaving this page either.
+  //
+  // Signed out there is no user and no org to write a cart row against —
+  // cart_items.user_id and organization_id are both NOT NULL — so the pay-first
+  // path takes the purchase and the partnership in one Stripe session instead.
   const auth = await getOptionalAuthContext();
-  const signedInWithOrg = Boolean(auth && auth.activeOrgIds.length > 0);
-  const offersHref = `/conference/${conference.year}/${conference.edition_code}/offers?offer=${offer.id}#offer-${offer.id}`;
+  const cartHref = `/conference/${conference.year}/${conference.edition_code}/cart`;
+
+  // WHICH org is buying must never be a guess.
+  //
+  // The first version of this took activeOrgIds[0], which showed a partner a
+  // disabled "Only partner can buy this" whenever a member or staff org sorted
+  // first. The second picked the first org that COULD buy — which quietly
+  // charged $750 to an organisation the viewer never named. Caught by clicking
+  // it: a cart row appeared under an org I had not asked for.
+  //
+  // So: `?org=` always decides when present (a global admin may buy for any
+  // org, as on the offers page; everyone else only for their own). With one
+  // org there is nothing to choose. With several, one is used but it is NAMED
+  // on the page with a switcher beside it, so the buyer can see whose money
+  // this is before pressing the button.
+  const isAdmin = Boolean(auth && isGlobalAdmin(auth.globalRole));
+  const ownOrgIds = auth?.activeOrgIds ?? [];
+  const requestedOrgId = query.org?.trim();
+  const permittedRequest = requestedOrgId && (isAdmin || ownOrgIds.includes(requestedOrgId)) ? requestedOrgId : null;
+
+  let buyerOrgId: string | null = permittedRequest;
+  if (!buyerOrgId) {
+    for (const orgId of ownOrgIds.slice(0, 5)) {
+      const result = await listConferenceOffers(conference.id, orgId);
+      const found = result.success ? result.data.find((o) => o.id === offer.id) : undefined;
+      if (!found) continue;
+      if (!buyerOrgId || found.eligible) buyerOrgId = orgId;
+      if (found.eligible) break;
+    }
+  }
+
+  let pricedOffer = null;
+  if (buyerOrgId) {
+    const result = await listConferenceOffers(conference.id, buyerOrgId);
+    if (result.success) pricedOffer = result.data.find((o) => o.id === offer.id) ?? null;
+  }
+
+  const { data: buyerOrg } = buyerOrgId
+    ? await db.from("organizations").select("id, name").eq("id", buyerOrgId).maybeSingle()
+    : { data: null };
+
+  // Only worth a switcher when there is genuinely a choice to make.
+  const { data: switchableOrgs } = ownOrgIds.length > 1
+    ? await db.from("organizations").select("id, name").in("id", ownOrgIds).order("name")
+    : { data: null };
 
   return (
     <main className="mx-auto max-w-3xl px-4 py-12">
@@ -82,7 +162,7 @@ export default async function ConferenceInABoxPage() {
         <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
           {deadlines.map((d, i) => (
             <p key={i} className="text-sm text-amber-900">
-              <strong>{d.date}</strong>
+              <strong>{formatDeadline(d.date)}</strong>
               {d.label ? ` — ${d.label}.` : null}
               {d.consequence ? ` ${d.consequence}` : null}
             </p>
@@ -98,15 +178,31 @@ export default async function ConferenceInABoxPage() {
       ) : null}
 
       <section className="mt-10">
-        {signedInWithOrg ? (
+        {pricedOffer ? (
           <>
-            <Link
-              href={offersHref}
-              className="inline-block rounded-md bg-[#EE2A2E] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#b50001]"
-            >
-              Add it to your cart
-            </Link>
-            <p className="mt-2 text-xs text-gray-500">
+            {buyerOrg && (switchableOrgs?.length ?? 0) > 1 ? (
+              <div className="mb-3 max-w-md">
+                <AdminOrgSwitcher
+                  orgs={switchableOrgs!}
+                  selectedOrgId={buyerOrg.id}
+                  basePath="/conference-in-a-box"
+                  label="buying as"
+                />
+              </div>
+            ) : buyerOrg ? (
+              <p className="mb-3 text-sm text-gray-600">
+                Buying as <span className="font-medium text-gray-900">{buyerOrg.name}</span>.
+              </p>
+            ) : null}
+            <div className="max-w-md">
+              <OfferCard
+                offer={pricedOffer}
+                conferenceId={conference.id}
+                organizationId={buyerOrgId!}
+                goToAfterAdd={cartHref}
+              />
+            </div>
+            <p className="mt-3 text-xs text-gray-500">
               Already included with a Connected Exhibitor booth — if that is you, there is
               nothing to buy, only something to send.
             </p>
@@ -117,7 +213,7 @@ export default async function ConferenceInABoxPage() {
             <p className="mt-1 text-sm text-gray-600">
               Already a CSC partner?{" "}
               <Link
-                href={`/login?next=${encodeURIComponent(offersHref)}`}
+                href={`/login?next=${encodeURIComponent("/conference-in-a-box")}`}
                 className="font-medium text-[#EE2A2E] hover:underline"
               >
                 Sign in

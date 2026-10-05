@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
 import { addOfferToCart } from "@/lib/actions/conference-commerce";
 import { dispatchConferenceCartUpdated } from "@/lib/conference/cart-events";
 import { formatCents } from "@/lib/utils";
@@ -13,6 +14,7 @@ export default function OfferCard({
   organizationId,
   compact = false,
   highlighted = false,
+  goToAfterAdd,
 }: {
   offer: ConferenceOffer;
   conferenceId: string;
@@ -27,7 +29,10 @@ export default function OfferCard({
    *  renders with its `ineligibleReason`, and "here it is, and here is why you
    *  can't buy it" beats a catalogue the promised thing is missing from. */
   highlighted?: boolean;
+  /** Where to send the buyer once the add succeeds. Omit to stay put. */
+  goToAfterAdd?: string;
 }) {
+  const router = useRouter();
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
 
@@ -49,6 +54,11 @@ export default function OfferCard({
             }
           : { text: res.error, ok: false }
       );
+      // On a page that sells ONE thing, adding it is the whole errand — land
+      // the buyer in the cart rather than leaving them on a page whose only
+      // remaining move is to find the cart themselves. Catalogue pages pass
+      // nothing and stay put, because there you are still shopping.
+      if (res.success && goToAfterAdd) router.push(goToAfterAdd);
     });
   };
 
