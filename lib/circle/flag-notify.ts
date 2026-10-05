@@ -15,6 +15,7 @@ import { isCircleConfigured } from "./config";
 import { sendEmail } from "@/lib/email/send";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { isBenchmarkingSurveyFlag } from "@/lib/circle/flag-routing";
+import { buildFlagDm, oneLine } from "@/lib/circle/flag-message";
 import { createClient } from "@/lib/supabase/server";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "";
@@ -23,6 +24,17 @@ export interface FlagNotificationParams {
   flagId: string;
   pageUrl: string;
   elementContent: string | null;
+  /**
+   * What the member actually wrote.
+   *
+   * ⛔ The point of the whole flag. Without it the DM quotes our own page back
+   * at the person who wrote it and says somebody somewhere objects, which is
+   * not something anyone can answer — so every notification ended with "go and
+   * look at the admin panel" and the conversation died there. Karin's September
+   * flag read "Jess isn't at UofT anymore, should update the admin to be April"
+   * and the DM carried only the email address she had clicked on.
+   */
+  note: string | null;
   priority: "normal" | "high";
   organizationId: string | null;
   reporterName: string | null;
@@ -77,7 +89,7 @@ async function benchmarkingRecipients(): Promise<string[]> {
 export async function sendFlagNotification(
   params: FlagNotificationParams
 ): Promise<{ success: boolean; method?: "circle_dm" | "email" | "none"; error?: string }> {
-  const { flagId, pageUrl, elementContent, priority, organizationId } = params;
+  const { flagId, pageUrl, elementContent, note, priority, organizationId } = params;
 
   // ── 1. Find recipient(s) ─────────────────────────────────────────────────
 
@@ -143,17 +155,14 @@ export async function sendFlagNotification(
 
   const pageLink = pageUrl.startsWith("http") ? pageUrl : `${APP_URL}${pageUrl}`;
   const priorityLabel = priority === "high" ? "🔴 HIGH PRIORITY" : "🟡 Normal priority";
-  const excerpt = elementContent ? `\n\n"${elementContent.slice(0, 200)}"` : "";
-
   const reviewLink = `${pageLink}${pageLink.includes("?") ? "&" : "?"}flag=${flagId}`;
-
   const survey = isBenchmarkingSurveyFlag(pageUrl);
-
-  const dmText = survey
-    ? `${priorityLabel} — A store flagged a problem while filling the benchmarking survey.${excerpt}\n\n` +
-      `Read it and answer: ${APP_URL}/benchmarking/admin/issues`
-    : `${priorityLabel} — A CSC member flagged content as potentially incorrect.${excerpt}\n\n` +
-      `Review: ${reviewLink}`;
+  const who = params.reporterName?.trim() || "A CSC member";
+  const dmText = buildFlagDm({
+    priorityLabel, who, note, elementContent, survey,
+    issuesUrl: `${APP_URL}/benchmarking/admin/issues`,
+    reviewLink,
+  });
 
   const emailSubject = priority === "high"
     ? "🔴 HIGH PRIORITY: Content flagged on CSC site"
@@ -162,10 +171,15 @@ export async function sendFlagNotification(
   const emailHtml = `
     <div style="font-family:sans-serif;max-width:600px;margin:0 auto;">
       <h2 style="color:#163D6D;margin:0 0 8px;">${priority === "high" ? "🔴 HIGH PRIORITY — " : ""}Content Flagged</h2>
-      <p style="color:#6B7280;margin:0 0 24px;font-size:14px;">A CSC member flagged this information as potentially incorrect.</p>
+      <p style="color:#6B7280;margin:0 0 20px;font-size:14px;">${who} flagged this as potentially incorrect.</p>
+      ${note?.trim() ? `
+        <blockquote style="margin:0 0 16px;padding:12px 16px;background:#F3F4F6;border-left:3px solid #163D6D;border-radius:4px;font-size:14px;color:#111827;">
+          "${note.trim().slice(0, 600)}"
+        </blockquote>` : ""}
       ${elementContent ? `
+        <p style="margin:0 0 6px;font-size:12px;color:#6B7280;">They were looking at</p>
         <blockquote style="margin:0 0 20px;padding:10px 14px;background:#FEF9C3;border-left:3px solid #CA8A04;border-radius:4px;font-size:13px;color:#78350F;">
-          "${elementContent.slice(0, 300)}"
+          "${elementContent.replace(/\s+/g, " ").trim().slice(0, 300)}"
         </blockquote>` : ""}
       <table style="width:100%;border-collapse:collapse;margin-bottom:24px;">
         <tr>

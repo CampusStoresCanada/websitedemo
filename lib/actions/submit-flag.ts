@@ -87,6 +87,9 @@ export async function submitFlag({
       flagId: flag.id,
       pageUrl,
       elementContent: elementContent ?? null,
+      // The message itself. It was written to the row and never handed to the
+      // notifier, so it only ever existed behind the admin panel.
+      note: note?.trim() || null,
       priority,
       organizationId,
       reporterName: profile?.display_name ?? null,

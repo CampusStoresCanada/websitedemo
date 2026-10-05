@@ -92,6 +92,19 @@ export async function getCircleCutoverStatus(): Promise<CircleCutoverStatus> {
   if (!isCircleConfigured()) issues.push("Circle API credentials not configured (CIRCLE_API_KEY / CIRCLE_COMMUNITY_ID)");
   if (!process.env.CIRCLE_HEADLESS_AUTH_TOKEN) issues.push("CIRCLE_HEADLESS_AUTH_TOKEN not set — headless auth will fail");
   if (!process.env.CIRCLE_BOT_USER_ID) issues.push("CIRCLE_BOT_USER_ID not set — bot DMs disabled");
+  /*
+    ⛔ Not "DMs are disabled" — worse. getCircleGhostClient() falls back to the
+    MAIN api key, which belongs to a named super admin, so every butler message
+    in the system goes out under their name: board vote notices, action-item
+    reminders, flag notifications. And that person can then never receive one,
+    because Circle refuses a self-DM. It is silent in both directions, which is
+    how it survived until a flag notification arrived from a human being.
+  */
+  if (!process.env.CIRCLE_GHOST_KEY)
+    issues.push(
+      "CIRCLE_GHOST_KEY not set — every butler DM will be sent as the CIRCLE_API_KEY owner, " +
+      "under their own name, and that person cannot receive butler DMs at all",
+    );
   if (!process.env.CIRCLE_WEBHOOK_SECRET) issues.push("CIRCLE_WEBHOOK_SECRET not set — webhooks will be rejected");
   if (stats.linkedContacts === 0) issues.push("No contacts linked to Circle yet — run backfill first");
   if (stats.mappingEntries === 0) issues.push("circle_member_mapping table is empty — run backfill first");
