@@ -61,6 +61,49 @@ export default function PrintButton({ auto = false }: { auto?: boolean }) {
         document.addEventListener("visibilitychange", onVisible);
       });
 
+    /*
+      ⛔ Wait for THIS page to be on screen, not for the document to say it is
+      ready. Every document-level signal is stale on a client-side navigation:
+      `load` fired on whatever page you came from and never fires again,
+      `readyState` is already "complete", and `document.fonts.ready` is already
+      resolved. So arriving here from the survey's Print control — which is a
+      router.push — ran this immediately on mount and opened the dialog 50ms
+      before React had painted the worksheet. The pages came out blank, while
+      pressing the button on the page or the browser's own print worked fine,
+      because by then the content was there.
+
+      So the readiness test is the worksheet itself: the sheet is in the DOM and
+      has stopped growing across two consecutive frames. That is true on a cold
+      load and on a soft navigation, which no document-level flag is.
+    */
+    const sheetIsSettled = () =>
+      new Promise<void>((resolve) => {
+        const deadline = Date.now() + 4000;
+        let lastHeight = -1;
+        let stableFrames = 0;
+
+        const check = () => {
+          if (cancelled) return;
+          const sheet = document.querySelector<HTMLElement>("[data-worksheet]");
+          const height = sheet?.scrollHeight ?? 0;
+
+          if (height > 0 && height === lastHeight) stableFrames += 1;
+          else stableFrames = 0;
+          lastHeight = height;
+
+          /*
+            Two settled frames, or we give up and print anyway. A worksheet that
+            prints slightly early is recoverable — the reader presses print
+            again. One that never prints because a measurement never settled
+            leaves somebody staring at a page wondering what they did wrong.
+          */
+          if (stableFrames >= 2 || Date.now() > deadline) return resolve();
+          timers.push(setTimeout(check, 50));
+        };
+
+        check();
+      });
+
     const go = async () => {
       try {
         await document.fonts?.ready;
@@ -70,11 +113,9 @@ export default function PrintButton({ auto = false }: { auto?: boolean }) {
       if (cancelled) return;
       await whenVisible();
       if (cancelled) return;
-      timers.push(
-        setTimeout(() => {
-          if (!cancelled) window.print();
-        }, 50),
-      );
+      await sheetIsSettled();
+      if (cancelled) return;
+      window.print();
     };
 
     const cleanup = () => {
@@ -82,17 +123,12 @@ export default function PrintButton({ auto = false }: { auto?: boolean }) {
       timers.forEach(clearTimeout);
     };
 
-    if (document.readyState === "complete") {
-      void go();
-      return cleanup;
-    }
-
-    const onLoad = () => void go();
-    window.addEventListener("load", onLoad);
-    return () => {
-      cleanup();
-      window.removeEventListener("load", onLoad);
-    };
+    /*
+      No `load` listener any more. It cannot fire on a soft navigation, and on a
+      cold load sheetIsSettled() already covers the case it was guarding.
+    */
+    void go();
+    return cleanup;
   }, [auto]);
 
   return (

@@ -119,8 +119,19 @@ export default function WorksheetSheet({
   const closes = formatDeadline(worksheet.closesAt);
   const cols = worksheet.priorYears.length;
 
+  /*
+    ⛔ `data-worksheet` on the root below is load-bearing, not decoration.
+    PrintButton's auto mode waits for that element to stop growing before it
+    opens the print dialogue, because every document-level readiness signal is
+    already stale when you arrive here by client-side navigation. Removing the
+    attribute does not break the page — it makes the automatic print fire early
+    and come out blank, which is exactly how this was found.
+  */
   return (
-    <div className="mx-auto max-w-4xl bg-white px-6 py-8 text-black print:max-w-none print:px-0 print:py-0">
+    <div
+      data-worksheet
+      className="mx-auto max-w-4xl bg-white px-6 py-8 text-black print:max-w-none print:px-0 print:py-0"
+    >
       {/*
         Predictable paper.
 
