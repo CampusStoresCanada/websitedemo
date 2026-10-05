@@ -8,7 +8,7 @@ import { offerRequiresOwnershipOfEntityIds } from "../ownership-gate";
  *
  * The org profile used to resolve its conference only from what the org already
  * held, so an org with nothing resolved to null and saw no storefront — the
- * exact population the Hot Products Care Package is sold to. Opening that door
+ * exact population the Conference in a Box is sold to. Opening that door
  * means deciding what comes through it.
  *
  * `standalone` is the answer, and it takes TWO conditions on purpose:

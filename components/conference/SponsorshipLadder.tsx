@@ -53,8 +53,8 @@ const CONFERENCE_TIERS: ConferenceTierDef[] = [
     items: [
       "Pre-arranged, curated meetings on Tuesday — CSC matches you with the members most relevant to you, using what we already know about them",
       "A full extra day on-site (Tuesday), on top of Wednesday & Thursday on the floor",
-      "Hot Products Care Package — your item goes out to every member school, not just the ones attending",
-      "Hot Products Online Showcase — present to members ahead of the show (December–January)",
+      "Conference in a Box — your item goes out to every member school, not just the ones attending",
+      "Pre-Conference Online Showcase — present to members ahead of the show (December–January)",
     ],
   },
 ];

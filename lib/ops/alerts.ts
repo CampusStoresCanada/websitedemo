@@ -1877,8 +1877,8 @@ export async function evaluateNewPartnerAnnouncementsWaiting(): Promise<Candidat
  *  1. No checkpoints at all. The checklist is active, has tasks, renders on the
  *     org page, and sends nothing, ever. Measured 2026-09-24: two of the three
  *     active checklists on CSC 2027 were in this state.
- *  2. A task that hardens BEFORE the first checkpoint fires. The Hot Products
- *     Care Package must arrive 20 November; the Exhibitor checklist's first
+ *  2. A task that hardens BEFORE the first checkpoint fires. The Conference in a
+ *     Box must arrive 20 November; the Exhibitor checklist's first
  *     reminder goes out 27 November. Put the task there and it is first
  *     mentioned a week after it was already too late — every year.
  *

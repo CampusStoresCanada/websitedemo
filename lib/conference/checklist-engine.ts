@@ -232,7 +232,7 @@ export async function filterTasksToOrgScope<
   /**
    * Holdings of ONE named thing, rather than a class of them.
    *
-   * "Ship your Hot Products Care Package" cannot be scoped by kind: that
+   * "Ship your Conference in a Box" cannot be scoped by kind: that
    * entity is an `item`, and so are the folding tables and chairs bundled with
    * every booth, so a kind scope would ask every exhibitor to ship a care
    * package they never bought.

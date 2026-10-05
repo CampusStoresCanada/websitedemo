@@ -3,7 +3,7 @@
 // Reminders fire at checkpoints, and a checkpoint is days before the
 // CHECKLIST's deadline — never the task's. Measured on CSC 2027 (2026-09-24):
 // two of the three active checklists had no checkpoints at all, so they sent
-// nothing, ever. And the Hot Products Care Package hardens 20 November while
+// nothing, ever. And the Conference in a Box hardens 20 November while
 // the Exhibitor checklist's first reminder goes out 27 November — put it there
 // and it is first mentioned a week after it was already too late.
 //
@@ -66,7 +66,7 @@ describe("a checklist nobody will ever hear from", () => {
     // The care package: 20 Nov, against a first reminder of 27 Nov.
     CHECKLISTS = [checklist({
       conference_checklist_tasks: [
-        { name: "Ship your Hot Products Care Package", deadline_at: "2026-11-20", active: true },
+        { name: "Ship your Conference in a Box", deadline_at: "2026-11-20", active: true },
       ],
     })];
     const [alert] = await evaluateChecklistReachability();

@@ -376,7 +376,7 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
      * Every id above comes from something the org already holds — attendance or
      * an entity_balance. So an org with nothing resolved to null, the whole
      * block below was skipped, and they saw no storefront at all. That is
-     * exactly the population the Hot Products Care Package is sold to: partners
+     * exactly the population the Conference in a Box is sold to: partners
      * who want their product in every member's hands without exhibiting.
      *
      * Falling back to the open conference opens a door, so what comes through

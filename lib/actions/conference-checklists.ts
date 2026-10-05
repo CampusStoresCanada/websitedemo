@@ -108,7 +108,7 @@ export type ChecklistTaskInput = {
   scopeEntityKind?: string | null;
   /**
    * Restrict to orgs holding one NAMED thing, rather than a class of them.
-   * "Ship your Hot Products Care Package" cannot be scoped by kind: that is an
+   * "Ship your Conference in a Box" cannot be scoped by kind: that is an
    * `item`, and so are the folding tables bundled with every booth.
    * Three-state like the others — `undefined` leaves it alone.
    */

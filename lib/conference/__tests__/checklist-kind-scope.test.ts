@@ -195,7 +195,7 @@ describe("scoping a single task inside a mixed checklist", () => {
 /**
  * One NAMED thing, not a class of them.
  *
- * "Ship your Hot Products Care Package" cannot be scoped by kind: that entity
+ * "Ship your Conference in a Box" cannot be scoped by kind: that entity
  * is an `item`, and so are the folding tables and chairs bundled with every
  * booth. Scoping by kind would ask every exhibitor to ship a care package they
  * never bought — the same failure the kind column was added to fix, one grain

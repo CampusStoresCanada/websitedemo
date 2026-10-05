@@ -14,8 +14,8 @@
  *
  * And the anchor was wrong even when the rows existed. `days_before_deadline`
  * counts back from the CHECKLIST's deadline, so a task that hardens earlier
- * than the checklist is first mentioned after it is already too late — the Hot
- * Products Care Package must arrive 20 November against an Exhibitor checklist
+ * than the checklist is first mentioned after it is already too late —
+ * Conference in a Box must arrive 20 November against an Exhibitor checklist
  * whose first reminder goes out 27 November.
  *
  * So the cadence is computed from the dates the tasks already carry, anchored
