@@ -38,6 +38,14 @@ export interface FlagNotificationParams {
   priority: "normal" | "high";
   organizationId: string | null;
   reporterName: string | null;
+  /**
+   * The person who raised it, so they can be in the room.
+   *
+   * ⛔ Required for the conversation to exist at all. Without it the flag is
+   * announced at the responders and the reporter is outside the thread, which
+   * is the shape that made every flag end in the admin panel.
+   */
+  reporterEmail: string | null;
 }
 
 
@@ -202,24 +210,46 @@ export async function sendFlagNotification(
 
   // ── 3. Deliver ───────────────────────────────────────────────────────────
 
+  /*
+    One room, containing the person who raised it and the people who answer it.
+
+    ⛔ The flag used to be announced AT the responders and the reporter was never
+    in the conversation at all — not when it was raised, not when it was
+    resolved. So the only way to reply was the admin panel, and the member who
+    took the trouble to tell us something heard nothing back. Everything after
+    that is a human talking to a human, which is the point: this opens the room,
+    it is not the record. The record is the resolution, and later the appendix
+    somebody writes from it.
+
+    Butler is the sender and is in the room by virtue of sending, so it is not
+    listed. Circle keys the room to its participants, so each reporter gets one
+    continuing thread with whoever currently answers — and nothing exists until
+    the first flag.
+  */
   const ghostClient = isCircleConfigured() ? getCircleGhostClient() : null;
+  const responders = recipientEmails.filter((e) => e !== params.reporterEmail);
+  const room = [...new Set([...(params.reporterEmail ? [params.reporterEmail] : []), ...responders])];
+
   let anyDm = false;
   let anyEmail = false;
 
-  for (const email of recipientEmails) {
-    let sentViaDm = false;
+  if (ghostClient && room.length > 0) {
+    const result = await ghostClient.sendGroupDirectMessage(room, dmText);
+    if (result.success) anyDm = true;
+    else console.warn("[flag-notify] Circle group DM failed:", result.error);
+  }
 
-    if (ghostClient) {
-      const result = await ghostClient.sendDirectMessage(email, dmText);
-      if (result.success) {
-        sentViaDm = true;
-        anyDm = true;
-      } else {
-        console.warn(`[flag-notify] Circle DM failed for ${email}:`, result.error);
-      }
-    }
+  /*
+    Email only when Circle could not be reached at all. A delivered DM already
+    notifies everyone in the room through Circle's own settings — that is what
+    circle_ios_fallback_text above is for — so mailing on top would be a second
+    copy of the same thing.
 
-    if (!sentViaDm) {
+    ⛔ Responders only. The reporter does not need an email telling them that
+    they themselves flagged something.
+  */
+  if (!anyDm) {
+    for (const email of responders) {
       const result = await sendEmail({ to: email, subject: emailSubject, html: emailHtml });
       if (result.success) anyEmail = true;
       else console.warn(`[flag-notify] Email also failed for ${email}:`, result.error);

@@ -39,8 +39,19 @@ describe("the message a flag sends", () => {
 
   it("keeps the page text, but as context rather than as the message", () => {
     const dm = buildFlagDm(base);
-    expect(dm).toContain("They were on:");
-    expect(dm.indexOf(base.note)).toBeLessThan(dm.indexOf("They were on:"));
+    // What they said has to come before what they were looking at. The page
+    // text leading is what made these unanswerable.
+    expect(dm).toContain(base.elementContent);
+    expect(dm.indexOf(base.note)).toBeLessThan(dm.indexOf(base.elementContent));
+  });
+
+  it("speaks to a room the reporter is in, not to a committee about them", () => {
+    const dm = buildFlagDm(base);
+    // They can read it, so it cannot describe them in the third person as a
+    // problem to be processed elsewhere.
+    expect(dm).toContain("Reply here");
+    expect(dm).not.toContain("flagged a question");
+    expect(dm).not.toContain("Answer them directly");
   });
 
   it("says nothing at all when there is no note, rather than an empty quote", () => {

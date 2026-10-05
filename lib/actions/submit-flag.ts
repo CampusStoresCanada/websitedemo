@@ -93,6 +93,8 @@ export async function submitFlag({
       priority,
       organizationId,
       reporterName: profile?.display_name ?? null,
+      // Puts them in the room rather than making them the subject of it.
+      reporterEmail: userEmail,
     }).then(({ method }) => {
       console.log(`[flag] Flag ${flag.id} notification sent via ${method ?? "none"}`);
     }).catch((err) => {

@@ -652,6 +652,63 @@ export class CircleAdminClient {
   }
 
   /**
+   * Open (or reuse) a group conversation and post to it.
+   *
+   * Circle keys a chat room to its exact participant set, which is the whole
+   * behaviour worth knowing here. The same list of people always lands in the
+   * same room, so a second message to the same group continues the conversation
+   * rather than starting another one; a different list — one person added or
+   * removed — is a different room, and the earlier thread stays where it was.
+   * Measured, not assumed: [Helpful, Stephen] returned 41d3017a twice, and
+   * [Helpful, Stephen, Sean] returned c14515b3.
+   *
+   * Nothing is created in advance. The room comes into existence on the first
+   * send, so a member who never raises anything never has a thread.
+   *
+   * The sender is the API key's own account and is implicitly in the room, so it
+   * does not appear in `emails`.
+   */
+  async sendGroupDirectMessage(
+    emails: string[],
+    text: string
+  ): Promise<{ success: boolean; chatRoomUuid?: string; error?: string }> {
+    const recipients = [...new Set(emails.filter(Boolean))];
+    if (recipients.length === 0) return { success: false, error: "No recipients" };
+
+    try {
+      const res = await this.request<{
+        chat_room_message?: { chat_room_uuid?: string };
+      }>("POST", "/messages", {
+        body: {
+          user_emails: recipients,
+          rich_text_body: {
+            body: {
+              type: "doc",
+              content: [{ type: "paragraph", content: [{ type: "text", text }] }],
+            },
+            circle_ios_fallback_text: text,
+            format: "chat",
+            attachments: [],
+            community_members: [],
+            entities: [],
+            group_mentions: [],
+            inline_attachments: [],
+            polls: [],
+            sgids_to_object_map: {},
+          },
+        },
+      });
+      return { success: true, chatRoomUuid: res?.chat_room_message?.chat_room_uuid };
+    } catch (err) {
+      if (err instanceof CircleApiError) {
+        const body = err.responseBody as { message?: string } | null;
+        return { success: false, error: body?.message ?? err.message };
+      }
+      return { success: false, error: String(err) };
+    }
+  }
+
+  /**
    * Send a DM with a ProseMirror content array — supports bold, links, multiple
    * paragraphs, etc. Pass a plain-text fallbackText for the iOS push notification.
    *
