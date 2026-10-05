@@ -58,8 +58,19 @@ if (stored.length !== live.length) {
   console.log(`⚠️  ${stored.length - live.length} suppressed (unsubscribed) and will NOT receive it`);
 }
 
-const subjectRaw = (campaign.subject_override ?? "") as string;
-const bodyRaw = (campaign.body_override ?? "") as string;
+// Same precedence as executeCampaignSend: override first, then template.
+// Reading only the overrides made this pass vacuously once the content moved
+// into a template — an empty body has no unrendered merge fields either.
+const { getTemplateById } = await import("../lib/comms/templates");
+const tmpl = campaign.template_id ? await getTemplateById(campaign.template_id as string) : null;
+const subjectRaw = ((campaign.subject_override ?? tmpl?.subject) ?? "") as string;
+const bodyRaw = ((campaign.body_override ?? tmpl?.body_html) ?? "") as string;
+
+if (!bodyRaw.trim()) {
+  console.error("\nNOT READY — resolved body is empty (no override and no template body)");
+  process.exit(1);
+}
+console.log(`content from:         ${campaign.body_override ? "campaign override" : "template"}`);
 
 let unrendered = 0;
 const samples = new Map<string, string>();

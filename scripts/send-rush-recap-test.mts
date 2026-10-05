@@ -33,6 +33,9 @@ try {
 const { sendEmail } = await import("../lib/email/send");
 const { BRAND_RED, FONT } = await import("../lib/email/layout");
 const { localEventTimeSentence } = await import("../lib/comms/local-time");
+const { createAdminClient } = await import("../lib/supabase/admin");
+const { resolveAudience } = await import("../lib/comms/audience");
+const { getTemplateById, renderTemplate } = await import("../lib/comms/templates");
 
 // 2026-10-07 10:00 MDT. Per-recipient in the real send; PROVINCE simulates
 // one recipient here.
@@ -94,13 +97,59 @@ const content = `
     It takes about a minute.</p>
 </td></tr>`;
 
+/**
+ * Render exactly what the real send would produce for this person.
+ *
+ * The previous version hardcoded "Hi Steve," and a PROVINCE env var, so it
+ * proved layout and deliverability but said nothing about the merge — which
+ * is how a greeting of "Hi christine.smith" survived three test sends. If the
+ * recipient is in the campaign's own audience, use their real resolved
+ * variables and the campaign's own template, so this email and theirs differ
+ * only in the address.
+ */
+const CAMPAIGN_ID = process.env.CAMPAIGN_ID ?? "4bf9b6df-0326-42ff-a710-e6c4be604cef";
+let html = content;
+let renderedAs = "static sample (recipient not in the audience)";
+
+const supabase = createAdminClient();
+const { data: campaign } = await supabase
+  .from("message_campaigns")
+  .select("template_id, subject_override, body_override, audience_definition, variable_values")
+  .eq("id", CAMPAIGN_ID)
+  .maybeSingle();
+
+if (campaign) {
+  const tmpl = campaign.template_id ? await getTemplateById(campaign.template_id as string) : null;
+  const bodyRaw = ((campaign.body_override ?? tmpl?.body_html) ?? "") as string;
+  const people = await resolveAudience(campaign.audience_definition as never);
+  // RENDER_AS borrows another audience member's resolved variables while
+  // still delivering to RECIPIENT — the only way to see what a member in a
+  // different province actually receives. Staff addresses are not in the
+  // member audience, so without this a test always falls back to the sample.
+  const borrow = process.env.RENDER_AS?.toLowerCase();
+  const me =
+    people.find((p) => p.email.toLowerCase() === (borrow ?? RECIPIENT.toLowerCase())) ??
+    (borrow ? undefined : people.find((p) => p.email.toLowerCase() === RECIPIENT.toLowerCase()));
+  if (bodyRaw && me) {
+    html = renderTemplate(bodyRaw, {
+      app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
+      ...((campaign.variable_values ?? {}) as Record<string, string>),
+      ...((me.variableOverrides ?? {}) as Record<string, string>),
+    });
+    renderedAs =
+      `${borrow ? "borrowed from " + borrow : "real audience member"}` +
+      ` (${me.variableOverrides?.first_name ?? "?"}, ${me.variableOverrides?.organization_province ?? "no province"})`;
+  }
+}
+
 // NOT wrapped here: sendEmail() calls wrapEmailBody() itself, so pre-wrapping
 // nests the whole CSC letterhead inside another copy of it.
 const result = await sendEmail({
   to: RECIPIENT,
   subject: "[TEST] Rush Recap: what even happened this year?",
-  html: content,
+  html,
 });
+console.log("rendered as:", renderedAs);
 
 console.log(result.success ? "sent" : "FAILED", result.error ?? "", result.messageId ?? "");
 console.log("to:", RECIPIENT);
