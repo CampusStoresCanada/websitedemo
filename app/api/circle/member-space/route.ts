@@ -5,6 +5,11 @@ import { mintMemberToken } from "@/lib/circle/headless-auth";
 import { getIntegrationConfig } from "@/lib/policy/engine";
 import { resolveUserCircleId } from "@/lib/circle/member-link";
 import { isFeatureEnabled } from "@/lib/data";
+import {
+  communityOriginFromTemplate,
+  renderBridgeInterstitial,
+  sanitizeDestination,
+} from "@/lib/circle/destination";
 
 export const dynamic = "force-dynamic";
 
@@ -15,38 +20,8 @@ function toAbsoluteUrl(target: string, request: NextRequest): URL {
   return new URL(target, request.url);
 }
 
-/**
- * Where inside Circle to land after the session cookie is set, from the
- * caller's ?to= (e.g. "/c/announcements-f3687d/some-post" in a campaign
- * CTA). Anything that isn't a plain path on Circle's own host is dropped
- * rather than rejected — a bad destination should still get the member
- * into Circle, just at the root.
- *
- * This is an open-redirect surface sitting directly behind an
- * authenticated token mint, so the check is allow-list shaped: exactly one
- * leading slash and nothing that can be re-parsed into a host.
- */
-export function sanitizeDestination(raw: string | null): string | null {
-  if (!raw) return null;
-  // "//evil.com" is protocol-relative and "https://evil.com" is absolute;
-  // both must fail. Requiring a single leading slash rejects each.
-  if (!raw.startsWith("/") || raw.startsWith("//")) return null;
-  // Browsers normalize backslashes to forward slashes, so "/\evil.com"
-  // becomes "//evil.com" once redirected.
-  if (raw.includes("\\")) return null;
-  // Control characters (raw or percent-encoded CR/LF) would split the
-  // Location header.
-  if (/[\u0000-\u001f\u007f]/.test(raw)) return null;
-  if (/%0[ad]/i.test(raw)) return null;
-  return raw;
-}
-
-function renderTemplate(template: string, token: string, destination: string | null): string {
-  let url = template.replace("{token}", encodeURIComponent(token));
-  if (url.includes("{redirect}")) {
-    url = url.replace("{redirect}", destination ? encodeURIComponent(destination) : "");
-  }
-  return url;
+function withToken(template: string, token: string): string {
+  return template.replace("{token}", encodeURIComponent(token));
 }
 
 export async function GET(request: NextRequest) {
@@ -97,13 +72,33 @@ export async function GET(request: NextRequest) {
 
     const headlessTemplate = process.env.CIRCLE_MEMBER_SPACE_HEADLESS_URL_TEMPLATE;
     if (headlessTemplate && headlessTemplate.includes("{token}")) {
-      return NextResponse.redirect(
-        toAbsoluteUrl(renderTemplate(headlessTemplate, token.access_token, destination), request)
+      const exchangeUrl = withToken(headlessTemplate, token.access_token);
+      const communityOrigin = communityOriginFromTemplate(headlessTemplate);
+
+      // No destination asked for (the Header "Member Space" link, notification
+      // hrefs): redirect straight through, same as it has always behaved. The
+      // interstitial is only worth a render when it has somewhere to go.
+      if (!destination || !communityOrigin) {
+        return NextResponse.redirect(toAbsoluteUrl(exchangeUrl, request));
+      }
+
+      return new NextResponse(
+        renderBridgeInterstitial(exchangeUrl, `${communityOrigin}${destination}`),
+        {
+          status: 200,
+          headers: {
+            "Content-Type": "text/html; charset=utf-8",
+            // The body carries a member access token.
+            "Cache-Control": "no-store, no-cache, must-revalidate",
+            "X-Robots-Tag": "noindex, nofollow",
+            "Referrer-Policy": "no-referrer",
+          },
+        }
       );
     }
 
-    // No headless template configured — no cookie exchange, so a
-    // destination can't survive the hop. Land on the member space root.
+    // No headless template configured — no cookie exchange, so a destination
+    // can't survive the hop. Land on the member space root.
     const memberSpaceUrl = process.env.CIRCLE_MEMBER_SPACE_URL ?? legacyUrl;
     return NextResponse.redirect(toAbsoluteUrl(memberSpaceUrl, request));
   } catch {
