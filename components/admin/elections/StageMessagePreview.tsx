@@ -36,6 +36,21 @@ export default function StageMessagePreview({
 
   return (
     <div className="mt-1.5">
+      {/*
+        ⛔ The label, not just the subject line.
+
+        Every StageMessage carries one — "Receipt, sent when a store files",
+        "Going first, sent when beta testing starts" — and this component
+        rendered none of them, in benchmarking OR elections. So a step showed a
+        bare subject with nothing saying what the mail is or what fires it, and
+        the submission receipt sitting under "Open to every store" read as though
+        opening the survey would send every member a confirmation they had
+        already filed. The sentence that explains it was written, stored, and
+        displayed nowhere.
+      */}
+      <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">
+        {message.label}
+      </p>
       <p className="truncate text-xs italic text-gray-500">“{message.renderedSubject}”</p>
       <div className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1">
         <button

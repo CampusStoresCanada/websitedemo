@@ -325,7 +325,25 @@ export async function getBenchmarkingTimeline(
       .select("status, invited_at, organizations!inner(is_test)")
       .eq("survey_id", surveyId)
       .not("organizations.is_test", "is", true),
-    db.from("benchmarking").select("status").eq("fiscal_year", survey.fiscal_year),
+    /*
+      ⛔ The same test-store exclusion as the query directly above, which is
+      where this one should have been added at the same time.
+
+      Without it the spine counted the test store's draft as a member store's
+      work: "0 submitted, 4 in progress" beside a response card reading 3, for
+      the same cycle on the same screen. Three real stores were in the beta and
+      the fourth was the walk-the-survey scratch row, which exists precisely
+      because walking WRITES.
+
+      It feeds more than that line — "N of 52 stores have filed" and "N stores
+      still outstanding" are both computed from it, so a scratch row would have
+      made the cycle look further along than it was all the way to close.
+    */
+    db
+      .from("benchmarking")
+      .select("status, organizations!inner(is_test)")
+      .eq("fiscal_year", survey.fiscal_year)
+      .not("organizations.is_test", "is", true),
     db
       .from("capability_contributions")
       .select("subject_id")

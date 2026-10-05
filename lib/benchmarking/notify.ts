@@ -661,15 +661,27 @@ export async function benchmarkingStageMessages(
     }),
     describe("benchmarking_invitation", {
       key: "invitation", stage: "invitations",
-      label: "The survey is open", recipientCount: invitePlan?.willSend.length ?? null,
+      // Trigger and audience, like the others. "The survey is open" merely
+      // restated the subject line sitting underneath it.
+      label: "Sent when you press Invite the stores, to every store not yet invited",
+      recipientCount: invitePlan?.willSend.length ?? null,
     }),
     describe("benchmarking_reminder", {
       key: "reminder", stage: "reminders",
-      label: "Reminder", recipientCount: remindPlan?.willSend.length ?? null,
+      label: "Sent when you press Send the reminder, to invited stores that have not filed",
+      recipientCount: remindPlan?.willSend.length ?? null,
     }),
     describe("benchmarking_submission_received", {
       key: "receipt", stage: "open",
-      label: "Receipt, sent when a store files", recipientCount: null,
+      /*
+        ⛔ Names its trigger, because no step sends this one. Every other
+        message on the spine is sent BY the step it hangs under; this one is
+        fired by a store pressing submit, any time while the survey is open. A
+        label reading "Receipt" under a step called "Open to every store" was
+        read as the mail that opening sends.
+      */
+      label: "Automatic. Sent to a store when it submits, any time while the survey is open",
+      recipientCount: null,
     }),
   ]);
 
