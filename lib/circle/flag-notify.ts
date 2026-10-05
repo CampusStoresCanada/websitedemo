@@ -50,18 +50,27 @@ export interface FlagNotificationParams {
 
 
 /**
- * Who answers for the survey: whoever holds the committee lead, and nobody else.
+ * Who answers for the survey: whoever holds Interpretation.
+ *
+ * ⛔ benchmarking.qa_verify, not committee_lead. Steve's decision, and it is the
+ * squad whose job this actually is — judging whether a figure or a question is
+ * sound. Reading the capability rather than naming people means the room follows
+ * the roster: Kathy Wood holds it by appointment, Sean Bell and Stephen Thomas
+ * ex officio, and nobody has to remember to update a list here when that changes.
+ *
+ * ⚠️ This read committee_lead until 2026-10-05, which left the one appointed
+ * interpreter out of every flag conversation while both ex officio leads were in
+ * it — so it looked like it worked.
  *
  * ⛔ NOT every super admin. The office has three, and two of them have nothing
  * to do with benchmarking — a beta round could easily produce a report a day,
  * and a DM that is nearly always somebody else's job is a DM people learn to
- * ignore. The capability already resolves ex officio holders, so the secretary
- * is in this list without being named in it.
+ * ignore.
  *
  * Super admins remain the fallback for the case where NOBODY holds the
  * capability, because a flag that reaches no one is worse than a flag that
- * reaches the wrong one. That state is real: the survey has sat with no
- * appointed lead before.
+ * reaches the wrong one. That state is real: the survey has sat with nobody
+ * appointed before.
  */
 async function benchmarkingRecipients(): Promise<string[]> {
   const adminClient = createAdminClient();
@@ -69,7 +78,7 @@ async function benchmarkingRecipients(): Promise<string[]> {
   const { data: leads } = await adminClient
     .from("capability_contributions")
     .select("subject_id")
-    .eq("capability", "benchmarking.committee_lead")
+    .eq("capability", "benchmarking.qa_verify")
     .eq("is_active", true);
 
   let ids = [...new Set((leads ?? []).map((l) => l.subject_id as string))];
