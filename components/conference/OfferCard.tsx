@@ -12,6 +12,7 @@ export default function OfferCard({
   conferenceId,
   organizationId,
   compact = false,
+  highlighted = false,
 }: {
   offer: ConferenceOffer;
   conferenceId: string;
@@ -20,6 +21,12 @@ export default function OfferCard({
    *  registration (e.g. an extra Meet & Greet ticket for a guest) — so it
    *  doesn't read with the same visual weight as picking a registration tier. */
   compact?: boolean;
+  /** Arrived here from a link naming THIS offer (`?offer=<id>`) — ring it so a
+   *  reader who was promised one specific product in an email can see which of
+   *  sixty cards it is. Ineligible offers are highlighted too: the card still
+   *  renders with its `ineligibleReason`, and "here it is, and here is why you
+   *  can't buy it" beats a catalogue the promised thing is missing from. */
+  highlighted?: boolean;
 }) {
   const [feedback, setFeedback] = useState<{ text: string; ok: boolean } | null>(null);
   const [isPending, startTransition] = useTransition();
@@ -49,7 +56,12 @@ export default function OfferCard({
 
   if (compact) {
     return (
-      <div className="flex items-center justify-between gap-3 rounded-lg bg-gray-50 px-4 py-3">
+      <div
+        id={`offer-${offer.id}`}
+        className={`flex items-center justify-between gap-3 rounded-lg px-4 py-3 scroll-mt-24 ${
+          highlighted ? "bg-[#fff1f1] ring-2 ring-[#EE2A2E]" : "bg-gray-50"
+        }`}
+      >
         <div className="min-w-0">
           <p className="text-sm font-medium text-gray-700">{offer.name}</p>
           <p className="text-xs text-gray-500">Already included with your registration — buy extra for a colleague or guest.</p>
@@ -73,7 +85,12 @@ export default function OfferCard({
   }
 
   return (
-    <div className="flex flex-col rounded-xl border border-gray-200 bg-white p-4">
+    <div
+      id={`offer-${offer.id}`}
+      className={`flex flex-col rounded-xl border bg-white p-4 scroll-mt-24 ${
+        highlighted ? "border-[#EE2A2E] ring-2 ring-[#EE2A2E]" : "border-gray-200"
+      }`}
+    >
       <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-gray-400">{offer.kind}</div>

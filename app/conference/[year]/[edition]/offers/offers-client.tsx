@@ -1,5 +1,6 @@
 "use client";
 
+import { useEffect } from "react";
 import Link from "next/link";
 import { formatCents } from "@/lib/utils";
 import type { ConferenceOffer, ConferenceFloorPlan } from "@/lib/actions/conference-entities";
@@ -17,6 +18,7 @@ export default function OffersClient({
   floorPlan = null,
   myCartOfferIds = new Set(),
   sponsorshipAnchorId,
+  highlightOfferId = null,
 }: {
   conferenceId: string;
   conferenceYear: string;
@@ -28,7 +30,26 @@ export default function OffersClient({
   myCartOfferIds?: Set<string>;
   /** If set, the inline floor plan's legend links down to the tier comparison section with this id. */
   sponsorshipAnchorId?: string;
+  /**
+   * One offer this visit is ABOUT, from `?offer=<entityId>` — set when a reader
+   * followed a link that promised them a specific product (an emailed
+   * Conference in a Box CTA, say) rather than browsing the catalogue.
+   *
+   * Only rings and scrolls to it. Deliberately does NOT filter the page down to
+   * that offer: the reader may well want a registration too, and a catalogue
+   * silently reduced to one card is harder to recover from than one that is
+   * merely long. Each card also carries `id="offer-<entityId>"`, so a plain
+   * `#offer-<entityId>` fragment reaches it with no JS at all.
+   */
+  highlightOfferId?: string | null;
 }) {
+  // Before the early return below — a hook after a conditional return breaks
+  // the rules of hooks the first time this page has no offers.
+  useEffect(() => {
+    if (!highlightOfferId) return;
+    document.getElementById(`offer-${highlightOfferId}`)?.scrollIntoView({ block: "center" });
+  }, [highlightOfferId]);
+
   // Even with nothing currently purchasable, the floor plan itself is still
   // worth showing (dimmed, unclickable booths) — sales opening later doesn't
   // mean there's nothing to look at yet.
@@ -162,7 +183,7 @@ export default function OffersClient({
             <DayPassOfferCard offers={dayPasses} conferenceId={conferenceId} organizationId={organizationId} />
           ) : null}
           {registrationOffers.map((offer) => (
-            <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} />
+            <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} highlighted={offer.id === highlightOfferId} />
           ))}
         </div>
       ) : null}
@@ -172,7 +193,7 @@ export default function OffersClient({
           <h3 className="text-xs font-semibold uppercase tracking-wide text-gray-400">Extra tickets</h3>
           <div className="mt-2 space-y-2">
             {addOnOffers.map((offer) => (
-              <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} compact />
+              <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} compact highlighted={offer.id === highlightOfferId} />
             ))}
           </div>
         </div>

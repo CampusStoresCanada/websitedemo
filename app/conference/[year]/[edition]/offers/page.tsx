@@ -28,7 +28,7 @@ export default async function ConferenceOffersPage({
   searchParams,
 }: {
   params: Promise<{ year: string; edition: string }>;
-  searchParams: Promise<{ org?: string }>;
+  searchParams: Promise<{ org?: string; offer?: string }>;
 }) {
   const { year, edition } = await params;
   const query = await searchParams;
@@ -172,6 +172,7 @@ export default async function ConferenceOffersPage({
         initialOffers={offersResult.data}
         floorPlan={floorPlan}
         myCartOfferIds={myCartOfferIds}
+        highlightOfferId={query.offer ?? null}
       />
     </main>
   );
