@@ -2,6 +2,30 @@
 
 Next.js 16 (App Router, Turbopack) + Supabase + TypeScript.
 
+## ⚠️ LIVE: the FY2026 benchmarking cycle (until 2026-11-20)
+
+**Real member stores are filling in the benchmarking survey right now.** Beta
+opened 2026-10-02, it opens to all 52 stores on 2026-10-08, and collection
+closes 2026-11-20. Delete this section after that date.
+
+Two narrow rules while it runs. Everything else ships as normal — this is not a
+site-wide freeze, and treating it as one blocks unrelated work for weeks.
+
+1. **Do not deploy changes to benchmarking without asking Steve first** —
+   `lib/benchmarking/`, `app/benchmarking/`, `components/benchmarking/`,
+   `lib/actions/benchmarking-*`. A store part-way through a submission is the
+   thing you would be changing under them.
+
+2. ⛔ **Do not run a migration touching benchmarking tables.** Prod and local
+   share one database, so a migration is live the instant it runs — no deploy,
+   no review, no warning. This is the sharp one: the code rules above are
+   enforced by not pushing, this one has nothing standing in its way.
+
+Unrelated pushes are fine. Note only that every push rebuilds the whole site on
+Vercel and the build budget for this deployment is finite, so batch where you
+reasonably can.
+
+
 ## ⛔ STOP before you build anything new
 
 **If you are about to create a new file, component, panel, action, template, or
