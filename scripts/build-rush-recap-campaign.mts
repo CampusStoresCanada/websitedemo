@@ -27,9 +27,14 @@ try {
 
 const { resolveAudience } = await import("../lib/comms/audience");
 const { createCampaign } = await import("../lib/comms/send");
+const { createAdminClient } = await import("../lib/supabase/admin");
 const { localEventTimeSentence } = await import("../lib/comms/local-time");
 
 const CREATE = process.argv.includes("--create");
+// --update <id> rewrites an existing draft in place rather than leaving a
+// stale one beside a new one. Only ever touches a campaign still in draft.
+const UPDATE_AT = process.argv.indexOf("--update");
+const UPDATE_ID = UPDATE_AT >= 0 ? process.argv[UPDATE_AT + 1] : null;
 const EVENT_AT = new Date("2026-10-07T16:00:00Z"); // 10:00 MDT
 const APP = "https://www.campusstores.ca";
 const POST = "/c/announcements-f3687d/rush-is-over-was-yours-normal";
@@ -121,9 +126,30 @@ const body = `
     It takes about a minute.</p>
 </td></tr>`;
 
-if (!CREATE) {
+if (!CREATE && !UPDATE_ID) {
   console.log("\nDRY RUN — nothing written. Re-run with --create to insert the draft.");
   console.log(`would create a draft for ${recipients.length} recipients`);
+  process.exit(0);
+}
+
+if (UPDATE_ID) {
+  const supabase = createAdminClient();
+  const { data, error: updErr } = await supabase
+    .from("message_campaigns")
+    .update({
+      subject_override: "Rush Recap: what even happened this year?",
+      body_override: body,
+      audience_definition: { type: "custom_recipient_list", filters: { recipients } } as never,
+    })
+    .eq("id", UPDATE_ID)
+    .eq("status", "draft")
+    .select("id, name, status")
+    .maybeSingle();
+  if (updErr || !data) {
+    console.log(`\nUPDATE FAILED: ${updErr?.message ?? "no draft matched that id"}`);
+    process.exit(1);
+  }
+  console.log(`\ndraft updated: ${data.id} (${data.status}) — ${recipients.length} recipients`);
   process.exit(0);
 }
 

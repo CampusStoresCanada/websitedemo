@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { formatLocalEventTime, zoneForProvince, localEventTimeSentence } from "../local-time";
+import { deriveRecipientNameVariables } from "../format";
 
 // Rush Recap: 2026-10-07 10:00 MDT === 16:00 UTC.
 const EVENT = new Date("2026-10-07T16:00:00Z");
@@ -65,5 +66,26 @@ describe("localEventTimeSentence", () => {
 
   it("falls back to the organizer's zone when it is not", () => {
     expect(localEventTimeSentence(EVENT, null, "10:00 a.m. MT")).toBe("10:00 a.m. MT");
+  });
+});
+
+/**
+ * profiles.display_name holds a bare email address for a large share of
+ * member logins, so without this the Rush Recap send would have greeted
+ * people with "Hi p2dwived@uwaterloo.ca,".
+ */
+describe("deriveRecipientNameVariables", () => {
+  it("never greets someone with an email address", () => {
+    const v = deriveRecipientNameVariables("wanda.beauchamp@lakelandcollege.ca", "wanda.beauchamp@lakelandcollege.ca");
+    expect(v.first_name).toBe("wanda.beauchamp");
+    expect(v.first_name).not.toContain("@");
+  });
+
+  it("uses a real name when there is one", () => {
+    expect(deriveRecipientNameVariables("Priyanka Dwivedi", "p2dwived@uwaterloo.ca").first_name).toBe("Priyanka");
+  });
+
+  it("falls back to the email local part when the name is empty", () => {
+    expect(deriveRecipientNameVariables(null, "tlinden@example.ca").first_name).toBe("tlinden");
   });
 });

@@ -14,6 +14,38 @@ import type { AudienceDefinition, ResolvedRecipient, TemplateCategory } from "./
 
 type AdminClient = ReturnType<typeof createAdminClient>;
 
+/**
+ * PostgREST puts `.in()` values in the query string, so a few hundred ids
+ * blows past the server's URL limit and the request comes back "Bad Request".
+ * Every call site here destructured only `data`, so that failure was silent:
+ * `profiles` resolved to undefined and all 487 Rush Recap recipients fell
+ * back to their email handle, which is how a send nearly went out greeting
+ * people as "Hi p2dwived@uwaterloo.ca". Measured 2026-10-05: 200 ids fine,
+ * 792 ids Bad Request.
+ *
+ * Chunk the id list and surface errors rather than returning a short list
+ * that looks like a legitimately empty result.
+ */
+const IN_CHUNK = 150;
+
+async function selectByIds<Row>(
+  ids: string[],
+  fetchChunk: (chunk: string[]) => PromiseLike<{ data: Row[] | null; error: { message: string } | null }>,
+  label: string
+): Promise<Row[]> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const out: Row[] = [];
+  for (let i = 0; i < unique.length; i += IN_CHUNK) {
+    const { data, error } = await fetchChunk(unique.slice(i, i + IN_CHUNK));
+    if (error) {
+      console.error(`[comms/audience] ${label} chunk failed:`, error.message);
+      continue;
+    }
+    if (data) out.push(...data);
+  }
+  return out;
+}
+
 type ConferenceVariables = Partial<
   Pick<Record<SystemVariableKey, string>, "conference_year" | "conference_dates" | "conference_location">
 >;
@@ -59,8 +91,8 @@ async function batchLoadOrganizationVariables(
 ): Promise<Map<string, Record<string, string>>> {
   const ids = [...new Set(orgIds.filter((id): id is string => !!id))];
   if (ids.length === 0) return new Map();
-  const { data: orgs } = await supabase.from("organizations").select("*").in("id", ids);
-  return new Map((orgs ?? []).map((org) => [org.id, deriveSubjectVariables("organization", org)]));
+  const orgs = await selectByIds(ids, (c) => supabase.from("organizations").select("*").in("id", c), "organizations");
+  return new Map(orgs.map((org) => [org.id, deriveSubjectVariables("organization", org)]));
 }
 
 /**
@@ -73,8 +105,8 @@ async function batchLoadPersonVariables(
 ): Promise<Map<string, Record<string, string>>> {
   const ids = [...new Set(userIds.filter((id): id is string => !!id))];
   if (ids.length === 0) return new Map();
-  const { data: profiles } = await supabase.from("profiles").select("*").in("id", ids);
-  return new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
+  const profiles = await selectByIds(ids, (c) => supabase.from("profiles").select("*").in("id", c), "profiles");
+  return new Map(profiles.map((p) => [p.id, deriveSubjectVariables("person", p)]));
 }
 
 /**
@@ -456,9 +488,36 @@ async function resolveOrgAdmins(
 
   if (filteredUserIds.length === 0) return [];
 
-  const { data: profiles } = await supabase.from("profiles").select("*").in("id", filteredUserIds);
-  const nameMap = Object.fromEntries((profiles ?? []).map((p) => [p.id, p.display_name]));
-  const personVarsById = new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
+  const profiles = await selectByIds(filteredUserIds, (c) => supabase.from("profiles").select("*").in("id", c), "profiles");
+
+  // profiles.display_name is not a reliable human name: for a large share of
+  // member logins it holds the email handle, and often the whole address
+  // ("wanda.beauchamp@lakelandcollege.ca"), which would greet 300+ people
+  // with their own email. contacts carries the real first/last name, keyed
+  // per (person, org) — profile_id alone is NOT unique, so the organization
+  // must be part of the match or a shared inbox resolves to the wrong store.
+  const contactRows = await selectByIds(
+    filteredUserIds,
+    (c) => supabase.from("contacts").select("profile_id, organization_id, first_name, name").in("profile_id", c),
+    "contacts"
+  );
+
+  const contactNameByUserOrg = new Map<string, string>();
+  for (const c of contactRows) {
+    if (!c.profile_id || !c.organization_id) continue;
+    const real = c.first_name?.trim() || c.name?.trim();
+    if (real) contactNameByUserOrg.set(`${c.profile_id}:${c.organization_id}`, real);
+  }
+
+  const profileNameById = Object.fromEntries(profiles.map((p) => [p.id, p.display_name]));
+  const nameMap: Record<string, string | null> = Object.fromEntries(
+    filteredUserIds.map((uid) => {
+      const orgId = orgIdByUserId.get(uid);
+      const fromContact = orgId ? contactNameByUserOrg.get(`${uid}:${orgId}`) : undefined;
+      return [uid, fromContact ?? profileNameById[uid] ?? null];
+    })
+  );
+  const personVarsById = new Map(profiles.map((p) => [p.id, deriveSubjectVariables("person", p)]));
 
   // Resolve emails via auth.users admin lookup (profiles table has no email column)
   const emailMap = await lookupUserEmails(supabase, filteredUserIds);
@@ -560,16 +619,17 @@ async function resolveEventRegistrants(
 
   const registrationByUserId = new Map((regs ?? []).map((r) => [r.user_id, r]));
 
-  // Resolve names from profiles
-  const { data: profiles } = await supabase
-    .from("profiles")
-    .select("*")
-    .in("id", userIds);
-
-  const nameMap = Object.fromEntries(
-    (profiles ?? []).map((p: { id: string; display_name: string | null }) => [p.id, p.display_name])
+  // Resolve names from profiles. Chunked for the same reason as
+  // resolveOrgAdmins: a large event blows past PostgREST's URL limit and the
+  // failure is invisible if only `data` is destructured.
+  const profiles = await selectByIds(
+    userIds.filter((id): id is string => Boolean(id)),
+    (c) => supabase.from("profiles").select("*").in("id", c),
+    "profiles"
   );
-  const personVarsById = new Map((profiles ?? []).map((p) => [p.id, deriveSubjectVariables("person", p)]));
+
+  const nameMap = Object.fromEntries(profiles.map((p) => [p.id, p.display_name]));
+  const personVarsById = new Map(profiles.map((p) => [p.id, deriveSubjectVariables("person", p)]));
 
   // Resolve emails from auth.users
   const emailMap = await lookupUserEmails(supabase, userIds);

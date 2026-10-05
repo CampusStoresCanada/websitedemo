@@ -49,7 +49,13 @@ export function deriveRecipientNameVariables(
   name: string | null,
   email: string
 ): Pick<Record<SystemVariableKey, string>, "recipient_name" | "first_name" | "email"> {
-  const displayName = name?.trim() || email.split("@")[0] || email;
+  // Defence in depth: some upstream name fields hold an email address rather
+  // than a name (profiles.display_name does, for a large share of member
+  // logins). Greeting someone with their own address is worse than greeting
+  // them with its local part, so never let an "@" reach the salutation.
+  const rawName = name?.trim() ?? "";
+  const cleanedName = rawName.includes("@") ? rawName.split("@")[0] : rawName;
+  const displayName = cleanedName || email.split("@")[0] || email;
   const firstName = displayName.split(/\s+/)[0] || displayName;
   return {
     recipient_name: displayName,
