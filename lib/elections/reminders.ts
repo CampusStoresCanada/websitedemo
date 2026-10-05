@@ -86,7 +86,7 @@ function resolveWorkingDay(
   return { sendOn: iso, movedFrom: null };
 }
 
-export interface PlannedReminder extends ReminderStep {
+export interface PlannedReminderFields {
   /** The date this step will actually send, after working-day adjustment. */
   sendOn: string;
   /** The date it would have landed on, when it was moved. */
@@ -100,6 +100,9 @@ export interface PlannedReminder extends ReminderStep {
   /** Set when this step cannot run as configured. */
   problem: string | null;
 }
+
+/** An election reminder step with its computed date. Unchanged in shape. */
+export type PlannedReminder = ReminderStep & PlannedReminderFields;
 
 export interface ReminderPlan {
   enabled: boolean;
@@ -122,20 +125,58 @@ export interface ReminderPlan {
  * Steps written before phases existed carry none and are treated as ballot
  * steps, which is what they were.
  */
-export function planReminders(
-  schedule: ElectionSchedule,
-  config: ElectionsConfig,
-  phase: ReminderPhase = "ballot"
-): ReminderPlan {
-  const { enabled, steps, minimumGapDays } = config.reminders;
-  const opensAt =
-    phase === "nominations" ? schedule.nominationsOpenAt : schedule.ballotsOpenAt;
-  const closesAt =
-    phase === "nominations" ? schedule.nominationsCloseAt : schedule.ballotsCloseAt;
+/**
+ * A reminder series, generically: count back from a deadline, land on working
+ * days, do not collide.
+ *
+ * ⛔ Extracted so benchmarking does not become a THIRD implementation of this.
+ * The renewal series already stores its own `[30, 14, 7, 0]` and this module's
+ * opening note says why that is not enough; a third copy would be the same
+ * mistake with a different deadline. Everything here was already generic — the
+ * only election-specific parts of the original were the WORDS, which the caller
+ * now supplies.
+ *
+ * Pure. No database, no clock, no knowledge of what is being chased.
+ */
+export interface SeriesStep {
+  daysBeforeClose: number;
+  label: string;
+  audience: string;
+  onNonWorkingDay?: NonWorkingDayPolicy;
+}
+
+/** How to say, in this cycle's language, what the window and audiences are. */
+export interface SeriesWords {
+  /** "voting opens", "collection opens" — for a step landing before the window. */
+  opensVerb: string;
+  /** "voting closes", "the survey closes" — used in each step's description. */
+  closeNoun: string;
+  /** "voting has closed" — for a step landing after it. */
+  closedClause: string;
+  /** Audience key to words a person would read. */
+  audienceLabel: (audience: string) => string;
+}
+
+export function planReminderSeries<S extends SeriesStep>(input: {
+  enabled: boolean;
+  opensAt: string;
+  closesAt: string;
+  steps: S[];
+  minimumGapDays: number;
+  words: SeriesWords;
+}): {
+  enabled: boolean;
+  windowOpensAt: string;
+  windowClosesAt: string;
+  windowDays: number;
+  steps: (S & PlannedReminderFields)[];
+  problems: string[];
+  notes: string[];
+} {
+  const { enabled, opensAt, closesAt, steps, minimumGapDays, words } = input;
   const windowDays = daysBetween(opensAt, closesAt);
 
-  const planned: PlannedReminder[] = steps
-    .filter((step) => (step.phase ?? "ballot") === phase)
+  const planned = steps
     .map((step) => {
       const policy = step.onNonWorkingDay ?? "move_earlier";
       const ideal = shiftDays(closesAt, -step.daysBeforeClose);
@@ -144,29 +185,20 @@ export function planReminders(
       const deliberate = policy === "send_anyway" && !isWorkingDay(sendOn);
 
       let problem: string | null = null;
-      const opensVerb = phase === "nominations" ? "nominations open" : "voting opens";
       if (sendOn < opensAt) {
         problem =
-          `Lands ${sendOn}, before ${opensVerb} on ${opensAt}. ` +
+          `Lands ${sendOn}, before ${words.opensVerb} on ${opensAt}. ` +
           `The window is only ${windowDays} days, so this step can be at most ${windowDays} days before close.`;
       } else if (sendOn > closesAt) {
-        problem = `Lands ${sendOn}, after ${phase === "nominations" ? "nominations have" : "voting has"} closed.`;
+        problem = `Lands ${sendOn}, after ${words.closedClause}.`;
       } else if (movedFrom === null && !isWorkingDay(sendOn) && policy !== "send_anyway") {
         problem = `${sendOn} is ${describeNonWorkingDay(sendOn)} and there is no working day within a week to move it to.`;
       }
 
-      const audience =
-        step.audience === "not_yet_voted"
-          ? "institutions with no ballot on file"
-          : step.audience === "has_not_nominated"
-            ? "institutions that have put nobody forward"
-            : "every eligible institution";
-
-      const closeNoun = phase === "nominations" ? "nominations close" : "voting closes";
       const when =
         step.daysBeforeClose === 0
-          ? `the day ${closeNoun}`
-          : `${step.daysBeforeClose} day${step.daysBeforeClose === 1 ? "" : "s"} before ${closeNoun}`;
+          ? `the day ${words.closeNoun}`
+          : `${step.daysBeforeClose} day${step.daysBeforeClose === 1 ? "" : "s"} before ${words.closeNoun}`;
 
       return {
         ...step,
@@ -175,9 +207,9 @@ export function planReminders(
         movedFrom,
         movedBecause,
         deliberateNonWorkingDay: deliberate,
-        describes: `${when}, to ${audience}`,
+        describes: `${when}, to ${words.audienceLabel(step.audience)}`,
         problem,
-      };
+      } as S & PlannedReminderFields;
     })
     .sort((a, b) => a.sendOn.localeCompare(b.sendOn));
 
@@ -218,16 +250,45 @@ export function planReminders(
     }
   }
 
-  return {
+  return { enabled, windowOpensAt: opensAt, windowClosesAt: closesAt, windowDays, steps: planned, problems, notes };
+}
+
+/**
+ * `phase` selects both which steps are planned and which window they sit in.
+ * Steps written before phases existed carry none and are treated as ballot
+ * steps, which is what they were.
+ */
+export function planReminders(
+  schedule: ElectionSchedule,
+  config: ElectionsConfig,
+  phase: ReminderPhase = "ballot"
+): ReminderPlan {
+  const { enabled, steps, minimumGapDays } = config.reminders;
+  const opensAt =
+    phase === "nominations" ? schedule.nominationsOpenAt : schedule.ballotsOpenAt;
+  const closesAt =
+    phase === "nominations" ? schedule.nominationsCloseAt : schedule.ballotsCloseAt;
+
+  const series = planReminderSeries({
     enabled,
-    phase,
-    windowOpensAt: opensAt,
-    windowClosesAt: closesAt,
-    windowDays,
-    steps: planned,
-    problems,
-    notes,
-  };
+    opensAt,
+    closesAt,
+    steps: steps.filter((step) => (step.phase ?? "ballot") === phase),
+    minimumGapDays,
+    words: {
+      opensVerb: phase === "nominations" ? "nominations open" : "voting opens",
+      closeNoun: phase === "nominations" ? "nominations close" : "voting closes",
+      closedClause: phase === "nominations" ? "nominations have closed" : "voting has closed",
+      audienceLabel: (a) =>
+        a === "not_yet_voted"
+          ? "institutions with no ballot on file"
+          : a === "has_not_nominated"
+            ? "institutions that have put nobody forward"
+            : "every eligible institution",
+    },
+  });
+
+  return { ...series, phase };
 }
 
 /**

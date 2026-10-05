@@ -1,5 +1,11 @@
 import type { TimelineStage } from "@/lib/elections/timeline";
-import { SURVEY_LADDER, ladderIndex, type SurveyState } from "./lifecycle";
+import {
+  SURVEY_LADDER,
+  ladderIndex,
+  BENCHMARKING_REMINDERS,
+  type SurveyState,
+} from "./lifecycle";
+import { planReminderSeries } from "@/lib/elections/reminders";
 import { deadlineDay, openingDay, formatDeadline, formatOpening } from "./deadline";
 
 /**
@@ -196,18 +202,74 @@ export function buildBenchmarkingTimeline(
       : null,
   });
 
-  stages.push({
-    key: "reminders",
-    label: "Chase who has not filed",
-    on: null,
-    until: null,
-    windowLabel: null,
-    state: now("open") && facts.invited > 0 ? "current" : past("open") ? "done" : "upcoming",
-    detail: `${Math.max(facts.recipientsTotal - facts.submitted, 0)} stores still outstanding.`,
-    action: now("open")
-      ? { key: "openReminders", label: "Send a reminder", blockedBy: null }
-      : null,
-  });
+  /*
+    The chase, as dated steps rather than one undated "send a reminder".
+
+    ⛔ Every reminder stage used to carry `on: null`, so none of them reached the
+    calendar and nothing anywhere told the operator a chase was due. Six weeks of
+    collection across 52 stores, and the entire schedule lived in somebody's
+    memory. Dated steps put five entries on the admin calendar, which is the only
+    thing that will prompt anyone — there is no benchmarking cron.
+
+    Planned by the elections series builder, so the weekend and statutory-holiday
+    handling is the one CSC already uses for board deadlines rather than a second
+    opinion about what a working day is.
+  */
+  const outstanding = Math.max(facts.recipientsTotal - facts.submitted, 0);
+  if (closes && opens) {
+    const series = planReminderSeries({
+      enabled: BENCHMARKING_REMINDERS.enabled,
+      opensAt: opens,
+      closesAt: closes,
+      steps: [...BENCHMARKING_REMINDERS.steps],
+      minimumGapDays: BENCHMARKING_REMINDERS.minimumGapDays,
+      words: {
+        opensVerb: "collection opens",
+        closeNoun: "the survey closes",
+        closedClause: "collection has closed",
+        audienceLabel: () => "invited stores that have not filed",
+      },
+    });
+
+    for (const step of series.steps) {
+      stages.push({
+        key: `reminder_${step.daysBeforeClose}`,
+        label: `Chase: ${step.label}`,
+        on: step.sendOn,
+        until: null,
+        windowLabel: null,
+        state: past("open")
+          ? "done"
+          : now("open") && today >= step.sendOn
+            ? "current"
+            : "upcoming",
+        detail: step.problem
+          ? step.problem
+          : `${outstanding} stores still outstanding. ${step.describes}.`,
+        // One action key for all five: they are the same send, and the page
+        // wires confirmation and recipient counts to the key, not the stage.
+        action:
+          now("open") && today >= step.sendOn
+            ? { key: "openReminders", label: "Send the reminder", blockedBy: null }
+            : null,
+      });
+    }
+  } else {
+    stages.push({
+      key: "reminders",
+      label: "Chase who has not filed",
+      on: null,
+      until: null,
+      windowLabel: null,
+      state: now("open") && facts.invited > 0 ? "current" : past("open") ? "done" : "upcoming",
+      // Without both dates there is nothing to count back from, so the chase
+      // stays a single undated step rather than inventing five.
+      detail: `${outstanding} stores still outstanding. Set the cycle's dates to schedule the chase.`,
+      action: now("open")
+        ? { key: "openReminders", label: "Send a reminder", blockedBy: null }
+        : null,
+    });
+  }
 
   // 7 — Close.
   stages.push({

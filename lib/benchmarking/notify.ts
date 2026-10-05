@@ -33,6 +33,7 @@ import type { TemplateKey } from "@/lib/comms/types";
 import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
 import { getTemplate, renderTemplateContent } from "@/lib/comms/templates";
 import { taskFor } from "./committee-workstreams";
+import { BENCHMARKING_REMINDERS } from "./lifecycle";
 import { CAPABILITIES } from "@/lib/auth/capability-names";
 import type { StageMessage } from "@/lib/elections/messages";
 
@@ -692,7 +693,19 @@ export async function benchmarkingStageMessages(
     appoint_testers: [appointTester],
     beta: [betaOpening],
     invitations: [invitation],
+    /*
+      The chase is five dated steps now, and stageMessages is keyed by STAGE —
+      so without an entry per step the mail would vanish from the spine the
+      moment the chase gained dates. Same message on each: it is one template
+      whose day count is computed at send time.
+    */
     reminders: [reminder],
+    ...Object.fromEntries(
+      BENCHMARKING_REMINDERS.steps.map((step) => [
+        `reminder_${step.daysBeforeClose}`,
+        [reminder],
+      ]),
+    ),
     open: [receipt],
   };
 }

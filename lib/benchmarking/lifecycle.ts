@@ -194,3 +194,38 @@ export function hasReached(status: string | null | undefined, state: SurveyState
   const at = ladderIndex(status);
   return at >= 0 && at >= ladderIndex(state);
 }
+
+/**
+ * The chase: when a store that has not filed is reminded.
+ *
+ * ⛔ Steps, not a bare list of day-numbers. `[30, 14, 7, 3, 1]` is fine for a
+ * machine and useless to the person deciding whether the association is being
+ * persistent or being a nuisance — it says nothing about what dates those land
+ * on, who receives them, or whether two collide. lib/elections/reminders.ts
+ * turns steps like these into dated, working-day-adjusted plans, and
+ * benchmarking uses that rather than becoming a third implementation beside it
+ * and the renewal series.
+ *
+ * ⚠️ Counted back from the LAST DAY A STORE CAN FILE, not from `closes_at`.
+ * closes_at is an exclusive boundary one day later, so counting from it would
+ * put every reminder a day late and the final one on a closed survey. See
+ * deadline.ts.
+ *
+ * ⛔ NOT snapshotted onto the survey row, unlike ElectionsConfig. It should be —
+ * changing 2027's cadence must not rewrite what 2026 claims it did — but that
+ * needs a column, and a migration against benchmarking tables is exactly what
+ * the live-cycle rule in CLAUDE.md forbids while stores are filing. Snapshot it
+ * when the cycle closes.
+ */
+export const BENCHMARKING_REMINDERS = {
+  enabled: true,
+  /** Gaps here are 16, 7, 4 and 2 days, so 2 is the floor this series allows. */
+  minimumGapDays: 2,
+  steps: [
+    { daysBeforeClose: 30, label: "A month to go", audience: "not_filed" },
+    { daysBeforeClose: 14, label: "Two weeks to go", audience: "not_filed" },
+    { daysBeforeClose: 7, label: "A week to go", audience: "not_filed" },
+    { daysBeforeClose: 3, label: "Three days to go", audience: "not_filed" },
+    { daysBeforeClose: 1, label: "Closes tomorrow", audience: "not_filed" },
+  ],
+} as const;
