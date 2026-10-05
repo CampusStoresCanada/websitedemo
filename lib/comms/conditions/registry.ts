@@ -54,6 +54,11 @@ export const CONDITION_SUBJECTS: Record<ConditionSubjectKey, ConditionSubjectDef
       logo_horizontal_url: { label: "Horizontal Logo", type: "nullable" },
       banner_url: { label: "Banner Image", type: "nullable" },
       website: { label: "Website", type: "nullable" },
+      // Province is what per-recipient local event times are computed from
+      // (lib/comms/local-time.ts). Declared here rather than special-cased in
+      // the audience resolver, because this catalog is the single source for
+      // both "what can I check" and "what can I insert".
+      province: { label: "Province", type: "nullable" },
       company_description: { label: "Company Description", type: "nullable" },
       membership_status: {
         label: "Membership Status",
