@@ -393,14 +393,14 @@ export default function BenchmarkingSurveyForm({
    *
    * ⛔ A contradiction, not a missing answer, so it is checked separately and
    * worded differently. Adding the Inclusive or Equitable Access format in §3
-   * means the store sells course materials through such a programme; answering
+   * means the store sells course materials through such a program; answering
    * "Neither" in §10 says it runs none. One of the two is wrong and only the
    * store knows which, so we point at both rather than picking a winner.
    */
   const iaeaContradiction = useMemo(() => {
     const message = iaEaContradiction({
       courseMaterialCategories: cmCategories,
-      programmeType: formData.ia_ea_program_type,
+      programType: formData.ia_ea_program_type,
     });
     if (!message) return null;
     return {

@@ -5,7 +5,7 @@ import type { StoreContact } from "@/lib/actions/benchmarking-respondent";
  *
  * The same note the printed worksheet leads with, for the same reason: this one
  * list fills in who compiled the survey, who buys for each category, and the
- * whole staffing section. Correcting it once on the organisation page saves
+ * whole staffing section. Correcting it once on the organization page saves
  * typing it three times inside the survey, and only saves anything at all if it
  * is read BEFORE the first question rather than discovered at the sixth.
  *
@@ -36,12 +36,14 @@ export default function KnownPeopleNotice({
             {orgHref ? (
               <a
                 href={orgHref}
+                target="_blank"
+                rel="noreferrer"
                 className="font-medium text-[#163D6D] underline underline-offset-4"
               >
-                go to your organisation page
+                go to your organization page
               </a>
             ) : (
-              "go to your organisation page"
+              "go to your organization page"
             )}{" "}
             and fix it there before you begin.
           </p>
@@ -62,12 +64,14 @@ export default function KnownPeopleNotice({
           {orgHref ? (
             <a
               href={orgHref}
+              target="_blank"
+              rel="noreferrer"
               className="font-medium text-[#163D6D] underline underline-offset-4"
             >
-              Go to your organisation page
+              Go to your organization page
             </a>
           ) : (
-            "Go to your organisation page"
+            "Go to your organization page"
           )}{" "}
           and add your people before you begin.
         </p>

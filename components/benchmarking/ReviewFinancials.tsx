@@ -584,7 +584,7 @@ export default function ReviewFinancials({
           <p className="mt-2 text-xs text-gray-600">
             {countsAsRevenue
               ? "You asked us to count this as part of your revenue. It sits outside the statement above because it never passed through your books, and we will say so wherever we use it."
-              : "You asked us to leave this out of your revenue, so it is not in the statement above. We will still report the programme's scale separately."}
+              : "You asked us to leave this out of your revenue, so it is not in the statement above. We will still report the program's scale separately."}
           </p>
         </div>
       )}

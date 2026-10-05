@@ -110,12 +110,12 @@ export const COURSE_MATERIAL_FORMAT_NOTES: Record<string, string> = {
   "Print — Used":
     "Used print, however you sourced it — buyback, wholesale, or a trade with another store.",
   Rentals: "Print or digital rented for a term. Report the rental income, not the retail value.",
-  Digital: "eBooks and digital access codes sold individually, outside any IA or EA programme.",
+  Digital: "eBooks and digital access codes sold individually, outside any IA or EA program.",
   "Course Packs": "Compiled readings, coursepacks and reprographic material you produce or resell.",
   "Custom Course Materials":
     "Custom editions and bundles built for a specific course, where the title exists only for that course.",
   "Inclusive or Equitable Access":
-    "Materials supplied through your IA or EA programme. Section 10 asks how the programme runs and who collects the money; this is what it contained.",
+    "Materials supplied through your IA or EA program. Section 10 asks how the program runs and who collects the money; this is what it contained.",
   "Course-Required Supplies":
     "Non-book material a syllabus requires: lab coats, safety equipment, art supplies, calculators, dissection kits. Course-required, so it belongs here rather than in General Merchandise — do not count it in both.",
   "Other Course Materials": "Anything adopted for a course that fits none of the above.",
@@ -134,7 +134,7 @@ export const DEPARTMENT_NOTES: Record<string, string> = {
   Books:
     "Trade books only here — the fun-to-read stuff you stock because people want it, not because a course requires it. Anything adopted for a course belongs in Course Materials.",
   "Graduation & Regalia":
-    "Caps, gowns, frames, rings, announcements. Include rental programmes.",
+    "Caps, gowns, frames, rings, announcements. Include rental programs.",
   "Campus Living":
     "Bedding, kitchen, bath, storage, decor. The move-in trade.",
   Accessories: "Bags, drinkware, stationery, desk accessories, lanyards.",

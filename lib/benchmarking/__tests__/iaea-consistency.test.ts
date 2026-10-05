@@ -5,21 +5,21 @@ const withFormat = [{ department: "Inclusive or Equitable Access" }];
 const withoutFormat = [{ department: "Print — New" }];
 
 describe("Inclusive and Equitable Access consistency", () => {
-  it("flags a store that sells through a programme it says it does not run", () => {
+  it("flags a store that sells through a program it says it does not run", () => {
     expect(
       iaEaContradiction({
         courseMaterialCategories: withFormat,
-        programmeType: "Neither",
+        programType: "Neither",
       }),
     ).toMatch(/Section 3 has an Inclusive or Equitable Access line/);
   });
 
-  it("says nothing when the store names its programme", () => {
+  it("says nothing when the store names its program", () => {
     for (const type of ["Inclusive Access", "Equitable Access", "Both"]) {
       expect(
         iaEaContradiction({
           courseMaterialCategories: withFormat,
-          programmeType: type,
+          programType: type,
         }),
       ).toBeNull();
     }
@@ -29,7 +29,7 @@ describe("Inclusive and Equitable Access consistency", () => {
     expect(
       iaEaContradiction({
         courseMaterialCategories: withoutFormat,
-        programmeType: "Neither",
+        programType: "Neither",
       }),
     ).toBeNull();
   });
@@ -40,7 +40,7 @@ describe("Inclusive and Equitable Access consistency", () => {
     expect(
       iaEaContradiction({
         courseMaterialCategories: withFormat,
-        programmeType: null,
+        programType: null,
       }),
     ).toBeNull();
   });

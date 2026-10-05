@@ -156,7 +156,7 @@ export default function OtherIncomeEditor({
         </p>
         <p className="mt-1 text-xs text-amber-900">
           If the money never reached your financial statements, it is not your income,
-          however large the programme is and however much work your store does to run
+          however large the program is and however much work your store does to run
           it. Section 10 asks for that amount separately and lets you decide whether it
           should count toward your comparison. Putting it here instead inflates your
           revenue against every store that left it out, and makes your margin and
@@ -284,7 +284,7 @@ export default function OtherIncomeEditor({
                       });
                     }}
                   />
-                  <Explain text="Ticked, this line is part of your revenue and every ratio built on it. Untick it for a service you run at cost as a campus obligation: a print desk or locker programme that clears its own expenses and nothing more. We will still report what it earned; it just will not count as revenue when your store is compared.">
+                  <Explain text="Ticked, this line is part of your revenue and every ratio built on it. Untick it for a service you run at cost as a campus obligation: a print desk or locker program that clears its own expenses and nothing more. We will still report what it earned; it just will not count as revenue when your store is compared.">
                     Included as income
                   </Explain>
                 </label>

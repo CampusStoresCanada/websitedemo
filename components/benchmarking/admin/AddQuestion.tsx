@@ -145,7 +145,7 @@ export default function AddQuestion({
             type="text"
             value={label}
             onChange={(e) => setLabel(e.target.value)}
-            placeholder="e.g. How is your IA/EA programme delivered?"
+            placeholder="e.g. How is your IA/EA program delivered?"
             className="mt-1 w-full rounded border border-gray-300 px-2 py-1.5 text-sm"
           />
         </div>

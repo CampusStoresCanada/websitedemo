@@ -54,7 +54,7 @@ export const LMS_SYSTEMS = [
   "Other",
 ] as const;
 
-/** Who actually runs an Inclusive or Equitable Access programme. */
+/** Who actually runs an Inclusive or Equitable Access program. */
 export const IA_OPERATORS = ["The institution", "In house", "Other"] as const;
 
 export const EMPLOYMENT_TYPES = [

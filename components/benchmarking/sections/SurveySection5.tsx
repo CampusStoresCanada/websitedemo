@@ -67,8 +67,8 @@ export default function SurveySection5(props: SurveySectionProps) {
         </div>
         {/*
           The old note here pointed back at Section 2 and told the reader the
-          two IA lines were the same programme seen twice. They are not: that
-          one asks where the money is booked, this one asks what the programme
+          two IA lines were the same program seen twice. They are not: that
+          one asks where the money is booked, this one asks what the program
           contains. The cross-reference was the single biggest source of
           confusion in question review, so it is gone rather than reworded.
         */}

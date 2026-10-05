@@ -245,7 +245,7 @@ function listsForSection(
           title: "Before you start: the people we already know",
           intro:
             known.people.length > 0
-              ? `We have ${known.people.length} people on file for your store, listed below. If that is wrong, sign in, go to your organisation page and fix it there before you begin. ` +
+              ? `We have ${known.people.length} people on file for your store, listed below. If that is wrong, sign in, go to your organization page and fix it there before you begin. ` +
                 (known.orgPath ? `It is at ${known.orgPath}. ` : "") +
                 "It makes the rest of this a great deal easier: the same list fills in who compiled the survey, who buys for each category, and your staffing section, so correcting it once here saves typing it three times later."
               : "We have nobody on file for your store. " +

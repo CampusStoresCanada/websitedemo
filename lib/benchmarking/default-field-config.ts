@@ -67,7 +67,7 @@ export interface FieldConfig {
    * Conditional visibility — hide unless another field has a matching value.
    *
    * An array means "any of these". Needed the moment one follow-up serves two
-   * answers: §10 asks who runs the programme, and both "a third party" and
+   * answers: §10 asks who runs the program, and both "a third party" and
    * "other" need the same "who, and how does that work?" box under them.
    */
   showIf?: { field: string; value: unknown };
@@ -780,9 +780,9 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           // EXCEPT books, and both misreadings come from it not looking like the
           // rest of the list it sits in.
           helpText:
-            "Course materials supplied through your Inclusive Access or Equitable Access programme. One more channel in this list: the same question asked of print, rentals and digital, asked of IA/EA. Course materials only: general merchandise bundled into the programme goes in General Merchandise. Leave blank if you do not run one.",
+            "Course materials supplied through your Inclusive Access or Equitable Access program. One more channel in this list: the same question asked of print, rentals and digital, asked of IA/EA. Course materials only: general merchandise bundled into the program goes in General Merchandise. Leave blank if you do not run one.",
           reviewerNote:
-            "Rewritten 2026-09. This used to say it was 'the product view of the same programme you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAMME CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
+            "Rewritten 2026-09. This used to say it was 'the product view of the same program you reported as revenue in Sales Revenue — the two are complementary, not duplicates', and that sentence was doing the damage. It reached three sections back to a question with a different subject, and reviewers read it as one number asked twice.\\n\\nThis question is WHAT THE PROGRAM CONTAINS. The Sales Revenue one is WHERE THE MONEY IS BOOKED. They are not the same quantity and neither is a subset of the other.\\n\\nThe bundle exclusion is the part to check: does a store running a bundle with a lab kit in it know to strip the kit out here?",
           order: 11,
           visible: false,
           group: "Inclusive Access / Equitable Access",
@@ -959,7 +959,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           name: "ia_revenue",
           reviewerNote:
-            "This field did not exist in 2025. One college runs a $16M Inclusive Access programme through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages. Is this description clear enough that an IA store knows this is where their money goes, and a non-IA store knows to leave it blank?",
+            "This field did not exist in 2025. One college runs a $16M Inclusive Access program through registration fees; their figures looked broken until a phone call explained it, and we had to add a custom field and asterisk 39 packages. Is this description clear enough that an IA store knows this is where their money goes, and a non-IA store knows to leave it blank?",
           label: "Inclusive Access revenue",
           type: "currency",
           helpText:
@@ -1647,7 +1647,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
       fields: [
         {
           name: "ia_ea_program_type",
-          label: "Do you run an Inclusive Access or Equitable Access programme?",
+          label: "Do you run an Inclusive Access or Equitable Access program?",
           type: "select",
           order: 1,
           visible: true,
@@ -1673,7 +1673,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Is it opt-in or opt-out?",
           type: "select",
           options: ["Opt-in", "Opt-out"],
-          helpText: "Whether a student is in the programme by default, or has to choose it.",
+          helpText: "Whether a student is in the program by default, or has to choose it.",
           order: 2,
           visible: true,
           allowOther: true,
@@ -1701,7 +1701,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "Who, and how does that work?",
           type: "text",
           helpText:
-            "Name the third party if one runs it. If it is some other arrangement, describe it: a shared service between campuses, a consortium, a faculty-run programme.",
+            "Name the third party if one runs it. If it is some other arrangement, describe it: a shared service between campuses, a consortium, a faculty-run program.",
           order: 3.1,
           visible: true,
           indent: true,
@@ -1752,7 +1752,7 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
           label: "How much did the institution collect on your behalf?",
           type: "currency",
           helpText:
-            "The fee revenue for the programme, in dollars, where it went onto student fee statements and never appeared on your financial statements. Asked here because it is not your revenue in the ordinary sense, and every other section of this survey deliberately excludes it.",
+            "The fee revenue for the program, in dollars, where it went onto student fee statements and never appeared on your financial statements. Asked here because it is not your revenue in the ordinary sense, and every other section of this survey deliberately excludes it.",
           order: 6,
           visible: true,
           indent: true,
@@ -1775,16 +1775,16 @@ export const DEFAULT_FIELD_CONFIG: SurveyFieldConfig = {
         {
           /*
             Fulfilment, not money. A store can collect every dollar of an IA
-            programme and still supply none of the books, because the institution
+            program and still supply none of the books, because the institution
             contracted the publisher or the platform directly for some courses.
-            That store looks like it runs a large programme and carries almost no
+            That store looks like it runs a large program and carries almost no
             inventory for it, and nothing else in the survey would show why.
           */
           name: "ia_ea_booked_outside_pct",
-          label: "What share of the programme's materials does someone other than your store supply?",
+          label: "What share of the program's materials does someone other than your store supply?",
           type: "percentage",
           helpText:
-            "By value of the materials, not by the money. Zero if every title in the programme is ordered, received and issued through your store, whoever took the payment. Above zero if the institution or the platform gets some titles to students without them ever passing through you, which usually means a direct deal with a publisher for particular courses.",
+            "By value of the materials, not by the money. Zero if every title in the program is ordered, received and issued through your store, whoever took the payment. Above zero if the institution or the platform gets some titles to students without them ever passing through you, which usually means a direct deal with a publisher for particular courses.",
           order: 8,
           visible: true,
           suffix: "%",

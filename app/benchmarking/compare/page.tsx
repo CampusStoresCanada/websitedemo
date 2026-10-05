@@ -163,7 +163,7 @@ export default async function BenchmarkingComparePage({
       ?.disclosure_level ?? null,
   });
 
-  // Staff need the truth to run the programme; that is not a disclosure decision.
+  // Staff need the truth to run the program; that is not a disclosure decision.
   if (tier === "none" && !isAdmin) {
     return (
       <ComparisonView

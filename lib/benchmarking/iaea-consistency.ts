@@ -4,7 +4,7 @@ import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
  * Two answers about Inclusive and Equitable Access that cannot both be true.
  *
  * Adding the Inclusive or Equitable Access format in §3 means the store sells
- * course materials through such a programme. Answering "Neither" in §10 says it
+ * course materials through such a program. Answering "Neither" in §10 says it
  * runs none. One of the two is wrong, and only the store knows which, so the
  * check names both places rather than picking a winner or silently correcting
  * either one.
@@ -17,22 +17,22 @@ import type { SurveyCategory } from "@/lib/actions/benchmarking-categories";
 /** The §3 format whose presence contradicts a "Neither" in §10. */
 export const IA_EA_FORMAT = "Inclusive or Equitable Access";
 
-/** The §10 answer meaning the store runs no such programme. */
-export const NO_PROGRAMME = "Neither";
+/** The §10 answer meaning the store runs no such program. */
+export const NO_PROGRAM = "Neither";
 
 export function iaEaContradiction(input: {
   courseMaterialCategories: Pick<SurveyCategory, "department">[];
-  programmeType: unknown;
+  programType: unknown;
 }): string | null {
-  const sellsThroughProgramme = input.courseMaterialCategories.some(
+  const sellsThroughProgram = input.courseMaterialCategories.some(
     (c) => c.department === IA_EA_FORMAT,
   );
-  if (!sellsThroughProgramme) return null;
-  if (input.programmeType !== NO_PROGRAMME) return null;
+  if (!sellsThroughProgram) return null;
+  if (input.programType !== NO_PROGRAM) return null;
 
   return (
     "Section 3 has an Inclusive or Equitable Access line, but Section 10 says you run " +
-    "neither. Either name the programme in Section 10, or remove that format from " +
+    "neither. Either name the program in Section 10, or remove that format from " +
     "Section 3 if you do not run one."
   );
 }

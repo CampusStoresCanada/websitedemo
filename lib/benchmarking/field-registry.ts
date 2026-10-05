@@ -182,7 +182,7 @@ export const FIELD_REGISTRY: Record<string, FieldDef> = {
   */
   adoption_deadline_window:{ type: "select", options: ["More than 12 weeks before term", "8 to 12 weeks before term", "4 to 8 weeks before term", "Less than 4 weeks before term", "We do not set one"] },
 
-  // ── How the IA/EA programme runs (Store Operations) ──
+  // ── How the IA/EA program runs (Store Operations) ──
   //
   // Registered rather than left to resolveConfiguredFieldDef, which exists for
   // questions added through the editor. These ship in DEFAULT_FIELD_CONFIG, so
