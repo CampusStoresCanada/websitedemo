@@ -5,16 +5,41 @@ import { createProspectiveBoothCheckout } from "@/lib/actions/prospective-booth-
 import { formatCents } from "@/lib/utils";
 import { PROVINCES } from "@/lib/constants/provinces";
 
+/**
+ * Pay-first checkout for someone with no CSC account yet: they are charged for
+ * the thing AND for the partnership in one Stripe session, then routed into the
+ * application pipeline.
+ *
+ * Not booth-only. Conference in a Box is sold to anyone, exhibiting or not, and
+ * a non-partner buying one needs exactly this flow — so the form takes a list
+ * of offers rather than a list of booths. A single offer renders as a line of
+ * text, because a <select> with one option is a decision nobody is making.
+ */
 export default function ExhibitCheckoutForm({
   conferenceId,
   conferenceYear,
   conferenceEdition,
   booths,
+  label = "Booth",
+  namePrefix = "Booth ",
+  successUrl,
+  cancelUrl,
+  footnote,
 }: {
   conferenceId: string;
   conferenceYear: number;
   conferenceEdition: string;
+  /** The things on offer. Named `booths` for the exhibit page that predates this. */
   booths: Array<{ id: string; name: string; priceCents: number }>;
+  /** Field label above the picker. */
+  label?: string;
+  /** Prefix on each option, e.g. "Booth 204". Empty for products named in full. */
+  namePrefix?: string;
+  /** Where Stripe returns to. Defaults to the exhibit success/cancel pages. */
+  successUrl?: string;
+  cancelUrl?: string;
+  /** Replaces the "charged for the booth plus a partnership deposit" line. */
+  footnote?: string;
 }) {
   const [companyName, setCompanyName] = useState("");
   const [email, setEmail] = useState("");
@@ -22,6 +47,7 @@ export default function ExhibitCheckoutForm({
   const [boothId, setBoothId] = useState(booths[0]?.id ?? "");
   const [error, setError] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
+  const onlyOffer = booths.length === 1 ? booths[0] : null;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -35,8 +61,9 @@ export default function ExhibitCheckoutForm({
         companyName,
         email,
         province,
-        successUrl: `${baseUrl}${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`,
-        cancelUrl: `${baseUrl}${conferencePath}/exhibit`,
+        successUrl:
+          successUrl ?? `${baseUrl}${conferencePath}/exhibit/success?session_id={CHECKOUT_SESSION_ID}`,
+        cancelUrl: cancelUrl ?? `${baseUrl}${conferencePath}/exhibit`,
       });
       if (!result.success) {
         setError(result.error);
@@ -92,16 +119,24 @@ export default function ExhibitCheckoutForm({
           Determines the tax rate on your membership dues line.
         </span>
       </label>
-      <label className="block">
-        <span className="text-sm font-medium text-gray-700">Booth</span>
-        <select value={boothId} onChange={(e) => setBoothId(e.target.value)} className={`mt-1 ${inputClass}`}>
-          {booths.map((b) => (
-            <option key={b.id} value={b.id}>
-              Booth {b.name} — {formatCents(b.priceCents)}
-            </option>
-          ))}
-        </select>
-      </label>
+      <div className="block">
+        <span className="text-sm font-medium text-gray-700">{label}</span>
+        {onlyOffer ? (
+          <p className="mt-1 text-sm text-gray-900">
+            {namePrefix}
+            {onlyOffer.name} — {formatCents(onlyOffer.priceCents)}
+          </p>
+        ) : (
+          <select value={boothId} onChange={(e) => setBoothId(e.target.value)} className={`mt-1 ${inputClass}`}>
+            {booths.map((b) => (
+              <option key={b.id} value={b.id}>
+                {namePrefix}
+                {b.name} — {formatCents(b.priceCents)}
+              </option>
+            ))}
+          </select>
+        )}
+      </div>
 
       {error ? <p className="text-sm text-red-600">{error}</p> : null}
 
@@ -113,9 +148,8 @@ export default function ExhibitCheckoutForm({
         {isPending ? "Starting checkout…" : "Continue to payment"}
       </button>
       <p className="text-xs text-gray-500">
-        Your card is charged for the booth plus a partnership membership deposit. This
-        does not guarantee approval — the CSC board reviews every new partner
-        application after payment.
+        {footnote ??
+          "Your card is charged for the booth plus a partnership membership deposit. This does not guarantee approval — the CSC board reviews every new partner application after payment."}
       </p>
     </form>
   );

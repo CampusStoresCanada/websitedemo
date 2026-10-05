@@ -86,9 +86,10 @@ export async function createProspectiveBoothCheckout(params: {
       .maybeSingle(),
   ]);
 
-  if (!booth || booth.kind !== "booth" || !booth.is_for_sale) {
-    return { success: false, error: "That booth isn't available." };
+  if (!booth || !booth.is_for_sale) {
+    return { success: false, error: "That isn't available to buy." };
   }
+  const isBooth = booth.kind === "booth";
   if (!conference?.end_date) {
     return { success: false, error: "Conference not found." };
   }
@@ -106,13 +107,21 @@ export async function createProspectiveBoothCheckout(params: {
 
   // Already sold to someone? Booths aren't tier-gated for prospects (they
   // have no org/tier yet), but they're still first-come-first-served.
-  const { data: existingPurchase } = await db
-    .from("entity_purchases")
-    .select("id")
-    .eq("offer_entity_id", params.boothEntityId)
-    .maybeSingle();
-  if (existingPurchase) {
-    return { success: false, error: "That booth has already been claimed." };
+  //
+  // Exclusivity is a property of a BOOTH — one physical space, one buyer.
+  // Conference in a Box has no such limit: every partner who wants one gets
+  // one, so checking "has anyone bought this entity" would refuse every buyer
+  // after the first. mint_prospective_booth_purchase carries the same guard
+  // and is scoped the same way.
+  if (isBooth) {
+    const { data: existingPurchase } = await db
+      .from("entity_purchases")
+      .select("id")
+      .eq("offer_entity_id", params.boothEntityId)
+      .maybeSingle();
+    if (existingPurchase) {
+      return { success: false, error: "That booth has already been claimed." };
+    }
   }
 
   const boothPriceCents = booth.price_cents ?? 0;
@@ -131,7 +140,7 @@ export async function createProspectiveBoothCheckout(params: {
         price_data: {
           currency: "cad",
           unit_amount: boothPriceCents,
-          product_data: { name: `Booth ${booth.name}` },
+          product_data: { name: isBooth ? `Booth ${booth.name}` : booth.name },
         },
         // Conference's rate, NOT the buyer's province — see above.
         tax_rates: [conference.stripe_tax_rate_id],
@@ -151,8 +160,9 @@ export async function createProspectiveBoothCheckout(params: {
     ],
     custom_text: {
       submit: {
-        message:
-          "This reserves your booth and starts your membership — approval by the CSC board is still required. You'll finish your application right after payment.",
+        message: isBooth
+          ? "This reserves your booth and starts your membership — approval by the CSC board is still required. You'll finish your application right after payment."
+          : "This starts your CSC partnership alongside your purchase — approval by the CSC board is still required. You'll finish your application right after payment.",
       },
     },
     metadata: {
