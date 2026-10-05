@@ -95,12 +95,21 @@ export default function OffersClient({
   const dayPasses = sellable.filter((o) => o.kind === "registration" && /Day Pass/i.test(o.name));
   const dayPassIds = new Set(dayPasses.map((o) => o.id));
   const otherOffers = sellable.filter((o) => o.kind !== "booth" && !dayPassIds.has(o.id));
-  // Registrations (what gets you in the door) and add-ons (optional extras
-  // like Meet & Greet Reception / Wednesday Offsite) are different kinds of
-  // decision — kept in their own section rather than one undifferentiated
-  // grid, so an add-on doesn't read as if it were another registration tier.
-  const registrationOffers = otherOffers.filter((o) => o.kind === "registration");
-  const addOnOffers = otherOffers.filter((o) => o.kind !== "registration");
+  // "Add-on" is a claim about a product, not about its kind.
+  //
+  // Splitting on `kind !== "registration"` filed Conference in a Box under
+  // "Extra tickets" — a $750 product that needs no booth, no registration and
+  // no other purchase, sitting beneath a heading that calls it a spare, under
+  // two $99 socials. It is not an extra. It is bought as part of a Connected
+  // booth OR entirely on its own, and the catalog already says which: a
+  // standalone offer has no `requires_ownership_of` at all.
+  //
+  // So standalone things are primary purchases and sit with the registrations
+  // at full weight. Only what genuinely hangs off something you already hold —
+  // a second Meet & Greet ticket for a colleague — is an extra.
+  const nonRegistration = otherOffers.filter((o) => o.kind !== "registration");
+  const primaryOffers = [...otherOffers.filter((o) => o.kind === "registration"), ...nonRegistration.filter((o) => o.standalone)];
+  const addOnOffers = nonRegistration.filter((o) => !o.standalone);
   const boothsEligible = booths.some((b) => b.eligible);
   const boothIneligibleReason = booths.find((b) => !b.eligible)?.ineligibleReason ?? null;
   const boothPrices = booths.map((b) => b.unitPriceCents);
@@ -195,12 +204,12 @@ export default function OffersClient({
         </div>
       ) : null}
 
-      {registrationOffers.length > 0 || dayPasses.length > 0 ? (
+      {primaryOffers.length > 0 || dayPasses.length > 0 ? (
         <div className="grid gap-4 sm:grid-cols-2">
           {dayPasses.length > 0 ? (
             <DayPassOfferCard offers={dayPasses} conferenceId={conferenceId} organizationId={organizationId} />
           ) : null}
-          {registrationOffers.map((offer) => (
+          {primaryOffers.map((offer) => (
             <OfferCard key={offer.id} offer={offer} conferenceId={conferenceId} organizationId={organizationId} highlighted={offer.id === highlightOfferId} />
           ))}
         </div>
