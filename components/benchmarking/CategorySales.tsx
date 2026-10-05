@@ -157,7 +157,28 @@ export default function CategorySales({
             : cat.lines.filter((l) => l.subcategory === null);
 
           return (
-            <div key={cat.id} className="rounded-lg border border-gray-200 bg-white p-4">
+            /*
+              data-flaggable on the CATEGORY, which is the thing a store would
+              question — "what counts as Course Materials, Digital?" — and the
+              unit that carries a name a reviewer can act on.
+
+              ⛔ The toolkit's Flag only ever selects elements carrying this
+              attribute, by click and by drag alike, so a section without one is
+              not merely hard to flag, it is inert: the overlay opens, nothing
+              highlights, and nothing happens. Every specialised editor in this
+              survey was in that state, including both category sections, which
+              are the ones the invitation email tells people to flag. Jackie
+              Nguyen reported it from here.
+
+              Not the whole section panel and not each cell: the first is
+              thousands of pixels tall and reduces to "section 3 is confusing",
+              the second captures a number with no question attached.
+            */
+            <div
+              key={cat.id}
+              data-flaggable
+              className="rounded-lg border border-gray-200 bg-white p-4"
+            >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 <div>
                   <h4 className="text-sm font-semibold text-gray-900">{cat.department}</h4>

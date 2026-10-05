@@ -795,23 +795,6 @@ export function getCircleGhostClient(): CircleAdminClient | null {
   const config = getCircleConfig();
   if (!config) return null;
 
-  /*
-    ⛔ The fallback is a degradation, not a convenience, and it has to say so.
-
-    Without the ghost key this client is the super admin's. Every DM it sends
-    then arrives under a real person's name — board votes, action items, flags —
-    and Circle refuses to deliver any of them TO that person, so the one human
-    most likely to notice is the only one who never sees them. Both halves are
-    silent. It took a member's flag arriving as a personal message from the
-    executive director to surface it.
-  */
-  if (!config.ghostApiKey) {
-    console.error(
-      "[circle] CIRCLE_GHOST_KEY is not set — butler DMs will be sent as the " +
-        "CIRCLE_API_KEY owner, under their own name, and cannot be delivered to them.",
-    );
-  }
-
   const key = config.ghostApiKey || config.apiKey;
   _ghostInstance = new CircleAdminClient(key, config.communityId);
   return _ghostInstance;

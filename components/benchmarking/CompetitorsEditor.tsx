@@ -60,7 +60,7 @@ export default function CompetitorsEditor({
 
       <div className="mt-3 space-y-2">
         {rows.map((r) => (
-          <div key={r.id} className="flex flex-wrap items-center gap-2">
+          <div key={r.id} data-flaggable className="flex flex-wrap items-center gap-2">
             <input
               type="text"
               value={r.name}

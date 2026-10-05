@@ -54,7 +54,7 @@ export default function OtherExpensesEditor({
 
       <div className="mt-3 space-y-2">
         {rows.map((r) => (
-          <div key={r.id} className="flex items-center gap-2">
+          <div key={r.id} data-flaggable className="flex items-center gap-2">
             <input
               type="text"
               value={r.label}

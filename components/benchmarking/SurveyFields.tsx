@@ -852,7 +852,14 @@ export function SectionHeading({
   description?: string;
 }) {
   return (
-    <div className="mb-6">
+    /*
+      data-flaggable, because the section's own explanation is a thing a store
+      can disagree with — and in the sections built from a specialised editor it
+      is often the ONLY prose on screen. "Give us what you can and overwrite the
+      totals in Review" lives here; somebody who cannot make that work needs to
+      be able to say so without a question to attach it to.
+    */
+    <div data-flaggable className="mb-6">
       <h2 className="text-lg font-semibold text-gray-900">{title}</h2>
       {description && (
         <p className="text-sm text-gray-600 mt-1">{description}</p>

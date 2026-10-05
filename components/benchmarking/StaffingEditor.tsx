@@ -70,7 +70,7 @@ export default function StaffingEditor({
 
       <div className="mt-3 space-y-2">
         {staff.map((s) => (
-          <div key={s.id} className="flex flex-wrap items-center gap-2">
+          <div key={s.id} data-flaggable className="flex flex-wrap items-center gap-2">
             <span className="min-w-[12rem] flex-1 text-sm text-gray-800">{s.name}</span>
 
             <select

@@ -254,7 +254,7 @@ export default function KeyDatesEditor({
         {dates.map((d) => {
           const kind = KEY_DATE_KINDS.find((k) => k.value === d.kind);
           return (
-            <div key={d.id} className="rounded-lg border border-gray-200 bg-white p-3">
+            <div key={d.id} data-flaggable className="rounded-lg border border-gray-200 bg-white p-3">
               <div className="flex flex-wrap items-end gap-3">
                 <div className="min-w-[12rem] flex-1">
                   <label className="block text-[11px] font-medium uppercase tracking-wide text-gray-500">

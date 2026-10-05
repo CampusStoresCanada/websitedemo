@@ -26,7 +26,18 @@ export default function Explain({
   const id = useId();
 
   return (
-    <span className="relative inline-flex items-center gap-1">
+    /*
+      data-flaggable here, so an explanation can be questioned and not only the
+      question it explains. These are the sentences most likely to be wrong in a
+      way only a store would notice, and until now the toolkit could not select
+      one at all.
+
+      ⛔ On the OUTER span, which contains the bubble while it is open. Flagging
+      mid-hover therefore captures the explanation itself rather than just the
+      words it is attached to; flagging it closed captures the trigger, and the
+      flagger's own note carries the rest.
+    */
+    <span data-flaggable className="relative inline-flex items-center gap-1">
       <span
         tabIndex={0}
         aria-describedby={open ? id : undefined}
