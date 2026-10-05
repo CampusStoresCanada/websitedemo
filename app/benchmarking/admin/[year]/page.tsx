@@ -279,6 +279,22 @@ export default async function BenchmarkingCyclePage({
       recipients: stageMessages.reminders?.[0]?.recipientCount ?? null,
       audience: "invited stores that have not filed",
     },
+    /*
+      ⛔ Starting the beta IS a send, and it was the one send on this page that
+      did not say so.
+
+      Without an entry here the timeline renders a plain button, so "Start beta
+      testing" moved the state and mailed every appointed tester in one press,
+      with no confirmation and no number — which is exactly the failure
+      ConfirmSendButton was written for, reappearing on the step beside the two
+      that use it. Seven people were emailed before anyone could count them.
+    */
+    startBeta: {
+      recipients: holders.filter(
+        (h) => h.capability === CAPABILITIES.BENCHMARKING_BETA_TESTER,
+      ).length,
+      audience: "appointed beta testers",
+    },
   };
 
   /*

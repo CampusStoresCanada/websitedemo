@@ -319,13 +319,27 @@ export async function planInvitations(surveyId: string): Promise<SendPlan | null
   // Deliberately NOT filtered to uninvited in the query — the preview should
   // show the already-invited stores too, so the operator can see that running
   // it again is safe rather than having to trust that it is.
-  const recipients = await loadRecipients(surveyId);
+  const [recipients, done] = await Promise.all([
+    loadRecipients(surveyId),
+    submittedOrgIds(survey.fiscal_year),
+  ]);
 
   const willSend: PlannedSend[] = [];
   const blocked: PlannedSend[] = [];
 
   for (const r of recipients) {
-    if (r.invited_at) blocked.push(planLine(r, "already_invited"));
+    /*
+      ⛔ A store that has already filed is not invited again.
+
+      The chase checked this and the invitation did not, so the two disagreed
+      about the same store. It matters because the beta runs BEFORE the doors
+      open: a beta store can finish its submission days before the invitation
+      goes out, and then be told "the survey is now open" and asked to fill in
+      a thing it has already sent us. That is the cycle telling a member we
+      have lost their work.
+    */
+    if (done.has(r.organization_id)) blocked.push(planLine(r, "already_submitted"));
+    else if (r.invited_at) blocked.push(planLine(r, "already_invited"));
     else if (!recipientEmail(r)) blocked.push(planLine(r, "no_address"));
     else willSend.push(planLine(r));
   }
@@ -540,7 +554,13 @@ export async function benchmarkingStageMessages(
     fiscal_year: String(survey.fiscal_year),
     opens_date: opens,
     closes_date: closes,
-    days_remaining: "7",
+    /*
+      ⛔ The real count, not a number somebody typed. The send computes this
+      from the deadline (see sendReminders), so a hardcoded sample showed
+      "7 days left" on a cycle with 46 to go — a preview stating something the
+      send would never say, which is the exact failure the note below warns of.
+    */
+    days_remaining: String(daysUntilDeadline(survey.closes_at)),
     survey_url: `${process.env.NEXT_PUBLIC_APP_URL ?? ""}/benchmarking/survey`,
     submitted_date: "[the day they filed]",
     task_title: "[the workstream]",
