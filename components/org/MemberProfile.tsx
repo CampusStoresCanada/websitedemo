@@ -323,6 +323,9 @@ export default function MemberProfile({
     const value = (primary || fallback) as string | null;
     if (!value) return <BlurredField placeholderWidth={type === "email" ? 20 : 12} />;
     if (isMaskedValue(value)) return <BlurredField maskedValue={value} />;
+    // In edit mode the row itself is the control (opens the contact editor), so a
+    // mailto:/tel: link here would swallow the click. Render plain text instead.
+    if (editMode) return value;
     // Full value — render as clickable link
     if (type === "email") {
       return (
@@ -1057,7 +1060,7 @@ export default function MemberProfile({
                         <td className="py-2 pr-4 text-[#1A1A1A]" {...(!editMode ? fieldProps("contacts", "name", contact.id, organization.id) : {})}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
-                              contact.circle_id ? (
+                              contact.circle_id && !editMode ? (
                                 <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
                               ) : (contact.name as string)
                             )
@@ -1677,7 +1680,7 @@ export default function MemberProfile({
                         <div className="font-medium text-[#1A1A1A]" {...fieldProps("contacts", "name", contact.id, organization.id)}>
                           {contact.name ? (
                             isMaskedValue(contact.name as string) ? <BlurredField maskedValue={contact.name as string} /> : (
-                              contact.circle_id ? (
+                              contact.circle_id && !editMode ? (
                                 <a href={`/api/circle/profile/${contact.id}`} className="hover:text-[#EE2A2E] transition-colors">{contact.name as string}</a>
                               ) : (contact.name as string)
                             )
