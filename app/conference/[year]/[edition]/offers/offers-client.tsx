@@ -74,9 +74,27 @@ export default function OffersClient({
   // (Non-Member)" — a distinct entity from the member one because it can't
   // carry a Membership Renewal requirement) — matched by substring, not an
   // exact end-of-string suffix, so that variant still buckets in here too.
-  const dayPasses = initialOffers.filter((o) => o.kind === "registration" && /Day Pass/i.test(o.name));
+  // Only what this buyer can actually buy.
+  //
+  // listConferenceOffers already drops anything whose `requires_ownership_of`
+  // is unmet, so a partner with no booth never sees the staff registrations or
+  // the two socials (both require a booth or a registration). What it does NOT
+  // drop is tier refusals: a partner arriving to buy Conference in a Box still
+  // got Full Conference Registration and all three Day Passes, each stamped
+  // "Only member can buy this." Those were never on offer to a partner at all,
+  // so they are not a catalogue, they are four apologies stacked on top of the
+  // one product the visit is about.
+  //
+  // The exception is the offer this visit NAMES (`?offer=`): a reader sent by
+  // an email promising one specific product must find it, and "here it is, and
+  // here is why you can't buy it yet" beats a page it is missing from.
+  // Booths keep their own path below — one summary card that states the reason
+  // once, rather than a refusal per booth.
+  const sellable = initialOffers.filter((o) => o.eligible || o.id === highlightOfferId);
+
+  const dayPasses = sellable.filter((o) => o.kind === "registration" && /Day Pass/i.test(o.name));
   const dayPassIds = new Set(dayPasses.map((o) => o.id));
-  const otherOffers = initialOffers.filter((o) => o.kind !== "booth" && !dayPassIds.has(o.id));
+  const otherOffers = sellable.filter((o) => o.kind !== "booth" && !dayPassIds.has(o.id));
   // Registrations (what gets you in the door) and add-ons (optional extras
   // like Meet & Greet Reception / Wednesday Offsite) are different kinds of
   // decision — kept in their own section rather than one undifferentiated
