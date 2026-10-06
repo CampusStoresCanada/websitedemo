@@ -60,9 +60,14 @@ export async function loadTopicBoard(
 
   const { data: topicRows, error } = await db
     .from("conference_topics")
-    .select("id, title, body, organization_id, organizations(name, type)")
+    .select("id, title, body, organization_id, organizations!inner(name, type, is_test)")
     .eq("conference_id", conferenceId)
     .in("status", ["proposed", "scheduled"])
+    // ⛔ Test orgs do not put topics in front of real members. Caught by
+    // testing: a seeded persona's topic rendered on the board as "Proposed by
+    // Test Org (BI Member)", which is what every other audience query in this
+    // codebase already guards against with this same flag.
+    .eq("organizations.is_test", false)
     .order("created_at", { ascending: true });
   if (error) return { success: false, error: error.message };
 

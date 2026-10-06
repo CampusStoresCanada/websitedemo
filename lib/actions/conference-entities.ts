@@ -506,7 +506,11 @@ export async function listConferenceOffers(
       return ownershipRequirementSatisfied(requiredEntityIds, heldIdentityIds);
     })
     .map((offer) => {
-      const elig = canBuy(offer, buyerTier, byId);
+      // The same answer that decided to show it decides whether it can be
+      // bought — otherwise a direct-purchase offer renders "Not for sale."
+      const soldDirectly =
+        isDirectPurchaseOnly(offer.attributes) && directPurchaseAllowed(offer.attributes, orgRes.data);
+      const elig = canBuy(offer, buyerTier, byId, soldDirectly);
       const avail = availability(offer, soldByOffer.get(offer.id) ?? 0);
       const refs = effectiveRefs(offer, byId);
       return {

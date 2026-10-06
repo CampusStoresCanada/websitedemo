@@ -44,9 +44,23 @@ export function effectiveBuyerTiers(buyerTier: string): string[] {
   return buyerTier === "staff" ? ["staff", "member"] : [buyerTier];
 }
 
-/** Can a buyer of the given permission tier purchase this Offer? */
-export function canBuy(offer: BuildEntity, buyerTier: string, byId: Map<string, BuildEntity>): Eligibility {
-  if (!offer.isForSale) return { ok: false, reason: "Not for sale." };
+/**
+ * Can a buyer of the given permission tier purchase this Offer?
+ *
+ * ⚠️ `soldDirectly` is how a direct-purchase offer gets past the first line.
+ * Those carry `is_for_sale: false` on purpose — they are kept off the general
+ * storefront — so without it the Big Ideas rates rendered to the very partners
+ * named on them as "Not for sale." with a dead button. Shown but unbuyable is
+ * the exact gap the shared gate exists to close, so the caller that decided to
+ * SHOW it passes the same answer in here.
+ */
+export function canBuy(
+  offer: BuildEntity,
+  buyerTier: string,
+  byId: Map<string, BuildEntity>,
+  soldDirectly = false
+): Eligibility {
+  if (!offer.isForSale && !soldDirectly) return { ok: false, reason: "Not for sale." };
   const tiers = eligibleTiers(offer, byId);
   if (tiers.length === 0) return { ok: true }; // open to all
   if (effectiveBuyerTiers(buyerTier).some((tier) => tiers.includes(tier))) return { ok: true };
