@@ -433,7 +433,7 @@ export async function listConferenceOffers(
 
   const db = createAdminClient();
   const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([
-    db.from("organizations").select("id, type, nacs_department").eq("id", organizationId).maybeSingle(),
+    db.from("organizations").select("id, type").eq("id", organizationId).maybeSingle(),
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
     db
       .from("conference_entity_refs")

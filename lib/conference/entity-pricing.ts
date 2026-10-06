@@ -82,41 +82,38 @@ export function availability(offer: BuildEntity, sold: number): Availability {
 export type DirectPurchaseBuyer = {
   id: string;
   type: string | null;
-  /**
-   * ⛔ NACS, not `primary_category`. The legacy column is free text — 31
-   * distinct comma-jammed values across 59 partners, 2 of them empty — and is
-   * deprecated. `nacs_department` is a controlled vocabulary populated for
-   * 59/59. An exact match against the legacy field is how the $500 Book
-   * Partner registration came to match exactly two organisations, both
-   * cancelled, while four active course-materials partners could not reach it.
-   */
-  nacs_department: string | null;
 };
 
 /**
  * Some offers are deliberately kept off the general storefront and sold only to
- * named buyers — the $500 Book Partner registration, the Big Ideas Day rates.
+ * named buyers — today, the Big Ideas Day rates.
  *
  * ⛔ ONE implementation, used by both `addOfferToCart` (which refuses) and
  * `listConferenceOffers` (which decides whether to show it). Two copies of
  * "may this org buy this" is how an offer becomes visible to someone who is
  * then refused at the till, or invisible to someone entitled to it.
  *
- * Two independent gates, AND-ed, both optional:
+ * `direct_purchase_org_ids` names the buyers outright, because nothing in the
+ * data can state this split. Operations partners pay $1,000 for Big Ideas Day
+ * and publishers $500, and all three categorisations were checked against the
+ * seven organisations named (2026-10-06):
  *
- *   `direct_purchase_department` matches `organizations.nacs_department` by
- *   EXACT equality — a controlled vocabulary, so exact is the right test and
- *   there is nothing to loosen. It replaced a match against the deprecated
- *   free-text `primary_category`, where exactness was a liability rather than
- *   a feature: "Books" matched two cancelled orgs and missed four active
- *   course-materials partners whose value was a comma-jammed list.
+ *   primary_category   free text, 2 of 7 exact-matchable, deprecated
+ *   nacs_department    McGraw Hill shares Course Materials with Ambassador,
+ *                      Login Canada and VitalSource; FIEL is Spirit & Gifts
+ *   the partner taxonomy parser resolves Ambassador and Login Canada to Books,
+ *                      same as McGraw Hill — yet they are priced as operations
  *
- *   `direct_purchase_org_ids` names the buyers outright. For Big Ideas Day,
- *   operations and publisher partners pay different rates and NOTHING in the
- *   data separates them — both resolve to the `partner` tier, and
- *   primary_category is free text that matches 2 of the 7 orgs named. The list
- *   is a human decision recorded where the offer lives, not a taxonomy invented
- *   so seven companies can self-select.
+ * The line is distributor-versus-publisher, a business model no field encodes.
+ * The list is a human decision recorded where the offer lives, not a taxonomy
+ * invented so seven companies can self-select.
+ *
+ * ⛔ There was also a department gate here, matching `nacs_department`. It
+ * existed for one offer — the Book Partner Attendee Registration — and that
+ * product was withdrawn entirely on 2026-10-06. A gate with no offer behind it
+ * is scaffolding, so it came down with the thing it was built for rather than
+ * waiting around for a new job. Bring it back when an offer needs it, which is
+ * cheaper than keeping a branch nothing exercises.
  */
 export function directPurchaseAllowed(
   attributes: Record<string, unknown> | null | undefined,
@@ -127,20 +124,8 @@ export function directPurchaseAllowed(
   // this way to members, and a member reaching one would be a mistake.
   if (buyer.type !== "Vendor Partner") return false;
 
-  const attrs = attributes ?? {};
-
-  const requiredCategory = attrs.direct_purchase_department;
-  const categoryOk =
-    requiredCategory == null ||
-    (typeof requiredCategory === "string" && buyer.nacs_department === requiredCategory) ||
-    (Array.isArray(requiredCategory) && requiredCategory.includes(buyer.nacs_department));
-
-  const allowedOrgIds = attrs.direct_purchase_org_ids;
-  const orgOk =
-    allowedOrgIds == null ||
-    (Array.isArray(allowedOrgIds) && allowedOrgIds.includes(buyer.id));
-
-  return categoryOk && orgOk;
+  const allowedOrgIds = (attributes ?? {}).direct_purchase_org_ids;
+  return allowedOrgIds == null || (Array.isArray(allowedOrgIds) && allowedOrgIds.includes(buyer.id));
 }
 
 /**
