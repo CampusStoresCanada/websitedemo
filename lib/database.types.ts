@@ -1789,6 +1789,7 @@ export type Database = {
       benchmarking_notes: {
         Row: {
           author_id: string
+          computed_value: number | null
           created_at: string
           delta_flag_id: string | null
           field_name: string
@@ -1805,12 +1806,14 @@ export type Database = {
           secretary_at: string | null
           secretary_decision: string | null
           secretary_id: string | null
+          stated_value: number | null
           status: string
           survey_id: string
           updated_at: string
         }
         Insert: {
           author_id: string
+          computed_value?: number | null
           created_at?: string
           delta_flag_id?: string | null
           field_name: string
@@ -1827,12 +1830,14 @@ export type Database = {
           secretary_at?: string | null
           secretary_decision?: string | null
           secretary_id?: string | null
+          stated_value?: number | null
           status?: string
           survey_id: string
           updated_at?: string
         }
         Update: {
           author_id?: string
+          computed_value?: number | null
           created_at?: string
           delta_flag_id?: string | null
           field_name?: string
@@ -1849,6 +1854,7 @@ export type Database = {
           secretary_at?: string | null
           secretary_decision?: string | null
           secretary_id?: string | null
+          stated_value?: number | null
           status?: string
           survey_id?: string
           updated_at?: string
@@ -5847,6 +5853,159 @@ export type Database = {
           {
             foreignKeyName: "conference_top_choices_declaring_org_id_fkey"
             columns: ["declaring_org_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_topic_ballot_selections: {
+        Row: {
+          ballot_id: string
+          created_at: string
+          topic_id: string
+        }
+        Insert: {
+          ballot_id: string
+          created_at?: string
+          topic_id: string
+        }
+        Update: {
+          ballot_id?: string
+          created_at?: string
+          topic_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_topic_ballot_selections_ballot_id_fkey"
+            columns: ["ballot_id"]
+            isOneToOne: false
+            referencedRelation: "conference_topic_ballots"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topic_ballot_selections_topic_id_fkey"
+            columns: ["topic_id"]
+            isOneToOne: false
+            referencedRelation: "conference_topics"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_topic_ballots: {
+        Row: {
+          conference_id: string
+          id: string
+          organization_id: string
+          submitted_at: string
+          user_id: string
+        }
+        Insert: {
+          conference_id: string
+          id?: string
+          organization_id: string
+          submitted_at?: string
+          user_id: string
+        }
+        Update: {
+          conference_id?: string
+          id?: string
+          organization_id?: string
+          submitted_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_topic_ballots_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topic_ballots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topic_ballots_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "organizations"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      conference_topics: {
+        Row: {
+          body: string | null
+          conference_id: string
+          created_at: string
+          deposit_purchase_id: string | null
+          id: string
+          organization_id: string
+          scheduled_at: string | null
+          status: string
+          submitted_by_user_id: string | null
+          table_label: string | null
+          title: string
+          updated_at: string
+        }
+        Insert: {
+          body?: string | null
+          conference_id: string
+          created_at?: string
+          deposit_purchase_id?: string | null
+          id?: string
+          organization_id: string
+          scheduled_at?: string | null
+          status?: string
+          submitted_by_user_id?: string | null
+          table_label?: string | null
+          title: string
+          updated_at?: string
+        }
+        Update: {
+          body?: string | null
+          conference_id?: string
+          created_at?: string
+          deposit_purchase_id?: string | null
+          id?: string
+          organization_id?: string
+          scheduled_at?: string | null
+          status?: string
+          submitted_by_user_id?: string | null
+          table_label?: string | null
+          title?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "conference_topics_conference_id_fkey"
+            columns: ["conference_id"]
+            isOneToOne: false
+            referencedRelation: "conference_instances"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topics_deposit_purchase_id_fkey"
+            columns: ["deposit_purchase_id"]
+            isOneToOne: false
+            referencedRelation: "entity_purchases"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topics_organization_id_fkey"
+            columns: ["organization_id"]
+            isOneToOne: false
+            referencedRelation: "active_organizations"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "conference_topics_organization_id_fkey"
+            columns: ["organization_id"]
             isOneToOne: false
             referencedRelation: "organizations"
             referencedColumns: ["id"]
