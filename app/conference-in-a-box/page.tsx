@@ -86,6 +86,16 @@ export default async function ConferenceInABoxPage({
   const deadlines = Array.isArray(attrs.deadlines)
     ? (attrs.deadlines as Array<{ date?: string; label?: string; consequence?: string }>)
     : [];
+  // Read from the entity, not written into this page: the announcement email
+  // quotes the same address, and two copies of a shipping address is how a
+  // pallet ends up at the wrong loading dock.
+  const shipTo = (attrs.ship_to ?? null) as {
+    attention?: string;
+    marking?: string;
+    company?: string;
+    lines?: string[];
+    city_line?: string;
+  } | null;
 
   // Signed in with an org? The add-to-cart control goes HERE. Sending them to
   // the catalogue to press the same button there is a click that buys nothing
@@ -149,17 +159,17 @@ export default async function ConferenceInABoxPage({
     : { data: null };
 
   return (
-    <main className="mx-auto max-w-3xl px-4 py-12">
-      <p className="text-xs font-semibold uppercase tracking-wide text-[#EE2A2E]">
+    <div className="mx-auto max-w-3xl px-4 py-12">
+      <p className="text-xs font-semibold uppercase tracking-wide text-[#EE2A2E] print:hidden">
         Campus Store Conference {conference.year}
       </p>
-      <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1A1A1A]">{offer.name}</h1>
-      <p className="mt-1 text-lg font-semibold text-gray-900">{formatCents(offer.price_cents ?? 0)}</p>
+      <h1 className="mt-2 text-3xl font-bold tracking-tight text-[#1A1A1A] print:hidden">{offer.name}</h1>
+      <p className="mt-1 text-lg font-semibold text-gray-900 print:hidden">{formatCents(offer.price_cents ?? 0)}</p>
 
-      {about ? <p className="mt-6 text-base leading-relaxed text-gray-700">{about}</p> : null}
+      {about ? <p className="mt-6 text-base leading-relaxed text-gray-700 print:hidden">{about}</p> : null}
 
       {deadlines.length > 0 ? (
-        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+        <div className="mt-6 rounded-lg border border-amber-200 bg-amber-50 p-4 print:hidden">
           {deadlines.map((d, i) => (
             <p key={i} className="text-sm text-amber-900">
               <strong>{formatDeadline(d.date)}</strong>
@@ -171,13 +181,80 @@ export default async function ConferenceInABoxPage({
       ) : null}
 
       {rules ? (
-        <section className="mt-8">
+        <section className="mt-8 print:hidden">
           <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">What to send</h2>
           <p className="mt-2 text-sm leading-relaxed text-gray-700">{rules}</p>
         </section>
       ) : null}
 
-      <section className="mt-10">
+      {shipTo ? (
+        <section id="shipping-label" className="mt-10">
+          <h2 className="text-lg font-semibold text-gray-900 print:hidden">Where to send it</h2>
+          <p className="mt-1 text-sm text-gray-600 print:hidden">
+            Print this label and fix it to your carton. McMaster&apos;s receiving dock handles
+            a high volume of deliveries that have nothing to do with the conference, so a
+            carton marked this way reaches the right place without anyone having to work out
+            what it is.
+          </p>
+
+          {/*
+            The label itself. Printing the page yields this and nothing else:
+            every other block is `print:hidden`, and the media query below drops
+            the site header and footer, which sit outside this component.
+
+            `marking` is set in the largest type on the label on purpose — it is
+            the line the person on the dock reads first, and it is the one that
+            decides whether the carton goes to the assembly area or into general
+            bookstore receiving.
+          */}
+          <div className="mt-4 rounded-lg border-2 border-gray-900 bg-white p-6 print:mt-0 print:rounded-none print:border-[3px] print:p-8">
+            <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-4xl">
+              {shipTo.marking}
+            </p>
+            <div className="mt-5 border-t-2 border-gray-900 pt-5 print:mt-6 print:pt-6">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">Deliver to</p>
+              {shipTo.attention ? (
+                <p className="mt-2 text-lg font-semibold text-gray-900 print:text-xl">{shipTo.attention}</p>
+              ) : null}
+              {shipTo.company ? (
+                <p className="text-lg font-semibold text-gray-900 print:text-xl">{shipTo.company}</p>
+              ) : null}
+              {(shipTo.lines ?? []).map((line) => (
+                <p key={line} className="text-lg text-gray-900 print:text-xl">
+                  {line}
+                </p>
+              ))}
+              {shipTo.city_line ? (
+                <p className="text-lg text-gray-900 print:text-xl">{shipTo.city_line}</p>
+              ) : null}
+            </div>
+            {deadlines[0]?.date ? (
+              <p className="mt-5 border-t border-gray-300 pt-3 text-sm text-gray-700 print:mt-6 print:text-base">
+                Must arrive by <strong>{formatDeadline(deadlines[0].date)}</strong>
+              </p>
+            ) : null}
+          </div>
+
+          <p className="mt-3 text-xs text-gray-500 print:hidden">
+            You cover the shipping to Hamilton. CSC covers sending it out to every member
+            store from there.
+          </p>
+        </section>
+      ) : null}
+
+      {/*
+        Print the label, not the page. The site header and footer are rendered by
+        the layout and cannot be reached with a `print:hidden` class from here, so
+        they are hidden the same way app/benchmarking/worksheet does it.
+      */}
+      <style>{`
+        @media print {
+          header, footer, nav { display: none !important; }
+          @page { margin: 12mm; }
+        }
+      `}</style>
+
+      <section className="mt-10 print:hidden">
         {pricedOffer ? (
           <>
             {buyerOrg && (switchableOrgs?.length ?? 0) > 1 ? (
@@ -235,6 +312,6 @@ export default async function ConferenceInABoxPage({
           </>
         )}
       </section>
-    </main>
+    </div>
   );
 }
