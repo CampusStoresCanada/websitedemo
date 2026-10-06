@@ -20,7 +20,6 @@ export default function TopicBoard({
   canPropose,
   proposeBlockedReason,
   deadlineLabel,
-  voteClosesLabel = null,
 }: {
   conferenceId: string;
   organizationId: string | null;
@@ -31,8 +30,6 @@ export default function TopicBoard({
   proposeBlockedReason: string | null;
   /** e.g. "Friday, December 4" — the date pitches have to be in by. */
   deadlineLabel: string | null;
-  /** e.g. "Friday, December 11" — when the members' vote closes. */
-  voteClosesLabel?: string | null;
 }) {
   const [chosen, setChosen] = useState<string[]>(topics.filter((t) => t.chosen).map((t) => t.id));
   const [voted, setVoted] = useState(hasBallot);
@@ -87,12 +84,49 @@ export default function TopicBoard({
 
   return (
     <section className="mt-10">
-      <h2 className="text-lg font-semibold text-gray-900">What people want to talk about</h2>
-      <p className="mt-1 max-w-2xl text-sm text-gray-600">
-        {canVote
-          ? "Choose all the topics that appeal to you, or none. We aren't picking on votes alone and we might combine topics. If you pick one, be ready to help us host it — we'd love you at the table, you don't need to prepare anything."
-          : "Member stores choose which of these run on the day."}
-      </p>
+      {/*
+        Copy owned by the page-writing session: see
+        planning/town-hall-followup/05-big-ideas-day-page-copy.md. Changes to
+        wording go through there, so the page and the five invitation emails
+        stay in step.
+
+        ⛔ "Vote" is avoided as a NOUN throughout. It promises a count that
+        wins, which is exactly what this is not — a topic can take every pick
+        and still not run. "Pick" and "choose" instead.
+      */}
+      <h2 className="text-lg font-semibold text-gray-900">What gets talked about is up to you</h2>
+      {canVote ? (
+        <div className="mt-2 max-w-2xl space-y-3 text-sm leading-relaxed text-gray-600">
+          <p>
+            The topics below come from members and from partners, all in one list. Pick the
+            ones you&apos;d want to sit at. Pick all of them. Pick none, if nothing&apos;s
+            landed yet, and come back later, because people keep adding and the list in
+            December won&apos;t be the list today.
+          </p>
+          <p>If something&apos;s missing, add it. That&apos;s rather the point.</p>
+          <p>
+            Picking a topic isn&apos;t a ballot and it isn&apos;t binding on us. We
+            aren&apos;t choosing on votes alone, we might fold two topics together when
+            they&apos;re really the same conversation, and we&apos;ll place things so the
+            day holds together. What your picks do is tell us what people actually want to
+            spend an hour on, which is the thing we can&apos;t guess from here.
+          </p>
+          <p>
+            One thing worth knowing before you pick. If you choose a topic, be ready to sit
+            at that table on the day. You don&apos;t need to prepare anything, bring slides,
+            or have the answer. Just turn up and talk.
+          </p>
+          <p className="text-gray-500">
+            Change your mind as often as you like. Nothing&apos;s final until we publish the
+            day.
+          </p>
+        </div>
+      ) : (
+        <p className="mt-1 max-w-2xl text-sm text-gray-600">
+          The topics below come from members and from partners, all in one list. Member
+          stores pick the ones they want to sit at.
+        </p>
+      )}
 
       {topics.length === 0 ? (
         <p className="mt-6 rounded-lg border border-dashed border-gray-300 p-6 text-center text-sm text-gray-500">
@@ -122,9 +156,14 @@ export default function TopicBoard({
                       ) : null}
                       <p className="mt-2 text-xs text-gray-400">Proposed by {topic.orgName}</p>
                     </div>
-                    <span className="shrink-0 rounded-full bg-gray-100 px-2.5 py-1 text-xs font-medium text-gray-600">
-                      {topic.votes}
-                    </span>
+                    {/*
+                      ⛔ No count rendered, deliberately. "No count shown, no
+                      deadline on picking, no limit, no sense of a thing you can
+                      get wrong — it's a signal, not a poll." A visible tally
+                      turns picking into a leaderboard and quietly promises that
+                      the top one runs, which is the promise we cannot keep.
+                      `topic.votes` still comes back for staff, who do need it.
+                    */}
                   </div>
                 </Chip>
               </li>
@@ -146,16 +185,16 @@ export default function TopicBoard({
             onClick={() => { setChosen([]); queueSave([]); }}
             className="rounded-md border border-gray-300 px-3 py-1.5 font-medium text-gray-700 hover:bg-gray-50"
           >
-            None of these appeal to me
+            Nothing here for me yet
           </button>
           {status === "saving" ? <span className="text-gray-500">Saving…</span> : null}
           {status === "saved" ? (
             <span className="text-green-700">
-              {chosen.length === 0 ? "Noted — none of these." : `Saved: ${chosen.length} chosen.`}
+              {chosen.length === 0 ? "Noted — nothing here yet." : `Saved: ${chosen.length} picked.`}
             </span>
           ) : null}
           {status === "idle" && voted && chosen.length === 0 ? (
-            <span className="text-gray-500">You picked none of these.</span>
+            <span className="text-gray-500">You haven&apos;t picked any of these.</span>
           ) : null}
           {error ? <span className="text-red-700">{error}</span> : null}
         </div>
@@ -169,10 +208,9 @@ export default function TopicBoard({
       */}
       {deadlineLabel ? (
         <p className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
-          Topics are in by <strong>{deadlineLabel}</strong>. Member stores vote the
-          following week{voteClosesLabel ? `, closing ${voteClosesLabel}` : ""}, we announce
-          what is running straight after, and any deposit on a topic that is not picked
-          comes back then.
+          Pitch a session with a $250 deposit by <strong>{deadlineLabel}</strong>. Member
+          stores pick the following week, we announce what is running straight after, and
+          any deposit on a topic that is not picked comes back then.
         </p>
       ) : null}
 

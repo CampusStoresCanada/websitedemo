@@ -35,11 +35,11 @@ export const metadata = {
  * have your pitch in by December 4th. The members vote the next week, we
  * announce the winners and refund right after."
  *
- * The same two dates appear in the invitation emails. Both were checked against
- * a calendar: 2026-12-04 and 2026-12-11 are Fridays.
+ * The emails carry the same deadline. December 4 2026 is a Friday, checked.
+ * The vote week is deliberately "the following week" rather than a second date,
+ * matching the wording in all five emails.
  */
 const PITCH_DEADLINE = { iso: "2026-12-04", label: "Friday, December 4" };
-const VOTE_CLOSES = { iso: "2026-12-11", label: "Friday, December 11" };
 
 export default async function BigIdeasDayPage({
   searchParams,
@@ -124,10 +124,10 @@ export default async function BigIdeasDayPage({
       ) : null}
 
       {/*
-        Wording shared with the invitation emails on purpose — "unconference",
-        "participant, not an exhibitor", and the manager/director sessions
-        folding in. A reader who clicks through from the email should meet the
-        same words twice rather than wonder whether this is the same thing.
+        Wording shared with the invitation emails on purpose — "unconference"
+        and "participant, not an exhibitor". A reader who clicks through from
+        the email should meet the same words twice rather than wonder whether
+        this is the same thing.
       */}
       <section className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">How the day runs</h2>
@@ -145,11 +145,18 @@ export default async function BigIdeasDayPage({
             Presenters stay in the room afterwards rather than packing up, so a session
             starts a conversation instead of ending one.
           </li>
+          {/*
+            ⛔ This said "the manager and director sessions folded into this
+            day". Removed 2026-10-06: it came to me from another session citing
+            the Town Hall recording, I never saw that recording, and Steve — who
+            ran the town hall — did not recognise the claim. It was never in the
+            invitation emails either, so the page was the only place it reached a
+            reader. Do not restore it without a source someone can point at.
+          */}
           <li>
-            It is open to every role in the store, not only the general merchandise buyer.
-            The manager and director sessions folded into this day, so the course materials
-            person, the operations lead and the people who never get sent to a trade show
-            are all in the room.
+            It is open to every role in the store, not only the general merchandise buyer —
+            the course materials person, the operations lead and the people who never get
+            sent to a trade show are all in the room.
           </li>
         </ul>
       </section>
@@ -249,7 +256,6 @@ export default async function BigIdeasDayPage({
           canPropose={board.data.canPropose}
           proposeBlockedReason={board.data.proposeBlockedReason}
           deadlineLabel={PITCH_DEADLINE.label}
-          voteClosesLabel={VOTE_CLOSES.label}
         />
       ) : null}
     </div>
