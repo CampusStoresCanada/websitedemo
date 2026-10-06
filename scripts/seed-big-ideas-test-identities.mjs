@@ -68,6 +68,34 @@ async function conferenceId() {
   return any.id;
 }
 
+/**
+ * ⛔ Insert, and CHECK the error.
+ *
+ * This was an upsert with onConflict "conference_id,organization_id,entity_id".
+ * entity_balances has no such unique constraint — only a primary key on id — so
+ * every call failed, and because the error was never read the script reported
+ * six happy personas while granting nothing. The presenter then showed as
+ * blocked from proposing, which is the bug it was seeded to disprove.
+ */
+async function grantBalance(conf, orgId, purchaseId, entityId) {
+  const { data: existing } = await db
+    .from("entity_balances")
+    .select("id")
+    .eq("conference_id", conf)
+    .eq("organization_id", orgId)
+    .eq("entity_id", entityId)
+    .maybeSingle();
+  if (existing) return;
+  const { error } = await db.from("entity_balances").insert({
+    conference_id: conf,
+    organization_id: orgId,
+    purchase_id: purchaseId,
+    entity_id: entityId,
+    quantity: 1,
+  });
+  if (error) throw new Error(`grant balance ${entityId} to ${orgId}: ${error.message}`);
+}
+
 async function entityByName(conf, name) {
   const { data } = await db.from("conference_entities").select("id, attributes").eq("conference_id", conf).eq("name", name).maybeSingle();
   return data ?? null;
@@ -154,10 +182,7 @@ async function up() {
       .insert({ conference_id: conf, offer_entity_id: slot.id, quantity: 1, buyer: MARKER })
       .select("id")
       .single();
-    await db.from("entity_balances").upsert(
-      { conference_id: conf, organization_id: byKey.presenter.orgId, purchase_id: purchase.id, entity_id: slot.id, quantity: 1 },
-      { onConflict: "conference_id,organization_id,entity_id" }
-    );
+    await grantBalance(conf, byKey.presenter.orgId, purchase.id, slot.id);
   }
 
   // The registered member needs something that reaches the session.
@@ -168,10 +193,7 @@ async function up() {
       .insert({ conference_id: conf, offer_entity_id: fullConf.id, quantity: 1, buyer: MARKER })
       .select("id")
       .single();
-    await db.from("entity_balances").upsert(
-      { conference_id: conf, organization_id: byKey.memberIn.orgId, purchase_id: purchase.id, entity_id: fullConf.id, quantity: 1 },
-      { onConflict: "conference_id,organization_id,entity_id" }
-    );
+    await grantBalance(conf, byKey.memberIn.orgId, purchase.id, fullConf.id);
   }
 
   writeEnv(created, password);
