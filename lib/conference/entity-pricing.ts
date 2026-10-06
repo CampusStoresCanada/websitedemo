@@ -82,7 +82,15 @@ export function availability(offer: BuildEntity, sold: number): Availability {
 export type DirectPurchaseBuyer = {
   id: string;
   type: string | null;
-  primary_category: string | null;
+  /**
+   * ⛔ NACS, not `primary_category`. The legacy column is free text — 31
+   * distinct comma-jammed values across 59 partners, 2 of them empty — and is
+   * deprecated. `nacs_department` is a controlled vocabulary populated for
+   * 59/59. An exact match against the legacy field is how the $500 Book
+   * Partner registration came to match exactly two organisations, both
+   * cancelled, while four active course-materials partners could not reach it.
+   */
+  nacs_department: string | null;
 };
 
 /**
@@ -96,11 +104,12 @@ export type DirectPurchaseBuyer = {
  *
  * Two independent gates, AND-ed, both optional:
  *
- *   `direct_purchase_category` matches `organizations.primary_category` by
- *   EXACT equality. That is deliberate and must stay: the Book Partner
- *   registration was specified as "primary category is books" and is meant to
- *   be narrow and invisible. Loosening it to a substring would open a hidden
- *   offer to every org with "Books" somewhere in a comma-jammed list.
+ *   `direct_purchase_department` matches `organizations.nacs_department` by
+ *   EXACT equality — a controlled vocabulary, so exact is the right test and
+ *   there is nothing to loosen. It replaced a match against the deprecated
+ *   free-text `primary_category`, where exactness was a liability rather than
+ *   a feature: "Books" matched two cancelled orgs and missed four active
+ *   course-materials partners whose value was a comma-jammed list.
  *
  *   `direct_purchase_org_ids` names the buyers outright. For Big Ideas Day,
  *   operations and publisher partners pay different rates and NOTHING in the
@@ -120,11 +129,11 @@ export function directPurchaseAllowed(
 
   const attrs = attributes ?? {};
 
-  const requiredCategory = attrs.direct_purchase_category;
+  const requiredCategory = attrs.direct_purchase_department;
   const categoryOk =
     requiredCategory == null ||
-    (typeof requiredCategory === "string" && buyer.primary_category === requiredCategory) ||
-    (Array.isArray(requiredCategory) && requiredCategory.includes(buyer.primary_category));
+    (typeof requiredCategory === "string" && buyer.nacs_department === requiredCategory) ||
+    (Array.isArray(requiredCategory) && requiredCategory.includes(buyer.nacs_department));
 
   const allowedOrgIds = attrs.direct_purchase_org_ids;
   const orgOk =

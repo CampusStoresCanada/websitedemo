@@ -702,7 +702,7 @@ export async function addOfferToCart(params: {
     if (directPurchaseOnly) {
       const { data: buyerOrg } = await adminClient
         .from("organizations")
-        .select("id, type, primary_category")
+        .select("id, type, nacs_department")
         .eq("id", params.organizationId)
         .single();
       // Same predicate listConferenceOffers uses to decide whether to SHOW it,

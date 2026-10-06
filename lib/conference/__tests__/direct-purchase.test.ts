@@ -7,24 +7,27 @@ import { directPurchaseAllowed, isDirectPurchaseOnly } from "../entity-pricing";
  * Two of these gates exist in the catalog for different reasons and must not be
  * collapsed into one another:
  *
- *   CATEGORY — the $500 Book Partner Attendee Registration. Specified as
- *   "member partner whose primary category is books", deliberately invisible
- *   and narrow. Exact match is the FEATURE; a substring would open it to every
- *   org with "Books" anywhere in a comma-jammed category string.
+ *   DEPARTMENT — the $500 Book Partner Attendee Registration, open to
+ *   course-materials partners. Reads `nacs_department`, a controlled
+ *   vocabulary populated for all 59 active partners. It replaced an exact
+ *   match against the deprecated free-text `primary_category`, which matched
+ *   exactly two organisations, both cancelled.
  *
  *   NAMED ORGS — the Big Ideas Day rates. Operations partners pay $1,000 and
- *   publishers $500, and NOTHING in the data separates them: both resolve to
- *   the `partner` tier, and organizations.primary_category is free text that
- *   matches exactly 2 of the 7 orgs named by hand. The list IS the decision.
+ *   publishers $500, and NO categorisation separates them. Measured
+ *   2026-10-06: Ambassador and Login Canada sit in Course Materials alongside
+ *   McGraw Hill, yet are priced as operations; FIEL is Spirit & Gifts and is
+ *   also priced as operations. The split is distributor-vs-publisher, a
+ *   business model no field encodes. The list IS the decision.
  */
 
 const OPS_ORG = "b809863d-e6c6-4d3e-9343-4b4e19686fae";
 const PUBLISHER_ORG = "97485330-26bd-42e5-8161-55ea7572b348";
 
-const partner = (id: string, category: string | null = null) => ({
+const partner = (id: string, department: string | null = null) => ({
   id,
   type: "Vendor Partner",
-  primary_category: category,
+  nacs_department: department,
 });
 
 describe("named-org gate", () => {
@@ -51,7 +54,7 @@ describe("named-org gate", () => {
   });
 
   it("refuses a member even when their id is somehow on the list", () => {
-    const member = { id: OPS_ORG, type: "Member", primary_category: null };
+    const member = { id: OPS_ORG, type: "Member", nacs_department: null };
     expect(directPurchaseAllowed(opsOffer, member)).toBe(false);
   });
 
@@ -60,28 +63,45 @@ describe("named-org gate", () => {
   });
 });
 
-describe("category gate stays exact", () => {
-  const bookOffer = { direct_purchase_only: true, direct_purchase_category: "Books" };
+describe("department gate, against NACS", () => {
+  // The $500 Book Partner Attendee Registration: course-materials partners only.
+  const bookOffer = { direct_purchase_only: true, direct_purchase_department: "Course Materials" };
 
-  it("admits the exact category", () => {
-    expect(directPurchaseAllowed(bookOffer, partner("x", "Books"))).toBe(true);
+  it("admits a course-materials partner", () => {
+    // Ambassador, Login Canada, McGraw Hill and VitalSource all carry this.
+    expect(directPurchaseAllowed(bookOffer, partner("x", "Course Materials"))).toBe(true);
+  });
+
+  it("refuses a partner in another department", () => {
+    // Bookware and PrismRBS are Technology & Electronics.
+    expect(directPurchaseAllowed(bookOffer, partner("y", "Technology & Electronics"))).toBe(false);
   });
 
   /**
-   * ⛔ The one that must never be "fixed" into a substring match. Login Canada's
-   * category really is "Books, Course Materials, Textbooks, Physical Textbooks,
-   * eBooks, Trade Books, Lanyards & Badges, Lab Supplies" — loosening this
-   * would silently sell them a registration meant to be invisible to them.
+   * ⛔ Exact is right here, unlike on the legacy column it replaced.
+   *
+   * `nacs_department` is a controlled vocabulary, but two of the 59 partners
+   * carry a comma-jammed value that leaked in from the old free-text field
+   * ("Apparel: Men's/Unisex, Women's, Youth, Infant/Toddler, Accessories").
+   * Those rows are dirty data to be fixed, not a reason to loosen the match —
+   * a substring test would make every such row match several departments.
    */
-  it("refuses a comma-jammed category that merely contains the word", () => {
-    const loginCanada = partner("y", "Books, Course Materials, Textbooks, eBooks, Trade Books");
-    expect(directPurchaseAllowed(bookOffer, loginCanada)).toBe(false);
+  it("refuses a value that merely contains the department name", () => {
+    const dirty = partner("z", "Apparel: Men's/Unisex, Women's, Youth, Infant/Toddler, Accessories");
+    expect(directPurchaseAllowed({ ...bookOffer, direct_purchase_department: "Apparel" }, dirty)).toBe(false);
   });
 
-  it("accepts a list of acceptable categories", () => {
-    const multi = { direct_purchase_only: true, direct_purchase_category: ["Store Operations", "Books"] };
-    expect(directPurchaseAllowed(multi, partner("z", "Store Operations"))).toBe(true);
-    expect(directPurchaseAllowed(multi, partner("z", "Campus Living"))).toBe(false);
+  it("accepts a list of acceptable departments", () => {
+    const multi = {
+      direct_purchase_only: true,
+      direct_purchase_department: ["Technology & Electronics", "Course Materials"],
+    };
+    expect(directPurchaseAllowed(multi, partner("a", "Technology & Electronics"))).toBe(true);
+    expect(directPurchaseAllowed(multi, partner("a", "Campus Living"))).toBe(false);
+  });
+
+  it("refuses a partner with no department recorded", () => {
+    expect(directPurchaseAllowed(bookOffer, partner("b", null))).toBe(false);
   });
 });
 
@@ -89,12 +109,15 @@ describe("both gates together", () => {
   it("requires BOTH when both are set", () => {
     const offer = {
       direct_purchase_only: true,
-      direct_purchase_category: "Store Operations",
+      direct_purchase_department: "Technology & Electronics",
       direct_purchase_org_ids: [OPS_ORG],
     };
-    expect(directPurchaseAllowed(offer, partner(OPS_ORG, "Store Operations"))).toBe(true);
+    // Bookware is the named org AND is Technology & Electronics, so it passes both.
+    expect(directPurchaseAllowed(offer, partner(OPS_ORG, "Technology & Electronics"))).toBe(true);
+    // Named, but in the wrong department.
     expect(directPurchaseAllowed(offer, partner(OPS_ORG, "Campus Living"))).toBe(false);
-    expect(directPurchaseAllowed(offer, partner("someone-else", "Store Operations"))).toBe(false);
+    // Right department, but not named.
+    expect(directPurchaseAllowed(offer, partner("someone-else", "Technology & Electronics"))).toBe(false);
   });
 
   it("admits any partner when neither gate is set", () => {
