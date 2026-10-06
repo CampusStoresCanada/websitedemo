@@ -208,25 +208,25 @@ export default async function ConferenceInABoxPage({
             decides whether the carton goes to the assembly area or into general
             bookstore receiving.
           */}
-          <PrintButton className="label-sheet mt-4 block w-full rounded-lg border-2 border-gray-900 bg-white p-6 text-left transition hover:border-[#EE2A2E] hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EE2A2E] print:mt-0 print:rounded-none print:border-[3px] print:p-10 print:shadow-none print:hover:border-gray-900">
-            <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-6xl print:leading-tight">
+          <PrintButton className="label-sheet mt-4 block w-full rounded-lg border-2 border-gray-900 bg-white p-6 text-left transition hover:border-[#EE2A2E] hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EE2A2E] print:mt-0 print:rounded-none print:border-[3px] print:p-8 print:shadow-none print:hover:border-gray-900">
+            <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-5xl print:leading-tight">
               {shipTo.marking}
             </p>
             <div className="mt-5 border-t-2 border-gray-900 pt-5 print:mt-6 print:pt-6">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">Deliver to</p>
               {shipTo.attention ? (
-                <p className="mt-2 text-lg font-semibold text-gray-900 print:text-3xl">{shipTo.attention}</p>
+                <p className="mt-2 text-lg font-semibold text-gray-900 print:text-2xl">{shipTo.attention}</p>
               ) : null}
               {shipTo.company ? (
-                <p className="text-lg font-semibold text-gray-900 print:text-3xl">{shipTo.company}</p>
+                <p className="text-lg font-semibold text-gray-900 print:text-2xl">{shipTo.company}</p>
               ) : null}
               {(shipTo.lines ?? []).map((line) => (
-                <p key={line} className="text-lg text-gray-900 print:text-3xl">
+                <p key={line} className="text-lg text-gray-900 print:text-2xl">
                   {line}
                 </p>
               ))}
               {shipTo.city_line ? (
-                <p className="text-lg text-gray-900 print:text-3xl">{shipTo.city_line}</p>
+                <p className="text-lg text-gray-900 print:text-2xl">{shipTo.city_line}</p>
               ) : null}
             </div>
             {/*
@@ -267,11 +267,6 @@ export default async function ConferenceInABoxPage({
       ) : null}
 
       {/*
-        Print the label, not the page. The site header and footer are rendered by
-        the layout and cannot be reached with a `print:hidden` class from here, so
-        they are hidden the same way app/benchmarking/worksheet does it.
-      */}
-      {/*
         Print the label, not the page.
 
         The site header and footer come from the layout and cannot be reached
@@ -294,16 +289,38 @@ export default async function ConferenceInABoxPage({
         the tray behind every label.
       */}
       <style>{`
-        @page { size: Letter landscape; margin: 14mm; }
+        @page { size: Letter landscape; margin: 12mm; }
         @media print {
-          header, footer, nav { display: none !important; }
-          html, body { background: #fff !important; }
+          /*
+            ⛔ Three sheets came out, and print:hidden on this page's own
+            blocks was not enough. The height comes from OUTSIDE this file —
+            the layout's chrome and its floating controls — and naming
+            header/footer/nav only caught the ones using those tags.
+
+            ⛔ And visibility:hidden does NOT fix it. Hidden boxes keep their
+            layout, so the document stays exactly as tall and you get the same
+            three pages, blank. The boxes have to collapse, which means
+            display:none — on everything EXCEPT the label's own ancestors,
+            since collapsing those would take the label with them.
+
+            :has() expresses precisely that: keep what contains the label,
+            keep the label and its contents, drop everything else.
+          */
+          body *:not(:has(#shipping-label)):not(#shipping-label):not(#shipping-label *) {
+            display: none !important;
+          }
+          html, body { background: #fff !important; height: auto !important; }
           #shipping-label { margin: 0 !important; }
+
+          /*
+            No min-height. It was 180mm to fill the sheet, but a fixed height
+            plus padding and a border is exactly how content tips onto a second
+            page — and a label that fits its content beats one that fills the
+            paper.
+          */
           #shipping-label .label-sheet {
-            display: flex !important;
-            flex-direction: column;
-            justify-content: center;
-            min-height: 180mm;
+            break-inside: avoid;
+            page-break-inside: avoid;
             box-sizing: border-box;
           }
         }
