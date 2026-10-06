@@ -736,6 +736,24 @@ function FlagSelectionOverlay({
       return best;
     };
 
+    /**
+     * What the flagged element says, as a person reading the page would.
+     *
+     * ⛔ innerText, not textContent. textContent concatenates child nodes with
+     * nothing between them, so a heading followed by its description arrives as
+     * one run-on word: "2. General MerchandiseThe categories you carry", and
+     * "Store NameThe name your store trades under". That lands in a DM to the
+     * interpretation squad and in the admin queue, where it reads as a typo in
+     * the survey rather than as two separate pieces of text.
+     *
+     * innerText is layout-aware and puts a line break between block elements,
+     * which the message builder then collapses to a single space. It returns ""
+     * for an element that is not rendered, hence the fallback — though a flagged
+     * element is by definition one somebody just pointed at.
+     */
+    const flaggedText = (el: HTMLElement): string =>
+      (el.innerText || el.textContent || "").trim().slice(0, 200);
+
     const handleMouseDown = (e: MouseEvent) => {
       if ((e.target as HTMLElement).closest("[data-toolkit]") || (e.target as HTMLElement).closest("[data-flag-overlay]")) return;
       dragStartRef.current = { x: e.clientX, y: e.clientY };
@@ -774,7 +792,7 @@ function FlagSelectionOverlay({
         const el = bestFlaggableInRect(selRect);
         if (!el) return;
         onSelect({
-          text: el.textContent?.trim().slice(0, 200) ?? "",
+          text: flaggedText(el),
           selector: generateSelector(el),
           rect: el.getBoundingClientRect(),
           orgId: findOrgId(el),
@@ -785,7 +803,7 @@ function FlagSelectionOverlay({
           e.preventDefault();
           e.stopPropagation();
           onSelect({
-            text: hovered.textContent?.trim().slice(0, 200) ?? "",
+            text: flaggedText(hovered),
             selector: generateSelector(hovered),
             rect: hovered.getBoundingClientRect(),
             orgId: findOrgId(hovered),
