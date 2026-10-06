@@ -99,9 +99,10 @@ export default function TopicBoard({
         <div className="mt-2 max-w-2xl space-y-3 text-sm leading-relaxed text-gray-600">
           <p>
             The topics below come from members and from partners, all in one list. Pick the
-            ones you&apos;d want to sit at. Pick all of them. Pick none, if nothing&apos;s
-            landed yet, and come back later, because people keep adding and the list in
-            December won&apos;t be the list today.
+            ones you&apos;d want to sit at. Pick all of them. If none of it appeals, say so,
+            because that tells us something silence doesn&apos;t. Either way come back
+            later, since people keep adding and the list in December won&apos;t be the list
+            today.
           </p>
           <p>If something&apos;s missing, add it. That&apos;s rather the point.</p>
           <p>
