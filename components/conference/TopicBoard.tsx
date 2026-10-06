@@ -20,6 +20,7 @@ export default function TopicBoard({
   canPropose,
   proposeBlockedReason,
   deadlineLabel,
+  voteClosesLabel = null,
 }: {
   conferenceId: string;
   organizationId: string | null;
@@ -30,6 +31,8 @@ export default function TopicBoard({
   proposeBlockedReason: string | null;
   /** e.g. "Friday, December 4" — the date pitches have to be in by. */
   deadlineLabel: string | null;
+  /** e.g. "Friday, December 11" — when the members' vote closes. */
+  voteClosesLabel?: string | null;
 }) {
   const [chosen, setChosen] = useState<string[]>(topics.filter((t) => t.chosen).map((t) => t.id));
   const [voted, setVoted] = useState(hasBallot);
@@ -156,6 +159,21 @@ export default function TopicBoard({
           ) : null}
           {error ? <span className="text-red-700">{error}</span> : null}
         </div>
+      ) : null}
+
+      {/*
+        The whole sequence, where someone is deciding whether to pitch.
+        A partner is handing over a deposit to enter this; "refunded if not
+        selected" without dates asks them to take the timing on trust, and the
+        invitation emails carry exactly these dates.
+      */}
+      {deadlineLabel ? (
+        <p className="mt-6 rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm leading-relaxed text-gray-700">
+          Topics are in by <strong>{deadlineLabel}</strong>. Member stores vote the
+          following week{voteClosesLabel ? `, closing ${voteClosesLabel}` : ""}, we announce
+          what is running straight after, and any deposit on a topic that is not picked
+          comes back then.
+        </p>
       ) : null}
 
       {canPropose ? (

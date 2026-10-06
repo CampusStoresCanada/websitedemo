@@ -28,8 +28,18 @@ export const metadata = {
     "The day of the Campus Store Conference built for conversation rather than transaction.",
 };
 
-/** Topics have to be in before members vote on them. */
+/**
+ * Topics in, then the members' vote, then the refunds.
+ *
+ * Steve: "We collect the $250 up front. Voting takes place in December, please
+ * have your pitch in by December 4th. The members vote the next week, we
+ * announce the winners and refund right after."
+ *
+ * The same two dates appear in the invitation emails. Both were checked against
+ * a calendar: 2026-12-04 and 2026-12-11 are Fridays.
+ */
 const PITCH_DEADLINE = { iso: "2026-12-04", label: "Friday, December 4" };
+const VOTE_CLOSES = { iso: "2026-12-11", label: "Friday, December 11" };
 
 export default async function BigIdeasDayPage({
   searchParams,
@@ -113,8 +123,17 @@ export default async function BigIdeasDayPage({
         <p className="mt-6 text-base leading-relaxed text-gray-700">{purpose}</p>
       ) : null}
 
+      {/*
+        Wording shared with the invitation emails on purpose — "unconference",
+        "participant, not an exhibitor", and the manager/director sessions
+        folding in. A reader who clicks through from the email should meet the
+        same words twice rather than wonder whether this is the same thing.
+      */}
       <section className="mt-8">
         <h2 className="text-sm font-semibold uppercase tracking-wide text-gray-400">How the day runs</h2>
+        <p className="mt-3 text-sm leading-relaxed text-gray-700">
+          It runs as an <strong>unconference</strong>.
+        </p>
         <ul className="mt-3 space-y-2 text-sm leading-relaxed text-gray-700">
           <li>
             The main room runs table conversations that members and vendors put forward in
@@ -127,8 +146,10 @@ export default async function BigIdeasDayPage({
             starts a conversation instead of ending one.
           </li>
           <li>
-            It is open to every role in the store, not only the general merchandise buyer —
-            the people who never get sent to a trade show are in this room.
+            It is open to every role in the store, not only the general merchandise buyer.
+            The manager and director sessions folded into this day, so the course materials
+            person, the operations lead and the people who never get sent to a trade show
+            are all in the room.
           </li>
         </ul>
       </section>
@@ -175,7 +196,10 @@ export default async function BigIdeasDayPage({
             </p>
           ) : bigIdeasOffers.length > 0 ? (
             <>
-              <p className="mt-1 text-sm text-gray-600">Your rate as {org.name}:</p>
+              <p className="mt-1 text-sm text-gray-600">
+                You would be there as a <strong>participant, not an exhibitor</strong> —
+                nothing to set up, no stand to manage. Your rate as {org.name}:
+              </p>
               <div className="mt-3 grid gap-4 sm:grid-cols-2">
                 {bigIdeasOffers.map((offer) => (
                   <OfferCard
@@ -225,6 +249,7 @@ export default async function BigIdeasDayPage({
           canPropose={board.data.canPropose}
           proposeBlockedReason={board.data.proposeBlockedReason}
           deadlineLabel={PITCH_DEADLINE.label}
+          voteClosesLabel={VOTE_CLOSES.label}
         />
       ) : null}
     </div>
