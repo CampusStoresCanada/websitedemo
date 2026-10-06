@@ -17,11 +17,18 @@ export default function PrintButton({
   auto = false,
   label = "Print this worksheet",
   className = "rounded-md bg-[#163D6D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#12325a]",
+  children,
 }: {
   auto?: boolean;
   /** What the button says. The sequencing below is what makes this worth reusing. */
   label?: string;
   className?: string;
+  /**
+   * Render the control as something other than a line of text — the shipping
+   * label on /conference-in-a-box IS the button, so the thing you click is the
+   * thing you get. Still a real <button>, so it keeps focus and the keyboard.
+   */
+  children?: React.ReactNode;
 }) {
   useEffect(() => {
     if (!auto) return;
@@ -142,7 +149,7 @@ export default function PrintButton({
 
   return (
     <button type="button" onClick={() => window.print()} className={className}>
-      {label}
+      {children ?? label}
     </button>
   );
 }

@@ -208,7 +208,7 @@ export default async function ConferenceInABoxPage({
             decides whether the carton goes to the assembly area or into general
             bookstore receiving.
           */}
-          <div className="label-sheet mt-4 rounded-lg border-2 border-gray-900 bg-white p-6 print:mt-0 print:rounded-none print:border-[3px] print:p-10">
+          <PrintButton className="label-sheet mt-4 block w-full rounded-lg border-2 border-gray-900 bg-white p-6 text-left transition hover:border-[#EE2A2E] hover:shadow-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#EE2A2E] print:mt-0 print:rounded-none print:border-[3px] print:p-10 print:shadow-none print:hover:border-gray-900">
             <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-6xl print:leading-tight">
               {shipTo.marking}
             </p>
@@ -229,22 +229,35 @@ export default async function ConferenceInABoxPage({
                 <p className="text-lg text-gray-900 print:text-3xl">{shipTo.city_line}</p>
               ) : null}
             </div>
-            {deadlines[0]?.date ? (
-              <p className="mt-5 border-t border-gray-300 pt-3 text-sm text-gray-700 print:mt-6 print:text-base">
-                Must arrive by <strong>{formatDeadline(deadlines[0].date)}</strong>
-              </p>
-            ) : null}
-          </div>
+            {/*
+              Deadline left, carton count right.
 
-          <div className="mt-4 flex flex-wrap items-center gap-3 print:hidden">
-            <PrintButton
-              label="Print this label"
-              className="rounded-md bg-[#EE2A2E] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#b50001]"
-            />
-            <span className="text-xs text-gray-500">
-              One sheet, 8.5&quot; × 11&quot; landscape.
-            </span>
-          </div>
+              A supplier sending 65 units rarely sends one box, and the dock has
+              no way to tell a short delivery from a complete one unless the
+              cartons say so. Ruled lines rather than a printed number because
+              the sheet is printed once and then written on — the label does not
+              know how many boxes this shipment turned out to be.
+            */}
+            <div className="mt-5 flex items-end justify-between gap-6 border-t border-gray-300 pt-3 print:mt-6">
+              {deadlines[0]?.date ? (
+                <p className="text-sm text-gray-700 print:text-base">
+                  Must arrive by <strong>{formatDeadline(deadlines[0].date)}</strong>
+                </p>
+              ) : (
+                <span />
+              )}
+              <p className="shrink-0 whitespace-nowrap text-sm font-semibold uppercase tracking-wide text-gray-900 print:text-base">
+                Box <span className="inline-block w-16 border-b-2 border-gray-900 print:w-24" />
+                {" / "}
+                <span className="inline-block w-16 border-b-2 border-gray-900 print:w-24" />
+              </p>
+            </div>
+          </PrintButton>
+
+          <p className="mt-2 text-xs text-gray-500 print:hidden">
+            Click the label above to print it, or save it as a PDF to use later. One sheet,
+            8.5&quot; × 11&quot; landscape.
+          </p>
 
           <p className="mt-3 text-xs text-gray-500 print:hidden">
             You cover the shipping to Hamilton. CSC covers sending it out to every member
