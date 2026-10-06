@@ -13,7 +13,16 @@ import { useEffect } from "react";
  * itself instead of making them ask a second time on a page they did not want
  * to read.
  */
-export default function PrintButton({ auto = false }: { auto?: boolean }) {
+export default function PrintButton({
+  auto = false,
+  label = "Print this worksheet",
+  className = "rounded-md bg-[#163D6D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#12325a]",
+}: {
+  auto?: boolean;
+  /** What the button says. The sequencing below is what makes this worth reusing. */
+  label?: string;
+  className?: string;
+}) {
   useEffect(() => {
     if (!auto) return;
 
@@ -132,12 +141,8 @@ export default function PrintButton({ auto = false }: { auto?: boolean }) {
   }, [auto]);
 
   return (
-    <button
-      type="button"
-      onClick={() => window.print()}
-      className="rounded-md bg-[#163D6D] px-4 py-2 text-sm font-semibold text-white hover:bg-[#12325a]"
-    >
-      Print this worksheet
+    <button type="button" onClick={() => window.print()} className={className}>
+      {label}
     </button>
   );
 }

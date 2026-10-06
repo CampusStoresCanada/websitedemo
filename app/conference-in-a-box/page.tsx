@@ -7,6 +7,7 @@ import { formatCents } from "@/lib/utils";
 import { listConferenceOffers } from "@/lib/actions/conference-entities";
 import OfferCard from "@/components/conference/OfferCard";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
+import PrintButton from "@/components/benchmarking/PrintButton";
 import ExhibitCheckoutForm from "../conference/[year]/[edition]/exhibit/exhibit-checkout-form";
 
 /**
@@ -207,25 +208,25 @@ export default async function ConferenceInABoxPage({
             decides whether the carton goes to the assembly area or into general
             bookstore receiving.
           */}
-          <div className="mt-4 rounded-lg border-2 border-gray-900 bg-white p-6 print:mt-0 print:rounded-none print:border-[3px] print:p-8">
-            <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-4xl">
+          <div className="label-sheet mt-4 rounded-lg border-2 border-gray-900 bg-white p-6 print:mt-0 print:rounded-none print:border-[3px] print:p-10">
+            <p className="text-center text-2xl font-extrabold uppercase tracking-wide text-gray-900 print:text-6xl print:leading-tight">
               {shipTo.marking}
             </p>
             <div className="mt-5 border-t-2 border-gray-900 pt-5 print:mt-6 print:pt-6">
               <p className="text-[10px] font-semibold uppercase tracking-widest text-gray-500">Deliver to</p>
               {shipTo.attention ? (
-                <p className="mt-2 text-lg font-semibold text-gray-900 print:text-xl">{shipTo.attention}</p>
+                <p className="mt-2 text-lg font-semibold text-gray-900 print:text-3xl">{shipTo.attention}</p>
               ) : null}
               {shipTo.company ? (
-                <p className="text-lg font-semibold text-gray-900 print:text-xl">{shipTo.company}</p>
+                <p className="text-lg font-semibold text-gray-900 print:text-3xl">{shipTo.company}</p>
               ) : null}
               {(shipTo.lines ?? []).map((line) => (
-                <p key={line} className="text-lg text-gray-900 print:text-xl">
+                <p key={line} className="text-lg text-gray-900 print:text-3xl">
                   {line}
                 </p>
               ))}
               {shipTo.city_line ? (
-                <p className="text-lg text-gray-900 print:text-xl">{shipTo.city_line}</p>
+                <p className="text-lg text-gray-900 print:text-3xl">{shipTo.city_line}</p>
               ) : null}
             </div>
             {deadlines[0]?.date ? (
@@ -233,6 +234,16 @@ export default async function ConferenceInABoxPage({
                 Must arrive by <strong>{formatDeadline(deadlines[0].date)}</strong>
               </p>
             ) : null}
+          </div>
+
+          <div className="mt-4 flex flex-wrap items-center gap-3 print:hidden">
+            <PrintButton
+              label="Print this label"
+              className="rounded-md bg-[#EE2A2E] px-5 py-2.5 text-sm font-semibold text-white hover:bg-[#b50001]"
+            />
+            <span className="text-xs text-gray-500">
+              One sheet, 8.5&quot; × 11&quot; landscape.
+            </span>
           </div>
 
           <p className="mt-3 text-xs text-gray-500 print:hidden">
@@ -247,10 +258,41 @@ export default async function ConferenceInABoxPage({
         the layout and cannot be reached with a `print:hidden` class from here, so
         they are hidden the same way app/benchmarking/worksheet does it.
       */}
+      {/*
+        Print the label, not the page.
+
+        The site header and footer come from the layout and cannot be reached
+        with a `print:hidden` class from here, so they go the same way
+        app/benchmarking/worksheet does it.
+
+        ⛔ The @page rule names Letter explicitly. Without one the browser uses
+        whatever default the machine has, and a label laid out for 8.5×11 that
+        comes out of an A4 default is cropped at the right edge — on the address,
+        which is the only part that matters.
+
+        LANDSCAPE, because the marking is what this sheet is for. Across the long
+        edge "CONFERENCE IN A BOX" gets ~9.9in of line rather than ~7.4in, so it
+        sets about a third larger before it wraps — and a label is read from
+        across a loading dock, not held at arm's length.
+
+        The height follows from that: landscape Letter at 14mm margins leaves
+        7.4in ≈ 188mm of usable height, so the sheet is 180mm. It was 240mm for
+        portrait; leaving it there would have pushed a second, blank page out of
+        the tray behind every label.
+      */}
       <style>{`
+        @page { size: Letter landscape; margin: 14mm; }
         @media print {
           header, footer, nav { display: none !important; }
-          @page { margin: 12mm; }
+          html, body { background: #fff !important; }
+          #shipping-label { margin: 0 !important; }
+          #shipping-label .label-sheet {
+            display: flex !important;
+            flex-direction: column;
+            justify-content: center;
+            min-height: 180mm;
+            box-sizing: border-box;
+          }
         }
       `}</style>
 
