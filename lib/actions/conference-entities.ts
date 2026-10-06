@@ -6,7 +6,7 @@ import { LEGACY_SURFACE_ID, PLACEMENT_ROLE, defaultSurfaceId, resolvePlacements,
 import { indexById, openQuestions, effectiveRefs } from "@/lib/conference/entity-graph";
 import { wouldCycleIncludes } from "@/lib/conference/entity-graph";
 import { RELATIONSHIP_BY_ROLE } from "@/lib/conference/entity-kinds";
-import { availability, canBuy, eligibleTiers, priceForTier } from "@/lib/conference/entity-pricing";
+import { availability, canBuy, directPurchaseAllowed, eligibleTiers, isDirectPurchaseOnly, priceForTier } from "@/lib/conference/entity-pricing";
 import { accessibleThings, offerGrants, summarizeAccess, type Grant, type AccessSummary } from "@/lib/conference/entity-commerce";
 import { buildEntityGraph, ENTITY_SELECT } from "@/lib/conference/entity-rows";
 import { MEMBERSHIP_RENEWAL_KIND } from "@/lib/conference/membership-gate";
@@ -433,7 +433,7 @@ export async function listConferenceOffers(
 
   const db = createAdminClient();
   const [orgRes, entitiesRes, refsRes, salesRes, balancesRes, programs] = await Promise.all([
-    db.from("organizations").select("type").eq("id", organizationId).maybeSingle(),
+    db.from("organizations").select("id, type, primary_category").eq("id", organizationId).maybeSingle(),
     db.from("conference_entities").select(ENTITY_SELECT).eq("conference_id", conferenceId),
     db
       .from("conference_entity_refs")
@@ -481,7 +481,26 @@ export async function listConferenceOffers(
     // the booth-gating flow (lib/actions/conference-commerce.ts) — it's
     // never independently browsable/purchasable, and its catalog price is
     // deliberately null (real price is computed per-org at add/checkout time).
-    .filter((e) => e.isForSale && e.kind !== MEMBERSHIP_RENEWAL_KIND)
+    /*
+      Storefront offers, plus the direct-purchase ones THIS org is named on.
+
+      A direct-purchase offer is kept off the general storefront (is_for_sale
+      false) and sold only to named buyers — the $500 Book Partner
+      registration, the Big Ideas Day rates. Excluding them here entirely meant
+      the only way to reach one was to know its entity id, so an entitled org
+      could not see what it was entitled to. Including them unconditionally
+      would show every partner a $1,000 offer they would be refused at the
+      till.
+
+      `directPurchaseAllowed` is the SAME predicate addOfferToCart refuses
+      with, so what is shown and what can be bought cannot drift apart.
+    */
+    .filter(
+      (e) =>
+        e.kind !== MEMBERSHIP_RENEWAL_KIND &&
+        (e.isForSale ||
+          (isDirectPurchaseOnly(e.attributes) && directPurchaseAllowed(e.attributes, orgRes.data)))
+    )
     .filter((e) => {
       const requiredEntityIds = offerRequiresOwnershipOfEntityIds(effectiveRefs(e, byId));
       return ownershipRequirementSatisfied(requiredEntityIds, heldIdentityIds);

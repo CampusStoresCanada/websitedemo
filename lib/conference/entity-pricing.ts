@@ -73,3 +73,75 @@ export function availability(offer: BuildEntity, sold: number): Availability {
   const remaining = Math.max(0, cap - sold);
   return { cap, sold, remaining, soldOut: remaining <= 0 };
 }
+
+// ─────────────────────────────────────────────────────────────────
+// Direct-purchase offers
+// ─────────────────────────────────────────────────────────────────
+
+/** The buyer facts a direct-purchase gate needs. */
+export type DirectPurchaseBuyer = {
+  id: string;
+  type: string | null;
+  primary_category: string | null;
+};
+
+/**
+ * Some offers are deliberately kept off the general storefront and sold only to
+ * named buyers — the $500 Book Partner registration, the Big Ideas Day rates.
+ *
+ * ⛔ ONE implementation, used by both `addOfferToCart` (which refuses) and
+ * `listConferenceOffers` (which decides whether to show it). Two copies of
+ * "may this org buy this" is how an offer becomes visible to someone who is
+ * then refused at the till, or invisible to someone entitled to it.
+ *
+ * Two independent gates, AND-ed, both optional:
+ *
+ *   `direct_purchase_category` matches `organizations.primary_category` by
+ *   EXACT equality. That is deliberate and must stay: the Book Partner
+ *   registration was specified as "primary category is books" and is meant to
+ *   be narrow and invisible. Loosening it to a substring would open a hidden
+ *   offer to every org with "Books" somewhere in a comma-jammed list.
+ *
+ *   `direct_purchase_org_ids` names the buyers outright. For Big Ideas Day,
+ *   operations and publisher partners pay different rates and NOTHING in the
+ *   data separates them — both resolve to the `partner` tier, and
+ *   primary_category is free text that matches 2 of the 7 orgs named. The list
+ *   is a human decision recorded where the offer lives, not a taxonomy invented
+ *   so seven companies can self-select.
+ */
+export function directPurchaseAllowed(
+  attributes: Record<string, unknown> | null | undefined,
+  buyer: DirectPurchaseBuyer | null | undefined
+): boolean {
+  if (!buyer) return false;
+  // Every direct-purchase offer is a partner product. Nothing currently sells
+  // this way to members, and a member reaching one would be a mistake.
+  if (buyer.type !== "Vendor Partner") return false;
+
+  const attrs = attributes ?? {};
+
+  const requiredCategory = attrs.direct_purchase_category;
+  const categoryOk =
+    requiredCategory == null ||
+    (typeof requiredCategory === "string" && buyer.primary_category === requiredCategory) ||
+    (Array.isArray(requiredCategory) && requiredCategory.includes(buyer.primary_category));
+
+  const allowedOrgIds = attrs.direct_purchase_org_ids;
+  const orgOk =
+    allowedOrgIds == null ||
+    (Array.isArray(allowedOrgIds) && allowedOrgIds.includes(buyer.id));
+
+  return categoryOk && orgOk;
+}
+
+/**
+ * Is this offer sold only to named buyers rather than from the storefront?
+ *
+ * ⚠️ Reads a boolean, and the stored value has been the STRING "true" at least
+ * once (Big Ideas Presentations, 2026-10). A string is not accepted here on
+ * purpose: accepting it would hide the data error rather than fix it, and the
+ * gate failing closed is the safe direction.
+ */
+export function isDirectPurchaseOnly(attributes: Record<string, unknown> | null | undefined): boolean {
+  return (attributes ?? {}).direct_purchase_only === true;
+}

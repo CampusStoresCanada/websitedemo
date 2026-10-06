@@ -13,7 +13,7 @@ import type { Database } from "@/lib/database.types";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 // Relative imports: these pure modules are pulled in unmocked by vitest, where
 // the "@/" alias isn't resolved (see project notes on the test setup).
-import { availability, canBuy, priceForTier } from "../conference/entity-pricing";
+import { availability, canBuy, directPurchaseAllowed, isDirectPurchaseOnly, priceForTier } from "../conference/entity-pricing";
 import {
   MEMBERSHIP_RENEWAL_KIND,
   membershipCoversConference,
@@ -695,25 +695,19 @@ export async function addOfferToCart(params: {
     // never via listConferenceOffers(). Gated on category here since the
     // generic who-audience/tier system has no concept of primary_category.
     const offerAttrs = (offerRow.attributes as Record<string, unknown> | null) ?? {};
-    const directPurchaseOnly = offerAttrs.direct_purchase_only === true;
+    const directPurchaseOnly = isDirectPurchaseOnly(offerAttrs);
     if (!offerRow.is_for_sale && !directPurchaseOnly) {
       return { success: false, error: "This thing isn't for sale." };
     }
     if (directPurchaseOnly) {
-      const requiredCategory = offerAttrs.direct_purchase_category;
       const { data: buyerOrg } = await adminClient
         .from("organizations")
-        .select("type, primary_category")
+        .select("id, type, primary_category")
         .eq("id", params.organizationId)
         .single();
-      // direct_purchase_category may be a single category (string) or a list
-      // of eligible categories (string[]) — e.g. Big Ideas Presentations
-      // slots are open to both "Store Operations" and "Books".
-      const categoryOk =
-        requiredCategory == null ||
-        (typeof requiredCategory === "string" && buyerOrg?.primary_category === requiredCategory) ||
-        (Array.isArray(requiredCategory) && requiredCategory.includes(buyerOrg?.primary_category));
-      if (buyerOrg?.type !== "Vendor Partner" || !categoryOk) {
+      // Same predicate listConferenceOffers uses to decide whether to SHOW it,
+      // so an org is never offered something it will be refused at the till.
+      if (!directPurchaseAllowed(offerAttrs, buyerOrg)) {
         return { success: false, error: "Not eligible for this registration." };
       }
     }
