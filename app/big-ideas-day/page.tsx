@@ -88,7 +88,27 @@ export default async function BigIdeasDayPage({
   const offersResult = buyerOrgId ? await listConferenceOffers(conference.id, buyerOrgId) : null;
   const offers = offersResult?.success ? offersResult.data : [];
   const bigIdeasOffers = offers.filter((o) => /^Big Ideas Day/.test(o.name));
-  const memberWayIn = offers.filter((o) => /Day Pass|Full Conference Registration/i.test(o.name));
+
+  /*
+    ⛔ ASK THE GRAPH WHETHER IT PUTS YOU IN THE ROOM. Never match on the name.
+
+    This read `/Day Pass|Full Conference Registration/`, which is a proxy for
+    the entitlement rather than the entitlement itself — and the proxy was
+    wrong the day it was written. Only Full Conference Registration and the
+    Thursday Day Pass carry `involved_in -> Big Ideas Day`; the Tuesday and
+    Wednesday passes do not. So the page offered four ways in under the
+    sentence "included with any conference registration", and two of them
+    bought a member a $199 pass to a day they would not be admitted to.
+
+    `accessSummary` is built from the same access walk that decides what the
+    card lists, so a registration that stops granting Big Ideas Day drops out
+    of this list and off its own What's-included bullet in the same edit.
+    `session.id` is the entity this page already resolved by name at the top —
+    not a second hardcoded uuid alongside the two in the components.
+  */
+  const memberWayIn = offers.filter((o) =>
+    o.accessSummary.tradeShowDays.some((d) => d.id === session.id)
+  );
 
   // Already in the room? Either they hold something that reaches the session,
   // or their booth does.
