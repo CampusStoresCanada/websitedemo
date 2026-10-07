@@ -3,6 +3,7 @@
 import { revalidatePath } from "next/cache";
 import { requireAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
+import { logAuditEventSafe } from "@/lib/ops/audit";
 
 const BUCKET = "board-documents";
 const MAX_BYTES = 52428800; // 50 MB (matches bucket limit)
@@ -329,5 +330,71 @@ export async function deleteBoardDocument(
   await db.from("board_documents").delete().eq("id", docId);
 
   revalidatePath("/admin/board/meetings");
+  return { success: true };
+}
+
+// ─── Mark a board meeting completed ──────────────────────────────────────────
+
+/**
+ * Closes out a meeting that has happened — the only exit from `upcoming` other
+ * than cancelling. Without it the board_meeting_not_closed_out alert can never
+ * clear: nothing else in the app writes `completed`, so every past meeting sat
+ * `upcoming` forever and the warning could only be muted, never answered.
+ *
+ * Refuses a future-dated meeting (nothing has happened yet) and a cancelled one
+ * (it never happened). Date boundary is the UTC day, matching the alert's own
+ * cutoff, so a meeting held earlier today can be closed out the same day.
+ *
+ * Deliberately leaves the linked calendar event alone. cancelBoardMeeting
+ * cascades because a cancelled meeting is cancelled for everyone, but
+ * `completed` on an event narrows what the public event reader will serve — a
+ * separate decision from closing the board's own record.
+ */
+export async function completeBoardMeeting(
+  meetingId: string,
+): Promise<{ success: true } | { error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { error: "Not authorised" };
+
+  const db = createAdminClient();
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, title, meeting_date, status")
+    .eq("id", meetingId)
+    .maybeSingle();
+
+  if (!meeting) return { error: "Meeting not found" };
+  if (meeting.status === "completed") return { success: true }; // already closed out
+  if (meeting.status === "cancelled") {
+    return { error: "A cancelled meeting cannot be marked completed" };
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  if (meeting.meeting_date > today) {
+    return { error: "This meeting has not happened yet" };
+  }
+
+  const { error } = await db
+    .from("board_meetings")
+    .update({ status: "completed", updated_at: new Date().toISOString() })
+    .eq("id", meetingId);
+
+  if (error) {
+    console.error("[completeBoardMeeting]", error);
+    return { error: "Failed to mark meeting completed" };
+  }
+
+  await logAuditEventSafe({
+    actorId: auth.ctx.userId,
+    action: "board_meeting_completed",
+    entityType: "board_meeting",
+    entityId: meetingId,
+    details: { title: meeting.title, meetingDate: meeting.meeting_date },
+  });
+
+  revalidatePath("/admin/board/meetings");
+  revalidatePath(`/admin/board/meetings/${meetingId}`);
+  revalidatePath("/admin/ops");
   return { success: true };
 }

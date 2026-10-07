@@ -18,6 +18,7 @@ import {
   retryQBQueueRowAction,
   skipQBQueueRowAction,
   ignoreQBReconciliationItemAction,
+  recordTaxSignOffAction,
 } from "@/lib/actions/ops";
 import { approveApplication, rejectApplication, resendApplicationInvite } from "@/lib/actions/applications";
 import { Timestamp } from "@/components/ui/LocalDate";
@@ -1380,6 +1381,36 @@ export default async function AdminOpsPage({ searchParams }: OpsPageProps) {
                   </form>
                 ) : null}
               </div>
+
+              {/* A tax mismatch that is real but settled. Resolve alone would
+                  not hold — the nightly reconciliation re-raises it — so the
+                  acceptance is stored against the figures with the reason. */}
+              {alert.status !== "resolved" && alert.rule_key.startsWith("qbo_tax_mismatch:") ? (
+                <form
+                  action={async (formData: FormData) => {
+                    "use server";
+                    await recordTaxSignOffAction(alert.id, String(formData.get("reason") ?? ""));
+                  }}
+                  className="mt-3 flex flex-wrap items-end gap-2 border-t border-gray-100 pt-3"
+                >
+                  <label className="flex-1 min-w-[18rem] text-xs text-gray-600">
+                    Bookkeeper sign-off — who accepted this, and why
+                    <input
+                      type="text"
+                      name="reason"
+                      required
+                      maxLength={500}
+                      placeholder="e.g. Reviewed with the bookkeeper 2026-10-07; posted correctly in the Oct journal"
+                      className="mt-1 w-full rounded-md border border-gray-300 px-2 py-1 text-xs"
+                    />
+                  </label>
+                  <PendingSubmitButton
+                    label="Record sign-off"
+                    pendingLabel="Recording…"
+                    className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  />
+                </form>
+              ) : null}
               {alert.status !== "resolved" ? (
                 <form
                   action={async (formData: FormData) => {

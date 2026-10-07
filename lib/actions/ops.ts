@@ -100,6 +100,137 @@ export async function resolveOpsAlertAction(alertId: string): Promise<{ success:
   return { success: true };
 }
 
+/**
+ * Records a reviewed-and-accepted tax discrepancy, then closes its alert.
+ *
+ * The bookkeeper's answer to a qbo_tax_mismatch finding that is real but
+ * settled. Resolving the alert alone does nothing lasting — the nightly
+ * reconciliation re-finds the discrepancy and raises it again — because the
+ * suppression lives with the figures, not the alert: an exception row covers
+ * the sale exactly as reviewed, so if any of the three numbers later move, the
+ * finding is new again and surfaces. The reason is required and stored; it is
+ * the only record of who accepted what, so it is written from the operator's
+ * own words rather than generated.
+ */
+export async function recordTaxSignOffAction(
+  alertId: string,
+  reason: string
+): Promise<{ success: boolean; error?: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) {
+    return { success: false, error: auth.error };
+  }
+
+  const trimmedReason = reason.trim();
+  if (trimmedReason.length === 0) {
+    return { success: false, error: "A sign-off needs a reason: who accepted this, and why." };
+  }
+
+  const adminClient = createAdminClient();
+  const { data: alert, error: readError } = await adminClient
+    .from("ops_alerts")
+    .select("id, rule_key, details")
+    .eq("id", alertId)
+    .maybeSingle();
+
+  if (readError) {
+    return { success: false, error: `Failed to read alert: ${readError.message}` };
+  }
+  if (!alert) {
+    return { success: false, error: "Alert not found" };
+  }
+  if (!alert.rule_key.startsWith("qbo_tax_mismatch:")) {
+    return { success: false, error: "Only a tax reconciliation alert can be signed off this way" };
+  }
+
+  // The figures come from the alert's own details, never from the message text:
+  // the message is frozen prose, while these are what the reconciler compared.
+  const details =
+    typeof alert.details === "object" && alert.details !== null
+      ? (alert.details as Record<string, unknown>)
+      : {};
+  const source = typeof details.source === "string" ? details.source : null;
+  const reference = typeof details.reference === "string" ? details.reference : null;
+  const expectedTaxCents =
+    typeof details.expectedTaxCents === "number" ? details.expectedTaxCents : null;
+
+  if (!source || !reference || expectedTaxCents === null) {
+    return {
+      success: false,
+      error: "This alert is missing the sale reference and figures a sign-off has to record",
+    };
+  }
+
+  // Null is a real value here, not a gap — "QuickBooks booked —" means the
+  // document could not be read, and the acceptance has to match that exactly.
+  const chargedTaxCents =
+    typeof details.chargedTaxCents === "number" ? details.chargedTaxCents : null;
+  const bookedTaxCents =
+    typeof details.bookedTaxCents === "number" ? details.bookedTaxCents : null;
+
+  const { error: exceptionError } = await adminClient
+    .from("tax_reconciliation_exceptions")
+    .upsert(
+      {
+        source,
+        reference,
+        expected_tax_cents: expectedTaxCents,
+        charged_tax_cents: chargedTaxCents,
+        booked_tax_cents: bookedTaxCents,
+        reason: trimmedReason,
+        created_by: auth.ctx.userId,
+      },
+      { onConflict: "source,reference" }
+    );
+
+  if (exceptionError) {
+    return { success: false, error: `Failed to record sign-off: ${exceptionError.message}` };
+  }
+
+  const now = new Date().toISOString();
+  const { error: resolveError } = await adminClient
+    .from("ops_alerts")
+    .update({
+      status: "resolved",
+      resolved_by: auth.ctx.userId,
+      resolved_at: now,
+      is_acknowledged: true,
+      acknowledged_by: auth.ctx.userId,
+      acknowledged_at: now,
+      owner_id: auth.ctx.userId,
+    })
+    .eq("id", alertId);
+
+  if (resolveError) {
+    // The acceptance is stored, so the nightly run will no longer alert; the
+    // open row is cosmetic. Say so rather than implying nothing happened.
+    return {
+      success: false,
+      error: `Sign-off recorded, but the alert could not be closed: ${resolveError.message}`,
+    };
+  }
+
+  await logAuditEventSafe({
+    action: "tax_discrepancy_signed_off",
+    entityType: "ops_alert",
+    entityId: alertId,
+    actorId: auth.ctx.userId,
+    actorType: "user",
+    details: {
+      ruleKey: alert.rule_key,
+      source,
+      reference,
+      expectedTaxCents,
+      chargedTaxCents,
+      bookedTaxCents,
+      reason: trimmedReason,
+    },
+  });
+
+  revalidatePath("/admin/ops");
+  return { success: true };
+}
+
 export async function setOpsAlertTriageAction(
   alertId: string,
   dueAt: string | null

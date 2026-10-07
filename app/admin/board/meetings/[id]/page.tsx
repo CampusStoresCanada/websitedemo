@@ -19,6 +19,7 @@ import MintFromMinutesPanel from "@/components/admin/board/MintFromMinutesPanel"
 import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEditor";
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
 import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
+import CompleteMeetingButton from "@/components/admin/board/CompleteMeetingButton";
 import MeetingDocumentsPanel from "@/components/admin/board/MeetingDocumentsPanel";
 import LinkEventButton from "@/components/admin/board/LinkEventButton";
 
@@ -136,6 +137,13 @@ export default async function MeetingDetailPage({
         <PullFinancialsButton
           meetingId={meeting.id}
           endDate={reportPeriod.end}
+        />
+      )}
+      {isSA && (
+        <CompleteMeetingButton
+          meetingId={meeting.id}
+          currentStatus={meeting.status}
+          meetingDate={meeting.meeting_date}
         />
       )}
       {isSA && <CancelMeetingButton meetingId={meeting.id} currentStatus={meeting.status} />}
