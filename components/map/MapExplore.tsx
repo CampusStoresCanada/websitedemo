@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type RefObject, type SetStateAction } from "react";
 import dynamic from "next/dynamic";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { maySeeCancoll } from "@/lib/visibility/cancoll";
@@ -14,6 +14,11 @@ import { SCALE_RANGES } from "@/lib/explore/types";
 import { VENDOR_CATEGORIES, CATEGORY_SUBCATEGORIES } from "@/lib/types/procurement";
 import { parseOrgCategories } from "@/lib/publication/categories";
 import { orgSubtitle, hasActiveCompounds } from "@/lib/explore/filters";
+import {
+  parseExploreFilterParams,
+  provinceVocabulary,
+  writeExploreFilterParams,
+} from "@/lib/explore/url-filters";
 import { CompoundFilterBar } from "@/components/explore/CompoundFilterBar";
 import { OrgDetailPanel } from "@/components/explore/OrgDetailPanel";
 import {
@@ -150,6 +155,13 @@ interface MapExploreProps {
   /** Bumped by MapHero's exitExplore — triggers this component's own filter/selection reset. */
   resetSeed: number | null;
   onHighlightedIdsChange: Dispatch<SetStateAction<string[]>>;
+  /**
+   * Opt in to reading the province/size filters out of the URL on mount and
+   * writing them back as the reader changes them. Only the persistent
+   * directory pages set this — the homepage hero enters explore as an overlay,
+   * where rewriting the address bar would be wrong.
+   */
+  syncFiltersToUrl?: boolean;
 }
 
 export default function MapExplore({
@@ -164,6 +176,7 @@ export default function MapExplore({
   entrySeed,
   resetSeed,
   onHighlightedIdsChange,
+  syncFiltersToUrl = false,
 }: MapExploreProps) {
   const { user, permissionState, isCancollMember } = useAuth();
   const isMember = !!user && hasPermission(permissionState, "member");
@@ -258,6 +271,50 @@ export default function MapExplore({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resetSeed]);
+
+  // ---------------------------------------------------------------------------
+  // URL query string <-> province / size filters (opt-in, persistent pages)
+  // ---------------------------------------------------------------------------
+  //
+  // Read once on mount, then write back on every change. We touch
+  // window.history directly rather than router.replace() because the filter bar
+  // fires on every click: router.replace() refetches the RSC payload each time,
+  // and it is the address bar we want to update, not the tree.
+  //
+  // Reading from window.location rather than useSearchParams() keeps this tree
+  // free of a Suspense boundary and free of a re-render on every write. It
+  // costs nothing visible: both <Map> and <DirectoryTable> are `ssr: false`
+  // dynamic imports, so there is no server-rendered list for a deep link to
+  // flash through before the filters land.
+  //
+  // urlFiltersReadRef gates the writer so the first render cannot blank out the
+  // very params the reader is about to apply.
+  const urlFiltersReadRef = useRef(false);
+
+  const knownProvinces = useMemo(() => provinceVocabulary(organizations), [organizations]);
+
+  useEffect(() => {
+    if (!syncFiltersToUrl || urlFiltersReadRef.current) return;
+    if (typeof window === "undefined") return;
+    urlFiltersReadRef.current = true;
+    const fromUrl = parseExploreFilterParams(window.location.search, {
+      availableProvinces: knownProvinces,
+    });
+    if (Object.keys(fromUrl).length === 0) return;
+    setCompoundFilters((prev) => ({ ...prev, ...fromUrl }));
+  }, [syncFiltersToUrl, knownProvinces]);
+
+  useEffect(() => {
+    if (!syncFiltersToUrl || !urlFiltersReadRef.current) return;
+    if (typeof window === "undefined") return;
+    const nextSearch = writeExploreFilterParams(window.location.search, compoundFilters);
+    if (nextSearch === window.location.search) return;
+    window.history.replaceState(
+      window.history.state,
+      "",
+      `${window.location.pathname}${nextSearch}${window.location.hash}`
+    );
+  }, [syncFiltersToUrl, compoundFilters]);
 
   // Debounced semantic search: fires 400ms after the user stops typing,
   // but only on the partners page where embeddings are meaningful.
