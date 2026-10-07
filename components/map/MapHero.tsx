@@ -43,6 +43,13 @@ interface MapHeroProps {
   slides?: HomeSlides | null;
   /** Admin-configured rotation settings (Hero Area admin page). Omitted on persistent-mode pages — falls back to DEFAULT_HERO_SETTINGS, which is never actually exercised there since attract mode's interleave effect never runs when explore starts true. */
   heroSettings?: HeroAreaSettings | null;
+  /**
+   * Opt in to reading `?province=` / `?size=` on load and keeping them in the
+   * address bar as the reader refines. For the persistent directory pages only
+   * — on the homepage the hero is an attract surface that happens to open an
+   * overlay, and a filter there is not what the URL describes.
+   */
+  syncFiltersToUrl?: boolean;
 }
 
 const EMPTY_SLIDES: HomeSlides = {
@@ -81,6 +88,7 @@ export default function MapHero({
   conferencePin = null,
   slides = null,
   heroSettings = null,
+  syncFiltersToUrl = false,
 }: MapHeroProps) {
   const mapRef = useRef<MapRef>(null);
   const sectionRef = useRef<HTMLElement>(null);
@@ -370,6 +378,7 @@ export default function MapHero({
         entrySeed={exploreEntrySeed}
         resetSeed={resetSeed}
         onHighlightedIdsChange={setExploreHighlightedIds}
+        syncFiltersToUrl={syncFiltersToUrl}
       />
     </section>
   );
