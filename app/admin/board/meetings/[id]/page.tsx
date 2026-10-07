@@ -18,8 +18,7 @@ import ActionItemsPanel from "@/components/admin/board/ActionItemsPanel";
 import MintFromMinutesPanel from "@/components/admin/board/MintFromMinutesPanel";
 import MeetingDocumentEditor from "@/components/admin/board/MeetingDocumentEditor";
 import MinutesTabs from "@/components/admin/board/MinutesTabs";
-import CancelMeetingButton from "@/components/admin/board/CancelMeetingButton";
-import CompleteMeetingButton from "@/components/admin/board/CompleteMeetingButton";
+import MeetingStatusControl from "@/components/admin/board/MeetingStatusControl";
 import MeetingDocumentsPanel from "@/components/admin/board/MeetingDocumentsPanel";
 import LinkEventButton from "@/components/admin/board/LinkEventButton";
 
@@ -31,19 +30,6 @@ import LinkEventButton from "@/components/admin/board/LinkEventButton";
 export const maxDuration = 300;
 export const dynamic = "force-dynamic";
 export const revalidate = 0;
-
-function StatusBadge({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    upcoming:  "bg-blue-100 text-blue-700",
-    completed: "bg-gray-100 text-gray-500",
-    cancelled: "bg-red-100 text-red-600",
-  };
-  return (
-    <span className={`inline-flex items-center rounded-full px-2.5 py-0.5 text-xs font-medium ${map[status] ?? "bg-gray-100 text-gray-600"}`}>
-      {status}
-    </span>
-  );
-}
 
 type TabKey = "agenda" | "minutes" | "documents" | "financials" | "actions";
 
@@ -139,14 +125,6 @@ export default async function MeetingDetailPage({
           endDate={reportPeriod.end}
         />
       )}
-      {isSA && (
-        <CompleteMeetingButton
-          meetingId={meeting.id}
-          currentStatus={meeting.status}
-          meetingDate={meeting.meeting_date}
-        />
-      )}
-      {isSA && <CancelMeetingButton meetingId={meeting.id} currentStatus={meeting.status} />}
       <Link
         href="/admin/board/meetings"
         className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
@@ -166,7 +144,12 @@ export default async function MeetingDetailPage({
 
       {/* Meeting meta */}
       <div className="mb-4 flex flex-wrap items-center gap-3 text-sm text-gray-600">
-        <StatusBadge status={meeting.status} />
+        <MeetingStatusControl
+          meetingId={meeting.id}
+          status={meeting.status}
+          meetingDate={meeting.meeting_date}
+          canEdit={isSA}
+        />
         <span className="text-gray-400">·</span>
         <span>{meetingTypeLabel}</span>
         <span className="text-gray-400">·</span>

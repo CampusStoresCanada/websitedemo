@@ -398,3 +398,58 @@ export async function completeBoardMeeting(
   revalidatePath("/admin/ops");
   return { success: true };
 }
+
+// ─── Reopen a closed-out meeting ─────────────────────────────────────────────
+
+/**
+ * Puts a completed meeting back to `upcoming`. The undo for a mis-click on
+ * "Mark completed" — without it that button would be a one-way door, which is
+ * the same dead end that made closing out impossible in the first place.
+ *
+ * Cancelled meetings are not reopened here: cancelling cascades to the linked
+ * calendar event, so undoing it has to decide what the event becomes, and that
+ * is a larger question than correcting a status.
+ */
+export async function reopenBoardMeeting(
+  meetingId: string,
+): Promise<{ success: true } | { error: string }> {
+  const auth = await requireAdmin();
+  if (!auth.ok) return { error: "Not authorised" };
+
+  const db = createAdminClient();
+
+  const { data: meeting } = await db
+    .from("board_meetings")
+    .select("id, title, meeting_date, status")
+    .eq("id", meetingId)
+    .maybeSingle();
+
+  if (!meeting) return { error: "Meeting not found" };
+  if (meeting.status === "upcoming") return { success: true };
+  if (meeting.status !== "completed") {
+    return { error: "Only a completed meeting can be reopened" };
+  }
+
+  const { error } = await db
+    .from("board_meetings")
+    .update({ status: "upcoming", updated_at: new Date().toISOString() })
+    .eq("id", meetingId);
+
+  if (error) {
+    console.error("[reopenBoardMeeting]", error);
+    return { error: "Failed to reopen meeting" };
+  }
+
+  await logAuditEventSafe({
+    actorId: auth.ctx.userId,
+    action: "board_meeting_reopened",
+    entityType: "board_meeting",
+    entityId: meetingId,
+    details: { title: meeting.title, meetingDate: meeting.meeting_date },
+  });
+
+  revalidatePath("/admin/board/meetings");
+  revalidatePath(`/admin/board/meetings/${meetingId}`);
+  revalidatePath("/admin/ops");
+  return { success: true };
+}
