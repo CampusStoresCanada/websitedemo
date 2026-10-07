@@ -240,9 +240,22 @@ export default async function BigIdeasDayPage({
             </>
           ) : org.type === "Member" ? (
             <>
+              {/*
+                ⛔ "ANY conference registration" was false and stayed false
+                after the list above it was fixed. The Tuesday and Wednesday
+                day passes do not carry Big Ideas Day, so a member already
+                holding one read "you just need to be registered" and
+                concluded they were in the room.
+
+                The sentence now points AT the list rather than making its own
+                claim about the catalogue, so it cannot drift from what the
+                graph actually grants — the same reason the list stopped
+                matching on names.
+              */}
               <p className="mt-1 text-sm text-gray-600">
-                Big Ideas Day is included with any conference registration — you just need to
-                be registered.
+                {memberWayIn.length > 0
+                  ? "Big Ideas Day is included with the registrations below — you need to be holding one of them."
+                  : "Big Ideas Day is included with a conference registration. Nothing that covers it is on sale right now."}
               </p>
               {memberWayIn.length > 0 ? (
                 <div className="mt-3 grid gap-4 sm:grid-cols-2">
