@@ -107,8 +107,32 @@ export async function loadOrgLegalStatus(
   const programs = await getProgramsConfig();
   const audienceSourceRoles = [resolveConferenceTier(org?.type, programs)];
 
+  /*
+    ⛔ `heldEntityIds: []` MEANT HOLDING-BASED TARGETING COULD NEVER FIRE HERE.
+
+    isPolicyRequired matches on audience OR on a held entity. Passing an empty
+    array left only the audience arm, so at org level a policy could be aimed
+    at "whoever holds a booth" and reach nobody — while one aimed at the
+    `partner` audience reached every partner, booth or not.
+
+    That is how a Big Ideas Day buyer with no booth was asked to accept the
+    Exhibitor & Booth Agreement, and it is why the Speaker & Presenter
+    Agreement — which has no audience and no ownership target — currently
+    reaches no one at all.
+
+    The empty array also made the two surfaces disagree: the per-person gate
+    resolves real holdings, so a policy could be required of the people and
+    invisible to the org that has to countersign it.
+  */
+  const { data: heldRows } = await db
+    .from("entity_balances")
+    .select("entity_id")
+    .eq("conference_id", conferenceId)
+    .eq("organization_id", organizationId);
+  const heldEntityIds = [...new Set((heldRows ?? []).map((r) => r.entity_id).filter((id): id is string => !!id))];
+
   const policies = await loadPolicyTargeting(db, conferenceId);
-  const required = requiredPolicyEntityIds(policies, { audienceSourceRoles, heldEntityIds: [] });
+  const required = requiredPolicyEntityIds(policies, { audienceSourceRoles, heldEntityIds });
 
   // accept_by lives on the policy entity's attributes.
   const policyIds = [...latestByType.values()]

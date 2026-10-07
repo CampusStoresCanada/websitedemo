@@ -86,14 +86,41 @@ async function grantBalance(conf, orgId, purchaseId, entityId) {
     .eq("entity_id", entityId)
     .maybeSingle();
   if (existing) return;
-  const { error } = await db.from("entity_balances").insert({
+  const { data: balance, error } = await db
+    .from("entity_balances")
+    .insert({
+      conference_id: conf,
+      organization_id: orgId,
+      purchase_id: purchaseId,
+      entity_id: entityId,
+      quantity: 1,
+    })
+    .select("id")
+    .single();
+  if (error) throw new Error(`grant balance ${entityId} to ${orgId}: ${error.message}`);
+
+  /*
+   * ⛔ A BALANCE WITHOUT A SEAT IS NOT A PURCHASE.
+   *
+   * The real mint writes entity_balance_seats alongside the balance, one row
+   * per unit, and the org page's assignment columns are built from SEATS —
+   * listEntitySeatsForOrg, not balances. Granting only the balance produced a
+   * fixture that held the right things and still rendered no checkbox column,
+   * which reads exactly like "a paying partner cannot assign anyone".
+   *
+   * Fourth fixture-shaped false finding in one session. Each time the fixture
+   * was missing a row a surface keys off — grants, contacts, now seats — and
+   * each time the missing row looked like a product defect. Mirror what the
+   * mint writes, not what the test happens to care about.
+   */
+  const { error: seatErr } = await db.from("entity_balance_seats").insert({
     conference_id: conf,
     organization_id: orgId,
-    purchase_id: purchaseId,
+    balance_id: balance.id,
     entity_id: entityId,
-    quantity: 1,
+    seat_index: 1,
   });
-  if (error) throw new Error(`grant balance ${entityId} to ${orgId}: ${error.message}`);
+  if (seatErr) throw new Error(`seat for ${entityId}: ${seatErr.message}`);
 }
 
 async function entityByName(conf, name) {
@@ -156,6 +183,39 @@ async function up() {
       { onConflict: "user_id,organization_id" }
     );
 
+    /*
+     * ⛔ A PERSONA WITHOUT A CONTACT ROW IS NOT A CUSTOMER.
+     *
+     * The org page's roster — the table carrying the per-entity assignment
+     * checkboxes — renders only when `contacts.length > 0`. A login plus a
+     * user_organizations link is not enough: every real org reaches that page
+     * with people on it, and these personas reached it with none.
+     *
+     * The cost was a false bug report. Walking this fixture showed no roster
+     * and no sign of the $1,250 the org had "bought", and I wrote that up as
+     * "a paying partner cannot see or assign what they bought" — a defect that
+     * does not exist. Bookware has two contacts and gets the full table.
+     *
+     * Third fixture-shaped false finding in one session, same shape each time:
+     * the fixture differed from the real org in a way the page keys off, so
+     * the answer did not transfer. A persona has to look like a customer in
+     * every field a surface reads, not just the ones the test is about.
+     */
+    const personName = `Test ${persona.key}`;
+    const { error: contactErr } = await db.from("contacts").insert({
+      organization_id: org.id,
+      profile_id: userId,
+      name: personName,              // NOT NULL — omitting it failed the whole insert silently
+      first_name: "Test",
+      last_name: persona.key,
+      email: addr,
+      is_primary: true,
+    });
+    // ⛔ Read the error. The first version of this swallowed it and reported
+    // six happy personas while creating zero contacts, which is the exact
+    // failure this file's header already warns about for grants.
+    if (contactErr) throw new Error(`contact ${addr}: ${contactErr.message}`);
+
     created.push({ ...persona, orgId: org.id, userId, email: addr });
   }
 
@@ -183,6 +243,30 @@ async function up() {
       .select("id")
       .single();
     await grantBalance(conf, byKey.presenter.orgId, purchase.id, slot.id);
+  }
+
+  /*
+   * ⛔ THE PRESENTER MUST ALSO HOLD THE $1,000 PLACE, OR THE FIXTURE IS NOT A
+   * CUSTOMER.
+   *
+   * It held only the slot, which no real buyer does: Bookware bought the
+   * Operations Partner place AND the Presentations slot in one $1,412.50
+   * order on 2026-10-07, and that is the obvious shape — you buy your way
+   * into the room, then buy the right to pitch in it.
+   *
+   * The gap mattered. Every question about what a Big Ideas partner SEES —
+   * the assignment grid, the exhibitor checklist, the meeting picker — was
+   * being asked of a fixture holding half of what the real org holds, so the
+   * answers did not transfer. Testing against it proved nothing, which is the
+   * same failure this file's header already describes for Test Org (Partner).
+   */
+  if (ops) {
+    const { data: placePurchase } = await db
+      .from("entity_purchases")
+      .insert({ conference_id: conf, offer_entity_id: ops.id, quantity: 1, buyer: MARKER })
+      .select("id")
+      .single();
+    await grantBalance(conf, byKey.presenter.orgId, placePurchase.id, ops.id);
   }
 
   // The registered member needs something that reaches the session.

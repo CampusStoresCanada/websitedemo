@@ -423,10 +423,30 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
 
       const byEntity = new Map<string, AssignableEntityColumn>();
       for (const seat of seatsResult.success ? seatsResult.data : []) {
-        // Org-level holdings (e.g. a membership renewal) and the booth
-        // itself aren't something a specific person is seated into — keep
-        // them out of the per-person assignment columns.
-        if (seat.kind === "membership_renewal" || seat.kind === "booth") continue;
+        /*
+          Org-level holdings (e.g. a membership renewal) and the booth
+          itself aren't something a specific person is seated into — keep
+          them out of the per-person assignment columns.
+
+          ⛔ `presentation_slot` joined them 2026-10-07. A pitch slot is a
+          right the ORG buys, and the kind already carries `presenter_org`
+          for "who is presenting" — an org, filled in by staff once a vendor
+          claims it. Offering a per-person checkbox beside it was a second
+          answer to that question, asking for a person, and nothing anywhere
+          read the result: `presentation_slot` appears in exactly one other
+          file in the tree, its own kind definition. Worse, assigning one ran
+          deriveRegistrationTier, which has no case for it and falls through
+          to `delegate` with the product name as the badge tier.
+
+          Seen on the page, not inferred: a partner holding the $1,000 place
+          and the $250 slot got two identical-looking columns, only one of
+          which meant anything.
+        */
+        if (
+          seat.kind === "membership_renewal" ||
+          seat.kind === "booth" ||
+          seat.kind === "presentation_slot"
+        ) continue;
         const existing = byEntity.get(seat.entityId);
         if (existing) {
           existing.seats.push(seat);
