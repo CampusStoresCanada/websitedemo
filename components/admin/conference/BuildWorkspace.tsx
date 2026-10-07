@@ -831,10 +831,30 @@ function ThingForm({
       }
     }
 
-    // Unlike qboItemId, salesWindow is meaningful precisely when the item is
-    // NOT yet for sale (it's what the cron will later flip on) — gate on
-    // `sellable` (the kind can ever be sold), not `finalSale` (is right now).
+    // salesWindow is meaningful precisely when the item is NOT yet for sale
+    // (it's what the cron will later flip on) — gate on `sellable` (the kind
+    // can ever be sold), not `finalSale` (is right now).
     const finalSalesWindow = sellable ? salesWindow : null;
+
+    /*
+      ⛔ THE QUICKBOOKS ITEM TAKES THE SAME GATE, AND USED TO TAKE `finalSale`.
+
+      That was true when "for sale" meant "sellable". It stopped being true the
+      day direct-purchase offers shipped: `is_for_sale: false` plus a named
+      buyer list IS how the Big Ideas Day rates are sold, deliberately kept off
+      the general storefront while remaining fully purchasable by the orgs named
+      on them. Those three offers could take real money and could not hold a
+      QuickBooks item — the picker was hidden below, and this line nulled the
+      value on every save even if it had been set another way.
+
+      Found on 2026-10-07 by Bookware paying $1,412.50: order settled, balances
+      minted, and the receipt then failed all three retries with "has no
+      QuickBooks item mapped". Money in Stripe, nothing in the books.
+
+      `sellable` asks the question that actually matters — can this kind of thing
+      ever be sold — which is the same question salesWindow asks directly above.
+    */
+    const finalQboItemId = sellable ? qboItemId : null;
 
     const connRefs = conns
       .filter((c) => c.target)
@@ -854,13 +874,13 @@ function ThingForm({
       const res = await updateEntity(editing.id, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
         attributes, needsDefinition: false, inventory: finalInventory, tierPrices: finalTierPrices,
-        qboItemId: finalSale ? qboItemId : null, salesWindow: finalSalesWindow,
+        qboItemId: finalQboItemId, salesWindow: finalSalesWindow,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
     } else {
       const res = await createEntity(conferenceId, {
         kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice, attributes,
-        inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
+        inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalQboItemId,
         salesWindow: finalSalesWindow,
       });
       if (!res.success) { setSaving(false); setError(res.error); return; }
@@ -894,7 +914,7 @@ function ThingForm({
     onSaved({
       id, kind: finalKind, name: finalName, isForSale: finalSale, priceCents: finalPrice,
       currency: editing?.currency ?? "CAD", attributes, needsDefinition: false,
-      inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalSale ? qboItemId : null,
+      inventory: finalInventory, tierPrices: finalTierPrices, qboItemId: finalQboItemId,
       salesWindow: finalSalesWindow, refs: viewRefs,
     });
   }
@@ -1041,7 +1061,14 @@ function ThingForm({
                 : "Not for sale yet — pick a window and the conference-sales-open cron will flip \"For sale\" on automatically at that scheduled time. Leave Manual to keep controlling it by hand."}
             </p>
           </div>
-          {isForSale && (
+          {/*
+            Shown whenever the kind can EVER be sold, not only when "For sale"
+            is on right now. A direct-purchase offer (is_for_sale false plus a
+            named buyer list) takes real money with the switch off, so gating
+            the picker on `isForSale` hid it from the three offers that most
+            needed it — see finalQboItemId above for what that cost.
+          */}
+          {sellable && (
             <div className="mt-2 space-y-2 rounded-md border border-gray-100 bg-gray-50 p-2">
               <QBItemPicker
                 value={qboItemId}
@@ -1051,6 +1078,12 @@ function ThingForm({
               {isInstance && !qboItemId && proliferateType?.qboItemId && (
                 <p className="text-[11px] text-gray-500">
                   Currently inherits “{proliferateType.name}”&apos;s item — leave blank to keep inheriting it.
+                </p>
+              )}
+              {!isForSale && (
+                <p className="text-[11px] text-amber-700">
+                  Not on the general storefront — but a direct-purchase offer still takes
+                  payment, and a sale with no item mapped here fails its QuickBooks receipt.
                 </p>
               )}
             </div>
