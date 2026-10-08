@@ -120,7 +120,7 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
 
   const conferenceId = conference.id;
 
-  const [ordersRes, boothPaymentsRes, regPaymentsRes, registrationsRes] = await Promise.all([
+  const [ordersRes, boothPaymentsRes, regPaymentsRes, registrationsRes, balancesRes] = await Promise.all([
     db
       .from("conference_orders")
       .select("id, organization_id, status, created_at, paid_at, refund_amount_cents, refunded_at")
@@ -147,12 +147,20 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
       .from("conference_people")
       .select("organization_id, person_kind, assignment_status, created_at")
       .eq("conference_id", conferenceId),
+
+    // Booths are counted from holdings, never from order lines — see the
+    // boothHoldings block below for why.
+    db
+      .from("entity_balances")
+      .select("entity_id, created_at")
+      .eq("conference_id", conferenceId),
   ]);
 
   const orders = ordersRes.data ?? [];
   const boothPayments = boothPaymentsRes.data ?? [];
   const regPayments = regPaymentsRes.data ?? [];
   const registrations = registrationsRes.data ?? [];
+  const balances = balancesRes.data ?? [];
 
   // Line items and entity kinds are fetched separately rather than as a nested
   // embed — PostgREST can't resolve conference_order_items -> conference_entities
@@ -231,7 +239,6 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
       const kind = item.kind;
       if (kind && NON_CONFERENCE_ENTITY_KINDS.has(kind)) continue;
       conferenceCents += item.total_cents;
-      if (kind === "booth") addTo(boothsByDay, day, item.quantity);
     }
 
     addTo(revenueByDay, day, conferenceCents);
@@ -252,7 +259,6 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
     const day = dayOf(payment.paid_at);
     activityDays.push(day);
     addTo(revenueByDay, day, payment.booth_amount_cents);
-    addTo(boothsByDay, day, 1);
   }
 
   for (const payment of regPayments) {
@@ -261,6 +267,37 @@ export async function getConferenceDashboardStats(): Promise<ConferenceDashboard
     activityDays.push(day);
     addTo(revenueByDay, day, payment.amount_cents);
     noteOrg(payment.organization_id, day);
+  }
+
+  // ── Booths: counted from holdings, not from order lines ────────────
+  // A booth is one physical thing, so "booths sold" has to mean "booths
+  // somebody holds" — which is exactly what entity_balances records, and
+  // exactly what the floor plan paints as sold.
+  //
+  // Counting order lines instead double-counted every booth move. A move
+  // refunds part of the original order and mints the new booth: the order
+  // drops to `partially_refunded` (still collected, so still counted) but
+  // keeps its original line items, so the booth the org walked away from
+  // went on counting forever — once on the stale line, and again when
+  // whoever took that booth next bought it. Four of those stale lines had
+  // the widget reading 48 against a floor plan showing 44 sold of 60.
+  //
+  // Holdings also subsume prospective_booth_payments: a pay-first prospect's
+  // booth mints into entity_balances on approval, so counting the payment
+  // too was a third way to count one booth twice.
+  //
+  // Keyed by entity, earliest mint day wins, so a booth can only ever
+  // contribute 1 — the same distinct-booth grain the map counts.
+  const boothFirstHeld = new Map<string, string>();
+  for (const balance of balances) {
+    if (kindByEntityId.get(balance.entity_id) !== "booth") continue;
+    const day = dayOf(balance.created_at);
+    const existing = boothFirstHeld.get(balance.entity_id);
+    if (!existing || day < existing) boothFirstHeld.set(balance.entity_id, day);
+  }
+  for (const day of boothFirstHeld.values()) {
+    activityDays.push(day);
+    addTo(boothsByDay, day, 1);
   }
 
   // ── Sponsorships: not yet wired ────────────────────────────────────
