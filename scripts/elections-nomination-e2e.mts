@@ -187,9 +187,12 @@ try {
     nomineeContactId: contact.id,
     nomineeOrganizationId: testOrg.id,
     source: "member",
+    // One institution, every administrator it has. The harness only knows the
+    // one contact it picked, which is all this needs — the fan-out it is
+    // exercising happens in submitMemberNomination, not here.
     cosignerOrganizationIds: invites.map((i) => ({
       organizationId: i.organizationId,
-      contactId: i.contactId,
+      contactIds: [i.contactId],
     })),
   });
   check("nomination created", created.ok, created.ok ? "" : created.error);
@@ -227,9 +230,28 @@ try {
   });
   check("rejected", !wrong.ok, wrong.ok ? "" : wrong.error);
 
-  step("Store permission is a separate consent the nominee cannot self-grant");
+  step("Store permission is a separate consent, and the institution boundary holds");
+  // ⚠️ A nominee who administers their own institution MAY grant it. This
+  // asserted the opposite until 2026-09-28: By-Law Part V S2(d) requires the
+  // STORE to permit them, not a second person to be the one who says so, and
+  // 40 of the 50 eligible institutions have exactly one administrator — so the
+  // refusal made those nominations impossible rather than merely awkward.
   const selfGrant = await svc.grantStorePermission(created.data.nominationId, contact.id, [testOrg.id]);
-  check("nominee cannot grant their own store's permission", !selfGrant.ok, selfGrant.ok ? "" : selfGrant.error);
+  check(
+    "a nominee who administers their own store may grant its permission",
+    selfGrant.ok,
+    selfGrant.ok ? "" : selfGrant.error
+  );
+
+  // What did NOT change: someone outside the nominee's institution still cannot.
+  const outsiderGrant = await svc.grantStorePermission(created.data.nominationId, contact.id, [
+    invites[0].organizationId,
+  ]);
+  check(
+    "an administrator elsewhere still cannot grant it",
+    !outsiderGrant.ok,
+    outsiderGrant.ok ? "" : outsiderGrant.error
+  );
 
   const otherContact = (
     await db.from("contacts").select("id").eq("organization_id", testOrg.id).neq("id", contact.id).limit(1)
