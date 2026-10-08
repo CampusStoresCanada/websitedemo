@@ -248,6 +248,26 @@ export async function sendCallForNominationsAction(slug: string): Promise<Action
   return { ok: true };
 }
 
+/**
+ * Chase the institutions sitting on an unsigned request.
+ *
+ * Distinct from chaseIncompleteAction, which emails the nominee about what
+ * they are missing. This one reaches the people who can actually fix it.
+ */
+export async function chaseCosignaturesAction(slug: string): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+  if (auth.globalRole !== "admin" && auth.globalRole !== "super_admin")
+    return { ok: false, error: "Only the nominating committee can send reminders." };
+
+  const { chaseOutstandingCosignatures } = await import("@/lib/elections/service");
+  const result = await chaseOutstandingCosignatures(slug);
+  revalidatePath(`/admin/elections/${slug}`);
+  if (result.chased === 0)
+    return { ok: false, error: "No institution has an outstanding signature request." };
+  return { ok: true };
+}
+
 /** Chase every accepted-but-incomplete nomination. Safe to run repeatedly. */
 export async function chaseIncompleteAction(slug: string): Promise<ActionResult> {
   const auth = await getServerAuthState();

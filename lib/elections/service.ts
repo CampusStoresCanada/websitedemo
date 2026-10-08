@@ -1620,6 +1620,82 @@ export async function submitMemberNomination(input: {
 }
 
 /**
+ * Chase the institutions sitting on an unsigned co-signature request.
+ *
+ * The one chase that existed emails the NOMINEE to say they are short a
+ * signature — the single person who cannot supply it. So a nomination stalls
+ * on an institution that was asked once, at submission, and never heard about
+ * it again. That is exactly how three nominations ended up waiting on two
+ * clicks in the 2027 cycle.
+ *
+ * Sends the SAME request again rather than a differently worded reminder: the
+ * message already says what is needed and who may do it, and a second copy
+ * weeks later reads as a nudge on its own.
+ *
+ * ⛔ Skips anything already settled — signed, revoked, withdrawn, declined —
+ * so pressing it twice does not pester an institution that has already acted.
+ * Repeatable on purpose otherwise, like the ballot chase.
+ */
+export async function chaseOutstandingCosignatures(
+  electionSlug: string
+): Promise<{ chased: number; institutions: number; outcomes: NotifyOutcome[] }> {
+  const db = createAdminClient();
+  const election = await getElection(electionSlug);
+  if (!election) return { chased: 0, institutions: 0, outcomes: [] };
+  if (!nominationsOpen(election)) return { chased: 0, institutions: 0, outcomes: [] };
+
+  const nominations = await listNominations(electionSlug);
+  const live = nominations.filter((n) => !n.withdrawnAt && !n.candidateDeclinedAt);
+
+  const outcomes: NotifyOutcome[] = [];
+  const institutions = new Set<string>();
+
+  for (const nomination of live) {
+    const { data: rows } = await db
+      .from("nomination_cosignatures")
+      .select("organization_id, sign_token")
+      .eq("nomination_id", nomination.id)
+      .is("signed_at", null)
+      .is("revoked_at", null);
+
+    const invitations: { organizationId: string; contactIds: string[]; token: string }[] = [];
+    for (const row of rows ?? []) {
+      const orgId = row.organization_id as string;
+      const { data: admins } = await db
+        .from("user_organizations")
+        .select("user_id")
+        .eq("organization_id", orgId)
+        .eq("role", "org_admin")
+        .eq("status", "active");
+      const userIds = (admins ?? []).map((a) => a.user_id as string).filter(Boolean);
+      if (userIds.length === 0) continue;
+
+      const { data: contacts } = await db
+        .from("contacts")
+        .select("id")
+        .eq("organization_id", orgId)
+        .in("profile_id", userIds);
+      const contactIds = (contacts ?? []).map((c) => c.id as string).sort();
+      if (contactIds.length === 0) continue;
+
+      institutions.add(orgId);
+      invitations.push({ organizationId: orgId, contactIds, token: row.sign_token as string });
+    }
+
+    if (invitations.length === 0) continue;
+    outcomes.push(
+      ...(await notifyCosigners(
+        election,
+        { name: nomination.nomineeName, organizationName: nomination.organizationName },
+        invitations
+      ))
+    );
+  }
+
+  return { chased: outcomes.length, institutions: institutions.size, outcomes };
+}
+
+/**
  * Tell a nominee their nomination is complete — but only on the transition,
  * never on every save. `wasComplete` is the caller's before-state; without it
  * a nominee editing their biography four times gets four "you're all set"
@@ -3253,7 +3329,13 @@ export async function runDueNominationReminders(
     const outcomes = await notifyNominationReminder(election, targets, {
       onlyThoseWhoHaveNotNominated: due.audience === "has_not_nominated",
     });
-    const summary = summarizeOutcomes(outcomes);
+
+    // A nomination reminder date is also the right day to chase the signatures
+    // already asked for. Different people entirely — this reaches institutions
+    // sitting on a request, the nudge above reaches ones that have put nobody
+    // forward — so nobody gets both for the same reason.
+    const chased = await chaseOutstandingCosignatures(slug);
+    const summary = summarizeOutcomes([...outcomes, ...chased.outcomes]);
 
     const { data: existing } = await db
       .from("elections")

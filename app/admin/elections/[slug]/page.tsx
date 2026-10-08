@@ -36,6 +36,7 @@ import {
   sendAgmNoticeAction,
   sendProxyFormAction,
   chaseIncompleteAction,
+  chaseCosignaturesAction,
   notifyCandidatesAction,
   mintElectionActionItemsAction,
   closeNominationsAction,
@@ -104,6 +105,7 @@ export default async function ElectionReviewPage({
     uploaded?: string;
     packageSent?: string;
     agendaGenerated?: string;
+    cosignersChased?: string;
     asOf?: string;
   }>;
 }) {
@@ -118,6 +120,7 @@ export default async function ElectionReviewPage({
     uploaded,
     packageSent,
     agendaGenerated,
+    cosignersChased,
     asOf: asOfParam,
   } = await searchParams;
 
@@ -204,6 +207,14 @@ export default async function ElectionReviewPage({
     const r = await notifyCandidatesAction(slug);
     redirect(
       `/admin/elections/${slug}${r.ok ? "?candidatesTold=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
+  async function chaseCosigners() {
+    "use server";
+    const r = await chaseCosignaturesAction(slug);
+    redirect(
+      `/admin/elections/${slug}${r.ok ? "?cosignersChased=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
     );
   }
 
@@ -329,6 +340,13 @@ export default async function ElectionReviewPage({
     )
   ) as Record<string, Awaited<ReturnType<typeof listDirectorTerms>>>;
 
+  // Unsigned, unrevoked requests on nominations that are still alive.
+  const outstandingCosignatures = nominations
+    .filter((n) => !n.withdrawnAt && !n.candidateDeclinedAt)
+    .reduce((total, n) => total + (n.cosignatures.required - n.cosignatures.valid > 0
+      ? n.cosignatures.required - n.cosignatures.valid
+      : 0), 0);
+
   const candidateOutcomes =
     election.status === "certified" ? await getCandidateOutcomes(slug) : null;
   const candidateCount = candidateOutcomes
@@ -392,6 +410,13 @@ export default async function ElectionReviewPage({
           {election.status === "balloting" ? "balloting" : "acclamation"}.
         </div>
       )}
+      {cosignersChased && (
+        <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
+          Signature requests re-sent, to every administrator at the institutions asked. Delivery
+          tracking records nothing, so a signature arriving is the reliable signal.
+        </div>
+      )}
+
       {circulated && (
         <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-900">
           Ballot links are on their way. Delivery tracking is not recording anything yet, so
@@ -614,6 +639,26 @@ export default async function ElectionReviewPage({
                 institutions. Sends once.
               </span>
             </div>
+          )}
+
+          {/* The gap this closes: the chase below emails the NOMINEE about what
+              they are missing. A missing signature is the one thing on that
+              list the nominee cannot supply, and nothing had ever reached the
+              institution holding it. */}
+          {outstandingCosignatures > 0 && (
+            <form action={chaseCosigners} className="flex items-center gap-3">
+              <button
+                type="submit"
+                className="rounded-lg border border-gray-300 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50"
+              >
+                Chase {outstandingCosignatures} outstanding signature
+                {outstandingCosignatures === 1 ? "" : "s"}
+              </button>
+              <span className="text-xs text-gray-500">
+                Goes to every administrator at the institutions asked, not to the nominees. Safe
+                to repeat.
+              </span>
+            </form>
           )}
 
           {incomplete.length > 0 && (
