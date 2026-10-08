@@ -406,6 +406,62 @@ async function reconcileLapsed(args: {
   const withAccount = contacts.filter((c) => c.circle_id !== null && c.email);
   const noCircleAccount = contacts.length - withAccount.length;
 
+  // ── Entitled somewhere else? Then this person is nobody's to move ─────────
+  // `contacts` is per (person, org), but a Circle write addresses the PERSON:
+  // the payload is an email, and Circle resolves one account from it. So a
+  // human with a row at a lapsed org and another row anywhere else is a
+  // conflict, not a lapsed member — stripping the lapsed row would take paid
+  // access off an account the other row entitles.
+  //
+  // The comparison set deliberately includes ARCHIVED orgs. An archived row is
+  // exactly how this shows up in practice: ctamas@momentecbrand.com sits at
+  // Cutter & Buck (lapsed) and at Momentec (active, archived), which is one
+  // business under two org records. Which record is live is a question for a
+  // person, so neither write fires and the pair is reported.
+  const entitledElsewhere = new Set<string>();
+  {
+    const { data: otherOrgs, error: otherOrgsErr } = await adminClient
+      .from("organizations")
+      .select("id, membership_status");
+    if (otherOrgsErr) {
+      errors.push(`Failed to fetch comparison orgs: ${otherOrgsErr.message}`);
+      return { configured: true, lapsedGroupId, error: otherOrgsErr.message };
+    }
+    const otherOrgIds = (otherOrgs ?? [])
+      .filter(
+        (o) =>
+          !o.membership_status ||
+          !(LAPSED_STATUSES as readonly string[]).includes(o.membership_status)
+      )
+      .map((o) => o.id);
+
+    for (const ids of chunk(otherOrgIds, IN_CHUNK)) {
+      const { data, error } = await adminClient
+        .from("contacts")
+        .select("email")
+        .in("organization_id", ids)
+        .is("archived_at", null)
+        .not("email", "is", null);
+      if (error) {
+        errors.push(`Failed to fetch comparison contacts: ${error.message}`);
+        return { configured: true, lapsedGroupId, error: error.message };
+      }
+      for (const row of data ?? []) {
+        if (row.email) entitledElsewhere.add(row.email.trim().toLowerCase());
+      }
+    }
+  }
+
+  const conflicted = withAccount.filter((c) =>
+    entitledElsewhere.has((c.email ?? "").trim().toLowerCase())
+  );
+  const conflictedEmails = new Set(
+    conflicted.map((c) => (c.email ?? "").trim().toLowerCase())
+  );
+  const movable = withAccount.filter(
+    (c) => !conflictedEmails.has((c.email ?? "").trim().toLowerCase())
+  );
+
   // ── What the downgrade group already holds ────────────────────────────────
   let lapsedRosterIds: number[];
   try {
@@ -420,13 +476,13 @@ async function reconcileLapsed(args: {
   // Still holding paid access they are no longer entitled to. No contact_type
   // filter here: whatever a person is tagged as, if they hold the paid group
   // and their org has lapsed, they come out.
-  const toStrip = withAccount.filter((c) => paidRoster.has(String(c.circle_id)));
+  const toStrip = movable.filter((c) => paidRoster.has(String(c.circle_id)));
 
   // Absent from the downgrade group. Also no contact_type filter — the
   // non-member tags exist to stop us *provisioning* accounts, and everyone
   // here already has one. Filtering on the `lapsed` tag in particular would
   // skip exactly the people this is for.
-  const toDowngrade = withAccount.filter((c) => !lapsedRoster.has(String(c.circle_id)));
+  const toDowngrade = movable.filter((c) => !lapsedRoster.has(String(c.circle_id)));
 
   const stripBatch = limit ? toStrip.slice(0, limit) : toStrip;
   const downgradeBatch = limit ? toDowngrade.slice(0, limit) : toDowngrade;
@@ -473,9 +529,14 @@ async function reconcileLapsed(args: {
     contacts: contacts.length,
     withCircleAccount: withAccount.length,
     noCircleAccount,
+    // Held back because the same email is on a contact row at a non-lapsed org
+    // (archived ones included). Neither write fires for these; a person decides.
+    conflictedEntitledElsewhere: conflicted.length,
+    conflictedEmails: [...conflictedEmails],
+    movable: movable.length,
     holdingPaidAccess: toStrip.length,
     stripQueued: dryRun ? 0 : stripQueued,
-    alreadyInDowngradeGroup: withAccount.length - toDowngrade.length,
+    alreadyInDowngradeGroup: movable.length - toDowngrade.length,
     missingFromDowngradeGroup: toDowngrade.length,
     downgradeQueued: dryRun ? 0 : downgradeQueued,
     downgradeGroupRosterSize: lapsedRosterIds.length,
