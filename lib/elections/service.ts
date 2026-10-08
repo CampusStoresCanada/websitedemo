@@ -606,7 +606,7 @@ export async function createNomination(input: {
   source: "nominating_committee" | "member";
   nominatedByContactId?: string | null;
   /** Organizations invited to co-sign; each gets its own signing token. */
-  cosignerOrganizationIds?: { organizationId: string; contactId: string }[];
+  cosignerOrganizationIds?: { organizationId: string; contactIds: string[] }[];
   /**
    * Also invite every sitting director to co-sign.
    *
@@ -686,18 +686,21 @@ export async function createNomination(input: {
         .in("id", directorContactIds)
         .is("archived_at", null);
 
+      // Directors are invited as THEMSELVES, one contact each, so this stays
+      // per-person and is mapped into the per-institution shape the rest of
+      // the flow now uses. Dedupe still runs on the flattened contact list.
       invitations.push(
         ...resolveBoardInvitations(
           (directorContacts ?? []).map((c) => ({
             contactId: c.id as string,
             organizationId: c.organization_id as string,
           })),
-          invitations,
+          invitations.flatMap((i) => i.contactIds.map((contactId) => ({ contactId }))),
           {
             contactId: input.nomineeContactId,
             organizationId: input.nomineeOrganizationId,
           }
-        )
+        ).map((d) => ({ organizationId: d.organizationId, contactIds: [d.contactId] }))
       );
     }
   }
@@ -705,10 +708,19 @@ export async function createNomination(input: {
   const cosignTokens: { organizationId: string; token: string }[] = [];
   for (const c of invitations) {
     const token = mintToken();
+    // ⚠️ `contact_id` is NOT NULL and signCosignature overwrites it with the
+    // signer, so on an unsigned row it reads as "addressee" and on a signed one
+    // as "who signed". That ambiguity predates this change and is left alone
+    // deliberately: dropping the constraint is DDL against a table with live
+    // nominations in it, which is not worth doing mid-cycle for a reporting
+    // nicety. What IS fixed is the arbitrariness — the recorded addressee is
+    // now the first administrator in a stable order rather than whichever row
+    // the database returned first, and every administrator is emailed
+    // regardless of which one lands in the column.
     const { error: sigError } = await db.from("nomination_cosignatures").insert({
       nomination_id: data.id,
       organization_id: c.organizationId,
-      contact_id: c.contactId,
+      contact_id: c.contactIds[0],
       sign_token: token,
     });
     // A duplicate invitation for the same institution is not an error worth
@@ -1471,26 +1483,51 @@ export async function submitMemberNomination(input: {
       `${plan.stillNeeded} more institution${plan.stillNeeded === 1 ? "" : "s"} must be asked to co-sign.`
     );
 
-  // Resolve one admin contact per invited institution to address the request to.
-  const inviteTargets: { organizationId: string; contactId: string }[] = [];
+  // EVERY administrator at each invited institution, not one of them.
+  //
+  // This used to take `.limit(1)` with no ordering, so the request went to
+  // whichever row the database happened to return first. At a store with two
+  // administrators that is a coin flip, and the nomination then waited on one
+  // arbitrary person reading one email. The signature belongs to the
+  // institution, not to whoever won the lottery, and any of its staff may sign
+  // it — so everybody who can act is told.
+  //
+  // ⚠️ An institution with no active administrator is REPORTED, not skipped.
+  // The old loop `continue`d silently: you asked two schools, one was never
+  // contacted, and the nomination simply showed fewer invitations than you
+  // thought you had sent.
+  const inviteTargets: { organizationId: string; contactIds: string[] }[] = [];
+  const uncontactable: string[] = [];
   for (const orgId of invites) {
-    const { data: admin } = await db
+    const { data: admins } = await db
       .from("user_organizations")
       .select("user_id")
       .eq("organization_id", orgId)
       .eq("role", "org_admin")
-      .eq("status", "active")
-      .limit(1);
-    const userId = admin?.[0]?.user_id as string | undefined;
-    if (!userId) continue;
-    const { data: contact } = await db
-      .from("contacts")
-      .select("id")
-      .eq("organization_id", orgId)
-      .eq("profile_id", userId)
-      .limit(1);
-    const contactId = contact?.[0]?.id as string | undefined;
-    if (contactId) inviteTargets.push({ organizationId: orgId, contactId });
+      .eq("status", "active");
+
+    const userIds = (admins ?? []).map((a) => a.user_id as string).filter(Boolean);
+    const { data: contacts } = userIds.length
+      ? await db
+          .from("contacts")
+          .select("id")
+          .eq("organization_id", orgId)
+          .in("profile_id", userIds)
+      : { data: [] as { id: string }[] };
+
+    // Sorted so the recorded addressee is stable across runs. The old
+    // `.limit(1)` had no ORDER BY at all, which is what made it a lottery.
+    const contactIds = (contacts ?? []).map((c) => c.id as string).sort();
+    if (contactIds.length === 0) {
+      const { data: org } = await db
+        .from("organizations")
+        .select("name")
+        .eq("id", orgId)
+        .maybeSingle();
+      uncontactable.push((org?.name as string) ?? "an invited institution");
+      continue;
+    }
+    inviteTargets.push({ organizationId: orgId, contactIds });
   }
 
   const created = await createNomination({
@@ -1546,8 +1583,9 @@ export async function submitMemberNomination(input: {
         { name: nominee.name, organizationName: nominee.organizationName },
         created.data.cosignTokens.map((t) => ({
           organizationId: t.organizationId,
-          contactId:
-            inviteTargets.find((i) => i.organizationId === t.organizationId)?.contactId ?? "",
+          // Every administrator there, not the one whose id landed on the row.
+          contactIds:
+            inviteTargets.find((i) => i.organizationId === t.organizationId)?.contactIds ?? [],
           token: t.token,
         }))
       ))
@@ -1562,6 +1600,15 @@ export async function submitMemberNomination(input: {
       );
     }
     notifications = summarizeOutcomes(outcomes);
+  }
+
+  // An institution nobody could be reached at is a fact the nominator needs,
+  // not a row to quietly drop. They asked a school to co-sign and that school
+  // was never told, which looks identical to the school ignoring them.
+  for (const name of uncontactable) {
+    notifications.problems.push(
+      `${name} has no administrator with an account, so nobody there could be asked to co-sign. Pick a different institution, or ask the CSC office to set one up.`
+    );
   }
 
   return ok({

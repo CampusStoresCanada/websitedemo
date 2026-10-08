@@ -323,44 +323,56 @@ export async function notifyNominee(
 export async function buildCosigners(
   election: Election,
   nominee: { name: string; organizationName: string },
-  invitations: { organizationId: string; contactId: string; token: string }[]
+  invitations: { organizationId: string; contactIds: string[]; token: string }[]
 ): Promise<PreparedMessages> {
 
   const db = createAdminClient();
 
-  // Usually two, but requestBoardCosignature invites every sitting director as
-  // well — so this fans out to a dozen people on a nomination that asked the
-  // board for help, not the two the by-law's minimum implies.
+  // Usually two institutions, but requestBoardCosignature invites every sitting
+  // director as well — so this fans out to a dozen people on a nomination that
+  // asked the board for help, not the two the by-law's minimum implies.
+  //
+  // ⚠️ EVERY administrator at an invited institution gets the request, sharing
+  // the institution's one token. The signature belongs to the institution and
+  // any of its staff may give it, so addressing one arbitrary administrator
+  // only decided who had to be reading their email that week. One token, many
+  // recipients: whoever acts first signs, and the rest find it already done.
   const resolved = await Promise.all(
     invitations.map(async (invite) => {
-      const [contact, orgRow] = await Promise.all([
-        loadContact(invite.contactId),
+      const [contacts, orgRow] = await Promise.all([
+        Promise.all(invite.contactIds.map((id) => loadContact(id))),
         db.from("organizations").select("name").eq("id", invite.organizationId).maybeSingle(),
       ]);
-      return { invite, contact, organizationName: (orgRow.data?.name as string) ?? "your institution" };
+      return {
+        invite,
+        contacts,
+        organizationName: (orgRow.data?.name as string) ?? "your institution",
+      };
     })
   );
 
   return {
     templateKey: "election_cosign_request",
-    recipients: resolved.map(({ invite, contact, organizationName }) => ({
-      to: contact?.email,
-      variables: {
-        contact_name: contact?.name ?? "there",
-        organization_name: organizationName,
-        nominee_name: nominee.name,
-        nominee_org: nominee.organizationName,
-        cosign_url: `${appUrl()}/elections/cosign/${invite.token}`,
-        nominations_close: formatDate(election.schedule.nominationsCloseAt),
-      },
-    })),
+    recipients: resolved.flatMap(({ invite, contacts, organizationName }) =>
+      contacts.map((contact) => ({
+        to: contact?.email,
+        variables: {
+          contact_name: contact?.name ?? "there",
+          organization_name: organizationName,
+          nominee_name: nominee.name,
+          nominee_org: nominee.organizationName,
+          cosign_url: `${appUrl()}/elections/cosign/${invite.token}`,
+          nominations_close: formatDate(election.schedule.nominationsCloseAt),
+        },
+      }))
+    ),
   };
 }
 
 export async function notifyCosigners(
   election: Election,
   nominee: { name: string; organizationName: string },
-  invitations: { organizationId: string; contactId: string; token: string }[]
+  invitations: { organizationId: string; contactIds: string[]; token: string }[]
 ): Promise<NotifyOutcome[]> {
   const prepared = await buildCosigners(election, nominee, invitations);
   return sendMany(prepared.templateKey, prepared.recipients);
