@@ -22,6 +22,7 @@ import {
 } from "@/lib/elections/board-service";
 import {
   acceptNominationAction,
+  inviteCosignerAction,
   declineNominationAction,
   withdrawNominationAction,
   grantStorePermissionAction,
@@ -44,10 +45,10 @@ export default async function AcceptNominationPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams: Promise<{ preview?: string; slug?: string }>;
+  searchParams: Promise<{ preview?: string; slug?: string; asked?: string; error?: string }>;
 }) {
   const { token } = await params;
-  const { preview, slug: previewSlug } = await searchParams;
+  const { preview, slug: previewSlug, asked, error: askError } = await searchParams;
   const auth = await getServerAuthState();
 
   if (!auth.user) return <SignInPrompt returnTo={`/elections/accept/${token}`} action="accept a nomination" />;
@@ -166,6 +167,14 @@ export default async function AcceptNominationPage({
     redirect(`/elections/accept/${token}`);
   }
 
+  async function inviteCosigner(formData: FormData) {
+    "use server";
+    const r = await inviteCosignerAction(token, formData);
+    redirect(
+      `/elections/accept/${token}${r.ok ? "?asked=1" : `?error=${encodeURIComponent(r.error ?? "")}`}`
+    );
+  }
+
   async function grantPermission() {
     "use server";
     await grantStorePermissionAction(nomination.id, token);
@@ -181,6 +190,20 @@ export default async function AcceptNominationPage({
   // control already withheld by canAct.
   const showNomineeView = isNominee || viewingAsAdmin;
 
+  // Who is left to ask. Excludes the ones already invited and, unless the
+  // config allows self-co-signature, the nominee's own institution.
+  const { listCosignerOrganizations } = await import("@/lib/elections/service");
+  const alreadyAsked = nomination.cosignatures.signingOrganizationIds;
+  const askable =
+    showNomineeView && nomination.cosignatures.valid < nomination.cosignatures.required
+      ? await listCosignerOrganizations(election.id, [
+          ...alreadyAsked,
+          ...(election.config.nominations.selfCosignatureAllowed
+            ? []
+            : [nomination.nomineeOrganizationId]),
+        ])
+      : [];
+
   return (
     <ElectionShell
       eyebrow={eyebrow}
@@ -188,6 +211,13 @@ export default async function AcceptNominationPage({
       subtitle={`${nomination.organizationName} · nominated for the Board of Directors`}
     >
       {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
+      {asked && (
+        <Notice tone="success">
+          Asked. Every administrator there has the request, and your nomination updates the moment
+          one of them signs.
+        </Notice>
+      )}
+      {askError && <Notice tone="warning">{askError}</Notice>}
       {viewingAsAdmin && (
         <Notice tone="info">
           <strong>You are looking at {nomination.nomineeName}&apos;s own page.</strong> This is what
@@ -360,6 +390,42 @@ export default async function AcceptNominationPage({
           <div className="mt-8">
             <OutstandingList items={nomination.completeness.missing} />
           </div>
+
+          {/* The invitation list used to be frozen at submission. Invite two,
+              have one never act, and the nomination was stuck with no way to
+              ask anybody else — watching it fail with nothing to press. */}
+          {canAct && askable.length > 0 && (
+            <div className="mt-6 rounded-lg border border-gray-200 px-4 py-3">
+              <p className="text-sm font-medium text-gray-900">Ask another institution</p>
+              <p className="mt-1 text-xs text-gray-600">
+                You need {nomination.cosignatures.required} signatures and have{" "}
+                {nomination.cosignatures.valid}. Asking more institutions than you need is
+                sensible: whoever signs first counts, and the others simply do nothing.
+              </p>
+              <form action={inviteCosigner} className="mt-3 flex flex-wrap items-center gap-2">
+                <select
+                  name="organizationId"
+                  aria-label="Institution to ask"
+                  className="rounded-md border border-gray-300 px-2 py-1.5 text-sm"
+                >
+                  {askable.map((o) => (
+                    <option key={o.organizationId} value={o.organizationId}>
+                      {o.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="submit"
+                  className="rounded-lg border border-gray-300 px-4 py-1.5 text-sm font-medium text-gray-700 hover:bg-gray-50"
+                >
+                  Ask them to co-sign
+                </button>
+              </form>
+              <p className="mt-2 text-xs text-gray-500">
+                Emails every administrator there. They still have to agree.
+              </p>
+            </div>
+          )}
 
           {canAct && (
             <div className="mt-8 border-t border-gray-200 pt-6">
