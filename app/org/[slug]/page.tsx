@@ -9,7 +9,6 @@ import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import MemberProfile from "@/components/org/MemberProfile";
 import PartnerProfile from "@/components/org/PartnerProfile";
 import ConferenceChecklistSection from "@/components/org/ConferenceChecklistSection";
-import MeetingPreferencesSection from "@/components/org/MeetingPreferencesSection";
 import OrgOnboardingCallout from "@/components/onboarding/OrgOnboardingCallout";
 import type {
   PendingTransferInfo,
@@ -699,10 +698,9 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
         slug={slug}
         conferenceId={currentConferenceId}
       />
-      <MeetingPreferencesSection
-        orgId={organization.id}
-        conferenceId={currentConferenceId}
-      />
+      {/* The meeting lists now render inside their own checklist task —
+          see ConferenceChecklistSection. A second copy down here was the
+          split that made the task a description with no controls. */}
       </>
     );
   }
@@ -745,10 +743,7 @@ export default async function OrgProfilePage({ params, searchParams }: PageProps
       slug={slug}
       conferenceId={currentConferenceId}
     />
-    <MeetingPreferencesSection
-      orgId={organization.id}
-      conferenceId={currentConferenceId}
-    />
+    {/* Meeting lists live in the checklist task above. */}
     </>
   );
 }

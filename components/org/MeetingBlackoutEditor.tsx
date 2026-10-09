@@ -35,6 +35,7 @@ export default function MeetingBlackoutEditor({
   const [refused, setRefused] = useState<string[]>(initialRefusedOrgIds);
   const [error, setError] = useState<string | null>(null);
   const [saved, setSaved] = useState(false);
+  const [open, setOpen] = useState(false);
   const [isPending, startTransition] = useTransition();
 
   function toggle(targetOrgId: string) {
@@ -61,14 +62,28 @@ export default function MeetingBlackoutEditor({
     });
   }
 
+  // Collapsed by default, same reasoning as the want-to-meet list: the header
+  // answers "have I done this?" and the sixty rows stay out of the way.
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 text-xs">
-        <span className="font-medium text-gray-700">{refused.length} selected</span>
-        {isPending ? <span className="text-gray-500">Saving…</span> : null}
-        {saved && !isPending ? <span className="text-green-700">Saved</span> : null}
-        {error ? <span className="text-red-700">{error}</span> : null}
-      </div>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:border-gray-300"
+      >
+        <span aria-hidden className="text-gray-400">{open ? "▾" : "▸"}</span>
+        <span className="text-sm font-medium text-gray-900">Who do you least want to meet?</span>
+        <span className="text-xs text-gray-500">({refused.length} selected)</span>
+        <span className="ml-auto flex items-center gap-2 text-xs">
+          {isPending ? <span className="text-gray-500">Saving…</span> : null}
+          {saved && !isPending ? <span className="text-green-700">Saved</span> : null}
+          {error ? <span className="text-red-700">{error}</span> : null}
+        </span>
+      </button>
+
+      {open ? (
+      <>
 
       {/*
         ⛔ Never disabled while saving. Disabling on each write dropped ticks in
@@ -86,6 +101,8 @@ export default function MeetingBlackoutEditor({
       <p className="text-xs text-gray-500">
         Stays in place for future conferences until you change it.
       </p>
+      </>
+      ) : null}
     </div>
   );
 }

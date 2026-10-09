@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useTransition } from "react";
+import { useState, useTransition, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { formatCalendarDate } from "@/lib/time/supabase-timestamp";
 import { describeUrgency, URGENCY_CLASS } from "@/lib/conference/deadline-urgency";
@@ -22,12 +22,26 @@ export default function TaskChecklist({
   onAnswer,
   emptyLabel = "Nothing outstanding.",
   boothNumbers = [],
+  controlsByTaskId,
 }: {
   tasks: PersonalTask[];
   onAnswer: (taskId: string, state: "done" | "not_applicable" | "pending", evidence?: string) => Promise<{ success: boolean; error?: string }>;
   emptyLabel?: string;
   /** Shown on supplier tasks — a shipping label needs the booth number. */
   boothNumbers?: string[];
+  /**
+   * Real controls to render inside a task's own row, keyed by task id.
+   *
+   * A task whose controls live elsewhere on the page makes the reader hold
+   * the ask in their head and go hunting for the thing that answers it. The
+   * meeting lists were a section of their own, far below this list, so the
+   * row said what to do and offered no way to do it.
+   *
+   * Passed in from the server component as rendered nodes, so the loading
+   * stays where the data is and this component stays dumb about what any
+   * particular task needs.
+   */
+  controlsByTaskId?: Record<string, ReactNode>;
 }) {
   if (tasks.length === 0) {
     return <p className="text-sm text-gray-500">{emptyLabel}</p>;
@@ -35,7 +49,13 @@ export default function TaskChecklist({
   return (
     <ul className="divide-y divide-gray-100">
       {tasks.map((task) => (
-        <TaskRow key={task.taskId} task={task} onAnswer={onAnswer} boothNumbers={boothNumbers} />
+        <TaskRow
+          key={task.taskId}
+          task={task}
+          onAnswer={onAnswer}
+          boothNumbers={boothNumbers}
+          controls={controlsByTaskId?.[task.taskId]}
+        />
       ))}
     </ul>
   );
@@ -56,9 +76,11 @@ function TaskRow({
   task,
   onAnswer,
   boothNumbers,
+  controls,
 }: {
   task: PersonalTask;
   boothNumbers: string[];
+  controls?: ReactNode;
   onAnswer: (taskId: string, state: "done" | "not_applicable" | "pending", evidence?: string) => Promise<{ success: boolean; error?: string }>;
 }) {
   const router = useRouter();
@@ -88,7 +110,13 @@ function TaskRow({
   const canAnswer = task.source === "self_reported";
 
   return (
-    <li className="py-3">
+    /*
+      Anchored per task, so a reminder can land on the ONE thing it is about.
+      Every CTA used to point at #conference_checklist — the whole section —
+      which on a long list means arriving at the top and hunting for the item
+      the email just named. scroll-mt keeps the row clear of the sticky header.
+    */
+    <li id={`task-${task.taskId}`} className="py-3 scroll-mt-24">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex flex-wrap items-center gap-2">
@@ -176,6 +204,8 @@ function TaskRow({
           </div>
         ) : null}
       </div>
+
+      {controls ? <div className="mt-3">{controls}</div> : null}
 
       {showEvidence && canAnswer ? (
         <div className="mt-2 flex flex-wrap items-center gap-2">

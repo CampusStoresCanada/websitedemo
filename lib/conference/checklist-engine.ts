@@ -85,17 +85,61 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/**
+ * One card per outstanding thing, carrying its OWN deadline and saying plainly
+ * whether we can see the answer.
+ *
+ * Two additions the ED asked for, both about not making people guess:
+ *
+ *  - The day count comes from the item, not the list. A supplier order closing
+ *    on the 10th and a badge check closing on the 18th are not "45 days until
+ *    January", and a reader who is told they are stops believing the number.
+ *
+ *  - A self-reported item says we cannot see it. We know whether a seat is
+ *    assigned or an invoice is paid; we have no idea whether a hotel got
+ *    booked or a pallet shipped. Chasing someone for something they finished
+ *    three weeks ago, in the same voice as something genuinely outstanding, is
+ *    how a reminder series teaches people to ignore it.
+ */
 function renderOpenItemsHtml(
-  items: { name: string; description: string; cta: { label: string; url: string } }[]
+  items: {
+    name: string;
+    description: string;
+    deadline: string | null;
+    selfReported: boolean;
+    cta: { label: string; url: string };
+  }[]
 ): string {
+  const today = new Date();
   return items
-    .map(
-      (item) => `<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px">
+    .map((item) => {
+      const days = item.deadline
+        ? Math.ceil((new Date(item.deadline).getTime() - today.getTime()) / 86_400_000)
+        : null;
+      const when =
+        days === null
+          ? ""
+          : days < 0
+            ? `<span style="color:#b91c1c;font-weight:600">Closed ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago</span>`
+            : days === 0
+              ? `<span style="color:#b91c1c;font-weight:600">Closes today</span>`
+              : days <= 7
+                ? `<span style="color:#b45309;font-weight:600">${days} day${days === 1 ? "" : "s"} left</span>`
+                : `<span style="color:#6b7280">${days} days left</span>`;
+      // No apology and no accusation. It states what we can see, which is the
+      // honest reason they are hearing from us about something they may well
+      // have already done.
+      const unverified = item.selfReported
+        ? `<p style="margin:8px 0 0;color:#6b7280;font-size:13px;line-height:1.5">We have no way to see this one from our side, so we are asking. If it is already handled, tell us and we will stop bringing it up.</p>`
+        : "";
+      return `<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px">
   <p style="margin:0 0 4px;font-weight:600;color:#111827">${item.name}</p>
+  <p style="margin:0 0 6px;font-size:13px">${when}</p>
   <p style="margin:0 0 8px;color:#6b7280;font-size:14px">${item.description}</p>
-  <a href="${item.cta.url}" style="color:#163D6D;font-weight:600;text-decoration:none;font-size:14px">${item.cta.label} →</a>
-</div>`
-    )
+  ${unverified}
+  <a href="${item.cta.url}" style="color:#163D6D;font-weight:600;text-decoration:none;font-size:14px;display:inline-block;margin-top:8px">${item.cta.label} →</a>
+</div>`;
+    })
     .join("\n");
 }
 
@@ -264,7 +308,15 @@ export async function filterTasksToOrgScope<
 
 export interface ChecklistDigest {
   orgName: string;
-  openItems: { name: string; description: string; cta: { label: string; url: string } }[];
+  openItems: {
+    name: string;
+    description: string;
+    /** This item's own deadline, falling back to the list's. */
+    deadline: string | null;
+    /** True when only the org can tell us — we cannot verify it ourselves. */
+    selfReported: boolean;
+    cta: { label: string; url: string };
+  }[];
   variables: Record<string, string>;
 }
 
@@ -290,7 +342,7 @@ export async function buildChecklistDigest(
 
   const { data: tasks } = await db
     .from("conference_checklist_tasks")
-    .select("id, name, description, check_type, check_entity_id, scope_entity_kind, scope_entity_id")
+    .select("id, name, description, check_type, check_entity_id, scope_entity_kind, scope_entity_id, deadline_at")
     .eq("checklist_id", checklist.id)
     .eq("active", true)
     .eq("audience", "org")
@@ -311,12 +363,20 @@ export async function buildChecklistDigest(
       openItems.push({
         name: task.name,
         description: task.description,
+        // Each item's OWN date, falling back to the list's. A list used to
+        // carry one date for every task on it, so "45 days until 11 January"
+        // was the only urgency anyone saw, whether the thing in front of them
+        // closed a week earlier or a week later.
+        deadline: (task.deadline_at as string | null) ?? checklist.deadline_at,
+        // Can we see the answer ourselves, or are we taking their word?
+        selfReported: checkType === "self_reported",
         cta: getTaskCta(checkType, {
           orgSlug: org.slug,
           conferenceId: checklist.conference_id,
           conferenceYear: conference.year,
           conferenceEdition: conference.edition_code,
           organizationId,
+          taskId: task.id,
         }),
       });
     }

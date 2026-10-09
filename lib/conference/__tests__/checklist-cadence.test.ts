@@ -16,14 +16,21 @@ describe("deriving when a checklist reminds people", () => {
   const CLOSES = new Date("2027-01-11");
 
   it("uses the standard cadence, then moves each reminder to a working day", () => {
-    // Anchored on a task hardening 4 Jan, the raw offsets are 52/28/14. The
-    // last lands on 2026-12-28 — the observed Boxing Day, because the 26th is
-    // a Saturday — so it shifts back to Thursday the 24th and becomes 18.
-    expect(deriveCheckpointOffsets(CLOSES, new Date("2027-01-04"))).toEqual([52, 28, 18]);
+    // Anchored on a task hardening 4 Jan. Every offset shifts off weekends and
+    // the Christmas closure, and the 14- and 10-day marks both land on Thu
+    // 24 Dec — deduped to one, because two rows for one day sends twice.
+    expect(deriveCheckpointOffsets(CLOSES, new Date("2027-01-04"))).toEqual([52, 38, 28, 21, 18, 11]);
   });
 
   it("falls back to the checklist's own deadline when no task carries one", () => {
-    expect(deriveCheckpointOffsets(CLOSES, null)).toEqual([...STANDARD_CADENCE_DAYS]);
+    // Not the raw constant: offsets landing on a weekend or holiday shift, so
+    // the derived ladder is the standard one AFTER the calendar has had its
+    // say. What must hold is that it never gets SHORTER than the standard
+    // first touch, and never duplicates.
+    const offsets = deriveCheckpointOffsets(CLOSES, null);
+    expect(offsets.length).toBe(new Set(offsets).size);
+    expect(offsets[0]).toBeGreaterThanOrEqual(STANDARD_CADENCE_DAYS[0]);
+    expect(offsets.length).toBe(STANDARD_CADENCE_DAYS.length);
   });
 
   it("widens so the first reminder still leads the EARLIEST task", () => {
@@ -38,8 +45,11 @@ describe("deriving when a checklist reminds people", () => {
   });
 
   it("never narrows below the standard cadence for a late-hardening task", () => {
-    // A task due AFTER the checklist closes must not pull the schedule in.
-    expect(deriveCheckpointOffsets(CLOSES, new Date("2027-02-01"))).toEqual([...STANDARD_CADENCE_DAYS]);
+    // A task due AFTER the checklist closes must not pull the schedule in —
+    // it derives exactly as if no task carried a date at all.
+    expect(deriveCheckpointOffsets(CLOSES, new Date("2027-02-01"))).toEqual(
+      deriveCheckpointOffsets(CLOSES, null)
+    );
   });
 
   it("returns widest-first, which is the order the sender expects", () => {
