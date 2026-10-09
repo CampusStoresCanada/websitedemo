@@ -938,11 +938,18 @@ export default async function ElectionReviewPage({
                         </button>
                       </form>
                     )}
+                    {/* ?preview=1 — without it this lands on "this nomination
+                        belongs to someone else", because the committee is
+                        neither the nominee nor an administrator of their
+                        institution. Read-only: see lib/elections/preview.ts. */}
                     <Link
-                      href={`/elections/accept/${n.acceptToken}`}
+                      href={`/elections/accept/${n.acceptToken}?preview=1`}
+                      target="_blank"
+                      rel="noreferrer"
                       className="text-xs text-gray-500 underline hover:text-gray-700"
+                      title="Their page, with their real progress. You cannot change anything from it."
                     >
-                      View their page
+                      See where they are
                     </Link>
                   </div>
                 </li>
