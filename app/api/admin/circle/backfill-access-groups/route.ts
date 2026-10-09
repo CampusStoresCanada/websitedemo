@@ -2,7 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getServerAuthState } from "@/lib/auth/server";
 import { getCircleClient } from "@/lib/circle/client";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { enqueueCircleSync } from "@/lib/circle/sync";
+import {
+  enqueueCircleSync,
+  enqueueNewContactCircleProvisioning,
+} from "@/lib/circle/sync";
+import { DRAFT_PREVIEW_ORG_IDS } from "@/lib/conference/draft-preview";
 import { getAccessGroupIds } from "@/lib/circle/config";
 import { hasNonMemberTag } from "@/lib/contacts/tags";
 
@@ -18,6 +22,20 @@ const ACTIVE_STATUSES = ["active", "grace", "reactivated"] as const;
  * and sweeping them into "Non-Member" would label them as one.
  */
 const LAPSED_STATUSES = ["locked", "canceled"] as const;
+
+/**
+ * Address domains that can never resolve to a Circle account. The survey and
+ * conference tools mint `@placeholder.com` locals for a person whose real
+ * address is not known yet, and the test rigs use `@example.com`. Queuing a
+ * link_member for either burns a Circle write to earn a 404.
+ */
+const UNRESOLVABLE_EMAIL_DOMAINS = ["@placeholder.com", "@example.com"];
+
+function isResolvableEmail(email: string | null): boolean {
+  if (!email) return false;
+  const e = email.trim().toLowerCase();
+  return !UNRESOLVABLE_EMAIL_DOMAINS.some((d) => e.endsWith(d));
+}
 
 /** PostgREST rejects an `.in()` list past roughly 200 ids with a 400. */
 const IN_CHUNK = 150;
@@ -90,7 +108,10 @@ function byOrg(
  * POST body:
  *   dryRun?: boolean  — default true; report the diff without queuing
  *   scope?: "partner" | "member" | "all"  — default "all"
- *   direction?: "active" | "lapsed" | "both"  — default "both"
+ *   direction?: "active" | "lapsed" | "provision" | "both" | "all"
+ *                     — default "both" (active + lapsed, its original meaning).
+ *                       "provision" creates Circle accounts for people at
+ *                       active orgs who have none; "all" runs all three.
  *   limit?: number    — max writes to queue per phase per tier (default: none)
  */
 export async function POST(request: NextRequest) {
@@ -107,14 +128,19 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => ({}))) as {
     dryRun?: boolean;
     scope?: "partner" | "member" | "all";
-    direction?: "active" | "lapsed" | "both";
+    direction?: "active" | "lapsed" | "provision" | "both" | "all";
     limit?: number;
   };
   const dryRun = body.dryRun !== false; // default to dry run
   const scope = body.scope ?? "all";
   const direction = body.direction ?? "both";
-  const doActive = direction === "both" || direction === "active";
-  const doLapsed = direction === "both" || direction === "lapsed";
+  const doActive =
+    direction === "both" || direction === "all" || direction === "active";
+  const doLapsed =
+    direction === "both" || direction === "all" || direction === "lapsed";
+  // Not in "both", which keeps its existing meaning of active + lapsed.
+  // Provisioning creates Circle accounts, so it is opted into explicitly.
+  const doProvision = direction === "all" || direction === "provision";
   const limit =
     typeof body.limit === "number" && body.limit > 0 ? body.limit : null;
 
@@ -290,6 +316,16 @@ export async function POST(request: NextRequest) {
         paidGroupId: groupId,
         lapsedGroupId,
         paidRoster: roster,
+        dryRun,
+        limit,
+        errors: results.errors,
+      });
+    }
+
+    if (doProvision) {
+      tierResult.provision = await provisionMissingAccounts({
+        adminClient,
+        tier,
         dryRun,
         limit,
         errors: results.errors,
@@ -546,5 +582,120 @@ async function reconcileLapsed(args: {
       strip: toStrip.length - stripBatch.length,
       downgrade: toDowngrade.length - downgradeBatch.length,
     },
+  };
+}
+
+/**
+ * Provision Circle accounts for people at active orgs who have none.
+ *
+ * This is the event-independent half of the system. Both live provisioning
+ * hooks are event-driven — `enqueueNewContactCircleProvisioning` fires when a
+ * contact is created through `ensureKnownPerson`, and
+ * `enqueueOrgCircleAccessSync` fires when an org transitions through the state
+ * machine — so a person who arrived via neither event is invisible to both,
+ * permanently. Measured 2026-10-09: 21 such people, in three bulk inserts.
+ * Fifteen came from the Notion inbound sync writing straight into `contacts`
+ * in Nov/Dec 2025, when `circle_sync_queue` did not yet exist and
+ * `circle_cutover_enabled` was still false. The other six sit at orgs with no
+ * `membership_state_log` row at all — imported as `active`, never transitioned
+ * — so the org-level catch-up never fired either. Fifteen of the 21 have a
+ * working website login and no Circle account.
+ *
+ * Reuses `enqueueNewContactCircleProvisioning` rather than assembling the
+ * queue rows here: that function already re-checks the org's own status,
+ * honours the non-member contact tags, and queues link_member plus the access
+ * group and org tag together. `link_member` is find-or-create and
+ * `createMember` passes `skip_invitation: true`, so an account is created
+ * silently — nobody is emailed by this.
+ */
+async function provisionMissingAccounts(args: {
+  adminClient: ReturnType<typeof createAdminClient>;
+  tier: "partner" | "member";
+  dryRun: boolean;
+  limit: number | null;
+  errors: string[];
+}): Promise<Record<string, unknown>> {
+  const { adminClient, tier, dryRun, limit, errors } = args;
+
+  let orgQuery = adminClient
+    .from("organizations")
+    .select("id, name, type")
+    .in("membership_status", ACTIVE_STATUSES)
+    .is("archived_at", null);
+
+  orgQuery =
+    tier === "partner"
+      ? orgQuery.ilike("type", "%partner%")
+      : orgQuery.not("type", "ilike", "%partner%");
+
+  const { data: orgs, error: orgsErr } = await orgQuery;
+  if (orgsErr) {
+    errors.push(`Failed to fetch active ${tier} orgs: ${orgsErr.message}`);
+    return { error: orgsErr.message };
+  }
+
+  // The draft-preview orgs exist to be walked through live flows, so their
+  // contacts must never earn a real Circle account. renewalReminderRun already
+  // excludes them for the same reason (2026-08-05: both Test Orgs were sent
+  // real finalized invoices because nothing filtered them out).
+  const orgById = new Map(
+    (orgs ?? [])
+      .filter((o) => !DRAFT_PREVIEW_ORG_IDS.includes(o.id))
+      .map((o) => [o.id, o.name])
+  );
+  const testOrgsSkipped = (orgs ?? []).length - orgById.size;
+
+  if (orgById.size === 0) {
+    return { orgs: 0, testOrgsSkipped, missingAccounts: 0, queued: 0 };
+  }
+
+  const contacts: ContactRow[] = [];
+  for (const ids of chunk([...orgById.keys()], IN_CHUNK)) {
+    const { data, error } = await adminClient
+      .from("contacts")
+      .select("id, email, circle_id, contact_type, organization_id")
+      .in("organization_id", ids)
+      .is("archived_at", null)
+      .is("circle_id", null)
+      .not("email", "is", null);
+    if (error) {
+      errors.push(`Failed to fetch unprovisioned ${tier} contacts: ${error.message}`);
+      return { error: error.message };
+    }
+    contacts.push(...((data ?? []) as ContactRow[]));
+  }
+
+  // Same two exclusions the live hook applies, plus addresses that cannot
+  // resolve. Reported rather than silently dropped.
+  const tagged = contacts.filter((c) => hasNonMemberTag(c.contact_type));
+  const unresolvable = contacts.filter(
+    (c) => !hasNonMemberTag(c.contact_type) && !isResolvableEmail(c.email)
+  );
+  const eligible = contacts.filter(
+    (c) => !hasNonMemberTag(c.contact_type) && isResolvableEmail(c.email)
+  );
+
+  const batch = limit ? eligible.slice(0, limit) : eligible;
+  let queued = 0;
+
+  if (!dryRun) {
+    for (const contact of batch) {
+      if (!contact.organization_id) continue;
+      await enqueueNewContactCircleProvisioning(contact.id, contact.organization_id);
+      queued++;
+    }
+  }
+
+  return {
+    orgs: orgById.size,
+    testOrgsSkipped,
+    contactsWithNoAccount: contacts.length,
+    nonMemberTagged: tagged.length,
+    unresolvableEmails: unresolvable.length,
+    unresolvableList: unresolvable.map((c) => c.email),
+    eligible: eligible.length,
+    queued: dryRun ? 0 : queued,
+    eligibleByOrg: byOrg(eligible, orgById),
+    skippedByLimit: eligible.length - batch.length,
   };
 }
