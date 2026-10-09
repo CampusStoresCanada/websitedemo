@@ -115,6 +115,42 @@ export async function signCosignatureAction(token: string): Promise<ActionResult
  * consent from the nominee's own acceptance, and one the nominee cannot give
  * themselves.
  */
+/**
+ * Ask one more institution to co-sign, from the nominee's own page.
+ *
+ * The invitation list was frozen at submission, so a nomination short a
+ * signature had no way to ask anybody else. The nominee is the right person
+ * to decide who to ask — they know who will say yes — and the committee can
+ * do it for them.
+ */
+export async function inviteCosignerAction(
+  token: string,
+  formData: FormData
+): Promise<ActionResult> {
+  const auth = await getServerAuthState();
+  if (!auth.user) return { ok: false, error: "Please sign in." };
+
+  const found = await getNominationByToken(token);
+  if (!found) return { ok: false, error: "That nomination could not be found." };
+
+  const organizationId = String(formData.get("organizationId") ?? "");
+  if (!organizationId) return { ok: false, error: "Choose an institution to ask." };
+
+  const isCommittee = auth.globalRole === "admin" || auth.globalRole === "super_admin";
+
+  const { inviteAdditionalCosigner } = await import("@/lib/elections/service");
+  const result = await inviteAdditionalCosigner({
+    nominationId: found.nomination.id,
+    organizationId,
+    actorProfileId: auth.user.id,
+    isCommittee,
+  });
+  if (!result.ok) return { ok: false, error: result.error };
+
+  revalidatePath(`/elections/accept/${token}`);
+  return { ok: true };
+}
+
 export async function grantStorePermissionAction(
   nominationId: string,
   token: string

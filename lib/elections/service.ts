@@ -1620,6 +1620,113 @@ export async function submitMemberNomination(input: {
 }
 
 /**
+ * Ask one more institution to co-sign, after the nomination is already in.
+ *
+ * The invitation list used to be frozen at submission. Invite two, have one
+ * decline or simply never act, and the nomination was stuck with no way to ask
+ * anybody else — the nominee could watch it fail and do nothing about it. That
+ * is what happened in the 2027 cycle: three people each invited exactly the
+ * two the by-law requires, built a closed circle, and two of them stalled on a
+ * single unsigned request.
+ *
+ * ⛔ Adds a request, never a signature. The institution still has to agree,
+ * and every check that applies at submission applies here: it must be
+ * eligible, it must not already be invited, and a nominee's own store still
+ * cannot count unless the config allows it.
+ */
+export async function inviteAdditionalCosigner(input: {
+  nominationId: string;
+  organizationId: string;
+  actorProfileId: string;
+  /** Set for a committee member acting on a nominee's behalf. */
+  isCommittee?: boolean;
+}): Promise<Result<{ organizationName: string; notified: number }>> {
+  const db = createAdminClient();
+
+  const { data: row } = await db
+    .from("nominations")
+    .select("id, election_id, nominee_profile_id, nominee_organization_id, nominee_contact_id, withdrawn_at, candidate_declined_at, elections(slug)")
+    .eq("id", input.nominationId)
+    .maybeSingle();
+  if (!row) return fail("That nomination does not exist.");
+
+  if (!input.isCommittee && row.nominee_profile_id !== input.actorProfileId)
+    return fail("Only the nominee can ask another institution to co-sign.");
+  if (row.withdrawn_at) return fail("This nomination has been withdrawn.");
+  if (row.candidate_declined_at) return fail("This nomination was declined.");
+
+  const election = await getElection((row.elections as { slug: string }).slug);
+  if (!election) return fail("That election could not be loaded.");
+  if (!nominationsOpen(election))
+    return fail(`Nominations closed on ${election.schedule.nominationsCloseAt}.`);
+
+  if (
+    input.organizationId === row.nominee_organization_id &&
+    !election.config.nominations.selfCosignatureAllowed
+  )
+    return fail("A nominee's own institution cannot co-sign their nomination.");
+
+  const { data: already } = await db
+    .from("nomination_cosignatures")
+    .select("id, revoked_at")
+    .eq("nomination_id", input.nominationId)
+    .eq("organization_id", input.organizationId)
+    .maybeSingle();
+  if (already && !already.revoked_at)
+    return fail("That institution has already been asked.");
+
+  const verdict = await canOrganizationParticipate(election.id, input.organizationId);
+  if (!verdict?.isEligible)
+    return fail(verdict?.reason ?? "That institution is not eligible to co-sign.");
+
+  const { data: admins } = await db
+    .from("user_organizations")
+    .select("user_id")
+    .eq("organization_id", input.organizationId)
+    .eq("role", "org_admin")
+    .eq("status", "active");
+  const userIds = (admins ?? []).map((a) => a.user_id as string).filter(Boolean);
+
+  const { data: contacts } = userIds.length
+    ? await db.from("contacts").select("id").eq("organization_id", input.organizationId).in("profile_id", userIds)
+    : { data: [] as { id: string }[] };
+  const contactIds = (contacts ?? []).map((c) => c.id as string).sort();
+
+  const { data: org } = await db
+    .from("organizations")
+    .select("name")
+    .eq("id", input.organizationId)
+    .maybeSingle();
+  const organizationName = (org?.name as string) ?? "that institution";
+
+  if (contactIds.length === 0)
+    return fail(
+      `${organizationName} has no administrator with an account, so nobody there could be asked. Pick another institution.`
+    );
+
+  const token = mintToken();
+  const { error } = await db.from("nomination_cosignatures").insert({
+    nomination_id: input.nominationId,
+    organization_id: input.organizationId,
+    contact_id: contactIds[0],
+    sign_token: token,
+  });
+  if (error) return fail(`Could not record the request: ${error.message}`);
+
+  const nomination = await hydrateNomination(input.nominationId, election);
+  const outcomes = await notifyCosigners(
+    election,
+    {
+      name: nomination?.nomineeName ?? "the nominee",
+      organizationName: nomination?.organizationName ?? "their institution",
+    },
+    [{ organizationId: input.organizationId, contactIds, token }]
+  );
+
+  return ok({ organizationName, notified: outcomes.filter((o) => o.sent).length });
+}
+
+/**
  * Chase the institutions sitting on an unsigned co-signature request.
  *
  * The one chase that existed emails the NOMINEE to say they are short a
