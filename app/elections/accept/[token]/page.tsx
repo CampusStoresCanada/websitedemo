@@ -56,7 +56,18 @@ export default async function AcceptNominationPage({
   // could visit, because the token does not exist until a nomination does. A
   // stand-in lets the committee see them before the cycle opens.
   const { isAdminPreview, PREVIEW_BANNER, sampleNomination } = await import("@/lib/elections/preview");
-  const previewing = token === "preview" && (await isAdminPreview({ preview }));
+  const adminPreview = await isAdminPreview({ preview });
+  const previewing = token === "preview" && adminPreview;
+  // An admin opening a REAL nomination's page, to see where that nominee has
+  // got to. The committee screen already lists what is outstanding; this is the
+  // same facts on the page the nominee is looking at, which is what somebody
+  // chasing them actually wants to see.
+  //
+  // ⛔ READ-ONLY, and not by relying on the actions to refuse. Every control is
+  // withheld below, because the page is being viewed by someone who is neither
+  // the nominee nor an administrator of their institution and must not be one
+  // misread condition away from acting as either.
+  const viewingAsAdmin = token !== "preview" && adminPreview;
 
   const found = previewing
     ? await (async () => {
@@ -103,7 +114,7 @@ export default async function AcceptNominationPage({
     new Date().toISOString().slice(0, 10) < election.schedule.nominationsOpenAt;
   const eyebrow = `Campus Stores Canada · ${election.cycleYear} Board election`;
 
-  if (!isNominee && !canGrantStorePermission) {
+  if (!isNominee && !canGrantStorePermission && !viewingAsAdmin) {
     // Someone else has the link. Say so plainly rather than 404ing, so a
     // forwarded email produces an explanation instead of a dead end.
     return (
@@ -162,6 +173,13 @@ export default async function AcceptNominationPage({
   }
 
   const accepted = !!nomination.candidateAcceptedAt;
+  // One switch, used on every control below, so adding a new one and
+  // forgetting it is the visible kind of mistake rather than the silent kind.
+  const canAct = windowOpen && !viewingAsAdmin;
+  // What the nominee sees. An admin looking in gets the same thing — that is
+  // the point of the link, and the banner promises exactly it — with every
+  // control already withheld by canAct.
+  const showNomineeView = isNominee || viewingAsAdmin;
 
   return (
     <ElectionShell
@@ -170,6 +188,13 @@ export default async function AcceptNominationPage({
       subtitle={`${nomination.organizationName} · nominated for the Board of Directors`}
     >
       {previewing && <Notice tone="info">{PREVIEW_BANNER}</Notice>}
+      {viewingAsAdmin && (
+        <Notice tone="info">
+          <strong>You are looking at {nomination.nomineeName}&apos;s own page.</strong> This is what
+          they see, with their real progress. Nothing here can be changed from your account, and
+          they have not been told you opened it.
+        </Notice>
+      )}
       {canGrantStorePermission && (
         <div className="mb-6 space-y-3">
           <Notice tone="warning">
@@ -206,7 +231,7 @@ export default async function AcceptNominationPage({
           page told them only what the process required of them — dates, a bio,
           a statement — and never what they would be taking on or why anyone
           does it. CSC's own case belongs here more than anywhere else. */}
-      {isNominee && (
+      {showNomineeView && (
         <details className="mb-6 rounded-lg border border-gray-200 px-4 py-3">
           <summary className="cursor-pointer text-sm font-semibold text-gray-900">
             What you are being asked to take on
@@ -234,7 +259,7 @@ export default async function AcceptNominationPage({
         </details>
       )}
 
-      {isNominee && (
+      {showNomineeView && (
         <>
           <div className="mb-6 space-y-1 text-sm text-gray-600">
             <p>
@@ -300,7 +325,7 @@ export default async function AcceptNominationPage({
                 name="bio"
                 rows={6}
                 defaultValue={nomination.bio ?? ""}
-                disabled={!windowOpen}
+                disabled={!canAct}
                 className="mt-2 w-full rounded-lg border border-gray-300 p-3 text-sm disabled:bg-gray-50"
               />
             </div>
@@ -317,12 +342,12 @@ export default async function AcceptNominationPage({
                 name="platform"
                 rows={6}
                 defaultValue={nomination.platform ?? ""}
-                disabled={!windowOpen}
+                disabled={!canAct}
                 className="mt-2 w-full rounded-lg border border-gray-300 p-3 text-sm disabled:bg-gray-50"
               />
             </div>
 
-            {windowOpen && (
+            {canAct && (
               <button
                 type="submit"
                 className="rounded-lg bg-[#B92026] px-5 py-2.5 text-sm font-medium text-white hover:bg-[#9c1b20]"
@@ -336,7 +361,7 @@ export default async function AcceptNominationPage({
             <OutstandingList items={nomination.completeness.missing} />
           </div>
 
-          {windowOpen && (
+          {canAct && (
             <div className="mt-8 border-t border-gray-200 pt-6">
               {accepted ? (
                 <form action={withdraw} className="space-y-3">
