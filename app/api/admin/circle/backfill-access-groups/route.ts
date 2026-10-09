@@ -70,6 +70,48 @@ function byOrg(
     .map(([org, count]) => ({ org, count }));
 }
 
+
+/**
+ * (org, email) pairs a human has archived — the GUI's delete sets
+ * `contacts.archived_at` via `archivePersonContact`, so an archived row IS a
+ * deletion decision.
+ *
+ * ⛔ A later unarchived row with the same address at the same org is a
+ * RESURRECTION, not authority to act. The 2026-08-17 21:24 import added 47
+ * live contact rows, 11 of which re-created people who had been deleted —
+ * "Nick Diezyn (retired)" at Barbarian Bruzer was archived 2026-03-10 and came
+ * back with the retirement noted in the NAME rather than the row being left
+ * out. Provisioning read the live row and gave him a Circle account.
+ *
+ * Deciding which row is real is a human's job, so neither row is touched and
+ * the pair is reported. Never merge or pick a winner here.
+ */
+async function loadArchivedPairs(
+  adminClient: ReturnType<typeof createAdminClient>,
+  errors: string[]
+): Promise<Set<string>> {
+  const pairs = new Set<string>();
+  const { data, error } = await adminClient
+    .from("contacts")
+    .select("email, organization_id")
+    .not("archived_at", "is", null)
+    .not("email", "is", null);
+  if (error) {
+    errors.push(`Failed to fetch archived contacts: ${error.message}`);
+    return pairs;
+  }
+  for (const row of data ?? []) {
+    if (row.email && row.organization_id) {
+      pairs.add(`${row.organization_id}|${row.email.trim().toLowerCase()}`);
+    }
+  }
+  return pairs;
+}
+
+function pairKey(c: ContactRow): string {
+  return `${c.organization_id ?? ""}|${(c.email ?? "").trim().toLowerCase()}`;
+}
+
 /**
  * Reconcile the shared Circle access groups against the database.
  *
@@ -188,6 +230,12 @@ export async function POST(request: NextRequest) {
     }
   }
 
+  // Loaded once: both the active-add and provision phases must refuse a row
+  // whose (org, email) a human has already archived.
+  const archivedPairs = doActive || doProvision
+    ? await loadArchivedPairs(adminClient, results.errors)
+    : new Set<string>();
+
   for (const { tier, groupId, lapsedGroupId } of tiers) {
     if (!groupId) {
       results.errors.push(
@@ -268,8 +316,14 @@ export async function POST(request: NextRequest) {
         }
 
         if (!contactsFailed) {
+          const resurrectedActive = contacts.filter(
+            (c) => c.email && !hasNonMemberTag(c.contact_type) && archivedPairs.has(pairKey(c))
+          );
           const eligible = contacts.filter(
-            (c) => c.email && !hasNonMemberTag(c.contact_type)
+            (c) =>
+              c.email &&
+              !hasNonMemberTag(c.contact_type) &&
+              !archivedPairs.has(pairKey(c))
           );
           const missing = eligible.filter((c) => !roster.has(String(c.circle_id)));
 
@@ -301,6 +355,7 @@ export async function POST(request: NextRequest) {
             queued: dryRun ? 0 : queued,
             // Named so a dry run is reviewable before anything is written.
             missingByOrg: byOrg(missing, orgById),
+            resurrectedDeleted: resurrectedActive.length,
             skippedByLimit: missing.length - toQueue.length,
           });
         }
@@ -329,6 +384,7 @@ export async function POST(request: NextRequest) {
         dryRun,
         limit,
         errors: results.errors,
+        archivedPairs,
       });
     }
 
@@ -614,8 +670,9 @@ async function provisionMissingAccounts(args: {
   dryRun: boolean;
   limit: number | null;
   errors: string[];
+  archivedPairs: Set<string>;
 }): Promise<Record<string, unknown>> {
-  const { adminClient, tier, dryRun, limit, errors } = args;
+  const { adminClient, tier, dryRun, limit, errors, archivedPairs } = args;
 
   let orgQuery = adminClient
     .from("organizations")
@@ -668,11 +725,20 @@ async function provisionMissingAccounts(args: {
   // Same two exclusions the live hook applies, plus addresses that cannot
   // resolve. Reported rather than silently dropped.
   const tagged = contacts.filter((c) => hasNonMemberTag(c.contact_type));
+  const resurrected = contacts.filter(
+    (c) =>
+      !hasNonMemberTag(c.contact_type) &&
+      isResolvableEmail(c.email) &&
+      archivedPairs.has(pairKey(c))
+  );
   const unresolvable = contacts.filter(
     (c) => !hasNonMemberTag(c.contact_type) && !isResolvableEmail(c.email)
   );
   const eligible = contacts.filter(
-    (c) => !hasNonMemberTag(c.contact_type) && isResolvableEmail(c.email)
+    (c) =>
+      !hasNonMemberTag(c.contact_type) &&
+      isResolvableEmail(c.email) &&
+      !archivedPairs.has(pairKey(c))
   );
 
   const batch = limit ? eligible.slice(0, limit) : eligible;
@@ -693,6 +759,9 @@ async function provisionMissingAccounts(args: {
     nonMemberTagged: tagged.length,
     unresolvableEmails: unresolvable.length,
     unresolvableList: unresolvable.map((c) => c.email),
+    // Held back: a human archived this address at this org already.
+    resurrectedDeleted: resurrected.length,
+    resurrectedList: resurrected.map((c) => c.email),
     eligible: eligible.length,
     queued: dryRun ? 0 : queued,
     eligibleByOrg: byOrg(eligible, orgById),
