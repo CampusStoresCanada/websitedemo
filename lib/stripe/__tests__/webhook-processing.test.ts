@@ -534,3 +534,150 @@ describe("processStripeWebhookEvent — invoice.voided", () => {
     expect(transitionMembershipStateMock).not.toHaveBeenCalled();
   });
 });
+
+// ---------------------------------------------------------------------------
+// invoice.paid — one paid conference order must produce ONE QBO document
+// ---------------------------------------------------------------------------
+
+function invoicePaidEvent(id: string, paymentIntent: string | null = null): Stripe.Event {
+  return {
+    id: `evt_${id}`,
+    type: "invoice.paid",
+    data: {
+      object: {
+        id,
+        object: "invoice",
+        metadata: { org_id: "org-1" },
+        payment_intent: paymentIntent,
+        invoice_pdf: null,
+        hosted_invoice_url: null,
+      },
+    },
+  } as unknown as Stripe.Event;
+}
+
+describe("processStripeWebhookEvent — invoice.paid (conference order)", () => {
+  beforeEach(() => {
+    // settlePaidInvoiceMembership reaches for its OWN admin client rather than
+    // the injected db. These invoices carry no billing period, so it only
+    // reads membership_status and no-ops for an org that is already active.
+    const { db: settleDb } = makeFakeDb({
+      organizations: [{ data: { membership_status: "active" } }],
+    });
+    createAdminClientMock.mockReturnValue(settleDb);
+  });
+
+  it("queues the conference sales receipt and NOT the invoice export", async () => {
+    // ⛔ The regression this pins: both queues firing posts the same money
+    // twice — a correct per-line Sales Receipt from the order, plus a
+    // single-line Invoice whose item is grepped out of the description and
+    // whose tax code comes from the ORIGIN-based membership resolver. For an
+    // out-of-Canada buyer that second document carries no HST on a sale
+    // Stripe charged 13% on, and its Payment is posted for the full
+    // tax-inclusive total, leaving an unapplied credit.
+    const { db } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-1" } },
+        {
+          data: {
+            id: "inv-1",
+            organization_id: "org-1",
+            billing_period_start: null,
+            billing_period_end: null,
+          },
+        },
+      ],
+      conference_orders: [
+        { data: { id: "order-1", conference_id: "conf-1", organization_id: "org-1", status: "pending" } },
+        { data: { status: "pending", expires_at: null } },
+      ],
+      conference_order_items: [{ data: [] }],
+    });
+
+    await processStripeWebhookEvent(invoicePaidEvent("in_conf_1", "pi_conf_1"), db as never);
+
+    expect(enqueueQBConferenceReceiptMock).toHaveBeenCalledExactlyOnceWith("order-1");
+    expect(enqueueQBExportMock).not.toHaveBeenCalled();
+  });
+
+  it("fulfils the order through the same RPC a card payment uses", async () => {
+    // Same seat, same receipt, same badge — only the payment instrument
+    // differs. The checkout session id stays null rather than being filled
+    // with an invoice id that is not one.
+    const { db, rpc } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-2" } },
+        { data: { id: "inv-2", organization_id: "org-1", billing_period_start: null, billing_period_end: null } },
+      ],
+      conference_orders: [
+        { data: { id: "order-2", conference_id: "conf-1", organization_id: "org-1", status: "pending" } },
+        { data: { status: "pending", expires_at: null } },
+      ],
+      conference_order_items: [{ data: [] }],
+    });
+
+    await processStripeWebhookEvent(invoicePaidEvent("in_conf_2", "pi_conf_2"), db as never);
+
+    expect(rpc).toHaveBeenCalledWith("process_conference_order_paid", {
+      p_order_id: "order-2",
+      p_checkout_session_id: null,
+      p_payment_intent_id: "pi_conf_2",
+    });
+  });
+
+  it("still exports a conference invoice that has no order behind it", async () => {
+    // ⚠️ The hand-made, off-checkout booth invoice — the case
+    // resolveManualConferenceInvoiceItemId was written for. Nothing else
+    // would ever post it, so suppressing this export would lose it entirely.
+    const { db } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-3" } },
+        { data: { id: "inv-3", organization_id: "org-1", billing_period_start: null, billing_period_end: null } },
+      ],
+      conference_orders: [{ data: null }],
+    });
+
+    await processStripeWebhookEvent(invoicePaidEvent("in_manual"), db as never);
+
+    expect(enqueueQBConferenceReceiptMock).not.toHaveBeenCalled();
+    expect(enqueueQBExportMock).toHaveBeenCalledExactlyOnceWith("inv-3");
+  });
+});
+
+describe("processStripeWebhookEvent — invoice.paid passes the buyer through", () => {
+  beforeEach(() => {
+    const { db: settleDb } = makeFakeDb({
+      organizations: [{ data: { membership_status: "active" } }],
+    });
+    createAdminClientMock.mockReturnValue(settleDb);
+  });
+
+  it("clears the cart, which only happens when userId reaches fulfilConferenceOrder", async () => {
+    // ⛔ Cart clearing AND triggerConferencePaymentConfirmation are both gated
+    // on `conferenceId && orgId && userId`. The card path gets userId from the
+    // Stripe session; the invoice path has to read it off the order row. Miss
+    // it and the buyer pays, keeps the booth in their cart, and is never
+    // emailed a confirmation — all silently.
+    const { db, recorded } = makeFakeDb({
+      invoices: [
+        { data: { id: "inv-9" } },
+        { data: { id: "inv-9", organization_id: "org-1", billing_period_start: null, billing_period_end: null } },
+      ],
+      conference_orders: [
+        { data: { id: "order-9", conference_id: "conf-1", organization_id: "org-1", user_id: "user-9", status: "pending" } },
+        { data: { status: "pending", expires_at: null } },
+      ],
+      conference_order_items: [{ data: [] }],
+    });
+
+    await processStripeWebhookEvent(invoicePaidEvent("in_conf_9", "pi_conf_9"), db as never);
+
+    const cartDelete = recorded.find((r) => r.table === "cart_items");
+    expect(cartDelete).toBeDefined();
+    expect(cartDelete!.calls.filter((c) => c.method === "eq").map((c) => c.args)).toEqual([
+      ["conference_id", "conf-1"],
+      ["organization_id", "org-1"],
+      ["user_id", "user-9"],
+    ]);
+  });
+});

@@ -44,6 +44,7 @@ export default function CartClient({
   organizationName,
   orgSlug,
   isDevAdmin,
+  canInvoice,
   initialCart,
   contacts,
   orgSeats,
@@ -55,6 +56,8 @@ export default function CartClient({
   organizationName: string;
   orgSlug: string;
   isDevAdmin: boolean;
+  /** Conference ops/staff: offers "invoice this organization" as well as a card. Re-checked server-side. */
+  canInvoice: boolean;
   initialCart: CartWithTotals;
   /** The org's existing Store Contacts — the picker's default list when assigning a registration line. */
   contacts: PickablePerson[];
@@ -67,6 +70,7 @@ export default function CartClient({
   const [status, setStatus] = useState<string | null>(null);
   const [warning, setWarning] = useState<string | null>(null);
   const [completedOrderId, setCompletedOrderId] = useState<string | null>(null);
+  const [invoiceUrl, setInvoiceUrl] = useState<string | null>(null);
   const [isPending, startTransition] = useTransition();
   const [assigningSlot, setAssigningSlot] = useState<{ cartItemId: string; index: number } | null>(null);
 
@@ -171,9 +175,10 @@ export default function CartClient({
     });
   };
 
-  const handleCheckout = () => {
+  const handleCheckout = (paymentMethod: "card" | "invoice" = "card") => {
     setError(null);
     setStatus(null);
+    setInvoiceUrl(null);
 
     startTransition(async () => {
       const origin = window.location.origin;
@@ -185,10 +190,30 @@ export default function CartClient({
         organizationId,
         successUrl,
         cancelUrl,
+        ...(paymentMethod === "invoice" ? { paymentMethod: "invoice" as const } : {}),
       });
 
       if (!result.success) {
         setError(result.error);
+        return;
+      }
+
+      /**
+       * ⛔ An invoice is already SENT by the time this returns
+       * (finalizeAndSendInvoice), so there is nothing for the staff member to
+       * complete — navigating them to Stripe's hosted page would look like a
+       * payment screen for a bill that has gone to the customer instead.
+       * Show the link so it can be checked or re-sent by hand.
+       *
+       * ⚠️ Inventory is NOT claimed yet. The booth is only taken out of
+       * entity_purchases when the invoice is paid (invoice.paid → mint), and
+       * nothing stops another org buying it in the meantime.
+       */
+      if (paymentMethod === "invoice") {
+        await refreshCart();
+        dispatchConferenceCartUpdated(organizationId);
+        setInvoiceUrl(result.data.checkoutUrl || null);
+        setStatus(`Invoice sent to ${organizationName}. Due in 30 days.`);
         return;
       }
 
@@ -230,6 +255,17 @@ export default function CartClient({
       ) : null}
       {warning ? (
         <p className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">{warning}</p>
+      ) : null}
+      {invoiceUrl ? (
+        <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
+          <a href={invoiceUrl} target="_blank" rel="noreferrer" className="font-semibold underline">
+            Open the invoice Stripe sent →
+          </a>
+          <p className="mt-1 text-emerald-700">
+            The booth is not out of inventory until this is paid. Nothing stops another
+            organization buying it in the meantime.
+          </p>
+        </div>
       ) : null}
       {completedOrderId ? (
         <div className="rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-800">
@@ -379,12 +415,21 @@ export default function CartClient({
 
         <div className="mt-4 flex flex-wrap gap-2">
           <button
-            onClick={handleCheckout}
+            onClick={() => handleCheckout("card")}
             disabled={checkoutDisabled}
             className="rounded-md bg-[#EE2A2E] px-4 py-2 text-sm font-medium text-white hover:bg-[#b50001] disabled:cursor-not-allowed disabled:opacity-50"
           >
             {isPending ? "Processing..." : "Proceed to Checkout"}
           </button>
+          {canInvoice ? (
+            <button
+              onClick={() => handleCheckout("invoice")}
+              disabled={checkoutDisabled}
+              className="rounded-md border border-gray-400 px-4 py-2 text-sm font-medium text-gray-800 hover:border-gray-600 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {isPending ? "Processing..." : `Invoice ${organizationName}`}
+            </button>
+          ) : null}
           <button
             onClick={handleClear}
             disabled={isPending || isEmpty}

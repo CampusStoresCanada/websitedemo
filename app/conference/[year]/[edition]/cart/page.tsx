@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { requireAuthenticated, isGlobalAdmin } from "@/lib/auth/guards";
+import { requireAuthenticated, isGlobalAdmin, requireConferenceOpsAccess } from "@/lib/auth/guards";
 import { getPublicConference } from "@/lib/actions/conference";
 import DraftPreviewBanner from "@/components/conference/DraftPreviewBanner";
 import AdminOrgSwitcher from "@/components/conference/AdminOrgSwitcher";
@@ -84,6 +84,19 @@ export default async function ConferenceCartPage({
     );
   }
 
+  /**
+   * Whether to offer "invoice this organization" alongside the card button.
+   *
+   * ⛔ This is display only. createConferenceCheckout re-runs
+   * requireConferenceOpsAccess server-side before it will honour
+   * paymentMethod:"invoice", because a server action's arguments are
+   * attacker-controlled — hiding the button is not the control. Deferring
+   * payment is a staff decision, so an org admin buying for their own org
+   * passes the manage-org check and must still fail this one.
+   */
+  const opsAccess = await requireConferenceOpsAccess();
+  const canInvoice = opsAccess.ok;
+
   const [cartResult, orgContacts, orgSeatsResult] = await Promise.all([
     getConferenceCart(conference.id, selectedOrg.id),
     getContactsForOrganization(selectedOrg.id),
@@ -146,6 +159,7 @@ export default async function ConferenceCartPage({
         organizationName={selectedOrg.name}
         orgSlug={selectedOrg.slug}
         isDevAdmin={isAdmin}
+        canInvoice={canInvoice}
         initialCart={cartResult.data}
         contacts={orgContacts.map((c) => ({ id: c.id, name: c.name ?? "", email: c.work_email ?? c.email ?? null }))}
         orgSeats={orgSeatsResult.success ? orgSeatsResult.data : []}
