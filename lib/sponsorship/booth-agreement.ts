@@ -83,3 +83,51 @@ export async function createSponsorAgreementFromBoothPurchase(params: {
     console.error(`createSponsorAgreementFromBoothPurchase failed for org ${params.organizationId}: ${error.message}`);
   }
 }
+
+/**
+ * Drop a booth from whatever agreement(s) currently claim it.
+ *
+ * ⛔ The counterpart to createSponsorAgreementFromBoothPurchase, and the half
+ * that was missing. A booth MOVE releases the old booth and grants a new one,
+ * but nothing ever told the sponsor agreement — so an org that moved off a
+ * Connected booth kept an agreement naming a booth they no longer hold, and
+ * that booth could meanwhile be sold to someone else. Varsity Collection's
+ * agreement still listed booths 203 and 205 months after moving to 405+407,
+ * and 205 had since been bought by Kotmo, who had their own agreement for it.
+ * Activating the stale one would have provisioned another company's booth.
+ *
+ * ⚠️ Deliberately does NOT change the agreement's status or tier. Removing a
+ * booth is a fact (they don't hold it); deciding whether what remains is still
+ * a sponsorship is a judgement about a paying relationship, and belongs to a
+ * human. An agreement left with no booths stays exactly as it is, for review.
+ */
+export async function removeBoothFromSponsorAgreements(params: {
+  organizationId: string;
+  boothEntityId: string;
+}): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+
+  const { data: agreements } = await db
+    .from("sponsor_agreements")
+    .select("id, custom_benefits")
+    .eq("organization_id", params.organizationId);
+
+  for (const agreement of agreements ?? []) {
+    const benefits: Array<{ config?: { reference_id?: string } }> = Array.isArray(agreement.custom_benefits)
+      ? agreement.custom_benefits
+      : [];
+    const remaining = benefits.filter((b) => b?.config?.reference_id !== params.boothEntityId);
+    if (remaining.length === benefits.length) continue; // this agreement never named it
+
+    const { error } = await db
+      .from("sponsor_agreements")
+      .update({ custom_benefits: remaining, updated_at: new Date().toISOString() })
+      .eq("id", agreement.id);
+    if (error) {
+      console.error(
+        `removeBoothFromSponsorAgreements failed for agreement ${agreement.id} (org ${params.organizationId}): ${error.message}`
+      );
+    }
+  }
+}

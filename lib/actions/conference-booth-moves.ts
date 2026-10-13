@@ -25,6 +25,10 @@ import { requireAdmin, isSuperAdmin } from "@/lib/auth/guards";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { stripe } from "@/lib/stripe/client";
 import { enqueueQBConferenceRefund, enqueueQBConferenceReceipt } from "@/lib/quickbooks/conference-export";
+import {
+  createSponsorAgreementFromBoothPurchase,
+  removeBoothFromSponsorAgreements,
+} from "@/lib/sponsorship/booth-agreement";
 import { logAuditEventSafe } from "@/lib/ops/audit";
 
 type Result<T> = { success: true; data: T } | { success: false; error: string };
@@ -349,6 +353,48 @@ export async function moveBoothsCore(
 
   if (result.minted) {
     await enqueueQBConferenceReceipt(result.new_order_id);
+
+    /**
+     * ⛔ Keep the sponsor agreement in step with what the org actually holds.
+     *
+     * This was missing entirely: the agreement hook lived only in the Stripe
+     * webhook, so a booth bought through the cart created one and a booth
+     * acquired by MOVING never did. Two live consequences, both found
+     * 2026-10-13: MV Sport moved onto Connected booth 306, paid for it, and
+     * had no agreement at all — no bursary, no logo, no care package. Varsity
+     * Collection moved OFF Connected booths 203+205 and kept an agreement
+     * naming both, one of which Kotmo had since bought.
+     *
+     * Order matters: release first, then grant. An org moving between two
+     * Connected booths would otherwise hit the "already tracked" no-op on the
+     * grant and then have the new booth stripped by the release.
+     *
+     * ⚠️ Inside `minted` only, matching enqueueQBConferenceReceipt above. A
+     * move that bills the org instead (an upgrade) mints later via Stripe, and
+     * its session carries `booth_move_session` rather than a conference_order_id,
+     * so that path needs its own fix — tracked separately, not papered over here.
+     */
+    for (const oldBoothId of params.oldBoothEntityIds) {
+      await removeBoothFromSponsorAgreements({
+        organizationId: params.organizationId,
+        boothEntityId: oldBoothId,
+      });
+    }
+
+    const { data: newBooths } = await db
+      .from("conference_entities")
+      .select("id, name, price_cents")
+      .in("id", params.newBoothEntityIds);
+
+    for (const booth of newBooths ?? []) {
+      if (booth.price_cents == null) continue;
+      await createSponsorAgreementFromBoothPurchase({
+        organizationId: params.organizationId,
+        boothEntityId: booth.id,
+        boothEntityName: booth.name,
+        boothPriceCents: booth.price_cents,
+      });
+    }
   }
 
   await logAuditEventSafe({
