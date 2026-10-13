@@ -85,17 +85,81 @@ function escapeHtml(value: string): string {
     .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
 }
 
+/**
+ * One card per outstanding thing, carrying its OWN deadline and saying plainly
+ * whether we can see the answer.
+ *
+ * Two additions the ED asked for, both about not making people guess:
+ *
+ *  - The day count comes from the item, not the list. A supplier order closing
+ *    on the 10th and a badge check closing on the 18th are not "45 days until
+ *    January", and a reader who is told they are stops believing the number.
+ *
+ *  - A self-reported item says we cannot see it. We know whether a seat is
+ *    assigned or an invoice is paid; we have no idea whether a hotel got
+ *    booked or a pallet shipped. Chasing someone for something they finished
+ *    three weeks ago, in the same voice as something genuinely outstanding, is
+ *    how a reminder series teaches people to ignore it.
+ */
 function renderOpenItemsHtml(
-  items: { name: string; description: string; cta: { label: string; url: string } }[]
+  items: {
+    name: string;
+    description: string;
+    deadline: string | null;
+    selfReported: boolean;
+    hardensBecause: string | null;
+    cta: { label: string; url: string };
+  }[]
 ): string {
+  const today = new Date();
   return items
-    .map(
-      (item) => `<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px">
+    .map((item) => {
+      const days = item.deadline
+        ? Math.ceil((new Date(item.deadline).getTime() - today.getTime()) / 86_400_000)
+        : null;
+      const when =
+        days === null
+          ? ""
+          : days < 0
+            ? `<span style="color:#b91c1c;font-weight:600">Closed ${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} ago</span>`
+            : days === 0
+              ? `<span style="color:#b91c1c;font-weight:600">Closes today</span>`
+              : days <= 7
+                ? `<span style="color:#b45309;font-weight:600">${days} day${days === 1 ? "" : "s"} left</span>`
+                : `<span style="color:#6b7280">${days} days left</span>`;
+      // No apology and no accusation. It states what we can see, which is the
+      // honest reason they are hearing from us about something they may well
+      // have already done.
+      /*
+        WHY the date matters, not just that it exists.
+
+        The org page has said this all along — "By 4 January, or anyone you
+        have not named is not in the attendee list members use to find who to
+        meet, and their badge is printed on site rather than in advance" —
+        and the email, the thing actually doing the asking, said only "4 days
+        left". A bare countdown gives someone no reason to act today rather
+        than on the last day, which is the behaviour the lead-in cadence
+        exists to prevent.
+
+        Steve: "the due date isn't when we should start reminding people...
+        its when the results become a bigger pain in the ass to change."
+        This is the sentence that says what the pain is.
+      */
+      const consequence = item.hardensBecause
+        ? `<p style="margin:6px 0 0;color:#6b7280;font-size:13px;line-height:1.5">After that, ${item.hardensBecause}.</p>`
+        : "";
+      const unverified = item.selfReported
+        ? `<p style="margin:8px 0 0;color:#6b7280;font-size:13px;line-height:1.5">We have no way to see this one from our side, so we are asking. If it is already handled, tell us and we will stop bringing it up.</p>`
+        : "";
+      return `<div style="margin:12px 0;padding:12px;border:1px solid #e5e7eb;border-radius:8px">
   <p style="margin:0 0 4px;font-weight:600;color:#111827">${item.name}</p>
+  <p style="margin:0 0 6px;font-size:13px">${when}</p>
   <p style="margin:0 0 8px;color:#6b7280;font-size:14px">${item.description}</p>
-  <a href="${item.cta.url}" style="color:#163D6D;font-weight:600;text-decoration:none;font-size:14px">${item.cta.label} →</a>
-</div>`
-    )
+  ${consequence}
+  ${unverified}
+  <a href="${item.cta.url}" style="color:#163D6D;font-weight:600;text-decoration:none;font-size:14px;display:inline-block;margin-top:8px">${item.cta.label} →</a>
+</div>`;
+    })
     .join("\n");
 }
 
@@ -264,7 +328,19 @@ export async function filterTasksToOrgScope<
 
 export interface ChecklistDigest {
   orgName: string;
-  openItems: { name: string; description: string; cta: { label: string; url: string } }[];
+  openItems: {
+    name: string;
+    description: string;
+    /** This item's own deadline, falling back to the list's. */
+    deadline: string | null;
+    /** True when only the org can tell us — we cannot verify it ourselves. */
+    selfReported: boolean;
+    /** What changes on the deadline, in the reader's terms. */
+    hardensBecause: string | null;
+    /** Rotating subject copy for a reminder that leads with this task. */
+    subjectLines: string[];
+    cta: { label: string; url: string };
+  }[];
   variables: Record<string, string>;
 }
 
@@ -290,7 +366,7 @@ export async function buildChecklistDigest(
 
   const { data: tasks } = await db
     .from("conference_checklist_tasks")
-    .select("id, name, description, check_type, check_entity_id, scope_entity_kind, scope_entity_id")
+    .select("id, name, description, check_type, check_entity_id, scope_entity_kind, scope_entity_id, deadline_at, hardens_because, subject_lines")
     .eq("checklist_id", checklist.id)
     .eq("active", true)
     .eq("audience", "org")
@@ -311,12 +387,22 @@ export async function buildChecklistDigest(
       openItems.push({
         name: task.name,
         description: task.description,
+        // Each item's OWN date, falling back to the list's. A list used to
+        // carry one date for every task on it, so "45 days until 11 January"
+        // was the only urgency anyone saw, whether the thing in front of them
+        // closed a week earlier or a week later.
+        deadline: (task.deadline_at as string | null) ?? checklist.deadline_at,
+        // Can we see the answer ourselves, or are we taking their word?
+        selfReported: checkType === "self_reported",
+        hardensBecause: (task.hardens_because as string | null) ?? null,
+        subjectLines: ((task.subject_lines as string[] | null) ?? []).filter(Boolean),
         cta: getTaskCta(checkType, {
           orgSlug: org.slug,
           conferenceId: checklist.conference_id,
           conferenceYear: conference.year,
           conferenceEdition: conference.edition_code,
           organizationId,
+          taskId: task.id,
         }),
       });
     }
@@ -457,6 +543,79 @@ export interface ChecklistRunResult {
  * "Send Reminders Now" button and the daily cron route — same code path,
  * so what's tested manually is exactly what runs unattended.
  */
+/**
+ * Which of an organisation's outstanding items leads today's reminder.
+ *
+ * ⛔ NOT "whatever fired today", and ⛔ NOT the same item every time.
+ *
+ * Two failures, in order. First the subject was the task's own name, so five
+ * consecutive sends said "Send your product for Conference in a Box". Giving
+ * each task several phrasings fixed the repetition and not the problem: the
+ * lead still came from whichever checklist triggered the send, and since the
+ * Box owns most of the early checkpoints, every October subject was a
+ * different way of saying Conference in a Box. The ED: "there are so many
+ * things we need them to do and not all of them are about the conference in
+ * a box."
+ *
+ * So:
+ *  · something genuinely close (inside a week) leads, because it has earned
+ *    the subject line and a reader who opens for it is opening in time;
+ *  · otherwise the lead ROTATES across everything they still owe, so a month
+ *    of reminders surfaces six different obligations rather than one.
+ *
+ * The whole list is in the body either way. This only decides what the
+ * envelope says.
+ */
+const URGENT_WITHIN_DAYS = 7;
+
+function pickLeadSection<T extends { triggered: boolean; daysOut: number; subjectLines: string[] }>(
+  sections: T[],
+  remindersSoFar: number
+): T | undefined {
+  if (sections.length === 0) return undefined;
+
+  /*
+    ⛔ OVERDUE NEVER LEADS.
+
+    This filtered on `daysOut <= 7`, which is true of every negative number,
+    and then sorted ascending — so the MOST overdue item was permanently the
+    "nearest" and took every subject line thereafter. Simulated: an org that
+    missed Conference in a Box on 20 November led all eight remaining
+    reminders with it, 56 days past, still saying "Last call" and "closes
+    soon" about a shipment the rules say is no longer accepted. Stronco,
+    Encore, booth staff and payment — all still actionable, all with money
+    attached — never reached the subject again.
+
+    A missed cliff has no action left to ask for, so it loses its claim on
+    the envelope. It stays in the body, where the renderer already labels it
+    "Closed N days ago" rather than pretending.
+  */
+  const upcoming = sections.filter((x) => x.daysOut >= 0);
+  const urgent = upcoming
+    .filter((x) => x.daysOut <= URGENT_WITHIN_DAYS)
+    .sort((a, b) => a.daysOut - b.daysOut);
+  if (urgent.length > 0) return urgent[0];
+
+  // Otherwise rotate across what can still be acted on.
+  if (upcoming.length > 0) return upcoming[remindersSoFar % upcoming.length];
+
+  // Everything they owe is already past. Still write, still rotate — the body
+  // tells the truth about each one, and silence would be worse.
+  return sections[remindersSoFar % sections.length];
+}
+
+function pickSubjectLine(pending: {
+  conferenceYear: number;
+  remindersSoFar: number;
+  sections: { triggered: boolean; daysOut: number; subjectLines: string[] }[];
+}): string {
+  const lead = pickLeadSection(pending.sections, pending.remindersSoFar);
+  const lines = lead?.subjectLines ?? [];
+  if (lines.length === 0) return `Get ready for the ${pending.conferenceYear} conference`;
+  // Rotate the phrasing too, so a repeat lead is not a repeat subject.
+  return lines[pending.remindersSoFar % lines.length];
+}
+
 export async function runChecklistReminders(
   options: { dryRun?: boolean } = {}
 ): Promise<ChecklistRunResult> {
@@ -492,9 +651,18 @@ export async function runChecklistReminders(
     conferenceYear: number;
     orgName: string;
     /** Each carries its OWN framing, so a lone reminder still reads specifically. */
-    sections: { checklistName: string; openItemsHtml: string; introLine: string; itemNames: string[] }[];
+    sections: {
+      checklistId: string; checklistName: string; closesAt: string;
+      openItemsHtml: string; introLine: string; itemNames: string[]; subjectLines: string[];
+      /** Days until this list closes — decides whether it earns the subject. */
+      daysOut: number;
+      /** True when THIS list's checkpoint is what caused the send today. */
+      triggered: boolean;
+    }[];
     /** Only publication-scoped checklists contribute the consent note. */
     consentNote: string;
+    /** How many reminders this org has already had — rotates the subject. */
+    remindersSoFar: number;
     log: { checklist_id: string; checkpoint_id: string; organization_id: string }[];
   };
   const pendingByOrg = new Map<string, Pending>();
@@ -520,24 +688,44 @@ export async function runChecklistReminders(
           organizationId,
           db
         );
-        if (!digest) continue; // fully caught up — silently skip, nothing logged
+        /*
+          ⛔ A FINISHED TRIGGER STILL OPENS THE DOOR.
 
+          This used to `continue` when the triggering checklist had nothing
+          open, which meant doing the thing early cancelled the whole email —
+          including the five other obligations the same org still had. The
+          org that acted heard less from us than the org that ignored us,
+          which is the exact opposite of what a reminder series is for.
+
+          The checkpoint decides WHEN we may write. Whether we write at all
+          is decided at the end, by whether anything is actually outstanding
+          anywhere (orgs with no sections are dropped before sending).
+        */
         const existing: Pending = pendingByOrg.get(organizationId) ?? {
           conferenceId: checklist.conference_id,
           conferenceYear: conference.year,
-          orgName: digest.orgName,
+          orgName: digest?.orgName ?? "",
           sections: [],
           consentNote: "",
+          remindersSoFar: 0,
           log: [],
         };
-        existing.sections.push({
+        if (digest) existing.sections.push({
+          triggered: true,
+          checklistId: checklist.id,
+          closesAt: checklist.deadline_at,
           checklistName: checklist.name,
           openItemsHtml: digest.variables.open_items_html,
           introLine: framing.intro_line,
           // For the dry run: what this org is actually being asked, by name.
           itemNames: digest.openItems.map((i) => i.name),
+          subjectLines: digest.openItems.flatMap((i) => i.subjectLines),
+          daysOut: Math.ceil(
+            (new Date(checklist.deadline_at).getTime() - Date.now()) / 86_400_000
+          ),
         });
         // Carried once even if several checklists would supply it.
+        if (digest && !existing.orgName) existing.orgName = digest.orgName;
         if (!existing.consentNote && framing.consent_note) existing.consentNote = framing.consent_note;
         existing.log.push({ checklist_id: checklist.id, checkpoint_id: checkpointId, organization_id: organizationId });
         pendingByOrg.set(organizationId, existing);
@@ -551,11 +739,99 @@ export async function runChecklistReminders(
 
   if (pendingByOrg.size === 0) return result;
 
+  /*
+    ⛔ THE REMINDER IS THE WHOLE CHECKLIST, NOT THE BIT THAT FIRED TODAY.
+
+    A section was only added for a checklist whose own checkpoint was due, so
+    the first real send told sixteen Connected Exhibitors about Conference in
+    a Box and nothing else — while the same orgs had a hotel to book, payment
+    to settle, agreements to accept and booth staff to name, all open, none
+    mentioned. Steve: "that isn't a reminder of the entire checklist... we're
+    supposed to be adding in and removing sections for everything that they
+    are supposed to be doing."
+
+    So: the checkpoint decides WHEN to write to someone. What they get is
+    everything they still owe.
+
+    ⛔ Only the checklists that were actually DUE get logged. A section added
+    for context must not consume its own checkpoint, or its real reminder
+    never arrives.
+  */
+  for (const [organizationId, pending] of pendingByOrg) {
+    const alreadyIn = new Set(pending.sections.map((x) => x.checklistId));
+    for (const checklist of checklists ?? []) {
+      if (alreadyIn.has(checklist.id)) continue;
+      const conference = Array.isArray(checklist.conference) ? checklist.conference[0] : checklist.conference;
+      if (!conference) continue;
+      try {
+        const scoped = await resolveScopedOrgs(db, checklist);
+        if (!scoped.includes(organizationId)) continue;
+        const publication = Array.isArray(checklist.publication) ? checklist.publication[0] : checklist.publication;
+        const digest = await buildChecklistDigest(
+          { ...checklist, publicationTitle: publication?.title ?? null },
+          conference,
+          organizationId,
+          db
+        );
+        if (!digest) continue; // nothing outstanding on that list — stays off
+        // The org's name may still be blank if the checklist that triggered
+        // this send had nothing open — that path never saw a digest.
+        if (!pending.orgName) pending.orgName = digest.orgName;
+        const framing = renderFraming(
+          { ...checklist, publicationTitle: publication?.title ?? null },
+          conference.year
+        );
+        pending.sections.push({
+          triggered: false,
+          checklistId: checklist.id,
+          closesAt: checklist.deadline_at,
+          checklistName: checklist.name,
+          openItemsHtml: digest.variables.open_items_html,
+          introLine: framing.intro_line,
+          itemNames: digest.openItems.map((i) => i.name),
+          subjectLines: digest.openItems.flatMap((i) => i.subjectLines),
+          daysOut: Math.ceil(
+            (new Date(checklist.deadline_at).getTime() - Date.now()) / 86_400_000
+          ),
+        });
+        if (!pending.consentNote && framing.consent_note) pending.consentNote = framing.consent_note;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : "Unknown error";
+        result.errors.push(`Context section ${checklist.id} for ${organizationId}: ${msg}`);
+      }
+    }
+    /*
+      What fired TODAY goes to the top, then the rest by nearest cliff.
+
+      Every send carries the whole outstanding list, so without this the
+      reason for today's email could sit fifth. The ED: "send the reminder
+      with that action at the top and as the subject." The carried sections
+      are context; the triggered one is the ask.
+    */
+    // Nothing outstanding anywhere: the checkpoint opened the door and there
+    // was no reason to walk through it. Dropped before any recipient is
+    // resolved, so a fully caught-up org is never written to.
+    if (pending.sections.length === 0) { pendingByOrg.delete(organizationId); continue; }
+
+    // Nearest cliff first — the order someone should work the list in. The
+    // LEAD (see pickLeadSection) is hoisted above it once chosen, so the
+    // thing named in the subject is the first thing in the body.
+    pending.sections.sort((a, b) => a.closesAt.localeCompare(b.closesAt));
+  }
+
   const recipients: { email: string; name: string | null; variableOverrides: Record<string, string> }[] = [];
   const sentLog: { checklist_id: string; checkpoint_id: string; organization_id: string }[] = [];
   let conferenceIdForAudience: string | null = null;
 
   for (const [organizationId, pending] of pendingByOrg) {
+    // How many reminders this org has had for this conference, which is what
+    // rotates the subject line. Counted once per org, not per section.
+    const { count: priorReminders } = await db
+      .from("conference_checklist_reminder_log")
+      .select("id", { count: "exact", head: true })
+      .eq("organization_id", organizationId);
+    pending.remindersSoFar = priorReminders ?? 0;
+
     const admins = await resolveAudience({
       type: "org_admins",
       filters: { org_ids: [organizationId] },
@@ -563,14 +839,27 @@ export async function runChecklistReminders(
     if (admins.length === 0) continue;
 
     conferenceIdForAudience ??= pending.conferenceId;
-    // Several checklists due at once become headed sections in one message,
-    // rather than several messages.
-    const body =
-      pending.sections.length === 1
-        ? pending.sections[0].openItemsHtml
-        : pending.sections
-            .map((s) => `<p style="margin:18px 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280">${s.checklistName}</p>\n${s.openItemsHtml}`)
-            .join("\n");
+    /*
+      ⛔ ALWAYS A LIST, EVEN WHEN THERE IS ONE THING ON IT.
+
+      This used to drop the section heading and title the whole email after
+      the single checklist that happened to be due. That read correctly when
+      checklists were broad ("Your Conference", "Exhibitor"), and stopped the
+      day they were split one-per-deadline: the first real send went out
+      titled "Conference in a Box", which lands as a one-off notice about a
+      product rather than as the conference checklist it belongs to.
+
+      Steve, seeing it: "they got Conference in a Box, not the reminder task
+      list". One shape now, so a list of one still looks like a list.
+    */
+    // The subject's item goes first; everything else follows by nearest cliff.
+    const lead = pickLeadSection(pending.sections, pending.remindersSoFar);
+    const ordered = lead
+      ? [lead, ...pending.sections.filter((x) => x !== lead)]
+      : pending.sections;
+    const body = ordered
+      .map((s) => `<p style="margin:18px 0 4px;font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:#6b7280">${s.checklistName}</p>\n${s.openItemsHtml}`)
+      .join("\n");
 
     for (const admin of admins) {
       recipients.push({
@@ -579,10 +868,22 @@ export async function runChecklistReminders(
         variableOverrides: {
           contact_name: admin.name ?? admin.email,
           org_name: pending.orgName,
-          checklist_name:
-            pending.sections.length === 1
-              ? pending.sections[0].checklistName
-              : `${pending.conferenceYear} conference`,
+          // Always the conference, never whichever list fired. The specific
+          // list is the section heading inside; the email is the checklist.
+          checklist_name: `${pending.conferenceYear} conference checklist`,
+          /*
+            The subject names the ACTION that caused today's send.
+
+            Every reminder carries the full outstanding list, so a subject
+            built from the list itself ("2027 conference checklist") is the
+            same words every time and stops being read by November. The thing
+            that changes send to send is which item just hit its mark, and
+            that is what belongs in the preview line.
+
+            Falls back to the nearest cliff when a send is carried rather
+            than triggered, so the subject is never empty.
+          */
+          headline_action: pickSubjectLine(pending),
           open_items_html: body,
           conference_year: String(pending.conferenceYear),
           // One checklist keeps its own specific framing. Several become a
@@ -595,6 +896,8 @@ export async function runChecklistReminders(
             pending.sections.length === 1
               ? pending.sections[0].introLine
               : "has a few things outstanding:",
+          // (framing stays per-section when there is exactly one, so a lone
+          //  reminder still explains WHY it is being asked)
           consent_note: pending.consentNote,
         },
       });

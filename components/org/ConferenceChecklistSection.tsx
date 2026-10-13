@@ -6,6 +6,9 @@ import { loadOrgPayments } from "@/lib/conference/org-payments";
 import { loadOrgLegalStatus } from "@/lib/conference/org-legal";
 import { getExhibitorStatusForOrg } from "@/lib/conference/exhibitor-status";
 import TaskChecklist from "@/components/conference/TaskChecklist";
+import { getMeetingPreferences } from "@/lib/actions/conference-meeting-preferences";
+import MeetingPreferencesEditor from "@/components/org/MeetingPreferencesEditor";
+import MeetingBlackoutEditor from "@/components/org/MeetingBlackoutEditor";
 import OrgAgreements from "@/components/org/OrgAgreements";
 import OrgPayments from "@/components/org/OrgPayments";
 import PrintReadiness from "@/components/org/PrintReadiness";
@@ -75,6 +78,49 @@ export default async function ConferenceChecklistSection({
     legalStatus.mine.length === 0 && legalStatus.theirsTitles.length === 0;
   if (nothingToShow) return null;
 
+  /*
+    The meeting lists render INSIDE their own task row.
+
+    They used to be two sections of their own, far below this list, so the
+    checklist stated the ask and the controls that answer it were somewhere
+    else entirely. A reader had to hold the instruction in their head and go
+    looking. The work belongs where the task is.
+
+    Loaded here, beside the other checklist data, and handed down as rendered
+    nodes — TaskChecklist stays dumb about what any one task needs.
+  */
+  const meetingTask = orgTasks.find((t) => t.checkType === "top_choices_declared");
+  let controlsByTaskId: Record<string, React.ReactNode> | undefined;
+  if (meetingTask) {
+    const prefs = await getMeetingPreferences(conferenceId, orgId);
+    if (prefs.success && prefs.data) {
+      const { present, topChoiceOrgIds, refusedOrgIds, limit } = prefs.data;
+      const others = present.filter((o) => o.id !== orgId);
+      if (others.length > 0) {
+        controlsByTaskId = {
+          [meetingTask.taskId]: (
+            // Each editor carries its own collapsed header and live count, so
+            // there is nothing for the wrapper to label.
+            <div className="space-y-2">
+              <MeetingPreferencesEditor
+                conferenceId={conferenceId}
+                orgId={orgId}
+                candidates={others}
+                initialTopChoiceOrgIds={topChoiceOrgIds}
+                limit={limit}
+              />
+              <MeetingBlackoutEditor
+                orgId={orgId}
+                candidates={others}
+                initialRefusedOrgIds={refusedOrgIds}
+              />
+            </div>
+          ),
+        };
+      }
+    }
+  }
+
   async function handleOrgTaskAnswer(
     taskId: string,
     state: "done" | "not_applicable" | "pending",
@@ -101,6 +147,7 @@ export default async function ConferenceChecklistSection({
           <div className="mt-2">
             <TaskChecklist tasks={orgTasks} onAnswer={handleOrgTaskAnswer}
               boothNumbers={boothNumbers}
+              controlsByTaskId={controlsByTaskId}
               emptyLabel="Nothing outstanding for your company." />
           </div>
         </div>

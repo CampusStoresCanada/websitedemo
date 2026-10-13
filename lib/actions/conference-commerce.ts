@@ -826,6 +826,50 @@ export async function addOfferToCart(params: {
     const eligible = canBuy(offer, buyerTier, byId);
     if (!eligible.ok) return { success: false, code: "INELIGIBLE", error: eligible.reason ?? "Not eligible to buy this." };
 
+    /*
+      Per-organisation cap: `attributes.max_per_org`.
+      ⛔ Counts what they HOLD plus what is already in the cart, because a cap
+      enforced only against holdings is no cap at all — two tabs, or one tab
+      and a double-click, and the second unit is through.
+
+      Conference in a Box is the first: one per institution, and sixteen
+      Connected Exhibitors now hold one bundled with their booth, so the
+      storefront was offering them a $750 second copy. MAX_BOOTHS_PER_CART
+      solves the same problem for booths but lives inside the mint RPC and
+      knows only about booths.
+    */
+    const maxPerOrg = Number((offerAttrs as Record<string, unknown>).max_per_org);
+    if (Number.isFinite(maxPerOrg) && maxPerOrg > 0) {
+      const [{ data: heldUnits }, { data: cartUnits }] = await Promise.all([
+        adminClient
+          .from("entity_balances")
+          .select("quantity")
+          .eq("conference_id", params.conferenceId)
+          .eq("organization_id", params.organizationId)
+          .eq("entity_id", params.offerEntityId),
+        adminClient
+          .from("cart_items")
+          .select("quantity")
+          .eq("conference_id", params.conferenceId)
+          .eq("organization_id", params.organizationId)
+          .eq("offer_entity_id", params.offerEntityId)
+          .gt("expires_at", new Date().toISOString()),
+      ]);
+      const already =
+        (heldUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0) +
+        (cartUnits ?? []).reduce((n, r) => n + (r.quantity ?? 1), 0);
+      if (already >= maxPerOrg) {
+        return {
+          success: false,
+          code: "INELIGIBLE",
+          error:
+            maxPerOrg === 1
+              ? `${offerRow.name} is one per organisation, and you already have it.`
+              : `${offerRow.name} is limited to ${maxPerOrg} per organisation.`,
+        };
+      }
+    }
+
     // Ownership gate: some offers (e.g. a booth-bundled registration) only
     // make sense once the org already holds a specific thing (e.g. a Bronze
     // booth, not just any booth) — set directly on this offer, or inherited

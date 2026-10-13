@@ -32,6 +32,11 @@ export type TaskCtaContext = {
   conferenceYear: number;
   conferenceEdition: string;
   organizationId: string;
+  /**
+   * The task being linked to, so the CTA can land on that row rather than on
+   * the section containing it. TaskChecklist renders `id="task-<id>"` per row.
+   */
+  taskId?: string;
 };
 
 /**
@@ -90,11 +95,23 @@ export function getTaskCta(
         url: `${appUrl}/conference/${ctx.conferenceYear}/${ctx.conferenceEdition}/offers?org=${ctx.organizationId}`,
       };
     case "travel_info_submitted":
-      return { label: "View readiness & travel status", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
+      return {
+        label: "View readiness & travel status",
+        url: `${appUrl}/org/${ctx.orgSlug}#${ctx.taskId ? `task-${ctx.taskId}` : "conference_checklist"}`,
+      };
     case "top_choices_declared":
+      /*
+        ⛔ #meeting_preferences no longer exists.
+
+        The two pick lists were their own sections until they moved inside
+        their checklist task row; the old section id went with them, and this
+        link kept pointing at it. A dead anchor silently drops the reader at
+        the top of a long page, which is the exact failure the per-task
+        anchors were added to fix.
+      */
       return {
         label: "Choose who you want to meet",
-        url: `${appUrl}/org/${ctx.orgSlug}#meeting_preferences`,
+        url: `${appUrl}/org/${ctx.orgSlug}#${ctx.taskId ? `task-${ctx.taskId}` : "conference_checklist"}`,
       };
     case "payment_complete":
       return {
@@ -114,7 +131,11 @@ export function getTaskCta(
     case "directory_profile_enriched":
       return { label: "Add your product details", url: `${appUrl}/org/${ctx.orgSlug}` };
     case "self_reported":
-      // The tick-off list moved onto the org page with everything else.
-      return { label: "Mark it done", url: `${appUrl}/org/${ctx.orgSlug}#conference_checklist` };
+      // The tick-off list moved onto the org page with everything else, and
+      // the link lands on the row itself when we know which one it is.
+      return {
+        label: "Mark it done",
+        url: `${appUrl}/org/${ctx.orgSlug}#${ctx.taskId ? `task-${ctx.taskId}` : "conference_checklist"}`,
+      };
   }
 }

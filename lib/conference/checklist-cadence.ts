@@ -28,12 +28,23 @@ import { isBusinessDay } from "@/lib/board/vote-schedule";
 /**
  * Days before the anchor that a reminder goes out.
  *
- * Three, spread wide: far enough out to act on, once more while there is still
- * room, and a last call. This is the shape the hand-authored rows used and the
- * one the copy is written for — it is now applied everywhere rather than
- * wherever somebody remembered to type it.
+ * Wide and sparse early, tightening as the date arrives: a first word far
+ * enough out to plan around, fortnightly contact while there is room, then
+ * closer together as it stops being theoretical.
+ *
+ * ⛔ This was [45, 21, 7]. Three touches meant the first two landed while the
+ * conference was still abstract and the third was effectively the deadline —
+ * which is how an exhibitor reaches January having genuinely never registered
+ * the ask. The ED: "we should start gently nudging people around now so that
+ * when they finally start reading emails in January they aren't like 'You
+ * never told me'."
+ *
+ * Each offset is moved off weekends and holidays by deriveCheckpointOffsets
+ * below, so a Christmas Day or New Year's landing never reaches anyone, and
+ * findDueOrgs only ever sends the most overdue unlogged one — a list created
+ * inside its own window sends once, not a burst.
  */
-export const STANDARD_CADENCE_DAYS = [45, 21, 7] as const;
+export const STANDARD_CADENCE_DAYS = [45, 30, 21, 14, 10, 7, 3] as const;
 
 /**
  * Off-switch, the same shape elections uses.
@@ -104,6 +115,20 @@ export function deriveCheckpointOffsets(
     raw.setUTCDate(raw.getUTCDate() - (d + anchorShift));
     return daysBetween(shiftToBusinessDay(raw), checklistDeadline);
   })
+    /*
+      ⛔ DEDUPE, OR THE HOLIDAYS SEND TWICE.
+
+      Two raw offsets can shift onto the SAME working day — around Christmas
+      especially, where a four-day closure swallows a whole bracket. On a
+      checklist closing 11 Jan anchored to a 4 Jan task, the 14- and 10-day
+      marks both land on Thu 24 Dec and both come back as 18. Stored, that is
+      two checkpoint rows for one date, and the send log keys on checkpoint id
+      — so the duplicate is not caught downstream, it just arrives twice.
+
+      Surfaced the moment the cadence went from three offsets to seven: the
+      sparser ladder never collided, so nothing here had to care.
+    */
+    .filter((d, i, all) => all.indexOf(d) === i)
     // A checklist already inside its own window still gets its full cadence;
     // findDueOrgs treats every past offset as due and sends the most overdue
     // unlogged one, so nobody receives a backlog burst from a wide offset.

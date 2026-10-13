@@ -38,6 +38,7 @@ export default function MeetingPreferencesEditor({
   const [chosen, setChosen] = useState<string[]>(initialTopChoiceOrgIds);
   const [error, setError] = useState<string | null>(null);
   const [status, setStatus] = useState<"idle" | "saving" | "saved">("idle");
+  const [open, setOpen] = useState(false);
 
   const atLimit = chosen.length >= limit;
 
@@ -96,23 +97,40 @@ export default function MeetingPreferencesEditor({
     });
   }
 
+  /*
+    Collapsed by default, with the count in the header.
+
+    The list is every organisation at the conference — sixty-odd rows — and it
+    sits inside a checklist task now. Open, it buries everything below it; the
+    header answers "have I done this?" without expanding, which is the only
+    question most readers have on most visits.
+  */
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-3 text-xs">
-        <span className="font-medium text-gray-700">
-          {chosen.length} of {limit} chosen
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 rounded-md border border-gray-200 bg-white px-3 py-2 text-left hover:border-gray-300"
+      >
+        <span aria-hidden className="text-gray-400">{open ? "▾" : "▸"}</span>
+        <span className="text-sm font-medium text-gray-900">Who do you most want to meet?</span>
+        <span className="text-xs text-gray-500">({chosen.length}/{limit} selected)</span>
+        <span className="ml-auto flex items-center gap-2 text-xs">
+          {status === "saving" ? <span className="text-gray-500">Saving…</span> : null}
+          {status === "saved" ? <span className="text-green-700">Saved</span> : null}
+          {error ? <span className="text-red-700">{error}</span> : null}
         </span>
-        {status === "saving" ? <span className="text-gray-500">Saving…</span> : null}
-        {status === "saved" ? <span className="text-green-700">Saved</span> : null}
-        {error ? <span className="text-red-700">{error}</span> : null}
-      </div>
+      </button>
 
-      <OrgChoiceList
-        orgs={candidates}
-        selectedIds={chosen}
-        onToggle={toggle}
-        limit={limit}
-      />
+      {open ? (
+        <OrgChoiceList
+          orgs={candidates}
+          selectedIds={chosen}
+          onToggle={toggle}
+          limit={limit}
+        />
+      ) : null}
     </div>
   );
 }
