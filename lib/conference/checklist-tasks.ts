@@ -366,7 +366,21 @@ export async function loadOrgTasks(
       .from("conference_entities")
       .select("id, name, kind, attributes")
       .in("id", serviceIds)
-      .eq("kind", "service");
+      /*
+        ⛔ Not only `service`-kind.
+
+        "Go and do a thing somewhere else, here are the facts you need" is the
+        shape, not "a show contractor". Conference in a Box is kind `item` and
+        fits it exactly: a date that costs you if missed, an address, rules
+        about what to send, and a page to go and read. Restricting to
+        `service` meant the one task where the facts matter most rendered as a
+        bare line of text, and I was about to bolt a second links mechanism
+        onto the email instead of using this one.
+
+        Safe to widen: parseServiceDetails returns null unless the entity
+        actually carries these attributes, so an item with none is unchanged.
+      */
+      .in("kind", ["service", "item"]);
     const { getServiceDocumentUrl } = await import("@/lib/actions/get-conference-document-url");
     for (const e of entities ?? []) {
       const parsed = parseServiceDetails(e.name, e.attributes);

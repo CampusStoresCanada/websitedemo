@@ -510,7 +510,21 @@ export async function listConferenceOffers(
       // bought — otherwise a direct-purchase offer renders "Not for sale."
       const soldDirectly =
         isDirectPurchaseOnly(offer.attributes) && directPurchaseAllowed(offer.attributes, orgRes.data);
-      const elig = canBuy(offer, buyerTier, byId, soldDirectly);
+      let elig = canBuy(offer, buyerTier, byId, soldDirectly);
+      /*
+        Same per-org cap addOfferToCart refuses with, applied to what is SHOWN
+        — otherwise the storefront offers a second one and the till says no,
+        which is the drift the direct-purchase comment above warns about.
+      */
+      const cap = Number((offer.attributes as Record<string, unknown> | null)?.max_per_org);
+      if (elig.ok && Number.isFinite(cap) && cap > 0) {
+        const heldUnits = (balancesRes.data ?? [])
+          .filter((b) => b.entity_id === offer.id)
+          .reduce((n, b) => n + ((b as { quantity?: number }).quantity ?? 1), 0);
+        if (heldUnits >= cap) {
+          elig = { ok: false, reason: cap === 1 ? "You already have this — one per organisation." : `Limit ${cap} per organisation.` };
+        }
+      }
       const avail = availability(offer, soldByOffer.get(offer.id) ?? 0);
       const refs = effectiveRefs(offer, byId);
       return {

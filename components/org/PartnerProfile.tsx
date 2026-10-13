@@ -1134,6 +1134,34 @@ export default function PartnerProfile({
                 <h3 className="text-xs uppercase tracking-wider text-gray-500 font-semibold mb-4">
                   Staffing
                 </h3>
+                {/*
+                  The one thing this table never said.
+
+                  A reminder sends an org admin straight here to name the
+                  people on their seats. With edit mode off the table lists
+                  whoever is already a contact and offers no way to add
+                  anyone, so an admin whose attendee is not yet listed meets
+                  a grid, a count of open seats, and no door. Walking it as a
+                  partner persona, that reads as broken rather than as
+                  "switch something on".
+
+                  Shown only when it is actually the answer: they can edit,
+                  they are not already editing, and a seat is genuinely
+                  waiting. Not a fifth callout component — ToolkitCallout,
+                  OrgOnboardingCallout, DirectoryOnboardingCallout and
+                  SurveyFlagCallout already exist, and none of them fires on
+                  this state. This is one line in the section that has the
+                  problem.
+                */}
+                {canEditThisOrg && !editMode && assignableEntities.some(
+                  (e) => e.seats.some((s) => !s.holderPersonId)
+                ) ? (
+                  <p className="-mt-2 mb-4 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+                    Seats here still need names. Open the toolkit (bottom right) and choose{" "}
+                    <strong>Edit</strong> to add someone, then tick the column for what they are
+                    getting.
+                  </p>
+                ) : null}
                 <table className="w-full text-sm">
                   <thead>
                     <tr className="text-left text-xs uppercase tracking-wider text-gray-500">
