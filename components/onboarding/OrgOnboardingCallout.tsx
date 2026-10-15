@@ -56,8 +56,8 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   // ── Org Admin: Member store ────────────────────────────────────────────────
   org_admin_member: {
     public_contact_email: {
-      heading: "Set your store's public email",
-      body: "A PUBLIC RECORD for your organisation, printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
+      heading: "Set your store's public contact",
+      body: "A PUBLIC RECORD for your organisation, printed in the directory and readable by anyone. Give the address you want campus stores and vendors to use when they contact the store, whichever address that is.",
       ctaLabel: "Show me",
       targetAttr: "public_contact_email",
       completionTrigger: { table: "organizations", column: "email" },
@@ -185,8 +185,8 @@ const CONFIGS: Record<Persona, Partial<Record<string, StepConfig>>> = {
   // ── Org Admin: Vendor Partner ──────────────────────────────────────────────
   org_admin_partner: {
     public_contact_email: {
-      heading: "Set your company's public email",
-      body: "A PUBLIC RECORD for your company, printed in the directory and readable by anyone. Use a shared inbox your team watches, never a personal address: whoever owns it cannot take it back once it is on paper.",
+      heading: "Set your company's public contact",
+      body: "A PUBLIC RECORD for your company, printed in the directory and readable by anyone. Give the address you want campus stores to use when they contact you, whichever address that is.",
       ctaLabel: "Show me",
       targetAttr: "public_contact_email",
       completionTrigger: { table: "organizations", column: "email" },

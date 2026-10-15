@@ -366,9 +366,16 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
      * their entry from UNWRITTEN in lib/publication/__tests__.
      */
     /**
-     * The one field on the page that gets printed. The in-app callout already
-     * carries the warning about shared inboxes; this says the same thing to
-     * the people who never open the page.
+     * The one field on the page that gets printed. The in-app callout asks for
+     * the same thing; this says it to the people who never open the page.
+     *
+     * ⛔ Asks for THE STORE'S PUBLIC CONTACT, and does not prescribe what kind
+     * of address that is. An earlier draft told stores to use a shared inbox
+     * and never a personal address. Many stores do not work that way, and the
+     * address already on file was given to CSC years before any of this
+     * existed — telling those people their own working address is the wrong
+     * sort reads as a lecture, and is not what the field is for. What the
+     * directory needs is whichever address they want to be reached on.
      */
     case "public_contact_email": {
       if (opts.persona !== "org_admin_member" && opts.persona !== "org_admin_partner") return null;
@@ -380,7 +387,7 @@ export function buildNudgeEmail(opts: NudgeEmailOptions): { subject: string; htm
         html: nudgeHtml({
           firstName,
           headline: "One address, printed and public.",
-          body: `${orgName}'s public contact email sits on your page for anyone to read, and it is the one that goes into the printed directory once your listing is confirmed.<br><br>There may be one on file already. Open it, check it is still the address you want giving out, and save it. Saving is what marks it confirmed.<br><br>Use a shared inbox your team watches rather than a personal address. Whoever owns it today may not be the person answering next year.<br><br>${wantsYou} will use it to reach you.`,
+          body: `${orgName}'s public contact email sits on your page for anyone to read, and it is the one that goes into the printed directory once your listing is confirmed.<br><br>There may be one on file already. Open it, check it is still the address you want giving out, and save it. Saving is what marks it confirmed.<br><br>Give the address you want people to use when they contact the store, whichever address that is.<br><br>${wantsYou} will use it to reach you.`,
           ctaText: "Set the public address",
           ctaUrl: orgUrl,
         }),
