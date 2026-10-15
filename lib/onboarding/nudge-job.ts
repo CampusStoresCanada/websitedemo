@@ -12,6 +12,7 @@ import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
 import { holdsTheFloor } from "./one-open-ask";
+import { isBusinessDay } from "@/lib/board/vote-schedule";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 import type { Persona } from "./steps";
 
@@ -911,6 +912,35 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   if (Date.now() < QUIET_UNTIL) {
     result.log.push(
       `quiet period: sending nothing until ${new Date(QUIET_UNTIL).toISOString()} (Town Hall 2026-09-23)`
+    );
+    return result;
+  }
+
+  /**
+   * Onboarding mail lands on a working day.
+   *
+   * The cron fires at 10:00 UTC every day of the year, so until now a nudge
+   * could arrive on a Saturday, on Christmas Day, or at 5am on a holiday
+   * Monday. Nothing here is urgent — a step that has waited four months can
+   * wait until Tuesday — and a nudge read on a day nobody is at work is a
+   * nudge wasted as well as resented.
+   *
+   * ⛔ Shifted LATER, unlike lib/conference/checklist-cadence.ts, which shifts
+   * its reminders EARLIER. That is not an inconsistency: a checklist reminder
+   * is about something that hardens on a date, so arriving before the weekend
+   * is useful and after it is not. An onboarding nudge has no deadline behind
+   * it, so the right move is simply to wait for Monday. Skipping the run does
+   * exactly that — the step stays due and goes out on the next working day.
+   *
+   * isBusinessDay comes from lib/board/vote-schedule.ts, which already knows
+   * the national holidays and observes the ones that land on a weekend.
+   * Adopted rather than reimplemented, the same way the conference checklist
+   * adopted it.
+   */
+  const today = new Date();
+  if (!isBusinessDay(today.getUTCFullYear(), today.getUTCMonth() + 1, today.getUTCDate())) {
+    result.log.push(
+      `not a working day (${today.toISOString().slice(0, 10)}): sending nothing, every step stays due`
     );
     return result;
   }
