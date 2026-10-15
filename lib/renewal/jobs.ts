@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import { getActivePolicySet, getRenewalConfig } from "@/lib/policy/engine";
 import { transitionMembershipState } from "@/lib/membership/state-machine";
 import { computeMembershipAssessment } from "@/lib/membership/pricing";
@@ -463,6 +464,7 @@ export async function renewalReminderRun(): Promise<JobResult> {
             const reminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of reminderRecipients) {
               await sendTransactional({
+                priority: MESSAGING_PRIORITY.lapse,
                 templateKey: renewalTemplateFor("reminder", resolveProgramFromOrgType(org.type, valuePrograms)),
                 to,
                 variables: {
@@ -724,6 +726,7 @@ export async function renewalChargeRun(): Promise<JobResult> {
               : await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of chargeFailedRecipients) {
               await sendTransactional({
+                priority: MESSAGING_PRIORITY.lapse,
                 templateKey: "renewal_charge_failed",
                 to,
                 variables: {
@@ -988,6 +991,7 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
               const lockedRecipients = await resolveRenewalRecipients(db, org.id, org.email);
               for (const to of lockedRecipients) {
                 await sendTransactional({
+                  priority: MESSAGING_PRIORITY.lapse,
                   templateKey: renewalTemplateFor("locked", resolveProgramFromOrgType(org.type, valuePrograms)),
                   to,
                   variables: {
@@ -1056,6 +1060,7 @@ export async function graceStateTransitionRun(): Promise<JobResult> {
             const graceReminderRecipients = await resolveRenewalRecipients(db, org.id, org.email);
             for (const to of graceReminderRecipients) {
               await sendTransactional({
+                priority: MESSAGING_PRIORITY.lapse,
                 templateKey: renewalTemplateFor("grace", resolveProgramFromOrgType(org.type, valuePrograms)),
                 to,
                 variables: {

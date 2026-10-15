@@ -1,4 +1,5 @@
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import { resolveAudience } from "@/lib/comms/audience";
 import { createCampaign, executeCampaignSend } from "@/lib/comms/send";
 import type { AudienceDefinition } from "@/lib/comms/types";
@@ -950,7 +951,8 @@ export async function runChecklistReminders(
   });
 
   if (campaignResult.success && campaignResult.campaignId) {
-    await executeCampaignSend(campaignResult.campaignId);
+    // A checklist closes on a date, so it outranks an ordinary campaign.
+    await executeCampaignSend(campaignResult.campaignId, { priority: MESSAGING_PRIORITY.deadline });
     if (sentLog.length > 0) {
       await db.from("conference_checklist_reminder_log").insert(sentLog);
     }

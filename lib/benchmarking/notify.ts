@@ -29,6 +29,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import type { TemplateKey } from "@/lib/comms/types";
 import { formatDeadline, formatOpening, daysUntilDeadline } from "./deadline";
 import { getTemplate, renderTemplateContent } from "@/lib/comms/templates";
@@ -113,7 +114,7 @@ async function send(
     // environment that does not send mail. A suppressed run never touches
     // Resend at all.
     const { sendTransactional } = await import("@/lib/comms/send");
-    const result = await sendTransactional({ templateKey, to, variables });
+    const result = await sendTransactional({ templateKey, to, variables, priority: MESSAGING_PRIORITY.deadline });
     return { ...base, to, sent: result.success, error: result.error };
   } catch (err) {
     return {
