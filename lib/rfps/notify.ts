@@ -10,6 +10,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import { sendCircleNotification } from "@/lib/circle/notifications";
 import { sendEmail } from "@/lib/email/send";
 
@@ -125,6 +126,7 @@ export async function notifyMatchingPartners(params: NotifyRFPParams): Promise<v
     // Email — always sent
     const greeting = r.display_name ? `Hi ${r.display_name.split(" ")[0]},` : "Hi,";
     await sendEmail({
+      priority: MESSAGING_PRIORITY.event,
       to: r.email,
       subject: `New RFP: ${params.title} — ${params.orgName}`,
       html: `<p style="font-family:sans-serif;margin:0 0 16px;">${greeting}</p>${emailHtml}`,

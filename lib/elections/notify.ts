@@ -28,6 +28,7 @@
  */
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import type { TemplateKey } from "@/lib/comms/types";
 import type { Election, CandidateOutcome } from "./service";
 import { boardServiceEmailHtml } from "./board-service";
@@ -88,7 +89,7 @@ async function send(
     // test run or any environment that does not send mail. A suppressed run now
     // never touches Resend at all.
     const { sendTransactional } = await import("@/lib/comms/send");
-    const result = await sendTransactional({ templateKey, to, variables });
+    const result = await sendTransactional({ templateKey, to, variables, priority: MESSAGING_PRIORITY.deadline });
     return { template: templateKey, to, sent: result.success, error: result.error };
   } catch (err) {
     return {
@@ -162,6 +163,7 @@ async function sendMany(
     // Resend client on load and throws without an API key.
     const { sendTransactionalBatch } = await import("@/lib/comms/send");
     const results = await sendTransactionalBatch({
+      priority: MESSAGING_PRIORITY.deadline,
       templateKey,
       recipients: sendable.map((r) => ({ to: r.to, variables: r.variables })),
     });

@@ -3,6 +3,7 @@
 // ─────────────────────────────────────────────────────────────────
 
 import { createAdminClient } from "@/lib/supabase/admin";
+import { MESSAGING_PRIORITY, type SendPriority } from "@/lib/comms/priority";
 import { sendEmail, sendEmailBatch } from "@/lib/email/send";
 import { resolveAudience } from "./audience";
 import { resolveEffectiveAudience } from "./campaigns";
@@ -29,6 +30,16 @@ export async function sendTransactional(options: {
   to: string;
   recipientName?: string;
   variables: Record<string, string | number | boolean | null | undefined>;
+  /**
+   * Where this sits on the ladder in lib/comms/priority.ts.
+   *
+   * ⛔ Omit it for genuinely transactional mail — a reset, a receipt, a ticket,
+   * an invitation — which is off the ladder and must never be arbitrated. The
+   * name of this function is older than the distinction: plenty of its callers
+   * are MESSAGING (renewal reminders, benchmarking chases) and those pass a
+   * priority so they claim the inbox and the ladder is real for them.
+   */
+  priority?: SendPriority;
 }): Promise<{ success: boolean; error?: string }> {
   const template = await getTemplate(options.templateKey);
   if (!template) {
@@ -39,7 +50,7 @@ export async function sendTransactional(options: {
     app_url: process.env.NEXT_PUBLIC_APP_URL ?? "",
     ...options.variables,
   });
-  return sendEmail({ to: options.to, subject, html: bodyHtml });
+  return sendEmail({ to: options.to, subject, html: bodyHtml, priority: options.priority ?? null });
 }
 
 /**
@@ -65,6 +76,8 @@ export async function sendTransactionalBatch(options: {
     to: string;
     variables: Record<string, string | number | boolean | null | undefined>;
   }[];
+  /** See sendTransactional.priority. Omit for genuinely transactional mail. */
+  priority?: SendPriority;
 }): Promise<{ success: boolean; error?: string }[]> {
   if (options.recipients.length === 0) return [];
 
@@ -82,7 +95,7 @@ export async function sendTransactionalBatch(options: {
     });
     // No manageUrl: these are transactional, and governance mail carries no
     // unsubscribe — a member cannot opt out of being told they are nominated.
-    return { to: r.to, subject, html: bodyHtml };
+    return { to: r.to, subject, html: bodyHtml, priority: options.priority ?? null };
   });
 
   const results = await sendEmailBatch(items);
@@ -107,7 +120,7 @@ export interface ExecuteSendResult {
  */
 export async function executeCampaignSend(
   campaignId: string,
-  options: { dryRun?: boolean } = {}
+  options: { dryRun?: boolean; priority?: SendPriority } = {}
 ): Promise<ExecuteSendResult> {
   const supabase = createAdminClient();
 
@@ -298,6 +311,10 @@ export async function executeCampaignSend(
     rendered.map((r) => {
       const deliveryId = deliveryIdByRecipientId.get(r.recipient.id);
       return {
+        // A campaign is messaging unless its caller says otherwise. The
+        // conference checklist passes `deadline`, because a checklist closing
+        // on a date outranks an ordinary campaign.
+        priority: options.priority ?? MESSAGING_PRIORITY.campaign,
         to: r.recipient.contact_email,
         subject: r.subject,
         html: r.bodyHtml,
