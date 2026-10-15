@@ -6,6 +6,7 @@ import { getOnboardingStep, initJourney, derivePersona } from "@/lib/actions/onb
 import type { Persona } from "@/lib/onboarding/steps";
 import { orgTypeForPersona } from "@/lib/onboarding/persona";
 import WelcomeModal from "@/components/onboarding/WelcomeModal";
+import { isStepOpen } from "@/lib/onboarding/step-state";
 
 interface OnboardingGateProps {
   children: React.ReactNode;
@@ -63,7 +64,7 @@ export default function OnboardingGate({ children, serverHasOnboarding }: Onboar
         const result = await getOnboardingStep("session_1_welcome", p);
         if (cancelled) return;
 
-        const needsModal = result.success && (!result.step || !result.step.completed_at);
+        const needsModal = result.success && isStepOpen(result.step);
         if (needsModal) {
           setPersona(p);
           setState("modal");

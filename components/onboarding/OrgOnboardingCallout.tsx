@@ -8,6 +8,7 @@ import { STEPS_BY_PERSONA } from "@/lib/onboarding/steps";
 import { personaForMembership } from "@/lib/onboarding/persona";
 import type { MembershipProgramDef } from "@/lib/policy/types";
 import ToolkitTourModal from "@/components/onboarding/ToolkitTourModal";
+import { isStepOpen } from "@/lib/onboarding/step-state";
 
 interface OrgOnboardingCalloutProps {
   orgSlug: string;
@@ -420,7 +421,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
         if (stepKey === "toolkit_tour") {
           const result = await getOnboardingStep(stepKey as any, persona!);
           if (cancelled) return;
-          if (result.success && (!result.step || !result.step.completed_at)) {
+          if (result.success && isStepOpen(result.step)) {
             // Show the tour modal for this step
             setShowTour(true);
             return;
@@ -436,7 +437,7 @@ export default function OrgOnboardingCallout({ orgSlug }: OrgOnboardingCalloutPr
 
         const result = await getOnboardingStep(stepKey as any, persona!);
         if (cancelled) return;
-        if (result.success && (!result.step || !result.step.completed_at)) {
+        if (result.success && isStepOpen(result.step)) {
           setActiveStep(stepKey);
           setPhase("intro");
           return;

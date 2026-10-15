@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useAuth } from "@/components/providers/AuthProvider";
 import { getOnboardingStep, completeOnboardingStep } from "@/lib/actions/onboarding";
 import { deriveGlobalPersona } from "@/lib/onboarding/persona";
+import { isStepOpen } from "@/lib/onboarding/step-state";
 
 interface DirectoryOnboardingCalloutProps {
   /** Which directory page this instance is on */
@@ -35,7 +36,7 @@ export default function DirectoryOnboardingCallout({ page }: DirectoryOnboarding
 
     getOnboardingStep(stepKey as any, persona).then((result) => {
       if (cancelled) return;
-      if (result.success && result.step && !result.step.completed_at) {
+      if (result.success && result.step && isStepOpen(result.step)) {
         setActive(true);
         setSubPhase("toggle");
         hasSeenMap.current = false;
