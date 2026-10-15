@@ -122,6 +122,33 @@ async function blockedByHardBounce(recipients: string[]): Promise<Set<string>> {
  * budget). `batchValidation: "permissive"` means one bad address in a chunk
  * fails just that item, not the whole chunk.
  */
+/**
+ * Every send, recorded — address and time, nothing else.
+ *
+ * Here rather than at the seventy-odd call sites because this is the one place
+ * they all pass through, the same reason the hard-bounce check lives here. A
+ * sender written next year is visible to the rate rules without its author
+ * knowing they exist.
+ *
+ * ⚠️ Never throws and never blocks a send. A ledger that can stop the mail is
+ * worse than no ledger: a logging outage would silently stop password resets.
+ * A missed row costs at most one extra nudge.
+ */
+async function recordSends(addresses: string[]): Promise<void> {
+  if (addresses.length === 0) return;
+  try {
+    const { createAdminClient } = await import("@/lib/supabase/admin");
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const db = createAdminClient() as any;
+    const now = new Date().toISOString();
+    await db.from("email_log").insert(
+      addresses.map((email) => ({ email: normalizeEmail(email), sent_at: now }))
+    );
+  } catch (e) {
+    console.error("[email] send not recorded (mail still went):", e);
+  }
+}
+
 export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendResult[]> {
   const intercept = process.env.DEV_EMAIL_INTERCEPT;
   const fromAddress = await resolveFromAddress();
@@ -174,12 +201,16 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
       // Resend's error indices refer to the payload we just sent, which is
       // `allowed` — not `chunk`. Map through it.
       const failedByIndex = new Map(data.errors.map((e) => [e.index, e.message]));
-      allowed.forEach(({ offset }, i) => {
+      const landed: string[] = [];
+      allowed.forEach(({ item, offset }, i) => {
         const failMessage = failedByIndex.get(i);
         results[start + offset] = failMessage
           ? { success: false, error: failMessage }
           : { success: true, messageId: data.data[i]?.id };
+        if (!failMessage) landed.push(item.to);
       });
+      // Only what actually went, against the intended recipients.
+      await recordSends(landed);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown email error";
       for (const { offset } of allowed) {
@@ -223,6 +254,10 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
       return { success: false, error: error.message };
     }
 
+    // Recorded against the INTENDED recipient, never the dev intercept
+    // address, so local runs do not teach the rate rules that one developer
+    // receives everything.
+    await recordSends([options.to]);
     return { success: true, messageId: data?.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown email error";
