@@ -51,32 +51,12 @@ describe("system mail is off the ladder", () => {
   });
 });
 
-describe("the crons run in ladder order, so arbitration is not decided by accident", () => {
-  const crons = JSON.parse(fs.readFileSync(path.join(process.cwd(), "vercel.json"), "utf8")).crons as
-    { path: string; schedule: string }[];
-  const at = (p: string) => {
-    const c = crons.find((c) => c.path === p)!;
-    const [m, h] = c.schedule.split(" ");
-    return Number(h) * 60 + Number(m);
-  };
-
-  it("renewals (lapse) run before the conference checklist (deadline)", () => {
-    expect(at("/api/cron/renewal-reminders")).toBeLessThan(at("/api/cron/checklist-reminders"));
-  });
-
-  it("deadlines run before events", () => {
-    expect(at("/api/cron/checklist-reminders")).toBeLessThan(at("/api/cron/rfp-notifications"));
-  });
-
-  it("onboarding runs last of all of them", () => {
-    const others = [
-      "/api/cron/renewal-reminders",
-      "/api/cron/checklist-reminders",
-      "/api/cron/elections-kickoff",
-      "/api/cron/action-item-reminders",
-      "/api/cron/rfp-notifications",
-      "/api/cron/prospective-booth-followup",
-    ].map(at);
-    expect(at("/api/cron/onboarding-nudge")).toBeGreaterThan(Math.max(...others));
+describe("priority is not encoded in cron times", () => {
+  it("no test asserts a firing order — the dispatcher decides, not the clock", () => {
+    // Deliberately empty of schedule assertions. Encoding the ladder in
+    // vercel.json made priority invisible, spread it across eight entries, and
+    // left it broken by anyone adding a sender or moving a time. One job now
+    // picks the winner; when the crons fire stopped mattering.
+    expect(true).toBe(true);
   });
 });
