@@ -35,6 +35,17 @@ export const COMPLETABLE_VERBS = [
   "complete", "submit", "prepare", "obtain", "deny", "address", "develop",
   "secure", "arrange", "update", "produce", "share", "distribute", "collect",
   "finalize", "finalise", "respond", "approve", "purchase", "launch",
+  // Added 2026-09-24 after the September minutes: real items with named owners
+  // and due dates graded as intentions purely because their verb was absent —
+  // "post" was missing while "publish" and "circulate" were already here.
+  //
+  // Grow this list ONLY from items that were actually mis-flagged, and only
+  // with words that are rarely nouns. Matching is a word-boundary search with
+  // no part-of-speech awareness, so a word that doubles as a noun creates false
+  // positives: "approach" was tried here and had to be removed because it made
+  // "review our approach to advocacy" — the canonical uncompletable example —
+  // grade as a real action.
+  "post", "enable", "claim",
 ];
 
 /**
