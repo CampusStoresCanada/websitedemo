@@ -13,6 +13,7 @@ import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
 import { holdsTheFloor } from "./one-open-ask";
 import { isBusinessDay } from "@/lib/board/vote-schedule";
+import { lastContactedByEmail, countSentSince, mayNudge } from "@/lib/comms/contact-budget";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 import type { Persona } from "./steps";
 
@@ -1020,6 +1021,40 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   // Auth emails
   const emailById = new Map(Object.entries(await lookupUserEmailsByIds(createAdminClient(), userIds)));
 
+  /**
+   * Everything ELSE we have sent them.
+   *
+   * The two sources above see onboarding's own nudges and campaign deliveries.
+   * They cannot see elections, renewals, benchmarking, conference mail, Stripe
+   * receipts, applications, tickets or logins — about seventy send sites that
+   * call lib/email/send.ts directly. Those now land in email_log at the
+   * chokepoint, and this folds them in, so "heard from us recently" finally
+   * means what it says.
+   */
+  const addresses = userIds.map((id) => emailById.get(id)).filter((e): e is string => !!e);
+  const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
+  let loggedLast = new Map<string, string>();
+  let sentTodayByEmail = new Map<string, number>();
+  try {
+    [loggedLast, sentTodayByEmail] = await Promise.all([
+      lastContactedByEmail(addresses),
+      countSentSince(addresses, dayAgo),
+    ]);
+  } catch (e) {
+    // ⛔ Fail LOUD but do not mail. An unreadable ledger reads as "nobody has
+    // heard from us", which is the one error that sends everything at once.
+    result.errors.push(`contact budget unavailable, sending nothing this run: ${String(e)}`);
+    return result;
+  }
+  for (const id of userIds) {
+    const addr = emailById.get(id);
+    if (!addr) continue;
+    const stamp = loggedLast.get(addr.toLowerCase());
+    if (!stamp) continue;
+    const seen = lastEmailByUser.get(id);
+    if (!seen || stamp > seen) lastEmailByUser.set(id, stamp);
+  }
+
   // Profiles (display_name)
   const { data: profiles } = await createAdminClient()
     .from("profiles")
@@ -1282,12 +1317,14 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       // user's remaining rows still get marked done when the data says so.
       // Anything from us in the last couple of days wins over a nudge. Placed
       // after auto-complete so a quiet person's satisfied steps still close.
-      const lastEmail = lastEmailByUser.get(userId);
-      if (lastEmail && daysSince(lastEmail) < QUIET_DAYS_AFTER_ANY_EMAIL) {
+      const verdict = mayNudge({
+        lastContactedAt: lastEmailByUser.get(userId) ?? null,
+        sentInLastDay: sentTodayByEmail.get(ctx.email.toLowerCase()) ?? 0,
+        quietHours: QUIET_DAYS_AFTER_ANY_EMAIL * 24,
+      });
+      if (!verdict.allowed) {
         result.skipped++;
-        result.log.push(
-          `quiet ${ctx.email} / ${row.step_key}: heard from us ${daysSince(lastEmail).toFixed(1)}d ago`
-        );
+        result.log.push(`quiet ${ctx.email} / ${row.step_key}: ${verdict.reason}`);
         continue;
       }
 
