@@ -1,0 +1,103 @@
+===========================================================================
+org_admin_member
+SUBJECT: Who buys what at University of Calgary?
+
+Campus Stores Canada 
+ 
+ Hey Sam, 
+ Put a name against each category. 
+ Your org page has a Procurement section: the categories University of Calgary carries, and who owns each one.
+
+Setting it does two things. Vendors looking for the right person at your store find them instead of guessing, and every buyer you name gets their own supplier list built from their own categories rather than the store's.
+
+You don't have to know it all. Name the ones you're sure of and leave the rest. Each buyer can add and adjust their own from their account, so it isn't a list you have to keep current by yourself. 
+ 
+ 
+ Set up procurement →
+ 
+ 
+ It's also what the curated meetings at the conference are matched on. 
+ 
+ 
+ You're receiving this because you're an org admin on the CSC platform.
+ Questions? Reply to this email.
+
+===========================================================================
+org_admin_member (reminder)
+SUBJECT: Still nobody named against University of Calgary's categories
+
+Campus Stores Canada 
+ 
+ Hey Sam, 
+ Put a name against each category. 
+ Your org page has a Procurement section: the categories University of Calgary carries, and who owns each one.
+
+Setting it does two things. Vendors looking for the right person at your store find them instead of guessing, and every buyer you name gets their own supplier list built from their own categories rather than the store's.
+
+You don't have to know it all. Name the ones you're sure of and leave the rest. Each buyer can add and adjust their own from their account, so it isn't a list you have to keep current by yourself. 
+ 
+ 
+ Set up procurement →
+ 
+ 
+ It's also what the curated meetings at the conference are matched on. 
+ 
+ 
+ You're receiving this because you're an org admin on the CSC platform.
+ Questions? Reply to this email.
+
+===========================================================================
+member_member
+SUBJECT: What do you buy for University of Calgary?
+
+Campus Stores Canada 
+ 
+ Hey Sam, 
+ Your own supplier list starts here. 
+ On your account page, open Edit my info and tick the categories you buy for. The site builds you a supplier list out of them.
+
+Yours, not the store's. If two of you buy different things, you each get a different list. And it keeps up with you: change what you tick and the list changes with it.
+
+If a category you buy isn't there yet, add it. What you pick becomes part of University of Calgary's record, which is how the store's list gets built in the first place. 
+ 
+ 
+ Set my categories →
+ 
+ 
+ 
+ 
+ 
+ You're receiving this because you're an org admin on the CSC platform.
+ Questions? Reply to this email.
+
+===========================================================================
+member_member (reminder)
+SUBJECT: Your supplier list is still waiting on one thing
+
+Campus Stores Canada 
+ 
+ Hey Sam, 
+ Your own supplier list starts here. 
+ On your account page, open Edit my info and tick the categories you buy for. The site builds you a supplier list out of them.
+
+Yours, not the store's. If two of you buy different things, you each get a different list. And it keeps up with you: change what you tick and the list changes with it.
+
+If a category you buy isn't there yet, add it. What you pick becomes part of University of Calgary's record, which is how the store's list gets built in the first place. 
+ 
+ 
+ Set my categories →
+ 
+ 
+ 
+ 
+ 
+ You're receiving this because you're an org admin on the CSC platform.
+ Questions? Reply to this email.
+
+===========================================================================
+org_admin_partner
+(no email — correctly returns null)
+
+===========================================================================
+org_admin_partner (reminder)
+(no email — correctly returns null)
