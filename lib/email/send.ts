@@ -1,6 +1,7 @@
 import { Resend } from "resend";
 import { wrapEmailBody } from "./layout";
 import { getPlatformIdentity } from "@/lib/data";
+import type { SendPriority } from "@/lib/comms/priority";
 import { loadHardBouncedEmails, normalizeEmail } from "@/lib/comms/suppressions";
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -53,6 +54,11 @@ function accountSetupBlock(code: string, email: string): string {
 }
 
 interface SendEmailOptions {
+  /**
+   * Where this sits on the ladder in lib/comms/priority.ts. Omit for system
+   * mail — a reset, a receipt, a ticket — which is off the ladder entirely.
+   */
+  priority?: SendPriority;
   to: string;
   subject: string;
   html: string;
@@ -63,6 +69,8 @@ interface SendEmailOptions {
 }
 
 export interface BatchSendItem {
+  /** See SendEmailOptions.priority. A batch is one send, so one priority. */
+  priority?: SendPriority;
   to: string;
   subject: string;
   html: string;
@@ -134,7 +142,7 @@ async function blockedByHardBounce(recipients: string[]): Promise<Set<string>> {
  * worse than no ledger: a logging outage would silently stop password resets.
  * A missed row costs at most one extra nudge.
  */
-async function recordSends(addresses: string[]): Promise<void> {
+async function recordSends(addresses: string[], priority: SendPriority = null): Promise<void> {
   if (addresses.length === 0) return;
   try {
     const { createAdminClient } = await import("@/lib/supabase/admin");
@@ -142,7 +150,7 @@ async function recordSends(addresses: string[]): Promise<void> {
     const db = createAdminClient() as any;
     const now = new Date().toISOString();
     await db.from("email_log").insert(
-      addresses.map((email) => ({ email: normalizeEmail(email), sent_at: now }))
+      addresses.map((email) => ({ email: normalizeEmail(email), sent_at: now, priority }))
     );
   } catch (e) {
     console.error("[email] send not recorded (mail still went):", e);
@@ -210,7 +218,7 @@ export async function sendEmailBatch(items: BatchSendItem[]): Promise<BatchSendR
         if (!failMessage) landed.push(item.to);
       });
       // Only what actually went, against the intended recipients.
-      await recordSends(landed);
+      await recordSends(landed, items[0]?.priority ?? null);
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Unknown email error";
       for (const { offset } of allowed) {
@@ -257,7 +265,7 @@ export async function sendEmail(options: SendEmailOptions): Promise<{ success: b
     // Recorded against the INTENDED recipient, never the dev intercept
     // address, so local runs do not teach the rate rules that one developer
     // receives everything.
-    await recordSends([options.to]);
+    await recordSends([options.to], options.priority ?? null);
     return { success: true, messageId: data?.id };
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Unknown email error";

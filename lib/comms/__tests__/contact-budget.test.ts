@@ -40,8 +40,9 @@ describe("the ledger is written where every sender passes", () => {
   });
 
   it("records the intended recipient, never the dev intercept address", () => {
-    expect(send).toContain("recordSends([options.to])");
-    expect(send).not.toMatch(/recordSends\(\[\s*to\s*\]\)/);
+    // the intended recipient, not the `to` that DEV_EMAIL_INTERCEPT rewrites
+    expect(send).toMatch(/recordSends\(\[options\.to\]/);
+    expect(send).not.toMatch(/recordSends\(\[\s*to\s*[,\]]/);
   });
 
   it("never lets a logging failure stop the mail", () => {
