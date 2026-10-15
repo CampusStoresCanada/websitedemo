@@ -21,7 +21,12 @@
 create table if not exists public.email_log (
   id uuid primary key default gen_random_uuid(),
   email text not null,
-  sent_at timestamptz not null default now()
+  sent_at timestamptz not null default now(),
+  -- 1 lapse, 2 deadline, 3 event, 4 campaign, 5 onboarding.
+  -- NULL means system mail — a reset, a receipt, a ticket, a notification.
+  -- System mail is off the ladder: it never defers, is never deferred, and is
+  -- excluded from every budget. See lib/comms/priority.ts.
+  priority smallint
 );
 
 create index if not exists email_log_email_sent_at_idx
@@ -29,6 +34,12 @@ create index if not exists email_log_email_sent_at_idx
 
 create index if not exists email_log_sent_at_idx
   on public.email_log (sent_at desc);
+
+-- The arbitration read: who holds this address's inbox today. Partial, because
+-- system mail is never a claim and would otherwise dominate the index.
+create index if not exists email_log_claim_idx
+  on public.email_log (lower(email), sent_at desc, priority)
+  where priority is not null;
 
 alter table public.email_log enable row level security;
 

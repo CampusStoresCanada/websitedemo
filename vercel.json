@@ -6,7 +6,7 @@
     },
     {
       "path": "/api/cron/renewal-reminders",
-      "schedule": "0 11 * * *"
+      "schedule": "0 8 * * *"
     },
     {
       "path": "/api/cron/renewal-charge",
@@ -82,19 +82,19 @@
     },
     {
       "path": "/api/cron/onboarding-nudge",
-      "schedule": "0 10 * * *"
+      "schedule": "0 11 * * *"
     },
     {
       "path": "/api/cron/prospective-booth-followup",
-      "schedule": "0 10 * * *"
+      "schedule": "45 9 * * *"
     },
     {
       "path": "/api/cron/rfp-notifications",
-      "schedule": "0 8 * * *"
+      "schedule": "30 9 * * *"
     },
     {
       "path": "/api/cron/checklist-reminders",
-      "schedule": "10 9 * * *"
+      "schedule": "30 8 * * *"
     },
     {
       "path": "/api/cron/conference-scheduled-transitions",
@@ -114,7 +114,7 @@
     },
     {
       "path": "/api/cron/elections-kickoff",
-      "schedule": "30 8 * * *"
+      "schedule": "45 8 * * *"
     },
     {
       "path": "/api/cron/notion-transcript-pages",

@@ -13,7 +13,8 @@ import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
 import { holdsTheFloor } from "./one-open-ask";
 import { isBusinessDay } from "@/lib/board/vote-schedule";
-import { lastContactedByEmail, countSentSince, mayNudge } from "@/lib/comms/contact-budget";
+import { lastContactedByEmail, countSentSince, mayNudge, inboxClaimsSince, mayReachToday } from "@/lib/comms/contact-budget";
+import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 import type { Persona } from "./steps";
 
@@ -1035,10 +1036,13 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
   const dayAgo = new Date(Date.now() - 24 * 60 * 60 * 1000);
   let loggedLast = new Map<string, string>();
   let sentTodayByEmail = new Map<string, number>();
+  let inboxTakenBy = new Map<string, number>();
+  const startOfToday = new Date(new Date().toISOString().slice(0, 10) + "T00:00:00Z");
   try {
-    [loggedLast, sentTodayByEmail] = await Promise.all([
+    [loggedLast, sentTodayByEmail, inboxTakenBy] = await Promise.all([
       lastContactedByEmail(addresses),
       countSentSince(addresses, dayAgo),
+      inboxClaimsSince(addresses, startOfToday),
     ]);
   } catch (e) {
     // ⛔ Fail LOUD but do not mail. An unreadable ledger reads as "nobody has
@@ -1317,6 +1321,21 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       // user's remaining rows still get marked done when the data says so.
       // Anything from us in the last couple of days wins over a nudge. Placed
       // after auto-complete so a quiet person's satisfied steps still close.
+      /**
+       * Onboarding is last on the ladder, so anything else that wrote to this
+       * person today keeps the inbox and the step simply stays due. A send is
+       * never held up for anybody — only this person is passed over.
+       */
+      const inbox = mayReachToday({
+        mine: MESSAGING_PRIORITY.onboarding,
+        inboxTakenBy: inboxTakenBy.get(ctx.email.toLowerCase()) ?? null,
+      });
+      if (!inbox.allowed) {
+        result.skipped++;
+        result.log.push(`yield ${ctx.email} / ${row.step_key}: ${inbox.reason}`);
+        continue;
+      }
+
       const verdict = mayNudge({
         lastContactedAt: lastEmailByUser.get(userId) ?? null,
         sentInLastDay: sentTodayByEmail.get(ctx.email.toLowerCase()) ?? 0,
@@ -1356,6 +1375,9 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
         to: ctx.email,
         subject: emailContent.subject,
         html: emailContent.html,
+        // Claims the inbox at the bottom of the ladder, so anything more
+        // pressing tomorrow still gets through.
+        priority: MESSAGING_PRIORITY.onboarding,
       });
 
       if (!sendResult.success) {

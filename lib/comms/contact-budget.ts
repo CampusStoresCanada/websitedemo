@@ -1,5 +1,6 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { normalizeEmail } from "@/lib/comms/suppressions";
+import { mayTakeInbox, type MessagingPriority } from "@/lib/comms/priority";
 
 /**
  * How much have we contacted this person lately?
@@ -115,4 +116,58 @@ export function mayNudge(opts: {
     }
   }
   return { allowed: true };
+}
+
+
+/**
+ * Who holds each of these inboxes today — the most pressing MESSAGING send
+ * already made to that address since `since`. System mail is excluded: it is
+ * off the ladder and must never cost anyone their messaging slot.
+ *
+ * Returns the priority NUMBER, lower being more pressing. Absent means the
+ * inbox is free.
+ */
+export async function inboxClaimsSince(
+  emails: string[],
+  since: Date
+): Promise<Map<string, number>> {
+  const out = new Map<string, number>();
+  const wanted = [...new Set(emails.map(normalizeEmail).filter(Boolean))];
+  if (wanted.length === 0) return out;
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const db = createAdminClient() as any;
+  for (let i = 0; i < wanted.length; i += 150) {
+    const chunk = wanted.slice(i, i + 150);
+    const { data, error } = await db
+      .from("email_log")
+      .select("email, priority")
+      .in("email", chunk)
+      .gte("sent_at", since.toISOString())
+      .not("priority", "is", null);
+    if (error) throw new Error(`contact-budget: ${error.message}`);
+    for (const row of (data ?? []) as { email: string; priority: number }[]) {
+      const key = normalizeEmail(row.email);
+      const held = out.get(key);
+      // Lower number is more pressing, and the most pressing claim is the one
+      // that counts — a campaign landing after a lapse notice does not demote it.
+      if (held === undefined || row.priority < held) out.set(key, row.priority);
+    }
+  }
+  return out;
+}
+
+/**
+ * The whole decision for one person: may this messaging send reach them today?
+ *
+ * ⚠️ Answers for a PERSON. A caller filters its recipient list with this; it
+ * never delays the send itself. Whoever is refused is queued for the next run,
+ * which is why every messaging sender needs somewhere to record "not yet" —
+ * onboarding leaves the step due, a campaign leaves the recipient unsent.
+ */
+export function mayReachToday(opts: {
+  mine: MessagingPriority;
+  inboxTakenBy: number | null;
+}): { allowed: boolean; reason?: string } {
+  return mayTakeInbox(opts.mine, opts.inboxTakenBy);
 }
