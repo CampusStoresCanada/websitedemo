@@ -11,6 +11,7 @@
 import { createAdminClient } from "@/lib/supabase/admin";
 import { lookupUserEmailsByIds } from "@/lib/supabase/user-lookup";
 import { sendEmail } from "@/lib/email/send";
+import { holdsTheFloor } from "./one-open-ask";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 import type { Persona } from "./steps";
 
@@ -22,6 +23,8 @@ import type { Persona } from "./steps";
  * rest simply arrive on following days.
  */
 const MAX_SENDS_PER_USER_PER_RUN = 1;
+
+
 
 /**
  * Quiet days a person gets after ANY CSC email before this job adds another.
@@ -1121,6 +1124,28 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
     );
     let sentForUser = 0;
 
+    /**
+     * ⛔ ONE OPEN ASK AT A TIME.
+     *
+     * The cap above limits a run; it does nothing across consecutive runs. The
+     * ordering sends the step that has been due longest, so a member with four
+     * dormant steps used to get four DIFFERENT asks on four consecutive nights,
+     * none of them answered, and then every one of those steps started its own
+     * reminder cycle on top. That is the onboarding pile-on, and spreading it
+     * over a week is not the same as not doing it.
+     *
+     * So a step that has been sent and is still open holds the floor. Nothing
+     * new starts until it is completed, skipped, or its reminders lapse — then
+     * the next task comes. One little thing, then a reminder or the next thing,
+     * never a queue.
+     *
+     * Reminders for the step that holds the floor are unaffected: this gates
+     * `shouldSendInitial` only.
+     */
+    const floorHeldBy = ordered.find((r) =>
+      holdsTheFloor(r, STEP_SCHEDULE[r.step_key], daysSince)
+    );
+
     for (const row of ordered) {
       result.processed++;
       const schedule = STEP_SCHEDULE[row.step_key];
@@ -1211,6 +1236,15 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
 
       if (!shouldSendInitial && !shouldSendReminder) {
         result.skipped++;
+        continue;
+      }
+
+      // One open ask at a time — see floorHeldBy above.
+      if (shouldSendInitial && floorHeldBy && floorHeldBy.id !== row.id) {
+        result.skipped++;
+        result.log.push(
+          `floor ${ctx.email} / ${row.step_key}: waiting on ${floorHeldBy.step_key}`
+        );
         continue;
       }
 
