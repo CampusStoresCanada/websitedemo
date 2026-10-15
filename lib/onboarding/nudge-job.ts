@@ -15,6 +15,7 @@ import { holdsTheFloor } from "./one-open-ask";
 import { isBusinessDay } from "@/lib/board/vote-schedule";
 import { lastContactedByEmail, countSentSince, mayNudge, inboxClaimsSince, mayReachToday } from "@/lib/comms/contact-budget";
 import { MESSAGING_PRIORITY } from "@/lib/comms/priority";
+import type { MessagingCandidate } from "@/lib/comms/dispatch";
 import { STEP_SCHEDULE } from "./nudge-schedule";
 import type { Persona } from "./steps";
 
@@ -899,6 +900,12 @@ async function autoCompleteIfDone(
 // ─────────────────────────────────────────────────────────────────────────────
 
 export interface NudgeJobResult {
+  /**
+   * What onboarding WOULD send today. The job no longer sends: whether these
+   * reach anyone is the dispatcher's call, because onboarding is last on the
+   * ladder and cannot know what else wants the same inbox.
+   */
+  candidates: MessagingCandidate[];
   processed: number;
   sent: number;
   skipped: number;
@@ -907,9 +914,10 @@ export interface NudgeJobResult {
 }
 
 export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
+  const candidates: MessagingCandidate[] = [];
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const db = createAdminClient() as any;
-  const result: NudgeJobResult = { processed: 0, sent: 0, skipped: 0, errors: [], log: [] };
+  const result: NudgeJobResult = { candidates: [], processed: 0, sent: 0, skipped: 0, errors: [], log: [] };
 
   if (Date.now() < QUIET_UNTIL) {
     result.log.push(
@@ -1371,40 +1379,56 @@ export async function runOnboardingNudgeJob(): Promise<NudgeJobResult> {
       }
 
       // ── Send ──
-      const sendResult = await sendEmail({
-        to: ctx.email,
-        subject: emailContent.subject,
-        html: emailContent.html,
-        // Claims the inbox at the bottom of the ladder, so anything more
-        // pressing tomorrow still gets through.
+      /**
+       * A candidate, not a send.
+       *
+       * Everything above decided WHETHER this person should hear from
+       * onboarding today. Whether they hear from onboarding rather than from
+       * something more pressing is not onboarding's call, so the work is
+       * handed to the dispatcher as a closure: it owns the send and the
+       * bookkeeping, because only this job knows that "sent" means stamping
+       * sent_at, and "reminded" means counting the reminder.
+       *
+       * Losing is free. Nothing is written, the step stays exactly as it is,
+       * and tomorrow this same row is a candidate again.
+       */
+      const captured = { row, ctx, emailContent, isReminder: shouldSendReminder };
+      candidates.push({
+        email: ctx.email,
         priority: MESSAGING_PRIORITY.onboarding,
+        source: "onboarding",
+        about: `${row.step_key}${shouldSendReminder ? " (reminder)" : ""}`,
+        send: async () => {
+          const sendResult = await sendEmail({
+            to: captured.ctx.email,
+            subject: captured.emailContent.subject,
+            html: captured.emailContent.html,
+            priority: MESSAGING_PRIORITY.onboarding,
+          });
+          if (!sendResult.success) return sendResult;
+
+          const stamp = new Date().toISOString();
+          if (!captured.isReminder) {
+            await db.from("user_onboarding_progress").update({
+              sent_at: stamp,
+              channel: "email",
+              updated_at: stamp,
+            }).eq("id", captured.row.id);
+          } else {
+            await db.from("user_onboarding_progress").update({
+              last_reminder_sent_at: stamp,
+              reminder_count: captured.row.reminder_count + 1,
+              updated_at: stamp,
+            }).eq("id", captured.row.id);
+          }
+          return { success: true };
+        },
       });
-
-      if (!sendResult.success) {
-        result.errors.push(`send ${ctx.email} / ${row.step_key}: ${sendResult.error}`);
-        continue;
-      }
-
-      result.sent++;
       sentForUser++;
-      result.log.push(`sent ${ctx.email} / ${row.step_key} (${shouldSendReminder ? "reminder" : "initial"})`);
-
-      // ── Update the progress row ──
-      if (shouldSendInitial) {
-        await db.from("user_onboarding_progress").update({
-          sent_at: now,
-          channel: "email",
-          updated_at: now,
-        }).eq("id", row.id);
-      } else {
-        await db.from("user_onboarding_progress").update({
-          last_reminder_sent_at: now,
-          reminder_count: row.reminder_count + 1,
-          updated_at: now,
-        }).eq("id", row.id);
-      }
+      result.log.push(`candidate ${ctx.email} / ${row.step_key} (${shouldSendReminder ? "reminder" : "initial"})`);
     }
   }
 
+  result.candidates = candidates;
   return result;
 }
