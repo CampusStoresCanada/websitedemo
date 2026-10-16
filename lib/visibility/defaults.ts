@@ -107,6 +107,22 @@ export const DEFAULT_CROSS_VISIBILITY_RULES: CrossVisibilityRules = {
     "organizations.company_description",
     "organizations.primary_category",
     "contacts.role_title",
+    // The partner's own promotional pitch — a featured product and whatever
+    // deal is currently on the table. Unlisted in every policy list, so
+    // isFieldVisible fell through to its closing `return false` and showed
+    // them to admins only. The declaring partner still sees its own values
+    // through canOrgAdminViewField, so from their side the fields look saved
+    // and simply never appear to anyone else.
+    //
+    // They go here rather than in public_allowlist for two reasons. The pitch
+    // is written for member buyers, not anonymous traffic; and a competing
+    // partner gets nothing from cross rules by design, which is what keeps
+    // this out of their view. Note that public_allowlist is seeded in
+    // policy_values and therefore overrides this file — cross_visibility_rules
+    // is not seeded, which is why editing it here takes effect.
+    "organizations.highlight_product_name",
+    "organizations.highlight_product_description",
+    "organizations.highlight_the_deal",
   ],
   // Partner viewers can see selected member purchasing-facing fields.
   partner_to_member_fields: [

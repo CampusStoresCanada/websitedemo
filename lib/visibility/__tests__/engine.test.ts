@@ -89,3 +89,54 @@ describe("visibility engine", () => {
     expect(masked.work_email).toBe("@school.ca");
   });
 });
+
+/**
+ * A partner's promotional pitch is written for member buyers. Unlisted fields
+ * fail closed, so before these were added to the cross rules the three
+ * highlight_* columns resolved to admins only — 30 live partner orgs had filled
+ * them in and no member could see any of it, while the partner's own admins
+ * could, so nothing looked broken from either end.
+ *
+ * The audience is the whole point of the fix, so it is asserted in both
+ * directions: members in, competing partners and anonymous traffic out.
+ */
+describe("a partner's pitch reaches member buyers and no one else", () => {
+  const PITCH = [
+    "organizations.highlight_product_name",
+    "organizations.highlight_product_description",
+    "organizations.highlight_the_deal",
+  ] as const;
+
+  it("is visible to a member viewing a partner", () => {
+    for (const field of PITCH) {
+      expect(
+        isFieldVisible(field, "member", config, "Vendor Partner"),
+        `${field} should be visible to a member`
+      ).toBe(true);
+    }
+  });
+
+  it("is hidden from a competing partner", () => {
+    for (const field of PITCH) {
+      expect(
+        isFieldVisible(field, "partner", config, "Vendor Partner"),
+        `${field} must not reach a competing partner`
+      ).toBe(false);
+    }
+  });
+
+  it("is hidden from anonymous traffic", () => {
+    for (const field of PITCH) {
+      expect(
+        isFieldVisible(field, "public", config, "Vendor Partner"),
+        `${field} must not be public`
+      ).toBe(false);
+    }
+  });
+
+  it("stays out of the public allowlist, which policy_values overrides anyway", () => {
+    for (const field of PITCH) {
+      expect(DEFAULT_VISIBILITY_CONFIG.public_allowlist).not.toContain(field);
+    }
+  });
+});
