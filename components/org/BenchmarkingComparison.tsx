@@ -266,7 +266,12 @@ export default function BenchmarkingComparison({
                 const isCurrentOrg = row.organization_id === currentOrgId;
                 return (
                   <tr
-                    key={row.id}
+                    // Not row.id — projectPeerRows rebuilds each row from
+                    // PEER_FIELDS, which deliberately omits the primary key, so
+                    // every row arrives here with id undefined and React sees a
+                    // keyless list. (organization_id, fiscal_year) is UNIQUE in
+                    // the database and both fields survive the projection.
+                    key={`${row.organization_id}-${row.fiscal_year}`}
                     className={`transition-colors ${
                       isCurrentOrg
                         ? 'outline outline-2 outline-[#163D6D] outline-offset-[-2px] relative'

@@ -37,6 +37,13 @@ When you approve a signup application that came from the Big Ideas Day
 reconnect list, add the new organisation to the named list for the rate the
 email quoted them.
 
+⚠️ **Go by what they were quoted, not by what they look like.** The two rates are
+different offers, and from an application alone there is no reliable way to tell
+a publisher from a platform — `nacs_department` puts McGraw Hill in Course
+Materials alongside three operations partners, and the old `primary_category` is
+free text. The figure is in the invitation they replied to, so read it there
+rather than inferring it.
+
 | They were quoted | Add them to |
 |---|---|
 | $500 — publisher | `Big Ideas Day — Publisher` |

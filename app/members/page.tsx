@@ -28,6 +28,7 @@ export default async function MembersPage() {
         organizations={mapOrgs}
         stories={[]}
         initialState={{ explore: true, viewMode: "table", lens: "members", focus: "members" }}
+        syncFiltersToUrl
       />
       <ValueProps header={valuePropsHeader[0] ?? null} cards={valuePropsCards} />
       <DirectoryJoinCTA />

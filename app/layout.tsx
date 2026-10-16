@@ -13,6 +13,7 @@ import PublicHighlightHandler from "@/components/ui/PublicHighlightHandler";
 import BookmarkJumpHandler from "@/components/ui/BookmarkJumpHandler";
 import { getServerAuthState } from "@/lib/auth/server";
 import OnboardingGate from "@/components/layout/OnboardingGate";
+import { ViewBeacon } from "@/components/signals/ViewBeacon";
 import { getPlatformIdentity } from "@/lib/data";
 import { canPauseCircleBadge, isCircleBadgePaused } from "@/lib/circle/badge-preference";
 import PresentationIndicator from "@/components/presentation/PresentationIndicator";
@@ -123,6 +124,27 @@ export default async function RootLayout({
               </Suspense>
               <Suspense>
                 <BookmarkJumpHandler />
+              </Suspense>
+              {/*
+                ⛔ THE SWITCH. Mounting this turns on site-wide behavioural
+                capture: for a signed-in member every navigation reports the
+                path they landed on and the one they came from.
+
+                Turned on deliberately on 2026-10-16, to give the match engine
+                the one signal the platform never collected — the quiet half,
+                what somebody looked at rather than what they chose to publish.
+
+                ⚠️ Switched on BEFORE any consumer exists, on purpose. Nothing
+                reads page_views yet. The data is only worth something with a
+                history behind it, so collecting early means the reader has
+                months of signal when it is built rather than starting at zero.
+
+                What is NOT recorded lives in lib/signals/page-view.ts and the
+                rules there are load-bearing: /admin never, query params by
+                allow-list rather than block-list, uuid-only paths dropped.
+              */}
+              <Suspense>
+                <ViewBeacon />
               </Suspense>
               {presentationLevel ? (
                 <PresentationIndicator level={presentationLevel} />
