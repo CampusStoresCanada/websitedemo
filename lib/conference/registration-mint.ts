@@ -185,11 +185,41 @@ export async function mintRegistrationAttendeesFromOrder(
     const balanceIds = (balances ?? []).map((b) => b.id);
     if (balanceIds.length === 0) continue;
 
+    /**
+     * ⛔ THE REGISTRATION'S OWN SEATS, NOT EVERY SEAT THE PURCHASE CREATED.
+     *
+     * One registration mints more than one seat: mint_v3_for_order expands the
+     * `includes` graph, so "Full Conference Registration" also lands a Meet &
+     * Greet Reception seat and a Wednesday Offsite seat — all three under the
+     * same purchase, and therefore all three in `balanceIds`.
+     *
+     * Without this filter the zip below paired the buyer's name with whichever
+     * of those sorted first by `id`, which is a random uuid. Observed on
+     * 2026-09-16: a quantity-1 registration seated "Scratch Probe" on the
+     * RECEPTION and left the registration seat empty. badges/run.ts then skips
+     * them — `if (seat.entityKind !== "registration") continue`, because a
+     * badge is only ever for a registration seat — so the person a name was
+     * supplied for gets no badge, and the org's roster reads as one spare
+     * registration plus a reception seat held by someone unregistered.
+     *
+     * The included event seats are deliberately left open: they belong to the
+     * org to allocate, exactly like a booth's seats do.
+     *
+     * ⚠️ Only reachable when a name is supplied AT PURCHASE TIME. The ordinary
+     * path — the org assigning people on their own page afterwards — names a
+     * specific seat and never came through here, which is why a coin-flip
+     * survived this long unnoticed.
+     */
     const { data: seats } = await db
       .from("entity_balance_seats")
       .select("id")
       .in("balance_id", balanceIds)
+      .eq("entity_id", offer.id)
       .is("holder_person_id", null)
+      // Lowest seat number first, so the same order always seats people the
+      // same way. seat_index is NOT NULL (generate_series in the mint); `id`
+      // only breaks ties, and on its own it is an arbitrary uuid.
+      .order("seat_index")
       .order("id");
     if (!seats || seats.length === 0) continue;
 
