@@ -3,10 +3,10 @@
 /**
  * Reports the current path after the page has rendered.
  *
- * ⛔ NOT MOUNTED. Dropping `<ViewBeacon />` into `app/layout.tsx` is the single
- * switch that turns on site-wide behavioural capture for signed-in members. That
- * is a deliberate decision about recording what named people look at, and it is
- * left for a human to make rather than arriving quietly with a merge.
+ * MOUNTED in app/layout.tsx since 2026-10-16. Dropping it in was the single
+ * switch that turned on site-wide behavioural capture for signed-in members —
+ * a deliberate decision about recording what named people look at, taken by
+ * Steve rather than arriving quietly with a merge.
  *
  * When it is mounted, it costs a signed-in visitor one keepalive POST per
  * navigation and nothing on the render path.
